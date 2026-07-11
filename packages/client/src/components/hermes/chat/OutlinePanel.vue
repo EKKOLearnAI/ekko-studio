@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { NTooltip } from 'naive-ui'
 import type { Message } from '@/stores/hermes/chat'
+import { mapHermesMessages } from '@/stores/hermes/chat'
+import { fetchHermesSession } from '@/api/hermes/sessions'
 
 interface OutlineItem {
   id: string
@@ -14,13 +17,33 @@ interface OutlineItem {
 
 const props = defineProps<{
   messages: Message[]
+  sessionId?: string
+  sessionProfile?: string | null
+  showLoadAll?: boolean
 }>()
 
 const emit = defineEmits<{
   navigate: [target: { messageId: string; anchorId: string }]
+  messagesLoaded: [messages: Message[]]
 }>()
 
 const { t } = useI18n()
+const localFetching = ref(false)
+
+async function handleLoadAll() {
+  if (!props.sessionId) return
+
+  localFetching.value = true
+  try {
+    const sessionDetail = await fetchHermesSession(props.sessionId, props.sessionProfile)
+    if (sessionDetail && sessionDetail.messages) {
+      const mapped = mapHermesMessages(sessionDetail.messages)
+      emit('messagesLoaded', mapped)
+    }
+  } finally {
+    localFetching.value = false
+  }
+}
 
 function extractAllHeadings(text: string, messageId: string): OutlineItem[] {
   const items: OutlineItem[] = []
@@ -122,6 +145,45 @@ function scrollToTarget(item: OutlineItem) {
   <div class="outline-panel">
     <div class="outline-header">
       <span class="outline-title">{{ t('chat.outlineTitle') }}</span>
+      <NTooltip v-if="showLoadAll" trigger="hover" placement="top">
+        <template #trigger>
+          <button
+            type="button"
+            class="load-all-btn"
+            :disabled="localFetching"
+            @click="handleLoadAll"
+          >
+            <svg
+              v-if="localFetching"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              class="load-all-spinner"
+            >
+              <path d="M21 12a9 9 0 11-6.219-8.56" />
+            </svg>
+            <svg
+              v-else
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
+        </template>
+        {{ t('chat.loadAllMessages') }}
+      </NTooltip>
     </div>
     <div class="outline-content">
       <template v-if="outlineItems.length > 0">
@@ -180,9 +242,13 @@ function scrollToTarget(item: OutlineItem) {
   padding: 16px;
   border-bottom: 1px solid $border-color;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .outline-title {
+  flex: 1;
   font-size: 14px;
   font-weight: 600;
   color: $text-primary;
@@ -307,5 +373,48 @@ function scrollToTarget(item: OutlineItem) {
   color: $text-muted;
   font-size: 13px;
   padding: 20px 0;
+}
+
+.load-all-btn {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: $text-muted;
+  background: transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+
+  &:hover {
+    color: $text-primary;
+    background: $bg-secondary;
+
+    .dark & {
+      background: $bg-input;
+    }
+  }
+
+  &:active {
+    opacity: 0.7;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.load-all-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

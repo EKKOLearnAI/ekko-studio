@@ -167,7 +167,16 @@ function parseHistoryMoaToolPayload(toolName: string | null, value: unknown): { 
 }
 
 function mapHistoryMessages(messages: HermesMessage[]): Session['messages'] {
-  return messages.map(m => {
+  // Filter out assistant messages with no content — they only carry tool_calls
+  // and mapHistoryMessages doesn't expand tool_calls like mapHermesMessages does.
+  const filtered = messages.filter(m => {
+    if (m.role === 'assistant') {
+      return m.content && m.content.trim() !== ''
+    }
+    return true
+  })
+
+  return filtered.map(m => {
     const displayRole = isHistoryMoaToolDisplay(m) ? 'tool' : (m.display_role || m.role)
     const msg: Session['messages'][number] = {
       id: String(m.id),
@@ -235,6 +244,16 @@ function sessionFromSummary(summary: SessionSummary, messages: Session['messages
     pushEnabled: Boolean(summary.push_enabled),
     workspace: summary.workspace || undefined,
     messages,
+  }
+}
+
+function onHistoryOutlineMessagesLoaded(messages: any[]) {
+  if (historySession.value) {
+    const firstMeaningfulIdx = messages.findIndex(m =>
+      m.role === 'user' || (m.role === 'command' && m.systemType === 'command')
+    );
+    const clean = firstMeaningfulIdx > 0 ? messages.slice(firstMeaningfulIdx) : messages;
+    historySession.value.messages = clean;
   }
 }
 
@@ -1049,7 +1068,11 @@ function handleBatchDeleteConfirm() {
         <OutlinePanel
           v-if="showOutline && historySession"
           :messages="historySession.messages || []"
+          :session-id="historySession.id"
+          :session-profile="historySession.profile || null"
+          :show-load-all="true"
           @navigate="handleOutlineNavigate"
+          @messages-loaded="onHistoryOutlineMessagesLoaded"
         />
       </div>
     </div>
