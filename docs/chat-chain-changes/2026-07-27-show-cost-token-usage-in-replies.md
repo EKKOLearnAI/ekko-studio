@@ -1,6 +1,6 @@
 ---
 date: 2026-07-27
-pr: pending
+pr: 2240
 feature: Show Cost token usage on chat replies
 impact: When display.show_cost is enabled, the latest completed assistant reply shows cumulative session input/output token usage.
 ---
