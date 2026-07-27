@@ -1184,6 +1184,7 @@ export default {
     stopSpeech: '停止',
     speechNotSupported: '此浏览器不支持语音播放',
     tokenUsage: '{input} 输入 · {output} 输出',
+    tokenUsageWithCache: '{input} 输入 · {cache} 缓存 · {output} 输出',
   },
 
   workflow: {

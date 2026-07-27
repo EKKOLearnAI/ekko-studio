@@ -1166,6 +1166,7 @@ export default {
     stopSpeech: '停止',
     speechNotSupported: '此瀏覽器不支援語音播放',
     tokenUsage: '{input} 輸入 · {output} 輸出',
+    tokenUsageWithCache: '{input} 輸入 · {cache} 快取 · {output} 輸出',
     modelSetFailed: '設定模型失敗',
     modelSet: '模型已設定',
     modelSwitching: '正在切換模型...',

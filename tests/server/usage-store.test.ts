@@ -25,6 +25,7 @@ import {
   getUsageBatch,
   deleteUsage,
   getRecordedUsageSessionIds,
+  getRecordedUsageByRun,
 } from '../../packages/server/src/modules/studio/repositories/usage-store'
 
 describe('Usage Store (JSON fallback)', () => {
@@ -306,5 +307,36 @@ describe('Usage Store (SQLite path)', () => {
       total_api_calls: 3,
     })
     expect(getRecordedUsageSessionIds('default')).toEqual(['session-1', 'session-2'])
+  })
+
+  it('aggregates JSON run usage by bare run id and prefix', () => {
+    mockJsonGetAll.mockReturnValue({
+      'session-1': {
+        run_id: 'run-abc:api:1',
+        source: 'hermes',
+        input_tokens: 10,
+        output_tokens: 4,
+        cache_read_tokens: 7,
+        cache_write_tokens: 0,
+        reasoning_tokens: 1,
+        api_calls: 1,
+      },
+    })
+    expect(getRecordedUsageByRun('session-1', 'hermes', 'run-abc')).toEqual({
+      inputTokens: 10,
+      outputTokens: 4,
+      cacheReadTokens: 7,
+      cacheWriteTokens: 0,
+      reasoningTokens: 1,
+      apiCalls: 1,
+    })
+    expect(getRecordedUsageByRun('session-1', 'hermes', 'other')).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+      apiCalls: 0,
+    })
   })
 })

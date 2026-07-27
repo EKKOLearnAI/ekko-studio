@@ -375,6 +375,22 @@ function formatTokenCount(value: number): string {
   return String(value);
 }
 
+const messageRunUsage = computed(() => {
+  const usage = props.message.usage;
+  if (!usage) return null;
+  const input = Number(usage.input || 0);
+  const output = Number(usage.output || 0);
+  const cacheRead = Number(usage.cacheRead || 0);
+  const reasoning = Number(usage.reasoning || 0);
+  if (input <= 0 && output <= 0 && cacheRead <= 0 && reasoning <= 0) return null;
+  return {
+    input,
+    output,
+    cacheRead,
+    reasoning,
+  };
+});
+
 const showTokenUsage = computed(() => {
   if (!settingsStore.display.show_cost) return false;
   if (props.message.role !== 'assistant') return false;
@@ -383,33 +399,24 @@ const showTokenUsage = computed(() => {
   const visibleBody = (parsedThinking.value.body || props.message.content || '').trim();
   if (!visibleBody) return false;
 
-  const session = chatStore.activeSession;
-  if (!session) return false;
-  const inputTokens = Number(session.inputTokens || 0);
-  const outputTokens = Number(session.outputTokens || 0);
-  if (inputTokens <= 0 && outputTokens <= 0) return false;
-
-  // Session usage is cumulative. Surface it once on the latest completed reply
-  // so "Show Cost" actually appears in the conversation instead of only as a
-  // dead settings toggle.
-  const messages = session.messages || [];
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role !== 'assistant') continue;
-    if (message.isStreaming || message.systemType === 'error') continue;
-    const body = String(message.content || '').trim();
-    if (!body) continue;
-    return message.id === props.message.id;
-  }
-  return false;
+  // Prefer provider-recorded usage for THIS reply/run. Session-level counters
+  // are cumulative context estimates and must not be shown as reply cost.
+  return messageRunUsage.value != null;
 });
 
 const tokenUsageLabel = computed(() => {
-  const session = chatStore.activeSession;
-  if (!session) return '';
+  const usage = messageRunUsage.value;
+  if (!usage) return '';
+  if (usage.cacheRead > 0) {
+    return t('chat.tokenUsageWithCache', {
+      input: formatTokenCount(usage.input),
+      cache: formatTokenCount(usage.cacheRead),
+      output: formatTokenCount(usage.output),
+    });
+  }
   return t('chat.tokenUsage', {
-    input: formatTokenCount(Number(session.inputTokens || 0)),
-    output: formatTokenCount(Number(session.outputTokens || 0)),
+    input: formatTokenCount(usage.input),
+    output: formatTokenCount(usage.output),
   });
 });
 

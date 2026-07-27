@@ -9,6 +9,7 @@ import { getSystemPrompt } from '../../public/runs/prompt'
 import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
 import { logger, bridgeLogger } from '../../public/logging'
 import { normalizeTokenUsage, recordSessionUsage } from '../usage/usage-recorder'
+import { getRecordedUsageByRun } from '../../repositories/usage-store'
 import type {
   PrimaryAgentBridgeClient as AgentBridgeClient,
   PrimaryAgentBridgeContextEstimate as AgentBridgeContextEstimate,
@@ -1846,6 +1847,7 @@ async function applyBridgeChunkAsync(
   state.runId = undefined
   state.activeRunMarker = undefined
   state.events = []
+  const runUsage = getRecordedUsageByRun(sessionId, 'hermes', String(chunk.run_id || ''))
   const payload = {
     event: eventName,
     run_id: chunk.run_id,
@@ -1856,6 +1858,16 @@ async function applyBridgeChunkAsync(
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     contextTokens,
+    // Provider-recorded usage for THIS run only (sum of model_call rows).
+    // Distinct from inputTokens/outputTokens above, which are session/context estimates.
+    runUsage: {
+      input: runUsage.inputTokens,
+      output: runUsage.outputTokens,
+      cacheRead: runUsage.cacheReadTokens,
+      cacheWrite: runUsage.cacheWriteTokens,
+      reasoning: runUsage.reasoningTokens,
+      apiCalls: runUsage.apiCalls,
+    },
     queue_remaining: state.queue.length,
     background_pending: backgroundPendingCount(state),
     autonomous: runMetadata?.autonomous === true,

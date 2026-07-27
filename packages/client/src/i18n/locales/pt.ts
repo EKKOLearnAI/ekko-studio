@@ -1095,6 +1095,7 @@ export default {
     stopSpeech: 'Parar',
     speechNotSupported: 'Reprodução de voz não suportada neste navegador',
     tokenUsage: '{input} entrada · {output} saída',
+    tokenUsageWithCache: '{input} entrada · {cache} cache · {output} saída',
     searchEnterHint: 'Enter para abrir · Esc para fechar',
     searchHint: 'Cmd/Ctrl+K',
     searchScope: 'Escopo da busca: apenas banco local de sessões da Web UI; sessões históricas Hermes somente leitura não são incluídas.',
