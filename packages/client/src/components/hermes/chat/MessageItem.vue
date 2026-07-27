@@ -369,6 +369,50 @@ function formatDuration(ms: number): string {
 
 const timeStr = computed(() => formatChatTimestamp(props.message.timestamp));
 
+function formatTokenCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
+}
+
+const showTokenUsage = computed(() => {
+  if (!settingsStore.display.show_cost) return false;
+  if (props.message.role !== 'assistant') return false;
+  if (props.message.isStreaming || isAgentError.value) return false;
+
+  const visibleBody = (parsedThinking.value.body || props.message.content || '').trim();
+  if (!visibleBody) return false;
+
+  const session = chatStore.activeSession;
+  if (!session) return false;
+  const inputTokens = Number(session.inputTokens || 0);
+  const outputTokens = Number(session.outputTokens || 0);
+  if (inputTokens <= 0 && outputTokens <= 0) return false;
+
+  // Session usage is cumulative. Surface it once on the latest completed reply
+  // so "Show Cost" actually appears in the conversation instead of only as a
+  // dead settings toggle.
+  const messages = session.messages || [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role !== 'assistant') continue;
+    if (message.isStreaming || message.systemType === 'error') continue;
+    const body = String(message.content || '').trim();
+    if (!body) continue;
+    return message.id === props.message.id;
+  }
+  return false;
+});
+
+const tokenUsageLabel = computed(() => {
+  const session = chatStore.activeSession;
+  if (!session) return '';
+  return t('chat.tokenUsage', {
+    input: formatTokenCount(Number(session.inputTokens || 0)),
+    output: formatTokenCount(Number(session.outputTokens || 0)),
+  });
+});
+
 function isImage(type: string): boolean {
   return type.startsWith("image/");
 }
@@ -1259,6 +1303,11 @@ onBeforeUnmount(() => {
               <span></span><span></span><span></span>
             </span>
           </div>
+          <span
+            v-if="showTokenUsage"
+            class="message-usage"
+            :title="tokenUsageLabel"
+          >{{ tokenUsageLabel }}</span>
           <div class="message-meta">
             <button
               v-if="canPlaySpeech"
@@ -1871,6 +1920,21 @@ onBeforeUnmount(() => {
   }
   50% {
     opacity: 0.5;
+  }
+}
+
+.message-usage {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: $text-muted;
+  white-space: nowrap;
+  user-select: none;
+
+  .dark & {
+    color: #999999;
   }
 }
 

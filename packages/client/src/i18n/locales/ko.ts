@@ -1094,6 +1094,7 @@ export default {
     resumeSpeech: '재개',
     stopSpeech: '중지',
     speechNotSupported: '이 브라우저는 음성 재생을 지원하지 않습니다',
+    tokenUsage: '입력 {input} · 출력 {output}',
     searchEnterHint: 'Enter로 열기 · Esc로 닫기',
     searchHint: 'Cmd/Ctrl+K',
     searchScope: '검색 범위: Web UI 로컬 세션 DB만 포함하며 읽기 전용 Hermes 기록 세션은 포함하지 않습니다.',

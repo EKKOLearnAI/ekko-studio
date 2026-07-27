@@ -1056,6 +1056,7 @@ export default {
     resumeSpeech: 'Продолжить',
     stopSpeech: 'Остановить',
     speechNotSupported: 'Этот браузер не поддерживает воспроизведение речи',
+    tokenUsage: '{input} вх · {output} вых',
   },
 
 
