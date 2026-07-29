@@ -33,6 +33,14 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
 
 vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () => ({
   updateUsage: mocks.updateUsage,
+  getRecordedUsageByRun: vi.fn(() => ({
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+    apiCalls: 0,
+  })),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({

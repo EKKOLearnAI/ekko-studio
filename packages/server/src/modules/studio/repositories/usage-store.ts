@@ -202,47 +202,52 @@ export function getRecordedUsageByRun(
   const normalizedRunId = String(runId || '').trim()
   if (!normalizedRunId) return empty
 
-  if (!isSqliteAvailable()) {
-    const all = jsonGetAll(TABLE)
-    // JSON fallback stores one blob per session id (no multi-row run history).
-    const row = all[sessionId]
-    if (!row) return empty
-    const rowRunId = String(row.run_id || '')
-    if (rowRunId !== normalizedRunId && !rowRunId.startsWith(`${normalizedRunId}:`)) {
-      return empty
+  // Lookup failure must never break run completion / socket emit paths.
+  try {
+    if (!isSqliteAvailable()) {
+      const all = jsonGetAll(TABLE)
+      // JSON fallback stores one blob per session id (no multi-row run history).
+      const row = all[sessionId]
+      if (!row) return empty
+      const rowRunId = String(row.run_id || '')
+      if (rowRunId !== normalizedRunId && !rowRunId.startsWith(`${normalizedRunId}:`)) {
+        return empty
+      }
+      if (source && String(row.source || '') !== source) return empty
+      return {
+        inputTokens: Number(row.input_tokens || 0),
+        outputTokens: Number(row.output_tokens || 0),
+        cacheReadTokens: Number(row.cache_read_tokens || 0),
+        cacheWriteTokens: Number(row.cache_write_tokens || 0),
+        reasoningTokens: Number(row.reasoning_tokens || 0),
+        apiCalls: Number(row.api_calls || 0),
+      }
     }
-    if (source && String(row.source || '') !== source) return empty
+
+    const row = getDb()!.prepare(`
+      SELECT
+        COALESCE(SUM(input_tokens), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens), 0) AS output_tokens,
+        COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+        COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+        COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+        COALESCE(SUM(api_calls), 0) AS api_calls
+      FROM ${TABLE}
+      WHERE session_id = ?
+        AND source = ?
+        AND (run_id = ? OR run_id LIKE ?)
+    `).get(sessionId, source, normalizedRunId, `${normalizedRunId}:%`) as any
+
     return {
-      inputTokens: Number(row.input_tokens || 0),
-      outputTokens: Number(row.output_tokens || 0),
-      cacheReadTokens: Number(row.cache_read_tokens || 0),
-      cacheWriteTokens: Number(row.cache_write_tokens || 0),
-      reasoningTokens: Number(row.reasoning_tokens || 0),
-      apiCalls: Number(row.api_calls || 0),
+      inputTokens: Number(row?.input_tokens || 0),
+      outputTokens: Number(row?.output_tokens || 0),
+      cacheReadTokens: Number(row?.cache_read_tokens || 0),
+      cacheWriteTokens: Number(row?.cache_write_tokens || 0),
+      reasoningTokens: Number(row?.reasoning_tokens || 0),
+      apiCalls: Number(row?.api_calls || 0),
     }
-  }
-
-  const row = getDb()!.prepare(`
-    SELECT
-      COALESCE(SUM(input_tokens), 0) AS input_tokens,
-      COALESCE(SUM(output_tokens), 0) AS output_tokens,
-      COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
-      COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
-      COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-      COALESCE(SUM(api_calls), 0) AS api_calls
-    FROM ${TABLE}
-    WHERE session_id = ?
-      AND source = ?
-      AND (run_id = ? OR run_id LIKE ?)
-  `).get(sessionId, source, normalizedRunId, `${normalizedRunId}:%`) as any
-
-  return {
-    inputTokens: Number(row?.input_tokens || 0),
-    outputTokens: Number(row?.output_tokens || 0),
-    cacheReadTokens: Number(row?.cache_read_tokens || 0),
-    cacheWriteTokens: Number(row?.cache_write_tokens || 0),
-    reasoningTokens: Number(row?.reasoning_tokens || 0),
-    apiCalls: Number(row?.api_calls || 0),
+  } catch {
+    return empty
   }
 }
 
