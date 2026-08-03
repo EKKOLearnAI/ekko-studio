@@ -1113,6 +1113,19 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
     // Normal user/assistant/command messages
     const displayRole = msg.display_role || msg.role
     const displayContent = msg.display_content ?? msg.content
+    // Server attaches provider-recorded usage (by run_id) to assistant rows on
+    // history read-back, so it survives refresh / reload. Surface it on the
+    // mapped Message so MessageItem can render it without a live run event.
+    const usage = displayRole === 'assistant' && msg.usage
+      ? {
+          input: msg.usage.input ?? 0,
+          output: msg.usage.output ?? 0,
+          ...(msg.usage.cacheRead != null ? { cacheRead: msg.usage.cacheRead } : {}),
+          ...(msg.usage.cacheWrite != null ? { cacheWrite: msg.usage.cacheWrite } : {}),
+          ...(msg.usage.reasoning != null ? { reasoning: msg.usage.reasoning } : {}),
+          ...(msg.usage.apiCalls != null ? { apiCalls: msg.usage.apiCalls } : {}),
+        }
+      : undefined
     result.push({
       id: String(msg.id),
       role: displayRole === 'moa' ? 'system' : displayRole,
@@ -1122,6 +1135,8 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
       systemType: displayRole === 'command' ? 'command' : undefined,
       finishReason: readFinishReason(msg),
       runMarker: readRunMarker(msg),
+      runId: msg.run_id || undefined,
+      usage,
     })
   }
   const restored = mergeTaskPlanMessages(result, taskPlans)

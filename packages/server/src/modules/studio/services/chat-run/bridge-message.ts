@@ -7,7 +7,7 @@ import { logger } from '../../public/logging'
 import { persistRunMessages } from './message-persistence'
 import type { SessionMessage, SessionState } from './types'
 
-export function flushBridgePendingToDb(state: SessionState, sessionId: string, runMarker?: string): string | undefined {
+export function flushBridgePendingToDb(state: SessionState, sessionId: string, runMarker?: string, runId?: string): string | undefined {
   const content = state.bridgePendingAssistantContent || ''
   const reasoning = state.bridgePendingReasoningContent || ''
   if (!content.trim()) return state.bridgeAssistantMessageId
@@ -25,7 +25,9 @@ export function flushBridgePendingToDb(state: SessionState, sessionId: string, r
       reasoning: reasoning || null,
       reasoning_content: reasoning || null,
       timestamp: Math.floor(Date.now() / 1000),
+      run_id: runId,
     }],
+  })
   })
   state.bridgePendingAssistantContent = ''
   state.bridgePendingReasoningContent = ''

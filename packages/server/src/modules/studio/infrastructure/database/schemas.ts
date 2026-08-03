@@ -114,7 +114,7 @@ export const MESSAGES_SCHEMA: Record<string, string> = {
   id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
   session_id: 'TEXT NOT NULL',
   role: 'TEXT NOT NULL',
-  content: 'TEXT NOT NULL DEFAULT \'\'',
+  content: "TEXT NOT NULL DEFAULT ''",
   display_role: 'TEXT',
   display_content: 'TEXT',
   tool_call_id: 'TEXT',
@@ -127,6 +127,10 @@ export const MESSAGES_SCHEMA: Record<string, string> = {
   reasoning: 'TEXT',
   reasoning_details: 'TEXT',
   reasoning_content: 'TEXT',
+  // Run id of the model run that produced this message (assistant/tool rows only).
+  // Empty for user/system messages and for legacy rows written before this column
+  // was added; syncTable auto-adds it via ALTER ADD COLUMN on existing DBs.
+  run_id: "TEXT NOT NULL DEFAULT ''",
 }
 
 export const MESSAGES_INDEX = 'CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)'

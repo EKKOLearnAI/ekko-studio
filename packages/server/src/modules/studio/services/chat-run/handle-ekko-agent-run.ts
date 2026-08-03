@@ -1458,6 +1458,7 @@ export async function handleEkkoAgentRun(
           reasoning: reasoningText || null,
           reasoning_details: reasoningDetails,
           reasoning_content: reasoningText || null,
+          run_id: runId || undefined,
         })
       } else if (step.type === 'tool') {
         if (persistedToolCallIds.has(step.toolCallId)) continue
@@ -1469,6 +1470,7 @@ export async function handleEkkoAgentRun(
           tool_name: step.toolName,
           timestamp,
           finish_reason: step.result.ok ? null : 'error',
+          run_id: runId || undefined,
         })
       }
     }
@@ -1533,6 +1535,7 @@ export async function handleEkkoAgentRun(
           reasoning: assistantReasoning || null,
           reasoning_details: reasoningDetails,
           reasoning_content: assistantReasoning || null,
+          run_id: runId || result.runId || undefined,
         }],
       })
       if (assistantId != null) assistantMessageId = String(assistantId)

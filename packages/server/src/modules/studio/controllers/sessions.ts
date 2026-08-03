@@ -2120,6 +2120,10 @@ export async function getConversationMessagesPaginated(ctx: any) {
     .filter((message: any) => String(message.display_role || message.role || '') === 'assistant')
     .map((message: any) => message.id)
 
+  // Attach provider-recorded usage (by run_id) to assistant messages so the
+  // UI can render token usage after a page refresh / session reload.
+  const messagesWithUsage = attachRunUsageToMessages(ctx.params.id, result.messages)
+
   ctx.body = {
     session: {
       id: session.id,

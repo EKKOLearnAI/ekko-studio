@@ -7,6 +7,7 @@ import { TASK_PLANS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_
 import { normalizeMessageContentForStorageRole } from './message-content'
 import { copyCompressionSnapshot } from './compression-snapshot'
 import { recordSkillUsageMessage } from './skill-usage-store'
+import { getRecordedUsageByRun } from './usage-store'
 
 // Re-export types for compatibility with sessions-db.ts consumers
 export interface HermesSessionRow {
@@ -70,6 +71,18 @@ export interface HermesMessageRow {
   reasoning: string | null
   reasoning_details?: string | null
   reasoning_content?: string | null
+  /** Run id of the model run that produced this message (assistant/tool rows only). */
+  run_id?: string | null
+  /** Provider-recorded usage for this run; attached on read by
+   *  {@link attachRunUsageToMessages}, not persisted in the messages table. */
+  usage?: {
+    input: number
+    output: number
+    cacheRead?: number
+    cacheWrite?: number
+    reasoning?: number
+    apiCalls?: number
+  } | null
 }
 
 export interface HermesSessionSearchRow extends HermesSessionRow {
@@ -180,6 +193,7 @@ function mapMessageRow(row: Record<string, unknown>): HermesMessageRow {
     reasoning: row.reasoning != null ? String(row.reasoning) : null,
     reasoning_details: row.reasoning_details != null ? String(row.reasoning_details) : null,
     reasoning_content: row.reasoning_content != null ? String(row.reasoning_content) : null,
+    run_id: row.run_id != null && row.run_id !== '' ? String(row.run_id) : null,
   }
 }
 
@@ -878,13 +892,25 @@ export function addMessage(msg: {
   reasoning?: string | null
   reasoning_details?: string | null
   reasoning_content?: string | null
+  /** Run id of the model run that produced this message (assistant/tool rows only). */
+  run_id?: string | null
+  /** Provider-recorded usage for this run; only attached on read-back in
+   *  {@link attachRunUsageToMessages}, never persisted in the messages table. */
+  usage?: {
+    input: number
+    output: number
+    cacheRead?: number
+    cacheWrite?: number
+    reasoning?: number
+    apiCalls?: number
+  } | null
 }): number | undefined {
   if (!isSqliteAvailable()) return undefined
   const db = getDb()!
   const toolCallsJson = msg.tool_calls ? JSON.stringify(msg.tool_calls) : null
   const result = db.prepare(
-    `INSERT INTO ${MESSAGES_TABLE} (session_id, role, content, display_role, display_content, tool_call_id, tool_calls, tool_name, run_marker, timestamp, token_count, finish_reason, reasoning, reasoning_details, reasoning_content)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO ${MESSAGES_TABLE} (session_id, role, content, display_role, display_content, tool_call_id, tool_calls, tool_name, run_marker, timestamp, token_count, finish_reason, reasoning, reasoning_details, reasoning_content, run_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.session_id, msg.role, normalizeMessageContentForStorageRole(msg.role, msg.content),
     msg.display_role ?? null, msg.display_content ?? null,
@@ -894,6 +920,7 @@ export function addMessage(msg: {
     msg.token_count ?? null, msg.finish_reason ?? null,
     msg.reasoning ?? null, msg.reasoning_details ?? null,
     msg.reasoning_content ?? null,
+    msg.run_id ?? '',
   )
   const messageId = Number(result.lastInsertRowid)
   recordSkillUsageMessage(messageId, msg)
@@ -916,12 +943,13 @@ export function addMessages(msgs: Array<{
   reasoning?: string | null
   reasoning_details?: string | null
   reasoning_content?: string | null
+  run_id?: string | null
 }>): number[] {
   if (!isSqliteAvailable() || msgs.length === 0) return []
   const db = getDb()!
   const insert = db.prepare(
-    `INSERT INTO ${MESSAGES_TABLE} (session_id, role, content, display_role, display_content, tool_call_id, tool_calls, tool_name, run_marker, timestamp, token_count, finish_reason, reasoning, reasoning_details, reasoning_content)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO ${MESSAGES_TABLE} (session_id, role, content, display_role, display_content, tool_call_id, tool_calls, tool_name, run_marker, timestamp, token_count, finish_reason, reasoning, reasoning_details, reasoning_content, run_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
   const ids: number[] = []
   db.exec('BEGIN')
@@ -937,6 +965,7 @@ export function addMessages(msgs: Array<{
         msg.token_count ?? null, msg.finish_reason ?? null,
         msg.reasoning ?? null, msg.reasoning_details ?? null,
         msg.reasoning_content ?? null,
+        msg.run_id ?? '',
       )
       const messageId = Number(result.lastInsertRowid)
       ids.push(messageId)
@@ -1119,4 +1148,66 @@ export function getSessionDetailPaginated(
     limit,
     hasMore: offset + messages.length < total,
   }
+}
+
+/**
+ * Attach provider-recorded usage to each assistant message that carries a `run_id`.
+ *
+ * Called on read-back (see controllers/hermes/sessions.ts) so that token usage
+ * survives session reload / page refresh. Non-assistant messages are returned
+ * unchanged — only assistant rows that already have a `run_id` get a `usage`
+ * field attached.
+ *
+ * Uses {@link getRecordedUsageByRun} to aggregate from `session_usage` rows.
+ * Multiple sources are tried because usage may have been recorded under
+ * `hermes`, `ekko_agent`, or `coding_agent` depending on which runtime path
+ * produced the run. Failures are swallowed conservatively (run-level usage must
+ * never break the history-loading path); a missing run id simply leaves the
+ * row without usage.
+ */
+export function attachRunUsageToMessages(
+  sessionId: string,
+  messages: HermesMessageRow[],
+): HermesMessageRow[] {
+  if (!messages.length) return messages
+  const seen = new Set<string>()
+  const cache = new Map<string, HermesMessageRow['usage'] | null>()
+  const sources = ['hermes', 'ekko_agent', 'coding_agent'] as const
+  for (const msg of messages) {
+    if (msg.role !== 'assistant') continue
+    const runId = msg.run_id
+    if (!runId || seen.has(runId)) continue
+    seen.add(runId)
+    try {
+      let usage: HermesMessageRow['usage'] | null = null
+      for (const source of sources) {
+        const u = getRecordedUsageByRun(sessionId, source, runId)
+        const candidate: HermesMessageRow['usage'] = {
+          input: u.inputTokens,
+          output: u.outputTokens,
+          ...(u.cacheReadTokens > 0 ? { cacheRead: u.cacheReadTokens } : {}),
+          ...(u.cacheWriteTokens > 0 ? { cacheWrite: u.cacheWriteTokens } : {}),
+          ...(u.reasoningTokens > 0 ? { reasoning: u.reasoningTokens } : {}),
+          ...(u.apiCalls > 0 ? { apiCalls: u.apiCalls } : {}),
+        }
+        // Skip zero-only payloads so we don't push a useless `{ input:0, output:0 }`
+        // onto every legacy assistant row that lacks a run_id.
+        if (candidate.input <= 0 && candidate.output <= 0) continue
+        usage = candidate
+        break
+      }
+      cache.set(runId, usage)
+    } catch {
+      cache.set(runId, null)
+    }
+  }
+  if (!cache.size) return messages
+  return messages.map(msg => {
+    if (msg.role !== 'assistant') return msg
+    const runId = msg.run_id
+    if (!runId) return msg
+    const usage = cache.get(runId)
+    if (!usage) return msg
+    return { ...msg, usage }
+  })
 }

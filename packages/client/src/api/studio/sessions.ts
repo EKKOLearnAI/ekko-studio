@@ -123,6 +123,15 @@ export interface HermesMessage {
   token_count: number | null
   finish_reason: string | null
   reasoning: string | null
+  run_id?: string | null
+  usage?: {
+    input: number
+    output: number
+    cacheRead?: number
+    cacheWrite?: number
+    reasoning?: number
+    apiCalls?: number
+  } | null
 }
 
 export interface WorkspaceRunChangeFileSummary {

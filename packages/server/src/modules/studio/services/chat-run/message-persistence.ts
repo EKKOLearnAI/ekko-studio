@@ -71,6 +71,7 @@ export function persistRunMessages(
     reasoning: message.reasoning ?? null,
     reasoning_details: message.reasoning_details ?? null,
     reasoning_content: message.reasoning_content ?? null,
+    run_id: (message as any).run_id ?? '',
   }))
   const ids = atomic
     ? addMessages(rows).map(id => id as number | undefined)
