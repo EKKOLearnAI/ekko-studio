@@ -56,6 +56,7 @@ export interface SessionMessage {
   reasoning?: string | null
   reasoning_details?: string | null
   reasoning_content?: string | null
+  run_id?: string | null
 }
 
 export interface QueuedRun {

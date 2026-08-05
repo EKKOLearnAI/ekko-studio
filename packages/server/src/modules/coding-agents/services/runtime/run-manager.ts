@@ -9,7 +9,7 @@ import { createSession, addMessage, getSession, updateSession, updateSessionStat
 import type { ApiMode, CodingAgentImageInput } from '../../protocol/types'
 import { logger } from '../../../studio/public/logging'
 import { normalizeTokenUsage, recordSessionUsage } from '../../../studio/public/usage'
-import { getRecordedUsageByRun } from '../../../studio/public/usage-store'
+import { getRecordedUsageByRun } from '../../../studio/public/sessions'
 import {
   applyResponseStreamEvent,
   calcAndUpdateUsage,
@@ -1204,7 +1204,6 @@ export class CodingAgentRunManager {
       if (run.launch.mode !== 'scoped' && !['opencode', 'pi'].includes(run.launch.agentId)) {
         const rows = (run.nativeUsage || new NativeTurnUsage()).rows(run.launch.agentId, final?.usage, final?.model || run.launch.model)
         this.recordNativeUsage(run, rows, final?.id || run.printResponseId || run.runMarker || run.id)
-      }
       }
       const deferPiUsageRefresh = run.launch.agentId === 'pi'
       run.terminalUsageRefresh = deferPiUsageRefresh

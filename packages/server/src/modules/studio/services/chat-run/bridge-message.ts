@@ -28,7 +28,6 @@ export function flushBridgePendingToDb(state: SessionState, sessionId: string, r
       run_id: runId,
     }],
   })
-  })
   state.bridgePendingAssistantContent = ''
   state.bridgePendingReasoningContent = ''
   if (persistedId != null) {

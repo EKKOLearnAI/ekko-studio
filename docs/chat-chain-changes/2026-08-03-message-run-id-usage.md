@@ -6,8 +6,9 @@ impact: Messages now store their originating run_id so provider usage can be att
 ---
 
 The `messages` table gains a `run_id` column (`TEXT NOT NULL DEFAULT ''`).
-All assistant tool-call flush sites (bridge, ekko, coding-agent, response-stream)
-now pass the active run id into `addMessage` so it is persisted with the row.
+All assistant tool-call flush sites (bridge, ekko `handle-ekko-agent-run.ts`,
+coding-agent, response-stream) now pass the active run id into `addMessage`
+so it is persisted with the row.
 
 `getConversationMessagesPaginated` calls `attachRunUsageToMessages` before
 returning history. That helper joins `session_usage` by `run_id` (trying

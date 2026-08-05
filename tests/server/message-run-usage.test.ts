@@ -30,8 +30,8 @@ describe('message run_id + usage persistence', () => {
 
   it('addMessage persists run_id and getSessionDetailPaginated maps it onto HermesMessageRow', async () => {
     ensureSqliteAvailable()
-    const { initAllHermesTables } = await import('../../packages/server/src/db/hermes/schemas')
-    const sessionStore = await import('../../packages/server/src/db/hermes/session-store')
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    const sessionStore = await import('../../packages/server/src/modules/studio/repositories/session-store')
     initAllHermesTables()
 
     const sid = `s1_${uniqueSuffix()}`
@@ -56,9 +56,9 @@ describe('message run_id + usage persistence', () => {
 
   it('attachRunUsageToMessages injects runUsage onto assistant messages with a matching run_id', async () => {
     ensureSqliteAvailable()
-    const { initAllHermesTables } = await import('../../packages/server/src/db/hermes/schemas')
-    const sessionStore = await import('../../packages/server/src/db/hermes/session-store')
-    const usageStore = await import('../../packages/server/src/db/hermes/usage-store')
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    const sessionStore = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    const usageStore = await import('../../packages/server/src/modules/studio/repositories/usage-store')
     initAllHermesTables()
 
     const sid = `s2_${uniqueSuffix()}`
