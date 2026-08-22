@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { NTooltip } from 'naive-ui'
 import type { Message } from '@/stores/hermes/chat'
 import { mapHermesMessages } from '@/stores/hermes/chat'
-import { fetchHermesSession } from '@/api/hermes/sessions'
+import { fetchHermesSession } from '@/api/studio/sessions'
 
 interface OutlineItem {
   id: string
@@ -44,36 +44,6 @@ async function handleLoadAll() {
   } finally {
     localFetching.value = false
   }
-}
-
-function extractAllHeadings(text: string, messageId: string): OutlineItem[] {
-  const items: OutlineItem[] = []
-  let cleanedText = text.replace(/<think>[\s\S]*?<\/think>/g, '')
-  const lines = cleanedText.split('\n')
-  
-  let headingIndex = 0
-  for (const line of lines) {
-    const trimmed = line.trim()
-    const h1Match = trimmed.match(/^#\s+(.+)/)
-    const h2Match = trimmed.match(/^##\s+(.+)/)
-    const h3Match = trimmed.match(/^###\s+(.+)/)
-    
-    const raw = h1Match?.[1] ?? h2Match?.[1] ?? h3Match?.[1]
-    if (!raw) continue
-    const content = cleanOutlineText(raw)
-    if (!content) continue
-    headingIndex++
-    items.push({
-      id: `outline-${messageId}-h${headingIndex}`,
-      type: 'outline',
-      content,
-      messageId,
-      level: h1Match ? 1 : h2Match ? 2 : 3,
-      anchorId: `msg-${messageId}-heading-${headingIndex}`
-    })
-  }
-  
-  return items
 }
 
 // 清洗内联 markdown：链接→文字、加粗/斜体/代码标记去掉、
@@ -158,25 +128,22 @@ const outlineItems = computed<OutlineItem[]>(() => {
       })
       i++
       // 一次回答可能拆成多条 assistant 行（tool-call 空行 + 正文行），
-      // 扫完整个连续 assistant 段：首条非空行作为 A 摘要，并收集 markdown 标题
+      // 扫完整个连续 assistant 段，取首条非空正文行作为 A 摘要。
+      // 大纲只展示 Q&A 对，不混入回答里的 markdown 标题。
       let answerShown = false
       while (i < filteredMessages.length && filteredMessages[i].role === 'assistant') {
         const assistantMsg = filteredMessages[i]
-        if (assistantMsg.content && assistantMsg.content.trim()) {
-          if (!answerShown) {
-            items.push({
-              id: `answer-${assistantMsg.id}`,
-              type: 'outline',
-              content: extractAnswerSummary(assistantMsg.content),
-              messageId: assistantMsg.id,
-              level: 1,
-              anchorId: `message-${assistantMsg.id}`,
-              isAnswer: true,
-            })
-            answerShown = true
-          }
-          const headings = extractAllHeadings(assistantMsg.content, assistantMsg.id)
-          items.push(...headings)
+        if (assistantMsg.content && assistantMsg.content.trim() && !answerShown) {
+          items.push({
+            id: `answer-${assistantMsg.id}`,
+            type: 'outline',
+            content: extractAnswerSummary(assistantMsg.content),
+            messageId: assistantMsg.id,
+            level: 1,
+            anchorId: `message-${assistantMsg.id}`,
+            isAnswer: true,
+          })
+          answerShown = true
         }
         i++
       }
