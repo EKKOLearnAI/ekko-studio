@@ -20,6 +20,7 @@ vi.mock('../../packages/server/src/modules/studio/services/task-plans', () => ({
   getSessionTaskPlans: getSessionTaskPlansMock,
 }))
 const userCanAccessProfileMock = vi.hoisted(() => vi.fn((_user: unknown, _profile: string) => true))
+const reconcileHermesSessionHistoryMock = vi.hoisted(() => vi.fn(async () => ({ changed: false, added: 0 })))
 const getSessionMock = vi.hoisted(() => vi.fn((sessionId?: string) => sessionId
   ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai' }
   : undefined))
@@ -50,6 +51,10 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/session-comm
   handleSessionCommand: vi.fn(),
   isSessionCommand: vi.fn(() => false),
   parseSessionCommand: vi.fn(() => null),
+}))
+
+vi.mock('../../packages/server/src/modules/studio/services/history/reconcile-hermes-history', () => ({
+  reconcileHermesSessionHistory: reconcileHermesSessionHistoryMock,
 }))
 
 vi.mock('../../packages/server/src/modules/hermes/services/bridge/index', () => ({
@@ -97,6 +102,10 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
   getSession: getSessionMock,
   getSessionMetadata: getSessionMock,
   getSessionDetail: vi.fn(() => null),
+}))
+
+vi.mock('../../packages/server/src/modules/studio/repositories/workspace-run-changes-store', () => ({
+  listWorkspaceRunChangesForAssistantMessages: vi.fn(() => []),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
@@ -156,6 +165,9 @@ describe('ChatRunSocket reports when the run started', () => {
     ensureReadyMock.mockReset()
     getRuntimeStateMock.mockReset()
     bridgeMock.statusIfLoaded.mockReset()
+    reconcileHermesSessionHistoryMock.mockReset().mockResolvedValue({ changed: false, added: 0 })
+    loadSessionStateFromDbMock.mockReset()
+    handleBridgeRunMock.mockClear()
     ensureReadyMock.mockResolvedValue({
       reachable: true,
       status: 'ready',
@@ -226,6 +238,159 @@ describe('ChatRunSocket reports when the run started', () => {
     const resumed = socket.emit.mock.calls.find((call: any[]) => call[0] === 'resumed')
     expect(resumed![1].isWorking).toBe(false)
     expect(resumed![1].runStartedAt).toBeUndefined()
+    expect(reconcileHermesSessionHistoryMock).toHaveBeenCalledWith('s2', expect.objectContaining({ profile: 'default' }))
+  })
+
+  it('reloads reconciled native continuation history before an idle resume', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 1, username: 'admin', role: 'super_admin' }
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).sessionMap.set('resume-lineage', {
+      messages: [{ id: 1, role: 'user', content: 'stale root' }], events: [], queue: [], isWorking: false,
+    })
+    reconcileHermesSessionHistoryMock.mockResolvedValueOnce({ changed: true, added: 1 })
+    loadSessionStateFromDbMock.mockResolvedValueOnce({
+      messages: [
+        { id: 1, role: 'user', content: 'stale root' },
+        { id: 2, role: 'assistant', content: 'native continuation' },
+      ],
+      events: [], queue: [], isWorking: false,
+    })
+
+    ;(server as any).onConnection(socket)
+    await handlers.get('resume')?.({ session_id: 'resume-lineage' })
+
+    const resumed = socket.emit.mock.calls.find((call: any[]) => call[0] === 'resumed')
+    expect(resumed![1].messages.map((message: any) => message.content)).toEqual(['stale root', 'native continuation'])
+    expect(loadSessionStateFromDbMock).toHaveBeenCalledWith('resume-lineage', expect.any(Map))
+  })
+
+  it('reconciles and reloads idle history before a direct bridge send', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 1, username: 'admin', role: 'super_admin' }
+    const server = new ChatRunSocket(io as any)
+    reconcileHermesSessionHistoryMock.mockResolvedValueOnce({ changed: true, added: 1 })
+    loadSessionStateFromDbMock.mockResolvedValueOnce({
+      messages: [{ id: 2, role: 'assistant', content: 'native continuation' }],
+      events: [], queue: [], isWorking: false,
+    })
+
+    ;(server as any).onConnection(socket)
+    await handlers.get('run')?.({ session_id: 'pre-send-lineage', input: 'next turn', source: 'cli' })
+
+    expect(reconcileHermesSessionHistoryMock).toHaveBeenCalledWith(
+      'pre-send-lineage',
+      expect.objectContaining({ profile: 'default' }),
+    )
+    expect(loadSessionStateFromDbMock).toHaveBeenCalledWith('pre-send-lineage', expect.any(Map))
+    expect(handleBridgeRunMock).toHaveBeenCalled()
+    const sessionMap = handleBridgeRunMock.mock.calls[0][4] as Map<string, any>
+    expect(sessionMap.get('pre-send-lineage').messages[0].content).toBe('native continuation')
+  })
+
+  it('preserves a concurrently queued second send while the first send refreshes native history', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 1, username: 'admin', role: 'super_admin' }
+    const server = new ChatRunSocket(io as any)
+    let finishLookup!: () => void
+    const lookupPending = new Promise<void>(resolve => { finishLookup = resolve })
+    reconcileHermesSessionHistoryMock.mockImplementationOnce(async (_id, options) => {
+      await lookupPending
+      expect(options.isSessionActive()).toBe(false)
+      return { changed: true, added: 1 }
+    })
+    loadSessionStateFromDbMock.mockResolvedValueOnce({
+      messages: [{ id: 2, role: 'assistant', content: 'native continuation' }],
+      events: [], queue: [], isWorking: false,
+    })
+
+    ;(server as any).onConnection(socket)
+    const first = handlers.get('run')?.({ session_id: 'concurrent-send', input: 'first', source: 'cli' })
+    await vi.waitFor(() => expect(reconcileHermesSessionHistoryMock).toHaveBeenCalledTimes(1))
+    const reserved = (server as any).sessionMap.get('concurrent-send')
+    const startedAt = reserved.runStartedAt
+    const second = handlers.get('run')?.({ session_id: 'concurrent-send', input: 'second', source: 'cli' })
+
+    await vi.waitFor(() => expect(reserved.queue.map((item: any) => item.input)).toEqual(['second']))
+    expect(reserved.isWorking).toBe(true)
+    reserved.events.push({ event: 'live.event', data: { value: 1 } })
+    finishLookup()
+    await Promise.all([first, second])
+
+    const current = (server as any).sessionMap.get('concurrent-send')
+    expect(current).toBe(reserved)
+    expect(current.messages.map((message: any) => message.content)).toEqual(['native continuation'])
+    expect(current.queue.map((item: any) => item.input)).toEqual(['second'])
+    expect(current.events).toEqual([{ event: 'live.event', data: { value: 1 } }])
+    expect(current.runStartedAt).toBe(startedAt)
+    expect(current.profile).toBe('default')
+    expect(handleBridgeRunMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a live send state when an idle resume lookup finishes afterward', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 1, username: 'admin', role: 'super_admin' }
+    const server = new ChatRunSocket(io as any)
+    const idleState = {
+      messages: [{ id: 1, role: 'user', content: 'existing' }], events: [], queue: [], isWorking: false,
+    }
+    ;(server as any).sessionMap.set('resume-send-race', idleState)
+    let finishResumeLookup!: () => void
+    const resumeLookupPending = new Promise<void>(resolve => { finishResumeLookup = resolve })
+    let resumeSawActive = false
+    reconcileHermesSessionHistoryMock
+      .mockImplementationOnce(async (_id, options) => {
+        await resumeLookupPending
+        resumeSawActive = options.isSessionActive()
+        return { changed: false, added: 0 }
+      })
+      .mockResolvedValueOnce({ changed: false, added: 0 })
+
+    ;(server as any).onConnection(socket)
+    const resume = handlers.get('resume')?.({ session_id: 'resume-send-race' })
+    await vi.waitFor(() => expect(reconcileHermesSessionHistoryMock).toHaveBeenCalledTimes(1))
+    await handlers.get('run')?.({ session_id: 'resume-send-race', input: 'new run', source: 'cli' })
+    const liveState = (server as any).sessionMap.get('resume-send-race')
+    const startedAt = liveState.runStartedAt
+    finishResumeLookup()
+    await resume
+
+    expect(resumeSawActive).toBe(true)
+    expect((server as any).sessionMap.get('resume-send-race')).toBe(liveState)
+    expect(liveState.isWorking).toBe(true)
+    expect(liveState.runStartedAt).toBe(startedAt)
+    const resumed = socket.emit.mock.calls.find((call: any[]) => call[0] === 'resumed')
+    expect(resumed?.[1]).toMatchObject({ isWorking: true, runStartedAt: startedAt })
+  })
+
+  it('does not replace state created by a send while an initial resume load is pending', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 1, username: 'admin', role: 'super_admin' }
+    const server = new ChatRunSocket(io as any)
+    let finishLoad!: (state: any) => void
+    loadSessionStateFromDbMock.mockImplementationOnce(() => new Promise(resolve => { finishLoad = resolve }))
+
+    ;(server as any).onConnection(socket)
+    const resume = handlers.get('resume')?.({ session_id: 'initial-resume-send-race' })
+    await vi.waitFor(() => expect(loadSessionStateFromDbMock).toHaveBeenCalledTimes(1))
+    await handlers.get('run')?.({ session_id: 'initial-resume-send-race', input: 'new run', source: 'cli' })
+    const liveState = (server as any).sessionMap.get('initial-resume-send-race')
+    finishLoad({
+      messages: [{ id: 1, role: 'user', content: 'loaded before send' }],
+      events: [], queue: [], isWorking: false,
+    })
+    await resume
+
+    expect((server as any).sessionMap.get('initial-resume-send-race')).toBe(liveState)
+    expect(liveState.isWorking).toBe(true)
+    expect(handleBridgeRunMock).toHaveBeenCalledTimes(1)
+    const resumed = socket.emit.mock.calls.find((call: any[]) => call[0] === 'resumed')
+    expect(resumed?.[1].isWorking).toBe(true)
   })
 
   it('refreshes the start when a queued run becomes active', async () => {

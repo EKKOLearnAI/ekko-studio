@@ -68,6 +68,7 @@ import {
   workspaceRelativePath,
 } from '../services/workspace/manager'
 import { getChatRunServer } from '../services/chat-run/server-registry'
+import { reconcileHermesSessionHistory } from '../services/history/reconcile-hermes-history'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
 import { buildFileContentHeaders, getFilePreviewDescriptor } from '../services/files/file-preview'
 import { decorateWorkspaceEntries, getWorkspaceFileGitDiff } from '../services/files/workspace-git-status'
@@ -170,6 +171,15 @@ function requestedSessionSources(source?: string): string[] {
 
 function isHermesHistorySessionSource(source?: string | null): boolean {
   return source !== 'global_agent' && source !== 'workflow' && source !== 'group_chat'
+}
+
+async function reconcileLocalHermesHistory(sessionId: string, profile?: string): Promise<void> {
+  const chatRunServer = getChatRunServer()
+  await reconcileHermesSessionHistory(sessionId, {
+    profile,
+    isSessionActive: () => chatRunServer?.isSessionRunActive?.(sessionId) === true,
+    invalidateCachedHistory: () => chatRunServer?.invalidateSessionHistory?.(sessionId),
+  })
 }
 
 function sessionLastActive(session: any): number {
@@ -1135,10 +1145,14 @@ export async function getHermesSession(ctx: any) {
   // Prefer the Web UI local session store. Hermes state.db can lag behind or
   // miss messages for Bridge-backed runs, while the local store is the source
   // used by chat rendering and compression.
-  const localSession = localGetSessionDetail(ctx.params.id)
+  let localSession = localGetSessionDetail(ctx.params.id)
   const localSessionProfile = (localSession?.profile || 'default') as string
   if (localSession && isHermesHistorySessionSource(localSession.source) && (!profile || localSessionProfile === profile)) {
     if (denySessionAccess(ctx, localSession)) return
+    if (isHermesAgentAvailable()) {
+      await reconcileLocalHermesHistory(ctx.params.id, profile || localSessionProfile)
+      localSession = localGetSessionDetail(ctx.params.id) || localSession
+    }
     ctx.body = { session: localSession }
     return
   }
@@ -1199,7 +1213,9 @@ export async function importHermesSession(ctx: any) {
 
   const existing = localGetSessionDetail(sessionId)
   if (existing) {
-    ctx.body = { ok: true, imported: false, session: existing }
+    if (denySessionAccess(ctx, existing)) return
+    if (isHermesAgentAvailable()) await reconcileLocalHermesHistory(sessionId, profile)
+    ctx.body = { ok: true, imported: false, session: localGetSessionDetail(sessionId) || existing }
     return
   }
 
@@ -2147,6 +2163,17 @@ export async function getConversationMessagesPaginated(ctx: any) {
   const profile = requestedProfile(ctx)
 
   const { getSessionDetailPaginated } = await import('../public/sessions')
+  const localDetail = localGetSessionDetail(ctx.params.id)
+  const localProfile = String(localDetail?.profile || 'default')
+  if (
+    localDetail
+    && isHermesHistorySessionSource(localDetail.source)
+    && (!profile || profile === localProfile)
+    && isHermesAgentAvailable()
+  ) {
+    if (denySessionAccess(ctx, localDetail)) return
+    await reconcileLocalHermesHistory(ctx.params.id, profile || localProfile)
+  }
   const localResult = getSessionDetailPaginated(ctx.params.id, offset, limit)
   const result = localResult && (!profile || localResult.session.profile === profile)
     ? localResult

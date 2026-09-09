@@ -147,6 +147,8 @@ export interface SessionState {
    * first render.
    */
   runStartedAt?: number
+  /** Identifies the socket run whose pre-send history refresh owns isWorking. */
+  historyRefreshReservation?: string
   events: Array<{ event: string; data: any }>
   abortController?: AbortController
   runId?: string

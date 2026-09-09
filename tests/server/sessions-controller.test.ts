@@ -11,6 +11,7 @@ const listSessionSummariesMock = vi.fn()
 const listSessionSummaryGroupsMock = vi.fn()
 const getSessionDetailFromDbMock = vi.fn()
 const getSessionDetailFromDbWithProfileMock = vi.fn()
+const getSessionDetailPaginatedFromDbWithProfileMock = vi.fn()
 const getExactSessionDetailFromDbWithProfileMock = vi.fn()
 const getUsageStatsFromDbMock = vi.fn()
 const getSessionMock = vi.fn()
@@ -42,12 +43,14 @@ const getRecordedUsageSessionIdsMock = vi.fn()
 const getActiveProfileNameMock = vi.fn()
 const loggerWarnMock = vi.fn()
 const getCompressionSnapshotMock = vi.fn()
+const deleteCompressionSnapshotMock = vi.fn()
 const buildDbExportHistoryMock = vi.fn()
 const listUserProfilesMock = vi.fn()
 const readConfigYamlForProfileMock = vi.fn()
 const bridgeSwitchSessionModelMock = vi.fn()
 const bridgeGetRuntimeStateMock = vi.fn()
 const emitSessionSettingsUpdatedMock = vi.fn()
+const invalidateSessionHistoryMock = vi.fn()
 const getChatRunServerMock = vi.fn()
 const agentStatusMocks = vi.hoisted(() => ({ hermesAvailable: true }))
 const codingAgentRunManagerMock = vi.hoisted(() => ({
@@ -93,6 +96,7 @@ vi.mock('../../packages/server/src/modules/hermes/services/history/sessions-db',
   searchSessionSummaries: vi.fn(),
   getSessionDetailFromDb: getSessionDetailFromDbMock,
   getSessionDetailFromDbWithProfile: getSessionDetailFromDbWithProfileMock,
+  getSessionDetailPaginatedFromDbWithProfile: getSessionDetailPaginatedFromDbWithProfileMock,
   getExactSessionDetailFromDbWithProfile: getExactSessionDetailFromDbWithProfileMock,
   getUsageStatsFromDb: getUsageStatsFromDbMock,
 }))
@@ -194,6 +198,18 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/server-regis
 
 vi.mock('../../packages/server/src/modules/studio/repositories/compression-snapshot', () => ({
   getCompressionSnapshot: getCompressionSnapshotMock,
+  deleteCompressionSnapshot: deleteCompressionSnapshotMock,
+}))
+
+vi.mock('../../packages/server/src/modules/studio/services/task-plans', () => ({
+  getSessionTaskPlans: vi.fn(() => []),
+}))
+
+vi.mock('../../packages/server/src/modules/studio/repositories/workspace-run-changes-store', () => ({
+  deleteWorkspaceRunChangesForSession: vi.fn(),
+  getWorkspaceRunChangeFile: vi.fn(),
+  listWorkspaceRunChangesForAssistantMessages: vi.fn(() => []),
+  listWorkspaceRunChangesForSession: vi.fn(() => []),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/context-compressor/export-compressor', () => ({
@@ -226,7 +242,7 @@ vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime',
   getHermesModelContextLength: vi.fn(),
   getHermesSessionDetail: getSessionDetailFromDbMock,
   getHermesSessionDetailForProfile: getSessionDetailFromDbWithProfileMock,
-  getHermesSessionDetailPaginatedForProfile: vi.fn(),
+  getHermesSessionDetailPaginatedForProfile: getSessionDetailPaginatedFromDbWithProfileMock,
   getExactHermesSessionDetailForProfile: getExactSessionDetailFromDbWithProfileMock,
   getHermesUsageStats: getUsageStatsFromDbMock,
   listHermesSessionSummaries: listSessionSummariesMock,
@@ -261,6 +277,7 @@ describe('session conversations controller', () => {
     listSessionSummaryGroupsMock.mockReset()
     getSessionDetailFromDbMock.mockReset()
     getSessionDetailFromDbWithProfileMock.mockReset()
+    getSessionDetailPaginatedFromDbWithProfileMock.mockReset()
     getExactSessionDetailFromDbWithProfileMock.mockReset()
     getUsageStatsFromDbMock.mockReset()
     getSessionMock.mockReset()
@@ -268,6 +285,7 @@ describe('session conversations controller', () => {
     localListSessionsMock.mockReset()
     localCountSessionsMock.mockReset().mockReturnValue(0)
     localGetSessionDetailMock.mockReset()
+    localGetSessionDetailPaginatedMock.mockReset()
     localSearchSessionsMock.mockReset()
     localDeleteSessionMock.mockReset()
     localRenameSessionMock.mockReset()
@@ -279,8 +297,13 @@ describe('session conversations controller', () => {
     localAddMessagesMock.mockReset()
     localUpdateSessionStatsMock.mockReset()
     emitSessionSettingsUpdatedMock.mockReset()
+    invalidateSessionHistoryMock.mockReset()
     getChatRunServerMock.mockReset()
-    getChatRunServerMock.mockReturnValue({ emitSessionSettingsUpdated: emitSessionSettingsUpdatedMock })
+    getChatRunServerMock.mockReturnValue({
+      emitSessionSettingsUpdated: emitSessionSettingsUpdatedMock,
+      isSessionRunActive: () => false,
+      invalidateSessionHistory: invalidateSessionHistoryMock,
+    })
     listSessionCategoriesMock.mockReset()
     createSessionCategoryMock.mockReset()
     deleteSessionCategoryMock.mockReset()
@@ -314,6 +337,7 @@ describe('session conversations controller', () => {
     getActiveProfileNameMock.mockReturnValue('default')
     loggerWarnMock.mockReset()
     getCompressionSnapshotMock.mockReset()
+    deleteCompressionSnapshotMock.mockReset()
     buildDbExportHistoryMock.mockReset()
     listUserProfilesMock.mockReset()
     listUserProfilesMock.mockReturnValue([])
@@ -1778,6 +1802,128 @@ describe('session conversations controller', () => {
     })
   })
 
+  it('reconciles a native compression continuation into local Hermes detail without replacing bridge-only messages', async () => {
+    let localDetail: any = {
+      id: 'studio-root',
+      profile: 'default',
+      source: 'api_server',
+      title: 'Stable Studio title',
+      messages: [
+        { id: 10, session_id: 'studio-root', role: 'user', content: 'shared root turn', timestamp: 100 },
+        { id: 11, session_id: 'studio-root', role: 'assistant', content: 'bridge-only commentary', timestamp: 110 },
+      ],
+    }
+    localGetSessionDetailMock.mockImplementation(() => localDetail)
+    localAddMessagesMock.mockImplementation((messages: any[]) => {
+      localDetail = {
+        ...localDetail,
+        messages: [
+          ...localDetail.messages,
+          ...messages.map((message, index) => ({ ...message, id: 20 + index })),
+        ],
+      }
+      return messages.map((_message, index) => 20 + index)
+    })
+    getSessionDetailFromDbWithProfileMock.mockResolvedValue({
+      id: 'studio-root',
+      source: 'cli',
+      thread_session_count: 2,
+      messages: [
+        { id: 1, session_id: 'studio-root', role: 'user', content: 'shared root turn', timestamp: 100 },
+        { id: 2, session_id: 'native-tip', role: 'assistant', content: 'native continuation turn', timestamp: 200 },
+      ],
+    })
+
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'studio-root' }, query: {}, state: {}, body: null }
+    await mod.getHermesSession(ctx)
+
+    expect(getSessionDetailFromDbWithProfileMock).toHaveBeenCalledWith('studio-root', 'default')
+    expect(localAddMessagesMock).toHaveBeenCalledWith([
+      expect.objectContaining({
+        session_id: 'studio-root',
+        role: 'assistant',
+        content: 'native continuation turn',
+        run_marker: expect.stringContaining('native-tip'),
+      }),
+    ])
+    expect(deleteCompressionSnapshotMock).toHaveBeenCalledWith('studio-root')
+    expect(invalidateSessionHistoryMock).toHaveBeenCalledWith('studio-root')
+    expect(ctx.body.session).toMatchObject({ id: 'studio-root', title: 'Stable Studio title' })
+    expect(ctx.body.session.messages.map((message: any) => message.content)).toEqual([
+      'shared root turn',
+      'bridge-only commentary',
+      'native continuation turn',
+    ])
+  })
+
+  it('reconciles before reading a local Hermes message page and keeps the public Studio id', async () => {
+    let messages: any[] = [
+      { id: 10, session_id: 'studio-page-root', role: 'user', content: 'root page turn', timestamp: 100 },
+    ]
+    const session = { id: 'studio-page-root', profile: 'travel', source: 'cli', title: 'Studio page' }
+    localGetSessionDetailMock.mockImplementation(() => ({ ...session, messages }))
+    localAddMessagesMock.mockImplementation((added: any[]) => {
+      messages = [...messages, ...added.map((message, index) => ({ ...message, id: 20 + index }))]
+      return added.map((_message, index) => 20 + index)
+    })
+    localGetSessionDetailPaginatedMock.mockImplementation((_id: string, offset: number, limit: number) => ({
+      session: { ...session, message_count: messages.length },
+      messages: messages.slice().reverse().slice(offset, offset + limit).reverse(),
+      total: messages.length,
+      offset,
+      limit,
+      hasMore: offset + limit < messages.length,
+    }))
+    getSessionDetailFromDbWithProfileMock.mockResolvedValue({
+      id: 'studio-page-root',
+      source: 'cli',
+      thread_session_count: 2,
+      messages: [
+        { id: 1, session_id: 'studio-page-root', role: 'user', content: 'root page turn', timestamp: 100 },
+        { id: 2, session_id: 'native-page-tip', role: 'assistant', content: 'continued page turn', timestamp: 200 },
+      ],
+    })
+
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      params: { id: 'studio-page-root' },
+      query: { profile: 'travel', offset: '0', limit: '20' },
+      state: {},
+      body: null,
+    }
+    await mod.getConversationMessagesPaginated(ctx)
+
+    expect(getSessionDetailFromDbWithProfileMock).toHaveBeenCalledWith('studio-page-root', 'travel')
+    expect(localGetSessionDetailPaginatedMock).toHaveBeenCalledWith('studio-page-root', 0, 20)
+    expect(ctx.body.session.id).toBe('studio-page-root')
+    expect(ctx.body.messages.map((message: any) => message.content)).toEqual([
+      'root page turn',
+      'continued page turn',
+    ])
+  })
+
+  it('denies a local Hermes message page before any native reconciliation read', async () => {
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'travel' }])
+    localGetSessionDetailMock.mockReturnValue({
+      id: 'private-page', profile: 'private', source: 'cli', messages: [],
+    })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      params: { id: 'private-page' },
+      query: { offset: '0', limit: '20' },
+      state: { user: { id: 7, role: 'user' } },
+      body: null,
+    }
+
+    await mod.getConversationMessagesPaginated(ctx)
+
+    expect(ctx.status).toBe(403)
+    expect(getSessionDetailFromDbWithProfileMock).not.toHaveBeenCalled()
+    expect(getSessionDetailPaginatedFromDbWithProfileMock).not.toHaveBeenCalled()
+    expect(localGetSessionDetailPaginatedMock).not.toHaveBeenCalled()
+  })
+
   it('falls back to Hermes state.db when local history detail is missing', async () => {
     localGetSessionDetailMock.mockReturnValue(null)
     getSessionDetailFromDbMock.mockResolvedValue({
@@ -2383,6 +2529,63 @@ describe('session conversations controller', () => {
     }))
     expect(localUpdateSessionMock.mock.calls.at(-1)?.[1].last_active).toBeGreaterThan(200)
     expect(ctx.body).toMatchObject({ ok: true, imported: true })
+  })
+
+  it('reconciles a continuation when importing an already-local Hermes session', async () => {
+    let localDetail: any = {
+      id: 'existing-import-root',
+      profile: 'travel',
+      source: 'cli',
+      title: 'Existing local session',
+      messages: [{ id: 10, session_id: 'existing-import-root', role: 'user', content: 'root turn', timestamp: 100 }],
+    }
+    localGetSessionDetailMock.mockImplementation(() => localDetail)
+    localAddMessagesMock.mockImplementation((messages: any[]) => {
+      localDetail = {
+        ...localDetail,
+        messages: [...localDetail.messages, ...messages.map((message, index) => ({ ...message, id: 20 + index }))],
+      }
+      return messages.map((_message, index) => 20 + index)
+    })
+    getSessionDetailFromDbWithProfileMock.mockResolvedValue({
+      id: 'existing-import-root',
+      source: 'cli',
+      thread_session_count: 2,
+      messages: [
+        { id: 1, session_id: 'existing-import-root', role: 'user', content: 'root turn', timestamp: 100 },
+        { id: 2, session_id: 'existing-import-tip', role: 'assistant', content: 'continued turn', timestamp: 200 },
+      ],
+    })
+
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      params: { id: 'existing-import-root' }, query: { profile: 'travel' }, state: {}, body: null,
+    }
+    await mod.importHermesSession(ctx)
+
+    expect(localCreateSessionMock).not.toHaveBeenCalled()
+    expect(ctx.body).toMatchObject({ ok: true, imported: false })
+    expect(ctx.body.session.messages.map((message: any) => message.content)).toEqual(['root turn', 'continued turn'])
+  })
+
+  it('denies an already-local import before any native reconciliation read', async () => {
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'travel' }])
+    localGetSessionDetailMock.mockReturnValue({
+      id: 'private-import', profile: 'private', source: 'cli', messages: [],
+    })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      params: { id: 'private-import' },
+      query: { profile: 'travel' },
+      state: { user: { id: 7, role: 'user' } },
+      body: null,
+    }
+
+    await mod.importHermesSession(ctx)
+
+    expect(ctx.status).toBe(403)
+    expect(getSessionDetailFromDbWithProfileMock).not.toHaveBeenCalled()
+    expect(localCreateSessionMock).not.toHaveBeenCalled()
   })
 
   describe('exportSession', () => {
