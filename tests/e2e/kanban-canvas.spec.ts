@@ -149,6 +149,7 @@ test('approves a codex-tech review card through the existing Kanban entry', asyn
   await page.addInitScript(() => localStorage.setItem('hermes.kanban.selectedBoard', 'codex-tech'))
   let status = 'review'
   let postedBody: Record<string, unknown> | null = null
+  let archivePosts = 0
   const task = () => ({
     id: 'task-review', title: 'Risky approval', body: 'Breaking migration risk', assignee: 'codex-worker',
     status, priority: 3, created_by: null, created_at: now, started_at: now + 1,
@@ -189,6 +190,12 @@ test('approves a codex-tech review card through the existing Kanban entry', asyn
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ receipt: { ok: true, duplicate: false, event_id: 'evt-ui', after_status: 'done' } }) })
       return
     }
+    if (pathname === '/api/hermes/kanban/task-review/archive' && request.method() === 'POST') {
+      archivePosts += 1
+      status = 'archived'
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ receipt: { ok: true, duplicate: false, event_id: 'evt-archive', after_status: 'archived' } }) })
+      return
+    }
     if (pathname === '/api/hermes/kanban/task-review') {
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ task: task(), latest_summary: 'Ready for review', comments: [], events: [{ id: 55, task_id: 'task-review', kind: 'review_requested', payload: {}, created_at: now + 2, run_id: 17 }], runs: [{ id: 17, profile: 'codex-worker', status, started_at: now + 1, ended_at: now + 2 }], parents: [], children: [] }) })
       return
@@ -209,5 +216,78 @@ test('approves a codex-tech review card through the existing Kanban entry', asyn
   await page.getByTestId('approval-approve').click()
   await expect(page.getByTestId('approval-archive')).toBeVisible()
   expect(postedBody).toEqual({ reason: 'tests and diff verified' })
+  await page.getByTestId('approval-archive').click()
+  const archiveDialog = page.getByRole('dialog').filter({ hasText: 'Archive this completed task?' })
+  await expect(archiveDialog).toBeVisible()
+  expect(archivePosts).toBe(0)
+  await archiveDialog.getByRole('button', { name: 'Archive Task' }).click()
+  await expect(page.getByTestId('approval-archive')).toHaveCount(0)
+  expect(archivePosts).toBe(1)
+  expect(api.unexpectedRequests).toEqual([])
+})
+
+test('returns a codex-tech review card for changes and refreshes its canonical status', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  const api = await mockHermesApi(page)
+  await page.addInitScript(() => localStorage.setItem('hermes.kanban.selectedBoard', 'codex-tech'))
+  let status = 'review'
+  let postedBody: Record<string, unknown> | null = null
+  const task = () => ({
+    id: 'task-changes', title: 'Needs more evidence', body: 'Review the release evidence', assignee: 'codex-worker',
+    status, priority: 2, created_by: null, created_at: now, started_at: now + 1,
+    completed_at: null, workspace_kind: 'worktree', workspace_path: '/tmp/wt', tenant: null,
+    result: null, skills: null, current_run_id: 18,
+  })
+
+  await page.route(/\/api\/hermes\/kanban(?:\/|\?|$)/, async (route) => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (pathname === '/api/hermes/kanban/boards') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ boards: [{ slug: 'codex-tech', name: 'Codex Tech', description: '', icon: '', color: '', created_at: now, archived: false, is_current: true, counts: { [status]: 1 }, total: 1 }] }) })
+      return
+    }
+    if (pathname === '/api/hermes/kanban/capabilities') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ capabilities: { source: 'hermes-cli', supports: {}, missing: [] } }) })
+      return
+    }
+    if (pathname === '/api/hermes/kanban/approval/capabilities') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ approval: { can_approve: true, allowed_boards: ['codex-tech'], dingtalk_configured: true } }) })
+      return
+    }
+    if (pathname === '/api/hermes/kanban/stats') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ stats: { by_status: { [status]: 1 }, by_assignee: { 'codex-worker': 1 }, total: 1 } }) })
+      return
+    }
+    if (pathname === '/api/hermes/kanban/assignees') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ assignees: [{ name: 'codex-worker', on_disk: true, counts: { [status]: 1 } }] }) })
+      return
+    }
+    if (pathname === '/api/hermes/kanban/task-changes/attachments') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ attachments: [] }) })
+      return
+    }
+    if (pathname === '/api/hermes/kanban/task-changes/request-changes' && request.method() === 'POST') {
+      postedBody = request.postDataJSON()
+      status = 'ready'
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ receipt: { ok: true, duplicate: false, event_id: 'evt-changes', after_status: 'ready' } }) })
+      return
+    }
+    if (pathname === '/api/hermes/kanban/task-changes') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ task: task(), latest_summary: 'Needs changes', comments: [], events: [{ id: 56, task_id: 'task-changes', kind: status === 'review' ? 'review_requested' : 'review_reopened', payload: {}, created_at: now + 2, run_id: 18 }], runs: [{ id: 18, profile: 'codex-worker', status, started_at: now + 1, ended_at: now + 2 }], parents: [], children: [] }) })
+      return
+    }
+    if (pathname === '/api/hermes/kanban') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ tasks: [task()] }) })
+      return
+    }
+    await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: `Unexpected Kanban route: ${request.method()} ${pathname}` }) })
+  })
+
+  await page.goto('/#/hermes/kanban')
+  await page.getByRole('button', { name: 'Needs more evidence' }).evaluate(element => (element as HTMLButtonElement).click())
+  await page.getByTestId('approval-reason').locator('input, textarea').fill('add rollback evidence')
+  await page.getByTestId('approval-request-changes').click()
+  await expect(page.getByTestId('approval-claim')).toBeVisible()
+  expect(postedBody).toEqual({ reason: 'add rollback evidence' })
   expect(api.unexpectedRequests).toEqual([])
 })

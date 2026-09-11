@@ -254,6 +254,52 @@ describe('KanbanTaskDrawer', () => {
     expect(mockArchiveTasks).toHaveBeenCalledWith(['task-1'])
   })
 
+  it('requires confirmation before archiving through the approval center', async () => {
+    mockGetApprovalCapabilities.mockResolvedValueOnce({
+      can_approve: true,
+      allowed_boards: ['project-a'],
+      dingtalk_configured: true,
+    })
+    const doneDetail = {
+      task: {
+        id: 'task-approval-archive', title: 'Approved task', body: null, assignee: 'codex-worker',
+        status: 'done', priority: 1, created_at: 100, started_at: 110, completed_at: 120, tenant: null,
+        result: 'Approved', current_run_id: 17,
+      },
+      latest_summary: 'Approved', comments: [], events: [], runs: [],
+    }
+    mockGetTask.mockReset()
+    mockGetTask.mockResolvedValueOnce(doneDetail).mockResolvedValueOnce({
+      ...doneDetail,
+      task: { ...doneDetail.task, status: 'archived' },
+    })
+
+    const wrapper = mount(KanbanTaskDrawer, { props: { taskId: 'task-approval-archive' } })
+    await flushPromises()
+
+    await wrapper.find('[data-testid="approval-archive"]').trigger('click')
+    await flushPromises()
+
+    expect(mockPerformApprovalAction).not.toHaveBeenCalled()
+    expect(mockDialogWarning).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'kanban.action.archive',
+      content: 'kanban.action.archiveConfirm',
+      positiveText: 'kanban.action.archive',
+      negativeText: 'common.cancel',
+    }))
+
+    await mockDialogWarning.mock.calls[0][0].onPositiveClick()
+    await flushPromises()
+
+    expect(mockPerformApprovalAction).toHaveBeenCalledWith(
+      'task-approval-archive',
+      'archive',
+      { reason: undefined },
+      { board: 'project-a' },
+    )
+    expect(mockGetTask).toHaveBeenCalledTimes(2)
+  })
+
   it('shows approval actions by lifecycle status and records the review decision reason', async () => {
     mockGetApprovalCapabilities.mockResolvedValueOnce({
       can_approve: true,
