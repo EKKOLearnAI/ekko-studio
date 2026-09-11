@@ -5,6 +5,7 @@ const handlers = {
   createBoard: vi.fn(async (ctx: any) => { ctx.body = { board: {} } }),
   archiveBoard: vi.fn(async (ctx: any) => { ctx.body = { ok: true } }),
   capabilities: vi.fn(async (ctx: any) => { ctx.body = { capabilities: {} } }),
+  approvalCapabilities: vi.fn(async (ctx: any) => { ctx.body = { approval: {} } }),
   stats: vi.fn(async (ctx: any) => { ctx.body = { stats: {} } }),
   assignees: vi.fn(async (ctx: any) => { ctx.body = { assignees: [] } }),
   readArtifact: vi.fn(async (ctx: any) => { ctx.body = { content: 'x' } }),
@@ -28,9 +29,17 @@ const handlers = {
   reassign: vi.fn(async (ctx: any) => { ctx.body = { ok: true } }),
   specify: vi.fn(async (ctx: any) => { ctx.body = { results: [] } }),
   dispatch: vi.fn(async (ctx: any) => { ctx.body = { result: {} } }),
+  claimTask: vi.fn(async (ctx: any) => { ctx.body = { receipt: {} } }),
+  requestTaskReview: vi.fn(async (ctx: any) => { ctx.body = { receipt: {} } }),
+  approveTask: vi.fn(async (ctx: any) => { ctx.body = { receipt: {} } }),
+  requestTaskChanges: vi.fn(async (ctx: any) => { ctx.body = { receipt: {} } }),
+  archiveApprovalTask: vi.fn(async (ctx: any) => { ctx.body = { receipt: {} } }),
 }
 
 vi.mock('../../packages/server/src/modules/hermes/controllers/kanban', () => handlers)
+vi.mock('../../packages/server/src/modules/hermes/controllers/kanban-dingtalk-approval', () => ({
+  receiveDingTalkKanbanApproval: vi.fn(),
+}))
 
 describe('kanban routes', () => {
   beforeEach(() => {
@@ -46,6 +55,8 @@ describe('kanban routes', () => {
       '/api/hermes/kanban/boards',
       '/api/hermes/kanban/boards/:slug',
       '/api/hermes/kanban/capabilities',
+      '/api/hermes/kanban/approval/capabilities',
+      '/api/hermes/kanban/dingtalk/approval-callback',
       '/api/hermes/kanban/stats',
       '/api/hermes/kanban/assignees',
       '/api/hermes/kanban/diagnostics',
@@ -67,6 +78,11 @@ describe('kanban routes', () => {
       '/api/hermes/kanban/:id/reclaim',
       '/api/hermes/kanban/:id/reassign',
       '/api/hermes/kanban/:id/specify',
+      '/api/hermes/kanban/:id/claim',
+      '/api/hermes/kanban/:id/request-review',
+      '/api/hermes/kanban/:id/approve',
+      '/api/hermes/kanban/:id/request-changes',
+      '/api/hermes/kanban/:id/archive',
     ]))
   })
 
