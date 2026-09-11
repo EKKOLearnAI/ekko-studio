@@ -142,6 +142,13 @@ export default {
     deleteProfileTitle: 'Excluir perfil?', deleteProfileWarning: 'Dados gerenciados irão para a Lixeira. Diretórios personalizados serão mantidos.', clearCache: 'Limpar cache', clearPermissionAudit: 'Limpar registro de permissões', clearSiteData: 'Limpar dados de sites', clearSiteDataWarning: 'Remove logins, cookies e armazenamento local do perfil selecionado.', dataCleared: 'Dados do navegador limpos', loadFailed: 'Não foi possível iniciar o navegador integrado',
   },
   kanban: {
+    title: 'Central de aprovação Kanban',
+    approval: {
+      title: 'Central de aprovação', claim: 'Assumir / iniciar', requestReview: 'Solicitar revisão', approve: 'Aprovar', requestChanges: 'Solicitar alterações', archive: 'Arquivar',
+      reasonPlaceholder: 'Motivo da decisão ou resumo', reasonRequired: 'É obrigatório informar um motivo', unauthorized: 'Esta identidade do Studio não está autorizada a aprovar.',
+      success: 'Ação de aprovação registrada', duplicate: 'Este evento já foi processado', failed: 'Falha na ação de aprovação',
+      risk: 'RISCO', riskDetected: 'Alteração de alto impacto — revise com cuidado', runId: 'ID da execução', eventId: 'ID do último evento',
+    },
     board: {
       defaultArchiveUnavailable: 'O quadro padrão não pode ser arquivado',
     },

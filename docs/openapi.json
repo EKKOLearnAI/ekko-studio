@@ -6181,6 +6181,32 @@
         }
       }
     },
+    "/api/hermes/kanban/approval/capabilities": {
+      "get": {
+        "tags": [
+          "Kanban"
+        ],
+        "summary": "Get capabilities",
+        "description": "GET /api/hermes/kanban/approval/capabilities",
+        "operationId": "approvalCapabilities",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
     "/api/hermes/kanban/artifact": {
       "get": {
         "tags": [
@@ -6536,6 +6562,44 @@
             }
           }
         ]
+      }
+    },
+    "/api/hermes/kanban/dingtalk/approval-callback": {
+      "post": {
+        "tags": [
+          "Kanban"
+        ],
+        "summary": "Create approval-callback",
+        "description": "POST /api/hermes/kanban/dingtalk/approval-callback",
+        "operationId": "receiveDingTalkKanbanApproval",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
       }
     },
     "/api/hermes/kanban/dispatch": {
@@ -6961,6 +7025,78 @@
         ]
       }
     },
+    "/api/hermes/kanban/{id}/approve": {
+      "post": {
+        "tags": [
+          "Kanban"
+        ],
+        "summary": "Create approve",
+        "description": "POST /api/hermes/kanban/:id/approve",
+        "operationId": "approveTask",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/hermes/kanban/{id}/archive": {
+      "post": {
+        "tags": [
+          "Kanban"
+        ],
+        "summary": "Create archive",
+        "description": "POST /api/hermes/kanban/:id/archive",
+        "operationId": "archiveApprovalTask",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/hermes/kanban/{id}/assign": {
       "post": {
         "tags": [
@@ -7179,6 +7315,42 @@
             }
           }
         }
+      }
+    },
+    "/api/hermes/kanban/{id}/claim": {
+      "post": {
+        "tags": [
+          "Kanban"
+        ],
+        "summary": "Create claim",
+        "description": "POST /api/hermes/kanban/:id/claim",
+        "operationId": "claimTask",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/hermes/kanban/{id}/comments": {
@@ -7423,6 +7595,78 @@
             }
           }
         }
+      }
+    },
+    "/api/hermes/kanban/{id}/request-changes": {
+      "post": {
+        "tags": [
+          "Kanban"
+        ],
+        "summary": "Create request-changes",
+        "description": "POST /api/hermes/kanban/:id/request-changes",
+        "operationId": "requestTaskChanges",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/hermes/kanban/{id}/request-review": {
+      "post": {
+        "tags": [
+          "Kanban"
+        ],
+        "summary": "Create request-review",
+        "description": "POST /api/hermes/kanban/:id/request-review",
+        "operationId": "requestTaskReview",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/hermes/kanban/{id}/specify": {

@@ -142,6 +142,13 @@ export default {
     deleteProfileTitle: 'プロファイルを削除しますか？', deleteProfileWarning: '管理対象データはゴミ箱へ移動します。カスタムディレクトリは残ります。', clearCache: 'キャッシュを消去', clearPermissionAudit: '権限ログを消去', clearSiteData: 'サイトデータを消去', clearSiteDataWarning: '選択したプロファイルのログイン、Cookie、ローカルストレージを消去します。', dataCleared: 'ブラウザーデータを消去しました', loadFailed: '内蔵ブラウザーを起動できませんでした',
   },
   kanban: {
+    title: 'Kanban 承認センター',
+    approval: {
+      title: '承認センター', claim: '引受 / 開始', requestReview: 'レビュー依頼', approve: '承認', requestChanges: '修正依頼', archive: 'アーカイブ',
+      reasonPlaceholder: '判断理由またはレビュー要約', reasonRequired: '理由を入力してください', unauthorized: 'この Studio アカウントには承認権限がありません。',
+      success: '承認操作を記録しました', duplicate: 'この承認イベントは処理済みです', failed: '承認操作に失敗しました',
+      risk: 'リスク', riskDetected: '影響の大きい変更です。慎重に確認してください', runId: '実行 ID', eventId: '最新イベント ID',
+    },
     board: {
       defaultArchiveUnavailable: 'デフォルトのカンバンはアーカイブできません',
     },
