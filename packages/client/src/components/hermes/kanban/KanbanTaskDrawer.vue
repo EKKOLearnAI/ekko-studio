@@ -488,6 +488,22 @@ async function handleApproval(action: KanbanApprovalAction) {
   }
 }
 
+function handleApprovalArchive() {
+  if (!props.taskId) return
+  const taskId = props.taskId
+  const board = kanbanStore.selectedBoard
+  dialog.warning({
+    title: t('kanban.action.archive'),
+    content: t('kanban.action.archiveConfirm'),
+    positiveText: t('kanban.action.archive'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      if (!isActiveTask(taskId, board)) return
+      await handleApproval('archive')
+    },
+  })
+}
+
 function handleNavigateTask(taskId: string) {
   emit('updated')
   emit('navigate', taskId)
@@ -614,7 +630,7 @@ function handleNavigateTask(taskId: string) {
                   data-testid="approval-archive"
                   secondary
                   :loading="approvalLoading === 'archive'"
-                  @click="handleApproval('archive')"
+                  @click="handleApprovalArchive"
                 >{{ t('kanban.approval.archive') }}</NButton>
               </div>
             </template>
