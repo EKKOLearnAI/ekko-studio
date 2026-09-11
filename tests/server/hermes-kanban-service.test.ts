@@ -235,6 +235,116 @@ describe('hermes kanban service', () => {
     expect(mockExecFileAsync.mock.calls[5][1]).toEqual(['kanban', '--board', 'default', 'assignees', '--json'])
   })
 
+  it('runs approval-center transitions through canonical CLI commands and verifies readback', async () => {
+    const detail = (status: string, events: unknown[] = []) => JSON.stringify({
+      task: { id: 'task-1', title: 'Ship', assignee: 'codex-worker', status },
+      comments: [],
+      events,
+      runs: [],
+    })
+    mockExecFileAsync
+      // ready -> running
+      .mockResolvedValueOnce({ stdout: detail('ready') })
+      .mockResolvedValueOnce({ stdout: 'Claimed task-1\n' })
+      .mockResolvedValueOnce({ stdout: detail('running', [{ id: 11, kind: 'claimed', created_at: 101, run_id: 7 }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+      // running -> review
+      .mockResolvedValueOnce({ stdout: detail('running') })
+      .mockResolvedValueOnce({ stdout: 'Requested review for task-1\n' })
+      .mockResolvedValueOnce({ stdout: detail('review', [{ id: 12, kind: 'review_requested', created_at: 102, run_id: 7 }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+      // review -> done
+      .mockResolvedValueOnce({ stdout: detail('review') })
+      .mockResolvedValueOnce({ stdout: 'Completed task-1\n' })
+      .mockResolvedValueOnce({ stdout: detail('done', [{ id: 13, kind: 'completed', created_at: 103, run_id: 8 }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+      // done -> archived
+      .mockResolvedValueOnce({ stdout: detail('done') })
+      .mockResolvedValueOnce({ stdout: 'Archived task-1\n' })
+      .mockResolvedValueOnce({ stdout: detail('archived', [{ id: 14, kind: 'archived', created_at: 104, run_id: 8 }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+
+    const actor = 'james'
+    await expect(service.performApprovalAction('task-1', 'claim', { board: 'codex-tech', actor, eventId: 'evt-claim' }))
+      .resolves.toMatchObject({ before_status: 'ready', after_status: 'running', event_id: 'evt-claim', canonical_event_id: 11 })
+    await expect(service.performApprovalAction('task-1', 'request_review', { board: 'codex-tech', actor, eventId: 'evt-review', reason: 'tests pass' }))
+      .resolves.toMatchObject({ before_status: 'running', after_status: 'review', canonical_event_id: 12 })
+    await expect(service.performApprovalAction('task-1', 'approve', { board: 'codex-tech', actor, eventId: 'evt-approve', reason: 'approved' }))
+      .resolves.toMatchObject({ before_status: 'review', after_status: 'done', canonical_event_id: 13 })
+    await expect(service.performApprovalAction('task-1', 'archive', { board: 'codex-tech', actor, eventId: 'evt-archive' }))
+      .resolves.toMatchObject({ before_status: 'done', after_status: 'archived', canonical_event_id: 14 })
+
+    expect(mockExecFileAsync.mock.calls[1][1]).toEqual(['kanban', '--board', 'codex-tech', 'claim', 'task-1'])
+    expect(mockExecFileAsync.mock.calls[5][1]).toEqual(expect.arrayContaining([
+      'kanban', '--board', 'codex-tech', 'request-review', 'task-1', '--summary', 'tests pass', '--metadata',
+    ]))
+    expect(mockExecFileAsync.mock.calls[9][1]).toEqual(expect.arrayContaining([
+      'kanban', '--board', 'codex-tech', 'complete', 'task-1', '--summary', 'approved', '--metadata',
+    ]))
+    expect(mockExecFileAsync.mock.calls[13][1]).toEqual(['kanban', '--board', 'codex-tech', 'archive', 'task-1'])
+    for (const index of [3, 7, 11, 15]) {
+      expect(mockExecFileAsync.mock.calls[index][1]).toEqual(expect.arrayContaining([
+        'kanban', '--board', 'codex-tech', 'comment', 'task-1', expect.stringContaining('KANBAN_APPROVAL_AUDIT'), '--author', 'studio:james',
+      ]))
+    }
+    expect(mockExecFileAsync.mock.calls[11][1][5]).toContain('"before_status":"review"')
+    expect(mockExecFileAsync.mock.calls[11][1][5]).toContain('"after_status":"done"')
+    expect(mockExecFileAsync.mock.calls[11][1][5]).toContain('"canonical_event_id":13')
+  })
+
+  it('rejects invalid and duplicate approval actions without running a transition', async () => {
+    mockExecFileAsync.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        task: { id: 'task-1', status: 'review' },
+        comments: [{ id: 1, body: '[KANBAN_APPROVAL_AUDIT] {"event_id":"evt-duplicate"}' }],
+        events: [],
+        runs: [],
+      }),
+    })
+
+    await expect(service.performApprovalAction('task-1', 'approve', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-duplicate',
+    })).resolves.toMatchObject({ duplicate: true, before_status: 'review', after_status: 'review' })
+    expect(mockExecFileAsync).toHaveBeenCalledTimes(1)
+
+    mockExecFileAsync.mockResolvedValueOnce({
+      stdout: JSON.stringify({ task: { id: 'task-2', status: 'ready' }, comments: [], events: [], runs: [] }),
+    })
+    await expect(service.performApprovalAction('task-2', 'approve', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-wrong-state',
+    })).rejects.toThrow('Cannot approve task "task-2" from status "ready"')
+    expect(mockExecFileAsync).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses canonical changes-requested semantics for active reviewer runs and the canonical dashboard reopen for review cards', async () => {
+    const base = (status: string, events: unknown[] = []) => JSON.stringify({
+      task: { id: 'task-1', status }, comments: [], events, runs: [],
+    })
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: base('running', [{ id: 20, kind: 'claimed', run_id: 9, payload: { source_status: 'review' } }]) })
+      .mockResolvedValueOnce({ stdout: 'Requested changes for task-1\n' })
+      .mockResolvedValueOnce({ stdout: base('ready', [{ id: 21, kind: 'changes_requested', created_at: 201, run_id: 9 }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+      .mockResolvedValueOnce({ stdout: base('review') })
+      .mockResolvedValueOnce({ stdout: 'Reopened task-1\n' })
+      .mockResolvedValueOnce({ stdout: base('ready', [{ id: 22, kind: 'review_reopened', created_at: 202, run_id: null }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+
+    await service.performApprovalAction('task-1', 'request_changes', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-active-review', reason: 'add evidence',
+    })
+    expect(mockExecFileAsync.mock.calls[1][1]).toEqual([
+      'kanban', '--board', 'codex-tech', 'request-changes', 'task-1', 'add evidence',
+    ])
+
+    await service.performApprovalAction('task-1', 'request_changes', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-review-card', reason: 'fix tests',
+    })
+    expect(mockExecFileAsync.mock.calls[5][1]).toEqual([
+      'kanban', '--board', 'codex-tech', 'reopen-review', 'task-1', '--reason', 'fix tests',
+    ])
+  })
+
   it('normalizes 0.19 detail ids and lists durable attachments', async () => {
     mockExecFileAsync
       .mockResolvedValueOnce({

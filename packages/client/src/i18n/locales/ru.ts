@@ -1323,7 +1323,13 @@ export default {
 
 
   kanban: {
-    title: 'Канбан',
+    title: 'Центр согласования Kanban',
+    approval: {
+      title: 'Центр согласования', claim: 'Взять / начать', requestReview: 'Запросить проверку', approve: 'Одобрить', requestChanges: 'Вернуть на доработку', archive: 'Архивировать',
+      reasonPlaceholder: 'Причина решения или итог проверки', reasonRequired: 'Укажите причину', unauthorized: 'Эта учётная запись Studio не может согласовывать задачи.',
+      success: 'Действие согласования записано', duplicate: 'Это событие уже обработано', failed: 'Ошибка согласования',
+      risk: 'РИСК', riskDetected: 'Изменение высокого влияния — проверьте внимательно', runId: 'ID запуска', eventId: 'ID последнего события',
+    },
     createTask: 'Создать задачу',
     noTasks: 'Нет задач',
     allStatuses: 'Все статусы',

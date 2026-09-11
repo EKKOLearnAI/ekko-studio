@@ -176,6 +176,13 @@ export default {
     deleteProfileTitle: '¿Eliminar perfil?', deleteProfileWarning: 'Los datos gestionados irán a la papelera. Los directorios personalizados se conservan.', clearCache: 'Borrar caché', clearPermissionAudit: 'Borrar registro de permisos', clearSiteData: 'Borrar datos de sitios', clearSiteDataWarning: 'Borra sesiones, cookies y almacenamiento local del perfil seleccionado.', dataCleared: 'Datos del navegador borrados', loadFailed: 'No se pudo iniciar el navegador integrado',
   },
   kanban: {
+    title: 'Centro de aprobación Kanban',
+    approval: {
+      title: 'Centro de aprobación', claim: 'Tomar / iniciar', requestReview: 'Solicitar revisión', approve: 'Aprobar', requestChanges: 'Solicitar cambios', archive: 'Archivar',
+      reasonPlaceholder: 'Motivo de la decisión o resumen', reasonRequired: 'Se requiere un motivo', unauthorized: 'Esta identidad de Studio no está autorizada para aprobar.',
+      success: 'Acción de aprobación registrada', duplicate: 'Este evento ya fue procesado', failed: 'Falló la acción de aprobación',
+      risk: 'RIESGO', riskDetected: 'Cambio de alto impacto; revisar con cuidado', runId: 'ID de ejecución', eventId: 'ID del último evento',
+    },
     board: {
       defaultArchiveUnavailable: 'El tablero predeterminado no se puede archivar',
     },

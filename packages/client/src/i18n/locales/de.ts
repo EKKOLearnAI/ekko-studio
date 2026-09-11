@@ -176,6 +176,13 @@ export default {
     deleteProfileTitle: 'Browserprofil löschen?', deleteProfileWarning: 'Verwaltete Daten werden in den Papierkorb verschoben. Benutzerdefinierte Ordner bleiben erhalten.', clearCache: 'Cache leeren', clearPermissionAudit: 'Berechtigungsprotokoll leeren', clearSiteData: 'Websitedaten löschen', clearSiteDataWarning: 'Löscht Anmeldungen, Cookies und lokalen Speicher des gewählten Profils.', dataCleared: 'Browserdaten gelöscht', loadFailed: 'Der eingebettete Browser konnte nicht gestartet werden',
   },
   kanban: {
+    title: 'Kanban-Freigabecenter',
+    approval: {
+      title: 'Freigabecenter', claim: 'Übernehmen / starten', requestReview: 'Prüfung anfordern', approve: 'Freigeben', requestChanges: 'Änderungen anfordern', archive: 'Archivieren',
+      reasonPlaceholder: 'Entscheidungsgrund oder Prüfzusammenfassung', reasonRequired: 'Ein Grund ist erforderlich', unauthorized: 'Diese Studio-Identität darf keine Freigaben durchführen.',
+      success: 'Freigabeaktion protokolliert', duplicate: 'Dieses Freigabeereignis wurde bereits verarbeitet', failed: 'Freigabeaktion fehlgeschlagen',
+      risk: 'RISIKO', riskDetected: 'Änderung mit hoher Auswirkung — sorgfältig prüfen', runId: 'Lauf-ID', eventId: 'Letzte Ereignis-ID',
+    },
     board: {
       defaultArchiveUnavailable: 'Das Standard-Kanban kann nicht archiviert werden',
     },

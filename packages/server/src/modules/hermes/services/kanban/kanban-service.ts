@@ -1,4 +1,5 @@
 import type { ChildProcess, ExecFileOptions } from 'child_process'
+import { randomUUID } from 'crypto'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -48,6 +49,7 @@ export interface KanbanTask {
   result: string | null
   skills: string[] | null
   goal_mode?: boolean
+  current_run_id?: number | null
 }
 
 export interface KanbanRun {
@@ -182,6 +184,32 @@ export interface KanbanBulkTaskResult {
 
 export interface KanbanBulkTaskUpdateResult {
   results: KanbanBulkTaskResult[]
+}
+
+export type KanbanApprovalAction = 'claim' | 'request_review' | 'approve' | 'request_changes' | 'archive'
+
+export interface KanbanApprovalActionOptions extends KanbanBoardOptions {
+  actor: string
+  channel?: 'studio' | 'dingtalk'
+  eventId?: string
+  reason?: string
+  reviewer?: string
+}
+
+export interface KanbanApprovalReceipt {
+  ok: true
+  duplicate: boolean
+  action: KanbanApprovalAction
+  actor: string
+  channel: 'studio' | 'dingtalk'
+  event_id: string
+  canonical_event_id: number | string | null
+  run_id: number | null
+  before_status: KanbanTaskStatus
+  after_status: KanbanTaskStatus
+  timestamp: number
+  reason: string | null
+  task: KanbanTask
 }
 
 // ─── CLI wrappers ───────────────────────────────────────────────
@@ -320,6 +348,198 @@ async function execKanbanMutation(
   } catch (err: any) {
     logger.error(err, logMessage)
     throw new Error(`${errorPrefix}: ${err.message}`)
+  }
+}
+
+const APPROVAL_AUDIT_PREFIX = '[KANBAN_APPROVAL_AUDIT] '
+const APPROVAL_EVENT_KINDS: Record<KanbanApprovalAction, ReadonlySet<string>> = {
+  claim: new Set(['claimed']),
+  request_review: new Set(['review_requested']),
+  approve: new Set(['completed']),
+  request_changes: new Set(['changes_requested', 'review_reopened']),
+  archive: new Set(['archived']),
+}
+
+function approvalError(action: KanbanApprovalAction, taskId: string, status: KanbanTaskStatus): Error {
+  return new Error(`Cannot ${action} task "${taskId}" from status "${status}"`)
+}
+
+function assertApprovalTransition(detail: KanbanTaskDetail, action: KanbanApprovalAction, reason?: string): void {
+  const status = detail.task.status
+  const allowed: Record<KanbanApprovalAction, KanbanTaskStatus[]> = {
+    claim: ['ready'],
+    request_review: ['running', 'ready'],
+    approve: ['review'],
+    request_changes: ['review', 'running'],
+    archive: ['done'],
+  }
+  if (!allowed[action].includes(status)) throw approvalError(action, detail.task.id, status)
+  if ((action === 'approve' || action === 'request_changes') && !reason?.trim()) {
+    throw new Error(`Reason is required to ${action} task "${detail.task.id}"`)
+  }
+  if (action === 'request_changes' && status === 'running') {
+    const activeRunId = detail.task.current_run_id
+    const claimed = [...detail.events].reverse().find(event => (
+      event.kind === 'claimed'
+      && (activeRunId == null || event.run_id === activeRunId)
+      && event.payload?.source_status === 'review'
+    ))
+    if (!claimed) throw approvalError(action, detail.task.id, status)
+  }
+}
+
+function hasApprovalEvent(detail: KanbanTaskDetail, eventId: string): boolean {
+  const safeEventId = eventId.replace(/["\\]/g, '')
+  return detail.comments.some(comment => comment.body.startsWith(APPROVAL_AUDIT_PREFIX)
+    && comment.body.includes(`"event_id":"${safeEventId}"`))
+}
+
+function scrubAuditText(value?: string): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  return trimmed
+    .slice(0, 2_000)
+    .replace(/\b(?:sk|key|token|secret|password)[-_:=\s]+[A-Za-z0-9_./+=-]{8,}\b/gi, '[REDACTED]')
+}
+
+function actionMetadata(
+  action: KanbanApprovalAction,
+  opts: Required<Pick<KanbanApprovalActionOptions, 'actor' | 'channel' | 'eventId'>>,
+  reason: string | null,
+) {
+  return {
+    approval: {
+      action,
+      actor: opts.actor,
+      channel: opts.channel,
+      event_id: opts.eventId,
+      reason,
+    },
+  }
+}
+
+async function executeApprovalTransition(
+  taskId: string,
+  action: KanbanApprovalAction,
+  before: KanbanTaskDetail,
+  opts: Required<Pick<KanbanApprovalActionOptions, 'board' | 'actor' | 'channel' | 'eventId'>> & KanbanApprovalActionOptions,
+  reason: string | null,
+): Promise<void> {
+  const args = boardArgs(opts.board)
+  const metadata = JSON.stringify(actionMetadata(action, opts, reason))
+  switch (action) {
+    case 'claim':
+      args.push('claim', taskId)
+      break
+    case 'request_review':
+      args.push('request-review', taskId)
+      if (reason) args.push('--summary', reason)
+      if (opts.reviewer?.trim()) args.push('--reviewer', opts.reviewer.trim())
+      args.push('--metadata', metadata, '--force')
+      break
+    case 'approve':
+      args.push('complete', taskId, '--summary', reason!, '--metadata', metadata)
+      break
+    case 'request_changes':
+      if (before.task.status === 'review') args.push('reopen-review', taskId, '--reason', reason!)
+      else args.push('request-changes', taskId, reason!)
+      break
+    case 'archive':
+      args.push('archive', taskId)
+      break
+  }
+  await execKanbanMutation(
+    args,
+    `Hermes CLI: kanban approval action ${action} failed`,
+    `Failed to ${action} kanban task`,
+  )
+}
+
+export async function performApprovalAction(
+  taskId: string,
+  action: KanbanApprovalAction,
+  options: KanbanApprovalActionOptions,
+): Promise<KanbanApprovalReceipt> {
+  const board = normalizeBoardSlug(options.board)
+  const actor = options.actor.trim()
+  if (!actor) throw new Error('Approval actor is required')
+  const channel = options.channel || 'studio'
+  const eventId = options.eventId?.trim() || randomUUID()
+  const reason = scrubAuditText(options.reason)
+  const before = await getTask(taskId, { board })
+  if (!before) throw new Error(`Kanban task "${taskId}" was not found`)
+
+  if (hasApprovalEvent(before, eventId)) {
+    return {
+      ok: true,
+      duplicate: true,
+      action,
+      actor,
+      channel,
+      event_id: eventId,
+      canonical_event_id: null,
+      run_id: before.task.current_run_id ?? null,
+      before_status: before.task.status,
+      after_status: before.task.status,
+      timestamp: Math.floor(Date.now() / 1000),
+      reason,
+      task: before.task,
+    }
+  }
+
+  assertApprovalTransition(before, action, reason || undefined)
+  await executeApprovalTransition(taskId, action, before, {
+    ...options,
+    board,
+    actor,
+    channel,
+    eventId,
+  }, reason)
+
+  const after = await getTask(taskId, { board })
+  if (!after) throw new Error(`Kanban task "${taskId}" disappeared after ${action}`)
+  const expected: Record<KanbanApprovalAction, KanbanTaskStatus[]> = {
+    claim: ['running'],
+    request_review: ['review'],
+    approve: ['done'],
+    request_changes: ['ready', 'todo'],
+    archive: ['archived'],
+  }
+  if (!expected[action].includes(after.task.status)) {
+    throw new Error(`Kanban ${action} readback failed: expected ${expected[action].join('/')} but got ${after.task.status}`)
+  }
+  const canonicalEvent = [...after.events].reverse().find(event => APPROVAL_EVENT_KINDS[action].has(event.kind))
+  const timestamp = canonicalEvent?.created_at || Math.floor(Date.now() / 1000)
+  const audit = {
+    action,
+    actor,
+    channel,
+    event_id: eventId,
+    canonical_event_id: canonicalEvent?.id ?? null,
+    run_id: canonicalEvent?.run_id ?? after.task.current_run_id ?? null,
+    before_status: before.task.status,
+    after_status: after.task.status,
+    reason,
+    timestamp,
+  }
+  await addComment(taskId, `${APPROVAL_AUDIT_PREFIX}${JSON.stringify(audit)}`, {
+    board,
+    author: `${channel}:${actor}`,
+  })
+  return {
+    ok: true,
+    duplicate: false,
+    action,
+    actor,
+    channel,
+    event_id: eventId,
+    canonical_event_id: canonicalEvent?.id ?? null,
+    run_id: canonicalEvent?.run_id ?? after.task.current_run_id ?? null,
+    before_status: before.task.status,
+    after_status: after.task.status,
+    timestamp,
+    reason,
+    task: after.task,
   }
 }
 

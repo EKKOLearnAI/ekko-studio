@@ -1472,7 +1472,13 @@ export default {
 
   // Kanban
   kanban: {
-    title: 'لوحة كانبان',
+    title: 'مركز اعتماد كانبان',
+    approval: {
+      title: 'مركز الاعتماد', claim: 'استلام / بدء', requestReview: 'طلب مراجعة', approve: 'اعتماد', requestChanges: 'طلب تعديلات', archive: 'أرشفة',
+      reasonPlaceholder: 'سبب القرار أو ملخص المراجعة', reasonRequired: 'السبب مطلوب', unauthorized: 'هوية Studio هذه غير مخولة بإجراءات الاعتماد.',
+      success: 'تم تسجيل إجراء الاعتماد', duplicate: 'تمت معالجة حدث الاعتماد هذا مسبقًا', failed: 'فشل إجراء الاعتماد',
+      risk: 'خطر', riskDetected: 'تغيير عالي التأثير — راجعه بعناية', runId: 'معرف التشغيل', eventId: 'معرف آخر حدث',
+    },
     createTask: 'مهمة جديدة',
     noTasks: 'لا توجد مهام',
     allStatuses: 'كل الحالات',

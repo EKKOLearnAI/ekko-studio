@@ -2,6 +2,10 @@ import type { Context } from 'koa'
 import { readFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import * as kanbanCli from '../services/kanban/kanban-service'
+import {
+  buildDingTalkApprovalPayload,
+  sendDingTalkApprovalNotification,
+} from '../services/kanban/dingtalk-approval'
 import { detectHermesRootHome, isRealPathWithin } from '../services/runtime/path'
 import { listProfileNamesFromDisk } from '../services/profiles/profile'
 import {
@@ -300,6 +304,133 @@ function rejectBadRequest(ctx: Context, error?: string): boolean {
   ctx.status = 400
   ctx.body = { error }
   return true
+}
+
+function strictCsvSet(value: string | undefined, fallback: string[] = []): Set<string> {
+  const values = value === undefined
+    ? fallback
+    : value.split(',').map(item => item.trim().toLowerCase()).filter(Boolean)
+  const set = new Set(values)
+  if (set.has('*')) return new Set()
+  return set
+}
+
+function approvalBoards(): Set<string> {
+  return strictCsvSet(process.env.HERMES_STUDIO_KANBAN_APPROVAL_BOARDS, ['codex-tech'])
+}
+
+function studioApprovers(): Set<string> {
+  return strictCsvSet(process.env.HERMES_STUDIO_KANBAN_APPROVERS)
+}
+
+function canApproveInStudio(ctx: Context): boolean {
+  const username = String(ctx.state?.user?.username || '').trim().toLowerCase()
+  return Boolean(username) && studioApprovers().has(username)
+}
+
+function requireApprovalAccess(ctx: Context, board: string): string | null {
+  const actor = String(ctx.state?.user?.username || '').trim()
+  if (!actor || !canApproveInStudio(ctx)) {
+    ctx.status = 403
+    ctx.body = { error: 'This Studio identity is not authorized for kanban approvals' }
+    return null
+  }
+  if (!approvalBoards().has(board)) {
+    ctx.status = 403
+    ctx.body = { error: `Kanban approvals are not enabled for board "${board}"` }
+    return null
+  }
+  return actor
+}
+
+function approvalErrorStatus(message: string): number {
+  if (message.includes('was not found')) return 404
+  if (message.startsWith('Cannot ') || message.includes('readback failed')) return 409
+  if (message.includes('required')) return 400
+  return 500
+}
+
+async function approvalAction(ctx: Context, action: kanbanCli.KanbanApprovalAction, notifyDingTalk = false) {
+  const bodyResult = requestBody(ctx)
+  if (rejectBadRequest(ctx, bodyResult.error)) return
+  const reason = optionalString(bodyResult.body.reason, 'reason')
+  const eventId = optionalString(bodyResult.body.event_id, 'event_id')
+  const reviewer = optionalString(bodyResult.body.reviewer, 'reviewer')
+  if (rejectBadRequest(ctx, reason.error || eventId.error || reviewer.error)) return
+  const board = requestBoard(ctx)
+  if (!board) return
+  const actor = requireApprovalAccess(ctx, board)
+  if (!actor) return
+  try {
+    if (!await getAuthorizedTask(ctx, board, ctx.params.id)) return
+    const receipt = await kanbanCli.performApprovalAction(ctx.params.id, action, {
+      actor,
+      board,
+      channel: 'studio',
+      eventId: eventId.value,
+      reason: reason.value,
+      reviewer: reviewer.value,
+    })
+    if (!notifyDingTalk || receipt.duplicate) {
+      ctx.body = { receipt }
+      return
+    }
+    const baseUrl = process.env.HERMES_STUDIO_PUBLIC_URL?.trim() || ctx.origin || ''
+    const studioUrl = `${baseUrl.replace(/\/$/, '')}/#/hermes/kanban?board=${encodeURIComponent(board)}&task=${encodeURIComponent(receipt.task.id)}`
+    const payload = buildDingTalkApprovalPayload({
+      task: receipt.task,
+      board,
+      eventId: receipt.event_id,
+      studioUrl,
+    })
+    try {
+      const notification = await sendDingTalkApprovalNotification(payload)
+      ctx.body = { receipt, notification }
+    } catch {
+      ctx.body = {
+        receipt,
+        notification: {
+          configured: Boolean(process.env.DINGTALK_APPROVAL_WEBHOOK_URL?.trim()),
+          api_accepted: false,
+          attempts: 0,
+          recipient_confirmed: false,
+        },
+      }
+    }
+  } catch (err: any) {
+    ctx.status = approvalErrorStatus(err.message || '')
+    ctx.body = { error: err.message }
+  }
+}
+
+export async function approvalCapabilities(ctx: Context) {
+  ctx.body = {
+    approval: {
+      can_approve: canApproveInStudio(ctx),
+      allowed_boards: [...approvalBoards()],
+      dingtalk_configured: Boolean(process.env.DINGTALK_APPROVAL_WEBHOOK_URL?.trim()),
+    },
+  }
+}
+
+export async function claimTask(ctx: Context) {
+  return approvalAction(ctx, 'claim')
+}
+
+export async function requestTaskReview(ctx: Context) {
+  return approvalAction(ctx, 'request_review', true)
+}
+
+export async function approveTask(ctx: Context) {
+  return approvalAction(ctx, 'approve')
+}
+
+export async function requestTaskChanges(ctx: Context) {
+  return approvalAction(ctx, 'request_changes')
+}
+
+export async function archiveApprovalTask(ctx: Context) {
+  return approvalAction(ctx, 'archive')
 }
 
 export async function listBoards(ctx: Context) {

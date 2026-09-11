@@ -21,6 +21,8 @@ export interface KanbanTask {
   result: string | null
   skills: string[] | null
   goal_mode?: boolean
+  current_run_id?: number | null
+  latest_event_id?: number | string | null
 }
 
 export interface KanbanRun {
@@ -218,6 +220,40 @@ export interface KanbanDispatchOptions extends KanbanBoardOptions {
   failureLimit?: number
 }
 
+export type KanbanApprovalAction = 'claim' | 'request_review' | 'approve' | 'request_changes' | 'archive'
+
+export interface KanbanApprovalCapabilities {
+  can_approve: boolean
+  allowed_boards: string[]
+  dingtalk_configured: boolean
+}
+
+export interface KanbanApprovalReceipt {
+  ok: true
+  duplicate: boolean
+  action: KanbanApprovalAction
+  actor: string
+  channel: 'studio' | 'dingtalk'
+  reason: string | null
+  event_id: string
+  canonical_event_id: number | string | null
+  timestamp: number
+  before_status: KanbanTaskStatus
+  after_status: KanbanTaskStatus
+  run_id: number | null
+  task: KanbanTask
+}
+
+export interface KanbanApprovalResult {
+  receipt: KanbanApprovalReceipt
+  notification?: {
+    configured: boolean
+    api_accepted: boolean
+    attempts: number
+    recipient_confirmed: boolean
+  }
+}
+
 export interface KanbanLinkRequest {
   parent_id: string
   child_id: string
@@ -322,6 +358,24 @@ export async function archiveBoard(slug: string): Promise<{ ok: boolean }> {
 export async function getCapabilities(): Promise<KanbanCapabilities> {
   const res = await request<{ capabilities: KanbanCapabilities }>('/api/hermes/kanban/capabilities')
   return res.capabilities
+}
+
+export async function getApprovalCapabilities(): Promise<KanbanApprovalCapabilities> {
+  const res = await request<{ approval: KanbanApprovalCapabilities }>('/api/hermes/kanban/approval/capabilities')
+  return res.approval
+}
+
+export async function performApprovalAction(
+  taskId: string,
+  action: KanbanApprovalAction,
+  data: { reason?: string; reviewer?: string; event_id?: string } = {},
+  opts?: KanbanBoardOptions,
+): Promise<KanbanApprovalResult> {
+  const actionPath = action.replace('_', '-')
+  return request<KanbanApprovalResult>(
+    appendQuery(`/api/hermes/kanban/${encodeURIComponent(taskId)}/${actionPath}`, boardParams(opts?.board)),
+    { method: 'POST', body: JSON.stringify(data) },
+  )
 }
 
 export async function listTasks(opts?: KanbanListOptions): Promise<KanbanTask[]> {

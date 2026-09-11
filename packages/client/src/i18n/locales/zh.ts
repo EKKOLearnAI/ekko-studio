@@ -1479,7 +1479,13 @@ export default {
 
   // 看板
   kanban: {
-    title: '看板',
+    title: '看板审批中心',
+    approval: {
+      title: '审批中心', claim: '领取 / 开始执行', requestReview: '请求审核', approve: '批准', requestChanges: '退回修改', archive: '归档',
+      reasonPlaceholder: '填写审批原因或审核摘要', reasonRequired: '必须填写原因', unauthorized: '当前 Studio 身份无权执行审批操作。',
+      success: '审批操作已记录', duplicate: '该审批事件已处理', failed: '审批操作失败',
+      risk: '风险', riskDetected: '高影响变更，请谨慎审核', runId: '运行 ID', eventId: '最新事件 ID',
+    },
     createTask: '新建任务',
     noTasks: '暂无任务',
     allStatuses: '全部状态',

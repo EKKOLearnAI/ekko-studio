@@ -16,6 +16,8 @@ import {
   createBoard,
   archiveBoard,
   getCapabilities,
+  getApprovalCapabilities,
+  performApprovalAction,
   listTasks,
   getTask,
   listAttachments,
@@ -106,6 +108,26 @@ describe('Kanban API', () => {
       ['/api/hermes/kanban/task-1/block?board=project-a', { method: 'POST', body: JSON.stringify({ reason: 'waiting' }) }],
       ['/api/hermes/kanban/unblock?board=project-a', { method: 'POST', body: JSON.stringify({ task_ids: ['task-1'] }) }],
       ['/api/hermes/kanban/task-1/assign?board=project-a', { method: 'POST', body: JSON.stringify({ profile: 'bob' }) }],
+    ])
+  })
+
+  it('uses dedicated approval endpoints and keeps decision reasons out of the URL', async () => {
+    const approval = { can_approve: true, allowed_boards: ['codex-tech'], dingtalk_configured: true }
+    const result = { receipt: { event_id: 'evt-1', after_status: 'done' } }
+    mockRequest.mockResolvedValueOnce({ approval }).mockResolvedValueOnce(result)
+
+    await expect(getApprovalCapabilities()).resolves.toEqual(approval)
+    await expect(performApprovalAction('task 1', 'request_changes', {
+      reason: 'missing rollback test',
+      event_id: 'evt-1',
+    }, { board: 'codex-tech' })).resolves.toEqual(result)
+
+    expect(mockRequest.mock.calls).toEqual([
+      ['/api/hermes/kanban/approval/capabilities'],
+      ['/api/hermes/kanban/task%201/request-changes?board=codex-tech', {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'missing rollback test', event_id: 'evt-1' }),
+      }],
     ])
   })
 
