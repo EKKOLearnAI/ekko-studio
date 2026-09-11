@@ -6,6 +6,11 @@ import { join } from 'path'
 import { logger } from '../../../studio/public/logging'
 import { detectHermesRootHome } from '../runtime/path'
 import { execHermes, spawnHermes } from '../runtime/process'
+import {
+  getKanbanApprovalAuditStore,
+  type KanbanApprovalAuditRecord,
+  type KanbanApprovalAuditStore,
+} from './approval-audit-store'
 
 const execOpts = { windowsHide: true }
 const BOARD_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
@@ -62,6 +67,7 @@ export interface KanbanRun {
   outcome: string | null
   summary: string | null
   error: string | null
+  metadata?: Record<string, unknown> | string | null
 }
 
 export interface KanbanComment {
@@ -164,6 +170,7 @@ export interface KanbanBoardOptions {
 
 export interface KanbanWatchOptions extends KanbanBoardOptions {
   interval?: number
+  kinds?: string[]
 }
 
 export interface KanbanBulkTaskUpdateOptions extends KanbanBoardOptions {
@@ -194,6 +201,7 @@ export interface KanbanApprovalActionOptions extends KanbanBoardOptions {
   eventId?: string
   reason?: string
   reviewer?: string
+  auditStore?: KanbanApprovalAuditStore
 }
 
 export interface KanbanApprovalReceipt {
@@ -394,6 +402,100 @@ function hasApprovalEvent(detail: KanbanTaskDetail, eventId: string): boolean {
     && comment.body.includes(`"event_id":"${safeEventId}"`))
 }
 
+function expectedApprovalStatuses(action: KanbanApprovalAction): KanbanTaskStatus[] {
+  const statuses: Record<KanbanApprovalAction, KanbanTaskStatus[]> = {
+    claim: ['running'],
+    request_review: ['review'],
+    approve: ['done'],
+    request_changes: ['ready', 'todo'],
+    archive: ['archived'],
+  }
+  return statuses[action]
+}
+
+function latestCanonicalApprovalEvent(
+  detail: KanbanTaskDetail,
+  action: KanbanApprovalAction,
+  excludedEventIds: Iterable<string> = [],
+): KanbanEvent | undefined {
+  const excluded = new Set(excludedEventIds)
+  return [...detail.events].reverse().find(event => (
+    APPROVAL_EVENT_KINDS[action].has(event.kind) && !excluded.has(String(event.id))
+  ))
+}
+
+function parsedRunMetadata(run: KanbanRun | undefined): Record<string, unknown> | null {
+  if (!run?.metadata) return null
+  if (typeof run.metadata === 'object') return run.metadata
+  try {
+    const parsed = JSON.parse(run.metadata)
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+function canonicalEventMatchesPreparedAudit(
+  detail: KanbanTaskDetail,
+  event: KanbanEvent,
+  audit: KanbanApprovalAuditRecord,
+): boolean {
+  const run = detail.runs.find(candidate => candidate.id === event.run_id)
+  const approval = parsedRunMetadata(run)?.approval
+  if (approval && typeof approval === 'object') {
+    const identity = approval as Record<string, unknown>
+    return identity.event_id === audit.event_id && identity.action === audit.action
+  }
+  return audit.action === 'claim'
+    && Boolean(audit.canonical_profile)
+    && run?.profile === audit.canonical_profile
+}
+
+function assertMatchingAuditRecord(
+  record: KanbanApprovalAuditRecord,
+  taskId: string,
+  action: KanbanApprovalAction,
+  board: string,
+  actor: string,
+  channel: 'studio' | 'dingtalk',
+  reason: string | null,
+  reviewer: string | null,
+): void {
+  if (
+    record.task_id !== taskId
+    || record.action !== action
+    || record.board !== board
+    || record.actor !== actor
+    || record.channel !== channel
+    || record.reason !== reason
+    || (record.reviewer !== undefined && record.reviewer !== reviewer)
+  ) {
+    throw new Error(`Approval event ID "${record.event_id}" is already bound to another action`)
+  }
+}
+
+function receiptFromAudit(
+  record: KanbanApprovalAuditRecord,
+  task: KanbanTask,
+  duplicate: boolean,
+): KanbanApprovalReceipt {
+  return {
+    ok: true,
+    duplicate,
+    action: record.action,
+    actor: record.actor,
+    channel: record.channel,
+    event_id: record.event_id,
+    canonical_event_id: record.canonical_event_id,
+    run_id: record.run_id,
+    before_status: record.before_status,
+    after_status: record.after_status || task.status,
+    timestamp: record.timestamp,
+    reason: record.reason,
+    task,
+  }
+}
+
 function scrubAuditText(value?: string): string | null {
   const trimmed = value?.trim()
   if (!trimmed) return null
@@ -455,7 +557,7 @@ async function executeApprovalTransition(
   )
 }
 
-export async function performApprovalAction(
+async function performApprovalActionUnlocked(
   taskId: string,
   action: KanbanApprovalAction,
   options: KanbanApprovalActionOptions,
@@ -466,8 +568,69 @@ export async function performApprovalAction(
   const channel = options.channel || 'studio'
   const eventId = options.eventId?.trim() || randomUUID()
   const reason = scrubAuditText(options.reason)
+  const auditStore = options.auditStore || getKanbanApprovalAuditStore()
   const before = await getTask(taskId, { board })
   if (!before) throw new Error(`Kanban task "${taskId}" was not found`)
+
+  const existingAudit = await auditStore.get(board, taskId, eventId)
+  if (existingAudit) {
+    assertMatchingAuditRecord(
+      existingAudit,
+      taskId,
+      action,
+      board,
+      actor,
+      channel,
+      reason,
+      options.reviewer?.trim() || null,
+    )
+    if (existingAudit.phase === 'completed') {
+      if (!hasApprovalEvent(before, eventId)) {
+        await addComment(taskId, `${APPROVAL_AUDIT_PREFIX}${JSON.stringify(existingAudit)}`, {
+          board,
+          author: `${existingAudit.channel}:${existingAudit.actor}`,
+        })
+      }
+      return receiptFromAudit(existingAudit, before.task, true)
+    }
+    const expectedStatuses = expectedApprovalStatuses(action)
+    const canonicalEvent = latestCanonicalApprovalEvent(before, action, existingAudit.before_event_ids || [])
+    if (canonicalEvent && !canonicalEventMatchesPreparedAudit(before, canonicalEvent, existingAudit)) {
+      throw new Error(`Cannot recover approval event "${eventId}" without matching canonical identity`)
+    }
+    if (canonicalEvent || (!existingAudit.before_event_ids && expectedStatuses.includes(before.task.status))) {
+      const payloadStatus = canonicalEvent?.payload && typeof canonicalEvent.payload === 'object'
+        ? [canonicalEvent.payload.after_status, canonicalEvent.payload.status, canonicalEvent.payload.to_status]
+            .find(value => typeof value === 'string' && expectedStatuses.includes(value as KanbanTaskStatus))
+        : undefined
+      const recoveredStatus = expectedStatuses.includes(before.task.status)
+        ? before.task.status
+        : typeof payloadStatus === 'string'
+          ? payloadStatus as KanbanTaskStatus
+          : expectedStatuses[0]
+      const recovered = await auditStore.complete(
+        { board, taskId, eventId },
+        {
+          after_status: recoveredStatus,
+          canonical_event_id: canonicalEvent?.id ?? null,
+          run_id: canonicalEvent?.run_id ?? before.task.current_run_id ?? null,
+          timestamp: canonicalEvent?.created_at || Math.floor(Date.now() / 1000),
+          updated_at: Math.floor(Date.now() / 1000),
+        },
+      )
+      await addComment(taskId, `${APPROVAL_AUDIT_PREFIX}${JSON.stringify(recovered)}`, {
+        board,
+        author: `${recovered.channel}:${recovered.actor}`,
+      })
+      return receiptFromAudit(recovered, before.task, true)
+    }
+    if (expectedStatuses.includes(before.task.status) && existingAudit.before_event_ids) {
+      throw new Error(`Cannot recover approval event "${eventId}" without a new canonical ${action} event`)
+    }
+    if (before.task.status !== existingAudit.before_status) {
+      throw new Error(`Cannot recover approval event "${eventId}" from status "${before.task.status}"`)
+    }
+  }
 
   if (hasApprovalEvent(before, eventId)) {
     return {
@@ -488,6 +651,50 @@ export async function performApprovalAction(
   }
 
   assertApprovalTransition(before, action, reason || undefined)
+  if (!existingAudit) {
+    const timestamp = Math.floor(Date.now() / 1000)
+    const prepared = await auditStore.prepare({
+      schema: 1,
+      phase: 'prepared',
+      board,
+      task_id: taskId,
+      event_id: eventId,
+      action,
+      actor,
+      channel,
+      reason,
+      reviewer: options.reviewer?.trim() || null,
+      canonical_profile: process.env.HERMES_PROFILE?.trim() || 'default',
+      before_status: before.task.status,
+      before_event_ids: before.events.map(event => String(event.id)),
+      after_status: null,
+      canonical_event_id: null,
+      run_id: before.task.current_run_id ?? null,
+      timestamp,
+      updated_at: timestamp,
+    })
+    if (!prepared.created) {
+      assertMatchingAuditRecord(
+        prepared.record,
+        taskId,
+        action,
+        board,
+        actor,
+        channel,
+        reason,
+        options.reviewer?.trim() || null,
+      )
+      const persistedBeforeIds = [...(prepared.record.before_event_ids || [])].sort()
+      const requestedBeforeIds = before.events.map(event => String(event.id)).sort()
+      if (
+        prepared.record.before_status !== before.task.status
+        || persistedBeforeIds.length !== requestedBeforeIds.length
+        || persistedBeforeIds.some((id, index) => id !== requestedBeforeIds[index])
+      ) {
+        throw new Error(`Approval event ID "${eventId}" is already bound to another action`)
+      }
+    }
+  }
   await executeApprovalTransition(taskId, action, before, {
     ...options,
     board,
@@ -498,31 +705,26 @@ export async function performApprovalAction(
 
   const after = await getTask(taskId, { board })
   if (!after) throw new Error(`Kanban task "${taskId}" disappeared after ${action}`)
-  const expected: Record<KanbanApprovalAction, KanbanTaskStatus[]> = {
-    claim: ['running'],
-    request_review: ['review'],
-    approve: ['done'],
-    request_changes: ['ready', 'todo'],
-    archive: ['archived'],
+  const expected = expectedApprovalStatuses(action)
+  if (!expected.includes(after.task.status)) {
+    throw new Error(`Kanban ${action} readback failed: expected ${expected.join('/')} but got ${after.task.status}`)
   }
-  if (!expected[action].includes(after.task.status)) {
-    throw new Error(`Kanban ${action} readback failed: expected ${expected[action].join('/')} but got ${after.task.status}`)
+  const canonicalEvent = latestCanonicalApprovalEvent(after, action, before.events.map(event => String(event.id)))
+  if (!canonicalEvent) {
+    throw new Error(`Kanban ${action} readback failed: canonical transition event was not found`)
   }
-  const canonicalEvent = [...after.events].reverse().find(event => APPROVAL_EVENT_KINDS[action].has(event.kind))
   const timestamp = canonicalEvent?.created_at || Math.floor(Date.now() / 1000)
-  const audit = {
-    action,
-    actor,
-    channel,
-    event_id: eventId,
-    canonical_event_id: canonicalEvent?.id ?? null,
-    run_id: canonicalEvent?.run_id ?? after.task.current_run_id ?? null,
-    before_status: before.task.status,
-    after_status: after.task.status,
-    reason,
-    timestamp,
-  }
-  await addComment(taskId, `${APPROVAL_AUDIT_PREFIX}${JSON.stringify(audit)}`, {
+  const durableAudit = await auditStore.complete(
+    { board, taskId, eventId },
+    {
+      after_status: after.task.status,
+      canonical_event_id: canonicalEvent?.id ?? null,
+      run_id: canonicalEvent?.run_id ?? after.task.current_run_id ?? null,
+      timestamp,
+      updated_at: Math.floor(Date.now() / 1000),
+    },
+  )
+  await addComment(taskId, `${APPROVAL_AUDIT_PREFIX}${JSON.stringify(durableAudit)}`, {
     board,
     author: `${channel}:${actor}`,
   })
@@ -543,8 +745,28 @@ export async function performApprovalAction(
   }
 }
 
+const approvalTaskLocks = new Map<string, Promise<void>>()
+
+export function performApprovalAction(
+  taskId: string,
+  action: KanbanApprovalAction,
+  options: KanbanApprovalActionOptions,
+): Promise<KanbanApprovalReceipt> {
+  const lockKey = `${normalizeBoardSlug(options.board)}\0${taskId}`
+  const previous = approvalTaskLocks.get(lockKey) || Promise.resolve()
+  const result = previous
+    .catch(() => undefined)
+    .then(() => performApprovalActionUnlocked(taskId, action, options))
+  const barrier = result.then(() => undefined, () => undefined)
+  approvalTaskLocks.set(lockKey, barrier)
+  return result.finally(() => {
+    if (approvalTaskLocks.get(lockKey) === barrier) approvalTaskLocks.delete(lockKey)
+  })
+}
+
 export function buildWatchArgs(opts?: KanbanWatchOptions): string[] {
   const args = [...boardArgs(opts?.board), 'watch']
+  if (opts?.kinds?.length) args.push('--kinds', opts.kinds.join(','))
   pushOptional(args, '--interval', opts?.interval ?? 0.5)
   return args
 }

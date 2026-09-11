@@ -56,7 +56,6 @@ describe('kanban routes', () => {
       '/api/hermes/kanban/boards/:slug',
       '/api/hermes/kanban/capabilities',
       '/api/hermes/kanban/approval/capabilities',
-      '/api/hermes/kanban/dingtalk/approval-callback',
       '/api/hermes/kanban/stats',
       '/api/hermes/kanban/assignees',
       '/api/hermes/kanban/diagnostics',
@@ -84,6 +83,14 @@ describe('kanban routes', () => {
       '/api/hermes/kanban/:id/request-changes',
       '/api/hermes/kanban/:id/archive',
     ]))
+    expect(paths).not.toContain('/api/hermes/kanban/dingtalk/approval-callback')
+  })
+
+  it('registers the signed DingTalk callback on the public router', async () => {
+    const { kanbanPublicRoutes } = await import('../../packages/server/src/modules/hermes/routes/kanban')
+    expect(kanbanPublicRoutes.stack.map((entry: any) => entry.path)).toEqual([
+      '/api/hermes/kanban/dingtalk/approval-callback',
+    ])
   })
 
   it('delegates search-sessions to the controller', async () => {

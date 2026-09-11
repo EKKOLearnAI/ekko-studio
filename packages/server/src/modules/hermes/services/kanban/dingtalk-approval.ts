@@ -22,6 +22,25 @@ export interface DingTalkNotificationResult {
   api_accepted: boolean
   attempts: number
   recipient_confirmed: false
+  retryable?: boolean
+  error?: string
+}
+
+export class DingTalkNotificationError extends Error {
+  readonly result: DingTalkNotificationResult
+
+  constructor(message: string, attempts: number, retryable: boolean) {
+    super(message)
+    this.name = 'DingTalkNotificationError'
+    this.result = {
+      configured: true,
+      api_accepted: false,
+      attempts,
+      recipient_confirmed: false,
+      retryable,
+      error: message,
+    }
+  }
 }
 
 export interface DingTalkApprovalReply {
@@ -110,15 +129,19 @@ export async function sendDingTalkApprovalNotification(
   } = {},
 ): Promise<DingTalkNotificationResult> {
   const webhookUrl = options.webhookUrl?.trim() || process.env.DINGTALK_APPROVAL_WEBHOOK_URL?.trim() || ''
-  if (!webhookUrl) return { configured: false, api_accepted: false, attempts: 0, recipient_confirmed: false }
+  if (!webhookUrl) {
+    return { configured: false, api_accepted: false, attempts: 0, recipient_confirmed: false }
+  }
 
   const fetchImpl = options.fetchImpl || fetch
   const sleep = options.sleep || defaultSleep
   const maxRetries = Math.max(0, Math.min(5, options.maxRetries ?? 2))
   let attempts = 0
   let lastError: Error | null = null
+  let lastRetryable = true
   while (attempts <= maxRetries) {
     attempts += 1
+    let shouldRetry = true
     try {
       const response = await fetchImpl(webhookUrl, {
         method: 'POST',
@@ -127,13 +150,33 @@ export async function sendDingTalkApprovalNotification(
         signal: AbortSignal.timeout(8_000),
       })
       if (response.ok) {
-        return { configured: true, api_accepted: true, attempts, recipient_confirmed: false }
+        let result: { errcode?: unknown; errmsg?: unknown }
+        try {
+          result = await response.json() as { errcode?: unknown; errmsg?: unknown }
+        } catch {
+          lastError = new Error('DingTalk notification API returned invalid JSON')
+          shouldRetry = false
+          lastRetryable = false
+          break
+        }
+        if (result.errcode === 0) {
+          return { configured: true, api_accepted: true, attempts, recipient_confirmed: false }
+        }
+        const message = typeof result.errmsg === 'string' ? ` ${result.errmsg}` : ''
+        lastError = new Error(`DingTalk notification API rejected request: ${String(result.errcode)}${message}`)
+        shouldRetry = false
+        lastRetryable = false
+        break
       }
       lastError = new Error(`DingTalk notification API returned ${response.status}`)
+      shouldRetry = response.status === 408 || response.status === 429 || response.status >= 500
+      lastRetryable = shouldRetry
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
+      lastRetryable = true
     }
+    if (!shouldRetry) break
     if (attempts <= maxRetries) await sleep(100 * 2 ** (attempts - 1))
   }
-  throw lastError || new Error('DingTalk notification failed')
+  throw new DingTalkNotificationError(lastError?.message || 'DingTalk notification failed', attempts, lastRetryable)
 }
