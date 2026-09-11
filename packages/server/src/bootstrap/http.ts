@@ -566,6 +566,12 @@ export async function bootstrap() {
     close: () => kanbanEventsWebSocket.close(),
     forceClose: () => kanbanEventsWebSocket.forceClose(),
   })
+  const { startDingTalkApprovalOutboxDispatcher } = await import('../modules/hermes/services/kanban/dingtalk-approval-outbox')
+  const dingtalkApprovalOutboxDispatcher = startDingTalkApprovalOutboxDispatcher()
+  additionalShutdownSteps.push({
+    name: 'DingTalk approval notification outbox',
+    close: () => dingtalkApprovalOutboxDispatcher.close(),
+  })
   const lanPeerSocketManager = getLanPeerSocketManager()
   lanPeerSocketManager.setupServer(servers)
   additionalShutdownSteps.push({

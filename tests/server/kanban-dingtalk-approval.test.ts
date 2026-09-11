@@ -45,7 +45,7 @@ describe('kanban DingTalk approval bridge', () => {
   it('retries transient DingTalk notification failures and distinguishes API acceptance from delivery', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 503 })
-      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ errcode: 0, errmsg: 'ok' }) })
     const sleep = vi.fn(async () => {})
 
     await expect(sendDingTalkApprovalNotification({ msgtype: 'markdown', markdown: { title: 'Review', text: 'Body' } }, {
@@ -56,6 +56,61 @@ describe('kanban DingTalk approval bridge', () => {
     })).resolves.toEqual({ configured: true, api_accepted: true, attempts: 2, recipient_confirmed: false })
     expect(fetchImpl).toHaveBeenCalledTimes(2)
     expect(sleep).toHaveBeenCalledTimes(1)
+  })
+
+
+  it('rejects a DingTalk business error returned with HTTP 200 without retrying', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ errcode: 310000, errmsg: 'keywords not in content' }),
+    })
+    const sleep = vi.fn(async () => {})
+
+    await expect(sendDingTalkApprovalNotification({ msgtype: 'markdown', markdown: { title: 'Review', text: 'Body' } }, {
+      webhookUrl: 'https://example.com/dingtalk',
+      fetchImpl: fetchImpl as any,
+      maxRetries: 2,
+      sleep,
+    })).rejects.toMatchObject({
+      message: 'DingTalk notification API rejected request: 310000 keywords not in content',
+      result: { attempts: 1, retryable: false },
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('does not retry permanent DingTalk HTTP failures', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 400 })
+    const sleep = vi.fn(async () => {})
+
+    await expect(sendDingTalkApprovalNotification({ msgtype: 'markdown', markdown: { title: 'Review', text: 'Body' } }, {
+      webhookUrl: 'https://example.com/dingtalk',
+      fetchImpl: fetchImpl as any,
+      maxRetries: 2,
+      sleep,
+    })).rejects.toMatchObject({
+      message: 'DingTalk notification API returned 400',
+      result: { attempts: 1, retryable: false },
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('reports exhausted transient attempts as retryable for durable outbox recovery', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 503 })
+    const sleep = vi.fn(async () => {})
+
+    await expect(sendDingTalkApprovalNotification({ msgtype: 'markdown', markdown: { title: 'Review', text: 'Body' } }, {
+      webhookUrl: 'https://example.com/dingtalk',
+      fetchImpl: fetchImpl as any,
+      maxRetries: 2,
+      sleep,
+    })).rejects.toMatchObject({
+      result: { attempts: 3, retryable: true },
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    expect(sleep).toHaveBeenCalledTimes(2)
   })
 
   it('reports notification as disabled without a configured webhook', async () => {

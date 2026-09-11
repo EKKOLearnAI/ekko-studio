@@ -365,6 +365,37 @@ export async function getApprovalCapabilities(): Promise<KanbanApprovalCapabilit
   return res.approval
 }
 
+const volatileApprovalEventIds = new Map<string, string>()
+
+function approvalEventStorageKey(board: string, taskId: string, action: KanbanApprovalAction): string {
+  return `hermes:kanban:approval:${board}:${taskId}:${action}`
+}
+
+function readOrCreateApprovalEventId(key: string): string {
+  try {
+    const stored = globalThis.localStorage?.getItem(key)
+    if (stored) return stored
+    const eventId = globalThis.crypto.randomUUID()
+    globalThis.localStorage?.setItem(key, eventId)
+    return eventId
+  } catch {
+    const stored = volatileApprovalEventIds.get(key)
+    if (stored) return stored
+    const eventId = globalThis.crypto.randomUUID()
+    volatileApprovalEventIds.set(key, eventId)
+    return eventId
+  }
+}
+
+function clearApprovalEventId(key: string) {
+  volatileApprovalEventIds.delete(key)
+  try {
+    globalThis.localStorage?.removeItem(key)
+  } catch {
+    // Volatile fallback was already cleared.
+  }
+}
+
 export async function performApprovalAction(
   taskId: string,
   action: KanbanApprovalAction,
@@ -372,10 +403,18 @@ export async function performApprovalAction(
   opts?: KanbanBoardOptions,
 ): Promise<KanbanApprovalResult> {
   const actionPath = action.replace('_', '-')
-  return request<KanbanApprovalResult>(
+  const board = opts?.board || 'default'
+  const storageKey = approvalEventStorageKey(board, taskId, action)
+  const generatedEventId = !data.event_id
+  const payload = generatedEventId
+    ? { ...data, event_id: readOrCreateApprovalEventId(storageKey) }
+    : data
+  const result = await request<KanbanApprovalResult>(
     appendQuery(`/api/hermes/kanban/${encodeURIComponent(taskId)}/${actionPath}`, boardParams(opts?.board)),
-    { method: 'POST', body: JSON.stringify(data) },
+    { method: 'POST', body: JSON.stringify(payload) },
   )
+  if (generatedEventId) clearApprovalEventId(storageKey)
+  return result
 }
 
 export async function listTasks(opts?: KanbanListOptions): Promise<KanbanTask[]> {

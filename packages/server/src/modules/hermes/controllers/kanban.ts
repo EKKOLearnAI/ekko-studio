@@ -3,9 +3,9 @@ import { readFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import * as kanbanCli from '../services/kanban/kanban-service'
 import {
-  buildDingTalkApprovalPayload,
-  sendDingTalkApprovalNotification,
-} from '../services/kanban/dingtalk-approval'
+  notificationResultFromOutboxRecord,
+  reconcileDingTalkApprovalEvent,
+} from '../services/kanban/dingtalk-approval-outbox'
 import { detectHermesRootHome, isRealPathWithin } from '../services/runtime/path'
 import { listProfileNamesFromDisk } from '../services/profiles/profile'
 import {
@@ -371,22 +371,26 @@ async function approvalAction(ctx: Context, action: kanbanCli.KanbanApprovalActi
       reason: reason.value,
       reviewer: reviewer.value,
     })
-    if (!notifyDingTalk || receipt.duplicate) {
+    if (!notifyDingTalk) {
       ctx.body = { receipt }
       return
     }
-    const baseUrl = process.env.HERMES_STUDIO_PUBLIC_URL?.trim() || ctx.origin || ''
-    const studioUrl = `${baseUrl.replace(/\/$/, '')}/#/hermes/kanban?board=${encodeURIComponent(board)}&task=${encodeURIComponent(receipt.task.id)}`
-    const payload = buildDingTalkApprovalPayload({
-      task: receipt.task,
-      board,
-      eventId: receipt.event_id,
-      studioUrl,
-    })
     try {
-      const notification = await sendDingTalkApprovalNotification(payload)
-      ctx.body = { receipt, notification }
-    } catch {
+      const record = receipt.canonical_event_id == null
+        ? null
+        : await reconcileDingTalkApprovalEvent(board, receipt.task.id, String(receipt.canonical_event_id))
+      ctx.body = {
+        receipt,
+        notification: record
+          ? notificationResultFromOutboxRecord(record)
+          : {
+              configured: Boolean(process.env.DINGTALK_APPROVAL_WEBHOOK_URL?.trim()),
+              api_accepted: false,
+              attempts: 0,
+              recipient_confirmed: false,
+            },
+      }
+    } catch (error) {
       ctx.body = {
         receipt,
         notification: {
@@ -394,6 +398,7 @@ async function approvalAction(ctx: Context, action: kanbanCli.KanbanApprovalActi
           api_accepted: false,
           attempts: 0,
           recipient_confirmed: false,
+          error: error instanceof Error ? error.message : String(error),
         },
       }
     }

@@ -3,13 +3,16 @@ import * as ctrl from '../controllers/kanban'
 import * as dingTalkApprovalCtrl from '../controllers/kanban-dingtalk-approval'
 
 export const kanbanRoutes = new Router()
+export const kanbanPublicRoutes = new Router()
+
+kanbanPublicRoutes.post('/api/hermes/kanban/dingtalk/approval-callback', dingTalkApprovalCtrl.receiveDingTalkKanbanApproval)
 
 kanbanRoutes.get('/api/hermes/kanban/boards', ctrl.listBoards)
 kanbanRoutes.post('/api/hermes/kanban/boards', ctrl.createBoard)
 kanbanRoutes.delete('/api/hermes/kanban/boards/:slug', ctrl.archiveBoard)
 kanbanRoutes.get('/api/hermes/kanban/capabilities', ctrl.capabilities)
 kanbanRoutes.get('/api/hermes/kanban/approval/capabilities', ctrl.approvalCapabilities)
-kanbanRoutes.post('/api/hermes/kanban/dingtalk/approval-callback', dingTalkApprovalCtrl.receiveDingTalkKanbanApproval)
+
 kanbanRoutes.get('/api/hermes/kanban/stats', ctrl.stats)
 kanbanRoutes.get('/api/hermes/kanban/assignees', ctrl.assignees)
 kanbanRoutes.get('/api/hermes/kanban/diagnostics', ctrl.diagnostics)

@@ -26,8 +26,7 @@ const mockGetStats = vi.hoisted(() => vi.fn())
 const mockGetAssignees = vi.hoisted(() => vi.fn())
 const mockListAttachments = vi.hoisted(() => vi.fn())
 const mockPerformApprovalAction = vi.hoisted(() => vi.fn())
-const mockBuildDingTalkApprovalPayload = vi.hoisted(() => vi.fn())
-const mockSendDingTalkApprovalNotification = vi.hoisted(() => vi.fn())
+const mockReconcileDingTalkApprovalEvent = vi.hoisted(() => vi.fn())
 const mockSearchSessions = vi.hoisted(() => vi.fn())
 const mockGetSessionDetail = vi.hoisted(() => vi.fn())
 const mockGetExactSessionDetail = vi.hoisted(() => vi.fn())
@@ -81,9 +80,14 @@ vi.mock('../../packages/server/src/modules/hermes/services/kanban/kanban-service
   performApprovalAction: mockPerformApprovalAction,
 }))
 
-vi.mock('../../packages/server/src/modules/hermes/services/kanban/dingtalk-approval', () => ({
-  buildDingTalkApprovalPayload: mockBuildDingTalkApprovalPayload,
-  sendDingTalkApprovalNotification: mockSendDingTalkApprovalNotification,
+vi.mock('../../packages/server/src/modules/hermes/services/kanban/dingtalk-approval-outbox', () => ({
+  reconcileDingTalkApprovalEvent: mockReconcileDingTalkApprovalEvent,
+  notificationResultFromOutboxRecord: (record: any) => ({
+    configured: record.configured,
+    api_accepted: record.api_accepted,
+    attempts: record.attempts,
+    recipient_confirmed: false,
+  }),
 }))
 
 vi.mock('../../packages/server/src/modules/hermes/services/history/sessions-db', () => ({
@@ -190,12 +194,12 @@ describe('kanban controller', () => {
       ok: true,
       action: 'request_review',
       event_id: 'evt-review',
+      canonical_event_id: 42,
       after_status: 'review',
       task: { id: 'task-1', title: 'Review me', priority: 3, status: 'review' },
     })
-    mockBuildDingTalkApprovalPayload.mockReturnValue({ msgtype: 'markdown' })
-    mockSendDingTalkApprovalNotification.mockResolvedValue({
-      configured: true, api_accepted: true, attempts: 1, recipient_confirmed: false,
+    mockReconcileDingTalkApprovalEvent.mockResolvedValue({
+      task_id: 'task-1', configured: true, api_accepted: true, attempts: 1, recipient_confirmed: false,
     })
     const c = ctx({
       state: { user: { id: 1, username: 'james', role: 'super_admin' } },
@@ -211,6 +215,7 @@ describe('kanban controller', () => {
       receipt: { after_status: 'review' },
       notification: { api_accepted: true, recipient_confirmed: false },
     })
+    expect(mockReconcileDingTalkApprovalEvent).toHaveBeenCalledWith('codex-tech', 'task-1', '42')
   })
 
   it('lists boards and tasks with explicit/default board context', async () => {

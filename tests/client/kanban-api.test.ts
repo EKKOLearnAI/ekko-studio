@@ -131,6 +131,22 @@ describe('Kanban API', () => {
     ])
   })
 
+  it('reuses a generated approval event ID after a lost response and clears it only after success', async () => {
+    mockRequest
+      .mockRejectedValueOnce(new Error('connection reset'))
+      .mockResolvedValueOnce({ receipt: { event_id: 'server-ack', after_status: 'review' } })
+
+    await expect(performApprovalAction('task-1', 'request_review', {}, { board: 'codex-tech' }))
+      .rejects.toThrow('connection reset')
+    await expect(performApprovalAction('task-1', 'request_review', {}, { board: 'codex-tech' }))
+      .resolves.toMatchObject({ receipt: { after_status: 'review' } })
+
+    const bodies = mockRequest.mock.calls.map(call => JSON.parse(call[1].body))
+    expect(bodies[0].event_id).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(bodies[1].event_id).toBe(bodies[0].event_id)
+    expect(localStorage.getItem('hermes:kanban:approval:codex-tech:task-1:request_review')).toBeNull()
+  })
+
   it('lists attachments and builds their authenticated content path', async () => {
     mockRequest.mockResolvedValueOnce({
       attachments: [{ id: 7, filename: 'report.html', size: 42 }],
