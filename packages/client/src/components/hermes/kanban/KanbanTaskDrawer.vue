@@ -6,8 +6,8 @@ import { useRouter } from 'vue-router'
 import { request } from '@/api/client'
 import { getApprovalCapabilities, getAttachmentContentPath, getTask, listAttachments, performApprovalAction } from '@/api/hermes/kanban'
 import { useKanbanStore } from '@/stores/hermes/kanban'
+import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useFilesStore } from '@/stores/hermes/files'
-import { withDefaultAssignee } from '@/utils/hermes/kanban-assignees'
 import HistoryMessageList from '@/components/hermes/chat/HistoryMessageList.vue'
 import FilePreview from '@/components/hermes/files/FilePreview.vue'
 import { fetchAuthenticatedBlob, saveBlob } from '@/api/studio/binary-content'
@@ -31,6 +31,7 @@ const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
 const kanbanStore = useKanbanStore()
+const profilesStore = useProfilesStore()
 const filesStore = useFilesStore()
 
 const detail = ref<KanbanTaskDetail | null>(null)
@@ -184,8 +185,12 @@ const historySession = computed<Session | null>(() => {
 })
 
 const assigneeOptions = computed(() => {
-  return withDefaultAssignee(kanbanStore.assignees, kanbanStore.stats?.by_assignee || {})
-    .map(a => ({ label: a.name, value: a.name }))
+  // profilesStore.profiles 是全集；kanbanStore.assignees 仅作"已被使用过"的标记
+  return profilesStore.profiles.map(p => ({
+    label: p.alias || p.name,
+    value: p.name,
+    used: kanbanStore.assignees.includes(p.name),
+  }))
 })
 
 const runHistoryPageCount = computed(() => {
