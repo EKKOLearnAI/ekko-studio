@@ -83,13 +83,13 @@ describe('kanban routes', () => {
       '/api/hermes/kanban/:id/request-changes',
       '/api/hermes/kanban/:id/archive',
     ]))
-    expect(paths).not.toContain('/api/hermes/kanban/dingtalk/approval-callback')
+    expect(paths).not.toContain('/api/hermes/kanban/dingtalk/card-callback')
   })
 
   it('registers the signed DingTalk callback on the public router', async () => {
     const { kanbanPublicRoutes } = await import('../../packages/server/src/modules/hermes/routes/kanban')
     expect(kanbanPublicRoutes.stack.map((entry: any) => entry.path)).toEqual([
-      '/api/hermes/kanban/dingtalk/approval-callback',
+      '/api/hermes/kanban/dingtalk/card-callback',
     ])
   })
 

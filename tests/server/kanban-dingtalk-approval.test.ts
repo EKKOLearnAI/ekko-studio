@@ -4,8 +4,8 @@ import {
   isDingTalkApprover,
   parseDingTalkApprovalReply,
   sendDingTalkApprovalNotification,
-  signDingTalkApprovalBody,
-  verifyDingTalkApprovalSignature,
+  signDingTalkCardCallbackTimestamp,
+  verifyDingTalkCardCallbackSignature,
 } from '../../packages/server/src/modules/hermes/services/kanban/dingtalk-approval'
 
 describe('kanban DingTalk approval bridge', () => {
@@ -32,14 +32,22 @@ describe('kanban DingTalk approval bridge', () => {
     expect(isDingTalkApprover('james-staff', '*')).toBe(false)
   })
 
-  it('verifies callback signatures with timestamp freshness', () => {
-    const body = JSON.stringify({ event_id: 'evt-1', action: 'approve' })
-    const timestamp = '1720000000'
-    const signature = signDingTalkApprovalBody(body, timestamp, 'test-secret')
+  it('verifies the official timestamp-only Base64 callback signature with freshness', () => {
+    const timestamp = '1720000000000'
+    const signature = signDingTalkCardCallbackTimestamp(timestamp, 'test-secret')
 
-    expect(verifyDingTalkApprovalSignature(body, timestamp, signature, 'test-secret', 1720000000)).toBe(true)
-    expect(verifyDingTalkApprovalSignature(body, timestamp, 'bad', 'test-secret', 1720000000)).toBe(false)
-    expect(verifyDingTalkApprovalSignature(body, timestamp, signature, 'test-secret', 1720001000)).toBe(false)
+    expect(signature).toBe('h4U2U2EJcOtnVcq7iZVeFe5PQ70qjIBp/X2U5tpUPAE=')
+    expect(verifyDingTalkCardCallbackSignature(timestamp, signature, 'test-secret', 1720000000000)).toBe(true)
+    expect(verifyDingTalkCardCallbackSignature(timestamp, 'bad', 'test-secret', 1720000000000)).toBe(false)
+    expect(verifyDingTalkCardCallbackSignature(timestamp, signature, '', 1720000000000)).toBe(false)
+    const nonCanonicalTimestamp = '1.72e12'
+    expect(verifyDingTalkCardCallbackSignature(
+      nonCanonicalTimestamp,
+      signDingTalkCardCallbackTimestamp(nonCanonicalTimestamp, 'test-secret'),
+      'test-secret',
+      1720000000000,
+    )).toBe(false)
+    expect(verifyDingTalkCardCallbackSignature(timestamp, signature, 'test-secret', 1720001000000)).toBe(false)
   })
 
   it('retries transient DingTalk notification failures and distinguishes API acceptance from delivery', async () => {
@@ -114,9 +122,16 @@ describe('kanban DingTalk approval bridge', () => {
   })
 
   it('reports notification as disabled without a configured webhook', async () => {
-    await expect(sendDingTalkApprovalNotification({ msgtype: 'markdown', markdown: { title: 'Review', text: 'Body' } }, {
-      webhookUrl: '',
-    })).resolves.toEqual({ configured: false, api_accepted: false, attempts: 0, recipient_confirmed: false })
+    const configuredWebhook = process.env.DINGTALK_APPROVAL_WEBHOOK_URL
+    try {
+      delete process.env.DINGTALK_APPROVAL_WEBHOOK_URL
+      await expect(sendDingTalkApprovalNotification({ msgtype: 'markdown', markdown: { title: 'Review', text: 'Body' } }, {
+        webhookUrl: '',
+      })).resolves.toEqual({ configured: false, api_accepted: false, attempts: 0, recipient_confirmed: false })
+    } finally {
+      if (configuredWebhook === undefined) delete process.env.DINGTALK_APPROVAL_WEBHOOK_URL
+      else process.env.DINGTALK_APPROVAL_WEBHOOK_URL = configuredWebhook
+    }
   })
 
   it('parses minimal Chinese approval replies without inventing the target card', () => {

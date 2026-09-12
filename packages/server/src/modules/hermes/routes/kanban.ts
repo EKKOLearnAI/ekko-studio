@@ -5,7 +5,7 @@ import * as dingTalkApprovalCtrl from '../controllers/kanban-dingtalk-approval'
 export const kanbanRoutes = new Router()
 export const kanbanPublicRoutes = new Router()
 
-kanbanPublicRoutes.post('/api/hermes/kanban/dingtalk/approval-callback', dingTalkApprovalCtrl.receiveDingTalkKanbanApproval)
+kanbanPublicRoutes.post('/api/hermes/kanban/dingtalk/card-callback', dingTalkApprovalCtrl.receiveDingTalkKanbanApproval)
 
 kanbanRoutes.get('/api/hermes/kanban/boards', ctrl.listBoards)
 kanbanRoutes.post('/api/hermes/kanban/boards', ctrl.createBoard)
