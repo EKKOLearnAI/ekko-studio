@@ -135,7 +135,9 @@ function getEncoder() {
 // hangs, so the catch-based heuristic fallback never fires. Detect that
 // pathological case up front and use the cheap heuristic instead. Normal text
 // (even very long, but space-separated) keeps the exact tiktoken path.
-const MAX_LETTER_RUN = 2000
+// Bound for contiguous runs of any single pat_str class (letters, digits,
+// symbols, or whitespace) that may form one oversized pre-tokenizer piece.
+const MAX_PATHOLOGICAL_RUN = 2000
 // Exact js-tiktoken encoding is synchronous. Even well-separated text takes
 // seconds once tool output reaches megabyte scale, starving unrelated HTTP
 // requests on the server thread. Token totals are estimates, so cap exact
@@ -157,16 +159,27 @@ function exceedsExactTokenBudget(text: string): boolean {
 }
 
 function hasPathologicalRun(text: string): boolean {
-  let maxRun = 0
+  // The GPT pat_str merges contiguous characters of EACH piece class —
+  // letters (\p{L}), digits (\p{N}), other symbols ([^\s\p{L}\p{N}]), and
+  // whitespace (\s+) — into a single pre-tokenizer piece. So a long run of
+  // ANY class, not just letters, becomes one huge piece that pins the event
+  // loop in the O(n²) BPE merge loop (e.g. a real 64 KB run of '!' ≈ 188 s
+  // per encode() and never throws). Track the current class run length and
+  // bail out when any class exceeds the bound.
   let run = 0
+  let cls = -1
   for (let i = 0; i < text.length; i++) {
     const cc = text.charCodeAt(i)
-    // ASCII letters or anything at/above CJK/extended ranges (>0x2e7f)
-    if ((cc >= 65 && cc <= 90) || (cc >= 97 && cc <= 122) || cc > 0x2e7f) {
-      if (++run > maxRun) maxRun = run
-      if (maxRun > MAX_LETTER_RUN) return true
+    const next =
+      cc <= 0x20 ? 0 :
+      (cc >= 65 && cc <= 90) || (cc >= 97 && cc <= 122) || cc > 0x2e7f ? 1 :
+      cc >= 48 && cc <= 57 ? 2 :
+      3
+    if (next === cls) {
+      if (++run > MAX_PATHOLOGICAL_RUN) return true
     } else {
-      run = 0
+      cls = next
+      run = 1
     }
   }
   return false

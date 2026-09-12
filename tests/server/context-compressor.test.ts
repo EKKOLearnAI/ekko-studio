@@ -879,6 +879,26 @@ describe('countTokens', () => {
     expect(elapsedMs).toBeLessThan(250)
   })
 
+  it.each([
+    ['punctuation', '!'],
+    ['digits', '7'],
+    ['symbols', '*'],
+    ['whitespace', ' '],
+  ])('does not hang on a long contiguous %s run (quadratic BPE guard)', async (_label, ch) => {
+    const { countTokens } = await import('../../packages/server/src/modules/studio/services/context-compressor')
+    // pat_str merges contiguous digits, symbols, and whitespace into single
+    // pieces too, so non-letter runs are equally pathological. A real 64 KB
+    // run of '!' in a stored reasoning field cost ~188 s per encode() and
+    // wedged the server event loop; the guard must route it to the O(n)
+    // heuristic. 30k chars is safely past the 2000-run bound.
+    const poison = ch.repeat(30000)
+    const start = performance.now()
+    const tokens = countTokens(poison)
+    const elapsedMs = performance.now() - start
+    expect(tokens).toBeGreaterThan(0)
+    expect(elapsedMs).toBeLessThan(250)
+  })
+
   it('bounds token estimation time for very large non-pathological text', async () => {
     const { countTokens } = await import('../../packages/server/src/modules/studio/services/context-compressor')
     const unit = 'abcdefghijklmnopqrstuvwxyz0123456789 '
