@@ -71,6 +71,7 @@ export const chatCodingAgentRunManager = {
   isSessionLaunchCompatible: (...args: any[]) => configured().codingAgentRunManager.isSessionLaunchCompatible(...args),
   isSessionProcessing: (...args: any[]) => configured().codingAgentRunManager.isSessionProcessing(...args),
   runIdForSession: (...args: any[]) => configured().codingAgentRunManager.runIdForSession(...args),
+  updateSessionEnvironment: (...args: any[]) => configured().codingAgentRunManager.updateSessionEnvironment(...args),
   interruptForQueueInsertion: (...args: any[]) => configured().codingAgentRunManager.interruptForQueueInsertion(...args),
   resolveApproval: (...args: any[]) => configured().codingAgentRunManager.resolveApproval(...args),
   resolveClarification: (...args: any[]) => configured().codingAgentRunManager.resolveClarification(...args),
