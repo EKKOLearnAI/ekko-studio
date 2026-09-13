@@ -374,10 +374,25 @@ export function toOpenAIChatPayload(config: ModelProviderConfig, request: ModelR
   const supportsToolChoice = supportsOpenAIChatToolChoice(model)
   const tools = request.tools?.length ? request.tools.map(toOpenAIToolDefinition) : undefined
   const messages = sanitizeOpenAIChatToolHistory(request.messages)
+  const chatMessages: OpenAIChatMessage[] = []
+  const toolImageMessages: OpenAIChatMessage[] = []
+  for (const message of messages) {
+    // Image attachments become user messages and must follow the entire tool batch.
+    if (message.role !== 'tool') chatMessages.push(...toolImageMessages.splice(0))
+    const converted = toOpenAIChatMessages(
+      message, isQwenOAuth, reasoningReplayField, requiresAssistantContent, supportsVision,
+    )
+    if (message.role === 'tool') {
+      chatMessages.push(converted[0]!)
+      toolImageMessages.push(...converted.slice(1))
+    } else {
+      chatMessages.push(...converted)
+    }
+  }
+  chatMessages.push(...toolImageMessages)
   return {
     model,
-    messages: messages.flatMap(message =>
-      toOpenAIChatMessages(message, isQwenOAuth, reasoningReplayField, requiresAssistantContent, supportsVision)),
+    messages: chatMessages,
     temperature: request.temperature,
     max_tokens: request.maxTokens,
     ...(tools
@@ -491,7 +506,7 @@ function toOpenAIChatMessages(
   return [base, {
     role: 'user',
     content: [
-      { type: 'text', text: 'Visual output from the preceding tool result:' },
+      { type: 'text', text: `Visual output from tool result ${message.toolCallId}:` },
       ...images.map(image => ({ type: 'image_url' as const, image_url: { url: `data:${image.mimeType};base64,${image.data}` } })),
     ],
   }]
@@ -669,22 +684,39 @@ function invalidOpenAIToolCallError(provider: string): ModelProviderError {
 }
 
 function sanitizeOpenAIChatToolHistory(messages: AgentMessage[]): AgentMessage[] {
-  const invalidToolCallIds = new Set<string>()
-  let invalidAnonymousToolCall = false
+  const pendingToolCalls = new Map<string, AgentToolCall>()
   const sanitized: AgentMessage[] = []
 
+  const closeToolBatch = () => {
+    for (const toolCall of pendingToolCalls.values()) {
+      sanitized.push({
+        role: 'tool',
+        toolCallId: toolCall.id,
+        name: toolCall.name,
+        content: 'Tool result is missing from the conversation history. Execution status is unknown; verify the current state before retrying any action.',
+      })
+    }
+    pendingToolCalls.clear()
+  }
+
   for (const message of messages) {
+    if (message.role === 'tool') {
+      const toolCallId = String(message.toolCallId || '').trim()
+      if (!pendingToolCalls.delete(toolCallId)) continue
+      sanitized.push({ ...message, toolCallId })
+      continue
+    }
+
+    // Interrupted or truncated history must still close every declared call.
+    closeToolBatch()
     if (message.role === 'assistant' && message.toolCalls?.length) {
       const toolCalls: AgentToolCall[] = []
       for (const toolCall of message.toolCalls) {
         const normalized = normalizeAgentToolCall(toolCall)
-        if (normalized) {
+        if (normalized && !pendingToolCalls.has(normalized.id)) {
           toolCalls.push(normalized)
-          continue
+          pendingToolCalls.set(normalized.id, normalized)
         }
-        const invalidId = String(toolCall?.id || '').trim()
-        if (invalidId) invalidToolCallIds.add(invalidId)
-        else invalidAnonymousToolCall = true
       }
       if (
         toolCalls.length === 0 &&
@@ -699,20 +731,10 @@ function sanitizeOpenAIChatToolHistory(messages: AgentMessage[]): AgentMessage[]
       continue
     }
 
-    if (message.role === 'tool') {
-      const toolCallId = String(message.toolCallId || '').trim()
-      if (toolCallId && invalidToolCallIds.has(toolCallId)) continue
-      if (!toolCallId && invalidAnonymousToolCall) {
-        invalidAnonymousToolCall = false
-        continue
-      }
-      sanitized.push(toolCallId ? { ...message, toolCallId } : message)
-      continue
-    }
-
     sanitized.push(message)
   }
 
+  closeToolBatch()
   return sanitized
 }
 
