@@ -3,6 +3,7 @@ import { chmod, mkdir, open, readFile, rename, rm } from 'fs/promises'
 import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { getHermesBaseDir, getProfileDir } from '../profiles/profile'
+import { saveEnvValueAtPath } from '../profiles/config'
 
 const DEFAULT_TIMEOUT_MS = 20_000
 const DEFAULT_REFRESH_SKEW_MS = 120_000
@@ -1089,5 +1090,20 @@ export async function resolveAuthorizedProviderRuntimeCredentials(
   }
   if (provider === 'qwen-oauth') return resolveQwenCredentials(dependencies, input.forceRefresh === true)
   const profile = clean(input.profile) || 'default'
-  return resolveHermesStoredProvider(profile, provider, dependencies, input.forceRefresh === true)
+  const credentials = await resolveHermesStoredProvider(
+    profile,
+    provider,
+    dependencies,
+    input.forceRefresh === true,
+  )
+  if (provider === 'claude-oauth') {
+    // The Python Hermes bridge intentionally executes Claude OAuth through the
+    // native `anthropic` provider. Hermes Agent discovers that OAuth bearer via
+    // ANTHROPIC_TOKEN, so every Studio resolution (including refresh) repairs
+    // the profile environment before a bridge worker creates/reuses an agent.
+    // Never mirror the refresh token into the environment.
+    const profileDir = (dependencies.profileDir || getProfileDir)(profile)
+    await saveEnvValueAtPath(join(profileDir, '.env'), 'ANTHROPIC_TOKEN', credentials.apiKey)
+  }
+  return credentials
 }

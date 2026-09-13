@@ -31,6 +31,18 @@ function readJson(relativePath: string) {
   return JSON.parse(readFileSync(join(hermesHome, relativePath), 'utf-8'))
 }
 
+function readEnv(relativePath: string): Record<string, string> {
+  return Object.fromEntries(
+    readFileSync(join(hermesHome, relativePath), 'utf-8')
+      .split(/\r?\n/)
+      .filter(line => line.includes('='))
+      .map((line) => {
+        const separator = line.indexOf('=')
+        return [line.slice(0, separator), line.slice(separator + 1)]
+      }),
+  )
+}
+
 function makeCtx(profile: string): any {
   return {
     state: { profile: { name: profile } },
@@ -79,6 +91,9 @@ describe('Anthropic OAuth controller', () => {
     expect(auth.providers.anthropic.tokens.access_token).toBe('anthropic-access-token')
     expect(auth.credential_pool.anthropic[0].refresh_token).toBe('anthropic-refresh-token')
     expect(readJson('profiles/research/.anthropic_oauth.json').accessToken).toBe('anthropic-access-token')
+    expect(readEnv('profiles/research/.env')).toEqual({
+      ANTHROPIC_TOKEN: 'anthropic-access-token',
+    })
     expect(readYaml('config.yaml').model).toEqual({ provider: 'deepseek', default: 'deepseek-chat' })
     expect(readYaml('profiles/research/config.yaml').model).toEqual({ provider: 'claude-oauth', default: 'claude-sonnet-4-6' })
 

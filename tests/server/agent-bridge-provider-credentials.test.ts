@@ -19,6 +19,88 @@ function runPython(script: string): Record<string, unknown> {
 }
 
 describe('Agent Bridge provider credentials', () => {
+  it('hot-switches a cached Anthropic agent after Studio rotates ANTHROPIC_TOKEN', () => {
+    const result = runPython(String.raw`
+import contextlib
+import json
+import sys
+import threading
+import types
+from pathlib import Path
+
+bridge_dir = Path("packages/server/src/modules/hermes/services/bridge/python").resolve()
+sys.path.insert(0, str(bridge_dir))
+import bridge_pool
+
+agent = types.SimpleNamespace(
+    model="claude-opus-4-6",
+    provider="anthropic",
+    api_key="old-access-token",
+    base_url="https://api.anthropic.com",
+    api_mode="anthropic_messages",
+)
+session = bridge_pool.AgentSession(
+    session_id="session-1",
+    agent=agent,
+    config={
+        "profile": "research",
+        "model": "claude-opus-4-6",
+        "provider": "anthropic",
+    },
+)
+pool = object.__new__(bridge_pool.AgentPool)
+pool._lock = threading.RLock()
+pool._sessions = {"session-1": session}
+
+calls = []
+bridge_pool._refresh_worker_profile_env = lambda: calls.append("refresh-env")
+bridge_pool._profile_env = lambda _profile: contextlib.nullcontext()
+bridge_pool._resolve_runtime = lambda _model, _provider: {
+    "provider": "anthropic",
+    "api_key": "fresh-access-token",
+    "base_url": "https://api.anthropic.com",
+    "api_mode": "anthropic_messages",
+}
+
+def switch(existing, model, provider, profile, *, add_note):
+    calls.append({
+        "model": model,
+        "provider": provider,
+        "profile": profile,
+        "add_note": add_note,
+    })
+    existing.agent.api_key = "fresh-access-token"
+
+pool._switch_loaded_session_model = switch
+resolved = pool.get_or_create(
+    "session-1",
+    profile="research",
+    model="claude-opus-4-6",
+    provider="anthropic",
+)
+print(json.dumps({
+    "same_session": resolved is session,
+    "api_key": resolved.agent.api_key,
+    "calls": calls,
+}))
+`)
+
+    expect(result).toEqual({
+      same_session: true,
+      api_key: 'fresh-access-token',
+      calls: [
+        'refresh-env',
+        'refresh-env',
+        {
+          model: 'claude-opus-4-6',
+          provider: 'anthropic',
+          profile: 'research',
+          add_note: false,
+        },
+      ],
+    })
+  })
+
   it('resolves xAI credentials through the worker action without starting an Agent run', () => {
     const result = runPython(String.raw`
 import json

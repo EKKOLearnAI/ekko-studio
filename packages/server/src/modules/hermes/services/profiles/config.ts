@@ -119,7 +119,7 @@ function assertValidEnvKey(key: string): void {
   }
 }
 
-async function saveEnvValueAtPath(envPath: string, key: string, value: string): Promise<void> {
+export async function saveEnvValueAtPath(envPath: string, key: string, value: string): Promise<void> {
   assertValidEnvKey(key)
   await safeFileStore.updateText(envPath, (raw) => {
     const remove = !value

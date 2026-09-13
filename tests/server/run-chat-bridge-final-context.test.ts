@@ -47,6 +47,7 @@ const recordBridgeToolStartedMock = vi.fn()
 const recordBridgeToolCompletedMock = vi.fn()
 const recordBridgeMoaDisplayToolMock = vi.fn()
 const resolveBridgeRunModelConfigMock = vi.fn()
+const resolveAuthorizedProviderRuntimeCredentialsMock = vi.fn()
 const issueModelRunJwtMock = vi.fn(async () => 'model-run-token')
 const startWorkspaceRunCheckpointMock = vi.fn()
 const completeWorkspaceRunCheckpointMock = vi.fn()
@@ -105,6 +106,10 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/model-config
   resolveBridgeRunModelConfig: resolveBridgeRunModelConfigMock,
 }))
 
+vi.mock('../../packages/server/src/modules/studio/public/authorized-provider-runtime', () => ({
+  resolveAuthorizedProviderRuntimeCredentials: resolveAuthorizedProviderRuntimeCredentialsMock,
+}))
+
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/workspace-diff-tracker', () => ({
   startWorkspaceRunCheckpoint: startWorkspaceRunCheckpointMock,
   completeWorkspaceRunCheckpoint: completeWorkspaceRunCheckpointMock,
@@ -155,6 +160,12 @@ describe('bridge run final context usage', () => {
     issueModelRunJwtMock.mockResolvedValue('model-run-token')
     getSessionMock.mockReturnValue({ id: 'session-1', profile: 'default', model: '', provider: '' })
     resolveBridgeRunModelConfigMock.mockResolvedValue({ model: 'gpt-test', provider: 'openai' })
+    resolveAuthorizedProviderRuntimeCredentialsMock.mockResolvedValue({
+      provider: 'claude-oauth',
+      apiKey: 'fresh-claude-access-token',
+      baseUrl: 'https://api.anthropic.com',
+      apiMode: 'anthropic_messages',
+    })
     buildCompressedHistoryMock.mockResolvedValue([{ role: 'user', content: 'previous' }])
     buildDbHistoryMock.mockResolvedValue([
       { role: 'user', content: 'hello' },
@@ -199,6 +210,74 @@ describe('bridge run final context usage', () => {
       const contextTokens = contextTokensWithCachedOverheadMock(state, messageTokens)
       return updateContextTokenUsageMock(sid, state, emit, contextTokens, usage)
     })
+  })
+
+  it('refreshes Studio Claude OAuth before creating the Anthropic bridge agent', async () => {
+    getSessionMock.mockReturnValue({
+      id: 'session-1',
+      profile: 'research',
+      model: 'claude-opus-4-6',
+      provider: 'anthropic',
+      workspace: '/tmp/hermes-bridge-final-context/research/workspace',
+    })
+    resolveBridgeRunModelConfigMock.mockResolvedValueOnce({
+      model: 'claude-opus-4-6',
+      provider: 'claude-oauth',
+    })
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    const state = makeState()
+    const sessionMap = new Map([['session-1', state]])
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-claude', status: 'started' }),
+      contextEstimate: vi.fn().mockResolvedValue({
+        token_count: 100,
+        fixed_context_tokens: 80,
+        message_count: 0,
+        tool_count: 0,
+        system_prompt_chars: 13,
+      }),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-claude', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1' },
+      'research',
+      sessionMap,
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(resolveAuthorizedProviderRuntimeCredentialsMock).toHaveBeenCalledWith({
+      profile: 'research',
+      provider: 'claude-oauth',
+      model: 'claude-opus-4-6',
+    })
+    expect(resolveAuthorizedProviderRuntimeCredentialsMock.mock.invocationCallOrder[0])
+      .toBeLessThan(bridge.contextEstimate.mock.invocationCallOrder[0])
+    expect(bridge.chat).toHaveBeenCalledWith(
+      'session-1',
+      'hello',
+      expect.any(Array),
+      expect.any(String),
+      'research',
+      expect.objectContaining({
+        model: 'claude-opus-4-6',
+        provider: 'anthropic',
+      }),
+    )
+    expect(updateSessionMock).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ provider: 'claude-oauth' }),
+    )
   })
 
   afterEach(() => {

@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
+import { saveEnvValueForProfile } from '../services/profiles/config'
 import { logger } from '../../studio/public/logging'
 import { updateConfigYamlForProfile } from '../../studio/public/profile-config'
 import { resolveAuthorizedProviderRuntimeCredentials } from '../services/providers/authorized-provider-credentials'
@@ -160,6 +161,11 @@ export async function saveAnthropicOAuthTokensForProfile(
   }]
   saveAuthJson(authPathForProfile(profile), auth)
 
+  // Hermes Agent's native Anthropic runtime discovers Claude OAuth through
+  // ANTHROPIC_TOKEN. Keep only the short-lived access token in the profile
+  // environment; refresh_token remains exclusively in Studio-managed auth
+  // storage.
+  await saveEnvValueForProfile(profile, 'ANTHROPIC_TOKEN', accessToken)
   await updateConfigYamlForProfile(profile, applyAnthropicOAuthDefaultModel)
 }
 

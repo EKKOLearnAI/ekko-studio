@@ -394,6 +394,10 @@ class AgentPool:
     ) -> AgentSession:
         requested_model = str(model or "").strip()
         requested_provider = str(provider or "").strip()
+        # A profile worker is long-lived while Studio may rotate OAuth access
+        # tokens between runs. Reload its .env before inspecting/reusing a
+        # cached AgentSession.
+        _refresh_worker_profile_env()
         with self._lock:
             existing = self._sessions.get(session_id)
             if existing is not None:
@@ -403,6 +407,30 @@ class AgentPool:
                     (requested_model and existing.config.get("model") != requested_model)
                     or (requested_provider and existing.config.get("provider") != requested_provider)
                 )
+                effective_provider = (
+                    requested_provider
+                    or str(existing.config.get("provider") or "")
+                    or str(getattr(existing.agent, "provider", "") or "")
+                ).strip().lower()
+                # Anthropic's SDK client freezes its credential at construction.
+                # Studio updates ANTHROPIC_TOKEN after centrally refreshing
+                # Claude OAuth, so compare the newly resolved runtime with the
+                # cached client and hot-switch before the next model request.
+                if not profile_changed and not runtime_changed and effective_provider == "anthropic":
+                    target_profile = profile or str(existing.config.get("profile") or "default")
+                    with _profile_env(target_profile):
+                        _refresh_worker_profile_env()
+                        refreshed_runtime = _resolve_runtime(
+                            requested_model or str(existing.config.get("model") or ""),
+                            effective_provider,
+                        )
+                    runtime_changed = (
+                        refreshed_runtime.get("api_key") != getattr(existing.agent, "api_key", None)
+                        or str(refreshed_runtime.get("base_url") or "").rstrip("/")
+                        != str(getattr(existing.agent, "base_url", "") or "").rstrip("/")
+                        or str(refreshed_runtime.get("api_mode") or "")
+                        != str(getattr(existing.agent, "api_mode", "") or "")
+                    )
                 config_changed = profile_changed or runtime_changed
                 if config_changed:
                     if profile_changed and not existing.running:

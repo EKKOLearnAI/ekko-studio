@@ -306,6 +306,42 @@ describe('Studio authorized provider runtime credentials', () => {
       refreshToken: 'rotated-claude-refresh',
       expiresAt: NOW + 3600 * 1000,
     })
+    expect(readFileSync(join(hermesHome, '.env'), 'utf-8')).toContain(
+      'ANTHROPIC_TOKEN=fresh-claude-token',
+    )
+    expect(readFileSync(join(hermesHome, '.env'), 'utf-8')).not.toContain(
+      'rotated-claude-refresh',
+    )
+  })
+
+  it('repairs ANTHROPIC_TOKEN for an existing fresh Claude OAuth authorization', async () => {
+    writeAuth({
+      providers: {
+        'claude-oauth': {
+          tokens: {
+            access_token: 'fresh-existing-claude-token',
+            refresh_token: 'existing-claude-refresh',
+            expires_at_ms: NOW + 3600 * 1000,
+          },
+          base_url: 'https://api.anthropic.com',
+        },
+      },
+    })
+    const fetcher = vi.fn<typeof fetch>()
+
+    await expect(resolveAuthorizedProviderRuntimeCredentials({
+      profile: 'default',
+      provider: 'claude-oauth',
+    }, { profileDir, now: () => NOW, fetch: fetcher })).resolves.toMatchObject({
+      apiKey: 'fresh-existing-claude-token',
+      apiMode: 'anthropic_messages',
+    })
+
+    expect(fetcher).not.toHaveBeenCalled()
+    const env = readFileSync(join(hermesHome, '.env'), 'utf-8')
+    expect(env).toContain('ANTHROPIC_TOKEN=fresh-existing-claude-token')
+    expect(env).not.toContain('existing-claude-refresh')
+    expect(env).not.toContain('ANTHROPIC_API_KEY=')
   })
 
   it('refreshes MiniMax and preserves its region-specific routing state', async () => {
