@@ -858,11 +858,27 @@ function normalizeMcpProfiles(value: unknown): EkkoConfig['mcp']['profiles'] {
   return profiles
 }
 
+function mcpServerType(value: unknown, path: string): 'stdio' | 'streamable_http' | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') {
+    throw new EkkoConfigError('must be one of: stdio, streamable_http', path)
+  }
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'stdio') return 'stdio'
+  if (
+    normalized === 'http'
+    || normalized === 'streamable_http'
+    || normalized === 'streamable-http'
+    || normalized === 'streamablehttp'
+  ) {
+    return 'streamable_http'
+  }
+  throw new EkkoConfigError('must be one of: stdio, streamable_http', path)
+}
+
 function normalizeMcpServerConfig(value: unknown, path: string): EkkoMcpServerConfig {
   const source = record(value, path)
-  const configuredType = source.type === undefined
-    ? undefined
-    : enumValue(source.type, ['stdio', 'streamable_http'] as const, undefined, `${path}.type`)
+  const configuredType = mcpServerType(source.type, `${path}.type`)
   const command = optionalString(source.command, `${path}.command`)
   const url = optionalString(source.url, `${path}.url`)
   const type = configuredType ?? (url ? 'streamable_http' : 'stdio')

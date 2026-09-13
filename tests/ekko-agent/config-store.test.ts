@@ -288,7 +288,7 @@ describe('EkkoConfigStore', () => {
       })
 
       setup.config.setMcpServer('remote-tools', {
-        type: 'streamable_http',
+        type: 'streamableHttp' as 'streamable_http',
         url: 'https://example.com/mcp',
         headers: { Authorization: 'Bearer test' },
         enabled: true,

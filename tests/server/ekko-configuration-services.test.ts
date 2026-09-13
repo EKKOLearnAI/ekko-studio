@@ -244,6 +244,26 @@ describe('Ekko configuration services', () => {
         enabled: true,
       },
     })
+    for (const [index, alias] of ['http', 'streamable-http', 'streamableHttp', 'streamablehttp'].entries()) {
+      const name = `http-alias-${index}`
+      await createEkkoMcpServer('work', name, {
+        type: alias as 'streamable_http',
+        url: `https://example.com/http-mcp-${index}`,
+      }, setup)
+      expect(listEkkoMcpServers('work', setup)).toContainEqual({
+        name,
+        managed: false,
+        config: {
+          type: 'streamable_http',
+          url: `https://example.com/http-mcp-${index}`,
+          enabled: true,
+        },
+      })
+    }
+    await expect(createEkkoMcpServer('work', 'legacy-sse', {
+      type: 'sse' as 'streamable_http',
+      url: 'https://example.com/sse',
+    }, setup)).rejects.toThrow('MCP server type must be stdio or streamable_http.')
 
     await updateEkkoMcpServer('work', 'local-tools', { command: 'node', enabled: false }, setup)
     expect(listEkkoMcpServers('work', setup).find(server => server.name === 'local-tools')?.config.enabled).toBe(false)
