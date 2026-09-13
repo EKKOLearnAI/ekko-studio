@@ -5,7 +5,6 @@ const managerMock = vi.hoisted(() => ({
   isSessionLaunchCompatible: vi.fn(),
   isSessionProcessing: vi.fn(),
   stop: vi.fn(),
-  updateSessionEnvironment: vi.fn(),
 }))
 const startCodingAgentRunMock = vi.hoisted(() => vi.fn())
 const sendCodingAgentRunInputMock = vi.hoisted(() => vi.fn())
@@ -73,7 +72,8 @@ describe('handleCodingAgentRun', () => {
     })
   })
 
-  it('refreshes Studio Claude OAuth and injects it only into a global Claude Code turn', async () => {
+  it('runs global Claude Code without requiring Studio OAuth credentials', async () => {
+    resolveAuthorizedProviderRuntimeCredentialsMock.mockRejectedValue(new Error('Studio OAuth is not configured'))
     managerMock.runIdForSession.mockReturnValue('agent-session-1')
     managerMock.isSessionLaunchCompatible.mockReturnValue(true)
     sendCodingAgentRunInputMock.mockResolvedValue({ runId: 'agent-session-1' })
@@ -99,13 +99,7 @@ describe('handleCodingAgentRun', () => {
       mode: 'global',
     }, 'default', sessionMap as any)
 
-    expect(resolveAuthorizedProviderRuntimeCredentialsMock).toHaveBeenCalledWith({
-      profile: 'default',
-      provider: 'claude-oauth',
-    })
-    expect(managerMock.updateSessionEnvironment).toHaveBeenCalledWith('session-1', {
-      CLAUDE_CODE_OAUTH_TOKEN: 'studio-claude-oauth-access-token',
-    })
+    expect(resolveAuthorizedProviderRuntimeCredentialsMock).not.toHaveBeenCalled()
     expect(sendCodingAgentRunInputMock).toHaveBeenCalledWith(
       'session-1',
       'hello claude',

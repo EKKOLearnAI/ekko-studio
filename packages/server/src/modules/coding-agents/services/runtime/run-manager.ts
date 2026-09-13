@@ -649,15 +649,6 @@ export class CodingAgentRunManager {
     return run && !run.exited ? run.id : undefined
   }
 
-  updateSessionEnvironment(sessionId: string, values: Record<string, string>): void {
-    const run = this.getBySession(sessionId)
-    if (!run || run.exited) throw new Error('Coding agent session not found')
-    run.launch.env = {
-      ...(run.launch.env || {}),
-      ...values,
-    }
-  }
-
   isSessionLaunchCompatible(sessionId: string, launch: {
     agentId: string
     mode?: 'scoped' | 'global'

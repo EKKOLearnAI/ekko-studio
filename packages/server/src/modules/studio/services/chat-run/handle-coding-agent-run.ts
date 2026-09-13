@@ -15,7 +15,6 @@ import type { AuthenticatedUser } from '../../public/auth'
 import { getSystemPrompt } from '../../public/runs/prompt'
 import { getSession, updateSession } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
-import { resolveAuthorizedProviderRuntimeCredentials } from '../../public/authorized-provider-runtime'
 
 export interface CodingAgentRunSocketData {
   input: string | ContentBlock[]
@@ -158,19 +157,6 @@ export async function handleCodingAgentRun(
   try {
     const codingInput = convertContentBlocksForCodingAgent(data.input)
     await writeModelRunProfileToken(socketUser, profile)
-    if (agentId === 'claude-code' && mode === 'global') {
-      // Studio owns Claude OAuth authorization and refresh. Resolve the latest
-      // short-lived access token immediately before every Claude Code turn and
-      // inject it only into the child process environment. Do not persist it in
-      // Claude settings, launcher scripts, or the coding-agent session record.
-      const credentials = await resolveAuthorizedProviderRuntimeCredentials({
-        profile,
-        provider: 'claude-oauth',
-      })
-      codingAgentRunManager.updateSessionEnvironment(sessionId, {
-        CLAUDE_CODE_OAUTH_TOKEN: credentials.apiKey,
-      })
-    }
     const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || (agentId === 'opencode' || agentId === 'dsh')
     const runPrompt = [
       groupSystemPrompt || (includeBaseSystemPrompt ? getSystemPrompt(undefined, { source: data.session_source || data.source }) : ''),
