@@ -1,4 +1,6 @@
 import { openCodeSessionHeaders } from '../../studio/public/opencode-session'
+import { fetchProvider, isRetriableProviderConnectFailure } from '../../studio/public/provider-network'
+import { setTimeout as delay } from 'node:timers/promises'
 
 /** A provider request issued by a Coding Agent proxy. */
 export interface AgentGatewayRequest {
@@ -8,6 +10,7 @@ export interface AgentGatewayRequest {
   provider?: string
   body: unknown
   headers?: Record<string, string>
+  proxyUrl?: string
   signal?: AbortSignal
 }
 
@@ -46,8 +49,23 @@ export class AgentRunGateway {
     return res.body as any
   }
 
-  private post(request: AgentGatewayRequest): Promise<Response> {
-    return fetch(request.url, {
+  private async post(request: AgentGatewayRequest): Promise<Response> {
+    for (let attempt = 0; ; attempt += 1) {
+      request.signal?.throwIfAborted()
+      try {
+        return await this.postOnce(request)
+      } catch (error) {
+        request.signal?.throwIfAborted()
+        // Only connection setup failures are safe to replay. Never retry a
+        // response, a reset after writing, or an error matched by message text.
+        if (attempt >= 3 || !isRetriableProviderConnectFailure(error)) throw error
+        await delay(150 * (attempt + 1), undefined, { signal: request.signal })
+      }
+    }
+  }
+
+  private postOnce(request: AgentGatewayRequest): Promise<Response> {
+    return fetchProvider(request.url, {
       method: 'POST',
       headers: {
         ...openCodeSessionHeaders(request.url, request.sessionId, request.provider),
@@ -57,7 +75,7 @@ export class AgentRunGateway {
       },
       body: JSON.stringify(request.body),
       signal: request.signal,
-    })
+    }, request.proxyUrl)
   }
 }
 

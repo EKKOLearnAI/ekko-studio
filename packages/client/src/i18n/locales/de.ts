@@ -1463,6 +1463,10 @@ jobTriggered: 'Job ausgelost',
 
   // Models
   models: {
+    preserveClientIdentity: 'Client-Identität von Codex / Claude beibehalten',
+    providerProxyUrl: 'Proxy-URL des Anbieters (HTTP / HTTPS)',
+    providerExtraHeaders: 'Zusätzliche Anfrage-Header (JSON)',
+    extraHeadersInvalid: 'Zusätzliche Header müssen ein JSON-Objekt mit Zeichenfolgenwerten sein.',
     opencodeFreeHint: "Kein Konto oder API-Schlüssel erforderlich. Für kostenlose Modelle können Nutzungslimits gelten.",
     opencodeFreeLoading: "Kostenlose Modelle werden im Hintergrund geladen…",
     opencodeFreeRetry: "Anbieterprüfung oder Katalogaktualisierung fehlgeschlagen. Automatischer neuer Versuch; der Cache bleibt erhalten.",

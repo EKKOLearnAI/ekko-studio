@@ -1,4 +1,6 @@
 import { openCodeSessionHeaders } from '../../../studio/public/opencode-session'
+import { fetchProvider } from '../../../studio/public/provider-network'
+import { normalizeProviderExtraHeaders, normalizeProviderProxyUrl } from '../../../studio/contracts/provider-request-options'
 import { createHash, randomBytes } from 'crypto'
 import { chmod } from 'fs/promises'
 import { join, resolve } from 'path'
@@ -27,6 +29,9 @@ export type ProviderEditableField =
   | 'request_timeout_seconds'
   | 'stale_timeout_seconds'
   | 'extra_body'
+  | 'extra_headers'
+  | 'preserve_client_identity'
+  | 'proxy_url'
 export type CredentialAction = 'keep' | 'replace' | 'clear'
 
 export interface ProviderEditorDetail {
@@ -47,6 +52,9 @@ export interface ProviderEditorDetail {
   request_timeout_seconds?: number
   stale_timeout_seconds?: number
   extra_body?: Record<string, unknown>
+  extra_headers?: Record<string, unknown>
+  preserve_client_identity?: boolean
+  proxy_url?: string
   connection_test_supported: boolean
   connection_test_reason?: string
   revision: string
@@ -65,6 +73,9 @@ export interface ProviderEditorPatch {
   request_timeout_seconds?: number | null
   stale_timeout_seconds?: number | null
   extra_body?: Record<string, unknown> | null
+  extra_headers?: Record<string, unknown> | null
+  preserve_client_identity?: boolean | null
+  proxy_url?: string | null
 }
 
 export class ProviderEditorError extends Error {
@@ -253,6 +264,9 @@ const CUSTOM_PROVIDER_EDITABLE_FIELDS: ProviderEditableField[] = [
   'request_timeout_seconds',
   'stale_timeout_seconds',
   'extra_body',
+  'extra_headers',
+  'preserve_client_identity',
+  'proxy_url',
 ]
 
 function editableFields(source: ProviderSource): ProviderEditableField[] {
@@ -338,6 +352,9 @@ function buildDetailFromRaw(
   const requestTimeoutSeconds = optionalPositiveNumber(entry, ['request_timeout_seconds', 'requestTimeoutSeconds'])
   const staleTimeoutSeconds = optionalPositiveNumber(entry, ['stale_timeout_seconds', 'staleTimeoutSeconds'])
   const extraBody = optionalObject(entry, ['extra_body', 'extraBody'])
+  const extraHeaders = optionalObject(entry, ['extra_headers', 'extraHeaders'])
+  const preserveClientIdentity = entry ? existingAlias(entry, ['preserve_client_identity', 'preserveClientIdentity'], undefined) : undefined
+  const proxyUrl = entry ? existingAlias(entry, ['proxy_url', 'proxyUrl', 'proxy'], undefined) : undefined
   const testCapability = connectionTestCapability(apiMode)
   const revision = revisionFor({
     providerId,
@@ -369,6 +386,9 @@ function buildDetailFromRaw(
     ...(requestTimeoutSeconds !== undefined ? { request_timeout_seconds: requestTimeoutSeconds } : {}),
     ...(staleTimeoutSeconds !== undefined ? { stale_timeout_seconds: staleTimeoutSeconds } : {}),
     ...(extraBody !== undefined ? { extra_body: extraBody } : {}),
+    ...(extraHeaders !== undefined ? { extra_headers: extraHeaders } : {}),
+    ...(typeof preserveClientIdentity === 'boolean' ? { preserve_client_identity: preserveClientIdentity } : {}),
+    ...(typeof proxyUrl === 'string' && proxyUrl.trim() ? { proxy_url: proxyUrl.trim() } : {}),
     connection_test_supported: testCapability.supported,
     ...(testCapability.reason ? { connection_test_reason: testCapability.reason } : {}),
     revision,
@@ -427,18 +447,26 @@ async function readLimitedResponse(response: Response): Promise<string> {
     }
     return text + decoder.decode()
   } finally {
+    await reader.cancel().catch(() => {})
     reader.releaseLock()
   }
 }
 
-export async function fetchProviderCatalogForTest(baseUrl: string, apiKey: string, apiMode?: ProviderApiMode): Promise<string[]> {
+export async function fetchProviderCatalogForTest(
+  baseUrl: string, apiKey: string, apiMode?: ProviderApiMode,
+  options: Pick<ProviderEditorPatch, 'proxy_url' | 'extra_headers'> = {},
+): Promise<string[]> {
   const endpoint = providerModelsEndpoint(baseUrl, apiMode)
   let current = endpoint.url
-  const headers: Record<string, string> = { ...openCodeSessionHeaders(current.toString()), Accept: 'application/json' }
+  const headers: Record<string, string> = {
+    ...openCodeSessionHeaders(current.toString()), accept: 'application/json',
+    ...normalizeProviderExtraHeaders(options.extra_headers),
+  }
+  const proxyUrl = normalizeProviderProxyUrl(options.proxy_url)
   if (apiKey) {
     if (endpoint.protocol === 'anthropic') {
       headers['x-api-key'] = apiKey
-      headers['anthropic-version'] = '2023-06-01'
+      headers['anthropic-version'] ||= '2023-06-01'
     } else if (endpoint.protocol === 'gemini') {
       headers['x-goog-api-key'] = apiKey
     } else {
@@ -449,8 +477,9 @@ export async function fetchProviderCatalogForTest(baseUrl: string, apiKey: strin
   const timeout = setTimeout(() => controller.abort(), PROVIDER_TEST_TIMEOUT_MS)
   try {
     for (let redirects = 0; redirects <= 3; redirects += 1) {
-      const response = await fetch(current, { headers, redirect: 'manual', signal: controller.signal })
+      const response = await fetchProvider(current, { headers, redirect: 'manual', signal: controller.signal }, proxyUrl)
       if (response.status >= 300 && response.status < 400) {
+        await response.body?.cancel()
         const location = response.headers.get('location')
         if (!location || redirects === 3) throw new ProviderEditorError('Provider returned too many redirects', 422, 'PROVIDER_REDIRECT_REJECTED')
         const next = new URL(location, current)
@@ -512,7 +541,10 @@ export async function testProviderEditorDraft(
     throw new ProviderEditorError(capability.reason || 'Provider connection testing is not supported', 422, 'PROVIDER_TEST_UNSUPPORTED')
   }
   try {
-    const models = await fetchProviderCatalogForTest(baseUrl, apiKey, apiMode)
+    const models = await fetchProviderCatalogForTest(baseUrl, apiKey, apiMode, {
+      proxy_url: patch.proxy_url !== undefined ? patch.proxy_url : detail.proxy_url,
+      extra_headers: patch.extra_headers !== undefined ? patch.extra_headers : detail.extra_headers,
+    })
     return { models: models.slice(0, 100), model_count: models.length }
   } catch (error) {
     // No catalog is not a failed connection. Report it as its own outcome so
@@ -591,6 +623,9 @@ function changedFields(before: ProviderEditorDetail, patch: ProviderEditorPatch)
   if (patch.request_timeout_seconds !== undefined && patch.request_timeout_seconds !== (before.request_timeout_seconds ?? null)) fields.push('request_timeout_seconds')
   if (patch.stale_timeout_seconds !== undefined && patch.stale_timeout_seconds !== (before.stale_timeout_seconds ?? null)) fields.push('stale_timeout_seconds')
   if (patch.extra_body !== undefined && JSON.stringify(stableObject(patch.extra_body)) !== JSON.stringify(stableObject(before.extra_body ?? null))) fields.push('extra_body')
+  if (patch.extra_headers !== undefined && JSON.stringify(stableObject(patch.extra_headers)) !== JSON.stringify(stableObject(before.extra_headers ?? null))) fields.push('extra_headers')
+  if (patch.preserve_client_identity !== undefined && patch.preserve_client_identity !== (before.preserve_client_identity ?? null)) fields.push('preserve_client_identity')
+  if (patch.proxy_url !== undefined && patch.proxy_url !== (before.proxy_url ?? null)) fields.push('proxy_url')
   if (patch.credential_action === 'replace') fields.push('api_key_replaced')
   if (patch.credential_action === 'clear') fields.push('api_key_cleared')
   return fields
@@ -614,6 +649,9 @@ function validatePatch(before: ProviderEditorDetail, patch: ProviderEditorPatch)
   if (patch.request_timeout_seconds !== undefined && !allowed.has('request_timeout_seconds')) throw new ProviderEditorError('Request timeout is read-only', 400, 'FIELD_READ_ONLY')
   if (patch.stale_timeout_seconds !== undefined && !allowed.has('stale_timeout_seconds')) throw new ProviderEditorError('Stale timeout is read-only', 400, 'FIELD_READ_ONLY')
   if (patch.extra_body !== undefined && !allowed.has('extra_body')) throw new ProviderEditorError('Extra request body is read-only', 400, 'FIELD_READ_ONLY')
+  for (const field of ['extra_headers', 'preserve_client_identity', 'proxy_url'] as const) {
+    if (patch[field] !== undefined && !allowed.has(field)) throw new ProviderEditorError('Provider network settings are read-only', 400, 'FIELD_READ_ONLY')
+  }
   if (patch.credential_action && patch.credential_action !== 'keep' && !allowed.has('api_key')) throw new ProviderEditorError('Provider credential is read-only', 400, 'FIELD_READ_ONLY')
   if (patch.label !== undefined && (!patch.label.trim() || patch.label.trim().length > 100)) throw new ProviderEditorError('Provider label must contain 1-100 characters', 400, 'INVALID_LABEL')
   if (patch.base_url !== undefined) normalizeUrl(patch.base_url)
@@ -623,6 +661,19 @@ function validatePatch(before: ProviderEditorDetail, patch: ProviderEditorPatch)
   validateOptionalRuntimeNumber(patch.rate_limit_delay, 'rate_limit_delay')
   validateOptionalRuntimeNumber(patch.request_timeout_seconds, 'request_timeout_seconds')
   validateOptionalRuntimeNumber(patch.stale_timeout_seconds, 'stale_timeout_seconds')
+  try {
+    normalizeProviderExtraHeaders(patch.extra_headers)
+  } catch (error) {
+    throw new ProviderEditorError((error as Error).message, 400, 'INVALID_EXTRA_HEADERS')
+  }
+  try {
+    normalizeProviderProxyUrl(patch.proxy_url)
+  } catch (error) {
+    throw new ProviderEditorError((error as Error).message, 400, 'INVALID_PROXY_URL')
+  }
+  if (patch.preserve_client_identity !== undefined && patch.preserve_client_identity !== null && typeof patch.preserve_client_identity !== 'boolean') {
+    throw new ProviderEditorError('Client identity forwarding must be a boolean', 400, 'INVALID_PRESERVE_CLIENT_IDENTITY')
+  }
   if (patch.extra_body !== undefined && patch.extra_body !== null) {
     if (typeof patch.extra_body !== 'object' || Array.isArray(patch.extra_body)) {
       throw new ProviderEditorError('extra_body must be a JSON object', 400, 'INVALID_EXTRA_BODY')
@@ -695,6 +746,19 @@ export async function updateProviderEditorDetail(
       if (patch.extra_body !== undefined) {
         if (patch.extra_body === null) deleteAliases(source.configEntry!, ['extra_body', 'extraBody'])
         else setExistingAlias(source.configEntry!, ['extra_body', 'extraBody'], patch.extra_body, 'extra_body')
+      }
+      if (patch.extra_headers !== undefined) {
+        if (patch.extra_headers === null) deleteAliases(source.configEntry!, ['extra_headers', 'extraHeaders'])
+        else setExistingAlias(source.configEntry!, ['extra_headers', 'extraHeaders'], normalizeProviderExtraHeaders(patch.extra_headers), 'extra_headers')
+      }
+      if (patch.preserve_client_identity !== undefined) {
+        if (patch.preserve_client_identity === null) deleteAliases(source.configEntry!, ['preserve_client_identity', 'preserveClientIdentity'])
+        else setExistingAlias(source.configEntry!, ['preserve_client_identity', 'preserveClientIdentity'], patch.preserve_client_identity, 'preserve_client_identity')
+      }
+      if (patch.proxy_url !== undefined) {
+        const proxyUrl = normalizeProviderProxyUrl(patch.proxy_url)
+        if (!proxyUrl) deleteAliases(source.configEntry!, ['proxy_url', 'proxyUrl', 'proxy'])
+        else setExistingAlias(source.configEntry!, ['proxy_url', 'proxyUrl', 'proxy'], proxyUrl, 'proxy_url')
       }
     }
 

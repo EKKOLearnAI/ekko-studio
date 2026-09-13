@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   mockReadFile,
   mockFetchProviderModels,
+  mockFetchCustomProviderCatalog,
   mockReadConfigYamlForProfile,
   mockReadText,
   mockUpdateText,
@@ -16,6 +17,7 @@ const {
 } = vi.hoisted(() => ({
   mockReadFile: vi.fn(),
   mockFetchProviderModels: vi.fn(),
+  mockFetchCustomProviderCatalog: vi.fn(),
   mockReadConfigYamlForProfile: vi.fn(),
   mockReadText: vi.fn(),
   mockUpdateText: vi.fn(),
@@ -108,6 +110,10 @@ vi.mock('../../packages/server/src/modules/studio/public/provider-catalog', () =
   fetchProviderModels: mockFetchProviderModels,
 }))
 
+vi.mock('../../packages/server/src/modules/hermes/services/providers/provider-editor', () => ({
+  fetchProviderCatalogForTest: mockFetchCustomProviderCatalog,
+}))
+
 vi.mock('../../packages/server/src/modules/studio/public/app-config', () => ({
   readAppConfig: mockReadAppConfig,
 }))
@@ -155,11 +161,13 @@ describe('model catalog cache', () => {
     mockReadAppConfig.mockResolvedValue({})
     mockResolveCopilotOAuthToken.mockResolvedValue('')
     mockFetchCopilotModelsWithOAuthToken.mockResolvedValue([])
-    mockFetchProviderModels.mockResolvedValue([])
+  mockFetchProviderModels.mockResolvedValue([])
+  mockFetchCustomProviderCatalog.mockResolvedValue([])
     mockResolveAuthorizedCredentials.mockRejectedValue(new Error('not authenticated'))
     mockGlobalFetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) })
     vi.stubGlobal('fetch', mockGlobalFetch)
     mockReadFile.mockImplementation(async (path: string) => {
+      path = path.replace(/\\/g, '/')
       if (path === '/hermes/default/.env') return 'OPENROUTER_API_KEY=default-openrouter\n'
       if (path === '/hermes/team/.env') {
         return [
@@ -288,10 +296,12 @@ describe('model catalog cache', () => {
 
     await refreshConfiguredProviderModelCatalogs({ force: true })
 
-    expect(mockFetchProviderModels).toHaveBeenCalledTimes(3)
+    expect(mockFetchProviderModels).toHaveBeenCalledTimes(2)
     expect(mockFetchProviderModels).toHaveBeenCalledWith('https://openrouter.ai/api/v1', 'default-openrouter', true)
     expect(mockFetchProviderModels).toHaveBeenCalledWith('https://api.deepseek.com/v1', 'team-deepseek', false)
-    expect(mockFetchProviderModels).toHaveBeenCalledWith('https://custom.local/v1', 'custom-a', false)
+    expect(mockFetchCustomProviderCatalog).toHaveBeenCalledWith('https://custom.local/v1', 'custom-a', undefined, expect.objectContaining({
+      provider: 'custom:shared-local',
+    }))
 
     const cache = JSON.parse(cacheText)
     expect(cache.providers[providerModelCatalogKey('openrouter', 'https://openrouter.ai/api/v1', true)]).toMatchObject({
@@ -416,6 +426,7 @@ describe('model catalog cache', () => {
       return { provider, ...credentials[provider] }
     })
     mockReadFile.mockImplementation(async (path: string) => {
+      path = path.replace(/\\/g, '/')
       if (path === '/hermes/default/.env') return ''
       if (path === '/hermes/default/auth.json') {
         return JSON.stringify({
@@ -518,6 +529,7 @@ describe('model catalog cache', () => {
     mockListProfileNamesFromDisk.mockReturnValue(['default'])
     mockReadConfigYamlForProfile.mockResolvedValue({})
     mockReadFile.mockImplementation(async (path: string) => {
+      path = path.replace(/\\/g, '/')
       if (path === '/hermes/default/.env') return ''
       if (path === '/hermes/default/auth.json') {
         return JSON.stringify({

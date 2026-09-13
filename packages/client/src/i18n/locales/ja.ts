@@ -1463,6 +1463,10 @@ export default {
 
   // モデル
   models: {
+    preserveClientIdentity: 'Codex / Claude のクライアント識別情報を保持',
+    providerProxyUrl: 'プロバイダーのプロキシ URL（HTTP / HTTPS）',
+    providerExtraHeaders: '追加リクエストヘッダー（JSON）',
+    extraHeadersInvalid: '追加ヘッダーは値が文字列の JSON オブジェクトである必要があります。',
     opencodeFreeHint: "アカウントや API キーは不要です。無料モデルには利用制限があります。",
     opencodeFreeLoading: "無料モデルをバックグラウンドで読み込み中…",
     opencodeFreeRetry: "プロバイダーの確認または一覧の更新に失敗しました。キャッシュを保持して自動で再試行します。",

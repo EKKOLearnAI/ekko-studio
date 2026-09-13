@@ -13,6 +13,7 @@ import { promisify } from 'util'
 import { getWebUiHome } from '../../studio/public/config'
 import { getProfileDir, PROVIDER_ENV_MAP, readConfigYamlForProfile, safeReadFile } from '../../studio/public/profile-config'
 import { getCompatibleCustomProviders } from '../../studio/contracts/provider-compat'
+import { normalizeProviderExtraHeaders, normalizeProviderProxyUrl } from '../../studio/contracts/provider-request-options'
 import { registerClaudeCodeProxyTarget } from './claude-code/proxy'
 import { registerCodexProxyTarget, restoreCodexProxyTarget } from './codex/proxy'
 import { compactCodexThread } from './runtime/codex-compact'
@@ -303,6 +304,9 @@ export interface CodingAgentLaunchInput extends CodingAgentConfigScope {
   baseUrl?: string
   apiKey?: string
   apiMode?: ApiMode
+  extraHeaders?: Record<string, string>
+  preserveClientIdentity?: boolean
+  proxyUrl?: string
   reasoningEffort?: string
   sessionId?: string
   agentSessionId?: string
@@ -765,6 +769,9 @@ async function resolveStoredProviderLaunchInput(
     ? normalizeStoredLaunchApiMode(existingSession?.api_mode)
     : undefined
   let apiMode = input.apiMode || storedApiMode
+  let extraHeaders = input.extraHeaders
+  let preserveClientIdentity = input.preserveClientIdentity
+  let proxyUrl = input.proxyUrl
   if (provider === OPENCODE_FREE_PROVIDER) {
     return { ...input, profile, provider, model, workspace, ...openCodeFreeRuntime(model) }
   }
@@ -775,13 +782,13 @@ async function resolveStoredProviderLaunchInput(
     apiKey = ''
   }
 
-  if (!provider || (baseUrl && apiKey && apiMode)) {
+  if (!provider) {
     return { ...input, profile, provider: provider || input.provider, model: model || input.model, workspace, baseUrl, apiKey, apiMode }
   }
 
   let config: Record<string, any> = {}
   try {
-    config = await readConfigYamlForProfile(profile)
+    config = await readConfigYamlForProfile(profile) || {}
   } catch {}
   const envContent = await safeReadFile(join(getProfileDir(profile), '.env')) || ''
   const normalizedProvider = providerKeyWithoutCustomPrefix(provider)
@@ -795,6 +802,9 @@ async function resolveStoredProviderLaunchInput(
   })
   if (customEntry) {
     canonicalProvider = `custom:${slugProviderName(String(customEntry.name || normalizedProvider))}`
+    extraHeaders = normalizeProviderExtraHeaders(customEntry.extra_headers)
+    preserveClientIdentity = customEntry.preserve_client_identity === true
+    proxyUrl = normalizeProviderProxyUrl(customEntry.proxy_url)
     if (!baseUrl) baseUrl = String(customEntry.base_url || '').trim()
     if (!apiKey) apiKey = String(customEntry.api_key || '').trim()
     if (!apiKey) {
@@ -836,6 +846,9 @@ async function resolveStoredProviderLaunchInput(
     baseUrl: baseUrl || (ignoredStaleProviderRuntime ? '' : input.baseUrl),
     apiKey: apiKey || (ignoredStaleProviderRuntime ? '' : input.apiKey),
     apiMode,
+    extraHeaders,
+    preserveClientIdentity,
+    proxyUrl,
   }
 }
 
@@ -2035,7 +2048,15 @@ export async function restorePersistedPiProxyTargets(): Promise<number> {
         || !String(input.model || '').trim()
         || !String(input.baseUrl || '').trim()
         || (!apiKey && input.provider !== OPENCODE_FREE_PROVIDER)) continue
-      const restoredInput = { ...input, apiKey }
+      const resolved = await resolveStoredProviderLaunchInput({
+        ...input, apiKey, mode: 'scoped', sessionId: input.chatSessionId || '',
+      }, null)
+      const restoredInput = {
+        ...input, apiKey,
+        extraHeaders: resolved.extraHeaders,
+        preserveClientIdentity: resolved.preserveClientIdentity,
+        proxyUrl: resolved.proxyUrl,
+      }
       delete restoredInput.apiKeyEncrypted
       restoreCodexProxyTarget(restoredInput, token)
       if (legacyApiKey || encryptedVersion === 1) {
@@ -2146,6 +2167,9 @@ export async function restorePersistedCodexProxyTargets(): Promise<number> {
         agentId: config.agentId,
         agentSessionId,
         chatSessionId,
+        extraHeaders: resolved.extraHeaders,
+        preserveClientIdentity: resolved.preserveClientIdentity,
+        proxyUrl: resolved.proxyUrl,
       }, token)
       restoredRouteKeys.add(routeKey)
       restoredCount += 1
@@ -3339,6 +3363,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         agentSessionId: input.agentSessionId || randomUUID(),
       }
     : input
+  const networkOptions = {
+    extraHeaders: input.extraHeaders,
+    preserveClientIdentity: input.preserveClientIdentity,
+    proxyUrl: input.proxyUrl,
+  }
   const rootDir = getScopedRuntimeConfigRoot(tool.id, scope, isolatedInput)
   const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
   await mkdir(rootDir, { recursive: true })
@@ -3366,6 +3395,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     const contextWindow = getModelContextLength({ profile: scope.profile, provider, model })
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerClaudeCodeProxyTarget({
+          ...networkOptions,
           provider,
           model,
           baseUrl,
@@ -3436,6 +3466,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     }
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerCodexProxyTarget({
+          ...networkOptions,
           profile: scope.profile,
           provider,
           model,
@@ -3528,6 +3559,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     await ensurePiScopedBaseConfigFiles(scope)
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerCodexProxyTarget({
+          ...networkOptions,
           profile: scope.profile,
           provider,
           model,
@@ -3603,6 +3635,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   } else if (tool.id === 'grok') {
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerCodexProxyTarget({
+          ...networkOptions,
           profile: scope.profile,
           provider,
           model,
@@ -3662,6 +3695,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     ]
   } else if (tool.id === 'dsh') {
     const proxyTarget = registerCodexProxyTarget({
+      ...networkOptions,
       profile: scope.profile, provider, model, baseUrl, apiKey, apiMode, reasoningEffort,
       agentId: tool.id, agentSessionId: isolatedInput.agentSessionId, chatSessionId: isolatedInput.sessionId,
     })
@@ -3681,6 +3715,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   } else {
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerCodexProxyTarget({
+          ...networkOptions,
           profile: scope.profile,
           provider,
           model,

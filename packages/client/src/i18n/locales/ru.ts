@@ -1719,6 +1719,10 @@ export default {
 
 
   models: {
+    preserveClientIdentity: 'Сохранять идентификацию клиента Codex / Claude',
+    providerProxyUrl: 'URL прокси провайдера (HTTP / HTTPS)',
+    providerExtraHeaders: 'Дополнительные заголовки запроса (JSON)',
+    extraHeadersInvalid: 'Дополнительные заголовки должны быть объектом JSON со строковыми значениями.',
     opencodeFreeHint: "Аккаунт и API-ключ не нужны. Для бесплатных моделей возможны ограничения запросов.",
     opencodeFreeLoading: "Бесплатные модели загружаются в фоновом режиме…",
     opencodeFreeRetry: "Ошибка проверки провайдера или обновления каталога. Повторим автоматически; кеш сохранён.",

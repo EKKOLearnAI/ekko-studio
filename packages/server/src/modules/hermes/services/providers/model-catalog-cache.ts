@@ -13,6 +13,7 @@ import { safeFileStore } from '../../../studio/public/safe-file-store'
 import { fetchCopilotModelsWithOAuthToken, resolveCopilotOAuthToken } from './copilot-models'
 import { getProfileDir, listProfileNamesFromDisk } from '../profiles/profile'
 import { resolveAuthorizedProviderRuntimeCredentials } from './authorized-provider-credentials'
+import { fetchProviderCatalogForTest, type ProviderApiMode } from './provider-editor'
 
 export type ModelCatalogSource = 'live' | 'fallback'
 
@@ -49,6 +50,8 @@ export interface ProviderCatalogRefreshTarget {
   free_only?: boolean
   profile: string
   api_mode?: string
+  extra_headers?: Record<string, string>
+  proxy_url?: string
   credential_kind: 'api_key' | 'oauth' | 'copilot' | 'none'
   skip_live_fetch?: boolean
 }
@@ -422,6 +425,16 @@ export async function fetchProviderCatalogRefreshTargetModels(
   if (target.provider === 'claude-oauth') {
     return fetchClaudeOAuthModels(target.base_url, target.api_key)
   }
+  if (target.provider.startsWith('custom:')) {
+    try {
+      const models = await fetchProviderCatalogForTest(target.base_url, target.api_key, target.api_mode as ProviderApiMode, target)
+      return (target.free_only ? models.filter(model => model.endsWith(':free')) : models).sort()
+    } catch {
+      // A failed probe must preserve the last-good catalog; never log request
+      // options, which can contain proxy credentials or private headers.
+      return []
+    }
+  }
   return fetchProviderModels(target.base_url, target.api_key, target.free_only === true)
 }
 
@@ -580,6 +593,8 @@ async function collectRefreshCandidates(profiles = listProfileNamesFromDisk()): 
         fallback_models: uniqueModels([cp.model, ...configuredModels, ...presetModels]),
         profile,
         api_mode: cp.api_mode,
+        extra_headers: cp.extra_headers,
+        proxy_url: cp.proxy_url,
         credential_kind: apiKey ? 'api_key' : 'none',
       })
     }
