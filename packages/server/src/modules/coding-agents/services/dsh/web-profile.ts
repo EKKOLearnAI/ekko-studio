@@ -76,7 +76,10 @@ export async function prepareDshWebProfile(input: { command: string; sourceHome:
     try { await symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir') }
     catch (error: any) { if (error.code !== 'EEXIST') throw error }
   }
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: profile, private: true,
+  // Declare a version: DSH resolves this file as the owning manifest of the profile's
+  // `file://` plugin rows (studio-acp.mjs), and its package-inventory request extension
+  // rejects an owning manifest that lacks a non-empty name or version.
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: profile, version: '0.0.0', private: true,
     dsh: { profile: { bundles: [...bundles, '@deepseek-ai/dsh-acp-app'], patchReload: 'startup' } } }, null, 2))
   await writeFile(join(directory, 'cordis.patch.yml'), anchorDshPatch(profilePatch, join(sourceProfile, 'cordis.patch.yml')), { mode: 0o600 })
   const webIndex = bundles.indexOf('@deepseek-ai/dsh-web-app')

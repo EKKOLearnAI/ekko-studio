@@ -76,3 +76,19 @@ it('uses the same persistent authoring roots in management and ACP, including ho
   expect(await readPresetConfig(management.patch)).toEqual({ default: 'home-preset', includeUserRoot: false, roots: [{ path: '/home-presets', trust: 'user' }] })
   expect(await readFile(join(input.sourceHome, 'cordis.patch.yml'), 'utf8')).toBe(homePatch)
 })
+
+// DSH's `dsh_plugin_packages` request extension resolves the manifest that owns each active
+// plugin row and rejects one without a non-empty name or version. Every manifest Studio
+// generates is loaded that way, so each must carry a version even though none is published.
+it('declares a version on every generated plugin manifest', async () => {
+  const input = await fixture()
+  const readVersion = async (path: string) => JSON.parse(await readFile(path, 'utf8')).version
+
+  const web = await prepareDshWebProfile(input)
+  expect(await readVersion(join(input.rootDir, 'profiles', web.profile, 'package.json'))).toMatch(/^\d+\.\d+\.\d+/)
+
+  const management = await prepareDshManagementProfile(input)
+  const managementDir = join(input.rootDir, 'profiles', management.profile)
+  expect(await readVersion(join(managementDir, 'package.json'))).toMatch(/^\d+\.\d+\.\d+/)
+  expect(await readVersion(join(managementDir, 'node_modules/studio-dsh-ui/package.json'))).toMatch(/^\d+\.\d+\.\d+/)
+})
