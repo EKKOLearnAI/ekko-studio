@@ -430,6 +430,7 @@ export default {
     subtitle: 'اكتشاف الوكلاء المتاحين على هذا الجهاز وإدارتهم.',
     refresh: 'تحديث',
     hermesDescription: 'يمكن لـ Hermes استخدام Runtime يديره Studio أو CLI محلي يثبّته المستخدم.',
+    hermesSettings: 'تكوين Hermes',
     managedRuntime: 'Hermes Runtime',
     managedRuntimeHint: 'يثبّت Studio حزم Runtime الكاملة ويديرها فقط، ولا يثبّت Hermes CLI بشكل منفصل.',
     studioManaged: 'يديره Studio',

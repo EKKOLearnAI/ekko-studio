@@ -352,6 +352,7 @@ export default {
     subtitle: 'Обнаружение и управление агентами, доступными на этом устройстве.',
     refresh: 'Обновить',
     hermesDescription: 'Hermes может использовать Runtime под управлением Studio или локальную CLI, установленную пользователем.',
+    hermesSettings: 'Настроить Hermes',
     managedRuntime: 'Hermes Runtime',
     managedRuntimeHint: 'Studio устанавливает и управляет только полными пакетами Runtime и не устанавливает Hermes CLI отдельно.',
     studioManaged: 'Управляется Studio',
