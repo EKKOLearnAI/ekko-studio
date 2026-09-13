@@ -5,6 +5,7 @@ const managerMock = vi.hoisted(() => ({
   isSessionLaunchCompatible: vi.fn(),
   isSessionProcessing: vi.fn(),
   stop: vi.fn(),
+  updateSessionCodexAuthorization: vi.fn(),
 }))
 const startCodingAgentRunMock = vi.hoisted(() => vi.fn())
 const sendCodingAgentRunInputMock = vi.hoisted(() => vi.fn())
@@ -14,6 +15,7 @@ const getSessionMock = vi.hoisted(() => vi.fn())
 const updateSessionMock = vi.hoisted(() => vi.fn())
 const handleCodingAgentSessionCommandMock = vi.hoisted(() => vi.fn(async () => undefined))
 const parseCodingAgentSessionCommandMock = vi.hoisted(() => vi.fn())
+const resolveAuthorizedProviderRuntimeCredentialsMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({
   codingAgentRunManager: managerMock,
@@ -41,6 +43,10 @@ vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))
 
+vi.mock('../../packages/server/src/modules/studio/public/authorized-provider-runtime', () => ({
+  resolveAuthorizedProviderRuntimeCredentials: resolveAuthorizedProviderRuntimeCredentialsMock,
+}))
+
 vi.mock('../../packages/server/src/modules/coding-agents/services/session-command', () => ({
   handleCodingAgentSessionCommand: handleCodingAgentSessionCommandMock,
   parseCodingAgentSessionCommand: parseCodingAgentSessionCommandMock,
@@ -62,6 +68,47 @@ describe('handleCodingAgentRun', () => {
     writeModelRunProfileTokenMock.mockResolvedValue(undefined)
     getSystemPromptMock.mockReturnValue('system prompt')
     parseCodingAgentSessionCommandMock.mockReturnValue(null)
+    resolveAuthorizedProviderRuntimeCredentialsMock.mockResolvedValue({
+      apiKey: 'studio-codex-oauth-access-token',
+    })
+  })
+
+  it('refreshes Studio Codex OAuth and replaces the isolated auth before every global Codex turn', async () => {
+    managerMock.runIdForSession.mockReturnValue('agent-session-1')
+    managerMock.isSessionLaunchCompatible.mockReturnValue(true)
+    sendCodingAgentRunInputMock.mockResolvedValue({ runId: 'agent-session-1' })
+
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    const state = {
+      messages: [],
+      isWorking: false,
+      isAborting: false,
+      events: [],
+      queue: [],
+    }
+    const sessionMap = new Map([['session-1', state]])
+    const socket = {
+      join: vi.fn(),
+      emit: vi.fn(),
+    }
+
+    await handleCodingAgentRun({} as any, socket as any, {
+      session_id: 'session-1',
+      input: 'hello codex',
+      coding_agent_id: 'codex',
+      mode: 'global',
+    }, 'default', sessionMap as any)
+
+    expect(resolveAuthorizedProviderRuntimeCredentialsMock).toHaveBeenCalledWith({
+      profile: 'default',
+      provider: 'openai-codex',
+    })
+    expect(managerMock.updateSessionCodexAuthorization).toHaveBeenCalledWith(
+      'session-1',
+      'studio-codex-oauth-access-token',
+    )
+    expect(managerMock.updateSessionCodexAuthorization.mock.invocationCallOrder[0])
+      .toBeLessThan(sendCodingAgentRunInputMock.mock.invocationCallOrder[0])
   })
 
   it('restarts an existing coding-agent runner when the requested launch mode changes', async () => {
@@ -155,6 +202,8 @@ describe('handleCodingAgentRun', () => {
       mode: 'scoped',
       profile: 'default',
     }), state)
+    expect(resolveAuthorizedProviderRuntimeCredentialsMock).not.toHaveBeenCalled()
+    expect(managerMock.updateSessionCodexAuthorization).not.toHaveBeenCalled()
     expect(sendCodingAgentRunInputMock).toHaveBeenCalledWith('session-1', 'continue with new model', 'system prompt')
   })
 

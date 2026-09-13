@@ -15,6 +15,7 @@ import type { AuthenticatedUser } from '../../public/auth'
 import { getSystemPrompt } from '../../public/runs/prompt'
 import { getSession, updateSession } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
+import { resolveAuthorizedProviderRuntimeCredentials } from '../../public/authorized-provider-runtime'
 
 export interface CodingAgentRunSocketData {
   input: string | ContentBlock[]
@@ -157,6 +158,16 @@ export async function handleCodingAgentRun(
   try {
     const codingInput = convertContentBlocksForCodingAgent(data.input)
     await writeModelRunProfileToken(socketUser, profile)
+    if (agentId === 'codex' && mode === 'global') {
+      // Studio owns Codex OAuth authorization and refresh. Resolve the current
+      // access token before every turn, then replace only this session's
+      // isolated auth.json using Codex's externally managed ChatGPT token mode.
+      const credentials = await resolveAuthorizedProviderRuntimeCredentials({
+        profile,
+        provider: 'openai-codex',
+      })
+      await codingAgentRunManager.updateSessionCodexAuthorization(sessionId, credentials.apiKey)
+    }
     const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || (agentId === 'opencode' || agentId === 'dsh')
     const runPrompt = [
       groupSystemPrompt || (includeBaseSystemPrompt ? getSystemPrompt(undefined, { source: data.session_source || data.source }) : ''),

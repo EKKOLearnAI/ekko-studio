@@ -33,6 +33,7 @@ import { isolatedCodingAgentChildEnv } from './child-env'
 import { NativeTurnUsage, type NativeUsageRow } from './native-usage'
 import { readCodexTurnModel, readOpenCodeMessageModel } from './native-model'
 import { getCodingAgentGlobalHome } from '../../../studio/public/coding-agent-global-home'
+import { writeCodexExternalAuth } from '../codex/external-auth'
 
 export { isolatedCodingAgentChildEnv } from './child-env'
 
@@ -647,6 +648,17 @@ export class CodingAgentRunManager {
   runIdForSession(sessionId: string): string | undefined {
     const run = this.getBySession(sessionId)
     return run && !run.exited ? run.id : undefined
+  }
+
+  async updateSessionCodexAuthorization(sessionId: string, accessToken: string): Promise<void> {
+    const run = this.getBySession(sessionId)
+    if (!run || run.exited) throw new Error('Coding agent session not found')
+    if (run.launch.agentId !== 'codex' || run.launch.mode !== 'global') {
+      throw new Error('Studio-managed Codex authorization is only available for global Codex sessions')
+    }
+    const codexHome = String(run.launch.env?.CODEX_HOME || '').trim()
+    if (!codexHome) throw new Error('Global Codex session has no isolated CODEX_HOME')
+    await writeCodexExternalAuth(codexHome, accessToken)
   }
 
   isSessionLaunchCompatible(sessionId: string, launch: {
