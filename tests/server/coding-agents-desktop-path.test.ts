@@ -25,7 +25,7 @@ const execState = vi.hoisted(() => {
       return { stdout: '/Users/example/.npm-global/bin/claude\n', stderr: '' }
     }
 
-    if (command === 'claude' && args[0] === '--version') {
+    if ((command === 'claude' || command === '/Users/example/.npm-global/bin/claude') && args[0] === '--version') {
       return { stdout: '1.2.3\n', stderr: '' }
     }
 
@@ -87,7 +87,8 @@ describe('coding agent desktop PATH detection', () => {
     expect(status.installed).toBe(true)
     expect(status.version).toBe('1.2.3')
 
-    const versionCall = execState.calls.find(call => call.command === 'claude' && call.args[0] === '--version')
+    const versionCall = execState.calls.find(call => (call.command === 'claude' || call.command === '/Users/example/.npm-global/bin/claude') && call.args[0] === '--version')
+    expect(versionCall?.command).toBe('/Users/example/.npm-global/bin/claude')
     expect(versionCall?.options.env.PATH.split(delimiter)).toContain('/Users/example/.npm-global/bin')
   })
 })

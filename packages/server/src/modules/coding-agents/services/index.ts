@@ -2624,12 +2624,17 @@ async function findCommandPaths(command: string, env: NodeJS.ProcessEnv): Promis
 }
 
 async function resolveCommandForExecution(command: string, env: NodeJS.ProcessEnv): Promise<string> {
-  if (process.platform !== 'win32') return command
   const paths = await findCommandPaths(command, env)
-  // On Windows, prioritize paths with .cmd or .bat extensions since where may return
-  // both the unix-style script (without extension) and the Windows shim (.cmd)
-  const windowsPath = paths.find(path => windowsCommandNeedsShell(path))
-  return windowsPath || paths[0] || command
+  if (process.platform === 'win32') {
+    // On Windows, prioritize paths with .cmd or .bat extensions since where may return
+    // both the unix-style script (without extension) and the Windows shim (.cmd)
+    const windowsPath = paths.find(path => windowsCommandNeedsShell(path))
+    return windowsPath || paths[0] || command
+  }
+  // Resolve to an absolute path on POSIX so the child process can spawn even when
+  // the server was launched from a desktop GUI whose PATH misses user bin dirs
+  // such as ~/.npm-global/bin (spawn falls back to the bare command when missing).
+  return paths[0] || command
 }
 
 function commandExecution(command: string, args: string[]): CommandExecution {
@@ -3833,16 +3838,14 @@ async function startCodingAgentRunInternal(
       logger.warn({ err, agentId: id, runtimeMcpPath }, '[coding-agent-mcp] runtime isolation failed open')
     }
   }
-  const commandExecutionEnv = process.platform === 'win32'
-    ? {
-        ...(await commandEnv()),
-        ...launch.env,
-      }
-    : launch.env
-  const runtimeCommand = process.platform === 'win32'
-    ? await resolveCommandForExecution(launch.command, commandExecutionEnv)
-    : launch.command
-  const runtimeEnv = launch.agentId === 'pi' ? launch.env : commandExecutionEnv
+  const commandExecutionEnv = {
+    ...(await commandEnv()),
+    ...launch.env,
+  }
+  const runtimeCommand = await resolveCommandForExecution(launch.command, commandExecutionEnv)
+  const runtimeEnv = launch.agentId === 'pi' || process.platform !== 'win32'
+    ? launch.env
+    : commandExecutionEnv
   const persistedProvider = String(resolvedInput.provider || launch.provider || '').trim() || launch.provider
   const started = codingAgentRunManager.start({
     agentSessionId,
@@ -3919,12 +3922,10 @@ export async function compactStoredCodingAgentSession(
     isolateSettings: true,
   })
   const launchEnv = {
-    ...process.env,
+    ...(await commandEnv()),
     ...launch.env,
   }
-  const command = process.platform === 'win32'
-    ? await resolveCommandForExecution(launch.command, launchEnv)
-    : launch.command
+  const command = await resolveCommandForExecution(launch.command, launchEnv)
   return compactCodexThread({
     command,
     env: launchEnv,
