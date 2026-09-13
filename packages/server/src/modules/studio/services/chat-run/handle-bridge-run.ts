@@ -51,6 +51,7 @@ import { ensureHermesRunWorkspace } from './workspace'
 import { observeRunChatPetEvent } from '../../public/pet-events'
 import { completeWorkspaceRunCheckpoint, startWorkspaceRunCheckpoint } from './workspace-diff-tracker'
 import { resolveAuthorizedProviderRuntimeCredentials } from '../../public/authorized-provider-runtime'
+import { saveEnvValueForProfile } from '../../public/profile-config'
 
 const BRIDGE_USAGE_FLUSH_DELAY_MS = 200
 const BRIDGE_TITLE_EVENT_POLL_INTERVAL_MS = 500
@@ -493,11 +494,15 @@ export async function handleBridgeRun(
     // Studio owns OAuth refresh. Resolving here happens before context
     // estimation can create a cached Python Agent and synchronizes Claude's
     // fresh access token into the profile ANTHROPIC_TOKEN environment.
-    await resolveAuthorizedProviderRuntimeCredentials({
+    const credentials = await resolveAuthorizedProviderRuntimeCredentials({
       profile,
       provider: selectedProvider,
       model: resolvedModel,
     })
+    // Hermes Agent's native Anthropic bridge reads Claude OAuth only from
+    // ANTHROPIC_TOKEN. This is intentionally Claude-specific: no other
+    // authorized provider or provider environment is touched here.
+    await saveEnvValueForProfile(profile, 'ANTHROPIC_TOKEN', credentials.apiKey)
   }
   const resolvedProvider = selectedProvider === 'claude-oauth' ? 'anthropic' : selectedProvider
   if (sessionRow && !callbackContext && data.one_shot_model !== true) {

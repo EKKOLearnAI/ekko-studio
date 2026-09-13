@@ -16,7 +16,7 @@ async function resolveDefaultModelConfig(profile: string): Promise<{ model: stri
     const provider = typeof modelConfig === 'object'
       ? String(modelConfig?.provider || '').trim()
       : ''
-    return { model, provider: runtimeProvider(provider) }
+    return { model, provider }
   } catch {
     return { model: '', provider: '' }
   }
@@ -40,6 +40,7 @@ export async function resolveBridgeRunModelConfig(options: {
   requestedProvider?: string | null
   modelGroups?: RunModelGroup[]
   preferRequested?: boolean
+  preserveAuthorizedProvider?: boolean
 }): Promise<{ model: string; provider: string }> {
   const sessionModel = String(options.sessionModel || '').trim()
   const sessionProvider = String(options.sessionProvider || '').trim()
@@ -50,7 +51,10 @@ export async function resolveBridgeRunModelConfig(options: {
   const hasGroups = Array.isArray(options.modelGroups) && options.modelGroups.length > 0
   const candidateAvailable = hasGroups && hasModelInGroups(options.modelGroups, candidateProvider, candidateModel)
   const shouldUseDefault = !candidateModel || !candidateProvider || (hasGroups && !candidateAvailable && !isVirtualProvider(candidateProvider))
-  return shouldUseDefault
-    ? resolveDefaultModelConfig(options.profile)
-    : { model: candidateModel, provider: runtimeProvider(candidateProvider) }
+  const selected = shouldUseDefault
+    ? await resolveDefaultModelConfig(options.profile)
+    : { model: candidateModel, provider: candidateProvider }
+  return options.preserveAuthorizedProvider
+    ? selected
+    : { ...selected, provider: runtimeProvider(selected.provider) }
 }

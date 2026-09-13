@@ -48,6 +48,7 @@ const recordBridgeToolCompletedMock = vi.fn()
 const recordBridgeMoaDisplayToolMock = vi.fn()
 const resolveBridgeRunModelConfigMock = vi.fn()
 const resolveAuthorizedProviderRuntimeCredentialsMock = vi.fn()
+const saveEnvValueForProfileMock = vi.fn()
 const issueModelRunJwtMock = vi.fn(async () => 'model-run-token')
 const startWorkspaceRunCheckpointMock = vi.fn()
 const completeWorkspaceRunCheckpointMock = vi.fn()
@@ -117,6 +118,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/workspace-di
 
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
   getProfileDir: (profile: string) => `/tmp/hermes-bridge-final-context/${profile || 'default'}`,
+  saveEnvValueForProfile: saveEnvValueForProfileMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/auth', () => ({
@@ -166,6 +168,7 @@ describe('bridge run final context usage', () => {
       baseUrl: 'https://api.anthropic.com',
       apiMode: 'anthropic_messages',
     })
+    saveEnvValueForProfileMock.mockResolvedValue(undefined)
     buildCompressedHistoryMock.mockResolvedValue([{ role: 'user', content: 'previous' }])
     buildDbHistoryMock.mockResolvedValue([
       { role: 'user', content: 'hello' },
@@ -262,6 +265,13 @@ describe('bridge run final context usage', () => {
       model: 'claude-opus-4-6',
     })
     expect(resolveAuthorizedProviderRuntimeCredentialsMock.mock.invocationCallOrder[0])
+      .toBeLessThan(bridge.contextEstimate.mock.invocationCallOrder[0])
+    expect(saveEnvValueForProfileMock).toHaveBeenCalledWith(
+      'research',
+      'ANTHROPIC_TOKEN',
+      'fresh-claude-access-token',
+    )
+    expect(saveEnvValueForProfileMock.mock.invocationCallOrder[0])
       .toBeLessThan(bridge.contextEstimate.mock.invocationCallOrder[0])
     expect(bridge.chat).toHaveBeenCalledWith(
       'session-1',
