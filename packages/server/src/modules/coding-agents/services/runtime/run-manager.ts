@@ -483,10 +483,24 @@ function piAssistantMessageText(message: any): string {
     .join('')
 }
 
-function childProcessErrorMessage(err: unknown): string {
+function codingAgentDisplayName(agentId: string): string {
+  if (agentId === 'codex') return 'Codex'
+  if (agentId === 'pi') return 'Pi'
+  if (agentId === 'grok') return 'Grok'
+  if (agentId === 'opencode') return 'OpenCode'
+  if (agentId === 'dsh') return 'DeepSeek Harness'
+  return 'Claude Code'
+}
+
+function childProcessErrorMessage(err: unknown, agentId?: string): string {
+  const record = err && typeof err === 'object'
+    ? err as Record<string, unknown>
+    : undefined
+  if (record?.code === 'ENOENT' && agentId) {
+    return `${codingAgentDisplayName(agentId)} is not installed or is not available in PATH. Install it in Coding Agent settings, then try again.`
+  }
   if (err instanceof Error) return err.message
-  if (!err || typeof err !== 'object') return String(err || 'Process failed')
-  const record = err as Record<string, unknown>
+  if (!record) return String(err || 'Process failed')
   const message = record.message
   if (typeof message === 'string' && message.trim()) return message
   try {
@@ -1454,7 +1468,7 @@ export class CodingAgentRunManager {
     })
     child.on('error', (err) => {
       logger.warn({ err, runId: run.id, sessionId: run.launch.sessionId }, '[coding-agent-run] Pi RPC failed to start')
-      if (!run.printCompleted) this.failClaudePrintTurn(run, childProcessErrorMessage(err))
+      if (!run.printCompleted) this.failClaudePrintTurn(run, childProcessErrorMessage(err, run.launch.agentId))
     })
     child.on('close', (code) => {
       if (run.currentChildKillTimer) clearTimeout(run.currentChildKillTimer)
@@ -1956,7 +1970,7 @@ export class CodingAgentRunManager {
             object: 'response',
             status: 'failed',
             model: run.launch.model,
-            error: { message: childProcessErrorMessage(err) },
+            error: { message: childProcessErrorMessage(err, run.launch.agentId) },
             output: [],
           },
         },
@@ -2402,7 +2416,7 @@ export class CodingAgentRunManager {
     startDshChatTurn(run, input, systemPrompt, images, {
       spawn: spawnCodingAgentChild, isRunning: childIsRunning,
       terminate: terminateChildProcess, forceKill: forceKillChildProcess,
-      processError: childProcessErrorMessage, exitError: (code, stderr) => exitErrorMessage('DSH', code, stderr),
+      processError: error => childProcessErrorMessage(error, run.launch.agentId), exitError: (code, stderr) => exitErrorMessage('DSH', code, stderr),
       stderr: chunk => { appendChildStderr(run, chunk) }, touch: () => this.touch(run),
       response: event => this.handleClaudePrintResponseEvent(run, event),
       text: (text, live) => this.appendCodexText(run, text, live), reasoning: text => this.appendCodexReasoning(run, text),
@@ -2502,7 +2516,7 @@ export class CodingAgentRunManager {
       onError: (err) => {
         run.currentChild = undefined
         logger.warn({ err, runId: run.id, sessionId: run.launch.sessionId }, '[coding-agent-run] grok failed to start')
-        if (!run.printCompleted) this.failCodexExecTurn(run, childProcessErrorMessage(err))
+        if (!run.printCompleted) this.failCodexExecTurn(run, childProcessErrorMessage(err, run.launch.agentId))
       },
       onClose: (code) => {
         run.currentChild = undefined
@@ -2601,7 +2615,7 @@ export class CodingAgentRunManager {
     child.on('error', (err) => {
       run.currentChild = undefined
       logger.warn({ err, runId: run.id, sessionId: run.launch.sessionId }, '[coding-agent-run] opencode failed to start')
-      if (!run.printCompleted) this.failClaudePrintTurn(run, childProcessErrorMessage(err))
+      if (!run.printCompleted) this.failClaudePrintTurn(run, childProcessErrorMessage(err, run.launch.agentId))
     })
     child.on('close', (code) => {
       if (stdoutBuffer.trim()) this.handleOpenCodeLine(run, stdoutBuffer)
@@ -2839,7 +2853,7 @@ export class CodingAgentRunManager {
             object: 'response',
             status: 'failed',
             model: run.launch.model,
-            error: { message: childProcessErrorMessage(err) },
+            error: { message: childProcessErrorMessage(err, run.launch.agentId) },
             output: [],
           },
         },

@@ -1342,7 +1342,7 @@ describe('coding agent Windows process launch', () => {
     ;(manager as any).sessionIndex.clear()
   })
 
-  it('emits a readable failed run when a hidden Claude Code process cannot start', async () => {
+  it('emits an actionable failed run when a hidden Claude Code process is missing', async () => {
     const manager = new CodingAgentRunManager()
     const emitted: Array<{ event: string; payload: any }> = []
     ;(manager as any).ensureDbSession = () => {}
@@ -1376,11 +1376,53 @@ describe('coding agent Windows process launch', () => {
     expect(emitted).toContainEqual(expect.objectContaining({
       event: 'run.failed',
       payload: expect.objectContaining({
-        error: 'spawn claude ENOENT',
+        error: 'Claude Code is not installed or is not available in PATH. Install it in Coding Agent settings, then try again.',
       }),
     }))
 
     const run = (manager as any).runs.get('agent-session-error-1')
+    if (run?.idleTimer) clearTimeout(run.idleTimer)
+    ;(manager as any).runs.clear()
+    ;(manager as any).sessionIndex.clear()
+  })
+
+  it('emits an actionable failed run when Codex is not installed', async () => {
+    const manager = new CodingAgentRunManager()
+    const emitted: Array<{ event: string; payload: any }> = []
+    ;(manager as any).ensureDbSession = () => {}
+    ;(manager as any).addUserMessage = () => {}
+    ;(manager as any).markChatRunCompleted = () => {}
+    ;(manager as any).emitToChat = (_sessionId: string, event: string, payload: any) => {
+      emitted.push({ event, payload })
+    }
+
+    manager.start({
+      agentSessionId: 'agent-session-codex-missing',
+      agentId: 'codex',
+      mode: 'global',
+      profile: 'default',
+      provider: 'global',
+      model: '',
+      sessionId: 'chat-session-codex-missing',
+      command: 'codex',
+      args: [],
+      shellCommand: 'codex',
+      workspaceDir: process.cwd(),
+      state: { messages: [], isWorking: false, events: [], queue: [] },
+    })
+
+    manager.send('chat-session-codex-missing', 'test')
+    testState.spawnCalls[0].child.emit('error', Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(emitted).toContainEqual(expect.objectContaining({
+      event: 'run.failed',
+      payload: expect.objectContaining({
+        error: 'Codex is not installed or is not available in PATH. Install it in Coding Agent settings, then try again.',
+      }),
+    }))
+
+    const run = (manager as any).runs.get('agent-session-codex-missing')
     if (run?.idleTimer) clearTimeout(run.idleTimer)
     ;(manager as any).runs.clear()
     ;(manager as any).sessionIndex.clear()
