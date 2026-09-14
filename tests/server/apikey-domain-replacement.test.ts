@@ -122,6 +122,14 @@ describe('Hermes startup apikey domain replacement', () => {
     expect(existsSync(configPath())).toBe(false)
   })
 
+  it('still replaces an endpoint that follows an empty *_BASE_URL assignment', async () => {
+    const envPath = join(hermesHome, '.env')
+    const raw = ['KIMI_BASE_URL=', 'ANTHROPIC_BASE_URL=https://api.apikey.fun/v1', ''].join('\n')
+    writeFileSync(envPath, raw)
+    expect((await replaceHermesApiKeyDomains()).updatedProfiles).toEqual(['default'])
+    expect(readFileSync(envPath, 'utf8')).toBe(raw.replace('api.apikey.fun', 'api.apikey.fan'))
+  })
+
   it('leaves malformed config intact, continues other profiles, and retries after repair', async () => {
     const malformed = 'providers: [invalid yaml'
     writeFileSync(configPath(), malformed)
