@@ -169,11 +169,27 @@ class WorkerProcess:
         return _send_bridge_request(self.endpoint, req, request_timeout)
 
 
+# Unix-domain socket paths are limited by sun_path (macOS/BSD: 104 bytes,
+# Linux: 108 bytes, including the trailing NUL). Keep a small safety margin.
+_AF_UNIX_MAX_PATH = 104 if sys.platform == "darwin" else 108
+
+
 def _worker_endpoint(key: str, namespace: str | None = None) -> str:
     namespace_key = f"{namespace or ''}\0{key}"
     safe = hashlib.sha256(namespace_key.encode("utf-8")).hexdigest()[:16]
     transport = os.environ.get("HERMES_AGENT_BRIDGE_WORKER_TRANSPORT", "").strip().lower()
+    forced_ipc = transport in {"ipc", "unix"}
     use_tcp = transport == "tcp" or (transport not in {"ipc", "unix"} and os.name == "nt")
+    if not use_tcp:
+        root = Path(tempfile.gettempdir()) / "hermes-agent-bridge-workers"
+        sock_path = root / f"{safe}.sock"
+        # A deep temp dir can push the socket path past the platform's sun_path
+        # limit; the worker then fails to bind and exits before it can report
+        # ready (surfaced as "profile worker ... exited before ready"). Fall
+        # back to a TCP endpoint in that case.
+        if forced_ipc or len(os.fsencode(str(sock_path))) < _AF_UNIX_MAX_PATH - 1:
+            return f"ipc://{sock_path}"
+        use_tcp = True
     if use_tcp:
         port_base = int(os.environ.get("HERMES_AGENT_BRIDGE_WORKER_PORT_BASE", "18780"))
         port_offset = int(safe[:4], 16) % 1000

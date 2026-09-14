@@ -107,4 +107,89 @@ print(json.dumps({"endpoint": endpoint, "port": port}))
     expect(result.port).toBeGreaterThanOrEqual(18780)
     expect(result.port).toBeLessThan(19780)
   })
+
+  it('uses an ipc endpoint when the worker socket path fits in sun_path', () => {
+    const result = runPython(String.raw`
+import importlib.util
+import json
+import os
+import sys
+import types
+
+bridge_runtime = types.ModuleType("bridge_runtime")
+bridge_runtime._hidden_subprocess_kwargs = lambda: {}
+bridge_runtime._json_line_bytes = lambda req: (json.dumps(req) + "\n").encode("utf-8")
+bridge_runtime._platform_text_encoding = lambda: "utf-8"
+sys.modules["bridge_runtime"] = bridge_runtime
+
+spec = importlib.util.spec_from_file_location(
+    "bridge_transport",
+    "packages/server/src/modules/hermes/services/bridge/python/bridge_transport.py",
+)
+bridge_transport = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(bridge_transport)
+
+original_name = bridge_transport.os.name
+original_gettempdir = bridge_transport.tempfile.gettempdir
+original_transport = os.environ.pop("HERMES_AGENT_BRIDGE_WORKER_TRANSPORT", None)
+try:
+    bridge_transport.os.name = "posix"
+    bridge_transport.tempfile.gettempdir = lambda: "/tmp"
+    endpoint = bridge_transport._worker_endpoint("default", "ipc:///tmp/hermes-agent-bridge.sock")
+finally:
+    bridge_transport.os.name = original_name
+    bridge_transport.tempfile.gettempdir = original_gettempdir
+    if original_transport is not None:
+        os.environ["HERMES_AGENT_BRIDGE_WORKER_TRANSPORT"] = original_transport
+
+print(json.dumps({"endpoint": endpoint}))
+`)
+
+    expect(result.endpoint).toMatch(/^ipc:\/\/.*\.sock$/)
+  })
+
+  it('falls back to a TCP endpoint when the temp dir pushes the socket path past sun_path', () => {
+    const result = runPython(String.raw`
+import importlib.util
+import json
+import os
+import sys
+import types
+
+bridge_runtime = types.ModuleType("bridge_runtime")
+bridge_runtime._hidden_subprocess_kwargs = lambda: {}
+bridge_runtime._json_line_bytes = lambda req: (json.dumps(req) + "\n").encode("utf-8")
+bridge_runtime._platform_text_encoding = lambda: "utf-8"
+sys.modules["bridge_runtime"] = bridge_runtime
+
+spec = importlib.util.spec_from_file_location(
+    "bridge_transport",
+    "packages/server/src/modules/hermes/services/bridge/python/bridge_transport.py",
+)
+bridge_transport = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(bridge_transport)
+
+original_name = bridge_transport.os.name
+original_gettempdir = bridge_transport.tempfile.gettempdir
+original_transport = os.environ.pop("HERMES_AGENT_BRIDGE_WORKER_TRANSPORT", None)
+try:
+    bridge_transport.os.name = "posix"
+    bridge_transport.tempfile.gettempdir = lambda: "/" + "/".join(["deep-temp-dir"] * 12)
+    endpoint = bridge_transport._worker_endpoint("default", "ipc:///tmp/hermes-agent-bridge.sock")
+finally:
+    bridge_transport.os.name = original_name
+    bridge_transport.tempfile.gettempdir = original_gettempdir
+    if original_transport is not None:
+        os.environ["HERMES_AGENT_BRIDGE_WORKER_TRANSPORT"] = original_transport
+
+print(json.dumps({"endpoint": endpoint}))
+`)
+
+    expect(result.endpoint).toMatch(/^tcp:\/\/127\.0\.0\.1:\d+$/)
+    const port = Number(result.endpoint.split(':').pop())
+    expect(port).toBeGreaterThanOrEqual(18780)
+    expect(port).toBeLessThan(19780)
+  })
 })
