@@ -255,7 +255,7 @@ async function fetchFullRemoteModels(
 ): Promise<string[]> {
   if (target.provider === OPENCODE_FREE_PROVIDER) return fetchProviderCatalogRefreshTargetModels(target)
   if (target.credential_kind === 'api_key' || target.credential_kind === 'none') {
-    return fetchProviderCatalogForTest(target.base_url, target.api_key, apiMode)
+    return fetchProviderCatalogForTest(target.base_url, target.api_key, apiMode, target)
   }
   return fetchProviderCatalogRefreshTargetModels(target)
 }

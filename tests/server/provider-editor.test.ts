@@ -61,6 +61,72 @@ afterEach(() => {
 })
 
 describe('provider editor service', () => {
+  it('persists, normalizes, and clears provider network settings without changing credentials', async () => {
+    writeProfile('research', YAML.dump({
+      providers: {
+        example: { baseUrl: 'https://provider.example/v1', apiKey: 'existing-key', extra_body: { keep: true } },
+      },
+    }))
+    const { getProviderEditorDetail, updateProviderEditorDetail } = await loadEditor()
+    const before = await getProviderEditorDetail('research', 'custom:example')
+    const { detail: changed } = await updateProviderEditorDetail('research', 'custom:example', {
+      preserve_client_identity: true,
+      proxy_url: 'localhost:8080',
+      extra_headers: { 'User-Agent': 'configured-client' },
+    }, before.revision)
+    expect(changed).toMatchObject({
+      preserve_client_identity: true, proxy_url: 'http://localhost:8080',
+      extra_headers: { 'user-agent': 'configured-client' },
+    })
+    expect(readYaml(join(profileDir('research'), 'config.yaml')).providers.example).toMatchObject({
+      apiKey: 'existing-key', extra_body: { keep: true },
+      preserve_client_identity: true, proxy_url: 'http://localhost:8080',
+    })
+    const { detail: cleared } = await updateProviderEditorDetail('research', 'custom:example', {
+      preserve_client_identity: false, proxy_url: null, extra_headers: null,
+    }, changed.revision)
+    expect(cleared.preserve_client_identity).toBe(false)
+    expect(cleared.proxy_url).toBeUndefined()
+    expect(cleared.extra_headers).toBeUndefined()
+  })
+
+  it.each([
+    { extra_headers: { 'Bad Header': 'value' } },
+    { extra_headers: { Authorization: 'replacement' } },
+    { proxy_url: 'http://user:private-password@proxy.example/path' },
+    { preserve_client_identity: 'true' },
+  ])('rejects invalid network settings without writing configuration: %j', async patch => {
+    writeProfile('research', YAML.dump({
+      custom_providers: [{ name: 'example', base_url: 'https://provider.example', api_key: 'existing-key' }],
+    }))
+    const path = join(profileDir('research'), 'config.yaml')
+    const original = readFileSync(path, 'utf8')
+    const { getProviderEditorDetail, updateProviderEditorDetail } = await loadEditor()
+    const before = await getProviderEditorDetail('research', 'custom:example')
+    await expect(updateProviderEditorDetail('research', 'custom:example', {
+      ...patch,
+    } as any, before.revision)).rejects.toMatchObject({ status: 400 })
+    expect(readFileSync(path, 'utf8')).toBe(original)
+  })
+
+  it('uses draft extra headers for catalog tests and does not persist them', async () => {
+    writeProfile('research', YAML.dump({
+      custom_providers: [{
+        name: 'example', base_url: 'https://provider.example/v1', api_key: 'existing-key',
+        extra_headers: { 'User-Agent': 'saved-client' },
+      }],
+    }))
+    const path = join(profileDir('research'), 'config.yaml')
+    const original = readFileSync(path, 'utf8')
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ data: [{ id: 'model-a' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { testProviderEditorDraft } = await loadEditor()
+    await testProviderEditorDraft('research', 'custom:example', { extra_headers: { 'User-Agent': 'draft-client' } })
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get('user-agent')).toBe('draft-client')
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get('authorization')).toBe('Bearer existing-key')
+    expect(readFileSync(path, 'utf8')).toBe(original)
+  })
+
   it('keeps the OpenCode probe affinity header across same-origin redirects', async () => {
     const { fetchProviderCatalogForTest } = await loadEditor()
     const fetchMock = vi.fn()
@@ -106,6 +172,9 @@ describe('provider editor service', () => {
       'request_timeout_seconds',
       'stale_timeout_seconds',
       'extra_body',
+      'extra_headers',
+      'preserve_client_identity',
+      'proxy_url',
     ])
     expect(JSON.stringify(detail)).not.toContain(storedCredential)
     expect(detail.revision).toMatch(/^[a-f0-9]{64}$/)

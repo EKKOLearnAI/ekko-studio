@@ -163,6 +163,7 @@ function detail(overrides: Partial<ProviderEditorDetail> = {}): ProviderEditorDe
     editable_fields: [
       'label', 'base_url', 'api_key', 'api_mode', 'preferred_model', 'context_lengths',
       'discover_models', 'rate_limit_delay', 'request_timeout_seconds', 'stale_timeout_seconds', 'extra_body',
+      'extra_headers', 'preserve_client_identity', 'proxy_url',
     ],
     context_lengths: {},
     connection_test_supported: true,
@@ -208,6 +209,82 @@ beforeEach(() => {
 })
 
 describe('ProviderEditorModal', () => {
+  it('provides network setting labels in every locale', () => {
+    const locales = import.meta.glob<{ models: Record<string, unknown> }>(
+      '../../packages/client/src/i18n/locales/*.ts', { eager: true, import: 'default' },
+    )
+    for (const [locale, messages] of Object.entries(locales)) {
+      for (const key of ['preserveClientIdentity', 'providerProxyUrl', 'providerExtraHeaders', 'extraHeadersInvalid']) {
+        expect(messages.models[key], `${locale}: models.${key}`).toEqual(expect.any(String))
+      }
+    }
+  })
+
+  it('leaves network settings opt-in and omits unchanged values from the patch', async () => {
+    const wrapper = await mountEditor()
+    const identity = wrapper.findAll('label').find(label => label.text() === 'models.preserveClientIdentity')!
+    expect(identity.find('input').element.checked).toBe(false)
+    expect(wrapper.find('input[name="provider-proxy-url"]').element.value).toBe('')
+    await wrapper.findAll('button').find(button => button.text() === 'Save')!.trigger('click')
+    await flushPromises()
+    const patch = storeMock.saveProviderEditor.mock.calls[0][2]
+    expect(patch).not.toHaveProperty('extra_headers')
+    expect(patch).not.toHaveProperty('preserve_client_identity')
+    expect(patch).not.toHaveProperty('proxy_url')
+  })
+
+  it('tests and saves the same draft network options without changing the API key', async () => {
+    const wrapper = await mountEditor()
+    const identity = wrapper.findAll('label').find(label => label.text() === 'models.preserveClientIdentity')!
+    await identity.find('input').setValue(true)
+    await wrapper.find('input[name="provider-proxy-url"]').setValue('http://user:proxy-password@localhost:8080')
+    await wrapper.find('textarea[name="provider-extra-headers"]').setValue('{"User-Agent":"custom-client","X-Route":"a"}')
+    await wrapper.findAll('button').find(button => button.text() === 'Save')!.trigger('click')
+    await flushPromises()
+    const patch = storeMock.saveProviderEditor.mock.calls[0][2]
+    expect(patch).toMatchObject({
+      preserve_client_identity: true,
+      proxy_url: 'http://user:proxy-password@localhost:8080',
+      extra_headers: { 'User-Agent': 'custom-client', 'X-Route': 'a' },
+      credential_action: 'keep',
+    })
+    expect(apiMock.testProviderEditor).toHaveBeenCalledWith('custom:example', patch)
+    expect(patch).not.toHaveProperty('api_key')
+  })
+
+  it('clears saved network settings and resets drafts on reopening', async () => {
+    const current = detail({
+      preserve_client_identity: true, proxy_url: 'http://localhost:8080',
+      extra_headers: { 'x-route': 'saved' },
+    })
+    const wrapper = await mountEditor({ detail: current })
+    const identity = () => wrapper.findAll('label').find(label => label.text() === 'models.preserveClientIdentity')!.find('input')
+    await identity().setValue(false)
+    await wrapper.find('input[name="provider-proxy-url"]').setValue('')
+    await wrapper.find('textarea[name="provider-extra-headers"]').setValue('')
+    await wrapper.findAll('button').find(button => button.text() === 'Save')!.trigger('click')
+    await flushPromises()
+    expect(storeMock.saveProviderEditor.mock.calls[0][2]).toMatchObject({
+      preserve_client_identity: false, proxy_url: null, extra_headers: null,
+    })
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(identity().element.checked).toBe(true)
+    expect(wrapper.find('input[name="provider-proxy-url"]').element.value).toBe(current.proxy_url)
+    expect(JSON.parse(wrapper.find('textarea[name="provider-extra-headers"]').element.value)).toEqual(current.extra_headers)
+  })
+
+  it.each(['[]', '{"x-route": 123}', '{broken'])('blocks malformed extra headers before testing or saving (%s)', async text => {
+    const wrapper = await mountEditor()
+    await wrapper.find('textarea[name="provider-extra-headers"]').setValue(text)
+    await wrapper.findAll('button').find(button => button.text() === 'Save')!.trigger('click')
+    await flushPromises()
+    expect(messageMock.error).toHaveBeenCalledWith('models.extraHeadersInvalid')
+    expect(apiMock.testProviderEditor).not.toHaveBeenCalled()
+    expect(storeMock.saveProviderEditor).not.toHaveBeenCalled()
+  })
+
   it('never renders the plaintext credential already present in the model list response', async () => {
     const credential = ['do', 'not', 'render'].join('-')
     const wrapper = await mountEditor({ providerCredential: credential })

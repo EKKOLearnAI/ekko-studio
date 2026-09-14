@@ -1,4 +1,5 @@
 import { Readable } from 'stream'
+import { proxyRequestOptions, type ProxyRequestOptions } from '../../protocol/proxy-request'
 import type { Context } from 'koa'
 import { config } from '../../../studio/public/config'
 import {
@@ -289,13 +290,14 @@ async function probeSseEncryptedContentError(
   return { stream: replayAsyncIterator(chunks, iterator), encryptedContentError: false }
 }
 
-async function callAnthropicMessages(target: ClaudeCodeProxyTarget, body: any): Promise<any> {
+async function callAnthropicMessages(target: ClaudeCodeProxyTarget, body: any, options: ProxyRequestOptions): Promise<any> {
   if (target.apiMode !== 'anthropic_messages') {
     const err = new Error(`Claude proxy Anthropic adapter only supports anthropic_messages targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
   const result = await withCustomEncryptedContentRetry(target, body, nextBody => agentRunGateway.completeJson({
+    ...options,
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
@@ -303,19 +305,21 @@ async function callAnthropicMessages(target: ClaudeCodeProxyTarget, body: any): 
     headers: {
       ...(target.apiKey ? { 'x-api-key': target.apiKey } : {}),
       'anthropic-version': '2023-06-01',
+      ...options.headers,
     },
     body: anthropicRequestBody(nextBody, target),
   }))
   return result.value
 }
 
-async function callOpenAiChat(target: ClaudeCodeProxyTarget, body: any): Promise<any> {
+async function callOpenAiChat(target: ClaudeCodeProxyTarget, body: any, options: ProxyRequestOptions): Promise<any> {
   if (target.apiMode !== 'chat_completions') {
     const err = new Error(`Claude proxy MVP only supports chat_completions targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
   return agentRunGateway.completeJson({
+    ...options,
     url: resolveChatCompletionsUrl(target.baseUrl),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
@@ -324,13 +328,14 @@ async function callOpenAiChat(target: ClaudeCodeProxyTarget, body: any): Promise
   })
 }
 
-async function callOpenAiResponses(target: ClaudeCodeProxyTarget, body: any): Promise<any> {
+async function callOpenAiResponses(target: ClaudeCodeProxyTarget, body: any, options: ProxyRequestOptions): Promise<any> {
   if (target.apiMode !== 'codex_responses') {
     const err = new Error(`Claude proxy responses adapter only supports codex_responses targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
   return agentRunGateway.completeJson({
+    ...options,
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
@@ -365,7 +370,7 @@ function loggerLikeWarn(err: unknown, message: string) {
   logger.warn(err, message)
 }
 
-async function openAiChatToAnthropicSseStream(target: ClaudeCodeProxyTarget, body: any): Promise<Readable> {
+async function openAiChatToAnthropicSseStream(target: ClaudeCodeProxyTarget, body: any, options: ProxyRequestOptions): Promise<Readable> {
   if (target.apiMode !== 'chat_completions') {
     const err = new Error(`Claude proxy MVP only supports chat_completions targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -373,6 +378,7 @@ async function openAiChatToAnthropicSseStream(target: ClaudeCodeProxyTarget, bod
   }
 
   const stream = await agentRunGateway.streamBytes({
+    ...options,
     url: resolveChatCompletionsUrl(target.baseUrl),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
@@ -384,7 +390,7 @@ async function openAiChatToAnthropicSseStream(target: ClaudeCodeProxyTarget, bod
   return anthropicEventStream(openAiChatSseToAnthropicEvents(clientStream, target))
 }
 
-async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: any): Promise<Readable> {
+async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: any, options: ProxyRequestOptions): Promise<Readable> {
   if (target.apiMode !== 'anthropic_messages') {
     const err = new Error(`Claude proxy Anthropic adapter only supports anthropic_messages targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -392,6 +398,7 @@ async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: a
   }
 
   const request = (nextBody: any) => agentRunGateway.streamBytes({
+    ...options,
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
@@ -399,6 +406,7 @@ async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: a
     headers: {
       ...(target.apiKey ? { 'x-api-key': target.apiKey } : {}),
       'anthropic-version': '2023-06-01',
+      ...options.headers,
     },
     body: anthropicRequestBody(nextBody, target),
   })
@@ -436,7 +444,7 @@ async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: a
   return Readable.from(clientStream)
 }
 
-async function openAiResponsesToAnthropicSseStream(target: ClaudeCodeProxyTarget, body: any): Promise<Readable> {
+async function openAiResponsesToAnthropicSseStream(target: ClaudeCodeProxyTarget, body: any, options: ProxyRequestOptions): Promise<Readable> {
   if (target.apiMode !== 'codex_responses') {
     const err = new Error(`Claude proxy responses adapter only supports codex_responses targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -444,6 +452,7 @@ async function openAiResponsesToAnthropicSseStream(target: ClaudeCodeProxyTarget
   }
 
   const stream = await agentRunGateway.streamBytes({
+    ...options,
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
@@ -476,22 +485,23 @@ export async function claudeProxyMessages(ctx: Context) {
   const target = requireTarget(ctx)
   if (!target) return
   try {
+    const options = proxyRequestOptions(ctx, target, 'claude-code')
     const requestBody = ctx.request.body || {}
     if ((requestBody as any).stream === true) {
       const stream = target.apiMode === 'anthropic_messages'
-        ? await anthropicMessagesSseStream(target, requestBody)
+        ? await anthropicMessagesSseStream(target, requestBody, options)
         : target.apiMode === 'codex_responses'
-          ? await openAiResponsesToAnthropicSseStream(target, requestBody)
-          : await openAiChatToAnthropicSseStream(target, requestBody)
+          ? await openAiResponsesToAnthropicSseStream(target, requestBody, options)
+          : await openAiChatToAnthropicSseStream(target, requestBody, options)
       ctx.set('Content-Type', 'text/event-stream; charset=utf-8')
       ctx.set('Cache-Control', 'no-cache')
       ctx.body = stream
     } else {
       const message = target.apiMode === 'anthropic_messages'
-        ? await callAnthropicMessages(target, requestBody)
+        ? await callAnthropicMessages(target, requestBody, options)
         : target.apiMode === 'codex_responses'
-          ? openAiResponsesToAnthropicMessage(await callOpenAiResponses(target, requestBody), target, requestBody?.tools)
-          : openAiToAnthropicMessage(await callOpenAiChat(target, requestBody), target)
+          ? openAiResponsesToAnthropicMessage(await callOpenAiResponses(target, requestBody, options), target, requestBody?.tools)
+          : openAiToAnthropicMessage(await callOpenAiChat(target, requestBody, options), target)
       ctx.body = message
     }
   } catch (err: any) {

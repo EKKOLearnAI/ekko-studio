@@ -1904,6 +1904,10 @@ export default {
 
   // 模型
   models: {
+    preserveClientIdentity: '嚴格請求標頭（保留 Codex / Claude 用戶端身分）',
+    providerProxyUrl: '供應商連線代理（HTTP / HTTPS）',
+    providerExtraHeaders: '額外請求標頭（JSON）',
+    extraHeadersInvalid: '額外請求標頭必須是值為字串的 JSON 物件。',
     opencodeFreeHint: "無需帳號或 API key，免費模型可能受到限流。",
     opencodeFreeLoading: "正在背景載入免費模型…",
     opencodeFreeRetry: "免費提供商檢查或目錄更新失敗，將自動重試並保留快取模型。",

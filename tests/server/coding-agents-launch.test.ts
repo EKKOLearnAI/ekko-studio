@@ -32,6 +32,7 @@ import {
 import { codingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
 import { configureProfileConfig } from '../../packages/server/src/modules/studio/public/profile-config'
 import * as providerRuntime from '../../packages/server/src/modules/studio/public/provider-runtime'
+import * as providerNetwork from '../../packages/server/src/modules/studio/public/provider-network'
 import { upsertCodingAgentMcpServer } from '../../packages/server/src/modules/coding-agents/services/mcp-manager'
 
 // Registry tests verify isolated homes/model injection without requiring a
@@ -52,7 +53,7 @@ function mockProcessUid(uid: number) {
   }))
 }
 
-function makeHome() {
+function makeHome(networkSettings: Record<string, unknown> = {}) {
   const home = mkdtempSync(join(tmpdir(), 'hermes-coding-agent-launch-'))
   homes.push(home)
   process.env.HERMES_WEB_UI_HOME = home
@@ -72,6 +73,7 @@ function makeHome() {
         base_url: 'https://api.example.com/v1',
         api_key: 'sk-restored-upstream',
         api_mode: 'codex_responses',
+        ...networkSettings,
       }],
     }),
     safeReadFile: async filePath => existsSync(filePath) ? readFileSync(filePath, 'utf-8') : null,
@@ -140,6 +142,59 @@ function makeProxyContext(routeKey: string, token: string, body: any): any {
 }
 
 describe('coding agent launch preparation', () => {
+  it.each(['codex', 'pi'] as const)('restores current %s network options without persisting proxy credentials', async agentId => {
+    const settings: Record<string, unknown> = {
+      extra_headers: { 'X-Route': 'current' },
+      preserve_client_identity: true,
+      proxy_url: 'http://user:fixture-proxy-password@proxy.example:8080',
+    }
+    const home = makeHome(settings)
+    if (agentId === 'pi') {
+      const adapterEntry = join(home, 'coding-agent', 'pi-mcp-adapter', 'node_modules', 'pi-mcp-adapter', 'index.ts')
+      mkdirSync(dirname(adapterEntry), { recursive: true })
+      writeFileSync(adapterEntry, 'export default {}')
+    }
+    const launch = await prepareCodingAgentLaunch(agentId, {
+      profile: 'default', provider: 'custom:test', model: 'test-model',
+      baseUrl: 'https://api.example.com/v1', apiKey: 'fixture-upstream-key', apiMode: 'codex_responses',
+      sessionId: 'network-chat', agentSessionId: 'network-agent',
+      extraHeaders: { 'X-Route': 'old' }, preserveClientIdentity: false,
+      proxyUrl: 'http://old:fixture-old-password@proxy.example:8080',
+    })
+    const runtimeFile = agentId === 'pi' ? 'models.json' : 'config.toml'
+    const runtimeText = readFileSync(join(launch.rootDir, runtimeFile), 'utf8')
+    const runtime = agentId === 'pi'
+      ? JSON.parse(runtimeText).providers['hermes-studio']
+      : (parseToml(runtimeText).model_providers as any).custom
+    const routeKey = new URL(runtime.baseUrl || runtime.base_url).pathname.split('/')[3]!
+    const token = runtime.apiKey || runtime.experimental_bearer_token
+    const persisted = agentId === 'pi'
+      ? readFileSync(join(launch.rootDir, 'proxy-target.json'), 'utf8')
+      : runtimeText
+    expect(persisted).not.toContain('fixture-old-password')
+    expect(persisted).not.toContain('fixture-proxy-password')
+    expect(Buffer.from(routeKey, 'base64url').toString()).not.toContain('password')
+    const fetch = vi.spyOn(providerNetwork, 'fetchProvider').mockImplementation(async () =>
+      new Response(JSON.stringify({ id: 'reply', output: [] })))
+    const restore = agentId === 'pi' ? restorePersistedPiProxyTargets : restorePersistedCodexProxyTargets
+
+    for (const clear of [false, true]) {
+      if (clear) for (const key of Object.keys(settings)) delete settings[key]
+      revokeCodexProxyTargets()
+      await expect(restore()).resolves.toBe(1)
+      const ctx = makeProxyContext(routeKey, token, { model: 'test-model', input: 'hello' })
+      const get = ctx.get.bind(ctx)
+      ctx.get = (name: string) => name.toLowerCase() === 'user-agent' ? 'fixture-client/1.0' : get(name)
+      await codexProxyResponses(ctx)
+      const [, init, proxyUrl] = fetch.mock.calls.at(-1)!
+      expect(proxyUrl).toBe(clear ? undefined : settings.proxy_url)
+      const headers = new Headers(init!.headers)
+      expect(headers.get('x-route')).toBe(clear ? null : 'current')
+      expect(headers.get('user-agent')).toBe(!clear && agentId === 'codex' ? 'fixture-client/1.0' : null)
+    }
+    revokeCodexProxyTargets()
+  })
+
   it('maps Grok system input messages to Responses developer messages', () => {
     const body = {
       instructions: 'Keep top-level instructions.',

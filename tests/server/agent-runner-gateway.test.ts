@@ -6,6 +6,56 @@ afterEach(() => {
 })
 
 describe('agent run gateway', () => {
+  it('does not start an already-cancelled request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}'))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(new AgentRunGateway().completeJson({
+      url: 'https://provider.example/v1/responses', apiKey: 'test-key',
+      body: {}, signal: AbortSignal.abort(),
+    })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('retries a classified connection failure but not arbitrary error text', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } }))
+      .mockResolvedValueOnce(new Response('{"ok":true}'))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(new AgentRunGateway().completeJson({
+      url: 'https://provider.example/v1/responses', apiKey: 'test-key', body: {},
+    })).resolves.toEqual({ ok: true })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    fetchMock.mockReset().mockRejectedValue(new Error('response body contains ECONNREFUSED'))
+    await expect(new AgentRunGateway().completeJson({
+      url: 'https://provider.example/v1/responses', apiKey: 'test-key', body: {},
+    })).rejects.toThrow('response body')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['ECONNRESET', 'UND_ERR_SOCKET', 'EPROTO', 'CERT_HAS_EXPIRED'])('does not replay requests on %s', async code => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed', { cause: { code } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(new AgentRunGateway().completeJson({
+      url: 'https://provider.example/v1/responses', apiKey: 'test-key', body: {},
+    })).rejects.toThrow('fetch failed')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts a pending retry without sending another request', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = new AgentRunGateway().completeJson({
+      url: 'https://provider.example/v1/responses', apiKey: 'test-key', body: {}, signal: controller.signal,
+    })
+    const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    controller.abort()
+    await rejection
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('shares OpenCode affinity across protocols and retries for one conversation', async () => {
     const fetchMock = vi.fn(async (_url: string | URL, init?: RequestInit) => {
       const stream = JSON.parse(String(init?.body)).stream

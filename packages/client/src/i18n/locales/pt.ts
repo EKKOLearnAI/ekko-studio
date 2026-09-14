@@ -1463,6 +1463,10 @@ jobTriggered: 'Job acionado',
 
   // Models
   models: {
+    preserveClientIdentity: 'Preservar a identidade do cliente Codex / Claude',
+    providerProxyUrl: 'URL do proxy do provedor (HTTP / HTTPS)',
+    providerExtraHeaders: 'Cabeçalhos de solicitação adicionais (JSON)',
+    extraHeadersInvalid: 'Os cabeçalhos adicionais devem ser um objeto JSON com valores de texto.',
     opencodeFreeHint: "Não é necessária conta nem chave API. Os modelos gratuitos podem ter limites de uso.",
     opencodeFreeLoading: "Carregando modelos gratuitos em segundo plano…",
     opencodeFreeRetry: "Falha na verificação ou atualização do catálogo. Nova tentativa automática; o cache será mantido.",

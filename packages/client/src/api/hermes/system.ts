@@ -90,6 +90,9 @@ export type ProviderEditableField =
   | 'request_timeout_seconds'
   | 'stale_timeout_seconds'
   | 'extra_body'
+  | 'extra_headers'
+  | 'preserve_client_identity'
+  | 'proxy_url'
 export type ProviderCredentialAction = 'keep' | 'replace' | 'clear'
 
 export interface ProviderEditorDetail {
@@ -110,6 +113,9 @@ export interface ProviderEditorDetail {
   request_timeout_seconds?: number
   stale_timeout_seconds?: number
   extra_body?: Record<string, unknown>
+  extra_headers?: Record<string, string>
+  preserve_client_identity?: boolean
+  proxy_url?: string
   connection_test_supported: boolean
   connection_test_reason?: string
   revision: string
@@ -127,6 +133,9 @@ export interface ProviderEditorPatch {
   request_timeout_seconds?: number | null
   stale_timeout_seconds?: number | null
   extra_body?: Record<string, unknown> | null
+  extra_headers?: Record<string, string> | null
+  preserve_client_identity?: boolean | null
+  proxy_url?: string | null
 }
 
 export interface ProviderEditorResponse {

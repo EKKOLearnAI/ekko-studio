@@ -1463,6 +1463,10 @@ export default {
 
   // 모델
   models: {
+    preserveClientIdentity: 'Codex / Claude 클라이언트 식별 정보 유지',
+    providerProxyUrl: '공급자 프록시 URL (HTTP / HTTPS)',
+    providerExtraHeaders: '추가 요청 헤더 (JSON)',
+    extraHeadersInvalid: '추가 헤더는 문자열 값을 가진 JSON 객체여야 합니다.',
     opencodeFreeHint: "계정이나 API 키가 필요하지 않습니다. 무료 모델은 사용량이 제한될 수 있습니다.",
     opencodeFreeLoading: "백그라운드에서 무료 모델을 불러오는 중…",
     opencodeFreeRetry: "제공자 확인 또는 목록 갱신에 실패했습니다. 캐시를 유지하고 자동으로 다시 시도합니다.",

@@ -54,6 +54,9 @@ const rateLimitDelay = ref<number | null>(null)
 const requestTimeoutSeconds = ref<number | null>(null)
 const staleTimeoutSeconds = ref<number | null>(null)
 const extraBodyText = ref('')
+const extraHeadersText = ref('')
+const preserveClientIdentity = ref(false)
+const proxyUrl = ref('')
 
 const providerLabelInputProps = {
   name: 'provider-display-name',
@@ -81,6 +84,15 @@ const providerCredentialInputProps = {
   'data-form-type': 'other',
   'data-1p-ignore': 'true',
   'data-lpignore': 'true',
+}
+const providerProxyInputProps = {
+  ...providerCredentialInputProps,
+  name: 'provider-proxy-url',
+}
+const providerExtraHeadersInputProps = {
+  name: 'provider-extra-headers',
+  autocomplete: 'off',
+  spellcheck: false,
 }
 
 const API_MODE_OPTIONS = [
@@ -118,6 +130,9 @@ function resetDraft(next: ProviderEditorDetail) {
   requestTimeoutSeconds.value = next.request_timeout_seconds ?? null
   staleTimeoutSeconds.value = next.stale_timeout_seconds ?? null
   extraBodyText.value = next.extra_body ? JSON.stringify(next.extra_body, null, 2) : ''
+  extraHeadersText.value = next.extra_headers ? JSON.stringify(next.extra_headers, null, 2) : ''
+  preserveClientIdentity.value = next.preserve_client_identity ?? false
+  proxyUrl.value = next.proxy_url || ''
   const contexts: Record<string, number | null> = {}
   for (const model of new Set([...modelIds.value, ...Object.keys(next.context_lengths)])) {
     contexts[model] = next.context_lengths[model] ?? null
@@ -154,6 +169,18 @@ function parseExtraBody(): Record<string, unknown> | null {
   return value as Record<string, unknown>
 }
 
+function parseExtraHeaders(): Record<string, string> | null {
+  const raw = extraHeadersText.value.trim()
+  if (!raw) return null
+  let value: unknown
+  try { value = JSON.parse(raw) } catch { throw new Error(t('models.extraHeadersInvalid')) }
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.values(value).some(item => typeof item !== 'string')) {
+    throw new Error(t('models.extraHeadersInvalid'))
+  }
+  return value as Record<string, string>
+}
+
 function buildPatch(): ProviderEditorPatch {
   const patch: ProviderEditorPatch = {}
   if (can('label')) patch.label = label.value.trim()
@@ -180,6 +207,16 @@ function buildPatch(): ProviderEditorPatch {
     if (can('extra_body')) {
       const nextExtraBody = parseExtraBody()
       if (JSON.stringify(nextExtraBody) !== JSON.stringify(detail.value.extra_body ?? null)) patch.extra_body = nextExtraBody
+    }
+    if (can('extra_headers')) {
+      const nextHeaders = parseExtraHeaders()
+      if (JSON.stringify(nextHeaders) !== JSON.stringify(detail.value.extra_headers ?? null)) patch.extra_headers = nextHeaders
+    }
+    if (can('preserve_client_identity') && preserveClientIdentity.value !== (detail.value.preserve_client_identity ?? false)) {
+      patch.preserve_client_identity = preserveClientIdentity.value
+    }
+    if (can('proxy_url') && proxyUrl.value.trim() !== (detail.value.proxy_url || '')) {
+      patch.proxy_url = proxyUrl.value.trim() || null
     }
   }
   return patch
@@ -393,7 +430,7 @@ async function clearCredentialNow() {
         </section>
 
         <details
-          v-if="can('discover_models') || can('rate_limit_delay') || can('request_timeout_seconds') || can('stale_timeout_seconds') || can('extra_body')"
+          v-if="can('discover_models') || can('rate_limit_delay') || can('request_timeout_seconds') || can('stale_timeout_seconds') || can('extra_body') || can('extra_headers') || can('preserve_client_identity') || can('proxy_url')"
           class="context-section"
         >
           <summary>{{ t('models.providerAdvancedSettings') }}</summary>
@@ -401,6 +438,29 @@ async function clearCredentialNow() {
             <NCheckbox v-if="can('discover_models')" v-model:checked="discoverModels">
               {{ t('models.discoverModels') }}
             </NCheckbox>
+            <NCheckbox v-if="can('preserve_client_identity')" v-model:checked="preserveClientIdentity">
+              {{ t('models.preserveClientIdentity') }}
+            </NCheckbox>
+            <label v-if="can('proxy_url')" class="field">
+              <span>{{ t('models.providerProxyUrl') }}</span>
+              <NInput
+                v-model:value="proxyUrl"
+                type="password"
+                show-password-on="click"
+                :input-props="providerProxyInputProps"
+                placeholder="http://127.0.0.1:8080"
+              />
+            </label>
+            <label v-if="can('extra_headers')" class="field">
+              <span>{{ t('models.providerExtraHeaders') }}</span>
+              <NInput
+                v-model:value="extraHeadersText"
+                type="textarea"
+                :input-props="providerExtraHeadersInputProps"
+                :autosize="{ minRows: 3, maxRows: 10 }"
+                placeholder="{}"
+              />
+            </label>
             <label v-if="can('rate_limit_delay')" class="field">
               <span>{{ t('models.rateLimitDelay') }}</span>
               <NInputNumber v-model:value="rateLimitDelay" :min="0.001" :max="86400" clearable />

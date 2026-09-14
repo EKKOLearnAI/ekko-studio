@@ -136,6 +136,58 @@ describe('coding agent resumed session config', () => {
     expect(settings.env.ANTHROPIC_API_KEY).toBe(launch.env.ANTHROPIC_API_KEY)
   })
 
+  it.each(['custom_providers', 'providers'])('restores and clears %s network settings even with explicit credentials', async schema => {
+    makeHome()
+    getSessionMock.mockReturnValue({
+      id: 'network-session', profile: 'work', source: 'coding_agent', agent: 'claude',
+      agent_session_id: 'network-agent', provider: 'custom:network', model: 'model',
+    })
+    const entry = {
+      base_url: 'https://provider.example/v1', api_key: 'stored-key', api_mode: 'anthropic_messages',
+      extra_headers: { 'X-Custom': 'saved-header' },
+      preserve_client_identity: true, proxy_url: 'http://proxy.example:8080',
+    }
+    const config = schema === 'providers' ? { providers: { network: entry } } : { custom_providers: [{ name: 'network', ...entry }] }
+    readConfigYamlForProfileMock.mockResolvedValue(config)
+    safeReadFileMock.mockResolvedValue('')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
+    const { claudeProxyMessages } = await import('../../packages/server/src/modules/coding-agents/services/claude-code/proxy')
+    const { agentRunGateway } = await import('../../packages/server/src/modules/coding-agents/protocol/gateway')
+    const complete = vi.spyOn(agentRunGateway, 'completeJson').mockResolvedValue({ id: 'test', content: [] })
+    try {
+      for (const enabled of [true, false]) {
+        if (!enabled) {
+          const cleared = { base_url: entry.base_url, api_key: entry.api_key, api_mode: entry.api_mode, preserve_client_identity: false }
+          readConfigYamlForProfileMock.mockResolvedValue(schema === 'providers'
+            ? { providers: { network: cleared } }
+            : { custom_providers: [{ name: 'network', ...cleared }] })
+        }
+        await startCodingAgentRun('claude-code', {
+          sessionId: 'network-session', baseUrl: entry.base_url,
+          apiKey: 'explicit-key', apiMode: 'anthropic_messages',
+        })
+        const launch = startRunMock.mock.calls.at(-1)![0]
+        const ctx: any = {
+          params: { key: new URL(launch.env.ANTHROPIC_BASE_URL).pathname.split('/').at(-1) },
+          request: { body: { model: 'model', messages: [{ role: 'user', content: 'hello' }] } },
+          get: (name: string) => name.toLowerCase() === 'authorization'
+            ? `Bearer ${launch.env.ANTHROPIC_API_KEY}`
+            : name.toLowerCase() === 'user-agent' ? 'live-claude-client' : '',
+          set: vi.fn(),
+        }
+        await claudeProxyMessages(ctx)
+        const request = complete.mock.calls.at(-1)![0]
+        expect(request.apiKey).toBe('explicit-key')
+        expect(request.proxyUrl).toBe(enabled ? 'http://proxy.example:8080' : undefined)
+        expect(new Headers(request.headers).get('x-custom')).toBe(enabled ? 'saved-header' : null)
+        expect(new Headers(request.headers).get('user-agent')).toBe(enabled ? 'live-claude-client' : null)
+        expect(readConfigYamlForProfileMock).toHaveBeenCalledWith('work')
+      }
+    } finally {
+      complete.mockRestore()
+    }
+  })
+
   it('recovers legacy sanitized custom provider keys from existing sessions', async () => {
     const home = makeHome()
     getSessionMock.mockReturnValue({

@@ -23,7 +23,7 @@ const KNOWN_KEYS = new Set([
   'models',
   'context_length', 'rate_limit_delay',
   'request_timeout_seconds', 'stale_timeout_seconds',
-  'discover_models', 'extra_body',
+  'discover_models', 'extra_body', 'extra_headers', 'preserve_client_identity', 'proxy_url', 'proxy',
 ])
 
 const CAMEL_ALIASES: Record<string, string> = {
@@ -35,6 +35,10 @@ const CAMEL_ALIASES: Record<string, string> = {
   defaultModel: 'default_model',
   contextLength: 'context_length',
   rateLimitDelay: 'rate_limit_delay',
+  extraHeaders: 'extra_headers',
+  preserveClientIdentity: 'preserve_client_identity',
+  proxyUrl: 'proxy_url',
+  proxy: 'proxy_url',
 }
 
 type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
@@ -53,6 +57,9 @@ export interface NormalizedCustomProvider {
   rate_limit_delay?: number
   discover_models?: boolean
   extra_body?: Record<string, any>
+  extra_headers?: Record<string, string>
+  preserve_client_identity?: boolean
+  proxy_url?: string
 }
 
 function looksLikeUrl(value: string): boolean {
@@ -177,6 +184,13 @@ export function normalizeCustomProviderEntry(
   if (e.extra_body && typeof e.extra_body === 'object' && !Array.isArray(e.extra_body)) {
     normalized.extra_body = { ...e.extra_body }
   }
+  if (e.extra_headers && typeof e.extra_headers === 'object' && !Array.isArray(e.extra_headers)) {
+    normalized.extra_headers = Object.fromEntries(Object.entries(e.extra_headers)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      .map(([name, value]) => [name.toLowerCase(), value]))
+  }
+  if (typeof e.preserve_client_identity === 'boolean') normalized.preserve_client_identity = e.preserve_client_identity
+  if (typeof e.proxy_url === 'string' && e.proxy_url.trim()) normalized.proxy_url = e.proxy_url.trim()
 
   // Surface unknown keys in the logs — same intent as Agent's warning, kept
   // soft so unfamiliar fields don't break callers.

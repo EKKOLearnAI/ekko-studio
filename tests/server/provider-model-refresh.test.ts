@@ -34,6 +34,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
+  vi.doUnmock('../../packages/server/src/modules/hermes/services/providers/authorized-provider-credentials')
   vi.unstubAllGlobals()
   vi.resetModules()
   rmSync(hermesHome, { recursive: true, force: true })
@@ -45,6 +47,64 @@ afterEach(() => {
 })
 
 describe('provider model refresh', () => {
+  it.each(['custom_providers', 'providers'])('uses profile-scoped %s network options in both refresh paths and honors clearing', async schema => {
+    const networkConfig = [
+      '    extra_headers:',
+      '      X-Route: research',
+      '    proxy_url: http://user:proxy-password@127.0.0.1:8080',
+    ]
+    const config = (network: string[]) => [
+      schema === 'providers' ? 'providers:' : 'custom_providers:',
+      schema === 'providers' ? '  network:' : '  - name: network',
+      '    base_url: https://provider.example/v1',
+      '    api_key: test-key',
+      '    api_mode: anthropic_messages',
+      '    model: model-a',
+      ...network,
+      '',
+    ].join('\n')
+    writeProfile('research', config(networkConfig))
+    writeProfile('other', config([]))
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Unexpected direct fetch')))
+    const transport = await import('../../packages/server/src/modules/studio/public/provider-network')
+    const fetchMock = vi.spyOn(transport, 'fetchProvider').mockImplementation(async () => new Response(
+      JSON.stringify({ data: [{ id: 'model-a' }, { id: 'model-b' }] }),
+      { headers: { 'content-type': 'application/json' } },
+    ))
+    const { refreshProviderModels } = await loadRefresh()
+    const { resolveProviderCatalogRefreshTarget, fetchProviderCatalogRefreshTargetModels } = await import(
+      '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
+    )
+
+    const target = await resolveProviderCatalogRefreshTarget('research', 'custom:network')
+    expect(target).toMatchObject({
+      extra_headers: { 'x-route': 'research' },
+      proxy_url: 'http://user:proxy-password@127.0.0.1:8080',
+    })
+    await refreshProviderModels('research', 'custom:network', { confirm: true })
+    await fetchProviderCatalogRefreshTargetModels(target!)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    for (const [, init, proxyUrl] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('x-route')).toBe('research')
+      expect(new Headers(init?.headers).get('x-api-key')).toBe('test-key')
+      expect(new Headers(init?.headers).get('anthropic-version')).toBe('2023-06-01')
+      expect(proxyUrl).toBe('http://user:proxy-password@127.0.0.1:8080')
+    }
+    const cache = readFileSync(join(webUiHome, 'cache', 'provider-model-catalog.json'), 'utf8')
+    expect(cache).not.toContain('proxy-password')
+    expect(cache).not.toContain('x-route')
+
+    fetchMock.mockClear()
+    await refreshProviderModels('other', 'custom:network', { confirm: true })
+    writeProfile('research', config([]))
+    await refreshProviderModels('research', 'custom:network', { confirm: true })
+    for (const [, init, proxyUrl] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).has('x-route')).toBe(false)
+      expect(proxyUrl).toBeUndefined()
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('requires confirmation when remote list would delete models, then applies authoritatively', async () => {
     const credential = ['refresh', 'credential'].join('-')
     writeProfile('research', [
@@ -146,6 +206,12 @@ describe('provider model refresh', () => {
   })
 
   it('preserves the xAI OAuth list when the shared global refresh probe returns empty', async () => {
+    vi.doMock('../../packages/server/src/modules/hermes/services/providers/authorized-provider-credentials', () => ({
+      resolveAuthorizedProviderRuntimeCredentials: vi.fn().mockResolvedValue({
+        apiKey: 'profile-xai-token',
+        baseUrl: 'https://api.x.ai/v1',
+      }),
+    }))
     writeProfile(
       'research',
       [
