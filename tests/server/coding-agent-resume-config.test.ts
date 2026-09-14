@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { delimiter, join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const getSessionMock = vi.fn()
@@ -35,6 +35,8 @@ vi.doMock('../../packages/server/src/modules/coding-agents/services/runtime/run-
 }))
 
 const homes: string[] = []
+const originalPath = process.env.PATH
+const originalNpmConfigPrefix = process.env.NPM_CONFIG_PREFIX
 
 function makeHome() {
   const home = mkdtempSync(join(tmpdir(), 'hermes-coding-agent-resume-'))
@@ -62,7 +64,37 @@ describe('coding agent resumed session config', () => {
 
   afterEach(() => {
     delete process.env.HERMES_WEB_UI_HOME
+    if (typeof originalPath === 'undefined') delete process.env.PATH
+    else process.env.PATH = originalPath
+    if (typeof originalNpmConfigPrefix === 'undefined') delete process.env.NPM_CONFIG_PREFIX
+    else process.env.NPM_CONFIG_PREFIX = originalNpmConfigPrefix
     for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
+  })
+
+  it('adds the npm global bin to the POSIX Codex runtime PATH', async () => {
+    if (process.platform === 'win32') return
+    const home = makeHome()
+    const npmPrefix = join(home, 'coding-agent', 'npm')
+    process.env.NPM_CONFIG_PREFIX = npmPrefix
+    process.env.PATH = '/usr/bin:/bin'
+    getSessionMock.mockReturnValue(null)
+    readConfigYamlForProfileMock.mockResolvedValue({})
+    safeReadFileMock.mockResolvedValue('')
+
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
+    await startCodingAgentRun('codex', {
+      sessionId: 'session-path',
+      mode: 'global',
+      profile: 'default',
+    })
+
+    const launch = startRunMock.mock.calls[0][0]
+    const entries = String(launch.env.PATH || '').split(delimiter)
+    expect(launch.command).toBe('codex')
+    expect(entries[0]).toBe(join(npmPrefix, 'bin'))
+    expect(entries).toContain('/usr/bin')
+    expect(entries).toContain('/bin')
+    expect(entries.filter((entry: string) => entry === join(npmPrefix, 'bin'))).toHaveLength(1)
   })
 
   it('rebuilds Claude scoped proxy credentials from stored provider config after restart', async () => {
@@ -375,10 +407,10 @@ describe('coding agent resumed session config', () => {
       nativeResume: false,
       provider: 'global',
       model: '',
-      env: {
+      env: expect.objectContaining({
         HERMES_STUDIO_SESSION_ID: 'session-1',
         CODEX_HOME: expect.stringContaining(join('coding-agent', 'model', 'default', 'global', 'codex', 'runs')),
-      },
+      }),
       args: [],
       promptFile: expect.stringContaining(join('AGENTS.md')),
     }))
