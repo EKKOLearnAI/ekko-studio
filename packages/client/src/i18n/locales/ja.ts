@@ -442,6 +442,7 @@ export default {
     subtitle: 'このデバイスで利用可能なエージェントを検出・管理します。',
     refresh: '更新',
     hermesDescription: 'Hermes は、Studio 管理の Runtime またはユーザーがインストールしたローカル CLI を使用できます。',
+    hermesSettings: 'Hermes を設定',
     managedRuntime: 'Hermes Runtime',
     managedRuntimeHint: 'Studio は完全な Runtime パッケージのみをインストール・管理し、Hermes CLI を個別にはインストールしません。',
     studioManaged: 'Studio 管理',

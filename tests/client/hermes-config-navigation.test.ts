@@ -96,5 +96,6 @@ describe("Hermes configuration navigation", () => {
       "router.push({ name: 'hermes.configSettings' })",
     );
     expect(agentManager).toContain('v-if="hermesDetected"');
+    expect(agentManager).toContain("t('agentManager.hermesSettings')");
   });
 });
