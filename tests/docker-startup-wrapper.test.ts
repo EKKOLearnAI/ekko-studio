@@ -40,6 +40,23 @@ describe('Docker startup wrapper', () => {
     await expect(import('node:fs/promises').then(fs => fs.readFile(marker, 'utf8'))).resolves.toBe('patch\nnode\n')
   })
 
+  it('continues when an explicitly configured optional Hermes patch is missing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hermes-startup-'))
+    const fakeBin = join(root, 'bin')
+    await mkdir(fakeBin)
+    await writeFile(join(fakeBin, 'node'), '#!/usr/bin/env bash\nprintf "node-started\\n"\n', { mode: 0o755 })
+
+    const result = await runWrapper({
+      ...process.env,
+      HERMES_PATCH_SCRIPT: join(root, 'missing-patch.sh'),
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    })
+
+    expect(result.code).toBe(0)
+    expect(result.stdout).toBe('node-started\n')
+    expect(result.stderr).toContain('optional Hermes patch not found')
+  })
+
   it('runs a compatible patch before starting the server and forwards arguments', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-startup-'))
     const fakeBin = join(root, 'bin')
