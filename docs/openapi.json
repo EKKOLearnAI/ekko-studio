@@ -9909,7 +9909,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "custom"
+              ]
             }
           }
         ]
@@ -10035,7 +10038,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "custom"
+              ]
             }
           }
         ]
@@ -22063,24 +22069,6 @@
         }
       }
     },
-    "/api/hermes/terminal": {
-      "get": {
-        "tags": [
-          "Terminal"
-        ],
-        "summary": "WebSocket terminal connection",
-        "description": "Establish a WebSocket connection for interactive terminal access. Uses the `ws` or `wss` protocol with `?token=` for authentication.",
-        "operationId": "terminalWebSocket",
-        "responses": {
-          "101": {
-            "description": "Switching Protocols - WebSocket connection established"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
     "/api/studio/task-plans/update": {
       "post": {
         "tags": [
@@ -22163,6 +22151,24 @@
           },
           "503": {
             "description": "Chat run service unavailable."
+          }
+        }
+      }
+    },
+    "/api/hermes/terminal": {
+      "get": {
+        "tags": [
+          "Terminal"
+        ],
+        "summary": "WebSocket terminal connection",
+        "description": "Establish a WebSocket connection for interactive terminal access. Uses the `ws` or `wss` protocol with `?token=` for authentication.",
+        "operationId": "terminalWebSocket",
+        "responses": {
+          "101": {
+            "description": "Switching Protocols - WebSocket connection established"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           }
         }
       }
