@@ -20,4 +20,13 @@ describe('Windows desktop main window', () => {
     expect(createWindowBody).not.toContain('transparent: true')
     expect(petWindowBody).toContain('transparent: true')
   })
+
+  it('shows the desktop window without stealing focus on the automatic ready-to-show path', () => {
+    const source = readFileSync(resolve('packages/desktop/src/main/index.ts'), 'utf8')
+    const createWindowBody = source.match(/async function createWindow\(\): Promise<void> \{([\s\S]*?)\n\}/)?.[1] || ''
+    const showWindowBody = source.match(/function showWindowWithFade\(focus = true\) \{([\s\S]*?)\n\}/)?.[1] || ''
+
+    expect(createWindowBody).toContain('showWindowWithFade(false)')
+    expect(showWindowBody).toContain('mainWindow.showInactive()')
+  })
 })
