@@ -22,5 +22,5 @@ authProtectedRoutes.get('/api/auth/users', requireSuperAdmin, ctrl.listManagedUs
 authProtectedRoutes.post('/api/auth/users', requireSuperAdmin, ctrl.createManagedUser)
 authProtectedRoutes.put('/api/auth/users/:id', requireSuperAdmin, ctrl.updateManagedUser)
 authProtectedRoutes.delete('/api/auth/users/:id', requireSuperAdmin, ctrl.deleteManagedUser)
-authProtectedRoutes.get('/api/auth/locked-ips', ctrl.listLockedIps)
-authProtectedRoutes.delete('/api/auth/locked-ips', ctrl.unlockIpHandler)
+authProtectedRoutes.get('/api/auth/locked-ips', requireSuperAdmin, ctrl.listLockedIps)
+authProtectedRoutes.delete('/api/auth/locked-ips', requireSuperAdmin, ctrl.unlockIpHandler)
