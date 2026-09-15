@@ -3881,9 +3881,13 @@ async function startCodingAgentRunInternal(
       logger.warn({ err, agentId: id, runtimeMcpPath }, '[coding-agent-mcp] runtime isolation failed open')
     }
   }
+  const desktopPathEnv = process.env.HERMES_DESKTOP === 'true' && process.platform !== 'win32'
+    ? { PATH: (await commandEnv()).PATH }
+    : {}
   const commandExecutionEnv = {
     ...(await commandEnv()),
     ...launch.env,
+    ...desktopPathEnv,
   }
   const runtimeCommand = process.platform === 'win32'
     ? await resolveCommandForExecution(launch.command, commandExecutionEnv)
