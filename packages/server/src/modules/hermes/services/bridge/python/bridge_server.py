@@ -31,12 +31,38 @@ from bridge_transport import _make_listen_socket, _read_json_request, _write_jso
 class BridgeServer:
     IDLE_TIMEOUT_SECONDS = 30 * 60  # 30 minutes
     GC_INTERVAL_SECONDS = 60  # check every minute
+    REQUEST_LOCK_STRIPES = 64
+    CONTROL_ACTIONS = {
+        "interrupt",
+        "request_boundary_interrupt",
+        "steer",
+        "approval_respond",
+        "clarify_respond",
+        "compression_respond",
+        "goal_pause",
+        "destroy",
+    }
 
     def __init__(self, endpoint: str) -> None:
         self.endpoint = endpoint
         self.pool = AgentPool()
         self._stop = threading.Event()
         self._last_gc = time.time()
+        self._request_locks = [threading.Lock() for _ in range(self.REQUEST_LOCK_STRIPES)]
+
+    def _request_lock(self, req: dict[str, Any]) -> threading.Lock | None:
+        if str(req.get("action") or "").strip() in self.CONTROL_ACTIONS:
+            return None
+        session_id = str(req.get("session_id") or "").strip()
+        if not session_id:
+            run_id = str(req.get("run_id") or "").strip()
+            if run_id:
+                with self.pool._lock:
+                    record = self.pool._runs.get(run_id)
+                session_id = str(record.session_id) if record is not None else ""
+        if not session_id:
+            return None
+        return self._request_locks[hash(session_id) % len(self._request_locks)]
 
     def handle(self, req: dict[str, Any]) -> dict[str, Any]:
         action = str(req.get("action") or "").strip()
@@ -745,6 +771,32 @@ class BridgeServer:
                 continue
             self.pool.destroy(sid)
 
+    def _handle_connection(self, conn: socket.socket) -> None:
+        try:
+            req = self._read_request(conn)
+            request_lock = self._request_lock(req)
+            if request_lock is None:
+                data = self.handle(req)
+            else:
+                with request_lock:
+                    data = self.handle(req)
+            resp = {"ok": True, **_jsonable(data)}
+        except Exception as exc:
+            resp = {
+                "ok": False,
+                "error": str(exc),
+                "error_type": exc.__class__.__name__,
+            }
+        try:
+            self._write_response(conn, resp)
+        except Exception as exc:
+            print(f"[hermes-bridge] response error: {exc}", file=sys.stderr, flush=True)
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
     def serve_forever(self) -> None:
         server = self._make_server_socket()
         restore_signals = _install_stop_signal_handlers(self._stop)
@@ -754,7 +806,7 @@ class BridgeServer:
             f"worker:{_worker_profile() or 'default'}",
         )
         try:
-            server.listen(16)
+            server.listen(1024)
             server.settimeout(0.2)
             print(json.dumps({"event": "ready", "endpoint": self.endpoint}), flush=True)
 
@@ -766,22 +818,16 @@ class BridgeServer:
                     except socket.timeout:
                         self._gc_idle_sessions()
                         continue
-                    try:
-                        req = self._read_request(conn)
-                        data = self.handle(req)
-                        resp = {"ok": True, **_jsonable(data)}
-                    except Exception as exc:
-                        resp = {
-                            "ok": False,
-                            "error": str(exc),
-                            "error_type": exc.__class__.__name__,
-                        }
-                    self._write_response(conn, resp)
+                    threading.Thread(
+                        target=self._handle_connection,
+                        args=(conn,),
+                        daemon=True,
+                        name="hermes-bridge-worker-connection",
+                    ).start()
                 except KeyboardInterrupt:
                     break
                 except Exception as exc:
                     print(f"[hermes-bridge] server loop error: {exc}", file=sys.stderr, flush=True)
-                finally:
                     if conn is not None:
                         try:
                             conn.close()

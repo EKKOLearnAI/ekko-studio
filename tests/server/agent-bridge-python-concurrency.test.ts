@@ -242,6 +242,119 @@ def wait_for(condition, timeout=20):
 `
 
 describe('agent bridge Python session concurrency', () => {
+  it('continues accepting worker requests while another request is running', () => {
+    runPython(String.raw`
+import importlib.util
+import json
+import socket
+import sys
+import threading
+import types
+
+ready = threading.Event()
+
+class ReadySocket(socket.socket):
+    def listen(self, backlog=0):
+        result = super().listen(backlog)
+        ready.set()
+        return result
+
+transport = types.ModuleType("bridge_transport")
+listener = ReadySocket(socket.AF_INET, socket.SOCK_STREAM)
+listener.bind(("127.0.0.1", 0))
+transport._make_listen_socket = lambda _endpoint: listener
+transport._read_json_request = lambda conn: json.loads(conn.recv(65536).split(b"\n", 1)[0])
+transport._write_json_response = lambda conn, response: conn.sendall((json.dumps(response) + "\n").encode())
+sys.modules["bridge_transport"] = transport
+
+runtime = types.ModuleType("bridge_runtime")
+runtime._agent_root = lambda: None
+runtime._apply_profile_env = lambda _profile: None
+runtime._ensure_agent_imports = lambda: None
+runtime._hermes_home = lambda: None
+runtime._install_stop_signal_handlers = lambda _stop: lambda: None
+runtime._jsonable = lambda value: value
+runtime._positive_int = lambda _value: None
+runtime._profile_env = lambda _profile: None
+runtime._profile_home = lambda _profile: None
+runtime._resolve_runtime = lambda *_args: {}
+runtime._restore_profile_env = lambda _original: None
+runtime._start_parent_process_watchdog = lambda *_args: None
+runtime._worker_profile = lambda: "default"
+sys.modules["bridge_runtime"] = runtime
+
+pool_module = types.ModuleType("bridge_pool")
+pool_module.AgentPool = type("AgentPool", (), {"__init__": lambda self: None})
+sys.modules["bridge_pool"] = pool_module
+
+spec = importlib.util.spec_from_file_location(
+    "bridge_server",
+    "packages/server/src/modules/hermes/services/bridge/python/bridge_server.py",
+)
+bridge_server = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(bridge_server)
+
+server = bridge_server.BridgeServer("tcp://127.0.0.1:0")
+started = threading.Event()
+release = threading.Event()
+server.handle = lambda request: (
+    (started.set(), release.wait(5), {"request": request["action"]})[2]
+    if request["action"] == "slow"
+    else {"request": request["action"]}
+)
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+assert ready.wait(2)
+port = listener.getsockname()[1]
+
+slow = socket.create_connection(("127.0.0.1", port), timeout=1)
+slow.sendall(b'{"action":"slow","session_id":"slow-session"}\n')
+assert started.wait(2)
+
+fast = socket.create_connection(("127.0.0.1", port), timeout=1)
+fast.settimeout(1)
+fast.sendall(b'{"action":"fast","session_id":"fast-session"}\n')
+response = json.loads(fast.recv(65536).split(b"\n", 1)[0])
+assert response == {"ok": True, "request": "fast"}
+
+release.set()
+slow.settimeout(2)
+slow_response = json.loads(slow.recv(65536).split(b"\n", 1)[0])
+assert slow_response == {"ok": True, "request": "slow"}
+
+same_started = threading.Event()
+same_release = threading.Event()
+server.handle = lambda request: (
+    (same_started.set(), same_release.wait(5), {"request": request["action"]})[2]
+    if request["action"] == "same-slow"
+    else {"request": request["action"]}
+)
+same_slow = socket.create_connection(("127.0.0.1", port), timeout=1)
+same_slow.sendall(b'{"action":"same-slow","session_id":"same-session"}\n')
+assert same_started.wait(2)
+same_fast = socket.create_connection(("127.0.0.1", port), timeout=1)
+same_fast.settimeout(0.2)
+same_fast.sendall(b'{"action":"same-fast","session_id":"same-session"}\n')
+try:
+    same_fast.recv(65536)
+    raise AssertionError("same-session request was not serialized")
+except TimeoutError:
+    pass
+same_release.set()
+same_slow.settimeout(2)
+same_fast.settimeout(2)
+assert json.loads(same_slow.recv(65536).split(b"\n", 1)[0]) == {"ok": True, "request": "same-slow"}
+assert json.loads(same_fast.recv(65536).split(b"\n", 1)[0]) == {"ok": True, "request": "same-fast"}
+server._stop.set()
+thread.join(timeout=2)
+slow.close()
+fast.close()
+same_slow.close()
+same_fast.close()
+`)
+  })
+
   it('denies only the interrupted session run generation approval queues', () => {
     runPython(String.raw`
 ${harness}
