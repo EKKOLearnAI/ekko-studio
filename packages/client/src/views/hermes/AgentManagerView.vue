@@ -513,7 +513,7 @@ onMounted(() => {
                 size="small"
                 @click="router.push({ name: 'hermes.configSettings' })"
               >
-                {{ t('sidebar.settings') }}
+                {{ t('agentManager.hermesSettings') }}
               </NButton>
               <NButton
                 v-if="hermesDetected && hermesType === 'CLI'"
