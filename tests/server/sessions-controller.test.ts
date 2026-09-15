@@ -1462,6 +1462,47 @@ describe('session conversations controller', () => {
     expect(ctx.body).toEqual({ error: 'pushEnabled must be a boolean' })
   })
 
+  it('archives accessible sessions in a batch and reports per-session failures', async () => {
+    getSessionMock.mockImplementation((id: string) => ({
+      id,
+      profile: 'default',
+      source: id === 'global-1' ? 'global_agent' : 'cli',
+    }))
+    localSetSessionArchivedMock.mockImplementation((id: string) => id !== 'failed-1')
+
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      request: { body: { ids: ['session-1', 'global-1', 'failed-1'], archived: true } },
+      state: {},
+      body: null,
+    }
+
+    await mod.batchArchive(ctx)
+
+    expect(localSetSessionArchivedMock).toHaveBeenCalledWith('session-1', true)
+    expect(localSetSessionArchivedMock).toHaveBeenCalledWith('failed-1', true)
+    expect(localSetSessionArchivedMock).not.toHaveBeenCalledWith('global-1', true)
+    expect(ctx.body).toEqual({
+      ok: true,
+      updated: 1,
+      failed: 2,
+      errors: [
+        { id: 'global-1', error: 'Global agent sessions cannot be archived' },
+        { id: 'failed-1', error: 'Failed to archive session' },
+      ],
+    })
+  })
+
+  it('rejects malformed batch archive requests', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { request: { body: { ids: [], archived: 'yes' } }, state: {}, body: null }
+
+    await mod.batchArchive(ctx)
+
+    expect(ctx.status).toBe(400)
+    expect(ctx.body).toEqual({ error: 'ids must be a non-empty array and archived must be a boolean' })
+  })
+
   it('lists and creates normalized global session categories', async () => {
     const category = { id: 1, name: 'Client Work', created_at: 1, updated_at: 1 }
     listSessionCategoriesMock.mockReturnValue([category])

@@ -136,6 +136,7 @@ function shouldAttachProfileHeader(path: string, options: RequestInit): boolean 
 function isProfileWideSessionCollection(pathname: string): boolean {
   return pathname === '/api/studio/sessions' ||
     pathname === '/api/studio/sessions/batch-delete' ||
+    pathname === '/api/studio/sessions/batch-archive' ||
     pathname === '/api/studio/search/sessions' ||
     pathname === '/api/studio/sessions/search' ||
     pathname === '/api/studio/sessions/conversations'

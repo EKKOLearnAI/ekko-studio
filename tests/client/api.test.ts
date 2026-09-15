@@ -16,7 +16,7 @@ import { getApiKey, setApiKey, clearApiKey, hasApiKey, getStoredUserRole, isStor
 import { downloadFile, getDownloadUrl } from '../../packages/client/src/api/studio/download'
 import { uploadFiles } from '../../packages/client/src/api/studio/files'
 import { importSkill } from '../../packages/client/src/api/hermes/skills'
-import { archiveSession, batchDeleteSessions, exportSession, fetchHermesSessionGroups, fetchHermesSessionPage, importHermesSession, unarchiveSession } from '../../packages/client/src/api/studio/sessions'
+import { archiveSession, batchArchiveSessions, batchDeleteSessions, exportSession, fetchHermesSessionGroups, fetchHermesSessionPage, importHermesSession, unarchiveSession } from '../../packages/client/src/api/studio/sessions'
 import router from '@/router'
 
 function fakeJwt(payload: Record<string, unknown>) {
@@ -438,6 +438,22 @@ describe('API Client', () => {
           { id: 'session-travel', profile: 'travel' },
         ],
       })
+    })
+
+    it('sends selected session ids and the requested archive state for batch archive updates', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ updated: 2, failed: 0, errors: [] }),
+      })
+
+      await batchArchiveSessions(['session-1', 'session-2'], true)
+
+      const [url, options] = mockFetch.mock.calls[0]
+      expect(url).toBe('/api/hermes/sessions/batch-archive')
+      expect(options.method).toBe('POST')
+      expect(options.headers['X-Hermes-Profile']).toBeUndefined()
+      expect(JSON.parse(options.body)).toEqual({ ids: ['session-1', 'session-2'], archived: true })
     })
 
     it('sends the profile selector when importing a Hermes session', async () => {

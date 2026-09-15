@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue";
 import {
+  batchArchiveSessions,
   batchDeleteSessions,
   createSessionCategory,
   deleteSessionCategory,
@@ -150,6 +151,7 @@ const isBatchMode = ref(false);
 const selectedSessionKeys = ref<Set<string>>(new Set());
 const showBatchDeleteConfirm = ref(false);
 const isBatchDeleting = ref(false);
+const isBatchArchiving = ref(false);
 
 // Initialize synchronously from the media query so first paint is correct.
 // On narrow viewports the session list is an absolute-positioned overlay
@@ -1619,7 +1621,7 @@ async function handleDeleteSession(id: string) {
 }
 
 function toggleBatchMode() {
-  if (isBatchDeleting.value) return;
+  if (isBatchDeleting.value || isBatchArchiving.value) return;
   isBatchMode.value = !isBatchMode.value;
   if (!isBatchMode.value) {
     selectedSessionKeys.value.clear();
@@ -1705,6 +1707,35 @@ function selectAllSessions() {
 }
 
 const selectedCount = computed(() => selectedSessionKeys.value.size);
+const selectedSessions = computed(() => {
+  const keys = selectedSessionKeys.value;
+  return chatStore.sessions.filter(session => keys.has(sessionSelectionKey(session)));
+});
+const batchArchiveTargets = computed(() =>
+  selectedSessions.value.filter(session => session.source !== "global_agent" && !session.isArchived),
+);
+
+async function handleBatchArchive() {
+  const targets = batchArchiveTargets.value;
+  if (targets.length === 0 || isBatchArchiving.value || isBatchDeleting.value) return;
+  isBatchArchiving.value = true;
+  try {
+    const result = await batchArchiveSessions(targets.map(session => session.id), true);
+    if (result.updated > 0) {
+      await chatStore.loadSessions(chatStore.sessionProfileFilter);
+      message.success(t("chat.batchArchiveSuccess", { count: result.updated }));
+      if (result.failed > 0) message.warning(t("chat.batchArchivePartial", { failed: result.failed }));
+    } else {
+      message.error(t("chat.batchArchiveFailed"));
+    }
+  } catch {
+    message.error(t("chat.batchArchiveFailed"));
+  } finally {
+    isBatchArchiving.value = false;
+    isBatchMode.value = false;
+    selectedSessionKeys.value.clear();
+  }
+}
 const canSelectAll = computed(() => {
   return chatStore.sessions.some(s => s.id !== chatStore.activeSessionId);
 });
@@ -2414,6 +2445,7 @@ async function handleSessionModelCustomSubmit() {
                   <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
                 </svg>
               </template>
+              {{ t('chat.toggleBatchMode') }}
             </NButton>
             <NButton
               v-if="isBatchMode"
@@ -2434,6 +2466,23 @@ async function handleSessionModelCustomSubmit() {
                 >
                   <path d="M9 11l3 3L22 4" />
                   <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg>
+              </template>
+            </NButton>
+            <NButton
+              v-if="isBatchMode && batchArchiveTargets.length > 0"
+              quaternary
+              size="tiny"
+              :loading="isBatchArchiving"
+              :disabled="isBatchDeleting || isBatchArchiving"
+              :title="t('chat.batchArchive', { count: batchArchiveTargets.length })"
+              @click="handleBatchArchive"
+            >
+              <template #icon>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 8v13H3V8" />
+                  <path d="M1 3h22v5H1z" />
+                  <path d="M10 12h4" />
                 </svg>
               </template>
             </NButton>
@@ -2468,7 +2517,7 @@ async function handleSessionModelCustomSubmit() {
               quaternary
               size="tiny"
               @click="toggleBatchMode"
-              :disabled="isBatchDeleting"
+              :disabled="isBatchDeleting || isBatchArchiving"
             >
               <template #icon>
                 <svg

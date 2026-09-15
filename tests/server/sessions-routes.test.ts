@@ -34,6 +34,7 @@ const usageSingleMock = vi.fn(async (ctx: any) => { ctx.body = { input_tokens: 0
 const usageStatsMock = vi.fn(async (ctx: any) => { ctx.body = { total_input_tokens: 0, total_output_tokens: 0 } })
 const contextLengthMock = vi.fn(async (ctx: any) => { ctx.body = { context_length: 256000 } })
 const batchRemoveMock = vi.fn(async (ctx: any) => { ctx.body = { deleted: 1, failed: 0, errors: [] } })
+const batchArchiveMock = vi.fn(async (ctx: any) => { ctx.body = { updated: 1, failed: 0, errors: [] } })
 const exportSessionMock = vi.fn(async (ctx: any) => { ctx.body = JSON.stringify({ id: ctx.params.id }) })
 const listWorkspaceRunChangesMock = vi.fn(async (ctx: any) => { ctx.body = { changes: [] } })
 const getWorkspaceRunChangeFileMock = vi.fn(async (ctx: any) => { ctx.body = { file: null } })
@@ -66,6 +67,7 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
   getContext: getContextMock,
   remove: removeMock,
   batchRemove: batchRemoveMock,
+  batchArchive: batchArchiveMock,
   rename: renameMock,
   archive: archiveMock,
   unarchive: unarchiveMock,
@@ -118,6 +120,7 @@ describe('session routes', () => {
     removeMock.mockClear()
     renameMock.mockClear()
     archiveMock.mockClear()
+    batchArchiveMock.mockClear()
     unarchiveMock.mockClear()
     setPushEnabledMock.mockClear()
     setCategoryMock.mockClear()
@@ -399,6 +402,18 @@ describe('session routes', () => {
 
     expect(archiveMock).toHaveBeenCalledWith(ctx)
     expect(ctx.body).toEqual({ ok: true })
+  })
+
+  it('delegates batch session archive updates to the controller', async () => {
+    const { sessionRoutes } = await import('../../packages/server/src/modules/studio/routes/sessions')
+    const layer = sessionRoutes.stack.find((entry: any) => entry.path === '/api/studio/sessions/batch-archive')
+    const handler = layer.stack[0]
+    const ctx: any = { request: { body: { ids: ['session-abc'], archived: true } }, state: {}, body: null }
+
+    await handler(ctx)
+
+    expect(batchArchiveMock).toHaveBeenCalledWith(ctx)
+    expect(ctx.body).toEqual({ updated: 1, failed: 0, errors: [] })
   })
 
   it('delegates session unarchive to the controller', async () => {

@@ -15,7 +15,7 @@ import SessionListItem from '@/components/hermes/chat/SessionListItem.vue'
 import OutlinePanel from '@/components/hermes/chat/OutlinePanel.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
 import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
-import { batchDeleteSessions, deleteSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchHermesSession, fetchSessionMessagesPage, importHermesSession, unarchiveSession, type HermesMessage, type SessionSummary } from '@/api/studio/sessions'
+import { batchArchiveSessions, batchDeleteSessions, deleteSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchHermesSession, fetchSessionMessagesPage, importHermesSession, unarchiveSession, type HermesMessage, type SessionSummary } from '@/api/studio/sessions'
 
 const appStore = useAppStore()
 const profilesStore = useProfilesStore()
@@ -48,6 +48,7 @@ const showOutline = ref(false)
 const historyMessageListRef = ref<InstanceType<typeof HistoryMessageList> | null>(null)
 const isBatchMode = ref(false)
 const isBatchDeleting = ref(false)
+const isBatchArchiving = ref(false)
 const showBatchDeleteConfirm = ref(false)
 const selectedSessionKeys = ref<Set<string>>(new Set())
 const contextSessionId = ref<string | null>(null)
@@ -463,7 +464,7 @@ function sessionSelectionKey(session: Pick<Session, 'id' | 'profile'>): string {
 }
 
 function toggleBatchMode() {
-  if (isBatchDeleting.value) return
+  if (isBatchDeleting.value || isBatchArchiving.value) return
   isBatchMode.value = !isBatchMode.value
   if (!isBatchMode.value) {
     selectedSessionKeys.value.clear()
@@ -505,6 +506,14 @@ function toggleSelectAllSessions() {
 }
 
 const selectedCount = computed(() => selectedSessionKeys.value.size)
+const selectedSessions = computed(() => {
+  const keys = selectedSessionKeys.value
+  return historySessions.value.filter(session => keys.has(sessionSelectionKey(session)))
+})
+const batchArchiveTargets = computed(() =>
+  selectedSessions.value.filter(session => session.source !== 'global_agent' && !session.isArchived),
+)
+const batchUnarchiveTargets = computed(() => selectedSessions.value.filter(session => session.isArchived))
 const canSelectAll = computed(() => historySessions.value.length > 0)
 const allSessionsSelected = computed(() =>
   historySessions.value.length > 0 && selectedSessionKeys.value.size === historySessions.value.length
@@ -825,6 +834,31 @@ function handleBatchDeleteConfirm() {
   return false
 }
 
+async function handleBatchArchive(archived: boolean) {
+  const targets = archived ? batchArchiveTargets.value : batchUnarchiveTargets.value
+  if (targets.length === 0 || isBatchArchiving.value || isBatchDeleting.value) return
+  isBatchArchiving.value = true
+  try {
+    const result = await batchArchiveSessions(targets.map(session => session.id), archived)
+    if (result.updated > 0) {
+      await loadHermesSessions()
+      if (historySession.value && targets.some(session => session.id === historySession.value?.id)) {
+        historySession.value.isArchived = archived
+      }
+      message.success(t(archived ? 'chat.batchArchiveSuccess' : 'chat.batchUnarchiveSuccess', { count: result.updated }))
+      if (result.failed > 0) message.warning(t(archived ? 'chat.batchArchivePartial' : 'chat.batchUnarchivePartial', { failed: result.failed }))
+    } else {
+      message.error(t(archived ? 'chat.batchArchiveFailed' : 'chat.batchUnarchiveFailed'))
+    }
+  } catch {
+    message.error(t(archived ? 'chat.batchArchiveFailed' : 'chat.batchUnarchiveFailed'))
+  } finally {
+    isBatchArchiving.value = false
+    isBatchMode.value = false
+    selectedSessionKeys.value.clear()
+  }
+}
+
 </script>
 
 <template>
@@ -857,6 +891,7 @@ function handleBatchDeleteConfirm() {
                   <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
                 </svg>
               </template>
+              {{ t('chat.toggleBatchMode') }}
             </NButton>
             <NButton
               v-if="isBatchMode"
@@ -871,6 +906,32 @@ function handleBatchDeleteConfirm() {
                   <path d="M9 11l3 3L22 4" />
                   <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
                 </svg>
+              </template>
+            </NButton>
+            <NButton
+              v-if="isBatchMode && batchArchiveTargets.length > 0"
+              quaternary
+              size="tiny"
+              :loading="isBatchArchiving"
+              :disabled="isBatchDeleting || isBatchArchiving"
+              :title="t('chat.batchArchive', { count: batchArchiveTargets.length })"
+              @click="handleBatchArchive(true)"
+            >
+              <template #icon>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+              </template>
+            </NButton>
+            <NButton
+              v-if="isBatchMode && batchUnarchiveTargets.length > 0"
+              quaternary
+              size="tiny"
+              :loading="isBatchArchiving"
+              :disabled="isBatchDeleting || isBatchArchiving"
+              :title="t('chat.batchUnarchive', { count: batchUnarchiveTargets.length })"
+              @click="handleBatchArchive(false)"
+            >
+              <template #icon>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="m9 15 3-3 3 3"/></svg>
               </template>
             </NButton>
             <NPopconfirm
@@ -896,7 +957,7 @@ function handleBatchDeleteConfirm() {
               v-if="isBatchMode"
               quaternary
               size="tiny"
-              :disabled="isBatchDeleting"
+              :disabled="isBatchDeleting || isBatchArchiving"
               @click="toggleBatchMode"
             >
               <template #icon>

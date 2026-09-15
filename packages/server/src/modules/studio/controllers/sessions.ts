@@ -1421,6 +1421,47 @@ export async function archive(ctx: any) {
   ctx.body = { ok: true }
 }
 
+export async function batchArchive(ctx: any) {
+  const { ids, archived } = (ctx.request.body || {}) as { ids?: unknown; archived?: unknown }
+  if (!Array.isArray(ids) || ids.length === 0 || ids.some(id => typeof id !== 'string' || !id.trim()) || typeof archived !== 'boolean') {
+    ctx.status = 400
+    ctx.body = { error: 'ids must be a non-empty array and archived must be a boolean' }
+    return
+  }
+
+  const results: { updated: number; failed: number; errors: Array<{ id: string; error: string }> } = {
+    updated: 0,
+    failed: 0,
+    errors: [],
+  }
+  for (const id of [...new Set(ids)]) {
+    const existing = localGetSession(id)
+    if (!existing) {
+      results.failed++
+      results.errors.push({ id, error: 'Session not found' })
+      continue
+    }
+    if (!canAccessProfile(ctx, existing.profile)) {
+      results.failed++
+      results.errors.push({ id, error: `Profile "${existing.profile || 'default'}" is not available for this user` })
+      continue
+    }
+    if (archived && existing.source === 'global_agent') {
+      results.failed++
+      results.errors.push({ id, error: 'Global agent sessions cannot be archived' })
+      continue
+    }
+    if (!localSetSessionArchived(id, archived)) {
+      results.failed++
+      results.errors.push({ id, error: `Failed to ${archived ? 'archive' : 'unarchive'} session` })
+      continue
+    }
+    results.updated++
+  }
+
+  ctx.body = { ok: true, ...results }
+}
+
 export async function unarchive(ctx: any) {
   const existing = localGetSession(ctx.params.id)
   if (!existing) {

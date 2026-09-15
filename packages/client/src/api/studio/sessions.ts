@@ -509,6 +509,13 @@ export async function batchDeleteSessions(targets: Array<string | BatchDeleteSes
   }
 }
 
+export async function batchArchiveSessions(ids: string[], archived: boolean): Promise<{ updated: number; failed: number; errors: Array<{ id: string; error: string }> }> {
+  return request('/api/hermes/sessions/batch-archive', {
+    method: 'POST',
+    body: JSON.stringify({ ids, archived }),
+  })
+}
+
 export async function renameSession(id: string, title: string): Promise<boolean> {
   try {
     await request(`/api/studio/sessions/${id}/rename`, {
