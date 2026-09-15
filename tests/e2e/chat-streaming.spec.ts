@@ -112,6 +112,10 @@ test('freezes the current reasoning between the thinking animation and its tool 
   }, run.session_id)
 
   await expect(page.locator('.streaming-indicator .thinking-status')).toBeVisible()
+  const thinkingAvatar = page.locator('.streaming-indicator .thinking-avatar')
+  await expect(thinkingAvatar).toHaveAttribute('src', '/coding-agents/hermes.png')
+  await expect(thinkingAvatar).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(thinkingAvatar).toHaveCSS('object-fit', 'contain')
 
   await page.evaluate((sid) => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest

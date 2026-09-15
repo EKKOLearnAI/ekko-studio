@@ -51,6 +51,7 @@ import SessionListItem from "./SessionListItem.vue";
 import OutlinePanel from "./OutlinePanel.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import SubagentStreamPanel from "./SubagentStreamPanel.vue";
+import { chatSessionAgentAvatar } from "@/utils/chat-agent-avatar";
 import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./session-category-groups";
 import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } from "./session-category-menu";
 import { buildActiveSessionMenuOptions, buildSessionContextMenuOptions } from "./session-menu-options";
@@ -3402,6 +3403,7 @@ async function handleSessionModelCustomSubmit() {
                 />
                 <SubagentStreamPanel
                   v-else-if="selectedSubagent"
+                  :agent="chatSessionAgentAvatar(chatStore.activeSession)"
                   :stream="selectedSubagentStream"
                   @close="closeToolPanelOverlay"
                 />

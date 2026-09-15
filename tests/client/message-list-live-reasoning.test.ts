@@ -96,6 +96,26 @@ describe('MessageList live reasoning', () => {
     vi.useRealTimers()
   })
 
+  it('updates the thinking logo with the active agent and preserves the Ekko animation', async () => {
+    const wrapper = mountMessageList([])
+    const chatStore = useChatStore()
+    for (const [agent, src] of [
+      ['hermes', '/coding-agents/hermes.png'],
+      ['codex', '/coding-agents/codex-openai.png'],
+      ['claude-code', '/coding-agents/claude-code.svg'],
+      ['ekko-agent', 'thinking.gif'],
+      ['pi', '/coding-agents/pi.svg'],
+    ]) {
+      chatStore.activeSession = { ...makeSession([]), agent }
+      await nextTick()
+      expect(wrapper.get('.thinking-avatar').attributes('src')).toContain(src)
+      expect(wrapper.get('.thinking-avatar').classes()).toContain(
+        agent === 'ekko-agent' ? 'thinking-avatar--animated' : 'thinking-avatar--logo',
+      )
+    }
+    wrapper.unmount()
+  })
+
   it('renders live reasoning between the thinking animation and tool area instead of flashing a message bubble', async () => {
     const wrapper = mountMessageList([
       { id: 'user-1', role: 'user', content: 'Think about this', timestamp: 1 },

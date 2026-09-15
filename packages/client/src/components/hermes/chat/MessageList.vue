@@ -701,6 +701,7 @@ defineExpose({
         <Transition name="fade">
         <div v-if="isRunIndicatorActive" class="streaming-indicator">
           <LiveReasoningStatus
+            :agent="assistantAgent"
             :reasoning="liveReasoningDetail?.reasoning"
             :reasoning-id="liveReasoningDetail?.messageId"
             :elapsed="formattedThinkingElapsed"

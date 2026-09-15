@@ -3,11 +3,13 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Message, SubagentStream, SubagentStreamEntry, SubagentStreamStatus } from '@/stores/hermes/chat'
 import LiveReasoningStatus from './LiveReasoningStatus.vue'
+import type { ChatAgentAvatar } from '@/utils/chat-agent-avatar'
 import MessageItem from './MessageItem.vue'
 import VirtualMessageList from './VirtualMessageList.vue'
 
 const props = defineProps<{
   stream: SubagentStream | null
+  agent?: ChatAgentAvatar
 }>()
 
 const emit = defineEmits<{
@@ -240,6 +242,7 @@ onBeforeUnmount(stopElapsedTimer)
       </VirtualMessageList>
       <div v-if="isRunning" class="subagent-run-indicator">
         <LiveReasoningStatus
+          :agent="agent"
           :reasoning="currentReasoningEntry?.text"
           :reasoning-id="currentReasoningEntry?.id"
           :elapsed="formattedElapsed"
