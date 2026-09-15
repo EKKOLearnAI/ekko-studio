@@ -13,6 +13,7 @@ const MANAGED_MCP_NAMES = new Set([
   'ekko-studio-browser',
   'ekko-studio-devices',
   'ekko-studio-use',
+  'ekko-studio-plan',
   'hermes-studio',
   'hermes-studio-mcp',
   'ekko-studio-mcp',

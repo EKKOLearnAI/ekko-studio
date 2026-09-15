@@ -1,3 +1,4 @@
+import { withTaskPlanTurnContext } from '../task-plan-runs'
 import type { Server, Socket } from 'socket.io'
 import { chatCodingAgentRunManager as codingAgentRunManager } from '../../public/chat-agent-runtime'
 import {
@@ -17,6 +18,7 @@ import { getSession, updateSession } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
 
 export interface CodingAgentRunSocketData {
+  task_plan_context_id?: string
   input: string | ContentBlock[]
   session_id?: string
   profile?: string
@@ -162,10 +164,11 @@ export async function handleCodingAgentRun(
       groupSystemPrompt || (includeBaseSystemPrompt ? getSystemPrompt(undefined, { source: data.session_source || data.source }) : ''),
       String(data.instructions || '').trim() === groupSystemPrompt ? '' : String(data.instructions || '').trim(),
     ].filter(Boolean).join('\n')
-    const sent = await (Array.isArray(data.input)
+    const runtimeInput = withTaskPlanTurnContext(codingInput.text, data.task_plan_context_id) as string
+    const sent = await (Array.isArray(data.input) || data.task_plan_context_id
       ? sendCodingAgentRunInput(
         sessionId,
-        codingInput.text,
+        runtimeInput,
         runPrompt,
         codingInput.images,
         contentBlocksToString(data.input),

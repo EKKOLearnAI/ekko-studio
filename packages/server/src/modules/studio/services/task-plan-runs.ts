@@ -97,6 +97,17 @@ export class TaskPlanRuns {
 
 }
 
-export function taskPlanRunInstruction(contextId: string): string {
-  return `For multi-step work, keep the user's Studio task plan current using the MCP tool ekko_studio_update_plan, available through ekko_studio_use_toolset (action=describe, then action=call). Use context_id="${contextId}" for this turn only; discard any context_id from previous turns. Send the complete ordered plan each time, with stable step ids and statuses pending, in_progress, or completed; at most one step may be in_progress. Create the plan before substantial work, update it as work advances, and mark steps completed only after verification. Skip a plan for simple one-step requests. Prefer this shared plan over a separate native planning tool so the user sees one task card. Do not create Studio sessions or chat runs to update a plan.`
+export function taskPlanRunInstruction(): string {
+  return `For multi-step work, maintain the user's Studio task card with ekko_studio_update_plan from the dedicated ekko-studio-plan MCP server. Call the tool directly; it is not inside ekko_studio_use_toolset. If tools are deferred, search for ekko-studio-plan / update_plan and use the exact discovered tool name (including its MCP prefix). The latest input supplies the current context_id; never reuse a context from history. Send the complete ordered plan each time, with stable step ids and statuses pending, in_progress, or completed; at most one step may be in_progress. Create the plan before substantial work and update it as work advances. Mark steps completed only after verification. Skip planning for simple one-step requests unless the user explicitly asks for a plan or task card. Prefer this shared tool over native todo/planning tools so progress appears in Studio and App.`
+}
+
+/** Attach changing run metadata to the latest input, outside cached system prompts. */
+export function taskPlanTurnInstruction(contextId: string): string {
+  return `<studio_task_plan_context>\n${taskPlanRunInstruction()}\nCurrent turn context_id="${contextId}". This supersedes all older task-plan contexts and discovery instructions, including cached system instructions.\n</studio_task_plan_context>`
+}
+
+export function withTaskPlanTurnContext<T extends { type: string; text?: string }>(message: string | T[], contextId?: string): string | Array<T | { type: 'text'; text: string }> {
+  if (!contextId) return message
+  const text = taskPlanTurnInstruction(contextId)
+  return typeof message === 'string' ? `${message}\n\n${text}` : [...message, { type: 'text', text }]
 }

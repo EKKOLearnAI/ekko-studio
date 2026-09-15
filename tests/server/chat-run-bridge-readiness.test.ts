@@ -999,6 +999,7 @@ describe('ChatRunSocket MCP task plan lifecycle', () => {
     const data = (handleEkkoAgentRunMock.mock.calls as any)[0][2]
     expect(data.instructions || '').not.toContain('ekko_studio_update_plan')
     expect(data.instructions || '').not.toContain('context_id=')
+    expect(data.task_plan_context_id).toBeUndefined()
     expect(begin).not.toHaveBeenCalled()
   })
 
@@ -1011,7 +1012,7 @@ describe('ChatRunSocket MCP task plan lifecycle', () => {
     const server = new ChatRunSocket(io as any)
     let contextId = ''
     handleCodingAgentRunMock.mockImplementationOnce((async (_nsp: any, _socket: any, data: any, _profile: any, sessions: any) => {
-      contextId = data.instructions.match(/context_id="([^"]+)"/)[1]
+      contextId = data.task_plan_context_id
       Object.assign(sessions.get(data.session_id), { isWorking: true, responseRun: { runMarker: 'coding-turn-1' } })
       return { runId: 'reused-runtime-id', messageId: 42 }
     }) as any)
@@ -1034,7 +1035,7 @@ describe('ChatRunSocket MCP task plan lifecycle', () => {
     ensureReadyMock.mockResolvedValue({ reachable: true, status: 'ready' })
     let contextId = ''
     handleBridgeRunMock.mockImplementationOnce((async (_nsp: any, _socket: any, data: any, _profile: any, sessions: any) => {
-      contextId = data.instructions.match(/context_id="([^"]+)"/)[1]
+      contextId = data.task_plan_context_id
       const state = sessions.get(data.session_id)
       Object.assign(state, { isWorking: true, activeRunMarker: 'cli-turn-1' })
       server.updateTaskPlan(contextId, 'default', input)

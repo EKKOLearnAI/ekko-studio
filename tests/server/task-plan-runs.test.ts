@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { parseTaskPlanUpdate, TaskPlanRuns, taskPlanRunInstruction } from '../../packages/server/src/modules/studio/services/task-plan-runs'
+import { parseTaskPlanUpdate, TaskPlanRuns, taskPlanRunInstruction, taskPlanTurnInstruction, withTaskPlanTurnContext } from '../../packages/server/src/modules/studio/services/task-plan-runs'
 
 const steps = () => ({ plan: [
   { id: 'inspect', step: 'Inspect', status: 'completed' },
@@ -95,9 +95,22 @@ describe('shared MCP task plans', () => {
     expect(() => parseTaskPlanUpdate(input)).toThrow()
   })
 
+  it('adds fresh turn context without mutating image blocks or the original input', () => {
+    const blocks = [{ type: 'text', text: 'Show a task card' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,test' } }]
+    const original = structuredClone(blocks)
+    const first = withTaskPlanTurnContext(blocks, 'turn-one')
+    const second = withTaskPlanTurnContext(blocks, 'turn-two')
+    expect(blocks).toEqual(original)
+    expect(first).toHaveLength(3)
+    expect(JSON.stringify(second)).toContain('turn-two')
+    expect(JSON.stringify(second)).not.toContain('turn-one')
+    expect(withTaskPlanTurnContext(blocks)).toBe(blocks)
+  })
+
   it('explains how to discover the MCP tool and supplies only the current context', () => {
-    const text = taskPlanRunInstruction('current-turn')
-    expect(text).toContain('ekko_studio_use_toolset')
+    const text = taskPlanTurnInstruction('current-turn')
+    expect(text).toContain('ekko-studio-plan')
+    expect(taskPlanRunInstruction()).not.toContain('context_id=')
     expect(text).toContain('ekko_studio_update_plan')
     expect(text).toContain('context_id="current-turn"')
   })

@@ -7,12 +7,14 @@ impact: Hermes and coding agents can publish task progress into the existing Stu
 
 ## Tool and transport
 
-The managed `use` MCP catalog includes `ekko_studio_update_plan`. Discover its
-schema through `ekko_studio_use_toolset` with `action=describe`, then invoke it
-with `action=call`. The tool posts to `/api/studio/task-plans/update` using the
+The dedicated managed `ekko-studio-plan` MCP server directly exposes
+`ekko_studio_update_plan`. It is absent from the `use` catalog. Agents with deferred
+tools search for this server/tool and use its exact provider-prefixed name. The tool posts to `/api/studio/task-plans/update` using the
 existing profile authentication. No extra MCP server or database table is needed.
 
-Each non-Ekko turn receives a fresh `context_id` in its instructions. A call
+Each non-Ekko turn receives a fresh `context_id` appended to its latest runtime
+input. Stable system instructions contain no turn id: Hermes can cache and reuse
+them safely. The original user input is preserved for display and storage. A call
 provides that context, an optional explanation, and the full ordered plan:
 
 ```json
@@ -31,7 +33,7 @@ run, revision, and execution-state fields cannot redirect or finish a plan.
 Contexts expire at the end of a turn and reject other profiles. Coding runtime
 ids can span turns, so snapshots use the response stream's per-turn history
 marker instead. Ekko continues using its native `update_plan` tool. Its managed
-MCP definitions set `HERMES_MCP_NATIVE_TASK_PLAN=1`, which excludes shared planning
+MCP definitions never register `ekko-studio-plan` and set `HERMES_MCP_NATIVE_TASK_PLAN=1`, which excludes shared planning
 from tool discovery, descriptions, and direct/catalog calls. Existing managed
 definitions receive this flag during configuration synchronization.
 
@@ -51,12 +53,14 @@ orphaned running snapshots interrupted; contexts are intentionally not restored.
 After upgrading, restart Studio and persistent MCP clients to load the new tool.
 New turns receive the planning instructions; already-running turns do not acquire
 a context retroactively. Tool use still depends on the agent following those
-instructions and having the managed `use` MCP enabled.
+instructions and having the managed `plan` MCP enabled.
 
 ## Validation
 
 - Service/controller tests cover validation, persistence ordering, revisions,
   profile isolation, stale contexts, failed writes, and terminal states.
 - Socket tests cover Codex completion/failure/stop and Hermes completion/interruption.
-- MCP subprocess tests describe and call the tool through its compact catalog.
+- MCP subprocess tests discover and call the direct tool, and reject it in Ekko.
+- A real MCP subprocess/HTTP test drives two consecutive Hermes bridge turns with
+  a cached system prompt, verifies distinct plan events, and rejects the old context.
 - Browser tests cover live progress and Ekko/Codex task-card recovery after reload.

@@ -1,3 +1,6 @@
+import { createServer } from 'node:http'
+import { spawn } from 'node:child_process'
+import { TaskPlanRuns, taskPlanRunInstruction } from '../../packages/server/src/modules/studio/services/task-plan-runs'
 import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -402,6 +405,92 @@ describe('bridge run final context usage', () => {
     const sent = String(bridge.chat.mock.calls[0]?.[3] ?? '')
     expect(sent).toContain(composed)
     expect(sent.split('system prompt').length - 1).toBe(1)
+  })
+
+  it('updates plans through the real standalone MCP on consecutive turns with a cached system prompt', async () => {
+    const emit = vi.fn()
+    const state = makeState()
+    const sessionMap = new Map([['session-1', state]])
+    const snapshots: any[] = []
+    const plans = new TaskPlanRuns(plan => snapshots.push(structuredClone(plan)), (_sid, plan) => emit('plan.updated', plan))
+    const http = createServer((req, res) => {
+      let raw = ''
+      req.on('data', chunk => { raw += chunk })
+      req.on('end', () => {
+        res.setHeader('content-type', 'application/json')
+        try {
+          expect(req.url).toBe('/api/studio/task-plans/update')
+          const args = JSON.parse(raw)
+          res.end(JSON.stringify({ ok: true, ...plans.update(args.context_id, 'default', args) }))
+        } catch (err: any) { res.statusCode = err.status || 500; res.end(JSON.stringify({ error: err.message })) }
+      })
+    })
+    await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve))
+    const child = spawn(process.execPath, ['bin/ekko-studio-mcp.mjs', 'plan'], {
+      env: { ...process.env, HERMES_WEB_UI_URL: `http://127.0.0.1:${(http.address() as any).port}`, HERMES_MCP_NATIVE_TASK_PLAN: '0' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let buffer = ''
+    let sequence = 0
+    const waiting = new Map<number, (value: any) => void>()
+    child.stdout.on('data', chunk => {
+      buffer += String(chunk)
+      let index: number
+      while ((index = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, index); buffer = buffer.slice(index + 1)
+        if (line.trim()) { const message = JSON.parse(line); waiting.get(message.id)?.(message.result); waiting.delete(message.id) }
+      }
+    })
+    const call = (context: string) => new Promise<any>((resolve, reject) => {
+      const id = ++sequence
+      const timer = setTimeout(() => { waiting.delete(id); reject(new Error('MCP request timed out')) }, 5000)
+      waiting.set(id, value => { clearTimeout(timer); resolve(value) })
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: {
+        name: 'ekko_studio_update_plan', arguments: { context_id: context, plan: [{ id: 'verify', step: 'Verify work', status: 'completed' }] },
+      } }) + '\n')
+    })
+    let cachedSystem = ''
+    const contexts: string[] = []
+    const bridge = {
+      contextEstimate: vi.fn().mockResolvedValue({ token_count: 10, fixed_context_tokens: 10 }),
+      chat: vi.fn(async (_sid, message, _history, system, _profile, options) => {
+        cachedSystem ||= system // Emulate Hermes retaining its first system prompt.
+        expect(system).not.toMatch(/context_id="/)
+        expect(cachedSystem).not.toMatch(/context_id="/)
+        const context = String(message).match(/context_id="([^"]+)"/)![1]
+        expect(context).toBe(contexts.at(-1))
+        expect(message).toContain('ekko-studio-plan')
+        expect(options.storage_message).toBe('Show the task card')
+        const result = await call(context)
+        expect(result.isError).not.toBe(true)
+        expect(JSON.parse(result.content[0].text)).toMatchObject({ ok: true, run_id: state.activeRunMarker, revision: 1 })
+        return { run_id: `bridge-${contexts.length}`, status: 'started' }
+      }),
+      streamOutput: vi.fn(async function* () { yield { done: true, status: 'completed', output: 'done' } }),
+    }
+    try {
+      const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+      for (let turn = 0; turn < 2; turn++) {
+        const context = plans.begin('session-1', 'default', () => state)
+        contexts.push(context)
+        await handleBridgeRun(makeNamespace(emit), makeSocket(), {
+          input: 'Show the task card', session_id: 'session-1', instructions: taskPlanRunInstruction(), task_plan_context_id: context,
+          onEvent: event => { if (event === 'run.completed') plans.finish(context, 'ended') },
+        }, 'default', sessionMap, bridge as any, false, vi.fn(), vi.fn())
+      }
+      expect(contexts[0]).not.toBe(contexts[1])
+      expect(snapshots.map(plan => plan.execution_state)).toEqual(['running', 'ended', 'running', 'ended'])
+      expect(snapshots[0].run_id).not.toBe(snapshots[2].run_id)
+      expect(snapshots[0].plan_id).not.toBe(snapshots[2].plan_id)
+      expect(addMessageMock.mock.calls.filter(([message]) => message.role === 'user').every(([message]) => message.content === 'Show the task card')).toBe(true)
+      const stale = await call(contexts[0])
+      expect(stale.isError).toBe(true)
+      expect(stale.content[0].text).toContain('expired')
+    } finally {
+      child.kill()
+      http.closeAllConnections()
+      await new Promise<void>(resolve => http.close(() => resolve()))
+    }
   })
 
   it('refreshes full context tokens when a bridge run completes', async () => {

@@ -1479,7 +1479,7 @@ export class ChatRunSocket {
       }
 
       const planContext = this.beginTaskPlanRun(data.session_id, profile)
-      if (planContext) data.instructions = [data.instructions, taskPlanRunInstruction(planContext)].filter(Boolean).join('\n\n')
+      if (planContext) data.instructions = [data.instructions, taskPlanRunInstruction()].filter(Boolean).join('\n\n')
       let fullInstructions = data.instructions
         ? `${getSystemPrompt(undefined, { source })}\n${data.instructions}`
         : getSystemPrompt(undefined, { source })
@@ -1503,7 +1503,7 @@ export class ChatRunSocket {
       }
       try {
         await handleBridgeRun(
-          this.nsp, socket, { ...data, instructions: fullInstructions, onEvent }, profile,
+          this.nsp, socket, { ...data, task_plan_context_id: planContext, instructions: fullInstructions, onEvent }, profile,
           this.sessionMap, this.bridge,
           skipUserMessage,
           loadSessionStateFromDb,
@@ -1552,11 +1552,11 @@ export class ChatRunSocket {
     const isCommand = typeof data.input === 'string' && parseCodingAgentSessionCommand(data.input)
     const planContext = isCommand ? undefined : this.beginTaskPlanRun(data.session_id, profile)
     const instructions = planContext
-      ? [data.instructions, taskPlanRunInstruction(planContext)].filter(Boolean).join('\n\n')
+      ? [data.instructions, taskPlanRunInstruction()].filter(Boolean).join('\n\n')
       : data.instructions
     let started: Awaited<ReturnType<typeof handleCodingAgentRun>>
     try {
-      started = await handleCodingAgentRun(this.nsp, socket, { ...data, instructions }, profile, this.sessionMap)
+      started = await handleCodingAgentRun(this.nsp, socket, { ...data, task_plan_context_id: planContext, instructions }, profile, this.sessionMap)
       if (!started && planContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, planContext)
     } catch (err) {
       if (planContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.failed', undefined, planContext)

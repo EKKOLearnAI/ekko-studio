@@ -38,6 +38,7 @@ describe('Ekko MCP server context', () => {
     const { buildManagedEkkoMcpServers } = await import('../../packages/server/src/modules/ekko/services/mcp')
 
     const servers = buildManagedEkkoMcpServers('work')
+    expect(servers['ekko-studio-plan']).toBeUndefined()
 
     expect(servers['ekko-studio-api']).toEqual({
       command: process.execPath,

@@ -88,3 +88,28 @@ for (const agent of ['ekko-agent', 'codex']) {
   })
 
 }
+
+
+test('keeps two successive Hermes turn plans as separate cards', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await mockChatSocket(page)
+  await page.goto('/#/hermes/chat')
+  const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')
+  for (const turn of [1, 2]) {
+    await input.fill(`Show task card ${turn}`)
+    await page.getByRole('button', { name: 'Send', exact: true }).click()
+    await page.waitForFunction(n => (window as any).__PW_CHAT_SOCKET__?.emitted.filter((entry: any) => entry.event === 'run').length >= n, turn)
+    await page.evaluate(({ p, turn }) => {
+      const socket = (window as any).__PW_CHAT_SOCKET__.latest
+      const sid = (window as any).__PW_CHAT_SOCKET__.emitted.filter((entry: any) => entry.event === 'run').at(-1).payload.session_id
+      const snapshot = { ...p, session_id: sid, run_id: `cli-turn-${turn}`, plan_id: `mcp:turn-${turn}`, created_at: p.created_at + turn * 1000 }
+      socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: snapshot.run_id })
+      socket.__trigger('plan.updated', { event: 'plan.updated', ...snapshot })
+      socket.__trigger('plan.updated', { event: 'plan.updated', ...snapshot, revision: 2, execution_state: 'ended', plan: p.plan.map(step => ({ ...step, status: 'completed' })) })
+      socket.__trigger('run.completed', { event: 'run.completed', session_id: sid, run_id: snapshot.run_id })
+    }, { p: plan, turn })
+    await expect(page.getByTestId('task-plan-card')).toHaveCount(turn)
+  }
+  for (const card of await page.getByTestId('task-plan-card').all()) await expect(card).toContainText('3/3 completed')
+})

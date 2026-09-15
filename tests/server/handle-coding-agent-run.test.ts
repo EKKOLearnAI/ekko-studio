@@ -107,6 +107,29 @@ describe('handleCodingAgentRun', () => {
     )
   })
 
+  it('sends a fresh task context on each turn while storing the original user message', async () => {
+    managerMock.runIdForSession.mockReturnValue('reused-runtime')
+    managerMock.isSessionLaunchCompatible.mockReturnValue(true)
+    sendCodingAgentRunInputMock.mockResolvedValue({ runId: 'reused-runtime' })
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    const state = { messages: [], isWorking: false, events: [], queue: [] }
+    const sessions = new Map([['session-1', state]])
+    const socket = { join: vi.fn(), emit: vi.fn() }
+    for (const context of ['first-turn', 'second-turn']) {
+      await handleCodingAgentRun({} as any, socket as any, {
+        session_id: 'session-1', coding_agent_id: 'codex', mode: 'global', input: 'Show a task card', task_plan_context_id: context,
+      }, 'default', sessions as any)
+    }
+    const calls = sendCodingAgentRunInputMock.mock.calls
+    expect(calls[0][1]).toContain('context_id="first-turn"')
+    expect(calls[1][1]).toContain('context_id="second-turn"')
+    expect(calls[1][1]).not.toContain('first-turn')
+    for (const args of calls) {
+      expect(args[2]).not.toContain('context_id=')
+      expect(args[4]).toBe('Show a task card')
+    }
+  })
+
   it('restarts an existing coding-agent runner when the requested launch mode changes', async () => {
     managerMock.runIdForSession.mockReturnValue('agent-session-1')
     managerMock.isSessionLaunchCompatible.mockReturnValue(false)
