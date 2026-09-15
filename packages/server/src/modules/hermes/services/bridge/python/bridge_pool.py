@@ -1131,6 +1131,7 @@ class AgentPool:
         notifications: list[dict[str, Any]] = []
         pending_notification_count = 0
         if loaded_session_ids:
+            notifications.extend(self._claim_kanban_notifications(loaded_session_ids))
             try:
                 from tools.async_delegation import claim_event_delivery, complete_completion_delivery
                 from tools.process_registry import format_process_notification, process_registry
@@ -1202,7 +1203,156 @@ class AgentPool:
             "pending_count": pending_notification_count,
         }
 
+    def _claim_kanban_notifications(self, loaded_session_ids: set[str]) -> list[dict[str, Any]]:
+        """Claim TUI-style Kanban subscriptions owned by loaded Web UI sessions."""
+        try:
+            from hermes_cli import kanban_db as kb
+        except Exception:
+            return []
+
+        terminal_kinds = (
+            "completed", "blocked", "gave_up", "crashed", "timed_out",
+            "status", "archived", "unblocked", "block_loop_detected",
+            "review_requested",
+        )
+        notifications: list[dict[str, Any]] = []
+        try:
+            boards = kb.list_boards(include_archived=False)
+        except Exception:
+            try:
+                boards = [kb.read_board_metadata(kb.DEFAULT_BOARD)]
+            except Exception:
+                return []
+
+        seen_db_paths: set[str] = set()
+        for board_meta in boards:
+            slug = (board_meta or {}).get("slug") or kb.DEFAULT_BOARD
+            db_path = (board_meta or {}).get("db_path")
+            try:
+                resolved = str(Path(db_path).expanduser().resolve()) if db_path else str(kb.kanban_db_path(slug).resolve())
+            except Exception:
+                resolved = f"slug:{slug}"
+            if resolved in seen_db_paths:
+                continue
+            seen_db_paths.add(resolved)
+
+            if not any(
+                kb.count_notify_subs(board=slug, platform="tui", chat_id=session_id)
+                for session_id in loaded_session_ids
+            ):
+                continue
+            try:
+                conn = kb.connect(board=slug)
+            except Exception:
+                continue
+            try:
+                for sub in kb.list_notify_subs(conn):
+                    session_id = str(sub.get("chat_id") or "")
+                    if (sub.get("platform") or "").lower() != "tui" or session_id not in loaded_session_ids:
+                        continue
+                    old_cursor, new_cursor, events = kb.claim_unseen_events_for_sub(
+                        conn,
+                        task_id=sub["task_id"],
+                        platform=sub["platform"],
+                        chat_id=session_id,
+                        thread_id=sub.get("thread_id") or "",
+                        kinds=terminal_kinds,
+                    )
+                    if not events:
+                        continue
+                    task = kb.get_task(conn, sub["task_id"])
+                    messages = [self._format_kanban_notification(slug, task, event) for event in events]
+                    message = "\n".join(text for text in messages if text)
+                    if not message:
+                        kb.rewind_notify_cursor(
+                            conn,
+                            task_id=sub["task_id"], platform=sub["platform"],
+                            chat_id=session_id, thread_id=sub.get("thread_id") or "",
+                            claimed_cursor=new_cursor, old_cursor=old_cursor,
+                        )
+                        continue
+                    delivery_id = f"kanban:{slug}:{sub['task_id']}:{new_cursor}"
+                    claim_id = uuid.uuid4().hex
+                    claim = {
+                        "notification_kind": "kanban",
+                        "board": slug,
+                        "db_path": resolved,
+                        "task_id": sub["task_id"],
+                        "platform": sub["platform"],
+                        "chat_id": session_id,
+                        "thread_id": sub.get("thread_id") or "",
+                        "old_cursor": old_cursor,
+                        "new_cursor": new_cursor,
+                        "final_status": getattr(task, "status", "") in {"done", "archived"},
+                    }
+                    with self._lock:
+                        self._background_notification_claims[(delivery_id, claim_id)] = claim
+                    last_event = events[-1]
+                    notifications.append({
+                        "notification_kind": "kanban",
+                        "delegation_id": delivery_id,
+                        "session_id": session_id,
+                        "claim_id": claim_id,
+                        "status": getattr(task, "status", None),
+                        "message": message,
+                        "event": {
+                            "type": "kanban",
+                            "board": slug,
+                            "task_id": sub["task_id"],
+                            "event_id": getattr(last_event, "id", new_cursor),
+                            "kind": getattr(last_event, "kind", "status"),
+                        },
+                        "board": slug,
+                        "task_id": sub["task_id"],
+                        "event_id": getattr(last_event, "id", new_cursor),
+                    })
+            finally:
+                conn.close()
+        return notifications
+
+    @staticmethod
+    def _format_kanban_notification(board: str, task: Any, event: Any) -> str:
+        task_id = str(getattr(event, "task_id", "") or getattr(task, "id", ""))
+        title = str(getattr(task, "title", "") or "")
+        kind = str(getattr(event, "kind", "status") or "status")
+        payload = getattr(event, "payload", {}) or {}
+        board_tag = "" if board == "default" else f"[{board}] "
+        label = f"Kanban {board_tag}{task_id}"
+        if title:
+            label += f" ({title})"
+        if kind == "completed":
+            summary = str(payload.get("summary") or payload.get("result") or "completed")
+            return f"✅ {label} completed: {summary}"
+        if kind == "blocked":
+            return f"⛔ {label} blocked: {payload.get('reason') or ''}".rstrip()
+        if kind == "review_requested":
+            return f"🔎 {label} requested review"
+        return f"🔄 {label} → {getattr(task, 'status', '') or kind}"
+
     def complete_background_notification(self, delegation_id: str, claim_id: str) -> dict[str, Any]:
+        with self._lock:
+            claim = self._background_notification_claims.get((delegation_id, claim_id))
+        if claim and claim.get("notification_kind") == "kanban":
+            completed = True
+            if claim.get("final_status"):
+                try:
+                    from hermes_cli import kanban_db as kb
+                    conn = kb.connect(board=claim["board"])
+                    try:
+                        kb.remove_notify_sub(
+                            conn,
+                            task_id=claim["task_id"], platform=claim["platform"],
+                            chat_id=claim["chat_id"], thread_id=claim["thread_id"],
+                        )
+                    finally:
+                        conn.close()
+                except Exception:
+                    completed = False
+            if completed:
+                with self._lock:
+                    self._background_notification_claims.pop((delegation_id, claim_id), None)
+            return {"delegation_id": delegation_id, "completed": completed}
+
         from tools.async_delegation import complete_completion_delivery
 
         completed = complete_completion_delivery(delegation_id, claim_id)
@@ -1210,13 +1360,38 @@ class AgentPool:
             self._background_notification_claims.pop((delegation_id, claim_id), None)
         return {"delegation_id": delegation_id, "completed": bool(completed)}
 
-    def release_background_notification(self, delegation_id: str, claim_id: str) -> dict[str, Any]:
+    def release_background_notification(
+        self, delegation_id: str, claim_id: str, *, requeue: bool = True
+    ) -> dict[str, Any]:
+        with self._lock:
+            claim = self._background_notification_claims.get((delegation_id, claim_id))
+        if claim and claim.get("notification_kind") == "kanban":
+            released = False
+            try:
+                from hermes_cli import kanban_db as kb
+                conn = kb.connect(board=claim["board"])
+                try:
+                    released = bool(kb.rewind_notify_cursor(
+                        conn,
+                        task_id=claim["task_id"], platform=claim["platform"],
+                        chat_id=claim["chat_id"], thread_id=claim["thread_id"],
+                        claimed_cursor=claim["new_cursor"], old_cursor=claim["old_cursor"],
+                    ))
+                finally:
+                    conn.close()
+            except Exception:
+                released = False
+            if released:
+                with self._lock:
+                    self._background_notification_claims.pop((delegation_id, claim_id), None)
+            return {"delegation_id": delegation_id, "released": released}
+
         from tools.async_delegation import release_completion_delivery
 
         released = release_completion_delivery(delegation_id, claim_id)
         with self._lock:
             event = self._background_notification_claims.pop((delegation_id, claim_id), None)
-        if released and event is not None:
+        if released and requeue and event is not None:
             from tools.process_registry import process_registry
 
             process_registry.completion_queue.put(event)
@@ -2824,17 +2999,15 @@ class AgentPool:
 
         released_claims = 0
         if claimed_notifications:
-            try:
-                from tools.async_delegation import release_completion_delivery
-
-                for delegation_id, claim_id in claimed_notifications:
-                    if release_completion_delivery(delegation_id, claim_id):
+            for delegation_id, claim_id in claimed_notifications:
+                try:
+                    result = self.release_background_notification(
+                        delegation_id, claim_id, requeue=False
+                    )
+                    if result.get("released"):
                         released_claims += 1
-            except Exception:
-                pass
-            with self._lock:
-                for key in claimed_notifications:
-                    self._background_notification_claims.pop(key, None)
+                except Exception:
+                    pass
 
         return {
             "interrupted_sessions": interrupted_sessions,

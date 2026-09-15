@@ -95,6 +95,7 @@ export interface QueuedRun {
   reasoningEffort?: string
   backgroundDelegationId?: string
   backgroundClaimId?: string
+  backgroundNotificationKind?: 'kanban'
   /** Internal-only origin history for a background callback. Never accepted from socket input. */
   backgroundContinuationContext?: BackgroundContinuationContext
   autonomous?: boolean

@@ -610,6 +610,91 @@ assert process_registry_module.process_registry.completion_queue.get_nowait() ==
 `)
   })
 
+  it('claims and acknowledges Kanban terminal events for loaded Web UI sessions', () => {
+    runPython(String.raw`
+${harness}
+
+class Event:
+    def __init__(self, event_id, task_id, kind, payload):
+        self.id = event_id
+        self.task_id = task_id
+        self.kind = kind
+        self.payload = payload
+
+class Task:
+    id = "t_webui"
+    title = "Web UI notification probe"
+    status = "done"
+
+state = {"cursor": 4, "removed": False, "rewinds": []}
+kanban_db = types.ModuleType("hermes_cli.kanban_db")
+kanban_db.DEFAULT_BOARD = "default"
+kanban_db.list_boards = lambda include_archived=False: [
+    {"slug": "default", "db_path": "/tmp/default-kanban.db"},
+    {"slug": "project-board", "db_path": "/tmp/project-kanban.db"},
+]
+kanban_db.count_notify_subs = lambda **kwargs: (
+    1 if kwargs.get("board") == "project-board" and kwargs.get("platform") == "tui"
+    and kwargs.get("chat_id") == "session-1" else 0
+)
+kanban_db.connect = lambda board=None: types.SimpleNamespace(close=lambda: None, board=board)
+kanban_db.list_notify_subs = lambda conn: ([] if conn.board != "project-board" or state["removed"] else [{
+    "task_id": "t_webui", "platform": "tui", "chat_id": "session-1",
+    "thread_id": "", "last_event_id": state["cursor"],
+}])
+
+def claim_unseen_events_for_sub(conn, **kwargs):
+    if state["cursor"] >= 5:
+        return state["cursor"], state["cursor"], []
+    old_cursor = state["cursor"]
+    state["cursor"] = 5
+    return old_cursor, 5, [Event(5, "t_webui", "completed", {"summary": "probe done"})]
+
+def rewind_notify_cursor(conn, **kwargs):
+    state["rewinds"].append((kwargs["claimed_cursor"], kwargs["old_cursor"]))
+    if state["cursor"] == kwargs["claimed_cursor"]:
+        state["cursor"] = kwargs["old_cursor"]
+        return True
+    return False
+
+kanban_db.claim_unseen_events_for_sub = claim_unseen_events_for_sub
+kanban_db.rewind_notify_cursor = rewind_notify_cursor
+kanban_db.get_task = lambda conn, task_id: Task()
+kanban_db.remove_notify_sub = lambda conn, **kwargs: state.update(removed=True)
+hermes_cli = types.ModuleType("hermes_cli")
+hermes_cli.__path__ = []
+hermes_cli.kanban_db = kanban_db
+sys.modules["hermes_cli"] = hermes_cli
+sys.modules["hermes_cli.kanban_db"] = kanban_db
+
+pool, _fake_db = make_pool()
+pool._sessions["session-1"] = bridge.AgentSession(session_id="session-1", agent=object())
+
+first = pool.poll_background()
+assert len(first["notifications"]) == 1
+notification = first["notifications"][0]
+assert notification["notification_kind"] == "kanban"
+assert notification["session_id"] == "session-1"
+assert notification["board"] == "project-board"
+assert notification["task_id"] == "t_webui"
+assert notification["event_id"] == 5
+assert state["cursor"] == 5
+
+released = pool.release_background_notification(notification["delegation_id"], notification["claim_id"])
+assert released["released"] is True
+assert state["cursor"] == 4
+assert state["rewinds"] == [(5, 4)]
+
+second = pool.poll_background()
+assert len(second["notifications"]) == 1
+redelivery = second["notifications"][0]
+completed = pool.complete_background_notification(redelivery["delegation_id"], redelivery["claim_id"])
+assert completed["completed"] is True
+assert state["removed"] is True
+assert pool.poll_background()["notifications"] == []
+`)
+  })
+
   it('acknowledges a user-cancelled delegation completion without starting a new parent turn', () => {
     runPython(String.raw`
 ${harness}
@@ -692,6 +777,54 @@ assert calls == [
     ("kill_all",),
     ("release", "deleg-1", "claim-1"),
 ]
+assert pool._background_notification_claims == {}
+`)
+  })
+
+  it('rewinds claimed Kanban notifications during worker shutdown', () => {
+    runPython(String.raw`
+${harness}
+
+calls = []
+kanban_db = types.ModuleType("hermes_cli.kanban_db")
+kanban_db.connect = lambda board=None: types.SimpleNamespace(close=lambda: None)
+kanban_db.rewind_notify_cursor = lambda conn, **kwargs: calls.append(kwargs) or True
+hermes_cli = types.ModuleType("hermes_cli")
+hermes_cli.__path__ = []
+hermes_cli.kanban_db = kanban_db
+sys.modules["hermes_cli"] = hermes_cli
+sys.modules["hermes_cli.kanban_db"] = kanban_db
+
+async_module = types.ModuleType("tools.async_delegation")
+async_module.interrupt_all = lambda reason: 0
+async_module.active_count = lambda: 0
+async_module.release_completion_delivery = lambda delegation_id, claim_id: calls.append(
+    {"wrong_delegation_release": (delegation_id, claim_id)}
+) or True
+sys.modules["tools.async_delegation"] = async_module
+
+process_registry_module = types.ModuleType("tools.process_registry")
+process_registry_module.process_registry = types.SimpleNamespace(kill_all=lambda: 0)
+sys.modules["tools.process_registry"] = process_registry_module
+
+pool, _fake_db = make_pool()
+pool._background_notification_claims[("kanban:board:t_webui:5", "claim-1")] = {
+    "notification_kind": "kanban",
+    "board": "board",
+    "task_id": "t_webui",
+    "platform": "tui",
+    "chat_id": "session-1",
+    "thread_id": "",
+    "old_cursor": 4,
+    "new_cursor": 5,
+}
+
+result = pool.shutdown()
+assert result["released_claims"] == 1
+assert calls == [{
+    "task_id": "t_webui", "platform": "tui", "chat_id": "session-1",
+    "thread_id": "", "claimed_cursor": 5, "old_cursor": 4,
+}]
 assert pool._background_notification_claims == {}
 `)
   })

@@ -431,7 +431,7 @@ async function ensureBridgeFixedContext(args: {
 export async function handleBridgeRun(
   nsp: ReturnType<Server['of']>,
   socket: Socket,
-  data: { input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; onEvent?: (event: string, payload: any) => void },
+  data: { input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; background_notification_kind?: 'kanban'; autonomous?: boolean; onEvent?: (event: string, payload: any) => void },
   profile: string,
   sessionMap: Map<string, SessionState>,
   bridge: AgentBridgeClient,
@@ -641,7 +641,7 @@ export async function handleBridgeRun(
     })
   }
 
-  if (data.background_delegation_id && !callbackContext) {
+  if (data.background_delegation_id && !callbackContext && data.background_notification_kind !== 'kanban') {
     const error = `Background callback ${data.background_delegation_id} cannot continue because its origin context is unavailable.`
     bridgeLogger.error({ sessionId: session_id, delegationId: data.background_delegation_id }, error)
     if (data.background_claim_id) {
@@ -718,6 +718,7 @@ export async function handleBridgeRun(
         return contextTokens
       },
       currentInputTokens,
+      data.background_notification_kind !== 'kanban' || shouldPersistUserMessage,
     )
   const bridgeHistory = history
   let backgroundNotificationAccepted = false

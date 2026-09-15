@@ -15,7 +15,7 @@ import type { Server, Socket } from 'socket.io'
 import { randomUUID } from 'crypto'
 import { logger } from '../public/logging'
 import { getSystemPrompt } from '../public/runs/prompt'
-import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
+import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessionRecoveryMetadata, updateMessageDisplayContent } from '../repositories/session-store'
 import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/workspace-run-changes-store'
 import { getSessionCategory } from '../repositories/session-category-store'
 import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../public/profile-config'
@@ -408,9 +408,11 @@ export class ChatRunSocket {
   private backgroundPollTimer?: NodeJS.Timeout
   private backgroundPollInFlight = false
   private backgroundRecoveryNeeded = true
+  private backgroundRecoveryPollAt = 0
   private backgroundBrokerId?: string
   private backgroundPollRetryAt = 0
   private backgroundActivityGraceUntil = 0
+  private backgroundKanbanPollAt = 0
   private closing = false
 
   constructor(io: Server) {
@@ -1346,6 +1348,7 @@ export class ChatRunSocket {
       context_compression_enabled?: boolean
       background_delegation_id?: string
       background_claim_id?: string
+      background_notification_kind?: 'kanban'
       autonomous?: boolean
       onEvent?: (event: string, payload: any) => void
     },
@@ -1710,6 +1713,7 @@ export class ChatRunSocket {
       source: resolveRunSource(session.source || undefined, sessionId),
       backgroundDelegationId: delegationId,
       backgroundClaimId: claimId,
+      backgroundNotificationKind: notification.notification_kind === 'kanban' ? 'kanban' : undefined,
       autonomous: true,
     }
 
@@ -1728,6 +1732,7 @@ export class ChatRunSocket {
   private needsBackgroundPoll(): boolean {
     if (this.closing) return false
     if (this.backgroundRecoveryNeeded) return true
+    if (Date.now() >= this.backgroundRecoveryPollAt) return true
     if (Date.now() < this.backgroundActivityGraceUntil) return true
     for (const state of this.sessionMap.values()) {
       if (Object.values(state.backgroundDelegations || {})
@@ -1735,13 +1740,13 @@ export class ChatRunSocket {
       if (Object.values(state.backgroundTasks || {})
         .some(task => task.status === 'running' && task.runtime !== 'ekko')) return true
     }
-    return false
+    return this.sessionMap.size > 0 && Date.now() >= this.backgroundKanbanPollAt
   }
 
   private backgroundRecoveryRoutes() {
     const cutoff = Math.floor(Date.now() / 1000) - 8 * 24 * 60 * 60
     const sessionsByProfile = new Map<string, string[]>()
-    for (const session of listSessions(undefined, undefined, 10_000)) {
+    for (const session of listSessionRecoveryMetadata()) {
       if (session.last_active < cutoff) continue
       if (!isHermesWorkerBackedSession(session)) continue
       const profile = session.profile || 'default'
@@ -1756,9 +1761,11 @@ export class ChatRunSocket {
     if (this.closing || this.backgroundPollInFlight || Date.now() < this.backgroundPollRetryAt || !this.needsBackgroundPoll()) return
     this.backgroundPollInFlight = true
     try {
-      const recovering = this.backgroundRecoveryNeeded
+      const recovering = this.backgroundRecoveryNeeded || Date.now() >= this.backgroundRecoveryPollAt
       const routes = recovering ? this.backgroundRecoveryRoutes() : undefined
       const result = await this.backgroundBridge.backgroundPoll(routes, { timeoutMs: recovering ? 120_000 : 1000 })
+      if (recovering) this.backgroundRecoveryPollAt = Date.now() + 60_000
+      this.backgroundKanbanPollAt = Date.now() + 5000
       if (this.closing) {
         await Promise.allSettled((result.notifications || []).map((notification: any) => (
           this.backgroundBridge.releaseBackgroundNotification(
@@ -2220,6 +2227,7 @@ export class ChatRunSocket {
       reasoning_effort: next.reasoningEffort,
       background_delegation_id: next.backgroundDelegationId,
       background_claim_id: next.backgroundClaimId,
+      background_notification_kind: next.backgroundNotificationKind,
       autonomous: next.autonomous,
     }, runProfile, skipUserMessage, backgroundContinuationContext)
   }

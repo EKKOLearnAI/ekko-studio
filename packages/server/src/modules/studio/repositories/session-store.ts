@@ -522,6 +522,22 @@ export function setSessionPushEnabled(id: string, enabled: boolean): boolean {
   return result.changes > 0
 }
 
+export type SessionRecoveryMetadata = Pick<
+  HermesSessionRow,
+  'id' | 'profile' | 'source' | 'agent' | 'agent_session_id' | 'last_active'
+>
+
+/** Session routing fields only; background recovery must not materialize message previews. */
+export function listSessionRecoveryMetadata(limit = 10_000): SessionRecoveryMetadata[] {
+  if (!isSqliteAvailable()) return []
+  return getDb()!.prepare(`
+    SELECT id, profile, source, agent, agent_session_id, last_active
+    FROM ${SESSIONS_TABLE}
+    ORDER BY last_active DESC, id DESC
+    LIMIT ?
+  `).all(limit) as SessionRecoveryMetadata[]
+}
+
 export function listSessions(
   profile?: string,
   source?: string,
