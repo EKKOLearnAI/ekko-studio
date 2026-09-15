@@ -5,7 +5,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { existsSync, readdirSync, realpathSync } from 'fs'
 import { chmod, copyFile, cp, lstat, mkdir, open, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'fs/promises'
 import { homedir } from 'os'
-import { delimiter, dirname, join } from 'path'
+import { delimiter, dirname, join, win32 as win32Path } from 'path'
 import { promisify } from 'util'
 import { getWebUiHome } from '../../studio/public/config'
 import { getProfileDir, PROVIDER_ENV_MAP, readConfigYamlForProfile, safeReadFile } from '../../studio/public/profile-config'
@@ -546,21 +546,24 @@ function getDesktopCommonBinPaths(): string[] {
 }
 
 function prependPathEntries(env: NodeJS.ProcessEnv, entries: Array<string | null | undefined>) {
+  const pathDelimiter = process.platform === 'win32' ? ';' : delimiter
   const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') || 'PATH'
   const currentPath = env[pathKey] || ''
-  const existing = new Set(currentPath.split(delimiter).filter(Boolean))
+  const existing = new Set(currentPath.split(pathDelimiter).filter(Boolean))
   const prepended: string[] = []
 
   for (const entry of entries) {
     if (!entry) continue
-    for (const segment of entry.split(delimiter).map(item => item.trim()).filter(Boolean)) {
+    for (const segment of entry.split(pathDelimiter).map(item => item.trim()).filter(Boolean)) {
       if (existing.has(segment) || prepended.includes(segment)) continue
       prepended.push(segment)
     }
   }
 
   if (prepended.length > 0) {
-    env[pathKey] = currentPath ? `${prepended.join(delimiter)}${delimiter}${currentPath}` : prepended.join(delimiter)
+    env[pathKey] = currentPath
+      ? `${prepended.join(pathDelimiter)}${pathDelimiter}${currentPath}`
+      : prepended.join(pathDelimiter)
   }
 }
 
@@ -2411,9 +2414,10 @@ function getScopedConfigFileDefinition(
 }
 
 function getCurrentNodeEnv(): NodeJS.ProcessEnv {
+  const pathDelimiter = process.platform === 'win32' ? ';' : delimiter
   return {
     ...process.env,
-    PATH: [getNodeBinDir(), getNvmNodeBinPaths(), process.env.PATH].filter(Boolean).join(delimiter),
+    PATH: [getNodeBinDir(), getNvmNodeBinPaths(), process.env.PATH].filter(Boolean).join(pathDelimiter),
     npm_node_execpath: process.execPath,
   }
 }
@@ -2477,10 +2481,41 @@ function normalizeErrorCode(err: any): string | undefined {
 }
 
 async function findCommandPaths(command: string, env: NodeJS.ProcessEnv): Promise<string[]> {
+  if (process.platform === 'win32') {
+    const envValue = (name: string): string => {
+      if (typeof env[name] === 'string') return env[name]
+      const entry = Object.entries(env).find(([key]) => key.toLowerCase() === name.toLowerCase())
+      return typeof entry?.[1] === 'string' ? entry[1] : ''
+    }
+    const normalizedCommand = normalizeWindowsCommandPath(command)
+    if (win32Path.isAbsolute(normalizedCommand) || /[\\/]/.test(normalizedCommand)) {
+      return existsSync(normalizedCommand) ? [normalizedCommand] : []
+    }
+
+    const extensions = win32Path.extname(normalizedCommand)
+      ? ['']
+      : (envValue('PATHEXT') || '.COM;.EXE;.BAT;.CMD')
+          .split(';')
+          .map(extension => extension.trim())
+          .filter(Boolean)
+    const paths: string[] = []
+    const seen = new Set<string>()
+    for (const rawDirectory of envValue('PATH').split(';')) {
+      const directory = rawDirectory.trim().replace(/^"(.*)"$/, '$1')
+      if (!directory) continue
+      for (const extension of extensions) {
+        const candidate = win32Path.join(directory, `${normalizedCommand}${extension}`)
+        const key = candidate.toLowerCase()
+        if (seen.has(key) || !existsSync(candidate)) continue
+        seen.add(key)
+        paths.push(candidate)
+      }
+    }
+    return paths
+  }
+
   try {
-    const lookupCommand = process.platform === 'win32' ? 'where' : 'which'
-    const lookupArgs = process.platform === 'win32' ? [command] : ['-a', command]
-    const { stdout } = await execFileAsync(lookupCommand, lookupArgs, {
+    const { stdout } = await execFileAsync('which', ['-a', command], {
       encoding: 'utf-8',
       timeout: 5000,
       windowsHide: true,
