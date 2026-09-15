@@ -181,4 +181,15 @@ describe('client style system', () => {
     )
   })
 
+  it('keeps mobile custom-background drawers opaque instead of glassy', () => {
+    const app = readClientFile('App.vue')
+    const customBackgroundStyles = app
+      .split('.app-shell--custom-background {')[1]
+      ?.split('.app-shell.desktop-platform-darwin')[0]
+
+    expect(customBackgroundStyles).toMatch(
+      /@media \(max-width: \$breakpoint-mobile\) \{[\s\S]*:deep\(\.sidebar\),[\s\S]*:deep\(\.hermes-config-sidebar\),[\s\S]*:deep\(\.ekko-config-sidebar\),[\s\S]*:deep\(\.chat-panel > \.session-list\),[\s\S]*:deep\(\.history-panel > \.session-list\),[\s\S]*:deep\(\.group-chat-panel > \.room-sidebar\),[\s\S]*:deep\(\.workflow-view > \.workflow-sidebar\) \{[\s\S]*background-color: var\(--bg-sidebar-surface\);[\s\S]*-webkit-backdrop-filter: none;[\s\S]*backdrop-filter: none;/,
+    )
+  })
+
 })

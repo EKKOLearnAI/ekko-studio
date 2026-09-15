@@ -472,6 +472,20 @@ useKeyboard();
     backdrop-filter: blur(8px) saturate(110%);
   }
 
+  @media (max-width: $breakpoint-mobile) {
+    :deep(.sidebar),
+    :deep(.hermes-config-sidebar),
+    :deep(.ekko-config-sidebar),
+    :deep(.chat-panel > .session-list),
+    :deep(.history-panel > .session-list),
+    :deep(.group-chat-panel > .room-sidebar),
+    :deep(.workflow-view > .workflow-sidebar) {
+      background-color: var(--bg-sidebar-surface);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
   :deep(.history-panel > .chat-main),
   :deep(.workflow-view > .workflow-main) {
     background-color: rgba(var(--bg-main-surface-rgb), 0.72);
