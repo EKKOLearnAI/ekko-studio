@@ -35,6 +35,7 @@ const CHAT_RUN_EVENTS = [
   'tool.completed',
   'tool.failed',
   'workspace.diff.completed',
+  'plan.updated',
   'run.completed',
   'run.failed',
   'compression.started',

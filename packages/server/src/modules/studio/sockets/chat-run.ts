@@ -1,3 +1,5 @@
+import { TaskPlanRuns, taskPlanRunInstruction } from '../services/task-plan-runs'
+import { saveTaskPlan } from '../repositories/task-plan-store'
 import { getSessionTaskPlans } from '../services/task-plans'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
 import { bindAppEventSubscription } from '../services/webhooks/app-events'
@@ -399,6 +401,9 @@ export class ChatRunSocket {
   private backgroundBridge = createPrimaryAgentBridge({ timeoutMs: 1000, connectRetryMs: 0 })
   /** sessionId → session state (messages, working status, events, run tracking) */
   private sessionMap = new Map<string, SessionState>()
+  private readonly taskPlanRuns = new TaskPlanRuns(saveTaskPlan, (sessionId, snapshot) => {
+    this.emitExternalEvent(sessionId, 'plan.updated', { event: 'plan.updated', ...snapshot })
+  })
   private bridgeResumePolls = new Set<string>()
   private readonly runWaiters = new Map<string, Set<(event: string, payload: any) => void>>()
   private readonly pendingMobileLocations = new Map<string, PendingMobileLocationRequest>()
@@ -415,6 +420,28 @@ export class ChatRunSocket {
 
   constructor(io: Server) {
     this.nsp = io.of('/chat-run')
+  }
+
+  updateTaskPlan(contextId: string, profile: string, input: Record<string, unknown>) {
+    return this.taskPlanRuns.update(contextId, profile, input)
+  }
+
+  private beginTaskPlanRun(sessionId: string | undefined, profile: string) {
+    if (!sessionId) return undefined
+    return this.taskPlanRuns.begin(sessionId, profile, () => this.sessionMap.get(sessionId))
+  }
+
+  private finishTaskPlanRun(sessionId: string, event: string, payload?: any, contextId?: string) {
+    if (!['run.completed', 'run.failed', 'abort.completed'].includes(event)) return
+    const interrupted = event === 'abort.completed' || payload?.interrupted === true || payload?.result?.interrupted === true || this.sessionMap.get(sessionId)?.isAborting
+    const executionState = interrupted ? 'interrupted' : event === 'run.failed' ? 'failed' : 'ended'
+    try {
+      if (contextId) this.taskPlanRuns.finish(contextId, executionState)
+      else this.taskPlanRuns.finishSession(sessionId, executionState)
+    } catch (err) {
+      // Keep terminal run delivery working even if persistence fails; startup recovery settles the stored plan.
+      logger.warn(err, '[chat-run-socket] failed to finish task plan for %s', sessionId)
+    }
   }
 
   emitSessionSettingsUpdated(sessionId: string, settings: {
@@ -995,6 +1022,7 @@ export class ChatRunSocket {
         } catch {
           return
         }
+        this.finishTaskPlanRun(sessionId, 'abort.completed')
         void handleAbort(
           this.nsp,
           socket,
@@ -1450,12 +1478,15 @@ export class ChatRunSocket {
         return
       }
 
+      const planContext = this.beginTaskPlanRun(data.session_id, profile)
+      if (planContext) data.instructions = [data.instructions, taskPlanRunInstruction(planContext)].filter(Boolean).join('\n\n')
       let fullInstructions = data.instructions
         ? `${getSystemPrompt(undefined, { source })}\n${data.instructions}`
         : getSystemPrompt(undefined, { source })
 
       const onEvent = (event: string, payload: any) => {
         if (data.session_id) this.observeQueueInsertionRunEvent(data.session_id, event, payload)
+        if (data.session_id) this.finishTaskPlanRun(data.session_id, event, payload, planContext)
         observeChatRunWebhookEvent({
           event,
           sessionId: String(data.session_id || payload?.session_id || ''),
@@ -1470,14 +1501,21 @@ export class ChatRunSocket {
         data.onEvent?.(event, payload)
         this.emitPendingInteraction(profile, event, payload)
       }
-      await handleBridgeRun(
-        this.nsp, socket, { ...data, instructions: fullInstructions, onEvent }, profile,
-        this.sessionMap, this.bridge,
-        skipUserMessage,
-        loadSessionStateFromDb,
-        this.dequeueNextQueuedRun.bind(this),
-        backgroundContinuationContext,
-      )
+      try {
+        await handleBridgeRun(
+          this.nsp, socket, { ...data, instructions: fullInstructions, onEvent }, profile,
+          this.sessionMap, this.bridge,
+          skipUserMessage,
+          loadSessionStateFromDb,
+          this.dequeueNextQueuedRun.bind(this),
+          backgroundContinuationContext,
+        )
+      } catch (err) {
+        if (data.session_id) this.finishTaskPlanRun(data.session_id, 'run.failed', undefined, planContext)
+        throw err
+      } finally {
+        if (data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, planContext)
+      }
       return
     }
 
@@ -1511,13 +1549,19 @@ export class ChatRunSocket {
       return
     }
 
-    const started = await handleCodingAgentRun(
-      this.nsp,
-      socket,
-      data,
-      profile,
-      this.sessionMap,
-    )
+    const isCommand = typeof data.input === 'string' && parseCodingAgentSessionCommand(data.input)
+    const planContext = isCommand ? undefined : this.beginTaskPlanRun(data.session_id, profile)
+    const instructions = planContext
+      ? [data.instructions, taskPlanRunInstruction(planContext)].filter(Boolean).join('\n\n')
+      : data.instructions
+    let started: Awaited<ReturnType<typeof handleCodingAgentRun>>
+    try {
+      started = await handleCodingAgentRun(this.nsp, socket, { ...data, instructions }, profile, this.sessionMap)
+      if (!started && planContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, planContext)
+    } catch (err) {
+      if (planContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.failed', undefined, planContext)
+      throw err
+    }
     if (!started) return
     if (data.session_id) {
       const timestamp = Math.floor(Date.now() / 1000)
@@ -1921,6 +1965,7 @@ export class ChatRunSocket {
           source,
           onEvent: (event, payload) => {
             this.observeQueueInsertionRunEvent(sid, event, payload)
+            this.finishTaskPlanRun(sid, event, payload)
             observeChatRunWebhookEvent({
               event,
               sessionId: sid,
@@ -2451,6 +2496,7 @@ export class ChatRunSocket {
       join: () => {},
       to: (room: string) => ({ emit: (event: string, payload: any) => this.nsp.to(room).emit(event, payload) }),
     } as unknown as Socket
+    this.finishTaskPlanRun(sid, 'abort.completed')
     await handleAbort(
       this.nsp,
       fakeSocket,
@@ -2488,6 +2534,7 @@ export class ChatRunSocket {
     }
     codingAgentRunManager.stop(sid, { reportClosed: false })
     const state = this.sessionMap.get(sid)
+    this.finishTaskPlanRun(sid, 'abort.completed')
     state?.abortController?.abort()
     this.sessionMap.delete(sid)
     this.runWaiters.delete(sid)
@@ -2495,6 +2542,7 @@ export class ChatRunSocket {
   }
 
   emitExternalEvent(sessionId: string, event: string, payload: any) {
+    this.finishTaskPlanRun(sessionId, event, payload)
     const tagged = { ...payload, session_id: sessionId }
     const profile = this.resolvePetEventProfile(sessionId, tagged)
     const state = this.sessionMap.get(sessionId)
@@ -2542,6 +2590,7 @@ export class ChatRunSocket {
   }
 
   clearSessionHistory(sessionId: string): { deleted: number; hadMemoryState: boolean } {
+    this.finishTaskPlanRun(sessionId, 'abort.completed')
     const deleted = clearSessionMessages(sessionId)
     const state = this.sessionMap.get(sessionId)
     const hadMemoryState = Boolean(state)
@@ -2851,6 +2900,7 @@ export class ChatRunSocket {
   async close() {
     if (this.closing) return
     this.closing = true
+    for (const sessionId of this.sessionMap.keys()) this.finishTaskPlanRun(sessionId, 'abort.completed')
     if (this.backgroundPollTimer) {
       clearInterval(this.backgroundPollTimer)
       this.backgroundPollTimer = undefined

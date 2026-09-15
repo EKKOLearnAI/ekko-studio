@@ -53,35 +53,38 @@ test('updates one plan card live and preserves unfinished work on stop with tool
   await expect(card.locator('li')).toHaveCount(3)
 })
 
-test('restores a completed plan from a resume snapshot after reload', async ({ page }) => {
-  await authenticate(page, TEST_ACCESS_KEY, 'research')
-  const completed = { ...plan, execution_state: 'ended', revision: 4,
-    plan: plan.plan.map(step => ({ ...step, status: 'completed' })) }
-  await page.addInitScript(p => {
-    ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = {
-      [p.session_id]: {
-        session_id: p.session_id, isWorking: false, events: [], taskPlans: [p],
-        messages: [
-          { id: 1, role: 'user', content: 'Implement task planning', timestamp: p.created_at / 1000 - 1 },
-          { id: 2, role: 'assistant', content: 'Task planning is ready', run_marker: p.run_id, timestamp: p.created_at / 1000 + 1 },
-        ],
-      },
-    }
-    localStorage.setItem('hermes_show_tool_calls', 'false')
-  }, completed)
-  await mockHermesApi(page, { sessions: [{ id: plan.session_id, profile: 'research', source: 'coding_agent', agent: 'ekko-agent',
-    model: 'test-model', title: 'Task plan session', preview: 'Implement task planning', started_at: now / 1000,
-    ended_at: now / 1000 + 1, last_active: now / 1000 + 1, message_count: 2, tool_call_count: 1, input_tokens: 0, output_tokens: 0 }] })
-  await mockChatSocket(page)
-  await page.goto(`/#/hermes/session/${plan.session_id}`)
-  await expect(page.getByTestId('task-plan-card')).toContainText('3/3 completed')
-  await page.reload()
-  await expect(page.getByTestId('task-plan-card')).toHaveCount(1)
-  await expect(page.getByTestId('task-plan-card')).toContainText('3/3 completed')
-  await expect(page.getByText('Task planning is ready', { exact: true })).toBeVisible()
-  await page.setViewportSize({ width: 390, height: 844 })
-  const card = page.getByTestId('task-plan-card')
-  await expect(card).toBeVisible()
-  const width = await card.evaluate(el => el.scrollWidth <= el.clientWidth)
-  expect(width).toBe(true)
-})
+for (const agent of ['ekko-agent', 'codex']) {
+  test(`restores a ${agent} completed plan from a resume snapshot after reload`, async ({ page }) => {
+    await authenticate(page, TEST_ACCESS_KEY, 'research')
+    const completed = { ...plan, plan_id: agent === 'codex' ? 'mcp:codex-turn-context' : plan.plan_id, execution_state: 'ended', revision: 4,
+      plan: plan.plan.map(step => ({ ...step, status: 'completed' })) }
+    await page.addInitScript(p => {
+      ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = {
+        [p.session_id]: {
+          session_id: p.session_id, isWorking: false, events: [], taskPlans: [p],
+          messages: [
+            { id: 1, role: 'user', content: 'Implement task planning', timestamp: p.created_at / 1000 - 1 },
+            { id: 2, role: 'assistant', content: 'Task planning is ready', run_marker: p.run_id, timestamp: p.created_at / 1000 + 1 },
+          ],
+        },
+      }
+      localStorage.setItem('hermes_show_tool_calls', 'false')
+    }, completed)
+    await mockHermesApi(page, { sessions: [{ id: plan.session_id, profile: 'research', source: 'coding_agent', agent,
+      model: 'test-model', title: 'Task plan session', preview: 'Implement task planning', started_at: now / 1000,
+      ended_at: now / 1000 + 1, last_active: now / 1000 + 1, message_count: 2, tool_call_count: 1, input_tokens: 0, output_tokens: 0 }] })
+    await mockChatSocket(page)
+    await page.goto(`/#/hermes/session/${plan.session_id}`)
+    await expect(page.getByTestId('task-plan-card')).toContainText('3/3 completed')
+    await page.reload()
+    await expect(page.getByTestId('task-plan-card')).toHaveCount(1)
+    await expect(page.getByTestId('task-plan-card')).toContainText('3/3 completed')
+    await expect(page.getByText('Task planning is ready', { exact: true })).toBeVisible()
+    await page.setViewportSize({ width: 390, height: 844 })
+    const card = page.getByTestId('task-plan-card')
+    await expect(card).toBeVisible()
+    const width = await card.evaluate(el => el.scrollWidth <= el.clientWidth)
+    expect(width).toBe(true)
+  })
+
+}

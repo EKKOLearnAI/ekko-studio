@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const saveTaskPlanMock = vi.hoisted(() => vi.fn())
+vi.mock('../../packages/server/src/modules/studio/repositories/task-plan-store', () => ({
+  saveTaskPlan: saveTaskPlanMock, listTaskPlansForPage: vi.fn(() => []),
+}))
+
 const handleBridgeRunMock = vi.hoisted(() => vi.fn(async () => {}))
 const resumeBridgeRunMock = vi.hoisted(() => vi.fn(async () => {}))
+const handleEkkoAgentRunMock = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run', () => ({
+  handleEkkoAgentRun: handleEkkoAgentRunMock,
+}))
 const handleCodingAgentRunMock = vi.hoisted(() => vi.fn(async () => {}))
 const loadSessionStateFromDbMock = vi.hoisted(() => vi.fn())
 const startBridgeMock = vi.hoisted(() => vi.fn())
@@ -972,5 +981,69 @@ describe('ChatRunSocket bridge readiness gating', () => {
     expect(order.slice(1)).toEqual(['close', 'close'])
     expect((server as any).sessionMap.size).toBe(0)
     expect((server as any).closing).toBe(true)
+  })
+})
+
+
+describe('ChatRunSocket MCP task plan lifecycle', () => {
+  it.each(['coding_agent', 'workflow', 'group_chat'])('does not inject shared planning into Ekko on %s', async source => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const begin = vi.spyOn((server as any).taskPlanRuns, 'begin')
+    handleEkkoAgentRunMock.mockClear()
+    await (server as any).handleRun(socket, {
+      session_id: 'session-1', source, coding_agent_id: 'ekko-agent', input: 'Implement a feature',
+    }, 'default')
+    expect(handleEkkoAgentRunMock).toHaveBeenCalledTimes(1)
+    const data = (handleEkkoAgentRunMock.mock.calls as any)[0][2]
+    expect(data.instructions || '').not.toContain('ekko_studio_update_plan')
+    expect(data.instructions || '').not.toContain('context_id=')
+    expect(begin).not.toHaveBeenCalled()
+  })
+
+  const input = { plan: [{ id: 'verify', step: 'Verify the change', status: 'in_progress' }] }
+
+  it.each(['run.completed', 'run.failed', 'abort.completed'])('settles a Codex plan before delivering %s', async event => {
+    saveTaskPlanMock.mockClear()
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { emitted, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    let contextId = ''
+    handleCodingAgentRunMock.mockImplementationOnce((async (_nsp: any, _socket: any, data: any, _profile: any, sessions: any) => {
+      contextId = data.instructions.match(/context_id="([^"]+)"/)[1]
+      Object.assign(sessions.get(data.session_id), { isWorking: true, responseRun: { runMarker: 'coding-turn-1' } })
+      return { runId: 'reused-runtime-id', messageId: 42 }
+    }) as any)
+    await (server as any).handleRun(socket, { session_id: 'session-1', source: 'coding_agent', coding_agent_id: 'codex', input: 'Implement a feature' }, 'default')
+    const snapshot = server.updateTaskPlan(contextId, 'default', input)
+    expect(snapshot.run_id).toBe('coding-turn-1')
+    expect(saveTaskPlanMock).toHaveBeenCalledWith(snapshot)
+    server.emitExternalEvent('session-1', event, { event, run_id: 'reused-runtime-id' })
+    const updates = emitted.filter(item => item.event === 'plan.updated')
+    expect(updates).toHaveLength(2)
+    expect(updates[1].payload).toMatchObject({ execution_state: event === 'run.completed' ? 'ended' : event === 'run.failed' ? 'failed' : 'interrupted', revision: 2 })
+    expect(emitted.indexOf(updates[1])).toBeLessThan(emitted.findIndex(item => item.event === event))
+    expect(() => server.updateTaskPlan(contextId, 'default', input)).toThrow('expired')
+  })
+
+  it.each([false, true])('keeps Hermes plans alive until its stream completes (interrupted=%s)', async interrupted => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { emitted, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ensureReadyMock.mockResolvedValue({ reachable: true, status: 'ready' })
+    let contextId = ''
+    handleBridgeRunMock.mockImplementationOnce((async (_nsp: any, _socket: any, data: any, _profile: any, sessions: any) => {
+      contextId = data.instructions.match(/context_id="([^"]+)"/)[1]
+      const state = sessions.get(data.session_id)
+      Object.assign(state, { isWorking: true, activeRunMarker: 'cli-turn-1' })
+      server.updateTaskPlan(contextId, 'default', input)
+      state.activeRunMarker = undefined
+      state.isWorking = false
+      data.onEvent('run.completed', { event: 'run.completed', result: { interrupted } })
+    }) as any)
+    await (server as any).handleRun(socket, { session_id: 'session-1', source: 'cli', input: 'Implement a feature' }, 'default')
+    expect(emitted.filter(item => item.event === 'plan.updated').map(item => item.payload.execution_state)).toEqual(['running', interrupted ? 'interrupted' : 'ended'])
+    expect(() => server.updateTaskPlan(contextId, 'default', input)).toThrow('expired')
   })
 })

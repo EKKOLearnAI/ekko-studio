@@ -909,6 +909,35 @@ Object.keys(openapi.paths).sort().forEach(key => {
 openapi.paths = sortedPaths
 
 // Add special endpoints after sorting
+// Shared task planning is bound to an authenticated, active turn capability.
+openapi.paths['/api/studio/task-plans/update'] = {
+  post: {
+    tags: ['Chat Run'], summary: 'Update the current turn task plan', operationId: 'updateTaskPlan',
+    description: 'Update the full ordered plan using the context_id injected into the current run instructions. Expired contexts and other profiles are rejected. Updates are persisted and emitted as plan.updated.',
+    security: [{ BearerAuth: [] }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['context_id', 'plan'],
+      properties: {
+        context_id: { type: 'string' }, explanation: { type: 'string', maxLength: 1000 },
+        plan: { type: 'array', minItems: 1, maxItems: 30, items: {
+          type: 'object', required: ['id', 'step', 'status'], additionalProperties: false,
+          properties: {
+            id: { type: 'string', minLength: 1, maxLength: 100 },
+            step: { type: 'string', minLength: 1, maxLength: 200 },
+            status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+          },
+        } },
+      },
+    } } } },
+    responses: {
+      200: { description: 'Persisted task plan snapshot with session_id, run_id, plan_id, revision, execution_state, explanation, plan, created_at and updated_at (milliseconds).' },
+      400: { description: 'Invalid plan; at most one step can be in_progress and step ids must be unique.' },
+      409: { description: 'Context expired, belongs to another profile, or has no active turn.' },
+      503: { description: 'Chat run service unavailable.' },
+    },
+  },
+}
+
 // Add non-streaming Chat Run HTTP wrapper endpoint
 openapi.paths['/api/studio/chat-run/runs'] = {
   post: {

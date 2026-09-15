@@ -132,6 +132,7 @@ function managedMcpServerConfig(
       HERMES_WEB_UI_PROFILE: profile,
       HERMES_MCP_SERVER_NAME: serverName,
       HERMES_MCP_TOOLSET: toolset,
+      HERMES_MCP_NATIVE_TASK_PLAN: '1',
       [MANAGED_ENV_KEY]: '1',
     },
     enabled: true,

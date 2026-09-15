@@ -21,6 +21,7 @@ function makeSocket() {
       process.nextTick(() => {
         nativeEmit('run.started', { event: 'run.started', run_id: 'run-1' })
         nativeEmit('message.delta', { event: 'message.delta', run_id: 'run-1', delta: 'hello' })
+        nativeEmit('plan.updated', { event: 'plan.updated', run_id: 'turn-1', plan_id: 'mcp:context', revision: 1 })
         nativeEmit('run.completed', { event: 'run.completed', run_id: 'run-1' })
       })
     }
@@ -202,7 +203,8 @@ describe('chat-run HTTP API controller', () => {
       run_id: 'run-1',
       output: 'hello',
     })
-    expect(ctx.body.events).toHaveLength(3)
+    expect(ctx.body.events).toHaveLength(4)
+    expect(ctx.body.events).toContainEqual(expect.objectContaining({ event: 'plan.updated', plan_id: 'mcp:context', revision: 1 }))
   })
 
   it('generates a session id when none is provided', async () => {

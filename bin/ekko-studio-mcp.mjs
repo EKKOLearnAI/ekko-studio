@@ -67,6 +67,7 @@ When run without options, this process waits for MCP JSON-RPC messages on stdin.
 const positionalArgs = process.argv.slice(2).filter(arg => !arg.startsWith('-'))
 const requestedToolset = String(positionalArgs[0] || process.env.HERMES_MCP_TOOLSET || 'api').trim().toLowerCase()
 const ACTIVE_TOOLSET = TOOLSETS.has(requestedToolset) ? requestedToolset : 'api'
+const SHARED_TASK_PLAN_ENABLED = process.env.HERMES_MCP_NATIVE_TASK_PLAN !== '1'
 
 if (process.argv.includes('-h') || process.argv.includes('--help')) {
   printHelp()
@@ -1007,6 +1008,26 @@ const tools = [
       }, ['path']),
   },
   {
+    name: 'ekko_studio_update_plan',
+    toolset: 'use',
+    description: 'Create or update the current turn task plan shown in Studio and App. For multi-step work, send the full ordered plan before starting and whenever progress changes. Keep step ids stable, use at most one in_progress step, and mark completion only after verification. Requires the context_id supplied in the current run instructions; cannot start a run or modify another turn.',
+    inputSchema: inputSchema({
+      context_id: { type: 'string', description: 'Current turn context supplied by Studio. Never reuse a previous turn context.' },
+      explanation: { type: 'string', maxLength: 1000 },
+      plan: {
+        type: 'array', minItems: 1, maxItems: 30,
+        items: {
+          type: 'object', additionalProperties: false, required: ['id', 'step', 'status'],
+          properties: {
+            id: { type: 'string', minLength: 1, maxLength: 100 },
+            step: { type: 'string', minLength: 1, maxLength: 200 },
+            status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+          },
+        },
+      },
+    }, ['context_id', 'plan']),
+  },
+  {
     name: 'ekko_studio_use_chat_run',
     toolset: 'use',
     description: 'Start one user-requested Ekko Studio chat or coding-agent run through the HTTP bridge and wait for completion. Do not use this as an internal delegation or subtask mechanism.',
@@ -1724,8 +1745,8 @@ const CATEGORY_TOOLSETS = {
   },
   use: {
     name: 'ekko_studio_use_toolset',
-    coverage: 'Explicit user-requested Studio chat/coding runs; one-time confirmed mobile location, calendar and reminder operations; session list/count/detail/messages/context/rename/delete; usage statistics; profiles and available models; provider add/delete; worker status; workflow CRUD and workflow run list/start/stop/rerun/delete.',
-    description: 'Discover and invoke high-level Ekko Studio operations without loading every Studio-use tool schema into the model context. Covers explicit user-requested chat or coding runs, one-time confirmed mobile location, calendar/reminder operations, session management and clean context, usage statistics, profiles/models/providers, worker status, workflow CRUD, and workflow run lifecycle. Never use chat/session or mobile-device operations as an internal delegation mechanism. Use action=list for the compact operation catalog, action=describe for one full input schema, then action=call with that exact tool name and arguments.',
+    coverage: (SHARED_TASK_PLAN_ENABLED ? 'Current-turn task plans and progress; ' : '') + 'Explicit user-requested Studio chat/coding runs; one-time confirmed mobile location, calendar and reminder operations; session list/count/detail/messages/context/rename/delete; usage statistics; profiles and available models; provider add/delete; worker status; workflow CRUD and workflow run list/start/stop/rerun/delete.',
+    description: 'Discover and invoke high-level Ekko Studio operations without loading every Studio-use tool schema into the model context. Covers ' + (SHARED_TASK_PLAN_ENABLED ? 'current-turn task planning, ' : '') + 'explicit user-requested chat or coding runs, one-time confirmed mobile location, calendar/reminder operations, session management and clean context, usage statistics, profiles/models/providers, worker status, workflow CRUD, and workflow run lifecycle. Never use chat/session or mobile-device operations as an internal delegation mechanism. Use action=list for the compact operation catalog, action=describe for one full input schema, then action=call with that exact tool name and arguments.',
   },
 }
 
@@ -1769,7 +1790,8 @@ function resolveToolName(name) {
 }
 
 function activeToolsetTools() {
-  return tools.filter(tool => tool.toolset === ACTIVE_TOOLSET)
+  return tools.filter(tool => tool.toolset === ACTIVE_TOOLSET
+    && (SHARED_TASK_PLAN_ENABLED || tool.name !== 'ekko_studio_update_plan'))
 }
 
 function categoryToolCatalog(query = '') {
@@ -1917,6 +1939,10 @@ async function callTool(name, args = {}) {
       })
       return jsonText(await requestEnvelope(path, options))
     }
+    case 'ekko_studio_update_plan':
+      return jsonText(await request('/api/studio/task-plans/update', withAuthArgs(args, {
+        method: 'POST', body: pickDefined(args, ['context_id', 'explanation', 'plan']),
+      })))
     case 'ekko_studio_use_chat_run':
       return jsonText(await request('/api/studio/chat-run/runs', withAuthArgs(args, {
         method: 'POST',

@@ -40,7 +40,7 @@ export function listTaskPlansForPage(
   return snapshots.sort((a, b) => a.created_at - b.created_at)
 }
 
-/** Ekko runs are in-process and cannot survive a Studio process restart. Bootstrap only. */
+/** Native runs and MCP plan contexts cannot survive a Studio process restart. Bootstrap only. */
 export function interruptOrphanedTaskPlans(): void {
   if (!isSqliteAvailable()) return
   const db = getDb()!
