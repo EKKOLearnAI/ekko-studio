@@ -77,7 +77,7 @@ export class BrowserProfileStore {
     const document = this.requireDocument()
     const profileName = safeName(input.name)
     const profileRoot = await this.validateProfileRoot(input.rootDirectory)
-    const proxyMode = safeProxyMode(input.proxyMode)
+    const proxyMode = input.proxyMode === undefined ? 'system' : safeProxyMode(input.proxyMode)
     const proxyRules = safeProxyRules(input.proxyRules, proxyMode)
     const id = randomUUID()
     const createdAt = now()
@@ -195,7 +195,7 @@ export class BrowserProfileStore {
         rootPath: join(this.root, 'profiles', id),
         sessionPath: join(this.root, 'profiles', id, 'data'),
         downloadPath: join(this.root, 'profiles', id, 'download'),
-        proxyMode: 'direct',
+        proxyMode: 'system',
         proxyRules: '',
         askBeforeDownload: true,
         downloadConflictPolicy: 'uniquify',

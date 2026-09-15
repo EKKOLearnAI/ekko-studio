@@ -1109,7 +1109,10 @@ ipcMain.handle('hermes-desktop:browser-navigation-action', (event, tabId?: unkno
 })
 ipcMain.handle('hermes-desktop:browser-create-profile', (event, input?: unknown) => {
   const value = input && typeof input === 'object' ? input as Record<string, unknown> : {}
-  const proxyMode = value.proxyMode === 'system' || value.proxyMode === 'fixed_servers' ? value.proxyMode : 'direct'
+  let proxyMode: 'direct' | 'system' | 'fixed_servers' = 'system'
+  if (value.proxyMode !== undefined) {
+    proxyMode = value.proxyMode === 'system' || value.proxyMode === 'fixed_servers' ? value.proxyMode : 'direct'
+  }
   return browserForEvent(event).createProfile({
     name: String(value.name || ''),
     rootDirectory: String(value.rootDirectory || ''),

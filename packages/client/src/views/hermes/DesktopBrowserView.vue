@@ -13,7 +13,7 @@ const settingsProfileId = ref('')
 const profileDraft = ref<DesktopBrowserProfile | null>(null)
 const profileName = ref('')
 const profileRootPath = ref('')
-const profileProxyMode = ref<'direct' | 'system' | 'fixed_servers'>('direct')
+const profileProxyMode = ref<'direct' | 'system' | 'fixed_servers'>('system')
 const profileProxyRules = ref('')
 const profileModalMode = ref<'create' | 'edit'>('create')
 const showProfileModal = ref(false)
@@ -51,7 +51,7 @@ function openCreateProfile(): void {
   profileModalMode.value = 'create'
   profileName.value = ''
   profileRootPath.value = ''
-  profileProxyMode.value = 'direct'
+  profileProxyMode.value = 'system'
   profileProxyRules.value = ''
   profileDraft.value = null
   showProfileModal.value = true
