@@ -634,6 +634,13 @@ export async function handleBridgeRun(
       socket.emit(event, outbound)
     }
   }
+  if (shouldPersistUserMessage) {
+    emit('run.accepted', {
+      event: 'run.accepted',
+      queue_id: data.queue_id,
+      message_id: messageId,
+    })
+  }
   if (shouldEmitWorkspaceUpdate) {
     emit('session.workspace.updated', {
       event: 'session.workspace.updated',

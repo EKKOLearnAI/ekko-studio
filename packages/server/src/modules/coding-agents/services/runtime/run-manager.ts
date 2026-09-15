@@ -219,6 +219,7 @@ interface CodingAgentRunSendOptions {
   systemPrompt?: string
   images?: CodingAgentImageInput[]
   storageInput?: string
+  displayInput?: string
 }
 
 function nowSeconds(): number {
@@ -830,7 +831,10 @@ export class CodingAgentRunManager {
     const systemPrompt = String(options.systemPrompt || '').trim()
     this.ensureDbSession(run)
     run.assistantMessageId = undefined
-    const messageId = this.addUserMessage(run, options.storageInput ?? text)
+    const storedInput = options.storageInput ?? text
+    const messageId = options.displayInput === undefined
+      ? this.addUserMessage(run, storedInput)
+      : this.addUserMessage(run, storedInput, options.displayInput)
     this.touch(run)
     this.emitTerminalStatus(run, 'Input sent to coding agent.')
     this.startWorkspaceRunDiff(run)
@@ -1340,20 +1344,24 @@ export class CodingAgentRunManager {
     })
   }
 
-  private addUserMessage(run: ManagedCodingAgentRun, content: string) {
+  private addUserMessage(run: ManagedCodingAgentRun, content: string, displayContent?: string) {
     const timestamp = nowSeconds()
+    const visibleContent = displayContent ?? content
+    const storedDisplayContent = displayContent && displayContent !== content ? displayContent : null
     run.state.messages.push({
       id: run.state.messages.length + 1,
       session_id: run.launch.sessionId,
       runMarker: run.runMarker,
       role: 'user',
-      content,
+      content: visibleContent,
+      display_content: storedDisplayContent,
       timestamp,
     })
     const id = addMessage({
       session_id: run.launch.sessionId,
       role: 'user',
       content,
+      display_content: storedDisplayContent,
       run_marker: run.runMarker ?? null,
       timestamp,
     })

@@ -569,10 +569,12 @@ export async function handleEkkoAgentRun(
 
   if (shouldPersistUserMessage) {
     const role = data.display_role === 'command' ? 'command' : 'user'
+    const displayContentForStorage = storageText !== displayText ? displayText : null
     const messageId = addMessage({
       session_id: sessionId,
       role,
       content: storageText,
+      display_content: displayContentForStorage,
       timestamp: now,
     })
     data.onEvent?.('message.created', {
@@ -589,6 +591,7 @@ export async function handleEkkoAgentRun(
       session_id: sessionId,
       role,
       content: storageText,
+      display_content: displayContentForStorage,
       timestamp: now,
     })
     const peerTarget = data.peerExcludeSocketId
@@ -600,9 +603,14 @@ export async function handleEkkoAgentRun(
       message: {
         id: data.queue_id || messageId,
         role,
-        content: storageText,
+        content: displayText,
         timestamp: now,
       },
+    })
+    emit('run.accepted', {
+      event: 'run.accepted',
+      queue_id: data.queue_id,
+      message_id: messageId,
     })
   }
 

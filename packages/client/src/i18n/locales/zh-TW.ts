@@ -887,6 +887,15 @@ export default {
     outlineEmpty: '暫無會話內容',
     outlineUserQuestion: '使用者問題',
     inputPlaceholder: '輸入訊息... (Enter 發送，Shift+Enter 換行)',
+    annotations: {
+      toolbarLabel: '回覆註解操作', addToChat: '加入聊天', markerLabel: '註解 {index}：{excerpt}',
+      countOne: '{count} 則註解', countMany: '{count} 則註解', clearAll: '清除所有註解',
+      selectedExcerpt: '已選摘錄', yourComment: '你的評論', optionalComment: '新增選填評論...', comment: '評論',
+      addFiles: '新增檔案', removeFile: '移除 {name}', editLabel: '編輯註解 {index}', deleteLabel: '刪除註解 {index}', delete: '刪除註解', cancel: '取消', save: '儲存',
+      commentTooLong: '註解評論不得超過 {count} 個字元。', tooManyFiles: '註解最多可包含 {count} 個檔案。',
+      showSource: '顯示來源', sourceUnavailable: '目前無法取得原始回覆。',
+      errors: { duplicate: '此摘錄已加入註解。', too_many_annotations: '註解數量過多。', selected_text_too_long: '所選摘錄過長。', comment_too_long: '評論過長。', too_many_files: '註解檔案過多。', missing: '此註解已無法使用。' },
+    },
     inputHeightResizeHint: '拖曳調整聊天輸入框高度，雙擊可恢復自動高度。',
     slashCommandArgs: {
       message: '<訊息>',

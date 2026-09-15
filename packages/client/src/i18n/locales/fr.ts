@@ -871,6 +871,15 @@ export default {
     outlineEmpty: 'Aucun contenu de conversation',
     outlineUserQuestion: 'Question utilisateur',
     inputPlaceholder: 'Tapez un message... (Entree pour envoyer, Shift+Entree pour un saut de ligne)',
+    annotations: {
+      toolbarLabel: 'Actions d’annotation de réponse', addToChat: 'Ajouter au chat', markerLabel: 'Annotation {index} : {excerpt}',
+      countOne: '{count} annotation', countMany: '{count} annotations', clearAll: 'Effacer toutes les annotations',
+      selectedExcerpt: 'Extrait sélectionné', yourComment: 'Votre commentaire', optionalComment: 'Ajouter un commentaire facultatif...', comment: 'Commentaire',
+      addFiles: 'Ajouter des fichiers', removeFile: 'Retirer {name}', editLabel: 'Modifier l’annotation {index}', deleteLabel: 'Supprimer l’annotation {index}', delete: 'Supprimer l’annotation', cancel: 'Annuler', save: 'Enregistrer',
+      commentTooLong: 'Un commentaire ne peut pas dépasser {count} caractères.', tooManyFiles: 'Les annotations peuvent inclure au maximum {count} fichiers.',
+      showSource: 'Afficher la source', sourceUnavailable: 'La réponse d’origine est indisponible.',
+      errors: { duplicate: 'Cet extrait est déjà annoté.', too_many_annotations: 'Trop d’annotations.', selected_text_too_long: 'L’extrait sélectionné est trop long.', comment_too_long: 'Le commentaire est trop long.', too_many_files: 'Trop de fichiers d’annotation.', missing: 'Cette annotation n’est plus disponible.' },
+    },
     inputHeightResizeHint: 'Faites glisser pour changer la hauteur du champ de chat, double-cliquez pour reinitialiser.',
     slashCommandArgs: {
       message: '<message>',

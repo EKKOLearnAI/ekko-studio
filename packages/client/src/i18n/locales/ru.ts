@@ -788,6 +788,15 @@ export default {
     outlineEmpty: 'Нет содержимого беседы',
     outlineUserQuestion: 'Вопрос пользователя',
     inputPlaceholder: 'Введите сообщение... (Enter — отправить, Shift+Enter — новая строка)',
+    annotations: {
+      toolbarLabel: 'Действия с аннотацией ответа', addToChat: 'Добавить в чат', markerLabel: 'Аннотация {index}: {excerpt}',
+      countOne: '{count} аннотация', countMany: '{count} аннотаций', clearAll: 'Очистить все аннотации',
+      selectedExcerpt: 'Выбранный фрагмент', yourComment: 'Ваш комментарий', optionalComment: 'Добавить необязательный комментарий...', comment: 'Комментарий',
+      addFiles: 'Добавить файлы', removeFile: 'Удалить {name}', editLabel: 'Редактировать аннотацию {index}', deleteLabel: 'Удалить аннотацию {index}', delete: 'Удалить аннотацию', cancel: 'Отмена', save: 'Сохранить',
+      commentTooLong: 'Комментарий не может превышать {count} символов.', tooManyFiles: 'Аннотации могут содержать не более {count} файлов.',
+      showSource: 'Показать источник', sourceUnavailable: 'Исходный ответ сейчас недоступен.',
+      errors: { duplicate: 'Этот фрагмент уже аннотирован.', too_many_annotations: 'Слишком много аннотаций.', selected_text_too_long: 'Выбранный фрагмент слишком длинный.', comment_too_long: 'Комментарий слишком длинный.', too_many_files: 'Слишком много файлов аннотации.', missing: 'Эта аннотация больше недоступна.' },
+    },
     inputHeightResizeHint: 'Перетащите, чтобы изменить высоту поля ввода, и дважды щелкните для сброса.',
     slashCommandArgs: {
       message: '<сообщение>',

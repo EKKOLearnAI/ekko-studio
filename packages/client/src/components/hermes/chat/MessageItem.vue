@@ -35,6 +35,9 @@ import { isServerTtsProvider } from "@/api/studio/tts";
 import type { ProfileAvatar as ProfileAvatarData } from "@/api/hermes/profiles";
 import ProfileAvatar from "@/components/hermes/profiles/ProfileAvatar.vue";
 import ImagePreviewOverlay from "./ImagePreviewOverlay.vue";
+import ResponseAnnotationSource from "./ResponseAnnotationSource.vue";
+import SentResponseAnnotations from "./SentResponseAnnotations.vue";
+import { parseResponseAnnotationDisplayEnvelope } from "@/utils/chat-response-annotations";
 
 const MarkdownRenderer = defineAsyncComponent(async () => (await import("./MarkdownRenderer.vue")).default);
 
@@ -168,8 +171,14 @@ const displayText = computed(() => {
     .filter(Boolean)
     .join('\n');
 });
+const responseAnnotationMessage = computed(() =>
+  props.message.role === 'user'
+    ? parseResponseAnnotationDisplayEnvelope(displayText.value)
+    : null,
+)
+const displayBodyText = computed(() => responseAnnotationMessage.value?.body ?? displayText.value)
 const parsedMessageReference = computed(() =>
-  props.message.role === 'user' ? parseMessageReference(displayText.value) : null,
+  props.message.role === 'user' ? parseMessageReference(displayBodyText.value) : null,
 )
 const referencedContentMarkdown = computed(() =>
   parsedMessageReference.value
@@ -182,6 +191,7 @@ const contentFiles = computed<DisplayContentFile[] | null>(() => {
   if (!isContentBlockArray.value) return null;
 
   return contentBlocks.value!.flatMap<DisplayContentFile>((block, index) => {
+    if (typeof (block as any).annotation_id === 'string') return []
     if ((block as any).video_frame === true) return []
     if (block.type === 'image') {
       return [{
@@ -239,7 +249,12 @@ const copyableContent = computed(() => {
       .filter(Boolean)
       .join('\n\n')
   }
-  const content = props.message.content || ''
+  const content = responseAnnotationMessage.value
+    ? [
+        displayBodyText.value,
+        ...responseAnnotationMessage.value.annotations.map(annotation => annotation.selectedText),
+      ].filter(Boolean).join('\n\n')
+    : props.message.content || ''
   if (!content.trim()) return null
   return content
 })
@@ -275,13 +290,40 @@ function referenceBubbleContent() {
 const parsedThinking = computed(() =>
   parseThinking(props.message.content || "", { streaming: !!props.message.isStreaming }),
 );
+const assistantAnnotationBody = computed(() => {
+  if (props.message.role !== 'assistant') return ''
+  return parsedThinking.value.hasThinking
+    ? parsedThinking.value.body
+    : props.message.content || ''
+})
+const annotationSessionId = computed(() => chatStore.activeSessionId || '')
+const canAnnotateAssistantBody = computed(() => Boolean(
+  assistantAnnotationBody.value
+  && annotationSessionId.value
+  && !props.message.isStreaming
+  && !isAgentError.value,
+))
+const showMessageBubble = computed(() => {
+  if (props.message.role !== 'user' || !responseAnnotationMessage.value) return true
+  return Boolean(
+    displayBodyText.value.trim()
+    || (contentFiles.value && contentFiles.value.length > 0)
+    || (props.message.attachments && props.message.attachments.length > 0),
+  )
+})
+
+function handleResponseAnnotationError(code: string) {
+  toast.error(code === 'selection_unavailable'
+    ? t('chat.annotations.sourceUnavailable')
+    : t(`chat.annotations.errors.${code}`))
+}
 
 const quotableContent = computed(() => {
   if (props.message.role !== 'user' && props.message.role !== 'assistant') return null
   if (props.message.isStreaming || isAgentError.value) return null
   const content = props.message.role === 'assistant'
     ? parsedThinking.value.body.trim()
-    : (parsedMessageReference.value?.reply || parsedMessageReference.value?.content || displayText.value).trim()
+    : (parsedMessageReference.value?.reply || parsedMessageReference.value?.content || displayBodyText.value).trim()
   return content || null
 })
 
@@ -1032,7 +1074,14 @@ onBeforeUnmount(() => {
             >
             <span class="message-author-name" dir="auto">{{ assistantAgent.label }}</span>
           </div>
+          <SentResponseAnnotations
+            v-if="responseAnnotationMessage && annotationSessionId"
+            :session-id="annotationSessionId"
+            :message-id="message.id"
+            :annotations="responseAnnotationMessage.annotations"
+          />
           <div
+            v-if="showMessageBubble"
             class="message-bubble"
             :class="{
               system: isSystem,
@@ -1141,9 +1190,22 @@ onBeforeUnmount(() => {
                 <MarkdownRenderer :content="thinkingFullText" />
               </div>
             </div>
+            <ResponseAnnotationSource
+              v-if="message.role === 'assistant' && canAnnotateAssistantBody"
+              :session-id="annotationSessionId"
+              :message-id="message.id"
+              :source="assistantAnnotationBody"
+              :enabled="true"
+              @annotation-error="handleResponseAnnotationError"
+            >
+              <MarkdownRenderer
+                :content="assistantAnnotationBody"
+                :heading-id-prefix="effectiveHeadingIdPrefix"
+              />
+            </ResponseAnnotationSource>
             <MarkdownRenderer
-              v-if="parsedThinking.body && message.role === 'assistant'"
-              :content="parsedThinking.body"
+              v-else-if="message.role === 'assistant' && assistantAnnotationBody"
+              :content="assistantAnnotationBody"
               :heading-id-prefix="effectiveHeadingIdPrefix"
             />
 
@@ -1207,15 +1269,8 @@ onBeforeUnmount(() => {
                 <MarkdownRenderer :content="referencedContentMarkdown" />
                 <MarkdownRenderer v-if="parsedMessageReference.reply" :content="parsedMessageReference.reply" />
               </template>
-              <MarkdownRenderer v-else-if="displayText" :content="displayText" />
+              <MarkdownRenderer v-else-if="displayBodyText" :content="displayBodyText" />
             </template>
-
-            <!-- Render assistant message content -->
-            <MarkdownRenderer
-              v-if="message.role === 'assistant' && message.content && !parsedThinking.body"
-              :content="message.content"
-              :heading-id-prefix="effectiveHeadingIdPrefix"
-            />
 
             <ToolChangeCard
               v-for="change in workspaceChanges"

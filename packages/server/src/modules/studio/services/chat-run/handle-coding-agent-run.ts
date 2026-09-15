@@ -18,6 +18,8 @@ import { logger } from '../../public/logging'
 
 export interface CodingAgentRunSocketData {
   input: string | ContentBlock[]
+  display_input?: string | ContentBlock[] | null
+  storage_message?: string
   session_id?: string
   profile?: string
   provider?: string
@@ -162,15 +164,39 @@ export async function handleCodingAgentRun(
       groupSystemPrompt || (includeBaseSystemPrompt ? getSystemPrompt(undefined, { source: data.session_source || data.source }) : ''),
       String(data.instructions || '').trim() === groupSystemPrompt ? '' : String(data.instructions || '').trim(),
     ].filter(Boolean).join('\n')
+    const displayInput = data.display_input === null
+      ? undefined
+      : data.display_input === undefined
+        ? undefined
+        : contentBlocksToString(data.display_input)
+    const hasSeparatePersistence = data.storage_message !== undefined || displayInput !== undefined
     const sent = await (Array.isArray(data.input)
-      ? sendCodingAgentRunInput(
-        sessionId,
-        codingInput.text,
-        runPrompt,
-        codingInput.images,
-        contentBlocksToString(data.input),
-      )
-      : sendCodingAgentRunInput(sessionId, codingInput.text, runPrompt))
+      ? displayInput === undefined
+        ? sendCodingAgentRunInput(
+            sessionId,
+            codingInput.text,
+            runPrompt,
+            codingInput.images,
+            data.storage_message ?? contentBlocksToString(data.input),
+          )
+        : sendCodingAgentRunInput(
+            sessionId,
+            codingInput.text,
+            runPrompt,
+            codingInput.images,
+            data.storage_message ?? contentBlocksToString(data.input),
+            displayInput,
+          )
+      : hasSeparatePersistence
+        ? sendCodingAgentRunInput(
+          sessionId,
+          codingInput.text,
+          runPrompt,
+          [],
+          data.storage_message ?? codingInput.text,
+          displayInput,
+        )
+        : sendCodingAgentRunInput(sessionId, codingInput.text, runPrompt))
     return sent
   } catch (err) {
     if (!codingAgentRunManager.isSessionProcessing(sessionId)) {

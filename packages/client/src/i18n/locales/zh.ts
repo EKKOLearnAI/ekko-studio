@@ -895,6 +895,15 @@ export default {
     outlineEmpty: '暂无会话内容',
     outlineUserQuestion: '用户问题',
     inputPlaceholder: '输入消息... (Enter 发送，Shift+Enter 换行)',
+    annotations: {
+      toolbarLabel: '回复批注操作', addToChat: '添加到聊天', markerLabel: '批注 {index}：{excerpt}',
+      countOne: '{count} 条批注', countMany: '{count} 条批注', clearAll: '清除全部批注',
+      selectedExcerpt: '已选摘录', yourComment: '你的评论', optionalComment: '添加可选评论...', comment: '评论',
+      addFiles: '添加文件', removeFile: '移除 {name}', editLabel: '编辑批注 {index}', deleteLabel: '删除批注 {index}', delete: '删除批注', cancel: '取消', save: '保存',
+      commentTooLong: '批注评论不能超过 {count} 个字符。', tooManyFiles: '批注最多可包含 {count} 个文件。',
+      showSource: '查看原文', sourceUnavailable: '当前无法找到原始回复。',
+      errors: { duplicate: '这段摘录已经添加过批注。', too_many_annotations: '批注数量过多。', selected_text_too_long: '所选摘录过长。', comment_too_long: '评论过长。', too_many_files: '批注文件过多。', missing: '该批注已不可用。' },
+    },
     inputHeightResizeHint: '拖拽调整聊天输入框高度，双击恢复自动高度。',
     slashCommandArgs: {
       message: '<消息>',

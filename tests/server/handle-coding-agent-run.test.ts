@@ -446,6 +446,33 @@ describe('handleCodingAgentRun', () => {
     expect(prompt).not.toContain('mcp__hermes-studio__')
   })
 
+  it('passes separate model, storage, and display content to coding-agent persistence', async () => {
+    managerMock.runIdForSession.mockReturnValue('agent-session-1')
+    managerMock.isSessionLaunchCompatible.mockReturnValue(true)
+    sendCodingAgentRunInputMock.mockResolvedValue({ runId: 'agent-session-1', messageId: 42 })
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    const state = { messages: [], isWorking: false, isAborting: false, events: [], queue: [] }
+    const sessionMap = new Map([['session-1', state]])
+    const socket = { data: {}, join: vi.fn(), emit: vi.fn() }
+
+    await handleCodingAgentRun({} as any, socket as any, {
+      session_id: 'session-1',
+      input: '<response_annotations>model context</response_annotations>',
+      storage_message: '<response_annotations>model context</response_annotations>',
+      display_input: '{"__hermes_studio_response_annotations__":1,"body":"","annotations":[]}',
+      coding_agent_id: 'codex',
+    }, 'default', sessionMap as any)
+
+    expect(sendCodingAgentRunInputMock).toHaveBeenCalledWith(
+      'session-1',
+      '<response_annotations>model context</response_annotations>',
+      'system prompt',
+      [],
+      '<response_annotations>model context</response_annotations>',
+      '{"__hermes_studio_response_annotations__":1,"body":"","annotations":[]}',
+    )
+  })
+
   it('routes CLI-style coding agent commands before sending input to the CLI', async () => {
     parseCodingAgentSessionCommandMock.mockReturnValue({
       name: 'compact',

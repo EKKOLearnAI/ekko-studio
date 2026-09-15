@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const socketState = vi.hoisted(() => ({
   sockets: [] as any[],
+  initiallyConnected: true,
 }))
 
 vi.mock('socket.io-client', () => {
@@ -24,7 +25,7 @@ vi.mock('socket.io-client', () => {
     }
 
     const socket: any = {
-      connected: true,
+      connected: socketState.initiallyConnected,
       on: vi.fn((event: string, handler: (...args: any[]) => void) => {
         addListener(event, handler)
         return socket
@@ -61,6 +62,8 @@ vi.mock('socket.io-client', () => {
         for (const handler of [...(listeners.get(event) || [])]) handler(...args)
       },
     }
+    socket.__volatileEmit = vi.fn()
+    socket.volatile = { emit: socket.__volatileEmit }
 
     return socket
   }
@@ -83,6 +86,46 @@ describe('chat-run socket reconnect handling', () => {
   beforeEach(() => {
     vi.resetModules()
     socketState.sockets = []
+    socketState.initiallyConnected = true
+  })
+
+  it('waits for a connection and sends acceptance-tracked runs without buffering', async () => {
+    socketState.initiallyConnected = false
+    const { startRunViaSocket } = await import('../../packages/client/src/api/studio/chat')
+    const body = {
+      session_id: 'session-annotation', input: 'annotated', queue_id: 'message-1', profile: 'default', source: 'cli' as const,
+    }
+    const controller = startRunViaSocket(
+      body, vi.fn(), vi.fn(), vi.fn(), undefined, { trackAcceptance: true },
+    )
+    const socket = socketState.sockets[0]
+
+    expect(socket.emit).not.toHaveBeenCalledWith('run', body)
+    expect(socket.__volatileEmit).not.toHaveBeenCalled()
+    socket.__trigger('connect')
+    expect(socket.__volatileEmit).toHaveBeenCalledWith('run', body)
+    socket.__trigger('run.started', {
+      event: 'run.started', session_id: 'session-annotation', queue_id: 'message-1', run_id: 'run-1',
+    })
+    await expect(controller.accepted).resolves.toBe(true)
+  })
+
+  it('does not transmit a rejected acceptance-tracked run after reconnect', async () => {
+    socketState.initiallyConnected = false
+    const { startRunViaSocket } = await import('../../packages/client/src/api/studio/chat')
+    const body = {
+      session_id: 'session-annotation', input: 'annotated', queue_id: 'message-1', profile: 'default', source: 'cli' as const,
+    }
+    const controller = startRunViaSocket(
+      body, vi.fn(), vi.fn(), vi.fn(), undefined, { trackAcceptance: true },
+    )
+    const socket = socketState.sockets[0]
+
+    socket.__trigger('connect_error', new Error('offline'))
+    await expect(controller.accepted).resolves.toBe(false)
+    socket.__trigger('connect')
+    expect(socket.__volatileEmit).not.toHaveBeenCalled()
+    expect(socket.emit).not.toHaveBeenCalledWith('run', body)
   })
 
   it('keeps transient mobile disconnects alive and resumes after reconnect', async () => {

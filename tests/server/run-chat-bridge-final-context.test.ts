@@ -361,6 +361,38 @@ describe('bridge run final context usage', () => {
     }))
   })
 
+  it('acknowledges durable user-message persistence before bridge startup resolves', async () => {
+    addMessageMock.mockReturnValueOnce(77)
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    const state = makeState()
+    const sessionMap = new Map([['session-1', state]])
+    let resolveStart!: (value: { run_id: string; status: string }) => void
+    const bridge = {
+      chat: vi.fn(() => new Promise(resolve => { resolveStart = resolve })),
+      contextEstimate: vi.fn().mockResolvedValue({ token_count: 12, fixed_context_tokens: 0 }),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-accepted', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    const running = handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'annotated', session_id: 'session-1', queue_id: 'annotation-message-1' },
+      'default', sessionMap, bridge, false, vi.fn(), vi.fn(),
+    )
+
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith('run.accepted', expect.objectContaining({
+      session_id: 'session-1', queue_id: 'annotation-message-1', message_id: 77,
+    })))
+    expect(bridge.chat).toHaveBeenCalledOnce()
+    resolveStart({ run_id: 'run-accepted', status: 'started' })
+    await running
+  })
+
   it('does not prepend the Studio guidance a second time when the caller already composed it', async () => {
     // The chat-run socket composes getSystemPrompt() and hands the result down as
     // `instructions`. Composing again duplicated the whole guidance block —

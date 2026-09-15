@@ -871,6 +871,15 @@ export default {
     outlineEmpty: '대화 내용이 없습니다',
     outlineUserQuestion: '사용자 질문',
     inputPlaceholder: '메시지를 입력하세요... (Enter로 전송, Shift+Enter로 줄바꿈)',
+    annotations: {
+      toolbarLabel: '응답 주석 작업', addToChat: '채팅에 추가', markerLabel: '주석 {index}: {excerpt}',
+      countOne: '주석 {count}개', countMany: '주석 {count}개', clearAll: '모든 주석 지우기',
+      selectedExcerpt: '선택한 발췌문', yourComment: '내 의견', optionalComment: '선택 사항인 의견 추가...', comment: '의견',
+      addFiles: '파일 추가', removeFile: '{name} 제거', editLabel: '주석 {index} 편집', deleteLabel: '주석 {index} 삭제', delete: '주석 삭제', cancel: '취소', save: '저장',
+      commentTooLong: '주석 의견은 {count}자를 초과할 수 없습니다.', tooManyFiles: '주석에는 최대 {count}개의 파일을 포함할 수 있습니다.',
+      showSource: '원문 보기', sourceUnavailable: '원래 응답을 현재 사용할 수 없습니다.',
+      errors: { duplicate: '이 발췌문에는 이미 주석이 있습니다.', too_many_annotations: '주석이 너무 많습니다.', selected_text_too_long: '선택한 발췌문이 너무 깁니다.', comment_too_long: '의견이 너무 깁니다.', too_many_files: '주석 파일이 너무 많습니다.', missing: '이 주석은 더 이상 사용할 수 없습니다.' },
+    },
     inputHeightResizeHint: '드래그해서 채팅 입력창 높이를 바꾸고, 더블클릭하면 자동 높이로 돌아갑니다.',
     slashCommandArgs: {
       message: '<메시지>',

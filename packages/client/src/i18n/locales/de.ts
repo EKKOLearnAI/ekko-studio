@@ -871,6 +871,15 @@ export default {
     outlineEmpty: 'Kein Konversationsinhalt',
     outlineUserQuestion: 'Benutzerfrage',
     inputPlaceholder: 'Nachricht eingeben... (Enter zum Senden, Shift+Enter fur neue Zeile)',
+    annotations: {
+      toolbarLabel: 'Antwort-Anmerkungsaktionen', addToChat: 'Zum Chat hinzufügen', markerLabel: 'Anmerkung {index}: {excerpt}',
+      countOne: '{count} Anmerkung', countMany: '{count} Anmerkungen', clearAll: 'Alle Anmerkungen löschen',
+      selectedExcerpt: 'Ausgewählter Auszug', yourComment: 'Ihr Kommentar', optionalComment: 'Optionalen Kommentar hinzufügen...', comment: 'Kommentar',
+      addFiles: 'Dateien hinzufügen', removeFile: '{name} entfernen', editLabel: 'Anmerkung {index} bearbeiten', deleteLabel: 'Anmerkung {index} löschen', delete: 'Anmerkung löschen', cancel: 'Abbrechen', save: 'Speichern',
+      commentTooLong: 'Ein Kommentar darf höchstens {count} Zeichen lang sein.', tooManyFiles: 'Anmerkungen können höchstens {count} Dateien enthalten.',
+      showSource: 'Quelle anzeigen', sourceUnavailable: 'Die ursprüngliche Antwort ist derzeit nicht verfügbar.',
+      errors: { duplicate: 'Dieser Auszug ist bereits markiert.', too_many_annotations: 'Zu viele Anmerkungen.', selected_text_too_long: 'Der ausgewählte Auszug ist zu lang.', comment_too_long: 'Der Kommentar ist zu lang.', too_many_files: 'Zu viele Anmerkungsdateien.', missing: 'Diese Anmerkung ist nicht mehr verfügbar.' },
+    },
     inputHeightResizeHint: 'Zum Andern der Chat-Eingabehohe ziehen, zum Zurucksetzen doppelklicken.',
     slashCommandArgs: {
       message: '<Nachricht>',

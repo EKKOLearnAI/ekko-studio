@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { Attachment } from '@/stores/hermes/chat'
 import { useChatStore } from '@/stores/hermes/chat'
+import { useChatAnnotationsStore } from '@/stores/hermes/chat-annotations'
+import ResponseAnnotationComposer from './ResponseAnnotationComposer.vue'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
@@ -23,6 +25,7 @@ import { extractRepresentativeVideoFrames, isVideoFile } from '@/utils/video-fra
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
 
 const chatStore = useChatStore()
+const annotationsStore = useChatAnnotationsStore()
 const appStore = useAppStore()
 const profilesStore = useProfilesStore()
 const settingsStore = useSettingsStore()
@@ -128,7 +131,23 @@ let sendAwaitingAttachments = false
 const isDragging = ref(false)
 const dragCounter = ref(0)
 const isComposing = ref(false)
+const isSubmitting = ref(false)
 const activeMessageReference = computed(() => chatStore.activeMessageReference)
+const activeAnnotationSessionId = computed(() => chatStore.activeSessionId || '')
+const activeResponseAnnotations = computed(() => activeAnnotationSessionId.value
+  ? annotationsStore.annotationsForSession(activeAnnotationSessionId.value) ?? []
+  : [])
+const responseAnnotationAttachments = computed<Attachment[]>(() => activeResponseAnnotations.value.flatMap(annotation =>
+  (annotationsStore.pendingFilesForAnnotation(annotation.id) ?? []).map((file, index) => ({
+    id: `annotation-file:${annotation.id}:${index}:${file.name}:${file.size}:${file.lastModified}`,
+    name: file.name,
+    type: file.type || 'application/octet-stream',
+    size: file.size,
+    url: '',
+    file,
+    annotationId: annotation.id,
+  })),
+))
 const messageReferencePreview = computed(() =>
   activeMessageReference.value?.content.replace(/\s+/g, ' ').trim() || '',
 )
@@ -595,7 +614,11 @@ watch(
   },
 )
 
-const canSend = computed(() => inputText.value.trim().length > 0 || attachments.value.length > 0)
+const canSend = computed(() => !isSubmitting.value && (
+  inputText.value.trim().length > 0
+  || attachments.value.length > 0
+  || activeResponseAnnotations.value.length > 0
+))
 const sendButtonIsStop = computed(() => chatStore.isStreaming && !canSend.value)
 
 function scrollCommandIntoView() {
@@ -979,7 +1002,21 @@ defineExpose({ addFiles, focusComposer })
 
 // --- Send ---
 
+function responseAnnotationDraftSignature(sessionId: string) {
+  return JSON.stringify((annotationsStore.annotationsForSession(sessionId) ?? []).map(annotation => ({
+    ...annotation,
+    pendingFiles: (annotationsStore.pendingFilesForAnnotation(annotation.id) ?? []).map(file => ({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      lastModified: file.lastModified,
+    })),
+  })))
+}
+
 async function handleSend() {
+  if (isSubmitting.value) return
+  const originSessionId = activeAnnotationSessionId.value
   if (isPreparingAttachments.value) {
     if (sendAwaitingAttachments) return
     sendAwaitingAttachments = true
@@ -991,30 +1028,66 @@ async function handleSend() {
       sendAwaitingAttachments = false
     }
   }
+  if (originSessionId && activeAnnotationSessionId.value !== originSessionId) return
   const text = inputText.value.trim()
-  if (!text && attachments.value.length === 0) return
-  if (isBridgeSession.value && text === '/skill' && attachments.value.length === 0) {
+  const annotations = activeResponseAnnotations.value.map(annotation => ({
+    ...annotation,
+    files: annotation.files.map(file => ({ ...file })),
+  }))
+  const allAttachments = [...attachments.value, ...responseAnnotationAttachments.value]
+  if (!text && allAttachments.length === 0 && annotations.length === 0) return
+  if (annotations.length === 0 && isBridgeSession.value && text === '/skill' && allAttachments.length === 0) {
     void openSkillPicker()
     return
   }
-  if (isBridgeSession.value && attachments.value.length === 0 && /^\/bundles$/i.test(text)) {
+  if (annotations.length === 0 && isBridgeSession.value && allAttachments.length === 0 && /^\/bundles$/i.test(text)) {
     void openBundlePicker()
     return
   }
-  if (isBridgeSession.value && attachments.value.length === 0 && /^\/bundles\s+create$/i.test(text)) {
+  if (annotations.length === 0 && isBridgeSession.value && allAttachments.length === 0 && /^\/bundles\s+create$/i.test(text)) {
     openBundleCreator()
     return
   }
 
-  chatStore.sendMessage(text, attachments.value.length > 0 ? attachments.value : undefined)
-  inputText.value = ''
-  saveDraftForActiveSession('')
-  previewAttachment.value = null
-  attachments.value = []
-  slashActive.value = false
-
-  if (textareaRef.value) {
-    textareaRef.value.style.height = 'auto'
+  const annotationDraftSignature = originSessionId
+    ? responseAnnotationDraftSignature(originSessionId)
+    : '[]'
+  const submittedInputDraft = inputText.value
+  const submittedAttachmentIds = new Set(attachments.value.map(attachment => attachment.id))
+  isSubmitting.value = true
+  let submitted = false
+  try {
+    submitted = annotations.length > 0
+      ? await chatStore.sendMessage(
+          text,
+          allAttachments.length > 0 ? allAttachments : undefined,
+          annotations,
+        )
+      : await chatStore.sendMessage(
+          text,
+          allAttachments.length > 0 ? allAttachments : undefined,
+        )
+  } finally {
+    isSubmitting.value = false
+  }
+  if (submitted === false) return
+  if (originSessionId && responseAnnotationDraftSignature(originSessionId) === annotationDraftSignature) {
+    annotationsStore.clearAnnotations(originSessionId)
+  }
+  if (originSessionId && activeAnnotationSessionId.value !== originSessionId) return
+  const inputUnchanged = inputText.value === submittedInputDraft
+  if (inputUnchanged) {
+    inputText.value = ''
+    saveDraftForActiveSession('')
+    slashActive.value = false
+    if (textareaRef.value) textareaRef.value.style.height = 'auto'
+  } else {
+    saveDraftForActiveSession(inputText.value)
+    updateSlashState()
+  }
+  attachments.value = attachments.value.filter(attachment => !submittedAttachmentIds.has(attachment.id))
+  if (previewAttachment.value && submittedAttachmentIds.has(previewAttachment.value.id)) {
+    previewAttachment.value = null
   }
 }
 
@@ -1126,6 +1199,10 @@ function openAttachmentPreview(attachment: Attachment) {
 
 <template>
   <div class="chat-input-area">
+    <ResponseAnnotationComposer
+      v-if="activeAnnotationSessionId"
+      :session-id="activeAnnotationSessionId"
+    />
     <!-- Attachment previews -->
     <div v-if="attachments.some(att => !att.videoFrameFor)" class="attachment-previews">
       <div

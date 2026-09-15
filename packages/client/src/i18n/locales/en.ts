@@ -895,6 +895,15 @@ export default {
     outlineEmpty: 'No conversation content',
     outlineUserQuestion: 'User question',
     inputPlaceholder: 'Type a message... (Enter to send, Shift+Enter for new line)',
+    annotations: {
+      toolbarLabel: 'Response annotation actions', addToChat: 'Add to chat', markerLabel: 'Annotation {index}: {excerpt}',
+      countOne: '{count} annotation', countMany: '{count} annotations', clearAll: 'Clear all annotations',
+      selectedExcerpt: 'Selected excerpt', yourComment: 'Your comment', optionalComment: 'Add an optional comment...', comment: 'Comment',
+      addFiles: 'Add files', removeFile: 'Remove {name}', editLabel: 'Edit annotation {index}', deleteLabel: 'Delete annotation {index}', delete: 'Delete annotation', cancel: 'Cancel', save: 'Save',
+      commentTooLong: 'An annotation comment cannot exceed {count} characters.', tooManyFiles: 'Annotations can include at most {count} files.',
+      showSource: 'Show source', sourceUnavailable: 'The original response is not currently available.',
+      errors: { duplicate: 'This excerpt is already annotated.', too_many_annotations: 'Too many annotations.', selected_text_too_long: 'The selected excerpt is too long.', comment_too_long: 'The comment is too long.', too_many_files: 'Too many annotation files.', missing: 'This annotation is no longer available.' },
+    },
     inputHeightResizeHint: 'Drag to resize the chat input. Double-click to reset.',
     slashCommandArgs: {
       message: '<message>',

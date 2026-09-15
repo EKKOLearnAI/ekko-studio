@@ -3936,8 +3936,9 @@ export function sendCodingAgentRunInput(
   systemPrompt?: string,
   images: CodingAgentImageInput[] = [],
   storageInput?: string,
+  displayInput?: string,
 ): { runId: string; messageId?: number } {
-  return codingAgentRunManager.send(sessionId, input, { systemPrompt, images, storageInput })
+  return codingAgentRunManager.send(sessionId, input, { systemPrompt, images, storageInput, displayInput })
 }
 
 export function stopCodingAgentRun(sessionId: string): { stopped: boolean } {

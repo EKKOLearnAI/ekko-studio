@@ -1526,6 +1526,12 @@ export class ChatRunSocket {
         ? data.storage_message || contentBlocksToString(data.input)
         : contentBlocksToString(data.display_input ?? data.input)
       const messageId = data.queue_id || started.messageId
+      socket.emit('run.accepted', {
+        event: 'run.accepted',
+        session_id: data.session_id,
+        run_id: started.runId,
+        queue_id: data.queue_id,
+      })
       observeChatRunWebhookEvent({
         event: 'message.created',
         sessionId: data.session_id,

@@ -871,6 +871,15 @@ export default {
     outlineEmpty: '会話内容はありません',
     outlineUserQuestion: 'ユーザーの質問',
     inputPlaceholder: 'メッセージを入力... (Enter で送信、Shift+Enter で改行)',
+    annotations: {
+      toolbarLabel: '応答注釈の操作', addToChat: 'チャットに追加', markerLabel: '注釈 {index}: {excerpt}',
+      countOne: '{count} 件の注釈', countMany: '{count} 件の注釈', clearAll: 'すべての注釈を消去',
+      selectedExcerpt: '選択した抜粋', yourComment: 'コメント', optionalComment: '任意のコメントを追加...', comment: 'コメント',
+      addFiles: 'ファイルを追加', removeFile: '{name} を削除', editLabel: '注釈 {index} を編集', deleteLabel: '注釈 {index} を削除', delete: '注釈を削除', cancel: 'キャンセル', save: '保存',
+      commentTooLong: '注釈コメントは {count} 文字以内にしてください。', tooManyFiles: '注釈に追加できるファイルは最大 {count} 件です。',
+      showSource: '元の場所を表示', sourceUnavailable: '元の応答は現在利用できません。',
+      errors: { duplicate: 'この抜粋はすでに注釈されています。', too_many_annotations: '注釈が多すぎます。', selected_text_too_long: '選択した抜粋が長すぎます。', comment_too_long: 'コメントが長すぎます。', too_many_files: '注釈ファイルが多すぎます。', missing: 'この注釈は利用できません。' },
+    },
     inputHeightResizeHint: 'ドラッグして入力欄の高さを変更。ダブルクリックでリセット。',
     slashCommandArgs: {
       message: '<メッセージ>',

@@ -871,6 +871,15 @@ export default {
     outlineEmpty: 'Sin contenido de conversación',
     outlineUserQuestion: 'Pregunta del usuario',
     inputPlaceholder: 'Escribe un mensaje... (Enter para enviar, Shift+Enter para nueva linea)',
+    annotations: {
+      toolbarLabel: 'Acciones de anotación de respuesta', addToChat: 'Añadir al chat', markerLabel: 'Anotación {index}: {excerpt}',
+      countOne: '{count} anotación', countMany: '{count} anotaciones', clearAll: 'Borrar todas las anotaciones',
+      selectedExcerpt: 'Fragmento seleccionado', yourComment: 'Tu comentario', optionalComment: 'Añadir un comentario opcional...', comment: 'Comentario',
+      addFiles: 'Añadir archivos', removeFile: 'Quitar {name}', editLabel: 'Editar anotación {index}', deleteLabel: 'Eliminar anotación {index}', delete: 'Eliminar anotación', cancel: 'Cancelar', save: 'Guardar',
+      commentTooLong: 'El comentario no puede superar {count} caracteres.', tooManyFiles: 'Las anotaciones pueden incluir hasta {count} archivos.',
+      showSource: 'Mostrar fuente', sourceUnavailable: 'La respuesta original no está disponible.',
+      errors: { duplicate: 'Este fragmento ya está anotado.', too_many_annotations: 'Demasiadas anotaciones.', selected_text_too_long: 'El fragmento seleccionado es demasiado largo.', comment_too_long: 'El comentario es demasiado largo.', too_many_files: 'Demasiados archivos de anotación.', missing: 'Esta anotación ya no está disponible.' },
+    },
     inputHeightResizeHint: 'Arrastra para cambiar la altura del cuadro de chat y haz doble clic para restablecerla.',
     slashCommandArgs: {
       message: '<mensaje>',

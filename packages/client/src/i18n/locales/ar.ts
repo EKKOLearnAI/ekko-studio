@@ -888,6 +888,15 @@ export default {
     outlineEmpty: 'لا يوجد محتوى في المحادثة',
     outlineUserQuestion: 'سؤال المستخدم',
     inputPlaceholder: 'اكتب رسالة... (Enter للإرسال، Shift+Enter لسطر جديد)',
+    annotations: {
+      toolbarLabel: 'إجراءات تعليق الرد', addToChat: 'إضافة إلى الدردشة', markerLabel: 'تعليق {index}: {excerpt}',
+      countOne: 'تعليق واحد', countMany: '{count} تعليقات', clearAll: 'مسح كل التعليقات',
+      selectedExcerpt: 'المقتطف المحدد', yourComment: 'تعليقك', optionalComment: 'أضف تعليقًا اختياريًا...', comment: 'تعليق',
+      addFiles: 'إضافة ملفات', removeFile: 'إزالة {name}', editLabel: 'تعديل التعليق {index}', deleteLabel: 'حذف التعليق {index}', delete: 'حذف التعليق', cancel: 'إلغاء', save: 'حفظ',
+      commentTooLong: 'لا يمكن أن يتجاوز التعليق {count} حرفًا.', tooManyFiles: 'يمكن أن تتضمن التعليقات ما يصل إلى {count} ملفات.',
+      showSource: 'إظهار المصدر', sourceUnavailable: 'الرد الأصلي غير متاح حاليًا.',
+      errors: { duplicate: 'هذا المقتطف معلّق عليه بالفعل.', too_many_annotations: 'عدد التعليقات كبير جدًا.', selected_text_too_long: 'المقتطف المحدد طويل جدًا.', comment_too_long: 'التعليق طويل جدًا.', too_many_files: 'ملفات التعليق كثيرة جدًا.', missing: 'هذا التعليق لم يعد متاحًا.' },
+    },
     inputHeightResizeHint: 'اسحب لتغيير حجم حقل المحادثة. انقر مرتين لإعادة التعيين.',
     slashCommandArgs: {
       message: '<message>',

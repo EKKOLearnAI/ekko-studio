@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const handleBridgeRunMock = vi.hoisted(() => vi.fn(async () => {}))
 const resumeBridgeRunMock = vi.hoisted(() => vi.fn(async () => {}))
-const handleCodingAgentRunMock = vi.hoisted(() => vi.fn(async () => {}))
+const handleCodingAgentRunMock = vi.hoisted(() => vi.fn(async (): Promise<any> => undefined))
 const loadSessionStateFromDbMock = vi.hoisted(() => vi.fn())
 const ensureReadyMock = vi.hoisted(() => vi.fn())
 const ekkoBoundaryInterruptMock = vi.hoisted(() => vi.fn())
@@ -183,6 +183,32 @@ describe('ChatRunSocket queued bridge runs', () => {
       isAborting: false,
       events: [],
       queue: [],
+    })
+  })
+
+  it('acknowledges a persisted coding-agent submission with its queue identity', async () => {
+    handleCodingAgentRunMock.mockResolvedValueOnce({
+      runId: 'coding-run-1',
+      messageId: 'stored-message-1',
+    })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).onConnection(socket)
+
+    await handlers.get('run')?.({
+      session_id: 'session-1',
+      input: 'annotation context',
+      source: 'coding_agent',
+      coding_agent_id: 'codex',
+      queue_id: 'annotation-message-1',
+    })
+
+    expect(socket.emit).toHaveBeenCalledWith('run.accepted', {
+      event: 'run.accepted',
+      session_id: 'session-1',
+      run_id: 'coding-run-1',
+      queue_id: 'annotation-message-1',
     })
   })
 
@@ -448,6 +474,27 @@ describe('ChatRunSocket queued bridge runs', () => {
       queue_id: 'queue-normal',
     }))
     expect(call[6]).toBe(false)
+  })
+
+  it('preserves response annotation display and storage envelopes through queue dequeue', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const displayInput = '{"__hermes_studio_response_annotations__":1}'
+    const storageMessage = '<response_annotations>quoted context</response_annotations>'
+
+    ;(server as any).runQueuedItem(socket, 'session-1', {
+      queue_id: 'queue-annotation', input: storageMessage, displayInput,
+      storageMessage, source: 'cli', profile: 'default',
+    }, 'default')
+
+    await vi.waitFor(() => expect(handleBridgeRunMock).toHaveBeenCalled())
+    expect(handleBridgeRunMock.mock.calls.at(-1)?.[2]).toEqual(expect.objectContaining({
+      input: storageMessage,
+      display_input: displayInput,
+      storage_message: storageMessage,
+      queue_id: 'queue-annotation',
+    }))
   })
 
   it('supports bridge peer broadcasts during runAndWait workflow runs', async () => {
