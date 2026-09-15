@@ -44,7 +44,6 @@ const CODING_AGENT_TOOL_OUTPUT_STORAGE_LIMIT = 32 * 1024
 const CODING_AGENT_TOOL_OUTPUT_HEAD_CHARS = 24 * 1024
 const CODING_AGENT_TOOL_OUTPUT_TAIL_CHARS = 8 * 1024
 const CODEX_REASONING_SUMMARY_ARGS = ['-c', 'model_reasoning_summary="auto"']
-const HERMES_MCP_SERVER_NAME = 'hermes-studio'
 const PI_RPC_REQUEST_TIMEOUT_MS = 30_000
 const PI_RPC_COMPACT_TIMEOUT_MS = 5 * 60 * 1000
 
@@ -339,7 +338,14 @@ function usageCodingAgent(agentId: string): 'claude_code' | 'codex' | 'pi' | 'gr
 }
 
 function hasManagedHermesMcpConfig(run: ManagedCodingAgentRun): boolean {
-  if (run.launch.mode !== 'scoped') return true
+  if (run.launch.mode !== 'scoped') {
+    if (run.launch.agentId === 'claude-code' || run.launch.agentId === 'pi') {
+      const flagIndex = run.launch.args.indexOf('--mcp-config')
+      const mcpPath = flagIndex >= 0 ? run.launch.args[flagIndex + 1] : ''
+      return Boolean(mcpPath && existsSync(mcpPath))
+    }
+    if (run.launch.agentId !== 'codex') return true
+  }
   if (run.launch.agentId === 'pi') {
     const piHome = String(run.launch.env?.PI_CODING_AGENT_DIR || '').trim()
     if (!piHome) return false
@@ -375,7 +381,7 @@ function hasManagedHermesMcpConfig(run: ManagedCodingAgentRun): boolean {
   if (!codexHome) return false
   try {
     const config = readFileSync(join(codexHome, 'config.toml'), 'utf-8')
-    return config.includes(`[mcp_servers.${HERMES_MCP_SERVER_NAME}]`)
+    return ['api', 'browser', 'devices', 'use', 'plan'].every(toolset => config.includes(`[mcp_servers.ekko-studio-${toolset}]`))
   } catch {
     return false
   }
