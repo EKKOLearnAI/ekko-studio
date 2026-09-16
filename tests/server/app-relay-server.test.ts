@@ -876,7 +876,7 @@ describe('LocalAppRelayServer', () => {
     app.__handlers.get('socket.event')({
       id: 'terminal-1',
       event: 'terminal.read',
-      payload: { terminalId: 'terminal-a', lease: 'lease-a', cursor: 0 },
+      payload: { terminalId: 'terminal-a', lease: 'lease-a', cursor: 0, stream: true },
       ack: true,
     }, eventAck)
 
@@ -887,6 +887,11 @@ describe('LocalAppRelayServer', () => {
       event: 'terminal.read',
       payload: { ok: true, data: { chunks: [{ seq: 1, data: 'hello\r\n' }], cursor: 1 } },
     })))
+    const pushed = { terminalId: 'terminal-a', lease: 'lease-a', batch: 1, chunks: [{ seq: 1, data: 'echo' }], cursor: 1 }
+    local.__onAny('terminal.output', pushed)
+    expect(app.emit).toHaveBeenCalledWith('socket.event', expect.objectContaining({
+      id: 'terminal-1', namespace: '/terminal', event: 'terminal.output', payload: pushed,
+    }))
     const deniedAck = vi.fn()
     app.__handlers.get('socket.event')({ id: 'terminal-1', event: 'run', payload: {}, ack: true }, deniedAck)
     await vi.waitFor(() => expect(deniedAck).toHaveBeenCalledWith(expect.objectContaining({

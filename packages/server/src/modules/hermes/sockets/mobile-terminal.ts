@@ -92,7 +92,7 @@ export function setupMobileTerminal(io: Server, resolveContext: ContextResolver)
           const lease = String(payload.lease || '')
           let data: unknown = {}
           switch (operation) {
-            case 'capabilities': data = { available: Boolean(pty), version: 1, ...MOBILE_TERMINAL_LIMITS }; break
+            case 'capabilities': data = { available: Boolean(pty), version: 1, outputPush: true, ...MOBILE_TERMINAL_LIMITS }; break
             case 'list': data = { terminals: sessions.list(scope) }; break
             case 'create': {
               const cwd = resolved.workspace || resolveTerminalCwd(getTerminalConfig(scope.profile), getProfileDir(scope.profile))
@@ -105,7 +105,15 @@ export function setupMobileTerminal(io: Server, resolveContext: ContextResolver)
               data = { terminal }; break
             }
             case 'attach': data = sessions.attach(scope, id, socket.id); break
-            case 'read': data = sessions.read(scope, id, socket.id, lease, payload.cursor); break
+            case 'read': {
+              let batch = 0
+              data = payload.stream === true
+                ? sessions.stream(scope, id, socket.id, lease, payload.cursor, output => {
+                  if (socket.connected) socket.emit('terminal.output', { terminalId: id, lease, batch: ++batch, ...output })
+                })
+                : sessions.read(scope, id, socket.id, lease, payload.cursor)
+              break
+            }
             case 'input': sessions.input(scope, id, socket.id, lease, payload.seq, payload.data); break
             case 'resize': sessions.resize(scope, id, socket.id, lease, payload.cols, payload.rows); break
             case 'detach': sessions.detach(scope, id, socket.id, lease); break

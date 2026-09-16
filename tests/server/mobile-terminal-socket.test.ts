@@ -51,6 +51,26 @@ async function request(socket: Socket, event: string, payload = {}): Promise<any
 }
 
 describe('mobile terminal Socket.IO authorization and recovery', () => {
+  it('pushes output and backspace over the socket using the existing read subscription operation', async () => {
+    const a = await connect(); const other = await connect()
+    const leaked = vi.fn(); other.on('terminal.output', leaked)
+    expect(await request(a, 'capabilities')).toMatchObject({ data: { outputPush: true } })
+    const created = await request(a, 'create', { requestId: 'request-push', cols: 80, rows: 24 })
+    const terminalId = created.data.terminal.id
+    const attached = await request(a, 'attach', { terminalId }); const lease = attached.data.lease
+    expect(await request(a, 'read', { terminalId, lease, cursor: 0, stream: true })).toMatchObject({ data: { streaming: true } })
+    const output = vi.fn(); a.on('terminal.output', output)
+    await request(a, 'input', { terminalId, lease, seq: 1, data: 'a' })
+    await vi.waitFor(() => expect(output).toHaveBeenCalledTimes(1))
+    await request(a, 'input', { terminalId, lease, seq: 2, data: '\b \b' })
+    await vi.waitFor(() => expect(output).toHaveBeenCalledTimes(2))
+    expect(output.mock.calls.map(([frame]) => frame.chunks[0].data)).toEqual(['a', '\b \b'])
+    expect(output.mock.calls[1][0]).toMatchObject({ terminalId, lease, cursor: 2 })
+    expect(leaked).not.toHaveBeenCalled()
+    mocks.revoked = true
+    expect(await request(a, 'read', { terminalId, lease, cursor: 2, stream: true })).toMatchObject({ error: 'terminal_forbidden' })
+    expect(mocks.processes[0].kill).toHaveBeenCalledTimes(1)
+  })
   it('rejects non-admin, invalid credentials and unrelated chat/profile scopes', async () => {
     await expect(connect('viewer')).rejects.toThrow('terminal_forbidden')
     await expect(connect('bad')).rejects.toThrow('terminal_forbidden')

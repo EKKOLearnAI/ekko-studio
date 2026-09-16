@@ -5,6 +5,29 @@ import { expect, it } from 'vitest'
 import { pty } from '../../packages/server/src/modules/hermes/services/terminal/runtime'
 import { MobileTerminalSessions } from '../../packages/server/src/modules/hermes/services/terminal/mobile-sessions'
 
+it.skipIf(!pty)('pushes real PTY command output and process exit without polling', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'mobile-terminal-push-'))
+  const sessions = new MobileTerminalSessions((cwd, shell, cols, rows) => pty.spawn(shell, [], { cwd, cols, rows, name: 'xterm-256color' }))
+  const scope = { owner: 'smoke', userId: 1, profile: 'default', source: 'single', sourceId: 'push' }
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    const terminal = sessions.create(scope, 'real-pty-push', cwd, process.platform === 'win32' ? 'powershell.exe' : '/bin/sh', 80, 24)
+    const attached = sessions.attach(scope, terminal.id, 'writer')
+    const completed = new Promise<string>((resolve, reject) => {
+      let output = ''
+      timeout = setTimeout(() => reject(new Error('PTY push timed out')), 5000)
+      sessions.stream(scope, terminal.id, 'writer', attached.lease, 0, batch => {
+        output += batch.chunks.map(c => c.data).join('')
+        sessions.stream(scope, terminal.id, 'writer', attached.lease, batch.cursor, () => {})
+        if (batch.exitCode !== null && batch.cursor === batch.latest) resolve(output)
+      })
+    })
+    sessions.input(scope, terminal.id, 'writer', attached.lease, 1,
+      process.platform === 'win32' ? "Write-Output ('PUSH_' + 'OK'); exit\r" : "printf 'PUSH_%s\\n' 'OK'; exit\r")
+    expect(await completed).toContain('PUSH_OK')
+  } finally { clearTimeout(timeout); sessions.shutdown(); rmSync(cwd, { recursive: true, force: true }) }
+}, 10_000)
+
 it.skipIf(!pty)('runs a real PTY in its workspace and keeps output across writer detach', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'mobile-terminal-pty-'))
   const sessions = new MobileTerminalSessions((cwd, shell, cols, rows) => pty.spawn(shell, [], { cwd, cols, rows, name: 'xterm-256color' }))

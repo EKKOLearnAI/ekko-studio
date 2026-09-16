@@ -16,11 +16,20 @@ export interface TerminalProcess {
 
 export interface TerminalScope { owner: string; userId: number; profile: string; source: string; sourceId: string }
 export interface TerminalChunk { seq: number; data: string }
+export interface TerminalOutput {
+  chunks: TerminalChunk[]; cursor: number; latest: number; truncated: boolean; exitCode: number | null
+}
+interface OutputStream {
+  cursor: number; sent: number; pending: number[]; exitSent: boolean
+  send: (output: TerminalOutput) => void; timer?: ReturnType<typeof setTimeout>
+}
 interface Session {
   id: string; scope: TerminalScope; requestId: string; cwd: string; shell: string
   process: TerminalProcess; createdAt: number; detachedAt: number | null
   writer: string | null; lease: string; inputSeq: number; seq: number
+  pendingInput: Map<number, string>
   chunks: TerminalChunk[]; bytes: number; exitCode: number | null
+  stream?: OutputStream
 }
 
 function matches(a: TerminalScope, b: TerminalScope): boolean {
@@ -35,7 +44,7 @@ export function terminalDimensions(cols: unknown, rows: unknown): { cols: number
   return { cols: Number(cols), rows: Number(rows) }
 }
 
-/** PTY ownership survives transport loss. Output is pulled in bounded, ordered batches. */
+/** PTY ownership survives transport loss. Output is read or pushed in bounded batches. */
 export class MobileTerminalSessions {
   private sessions = new Map<string, Session>()
   constructor(
@@ -55,7 +64,7 @@ export class MobileTerminalSessions {
     const process = this.spawn(cwd, shell, cols, rows)
     const session: Session = {
       id: randomUUID(), scope: { ...scope }, requestId, cwd, shell, process, createdAt: this.now(),
-      detachedAt: this.now(), writer: null, lease: '', inputSeq: 0, seq: 0, chunks: [], bytes: 0, exitCode: null,
+      detachedAt: this.now(), writer: null, lease: '', inputSeq: 0, pendingInput: new Map(), seq: 0, chunks: [], bytes: 0, exitCode: null,
     }
     this.sessions.set(session.id, session)
     process.onData(data => {
@@ -75,10 +84,12 @@ export class MobileTerminalSessions {
       while (session.bytes > MOBILE_TERMINAL_LIMITS.bufferBytes) {
         session.bytes -= Buffer.byteLength(session.chunks.shift()!.data)
       }
+      this.scheduleOutput(session)
     })
     process.onExit(({ exitCode }) => {
       session.exitCode = exitCode
       session.detachedAt = this.now()
+      this.scheduleOutput(session)
     })
     return this.info(session)
   }
@@ -90,18 +101,24 @@ export class MobileTerminalSessions {
 
   attach(scope: TerminalScope, id: string, writer: string) {
     const session = this.get(scope, id)
+    this.stopOutput(session)
     session.writer = writer; session.lease = randomUUID(); session.inputSeq = 0
+    session.pendingInput.clear()
     if (session.exitCode === null) session.detachedAt = null
     return { ...this.info(session), lease: session.lease, inputSeq: session.inputSeq }
   }
 
   read(scope: TerminalScope, id: string, writer: string, lease: string, cursor: number) {
-    const session = this.writable(scope, id, writer, lease)
+    return this.readOutput(this.writable(scope, id, writer, lease), cursor)
+  }
+
+  private readOutput(session: Session, cursor: number): TerminalOutput {
     if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor > session.seq) throw new Error('terminal_invalid_cursor')
     let bytes = 0
     const chunks: TerminalChunk[] = []
-    for (const chunk of session.chunks) {
-      if (chunk.seq <= cursor) continue
+    const start = Math.max(0, cursor - (session.chunks[0]?.seq ?? 1) + 1)
+    for (let index = start; index < session.chunks.length; index++) {
+      const chunk = session.chunks[index]
       const size = Buffer.byteLength(chunk.data)
       if (bytes + size > MOBILE_TERMINAL_LIMITS.readBytes) break
       chunks.push(chunk); bytes += size
@@ -112,13 +129,62 @@ export class MobileTerminalSessions {
     }
   }
 
+  /** Reuse terminal.read for subscription and cumulative render acknowledgements.
+   * Four bounded batches may be in flight; a slow renderer cannot grow the wire queue. */
+  stream(scope: TerminalScope, id: string, writer: string, lease: string, cursor: number,
+    send: (output: TerminalOutput) => void) {
+    const session = this.writable(scope, id, writer, lease)
+    if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor > session.seq) throw new Error('terminal_invalid_cursor')
+    const stream = session.stream
+    if (stream) {
+      if (cursor < stream.cursor || cursor > stream.sent
+        || (cursor !== stream.cursor && !stream.pending.includes(cursor))) throw new Error('terminal_invalid_cursor')
+      stream.cursor = cursor
+      stream.pending = stream.pending.filter(seq => seq > cursor)
+    } else {
+      session.stream = { cursor, sent: cursor, pending: [], exitSent: false, send }
+    }
+    this.scheduleOutput(session)
+    return { streaming: true }
+  }
+
+  private scheduleOutput(session: Session) {
+    const stream = session.stream
+    if (!stream || stream.timer || stream.pending.length >= 4) return
+    stream.timer = setTimeout(() => {
+      stream.timer = undefined
+      if (session.stream !== stream) return
+      while (stream.pending.length < 4) {
+        const output = this.readOutput(session, stream.sent)
+        if (!output.chunks.length && (output.exitCode === null || stream.exitSent)) break
+        stream.sent = output.cursor
+        stream.pending.push(output.cursor)
+        if (output.exitCode !== null && output.cursor >= output.latest) stream.exitSent = true
+        stream.send(output)
+      }
+    }, 8)
+    stream.timer.unref()
+  }
+
+  private stopOutput(session: Session) {
+    clearTimeout(session.stream?.timer)
+    session.stream = undefined
+  }
+
   input(scope: TerminalScope, id: string, writer: string, lease: string, seq: number, data: string) {
     const session = this.writable(scope, id, writer, lease)
     if (session.exitCode !== null) throw new Error('terminal_exited')
-    if (!Number.isSafeInteger(seq) || seq !== session.inputSeq + 1) throw new Error('terminal_input_sequence')
+    if (!Number.isSafeInteger(seq) || seq <= session.inputSeq || seq > session.inputSeq + 8 || session.pendingInput.has(seq)) throw new Error('terminal_input_sequence')
     if (typeof data !== 'string' || Buffer.byteLength(data) > MOBILE_TERMINAL_LIMITS.inputBytes) throw new Error('terminal_input_too_large')
-    session.process.write(data)
-    session.inputSeq = seq
+    // Relay authorization/throttling is asynchronous and may finish out of order.
+    // Buffer only the bounded input window, then write contiguous sequences.
+    session.pendingInput.set(seq, data)
+    while (session.pendingInput.has(session.inputSeq + 1)) {
+      const next = session.inputSeq + 1
+      session.process.write(session.pendingInput.get(next)!)
+      session.pendingInput.delete(next)
+      session.inputSeq = next
+    }
   }
 
   resize(scope: TerminalScope, id: string, writer: string, lease: string, cols: number, rows: number) {
@@ -172,10 +238,14 @@ export class MobileTerminalSessions {
     return session
   }
   private release(session: Session) {
+    this.stopOutput(session)
+    session.pendingInput.clear()
     session.writer = null; session.lease = ''
     session.detachedAt ??= this.now()
   }
   private destroy(session: Session) {
+    this.stopOutput(session)
+    session.pendingInput.clear()
     this.sessions.delete(session.id)
     if (session.exitCode === null) { try { session.process.kill() } catch { /* Already exited. */ } }
     session.chunks.length = 0

@@ -20,6 +20,80 @@ function fixture() {
 }
 
 describe('mobile terminal lifetime and protocol', () => {
+  it('orders pipelined input across relay reordering and discards gaps on detach', () => {
+    const f = fixture(); const { id } = f.create(); const a = f.service.attach(scope, id, 'a')
+    f.service.input(scope, id, 'a', a.lease, 3, '\x7f')
+    f.service.input(scope, id, 'a', a.lease, 2, 'b')
+    expect(f.processes[0].write).not.toHaveBeenCalled()
+    expect(() => f.service.input(scope, id, 'a', a.lease, 2, 'b')).toThrow('terminal_input_sequence')
+    f.service.input(scope, id, 'a', a.lease, 1, 'a')
+    expect(vi.mocked(f.processes[0].write).mock.calls).toEqual([['a'], ['b'], ['\x7f']])
+    f.service.input(scope, id, 'a', a.lease, 5, 'discard')
+    f.service.detachWriter('a')
+    const b = f.service.attach(scope, id, 'b')
+    f.service.input(scope, id, 'b', b.lease, 1, 'new')
+    expect(vi.mocked(f.processes[0].write).mock.calls).toEqual([['a'], ['b'], ['\x7f'], ['new']])
+    f.service.shutdown()
+  })
+  it('pushes bounded output windows and replenishes them only after render acknowledgement', () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    try {
+      const { id } = f.create(); const a = f.service.attach(scope, id, 'a'); const send = vi.fn()
+      f.service.stream(scope, id, 'a', a.lease, 0, send)
+      f.processes[0].output('x'.repeat(MOBILE_TERMINAL_LIMITS.readBytes * 6))
+      vi.advanceTimersByTime(8)
+      expect(send).toHaveBeenCalledTimes(4)
+      expect(send.mock.calls.every(([output]) => Buffer.byteLength(output.chunks.map((c: any) => c.data).join('')) <= MOBILE_TERMINAL_LIMITS.readBytes)).toBe(true)
+      vi.advanceTimersByTime(1000); expect(send).toHaveBeenCalledTimes(4)
+      expect(() => f.service.stream(scope, id, 'a', a.lease, 99999, send)).toThrow('terminal_invalid_cursor')
+      f.service.stream(scope, id, 'a', a.lease, send.mock.calls[1][0].cursor, send)
+      vi.advanceTimersByTime(8); expect(send).toHaveBeenCalledTimes(6)
+      const chunks = send.mock.calls.flatMap(([output]) => output.chunks)
+      expect(chunks.map(c => c.data).join('')).toBe('x'.repeat(MOBILE_TERMINAL_LIMITS.readBytes * 6))
+      expect(chunks.map(c => c.seq)).toEqual(Array.from({ length: 48 }, (_, i) => i + 1))
+    } finally { f.service.shutdown(); vi.useRealTimers() }
+  })
+
+  it('pushes echo, deletion and exit without another read, and cancels stale writer subscriptions', () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    try {
+      const { id } = f.create(); const a = f.service.attach(scope, id, 'a'); const send = vi.fn()
+      f.service.stream(scope, id, 'a', a.lease, 0, send)
+      f.processes[0].output('a'); vi.advanceTimersByTime(8)
+      f.processes[0].output('\b \b'); vi.advanceTimersByTime(8)
+      expect(send.mock.calls.map(([output]) => output.chunks[0].data)).toEqual(['a', '\b \b'])
+      f.processes[0].output('pending')
+      const b = f.service.attach(scope, id, 'b')
+      vi.advanceTimersByTime(8); expect(send).toHaveBeenCalledTimes(2)
+      expect(() => f.service.stream(scope, id, 'a', a.lease, 0, send)).toThrow('terminal_taken_over')
+      const next = vi.fn(); f.service.stream(scope, id, 'b', b.lease, 0, next)
+      f.processes[0].exit(0); vi.advanceTimersByTime(8)
+      expect(next).toHaveBeenCalledTimes(1)
+      expect(next.mock.calls[0][0]).toMatchObject({ cursor: 3, latest: 3, exitCode: 0 })
+      f.service.stream(scope, id, 'b', b.lease, 3, next)
+      vi.advanceTimersByTime(8); expect(next).toHaveBeenCalledTimes(1)
+      f.service.detach(scope, id, 'b', b.lease)
+      f.processes[0].output('detached'); vi.advanceTimersByTime(8)
+      expect(next).toHaveBeenCalledTimes(1)
+    } finally { f.service.shutdown(); vi.useRealTimers() }
+  })
+
+  it('reports output dropped while a renderer stalls and retains bounded history', () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    try {
+      const { id } = f.create(); const a = f.service.attach(scope, id, 'a'); const send = vi.fn()
+      f.service.stream(scope, id, 'a', a.lease, 0, send)
+      f.processes[0].output('a'.repeat(4 * MOBILE_TERMINAL_LIMITS.readBytes)); vi.advanceTimersByTime(8)
+      const cursor = send.mock.calls[3][0].cursor
+      f.processes[0].output('中'.repeat(MOBILE_TERMINAL_LIMITS.bufferBytes)); vi.advanceTimersByTime(8)
+      expect(send).toHaveBeenCalledTimes(4)
+      f.service.stream(scope, id, 'a', a.lease, cursor, send); vi.advanceTimersByTime(8)
+      expect(send.mock.calls[4][0].truncated).toBe(true)
+    } finally { f.service.shutdown(); vi.useRealTimers() }
+  })
   it('rejects missing idempotency keys before spawning a process', () => {
     const f = fixture()
     expect(() => f.service.create(scope, undefined as any, '/workspace', '/bin/sh', 80, 24)).toThrow('terminal_invalid_request')
@@ -50,7 +124,7 @@ describe('mobile terminal lifetime and protocol', () => {
     expect(() => f.service.input(scope, id, 'a', a.lease, 1, 'x')).toThrow('terminal_taken_over')
     f.service.input(scope, id, 'b', b.lease, 1, 'x')
     expect(() => f.service.input(scope, id, 'b', b.lease, 1, 'x')).toThrow('terminal_input_sequence')
-    expect(() => f.service.input(scope, id, 'b', b.lease, 3, 'x')).toThrow('terminal_input_sequence')
+    expect(() => f.service.input(scope, id, 'b', b.lease, 10, 'x')).toThrow('terminal_input_sequence')
     expect(() => f.service.resize(scope, id, 'b', b.lease, Infinity, 24)).toThrow('terminal_invalid_size')
     expect(() => f.service.input(scope, id, 'b', b.lease, 2, 'x'.repeat(17000))).toThrow('terminal_input_too_large')
   })
