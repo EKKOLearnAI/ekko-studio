@@ -343,10 +343,16 @@ function currentSynthesisRequest(text: string, signal: AbortSignal) {
     })
   }
   if (isServerTtsProvider(voiceSettings.provider.value)) {
+    const provider = voiceSettings.provider.value
+    // 实时语音不走 useSpeech.applyTtsPreset，克隆参考音频需在此单独注入
+    const cloneUri = provider === 'openrouter'
+      ? voiceSettings.openrouterVoiceCloneDataUri.value
+      : ''
     return synthesizeSpeech({
-      provider: voiceSettings.provider.value,
+      provider,
       text,
       signal,
+      ...(cloneUri ? { options: { voiceCloneDataUri: cloneUri } } : {}),
     })
   }
   return null

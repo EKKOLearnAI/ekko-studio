@@ -152,3 +152,79 @@ export async function deleteTtsBaseUrlPreset(
   }
   return body as TtsProviderSettingsResponse
 }
+
+// ---------------------------------------------------------------------------
+// 语音预处理（speech-preprocessing）全局配置
+// ---------------------------------------------------------------------------
+
+export type SpeechPreprocessingMode = 'faithful' | 'summary'
+
+export interface SpeechPreprocessingTriggers {
+  codeBlock: boolean
+  table: boolean
+  minChars: number
+}
+
+export interface SpeechPreprocessingSettings {
+  enabled: boolean
+  /** Hermes custom_providers 条目名（如 open.bigmodel.cn） */
+  provider: string
+  model: string
+  mode: SpeechPreprocessingMode
+  promptFaithful: string
+  promptSummary: string
+  triggers: SpeechPreprocessingTriggers
+  /** 模型调用超时（毫秒），默认 8000 */
+  timeoutMs?: number
+}
+
+interface SpeechPreprocessingResponse {
+  profile: string
+  config: SpeechPreprocessingSettings
+}
+
+export async function fetchSpeechPreprocessing(): Promise<SpeechPreprocessingSettings> {
+  const body = await request<SpeechPreprocessingResponse>('/api/studio/tts/speech-preprocessing')
+  return body.config
+}
+
+export async function saveSpeechPreprocessing(
+  config: Partial<SpeechPreprocessingSettings>,
+): Promise<SpeechPreprocessingSettings> {
+  const body = await request<SpeechPreprocessingResponse>('/api/studio/tts/speech-preprocessing', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+  return body.config
+}
+
+// ---------------------------------------------------------------------------
+// TTS fallback（备用降级）配置
+// ---------------------------------------------------------------------------
+
+export interface TtsFallbackSettings {
+  enabled: boolean
+  /** 备用 provider 有序列表（主 provider 失败后依次尝试） */
+  providers: string[]
+  /** 单个 provider 尝试窗口（毫秒） */
+  perProviderTimeoutMs?: number
+}
+
+interface TtsFallbackResponse {
+  profile: string
+  config: TtsFallbackSettings
+}
+
+export async function fetchTtsFallback(): Promise<TtsFallbackSettings> {
+  const body = await request<TtsFallbackResponse>('/api/studio/tts/fallback')
+  return body.config
+}
+
+export async function saveTtsFallback(config: Partial<TtsFallbackSettings>): Promise<TtsFallbackSettings> {
+  const body = await request<TtsFallbackResponse>('/api/studio/tts/fallback', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+  return body.config
+}
+

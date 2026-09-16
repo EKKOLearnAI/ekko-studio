@@ -20,6 +20,7 @@ import {
 } from '../public/voice-settings'
 import { config } from '../public/config'
 import { SttProviderConfigError, transcribeWithProvider } from '../services/voice/stt'
+import { updateUsage } from '../repositories/usage-store'
 import { SttNoSpeechDetectedError } from '../services/voice/stt/types'
 import { logger } from '../public/logging'
 import { emitMcuVoiceEvent, startMcuVoiceChatTurn } from '../public/mcu-voice'
@@ -731,6 +732,23 @@ export async function transcribeVoiceProxy(ctx: Context) {
       secrets: setting.secrets,
       signal: controller.signal,
     })
+    // #11 用量统计
+    try {
+      updateUsage(profile, {
+        runId: '',
+        source: 'stt',
+        agent: String(setting?.settings?.model || activeProvider || ''),
+        usageScope: 'model_call',
+        purpose: 'stt_transcribe',
+        apiCalls: 1,
+        inputTokens: audio.data.length,
+        outputTokens: result.text.length,
+        model: String(setting?.settings?.model || activeProvider || ''),
+        provider: String(activeProvider || ''),
+        profile,
+        isEstimated: false,
+      })
+    } catch {}
     if (parsed.fields.response_format === 'text') {
       ctx.set('Content-Type', 'text/plain; charset=utf-8')
       ctx.body = result.text
@@ -868,15 +886,8 @@ export async function mcuVoiceTurn(ctx: Context) {
   void (async () => {
     emitMcuVoiceEvent({ type: 'interaction.status', interactionId, status: 'transcribing' }, { clientId })
     try {
-      const result = await transcribeWithProvider({
-        provider,
-        audio,
-        fileName: 'mcu-voice.wav',
-        mimeType: contentType,
-        settings,
-        secrets,
-        signal: controller.signal,
-      })
+      // 注: 讯飞流式转写要求 40ms 真流式分片，当前架构按整段上传，故走 IAT 整段识别
+      const result = await transcribeWithProvider({ provider, audio, fileName: 'mcu-voice.wav', mimeType: contentType, settings, secrets, signal: controller.signal })
 
       logger.info({
         userId,

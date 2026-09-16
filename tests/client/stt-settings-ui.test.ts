@@ -312,6 +312,77 @@ vi.mock('naive-ui', () => ({
     inheritAttrs: false,
     template: '<div v-bind="$attrs"><slot /></div>',
   }),
+  NCheckbox: defineComponent({
+    name: 'NCheckbox',
+    inheritAttrs: false,
+    props: {
+      checked: { type: Boolean, default: false },
+    },
+    emits: ['update:checked'],
+    template: `<label v-bind="$attrs"><input type="checkbox" :checked="checked" @change="$emit('update:checked', $event.target.checked)" /><slot /></label>`,
+  }),
+  NSwitch: defineComponent({
+    name: 'NSwitch',
+    inheritAttrs: false,
+    props: { value: { type: Boolean, default: false } },
+    emits: ['update:value'],
+    template: `<button type="button" v-bind="$attrs" :data-value="String(value)" @click="$emit('update:value', !value)"></button>`,
+  }),
+  NInputNumber: defineComponent({
+    name: 'NInputNumber',
+    inheritAttrs: false,
+    props: { value: { type: Number, default: 0 } },
+    emits: ['update:value'],
+    template: `<input type="number" v-bind="$attrs" :value="value" @input="$emit('update:value', Number($event.target.value))" />`,
+  }),
+  NPopover: defineComponent({
+    name: 'NPopover',
+    inheritAttrs: false,
+    template: `<div v-bind="$attrs"><slot name="trigger" /><slot /></div>`,
+  }),
+  NRadioGroup: defineComponent({
+    name: 'NRadioGroup',
+    inheritAttrs: false,
+    props: { value: { type: [String, Number], default: '' } },
+    emits: ['update:value'],
+    template: `<div v-bind="$attrs"><slot /></div>`,
+  }),
+  NRadioButton: defineComponent({
+    name: 'NRadioButton',
+    inheritAttrs: false,
+    props: { value: { type: [String, Number], default: '' } },
+    template: `<label v-bind="$attrs"><slot /></label>`,
+  }),
+  NDataTable: defineComponent({
+    name: 'NDataTable',
+    inheritAttrs: false,
+    props: { data: { type: Array as () => unknown[], default: () => [] } },
+    template: `<table v-bind="$attrs"><tbody><tr v-for="(row, i) in data" :key="i"><td><slot :row="row" /></td></tr></tbody></table>`,
+  }),
+  NEmpty: defineComponent({
+    name: 'NEmpty',
+    inheritAttrs: false,
+    template: `<div v-bind="$attrs"><slot /></div>`,
+  }),
+  NSkeleton: defineComponent({
+    name: 'NSkeleton',
+    inheritAttrs: false,
+    template: `<div v-bind="$attrs"></div>`,
+  }),
+  NSpin: defineComponent({
+    name: 'NSpin',
+    inheritAttrs: false,
+    template: `<div v-bind="$attrs"><slot /></div>`,
+  }),
+  NStatistic: defineComponent({
+    name: 'NStatistic',
+    inheritAttrs: false,
+    props: {
+      label: { type: String, default: '' },
+      value: { type: [String, Number], default: '' },
+    },
+    template: `<div v-bind="$attrs"><span class="mock-stat-label">{{ label }}</span><span class="mock-stat-value">{{ value }}</span></div>`,
+  }),
   NSelect: defineComponent({
     name: 'NSelect',
     inheritAttrs: false,
@@ -438,6 +509,9 @@ vi.mock('@/api/studio/tts-settings', () => ({
   clearTtsSecret: mockClearTtsSecret,
   deleteTtsProvider: mockDeleteTtsProvider,
   deleteTtsBaseUrlPreset: mockDeleteTtsBaseUrlPreset,
+  // VoiceSettings mounts SpeechPreprocessingSection, which loads/saves this on mount
+  fetchSpeechPreprocessing: vi.fn().mockResolvedValue({ enabled: false }),
+  saveSpeechPreprocessing: vi.fn().mockResolvedValue({ enabled: false }),
 }))
 
 vi.mock('@/api/hermes/system', () => ({

@@ -17,6 +17,11 @@ export type StoredTtsProvider =
   | 'mistral'
   | 'minimax'
   | 'deepinfra'
+  | 'siliconflow'
+  | 'zhipu'
+  | 'fishaudio'
+  | 'aliyun'
+  | 'openrouter'
 export type ActiveTtsProvider = StoredTtsProvider
 
 const SETTINGS_KEYS = [
@@ -38,6 +43,7 @@ const SETTINGS_KEYS = [
   'volume',
   'emotion',
   'groupId',
+  'proxy',
 ] as const
 const SECRET_KEYS = ['apiKey'] as const
 
@@ -62,17 +68,22 @@ const STORED_MARKER = '[stored]'
 const MAX_TEXT_SETTING_LENGTH = 2000
 const MAX_BASE_URL_PRESETS = 20
 const PROVIDERS: StoredTtsProvider[] = [
+  'aliyun',
   'custom',
   'deepinfra',
   'doubao',
   'edge',
   'elevenlabs',
+  'fishaudio',
   'gemini',
   'mimo',
   'minimax',
   'mistral',
   'openai',
+  'openrouter',
+  'siliconflow',
   'xai',
+  'zhipu',
 ]
 const ACTIVE_PROVIDERS: ActiveTtsProvider[] = PROVIDERS
 const PROVIDER_SQL_PLACEHOLDERS = PROVIDERS.map(() => '?').join(', ')
@@ -88,6 +99,11 @@ const PROVIDER_LABELS: Record<StoredTtsProvider, string> = {
   mistral: 'Mistral TTS',
   minimax: 'MiniMax TTS',
   deepinfra: 'DeepInfra TTS',
+  siliconflow: 'SiliconFlow TTS',
+  zhipu: 'Zhipu GLM-TTS',
+  fishaudio: 'Fish Audio TTS',
+  aliyun: 'Aliyun Qwen-TTS-VC',
+  openrouter: 'OpenRouter TTS',
 }
 
 type StoredRow = {

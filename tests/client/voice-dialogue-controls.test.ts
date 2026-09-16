@@ -113,6 +113,12 @@ vi.mock('naive-ui', () => ({
   NButton: { template: '<button type="button" v-bind="$attrs"><slot /><slot name="icon" /></button>' },
   NTooltip: { template: '<div><slot name="trigger" /><slot /></div>' },
   NSwitch: { template: '<button type="button"></button>' },
+  NCheckbox: {
+    name: 'NCheckbox',
+    props: ['checked'],
+    emits: ['update:checked'],
+    template: '<label><input type="checkbox" :checked="checked" /><slot /></label>',
+  },
   NDropdown: { name: 'NDropdown', props: ['options'], emits: ['select'], template: '<div><slot /></div>' },
   NModal: { template: '<div><slot /><slot name="footer" /></div>' },
   NInputNumber: { template: '<input />' },

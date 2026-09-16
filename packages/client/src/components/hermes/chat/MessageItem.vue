@@ -806,6 +806,19 @@ function handleSpeechToggle() {
 // 监听自动播放事件
 let autoPlayHandler: ((e: Event) => void) | null = null
 
+// 自动播放去重（跨组件实例共享）：
+// 同一 assistant 消息可能在列表中对应多个 MessageItem 监听实例（重复 DOM / 重挂载），
+// 且 run.completed 存在「本地 onEvent + 会话级 handler」双通道偶发重复派发。
+// 以 messageId 在短时间窗内只放行一次真正的播放，避免一条消息触发两遍口播。
+const AUTO_PLAY_DEDUP_MS = 3000
+const autoplayDedup: Map<string, number> =
+  ((globalThis as unknown as Record<string, unknown>).__hermesAutoplayDedup__ as Map<string, number> | undefined)
+  ?? (() => {
+    const map = new Map<string, number>()
+    ;(globalThis as unknown as Record<string, unknown>).__hermesAutoplayDedup__ = map
+    return map
+  })()
+
 function handleAutoplayTtsError(err: unknown) {
   if (err instanceof Error && err.name === 'AbortError') return
   console.warn('[MessageItem] TTS autoplay failed:', err)
@@ -815,6 +828,16 @@ onMounted(() => {
   autoPlayHandler = (e: Event) => {
     const customEvent = e as CustomEvent<{ messageId: string; content: string }>
     if (customEvent.detail.messageId === props.message.id && canPlaySpeech.value) {
+      const now = Date.now()
+      const lastPlayedAt = autoplayDedup.get(props.message.id)
+      if (lastPlayedAt !== undefined && now - lastPlayedAt < AUTO_PLAY_DEDUP_MS) return
+      autoplayDedup.set(props.message.id, now)
+      // 顺带清理过期条目，防止 map 无限增长
+      if (autoplayDedup.size > 128) {
+        for (const [k, t] of autoplayDedup) {
+          if (now - t >= AUTO_PLAY_DEDUP_MS) autoplayDedup.delete(k)
+        }
+      }
       const content = customEvent.detail.content || props.message.content || ''
       if (voiceSettings.provider.value === 'openai') {
         const apiUrl = voiceSettings.openaiBaseUrl.value

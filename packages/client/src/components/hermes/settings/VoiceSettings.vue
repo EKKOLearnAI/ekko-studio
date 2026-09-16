@@ -14,6 +14,8 @@ import VoiceApiFormModal from './voice/VoiceApiFormModal.vue'
 import VoiceApiConfigurator from './voice/VoiceApiConfigurator.vue'
 import HermesVoiceConfigSummary from './voice/HermesVoiceConfigSummary.vue'
 import LocalSttModelCard from './voice/LocalSttModelCard.vue'
+import SpeechPreprocessingSection from './voice/SpeechPreprocessingSection.vue'
+import TtsFallbackSection from './voice/TtsFallbackSection.vue'
 import type { VoiceApiConnection, VoiceApiKind, VoiceApiProvider, VoiceApiSavePayload } from '@/types/voice-api'
 import type { StoredSttProvider } from '@/api/studio/stt-settings'
 
@@ -350,6 +352,13 @@ async function handleLocalTest() {
       </div>
     </section>
 
+    <SpeechPreprocessingSection v-if="showTts" :active-provider="voiceSettings.provider.value" />
+    <TtsFallbackSection
+      v-if="showTts"
+      :connections="voiceApi.ttsConnections.value"
+      :active-provider="voiceSettings.provider.value"
+    />
+
     <section v-if="showStt" class="settings-section voice-provider-section" aria-labelledby="stt-providers-title">
       <HermesVoiceConfigSummary
         :key="`stt-${hermesConfigRevision}`"
@@ -415,107 +424,4 @@ async function handleLocalTest() {
       @close="showConfigurator = false"
       @save="handleConfigSave"
     />
-  </div>
-</template>
-
-<style scoped lang="scss">
-@use '@/styles/variables' as *;
-
-.voice-settings {
-  padding: 8px 0;
-}
-
-.settings-section {
-  margin-top: 16px;
-}
-
-.voice-provider-section + .voice-provider-section {
-  margin-top: 28px;
-  padding-top: 20px;
-  border-top: 1px solid $border-color;
-}
-
-.section-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 14px;
-}
-
-.section-copy {
-  min-width: 0;
-}
-
-.section-title {
-  margin: 0 0 6px;
-  color: $text-primary;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.section-desc {
-  margin: 0;
-  max-width: 620px;
-  color: $text-muted;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.section-controls {
-  display: grid;
-  grid-template-columns: 220px 112px;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-
-  > .n-button {
-    width: 112px;
-  }
-}
-
-.active-select {
-  display: grid;
-  gap: 5px;
-  width: 220px;
-  min-width: 0;
-}
-
-.active-label,
-.active-summary {
-  color: $text-muted;
-  font-size: 11px;
-  line-height: 1.3;
-}
-
-.active-summary {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.test-copy-row {
-  max-width: 460px;
-  margin-bottom: 10px;
-}
-
-.provider-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-@media (max-width: 860px) {
-  .section-header,
-  .section-controls {
-    grid-template-columns: 1fr;
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .section-controls > .n-button,
-  .active-select {
-    width: 100%;
-  }
-}
-</style>
+  </div>  </template>

@@ -1,7 +1,10 @@
 import { edgeTtsProvider } from './edge'
-import { customTtsProvider, deepinfraTtsProvider, openaiTtsProvider } from './openai'
+import { customTtsProvider, deepinfraTtsProvider, openaiTtsProvider, siliconflowTtsProvider, zhipuTtsProvider } from './openai'
 import { mimoTtsProvider } from './mimo'
 import { doubaoTtsProvider } from './doubao'
+import { fishaudioTtsProvider } from './fishaudio'
+import { aliyunTtsProvider } from './aliyun'
+import { openrouterTtsProvider } from './openrouter'
 import {
   elevenLabsTtsProvider,
   geminiTtsProvider,
@@ -23,6 +26,11 @@ const providers: Record<TtsProviderId, TtsProvider<any>> = {
   mistral: mistralTtsProvider,
   minimax: minimaxTtsProvider,
   deepinfra: deepinfraTtsProvider,
+  siliconflow: siliconflowTtsProvider,
+  zhipu: zhipuTtsProvider,
+  fishaudio: fishaudioTtsProvider,
+  aliyun: aliyunTtsProvider,
+  openrouter: openrouterTtsProvider,
 }
 
 export function getTtsProvider(provider: string): TtsProvider<any> | undefined {

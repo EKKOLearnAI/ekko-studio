@@ -19891,6 +19891,125 @@
         }
       }
     },
+    "/api/studio/tts/fallback": {
+      "get": {
+        "tags": [
+          "TTS"
+        ],
+        "summary": "Get fallback",
+        "description": "GET /api/studio/tts/fallback",
+        "operationId": "getTtsFallback",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "TTS"
+        ],
+        "summary": "Update fallback",
+        "description": "PUT /api/studio/tts/fallback",
+        "operationId": "updateTtsFallback",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "string"
+                  },
+                  "perProviderTimeoutMs": {
+                    "type": "string"
+                  },
+                  "primaryTimeoutMs": {
+                    "type": "string"
+                  },
+                  "providers": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/tts/prepare": {
+      "post": {
+        "tags": [
+          "TTS"
+        ],
+        "summary": "Create prepare",
+        "description": "POST /api/studio/tts/prepare",
+        "operationId": "prepareSpeechPreview",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/tts/settings": {
       "get": {
         "tags": [
@@ -20135,6 +20254,71 @@
         ]
       }
     },
+    "/api/studio/tts/speech-preprocessing": {
+      "get": {
+        "tags": [
+          "TTS"
+        ],
+        "summary": "Get speech-preprocessing",
+        "description": "GET /api/studio/tts/speech-preprocessing",
+        "operationId": "getSpeechPreprocessing",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "TTS"
+        ],
+        "summary": "Update speech-preprocessing",
+        "description": "PUT /api/studio/tts/speech-preprocessing",
+        "operationId": "updateSpeechPreprocessing",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "triggers": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/tts/synthesize": {
       "post": {
         "tags": [
@@ -20172,6 +20356,12 @@
                   },
                   "provider": {
                     "type": "string"
+                  },
+                  "skipFallback": {
+                    "type": "boolean"
+                  },
+                  "skipPreprocess": {
+                    "type": "boolean"
                   },
                   "text": {
                     "type": "string"
@@ -20592,6 +20782,32 @@
                 "additionalProperties": true
               }
             }
+          }
+        }
+      }
+    },
+    "/api/studio/voice/usage": {
+      "get": {
+        "tags": [
+          "TTS"
+        ],
+        "summary": "Get usage",
+        "description": "GET /api/studio/voice/usage",
+        "operationId": "getVoiceUsage",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
           }
         }
       }

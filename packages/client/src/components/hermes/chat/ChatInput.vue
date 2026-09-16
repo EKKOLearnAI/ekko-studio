@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Attachment } from '@/stores/hermes/chat'
+import type { Attachment, AutoPlaySpeechOptions } from '@/stores/hermes/chat'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
@@ -9,12 +9,16 @@ import { setModelContext } from '@/api/hermes/model-context'
 import { fetchSocialMessagePlatforms } from '@/api/studio/social-messages'
 import { fetchSkills, type SkillCategory, type SkillInfo } from '@/api/hermes/skills'
 import { deleteSkillBundleApi, fetchSkillBundles, type SkillBundleInfo } from '@/api/hermes/skill-bundles'
-import { NButton, NTooltip, NModal, NInputNumber, NPopover, NSlider, NDropdown, useDialog, useMessage, type DropdownOption } from 'naive-ui'
+import { NButton, NTooltip, NModal, NInputNumber, NPopover, NSlider, NDropdown, NCheckbox, useDialog, useMessage, type DropdownOption } from 'naive-ui'
 import { computed, ref, nextTick, onMounted, onUnmounted, watch, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToolTraceVisibility } from '@/composables/useToolTraceVisibility'
 import { extractClipboardFiles } from '@/utils/clipboard-files'
 import VoiceDialogueControls from './VoiceDialogueControls.vue'
+import { useGlobalSpeech } from '@/composables/useSpeech'
+import { useVoiceSettings } from '@/composables/useVoiceSettings'
+import { speedToEdgeRate, hzToEdgePitch } from '@/utils/ttsHelpers'
+import { isServerTtsProvider } from '@/api/studio/tts'
 import BundleCreateModal from './BundleCreateModal.vue'
 import { BRIDGE_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
 import { clampChatInputHeight, isMobileChatInputViewport } from '@/utils/chat-input-height'
@@ -23,6 +27,156 @@ import { extractRepresentativeVideoFrames, isVideoFile } from '@/utils/video-fra
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
 
 const chatStore = useChatStore()
+
+// === Auto-play speech toggle ===
+const autoPlaySpeechEnabled = ref(false)
+// 窄屏下用 modal 替代 popover（避免 popover 跑出右边缘）
+const showAutoPlayOptionsModal = ref(false)
+function openAutoPlayOptions() { showAutoPlayOptionsModal.value = true }
+function closeAutoPlayOptions() { showAutoPlayOptionsModal.value = false }
+function toggleAutoPlaySpeech() {
+  autoPlaySpeechEnabled.value = !autoPlaySpeechEnabled.value
+  window.localStorage.setItem('autoPlaySpeech', String(autoPlaySpeechEnabled.value))
+  chatStore.setAutoPlaySpeech(autoPlaySpeechEnabled.value)
+}
+onMounted(() => {
+  chatStore.loadAutoPlaySessionOverrides()
+  const saved = window.localStorage.getItem('autoPlaySpeech')
+  if (saved !== null) {
+    autoPlaySpeechEnabled.value = saved === 'true'
+    chatStore.setAutoPlaySpeech(autoPlaySpeechEnabled.value)
+  }
+})
+
+// === #9 会话级自动播放覆盖（'on' / 'off' / 'default'）===
+import { computed as _computed } from 'vue'
+const sessionAutoPlayOverride = _computed<'on' | 'off' | 'default'>({
+  get() {
+    const sid = chatStore.activeSessionId
+    if (!sid) return 'default'
+    return chatStore.autoPlaySessionOverrides[sid] || 'default'
+  },
+  set(v: 'on' | 'off' | 'default') {
+    const sid = chatStore.activeSessionId
+    if (sid) chatStore.setAutoPlaySessionOverride(sid, v)
+  },
+})
+function cycleSessionAutoPlay() {
+  const cur = sessionAutoPlayOverride.value
+  const next: 'on' | 'off' | 'default' = cur === 'default' ? 'on' : cur === 'on' ? 'off' : 'default'
+  sessionAutoPlayOverride.value = next
+}
+
+// === Auto-play process-message options (阶段性消息 / 思考过程 / 工具旁白) ===
+const DEFAULT_AUTOPLAY_OPTIONS: AutoPlaySpeechOptions = { interim: true, reasoning: false, tools: false }
+const autoPlayOptions = ref<AutoPlaySpeechOptions>({ ...DEFAULT_AUTOPLAY_OPTIONS })
+function persistAutoPlayOptions() {
+  window.localStorage.setItem('autoPlaySpeechOptions', JSON.stringify(autoPlayOptions.value))
+  chatStore.setAutoPlaySpeechOptions(autoPlayOptions.value)
+}
+function setAutoPlayOption(key: keyof AutoPlaySpeechOptions, value: boolean) {
+  autoPlayOptions.value = { ...autoPlayOptions.value, [key]: value }
+  persistAutoPlayOptions()
+}
+onMounted(() => {
+  const raw = window.localStorage.getItem('autoPlaySpeechOptions')
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<AutoPlaySpeechOptions>
+      autoPlayOptions.value = {
+        interim: typeof parsed.interim === 'boolean' ? parsed.interim : DEFAULT_AUTOPLAY_OPTIONS.interim,
+        reasoning: typeof parsed.reasoning === 'boolean' ? parsed.reasoning : DEFAULT_AUTOPLAY_OPTIONS.reasoning,
+        tools: typeof parsed.tools === 'boolean' ? parsed.tools : DEFAULT_AUTOPLAY_OPTIONS.tools,
+      }
+    } catch {
+      autoPlayOptions.value = { ...DEFAULT_AUTOPLAY_OPTIONS }
+    }
+  }
+  chatStore.setAutoPlaySpeechOptions(autoPlayOptions.value)
+})
+
+// === 过程消息旁白播放器（工具旁白等非消息实体的短播报） ===
+const speech = useGlobalSpeech()
+const voiceSettings = useVoiceSettings()
+let narrationDedup = { content: '', at: 0 }
+function speakNarration(content: string) {
+  if (!content) return
+  const key = `narration-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const provider = voiceSettings.provider.value
+  // 分支顺序与 MessageItem.vue 保持一致（服务端 provider 判定放 mimo 之后），
+  // 以满足 TS 对 provider 字面量联合类型的收窄要求。
+  if (provider === 'openai') {
+    void speech.openaiPlay(key, content, {
+      provider: 'openai',
+      baseUrl: voiceSettings.openaiBaseUrl.value,
+      apiKey: voiceSettings.openaiApiKey.value,
+      model: voiceSettings.openaiModel.value,
+      voice: voiceSettings.openaiVoice.value,
+    }).catch(() => {})
+  } else if (provider === 'custom') {
+    void speech.openaiPlay(key, content, {
+      provider: 'custom',
+      baseUrl: voiceSettings.customUrl.value,
+      apiKey: voiceSettings.customApiKey.value || undefined,
+    }).catch(() => {})
+  } else if (provider === 'edge') {
+    void speech.openaiPlay(key, content, {
+      provider: 'edge',
+      baseUrl: '/api/tts/proxy',
+      voice: voiceSettings.edgeVoice.value,
+      rate: speedToEdgeRate(voiceSettings.edgeRate.value),
+      pitch: hzToEdgePitch(voiceSettings.edgePitchHz.value),
+    }).catch(() => {})
+  } else if (provider === 'mimo') {
+    void speech.mimoPlay(key, content, {
+      baseUrl: voiceSettings.mimoBaseUrl.value,
+      apiKey: voiceSettings.mimoApiKey.value || undefined,
+      authMode: voiceSettings.mimoAuthMode.value,
+      model: voiceSettings.mimoModel.value,
+      voiceMode: voiceSettings.mimoModel.value === 'mimo-v2.5-tts-voicedesign' ? 'voiceDesign' : voiceSettings.mimoModel.value === 'mimo-v2.5-tts-voiceclone' ? 'voiceClone' : 'preset',
+      voice: voiceSettings.mimoVoice.value,
+      voiceDesignDesc: voiceSettings.mimoVoiceDesignDesc.value || undefined,
+      voiceCloneDataUri: voiceSettings.mimoVoiceCloneDataUri.value || undefined,
+      voiceCloneFormat: voiceSettings.mimoVoiceCloneFormat.value,
+      stylePrompt: voiceSettings.mimoStylePrompt.value || undefined,
+    }).catch(() => {})
+  } else if (provider === 'doubao') {
+    void speech.openaiPlay(key, content, {
+      provider: 'doubao',
+      model: voiceSettings.doubaoModel.value,
+      voice: voiceSettings.doubaoVoice.value,
+      stylePrompt: voiceSettings.doubaoStylePrompt.value || undefined,
+    }).catch(() => {})
+  } else if (isServerTtsProvider(provider)) {
+    // 服务端 TTS（fishaudio 等，会自动经过语音预处理管线）
+    void speech.openaiPlay(key, content, { provider }).catch(() => {})
+  } else if (provider === 'webspeech') {
+    const text = speech.extractReadableText?.(content) || content
+    if (text) {
+      speech.stop(false)
+      speech.speakViaBrowser(key, text, { voiceName: voiceSettings.webspeechVoice.value || undefined })
+    }
+  } else {
+    // 其余未知 provider：尽力入队
+    speech.enqueue(key, content)
+  }
+}
+let narrationHandler: ((e: Event) => void) | null = null
+onMounted(() => {
+  narrationHandler = (e: Event) => {
+    const detail = (e as CustomEvent<{ content?: string }>).detail
+    const content = String(detail?.content || '').trim()
+    if (!content) return
+    const now = Date.now()
+    if (narrationDedup.content === content && now - narrationDedup.at < 2500) return
+    narrationDedup = { content, at: now }
+    speakNarration(content)
+  }
+  window.addEventListener('hermes-speech-narration', narrationHandler)
+})
+onUnmounted(() => {
+  if (narrationHandler) window.removeEventListener('hermes-speech-narration', narrationHandler)
+})
 const appStore = useAppStore()
 const profilesStore = useProfilesStore()
 const settingsStore = useSettingsStore()
@@ -1341,6 +1495,133 @@ function openAttachmentPreview(attachment: Attachment) {
             </NTooltip>
           </NDropdown>
 
+
+          <NTooltip trigger="hover" :disabled="isMobileViewport">
+            <template #trigger>
+              <NButton
+                quaternary
+                size="tiny"
+                circle
+                class="toolbar-icon-button session-auto-play-toggle"
+                :class="{ 'session-auto-play-on': sessionAutoPlayOverride === 'on', 'session-auto-play-off': sessionAutoPlayOverride === 'off' }"
+                :aria-label="t('chat.sessionAutoPlay')"
+                @click="cycleSessionAutoPlay"
+                :disabled="!chatStore.activeSessionId"
+              >
+                <template #icon>
+                  <svg v-if="sessionAutoPlayOverride === 'default'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+                    <circle cx="18" cy="18" r="3" stroke-dasharray="2 2"/>
+                  </svg>
+                  <svg v-else-if="sessionAutoPlayOverride === 'on'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                  </svg>
+                  <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+                    <line x1="23" y1="9" x2="17" y2="15"/>
+                    <line x1="17" y1="9" x2="23" y2="15"/>
+                  </svg>
+                </template>
+              </NButton>
+            </template>
+            {{ sessionAutoPlayOverride === 'default' ? t('chat.sessionAutoPlayDefault') : sessionAutoPlayOverride === 'on' ? t('chat.sessionAutoPlayOn') : t('chat.sessionAutoPlayOff') }}
+          </NTooltip>
+          <NTooltip trigger="hover" :disabled="isMobileViewport">
+            <template #trigger>
+              <NButton
+                quaternary
+                size="tiny"
+                circle
+                class="toolbar-icon-button auto-play-speech-toggle"
+                :class="{ 'auto-play-speech-on': autoPlaySpeechEnabled }"
+                :aria-label="t('chat.autoPlaySpeech')"
+                @click="toggleAutoPlaySpeech"
+              >
+                <template #icon>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                  </svg>
+                </template>
+              </NButton>
+            </template>
+            {{ t('chat.autoPlaySpeech') }}
+          </NTooltip>
+
+          <NPopover
+            v-if="!isMobileViewport"
+            trigger="click"
+            placement="bottom-start"
+          >
+            <template #trigger>
+              <NButton
+                quaternary
+                size="tiny"
+                circle
+                class="toolbar-icon-button auto-play-options-toggle"
+                :class="{ 'auto-play-options-on': autoPlaySpeechEnabled && (autoPlayOptions.interim || autoPlayOptions.reasoning || autoPlayOptions.tools) }"
+                :disabled="!autoPlaySpeechEnabled"
+                :aria-label="t('chat.autoPlaySpeechOptions')"
+              >
+                <template #icon>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+                    <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+                    <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+                    <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+                  </svg>
+                </template>
+              </NButton>
+            </template>
+            <div style="display:flex;flex-direction:column;gap:4px;min-width:230px;padding:2px 2px 4px;">
+              <div style="font-size:13px;font-weight:600;">{{ t('chat.autoPlaySpeechOptions') }}</div>
+              <div style="font-size:12px;opacity:.72;margin-bottom:2px;">{{ t('chat.autoPlaySpeechOptionsDesc') }}</div>
+              <NCheckbox
+                class="auto-play-option-row"
+                :checked="autoPlayOptions.interim"
+                @update:checked="(v) => setAutoPlayOption('interim', !!v)"
+              >
+                {{ t('chat.autoPlaySpeechInterim') }}
+              </NCheckbox>
+              <NCheckbox
+                class="auto-play-option-row"
+                :checked="autoPlayOptions.reasoning"
+                @update:checked="(v) => setAutoPlayOption('reasoning', !!v)"
+              >
+                {{ t('chat.autoPlaySpeechReasoning') }}
+              </NCheckbox>
+              <NCheckbox
+                class="auto-play-option-row"
+                :checked="autoPlayOptions.tools"
+                @update:checked="(v) => setAutoPlayOption('tools', !!v)"
+              >
+                {{ t('chat.autoPlaySpeechTools') }}
+              </NCheckbox>
+            </div>
+          </NPopover>
+          <NButton
+            v-else
+            quaternary
+            size="tiny"
+            circle
+            class="toolbar-icon-button auto-play-options-toggle"
+            :class="{ 'auto-play-options-on': autoPlaySpeechEnabled && (autoPlayOptions.interim || autoPlayOptions.reasoning || autoPlayOptions.tools) }"
+            :disabled="!autoPlaySpeechEnabled"
+            :aria-label="t('chat.autoPlaySpeechOptions')"
+            @click="openAutoPlayOptions"
+          >
+            <template #icon>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+                <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+                <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+                <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+              </svg>
+            </template>
+          </NButton>
+
           <NTooltip trigger="hover" :disabled="isMobileViewport">
             <template #trigger>
               <NButton
@@ -1595,6 +1876,36 @@ function openAttachmentPreview(attachment: Attachment) {
       </template>
     </NModal>
   </div>
+    <NModal
+      v-model:show="showAutoPlayOptionsModal"
+      preset="card"
+      :title="t('chat.autoPlaySpeechOptions')"
+      style="max-width: 320px"
+      :mask-closable="true"
+      @close="closeAutoPlayOptions"
+    >
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="font-size:12px;opacity:.72;">{{ t('chat.autoPlaySpeechOptionsDesc') }}</div>
+        <NCheckbox
+          :checked="autoPlayOptions.interim"
+          @update:checked="(v) => setAutoPlayOption('interim', !!v)"
+        >
+          {{ t('chat.autoPlaySpeechInterim') }}
+        </NCheckbox>
+        <NCheckbox
+          :checked="autoPlayOptions.reasoning"
+          @update:checked="(v) => setAutoPlayOption('reasoning', !!v)"
+        >
+          {{ t('chat.autoPlaySpeechReasoning') }}
+        </NCheckbox>
+        <NCheckbox
+          :checked="autoPlayOptions.tools"
+          @update:checked="(v) => setAutoPlayOption('tools', !!v)"
+        >
+          {{ t('chat.autoPlaySpeechTools') }}
+        </NCheckbox>
+      </div>
+    </NModal>
 </template>
 
 <style scoped lang="scss">
@@ -2319,6 +2630,28 @@ function openAttachmentPreview(attachment: Attachment) {
 
 .toolbar-icon-button {
   color: $text-muted;
+}
+
+.auto-play-speech-toggle.auto-play-speech-on {
+  color: #18a058;
+  background: rgba(24, 160, 88, 0.12);
+
+  &:hover {
+    background: rgba(24, 160, 88, 0.18);
+  }
+}
+
+.auto-play-options-toggle.auto-play-options-on {
+  color: #18a058;
+
+  &:hover {
+    color: #18a058;
+  }
+}
+
+.auto-play-option-row {
+  margin: 0;
+  font-size: 13px;
 }
 
 .send-button {

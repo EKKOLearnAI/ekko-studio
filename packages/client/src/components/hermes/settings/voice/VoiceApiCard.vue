@@ -156,8 +156,7 @@ function handleMoreSelect(key: string | number) {
 </script>
 
 <template>
-  <article class="voice-api-card" :class="{ active: connection.active }" :data-state="testState?.status || 'idle'">
-    <div class="card-main">
+  <article class="voice-api-card" :class="{ active: connection.active }" :data-state="testState?.status || 'idle'"><div class="card-main">
       <div class="provider-identity">
         <div class="provider-icon" aria-hidden="true">
           {{ connection.kind === 'tts' ? 'T' : 'S' }}

@@ -1,9 +1,12 @@
 import { ref, computed, onUnmounted } from 'vue'
 import { parseThinking } from '@/utils/thinking-parser'
+import { useVoiceSettings } from './useVoiceSettings'
 import {
   generateSpeech,
   playAudioBlob,
   synthesizeSpeech,
+  prepareSpeechSegments,
+  isServerTtsProvider,
   type TtsProviderId,
 } from '@/api/studio/tts'
 
@@ -51,6 +54,16 @@ interface SpeechQueueItem {
   options: SpeechOptions
 }
 
+interface CustomTtsQueueItem {
+  messageId: string
+  content: string
+  opts: OpenaiTtsOptions
+  /** 分段渐进播放：同一 message 的第几段；0=整段/无分段 */
+  segIndex?: number
+  /** 分段渐进播放：该消息总段数（>1 时启用渐进） */
+  segTotal?: number
+}
+
 type PreparedProfileSpeech =
   | { ok: true; audio: Blob }
   | { ok: false; error: unknown }
@@ -77,6 +90,91 @@ const MAX_CONCURRENT_PROFILE_TTS_SYNTHESIS = 5
  * 优先后端 TTS（Edge → Google），失败降级浏览器 speechSynthesis
  */
 export function useSpeech() {
+  // 共享 voice settings 引用（懒加载避免循环依赖）
+  let _vs: {
+    ttsSpeed: { value: number }
+    ttsVolume: { value: number }
+    openrouterVoiceCloneDataUri?: { value: string }
+  } | undefined
+  function voiceSettingsGlobal() {
+    if (!_vs) {
+      try {
+        _vs = useVoiceSettings() as unknown as typeof _vs
+      } catch {
+        _vs = undefined
+      }
+    }
+    return _vs
+  }
+  /** volume → 顶层 gain 字段（仅 siliconflow/fishaudio 用 gain dB） */
+  function gainForProvider(provider: string | undefined, volume: number): number | undefined {
+    if (!Number.isFinite(volume) || volume === 1.0) return undefined
+    if (provider === 'siliconflow' || provider === 'fishaudio') {
+      return Math.max(-10, Math.min(10, (volume - 1) * 5))
+    }
+    return undefined
+  }
+  /**
+   * 语速下发：仅当全局语速不是默认值 1.0 时才带 speed。
+   * 直连 synthesizeSpeech 的路径（不走 applyTtsPreset）必须复用这个判断，
+   * 否则默认语速也会出现在请求体里。
+   */
+  function speechSpeedPatch(): { speed?: number } {
+    const speed = Number(voiceSettingsGlobal()?.ttsSpeed.value ?? 1.0)
+    return Number.isFinite(speed) && speed !== 1.0 ? { speed } : {}
+  }
+
+  /**
+   * 全局档位映射到 opts.speed / opts.volume / opts.gain（按 provider）
+   *  - aliyun：无支持，原样返回
+   *  - siliconflow/fishaudio: gain dB
+   *  - zhipu/minimax/mimo: volume
+   *  - openai/custom/deepinfra/doubao/edge: 仅 speed
+   *
+   * 同时是**音色克隆参考音频的唯一注入点**：各播放组件只会无条件塞 mimo 的
+   * voiceCloneDataUri，这里按 provider 重新归属，避免把 mimo 的参考音频带到
+   * 别的 provider（例如 openrouter 的 stateless 克隆）。
+   */
+  function applyTtsPreset(
+    options: Record<string, unknown> | undefined,
+    provider: string | undefined,
+  ): Record<string, unknown> {
+    const base: Record<string, unknown> = { ...(options || {}) }
+    const vs = voiceSettingsGlobal()
+    const speed = Number(vs?.ttsSpeed.value ?? 1.0)
+    const volume = Number(vs?.ttsVolume.value ?? 1.0)
+    if (Number.isFinite(speed) && speed !== 1.0) base.speed = speed
+    else delete base.speed
+
+    if (provider === 'openrouter') {
+      const cloneUri = typeof vs?.openrouterVoiceCloneDataUri?.value === 'string'
+        ? vs.openrouterVoiceCloneDataUri.value
+        : ''
+      if (cloneUri) base.voiceCloneDataUri = cloneUri
+      else delete base.voiceCloneDataUri
+    } else if (provider !== 'mimo') {
+      // 非 mimo 的 provider 不该带 clone 参考音频（上游组件无条件注入了 mimo 的值）
+      delete base.voiceCloneDataUri
+    }
+
+    if (provider === 'aliyun') {
+      delete base.volume
+      delete base.gain
+      return base
+    }
+    if (provider === 'siliconflow' || provider === 'fishaudio') {
+      if (Number.isFinite(volume) && volume !== 1.0) base.gain = Math.max(-10, Math.min(10, (volume - 1) * 5))
+      else delete base.gain
+      delete base.volume
+    } else if (provider === 'zhipu' || provider === 'minimax' || provider === 'mimo') {
+      if (Number.isFinite(volume) && volume !== 1.0) base.volume = volume
+      else delete base.volume
+    } else {
+      delete base.volume
+      delete base.gain
+    }
+    return base
+  }
   const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined
   const availableVoices = ref<SpeechSynthesisVoice[]>([])
   const state = ref<SpeechState>({
@@ -91,6 +189,7 @@ export function useSpeech() {
   let currentAudio: HTMLAudioElement | null = null
   let playbackToken = 0
   const speechQueue: SpeechQueueItem[] = []
+  const customTtsQueue: CustomTtsQueueItem[] = []
   const profileSpeechQueue: ProfileSpeechQueueItem[] = []
   const queuedProfileMessageIds = new Set<string>()
   const profileSynthesisControllers = new Set<AbortController>()
@@ -135,7 +234,10 @@ export function useSpeech() {
     // 移除 HTML 标签
     text = text.replace(/<[^>]+>/g, '')
 
-    text = text.replace(/[^\p{L}\p{N}\s.。!?;,，。！？；：、""''（）【】《》+\-%:\/=~\n一-鿿㐀-䶿]/gu, '')
+    // 语义符号白名单保留：-（负号/区间）%（百分）+（正号）:（时间/比值）/（日期/分数）= ~ ,（千分位）
+    // 这些是服务端语音预处理（LLM 汉化）的关键输入语义，前端绝不能剥掉——否则 -3% 会被滤成 3。
+    // 仍剔除 # * _ ` 等 Markdown 控制符与其余噪声，避免污染 TTS 管线。
+    text = text.replace(/[^\p{L}\p{N}\s\-%+\/:~=,.。!?;，。！？；：、""''（）【】《》\n一-鿿㐀-䶿]/gu, '')
 
     text = text.replace(/\s+/g, ' ').trim()
 
@@ -170,6 +272,7 @@ export function useSpeech() {
       profilePlaybackGeneration += 1
       abortProfileSpeechSynthesis()
       speechQueue.length = 0
+      customTtsQueue.length = 0
       profileSpeechQueue.length = 0
       queuedProfileMessageIds.clear()
     }
@@ -420,6 +523,7 @@ export function useSpeech() {
     playbackErrorMessage: string,
     profile?: string,
     onSettled?: () => void,
+    skipPreprocess?: boolean,
   ) {
     currentTtsAbort?.abort()
     cancelActiveProfileAudio()
@@ -437,7 +541,10 @@ export function useSpeech() {
         provider,
         profile,
         text,
-        options,
+        options: applyTtsPreset(options, provider),
+        ...(skipPreprocess === true ? { skipPreprocess: true } : {}),
+        ...speechSpeedPatch(),
+        gain: gainForProvider(provider, Number(voiceSettingsGlobal()?.ttsVolume.value ?? 1.0)),
         signal: abortController.signal,
       })
 
@@ -523,6 +630,8 @@ export function useSpeech() {
       void synthesizeSpeech({
         profile: job.profile,
         text: job.text,
+        ...speechSpeedPatch(),
+        gain: gainForProvider(undefined, Number(voiceSettingsGlobal()?.ttsVolume.value ?? 1.0)),
         signal: controller.signal,
       })
         .then(({ audio }) => job.resolve({ ok: true, audio }))
@@ -699,8 +808,77 @@ export function useSpeech() {
     const text = extractReadableText(content)
     if (!text) return
 
-    const token = ++playbackToken
+    // 分段队列项（__hermesSeg 标记）直接整段合成，不再探测分段、不再二次预处理
+    const asSegment = opts as OpenaiTtsOptions & { __hermesSeg?: boolean }
+    if (asSegment.__hermesSeg === true) {
+      if (hasActivePlayback() && currentCustomMessageId.value !== messageId) {
+        customTtsQueue.push({ messageId, content, opts })
+        return
+      }
+      const token = ++playbackToken
+      const provider = resolveOpenaiProvider(opts)
+      const { provider: _p, ...providerOptions } = opts
+      await playUnifiedCustomTts(
+        messageId, text, provider,
+        providerOptions as unknown as Record<string, unknown>,
+        token, '[useSpeech] Custom TTS audio playback error', undefined,
+        () => playNextQueuedCustomTts(), true,
+      )
+      return
+    }
+
+    // 分段渐进（纯 X）：服务端 provider + 长文本(>500字符) 先跑预处理拿语义分段，
+    // 每段作为独立队列项逐段合成播放（段间由 onended 自然衔接）。
+    // 短文本/分段失败/非服务端 provider 一律走原整段逻辑。
     const provider = resolveOpenaiProvider(opts)
+    const SEG_MIN_CHARS = 500
+    if (text.length > SEG_MIN_CHARS && isServerTtsProvider(provider)) {
+      try {
+        const segments = await prepareSpeechSegments({ text, signal: undefined })
+        if (segments && segments.length > 1) {
+          const deduped = customTtsQueue.some(item => item.messageId === messageId && item.segTotal)
+          if (!deduped) {
+            const segItems: CustomTtsQueueItem[] = segments.map((segText, i) => ({
+              messageId,
+              content: segText,
+              opts: { ...opts, __hermesSeg: true } as OpenaiTtsOptions & { __hermesSeg?: boolean },
+              segIndex: i,
+              segTotal: segments.length,
+            }))
+            // 若当前空闲直接播第 0 段；否则整批入队
+            if (!hasActivePlayback() || currentCustomMessageId.value === messageId) {
+              const [first, ...rest] = segItems
+              customTtsQueue.unshift(...rest)
+              const token = ++playbackToken
+              const { provider: _p, ...providerOptions } = opts
+              await playUnifiedCustomTts(
+                first.messageId, first.content, provider,
+                providerOptions as unknown as Record<string, unknown>,
+                token, '[useSpeech] Custom TTS audio playback error', undefined,
+                () => playNextQueuedCustomTts(),
+                true, // skipPreprocess：分段文本已由 prepare 转述过，直接合成避免二次改写
+              )
+              return
+            }
+            customTtsQueue.push(...segItems)
+            return
+          }
+        }
+      } catch {
+        // 分段探测失败 → 落回整段合成
+      }
+    }
+
+    // 队列播放：当前在播别消息时不打断，入队等待
+    if (hasActivePlayback() && currentCustomMessageId.value !== messageId) {
+      // 去重：同 messageId 已在队列里就别再 push
+      if (!customTtsQueue.some(item => item.messageId === messageId)) {
+        customTtsQueue.push({ messageId, content, opts })
+      }
+      return
+    }
+
+    const token = ++playbackToken
     const { provider: _provider, ...providerOptions } = opts
 
     await playUnifiedCustomTts(
@@ -710,7 +888,17 @@ export function useSpeech() {
       providerOptions as unknown as Record<string, unknown>,
       token,
       '[useSpeech] Custom TTS audio playback error',
+      undefined, // profile
+      () => playNextQueuedCustomTts(), // onSettled
     )
+  }
+
+  function playNextQueuedCustomTts() {
+    if (hasActivePlayback()) return
+    const next = customTtsQueue.shift()
+    if (!next) return
+    // 直接走 openaiPlay（hasActivePlayback 已 false，会直接播放）
+    void openaiPlay(next.messageId, next.content, next.opts)
   }
 
   function resumeCustomAudio() {
@@ -960,6 +1148,8 @@ export function useSpeech() {
 let globalSpeech: ReturnType<typeof useSpeech> | null = null
 
 export function useGlobalSpeech() {
+
+
   if (!globalSpeech) {
     globalSpeech = useSpeech()
   }

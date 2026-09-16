@@ -1,11 +1,16 @@
 import type { Context } from 'koa'
+import type { TtsSynthesisResult } from '../services/voice/tts/providers/types'
 import { createReadStream } from 'fs'
 import { stat } from 'fs/promises'
 import { textToSpeech, openaiCompatibleTts, speedToEdgeRate } from '../services/voice/tts/core'
 import { getTtsProvider } from '../services/voice/tts/providers'
+import { updateUsage } from '../repositories/usage-store'
+import { prepareSpeechText, normalizeSpeechPreprocessingConfig, splitSpeechSegments } from '../services/voice/tts/speech-preprocess'
+import { readAppConfig, writeAppConfig } from '../services/config/app-config'
 import { transcodeToMp3 } from '../services/voice/stt/audio-convert'
 import { assertSafeResolvedTtsBaseUrl } from '../services/voice/tts/providers/url-safety'
 import { isValidMcuAudioFileName, resolveMcuAudioPath } from '../services/voice/mcu/prompts'
+import { logger } from '../public/logging'
 import {
   assertActiveTtsProvider,
   assertStoredTtsProvider,
@@ -94,6 +99,157 @@ function mergeStoredTtsOptions(ctx: Context, providerName: string, options: Reco
     ...requestOptionsWithoutApiKey,
   }
 }
+// ---------------------------------------------------------------------------
+// TTS fallback 链（备用降级，B 方案）
+// ---------------------------------------------------------------------------
+// 配置：config.json ttsFallback.<profile> = { enabled, providers: [备用有序], perProviderTimeoutMs }
+// 行为：UI 播放 synthesize 时主 provider 失败 → 错误分类判断 → 切下一家备用。
+//   可切：网络/代理错误、无状态错误(超时 abort)、429 限流、5xx 服务端错误
+//   不切：401/403/404 等其余 4xx（配置问题，切换无意义，直接暴露）
+// 试听/直测：请求带 skipFallback=true 时链只含主 provider（防止 fallback 掩盖真实可用性）
+// 响应头 X-TTS-Provider 标注实际命中的 provider（可能与请求的不一致）。
+// 存储沿用 config.json（与 speechPreprocessing 同约定；上游化时再评估 DB migration）。
+
+const TTS_FALLBACK_DEFAULT_TIMEOUT_MS = 12_000
+const TTS_FALLBACK_DEFAULT_PRIMARY_TIMEOUT_MS = 45_000
+const TTS_FALLBACK_MAX_CHAIN = 5
+
+interface TtsFallbackConfig {
+  enabled: boolean
+  providers: string[]
+  perProviderTimeoutMs: number
+  /** 主 provider 尝试窗口：长文本合成本来就慢，但仍需兜底（避免 UI 永久转圈） */
+  primaryTimeoutMs: number
+}
+
+function normalizeTtsFallbackConfig(value: unknown): TtsFallbackConfig {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  const providers = Array.isArray(raw.providers)
+    ? raw.providers
+        .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+        .map(p => p.trim())
+    : []
+  const timeoutMs =
+    typeof raw.perProviderTimeoutMs === 'number' && Number.isFinite(raw.perProviderTimeoutMs)
+      ? Math.min(Math.max(Math.floor(raw.perProviderTimeoutMs), 3_000), 60_000)
+      : TTS_FALLBACK_DEFAULT_TIMEOUT_MS
+  const primaryTimeoutMs =
+    typeof raw.primaryTimeoutMs === 'number' && Number.isFinite(raw.primaryTimeoutMs)
+      ? Math.min(Math.max(Math.floor(raw.primaryTimeoutMs), 5_000), 300_000)
+      : TTS_FALLBACK_DEFAULT_PRIMARY_TIMEOUT_MS
+  return { enabled: raw.enabled === true, providers, perProviderTimeoutMs: timeoutMs, primaryTimeoutMs }
+}
+
+function statusCodeFromTtsError(error: unknown): number | null {
+  const msg = error instanceof Error ? error.message : String(error)
+  const match = /(?:returned|HTTP|status)\s*(\d{3})/i.exec(msg)
+  return match ? Number(match[1]) : null
+}
+
+/** B 方案错误分类：无状态错误(网络/代理/超时 abort) 与 429/5xx 可切；其余 4xx 不切 */
+function shouldFallbackForTtsError(error: unknown): boolean {
+  const status = statusCodeFromTtsError(error)
+  if (status === null) return true
+  return status === 429 || status >= 500
+}
+
+async function readTtsFallbackConfig(ctx: Context): Promise<TtsFallbackConfig> {
+  const appConfig = await readAppConfig()
+  const value = appConfig.ttsFallback?.[requestedProfile(ctx)] ?? appConfig.ttsFallback?.default
+  return normalizeTtsFallbackConfig(value)
+}
+
+function buildTtsFallbackChain(providerName: string, fb: TtsFallbackConfig): string[] {
+  const chain = [providerName]
+  if (!fb.enabled) return chain
+  for (const candidate of fb.providers) {
+    if (chain.length >= TTS_FALLBACK_MAX_CHAIN) break
+    if (chain.includes(candidate)) continue
+    // 备用必须"服务端已实现 + 该 profile 已配置"，否则跳过（缺配置的备用等于没用）
+    if (!getTtsProvider(candidate) || !isStoredTtsProvider(candidate)) continue
+    chain.push(candidate)
+  }
+  return chain
+}
+
+interface RunTtsFallbackChainArgs {
+  ctx: Context
+  providerName: string
+  speechText: string
+  outerSignal: AbortSignal
+  requestOptions: Record<string, unknown>
+  skipFallback: boolean
+}
+
+export async function runTtsFallbackChain(args: RunTtsFallbackChainArgs): Promise<TtsSynthesisResult> {
+  const { ctx, providerName, speechText, outerSignal, requestOptions, skipFallback } = args
+  const fb = await readTtsFallbackConfig(ctx)
+  const chain = skipFallback ? [providerName] : buildTtsFallbackChain(providerName, fb)
+  const chainStart = Date.now()
+
+  let lastError: unknown = null
+  for (const attemptProvider of chain) {
+    const attempt = getTtsProvider(attemptProvider)
+    if (!attempt) continue
+
+    const perProviderController = new AbortController()
+    // 主 provider 不做内部超时（长文本合成本来就慢，如 fishaudio 免费档 ~24s/1MB）；
+    // 备用 provider 才用 perProviderTimeoutMs 窗口，避免每家都拖很久。
+    const isPrimary = attemptProvider === chain[0]
+    const attemptStart = Date.now()
+    const timer = isPrimary
+      ? setTimeout(() => perProviderController.abort(), fb.primaryTimeoutMs)
+      : setTimeout(() => perProviderController.abort(), fb.perProviderTimeoutMs)
+    const onOuterAbort = () => perProviderController.abort()
+    if (outerSignal.aborted) perProviderController.abort()
+    else outerSignal.addEventListener('abort', onOuterAbort)
+
+    try {
+      const attemptOptions = mergeStoredTtsOptions(ctx, attemptProvider, requestOptions)
+      const result = await attempt.synthesize(
+        { text: speechText, signal: perProviderController.signal },
+        attemptOptions,
+      )
+      const durationMs = Date.now() - attemptStart
+      logger.info({
+        provider: attemptProvider,
+        textChars: speechText.length,
+        durationMs,
+        chainPosition: chain.indexOf(attemptProvider),
+        chainLength: chain.length,
+        chainTotalMs: Date.now() - chainStart,
+        aborted: false,
+        result: 'success',
+      }, '[tts-chain] attempt succeeded')
+      return result
+    } catch (error) {
+      lastError = error
+      const durationMs = Date.now() - attemptStart
+      const abortedByUser = outerSignal.aborted
+      const timedOut = !abortedByUser && perProviderController.signal.aborted
+      const message = error instanceof Error ? error.message : String(error)
+      logger.warn({
+        err: error,
+        provider: attemptProvider,
+        textChars: speechText.length,
+        durationMs,
+        chainPosition: chain.indexOf(attemptProvider),
+        chainLength: chain.length,
+        aborted: true,
+        abortedByUser,
+        timedOut,
+        message: message.slice(0, 300),
+      }, '[tts-chain] attempt failed')
+      if (abortedByUser) throw error // 用户主动断开 → 上层 499 处理，不参与 fallback
+      if (!shouldFallbackForTtsError(error) || attemptProvider === chain[chain.length - 1]) throw error
+    } finally {
+      if (timer) clearTimeout(timer)
+      outerSignal.removeEventListener('abort', onOuterAbort)
+    }
+  }
+  throw lastError ?? new Error('TTS synthesis failed: no provider available')
+}
+
 
 function resolveActiveTtsProvider(profile: string, userId: number | null, settings?: ReturnType<typeof listTtsProviderSettings>) {
   if (!userId) return 'edge'
@@ -458,6 +614,10 @@ export async function synthesize(ctx: Context) {
     provider?: string
     text?: string
     options?: unknown
+    /** true=试听/直测，绕过 fallback；false(默认)=UI 播放走备用降级 */
+    skipFallback?: boolean
+    /** true=跳过语音预处理（已编辑好的稿子直接合成，避免二次改写） */
+    skipPreprocess?: boolean
   }
 
   if (!body.text || typeof body.text !== 'string' || !body.text.trim()) {
@@ -475,10 +635,9 @@ export async function synthesize(ctx: Context) {
   const requestOptions = asRecord(body.options)
   const userId = currentUserId(ctx)
   const providerName = body.provider || resolveActiveTtsProvider(requestedProfile(ctx), userId)
-  const options = mergeStoredTtsOptions(ctx, providerName, requestOptions)
+  const skipFallback = body.skipFallback === true
 
-  const provider = getTtsProvider(providerName)
-  if (!provider) {
+  if (!getTtsProvider(providerName)) {
     ctx.status = 400
     ctx.body = { error: 'unknown TTS provider' }
     return
@@ -487,15 +646,44 @@ export async function synthesize(ctx: Context) {
   const controller = createRequestAbortController(ctx)
 
   try {
-    const result = await provider.synthesize(
-      { text: body.text, signal: controller.signal },
-      options,
-    )
+    // 语音预处理管线：规则清洗 → 智能触发 → 模型转述（超时降级规则层）。
+    // 任何失败都回退原文本，绝不阻断播放。
+    const speechText =
+      body.skipPreprocess === true
+        ? String(body.text ?? '')
+        : await prepareSpeechText(body.text, controller.signal, requestedProfile(ctx))
+
+    // TTS fallback 链：主 provider → 备用有序列表（错误分类切换 + 每 provider 独立超时窗口）
+    const result = await runTtsFallbackChain({
+      ctx,
+      providerName,
+      speechText,
+      outerSignal: controller.signal,
+      requestOptions,
+      skipFallback,
+    })
 
     ctx.set('Content-Type', result.contentType)
     ctx.set('Content-Length', String(result.audio.length))
     ctx.set('X-TTS-Engine', result.engine)
     ctx.set('X-TTS-Provider', result.provider)
+    // #11 用量统计：TTS 成功时写一行（fire-and-forget；不影响播放延迟）
+    try {
+      updateUsage(requestedProfile(ctx) || 'default', {
+        runId: '',
+        source: 'tts',
+        agent: result.provider,
+        usageScope: 'model_call',
+        purpose: 'tts_synthesize',
+        apiCalls: 1,
+        inputTokens: result.audio.length,
+        outputTokens: speechText.length,
+        model: result.engine,
+        provider: result.provider,
+        profile: requestedProfile(ctx) || 'default',
+        isEstimated: false,
+      })
+    } catch {}
     ctx.body = result.audio
   } catch (error) {
     if (isAbortError(error)) {
@@ -724,5 +912,178 @@ export async function mcuAudio(ctx: Context) {
   } catch {
     ctx.status = 404
     ctx.body = { error: 'audio not found' }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 语音预处理（speech-preprocessing）配置读写
+// ---------------------------------------------------------------------------
+
+export async function getSpeechPreprocessing(ctx: Context) {
+  const profile = requestedProfile(ctx)
+  const appConfig = await readAppConfig()
+  const stored = appConfig.speechPreprocessing?.[profile]
+  ctx.body = {
+    profile,
+    config: normalizeSpeechPreprocessingConfig(stored),
+  }
+}
+
+export async function updateSpeechPreprocessing(ctx: Context) {
+  const body = ctx.request.body as Record<string, unknown> | null
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    ctx.status = 400
+    ctx.body = { error: 'body must be an object' }
+    return
+  }
+
+  const profile = requestedProfile(ctx)
+  const appConfig = await readAppConfig()
+  const current = appConfig.speechPreprocessing?.[profile]
+
+  // 归一化当前值（若从未保存则为默认值），再与请求体合并，保证部分更新不丢字段
+  const merged = normalizeSpeechPreprocessingConfig({
+    ...(current || {}),
+    ...body,
+    triggers: {
+      ...(normalizeSpeechPreprocessingConfig(current).triggers),
+      ...(typeof body.triggers === 'object' && body.triggers !== null ? (body.triggers as Record<string, unknown>) : {}),
+    },
+  })
+
+  await writeAppConfig({
+    speechPreprocessing: {
+      ...(appConfig.speechPreprocessing || {}),
+      [profile]: merged,
+    },
+  })
+
+  ctx.body = { ok: true, profile, config: merged }
+}
+
+export async function getTtsFallback(ctx: Context) {
+  const profile = requestedProfile(ctx)
+  const fb = await readTtsFallbackConfig(ctx)
+  ctx.body = { profile, config: fb }
+}
+
+export async function updateTtsFallback(ctx: Context) {
+  if (!authUserId(ctx)) return
+  const body = ctx.request.body as Record<string, unknown> | null
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    ctx.status = 400
+    ctx.body = { error: 'body must be an object' }
+    return
+  }
+  const profile = requestedProfile(ctx)
+  const appConfig = await readAppConfig()
+  const current = await readTtsFallbackConfig(ctx)
+
+  const providers = Array.isArray(body.providers)
+    ? (body.providers as unknown[]).filter((p): p is string => typeof p === 'string' && p.trim().length > 0).map(p => p.trim())
+    : current.providers
+  // 约束：备用必须服务端已实现；未实现的直接剔除（避免存了永远切不过去的名字）
+  const validProviders = providers.filter(p => getTtsProvider(p) && p !== 'custom')
+  const merged: TtsFallbackConfig = {
+    enabled: typeof body.enabled === 'boolean' ? body.enabled : current.enabled,
+    providers: validProviders,
+    primaryTimeoutMs:
+      typeof body.primaryTimeoutMs === 'number' && Number.isFinite(body.primaryTimeoutMs)
+        ? Math.min(Math.max(Math.floor(body.primaryTimeoutMs), 5_000), 300_000)
+        : current.primaryTimeoutMs,
+    perProviderTimeoutMs:
+      typeof body.perProviderTimeoutMs === 'number' && Number.isFinite(body.perProviderTimeoutMs)
+        ? Math.min(Math.max(Math.floor(body.perProviderTimeoutMs), 3_000), 30_000)
+        : current.perProviderTimeoutMs,
+  }
+
+  await writeAppConfig({
+    ttsFallback: {
+      ...(appConfig.ttsFallback || {}),
+      [profile]: merged,
+    },
+  })
+
+  ctx.body = { ok: true, profile, config: merged }
+}
+
+export async function prepareSpeechPreview(ctx: Context) {
+  if (!authUserId(ctx)) return
+  const body = ctx.request.body as { text?: unknown } | null
+  if (!body || typeof body.text !== 'string' || !body.text.trim()) {
+    ctx.status = 400
+    ctx.body = { error: 'text is required' }
+    return
+  }
+  const text = body.text.trim()
+  if (text.length > 5000) {
+    ctx.status = 400
+    ctx.body = { error: 'text is too long (max 5000 characters)' }
+    return
+  }
+  // 只跑预处理（规则清洗 → 触发判断 → 模型改写），不合成——供前端预览/编辑语音稿
+  const controller = createRequestAbortController(ctx)
+  const prepared = await prepareSpeechText(text, controller.signal, requestedProfile(ctx))
+  const segments = splitSpeechSegments(prepared)
+  if (segments.length > 1) {
+    // 长文本走分段（渐进播放）：返回 segments 数组
+    ctx.body = { segments, segmentCount: segments.length }
+  } else {
+    // 短文本兼容原逻辑：直接返回 text
+    ctx.body = { text: prepared }
+  }
+}
+
+// #11 用量统计：今日/本周/总，tts 与 stt 合并
+export async function getVoiceUsage(ctx: Context) {
+  if (!authUserId(ctx)) return
+  const now = Date.now()
+  const dayMs = 24 * 3600 * 1000
+  // 从 ?days= 取区间天数（默认 30），限制 1..365
+  const days = Math.max(1, Math.min(365, Number((ctx.query as any)?.days) || 30))
+  const startMs = now - days * dayMs
+  const startOfToday = new Date()
+  startOfToday.setHours(0, 0, 0, 0)
+  const startOfTodayMs = startOfToday.getTime()
+  const profile = requestedProfile(ctx)
+  const empty = {
+    range: [],
+    today: [],
+    total: [],
+    period: { days, start_at: startMs, end_at: now },
+    generated_at: now,
+  }
+  try {
+    const db = (await import('../infrastructure/database')).getDb()
+    if (!db) { ctx.body = empty; return }
+    // 区间内：按 source + provider 聚合
+    const range = db.prepare(
+      `SELECT source, provider, SUM(api_calls) as calls, SUM(input_tokens) as input_total, SUM(output_tokens) as output_total,
+              MIN(created_at) as first_at, MAX(created_at) as last_at
+       FROM session_usage WHERE source IN ('tts','stt') AND created_at >= ? AND profile = ?
+       GROUP BY source, provider ORDER BY source, calls DESC`
+    ).all(startMs, profile) as any[]
+    // 今日
+    const today = db.prepare(
+      `SELECT source, provider, SUM(api_calls) as calls, SUM(input_tokens) as input_total, SUM(output_tokens) as output_total
+       FROM session_usage WHERE source IN ('tts','stt') AND created_at >= ? AND profile = ?
+       GROUP BY source, provider`
+    ).all(startOfTodayMs, profile) as any[]
+    // 全历史
+    const total = db.prepare(
+      `SELECT source, SUM(api_calls) as calls, SUM(input_tokens) as input_total, SUM(output_tokens) as output_total
+       FROM session_usage WHERE source IN ('tts','stt') AND profile = ?
+       GROUP BY source`
+    ).all(profile) as any[]
+    // 按日分桶
+    const dailyRows = db.prepare(
+      `SELECT date(created_at/1000, 'unixepoch', 'localtime') as day, source,
+              SUM(api_calls) as calls, SUM(input_tokens) as input_total, SUM(output_tokens) as output_total
+       FROM session_usage WHERE source IN ('tts','stt') AND created_at >= ? AND profile = ?
+       GROUP BY day, source ORDER BY day ASC`
+    ).all(startMs, profile) as any[]
+    ctx.body = { range, today, total, daily: dailyRows, period: { days, start_at: startMs, end_at: now }, generated_at: now }
+  } catch {
+    ctx.body = empty
   }
 }

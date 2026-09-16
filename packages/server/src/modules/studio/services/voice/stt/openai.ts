@@ -20,6 +20,10 @@ const DEFAULT_PROVIDER_CONFIG: Partial<Record<StoredSttProvider, { baseUrl: stri
     baseUrl: 'https://api.deepinfra.com/v1/openai',
     model: 'openai/whisper-large-v3',
   },
+  zhipu: {
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    model: 'glm-asr-2512',
+  },
 }
 
 const MAX_ERROR_DETAIL_LENGTH = 200
@@ -30,6 +34,7 @@ function getProviderLabel(provider: StoredSttProvider): string {
   if (provider === 'deepinfra') return 'DeepInfra STT'
   if (provider === 'groq') return 'Groq STT'
   if (provider === 'mistral') return 'Mistral STT'
+  if (provider === 'zhipu') return 'Zhipu GLM-ASR'
   return 'OpenAI STT'
 }
 

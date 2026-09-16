@@ -16,6 +16,11 @@ export type TtsProvider =
   | 'mistral'
   | 'minimax'
   | 'deepinfra'
+  | 'siliconflow'
+  | 'zhipu'
+  | 'fishaudio'
+  | 'aliyun'
+  | 'openrouter'
 export type MimoAuthMode = 'api-key' | 'bearer' | 'both'
 
 export interface VoiceSettingsData {
@@ -59,6 +64,10 @@ export interface VoiceSettingsData {
   doubaoVoice: string
   doubaoStylePrompt: string
   doubaoSpeed: string
+
+  // OpenRouter TTS（stateless 声音克隆，仅 fish-audio/s2.1-pro 系模型支持）
+  openrouterVoiceCloneDataUri: string
+  openrouterVoiceCloneFileName: string
 }
 
 const STORAGE_KEY = 'hermes-tts-settings-v2'
@@ -121,6 +130,9 @@ const DEFAULT: VoiceSettingsData = {
   doubaoVoice: DOUBAO_TTS_DEFAULT_VOICE,
   doubaoStylePrompt: '',
   doubaoSpeed: '1',
+
+  openrouterVoiceCloneDataUri: '',
+  openrouterVoiceCloneFileName: '',
 }
 
 function sanitize(data: VoiceSettingsData): VoiceSettingsData {
@@ -236,6 +248,8 @@ const doubaoModel = ref<string>(load().doubaoModel)
 const doubaoVoice = ref<string>(load().doubaoVoice)
 const doubaoStylePrompt = ref<string>(load().doubaoStylePrompt)
 const doubaoSpeed = ref<string>(load().doubaoSpeed)
+const openrouterVoiceCloneDataUri = ref<string>(load().openrouterVoiceCloneDataUri || '')
+const openrouterVoiceCloneFileName = ref<string>(load().openrouterVoiceCloneFileName || '')
 
 // Auto-persist on change
 watch(
@@ -243,7 +257,8 @@ watch(
    customUrl, customApiKey, edgeUrl, edgeVoice, edgeRate, edgePitchHz,
    mimoApiKey, mimoAuthMode, mimoBaseUrl, mimoModel, mimoVoice, mimoVoiceDesignDesc,
    mimoVoiceCloneDataUri, mimoVoiceCloneFileName, mimoVoiceCloneFormat, mimoStylePrompt,
-   doubaoApiKey, doubaoBaseUrl, doubaoModel, doubaoVoice, doubaoStylePrompt, doubaoSpeed],
+   doubaoApiKey, doubaoBaseUrl, doubaoModel, doubaoVoice, doubaoStylePrompt, doubaoSpeed,
+   openrouterVoiceCloneDataUri, openrouterVoiceCloneFileName],
   () => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -275,6 +290,8 @@ watch(
         doubaoVoice: doubaoVoice.value,
         doubaoStylePrompt: doubaoStylePrompt.value,
         doubaoSpeed: doubaoSpeed.value,
+        openrouterVoiceCloneDataUri: openrouterVoiceCloneDataUri.value,
+        openrouterVoiceCloneFileName: openrouterVoiceCloneFileName.value,
       }))
     } catch (err) {
       console.warn('[useVoiceSettings] Failed to persist voice settings:', err)
@@ -282,7 +299,13 @@ watch(
   },
 )
 
-export function useVoiceSettings() {
+export function useVoiceSettings() {// #8 全局 TTS 档位（语速/音量），所有 provider 生效
+const ttsSpeed = ref<number>(1.0)
+const ttsVolume = ref<number>(1.0)
+function setTtsSpeed(v: number) { ttsSpeed.value = v }
+function setTtsVolume(v: number) { ttsVolume.value = v }
+
+
   return {
     provider,
     webspeechVoice,
@@ -312,6 +335,10 @@ export function useVoiceSettings() {
     doubaoVoice,
     doubaoStylePrompt,
     doubaoSpeed,
+    openrouterVoiceCloneDataUri,
+    openrouterVoiceCloneFileName,
+    ttsSpeed,
+    ttsVolume,
 
     loadServerTtsSettings,
 
@@ -343,6 +370,10 @@ export function useVoiceSettings() {
     setDoubaoVoice(v: string) { doubaoVoice.value = v },
     setDoubaoStylePrompt(v: string) { doubaoStylePrompt.value = v },
     setDoubaoSpeed(v: string) { doubaoSpeed.value = v },
+    setOpenrouterVoiceCloneDataUri(v: string) { openrouterVoiceCloneDataUri.value = v },
+    setOpenrouterVoiceCloneFileName(v: string) { openrouterVoiceCloneFileName.value = v },
+    setTtsSpeed,
+    setTtsVolume,
 
     reset() {
       provider.value = DEFAULT.provider
@@ -373,6 +404,8 @@ export function useVoiceSettings() {
       doubaoVoice.value = DEFAULT.doubaoVoice
       doubaoStylePrompt.value = DEFAULT.doubaoStylePrompt
       doubaoSpeed.value = DEFAULT.doubaoSpeed
+      openrouterVoiceCloneDataUri.value = DEFAULT.openrouterVoiceCloneDataUri
+      openrouterVoiceCloneFileName.value = DEFAULT.openrouterVoiceCloneFileName
     },
   }
 }

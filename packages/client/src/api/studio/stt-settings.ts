@@ -11,6 +11,8 @@ export type SttProvider =
   | 'xai'
   | 'elevenlabs'
   | 'deepinfra'
+  | 'zhipu'
+  | 'iflytek'
 export type StoredSttProvider = Exclude<SttProvider, 'browser'>
 
 export interface SttStoredSettings {
@@ -27,10 +29,13 @@ export interface SttStoredSettings {
 
 export interface SttStoredSecretsInput {
   apiKey?: string
+  /** 讯飞 IAT 的 APISecret */
+  apiSecret?: string
 }
 
 export interface SttStoredSecretsResponse {
   apiKey?: '[stored]'
+  apiSecret?: '[stored]'
 }
 
 export interface SttProviderSettingsResponse {

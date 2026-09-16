@@ -39,8 +39,8 @@ function supportedFormatsFromError(body: string): string[] {
 }
 
 export function createOpenaiCompatibleTtsProvider(
-  id: Extract<TtsProviderId, 'openai' | 'custom' | 'deepinfra'>,
-  options: { engine?: string; defaultBaseUrl?: string; defaultModel?: string; defaultVoice?: string } = {},
+  id: TtsProviderId,
+  options: { engine?: string; defaultBaseUrl?: string; defaultModel?: string; defaultVoice?: string; defaultFormat?: string } = {},
 ): OpenaiTtsProvider {
   return {
     id,
@@ -78,7 +78,7 @@ export function createOpenaiCompatibleTtsProvider(
         signal: req.signal,
       })
 
-      let res = await speak(opts.format)
+      let res = await speak(opts.format || options.defaultFormat)
 
       if (!res.ok) {
         let body = await res.text().catch(() => '')
@@ -110,3 +110,13 @@ export const deepinfraTtsProvider: OpenaiTtsProvider = createOpenaiCompatibleTts
   defaultBaseUrl: 'https://api.deepinfra.com/v1/openai',
   defaultVoice: 'default',
 })
+
+
+export const siliconflowTtsProvider: OpenaiTtsProvider = createOpenaiCompatibleTtsProvider('siliconflow', {
+  engine: 'siliconflow',
+})
+export const zhipuTtsProvider: OpenaiTtsProvider = createOpenaiCompatibleTtsProvider('zhipu', {
+  engine: 'zhipu',
+  defaultFormat: 'wav',
+})
+

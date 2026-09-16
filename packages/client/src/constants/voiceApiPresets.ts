@@ -1,5 +1,6 @@
 import type { VoiceApiPreset } from '@/types/voice-api'
 import { DOUBAO_TTS_2_RESOURCE_ID } from './doubaoTtsVoices'
+import { OPENROUTER_DEFAULT_MODEL } from './openrouterTtsVoices'
 
 export const VOICE_API_PRESETS: VoiceApiPreset[] = [
   // TTS Presets
@@ -167,6 +168,73 @@ export const VOICE_API_PRESETS: VoiceApiPreset[] = [
     },
   },
   {
+    id: 'tts-fishaudio',
+    kind: 'tts',
+    provider: 'fishaudio',
+    label: 'Fish Audio TTS（含免费档）',
+    baseUrl: 'https://api.fish.audio',
+    defaultModel: 's2.1-pro-free',
+    isSecretRequired: true,
+    capabilities: {
+      models: true,
+      voices: true,
+    },
+  },
+  {
+    id: 'tts-siliconflow',
+    kind: 'tts',
+    provider: 'siliconflow',
+    label: '硅基流动 SiliconFlow（CosyVoice2）',
+    baseUrl: 'https://api.siliconflow.com/v1',
+    defaultModel: 'FunAudioLLM/CosyVoice2-0.5B',
+    compatibility: 'openai-compatible',
+    isSecretRequired: true,
+    capabilities: {
+      models: true,
+      voices: true,
+    },
+  },
+  {
+    id: 'tts-zhipu',
+    kind: 'tts',
+    provider: 'zhipu',
+    label: '智谱 GLM-TTS',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    defaultModel: 'glm-tts',
+    isSecretRequired: true,
+    capabilities: {
+      voices: true,
+    },
+  },
+  {
+    id: 'tts-aliyun',
+    kind: 'tts',
+    provider: 'aliyun',
+    label: '阿里云百炼 Qwen-TTS-VC（声音复刻）',
+    baseUrl: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+    defaultModel: 'qwen3-tts-vc-2026-01-22',
+    isSecretRequired: true,
+    capabilities: {
+      voices: true,
+    },
+  },
+  {
+    id: 'tts-openrouter',
+    kind: 'tts',
+    provider: 'openrouter',
+    label: 'OpenRouter TTS（内含免费模型）',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    defaultModel: OPENROUTER_DEFAULT_MODEL,
+    compatibility: 'openai-compatible',
+    isSecretRequired: true,
+    capabilities: {
+      models: true,
+      voices: true,
+      speed: true,
+      voiceClone: true,
+    },
+  },
+  {
     id: 'tts-custom',
     kind: 'tts',
     provider: 'custom',
@@ -304,6 +372,31 @@ export const VOICE_API_PRESETS: VoiceApiPreset[] = [
     isSecretRequired: true,
     capabilities: {
       models: true,
+    },
+  },
+  {
+    id: 'stt-iflytek',
+    kind: 'stt',
+    provider: 'iflytek',
+    label: '讯飞 IAT',
+    isSecretRequired: true,
+
+    capabilities: {
+      models: false,
+    },
+  },
+  {
+    id: 'stt-zhipu',
+    kind: 'stt',
+    provider: 'zhipu',
+    label: '智谱 GLM-ASR',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    defaultModel: 'glm-asr-2512',
+    compatibility: 'openai-compatible',
+    isSecretRequired: true,
+    capabilities: {
+      models: true,
+      language: true,
     },
   },
   {

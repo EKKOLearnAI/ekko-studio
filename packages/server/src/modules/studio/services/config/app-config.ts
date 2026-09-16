@@ -82,6 +82,38 @@ export interface AppConfig {
   // Defaults to legacy behavior: all local profiles are eligible. This is a
   // Web UI-level setting, not the active Hermes profile's config.yaml.
   gatewayAutoStart?: GatewayAutoStartConfig
+
+  // Speech preprocessing pipeline settings (global TTS voice cleaning), keyed
+  // by Hermes profile name (e.g. speechPreprocessing.default). Managed by the
+  // TTS settings panel.
+  speechPreprocessing?: Record<
+    string,
+    {
+      enabled?: boolean
+      provider?: string
+      model?: string
+      mode?: 'faithful' | 'summary'
+      promptFaithful?: string
+      promptSummary?: string
+      triggers?: {
+        codeBlock?: boolean
+        table?: boolean
+        minChars?: number
+      }
+      timeoutMs?: number
+    }
+  >
+
+  // TTS fallback chain (backup provider list per profile), managed by
+  // GET/PUT /api/studio/tts/fallback.
+  ttsFallback?: Record<
+    string,
+    {
+      enabled?: boolean
+      providers?: string[]
+      perProviderTimeoutMs?: number
+    }
+  >
 }
 
 let cache: AppConfig | null = null

@@ -176,12 +176,24 @@ const toolPanelStyle = computed(() => ({
   width: isMobile.value ? "100%" : `min(${toolPanelWidth.value}px, 100%)`,
 }));
 
+let savedAutoPlaySpeech: string | null = null
 function openRealtimeVoice() {
   if (!chatStore.activeSessionId) return;
+  // 语音模式激活时自动关自动播放，退出后恢复（保存原值，不强关）
+  if (savedAutoPlaySpeech === null) {
+    savedAutoPlaySpeech = localStorage.getItem('autoPlaySpeech')
+  }
+  chatStore.setAutoPlaySpeech(false)
+  chatStore.setRealtimeVoiceActive(true)
   showRealtimeVoice.value = true;
 }
 
 function closeRealtimeVoice() {
+  chatStore.setRealtimeVoiceActive(false)
+  // 恢复进入语音模式前自动播放状态（默认 false=不开，与初始行为一致）
+  const shouldRestore = savedAutoPlaySpeech === 'true'
+  chatStore.setAutoPlaySpeech(shouldRestore)
+  savedAutoPlaySpeech = null
   showRealtimeVoice.value = false;
 }
 

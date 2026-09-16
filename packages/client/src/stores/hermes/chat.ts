@@ -78,6 +78,16 @@ export interface Attachment {
   videoFrameFor?: string
 }
 
+/** 自动播放「过程消息」的子选项（配合主开关 autoPlaySpeech 使用）。 */
+export interface AutoPlaySpeechOptions {
+  /** 阶段性 assistant 消息：message.interim 定稿即朗读（默认开） */
+  interim: boolean
+  /** 最终消息朗读前先并入思考过程（默认关） */
+  reasoning: boolean
+  /** 工具调用旁白：开始 / 出错时短播报（默认关） */
+  tools: boolean
+}
+
 export interface Message {
   taskPlan?: TaskPlanSnapshot
   id: string
@@ -1453,9 +1463,48 @@ export const useChatStore = defineStore('chat', () => {
 
   // 自动播放语音开关
   const autoPlaySpeechEnabled = ref(false)
+  /** 实时语音对话（RealtimeVoiceStage）激活时抑制自动播放，避免双播 */
+  const realtimeVoiceActive = ref(false)
 
-  function setAutoPlaySpeech(enabled: boolean) {
+  function setRealtimeVoiceActive(active: boolean) {
+    realtimeVoiceActive.value = active
+  }
+
+  /** 会话级自动播放覆盖（'on' / 'off' / 'default'）。'default' = 跟随全局 autoPlaySpeechEnabled */
+  const autoPlaySessionOverrides = ref<Record<string, 'on' | 'off' | 'default'>>({})
+  function getAutoPlayForSession(sessionId: string | null | undefined): boolean {
+    if (realtimeVoiceActive.value) return false
+    if (!sessionId) return autoPlaySpeechEnabled.value
+    const ov = autoPlaySessionOverrides.value[sessionId]
+    if (ov === 'on') return true
+    if (ov === 'off') return false
+    return autoPlaySpeechEnabled.value
+  }
+  function setAutoPlaySessionOverride(sessionId: string, value: 'on' | 'off' | 'default') {
+    autoPlaySessionOverrides.value = { ...autoPlaySessionOverrides.value, [sessionId]: value }
+    try { window.localStorage.setItem('autoPlaySessionOverrides', JSON.stringify(autoPlaySessionOverrides.value)) } catch {}
+  }
+  function loadAutoPlaySessionOverrides() {
+    try {
+      const raw = window.localStorage.getItem('autoPlaySessionOverrides')
+      if (raw) autoPlaySessionOverrides.value = JSON.parse(raw)
+    } catch {}
+  }
+    function setAutoPlaySpeech(enabled: boolean) {
     autoPlaySpeechEnabled.value = enabled
+  }
+
+  // 自动播放「过程消息」子选项（仅主开关开启时生效）
+  //  - interim  : 阶段性 assistant 消息（message.interim 定稿即读；默认开）
+  //  - reasoning: 最终消息朗读前先并入思考过程（默认关）
+  //  - tools    : 工具调用旁白（开始/出错时短播报，默认关）
+  const autoPlaySpeechOptions = ref<AutoPlaySpeechOptions>({ interim: true, reasoning: false, tools: false })
+
+  function setAutoPlaySpeechOptions(options: Partial<AutoPlaySpeechOptions>) {
+    autoPlaySpeechOptions.value = {
+      ...autoPlaySpeechOptions.value,
+      ...(options && typeof options === 'object' ? options : {}),
+    }
   }
   const isStreaming = computed(() => {
     const sid = activeSessionId.value
@@ -2488,6 +2537,9 @@ export const useChatStore = defineStore('chat', () => {
       || (isEkkoAgentSession(sessionId) && toolName === 'delegate_task')
     ) return
 
+    // 工具开始旁白（tools 子项开启时）
+    if (toolName) narrateTool(`正在调用工具「${toolName}」。`)
+
     const toolCallId = typeof (evt as any).tool_call_id === 'string'
       ? String((evt as any).tool_call_id)
       : undefined
@@ -2559,6 +2611,10 @@ export const useChatStore = defineStore('chat', () => {
     const hasError = evt.event === 'tool.failed'
       || (evt as any).error === true
       || runtimeToolOutputHasError(output)
+
+    // 工具失败旁白（tools 子项开启时）
+    if (hasError && toolName) narrateTool(`工具「${toolName}」执行出错。`)
+
     if (existing) {
       updateMessage(sessionId, existing.id, {
         toolName: toolName || existing.toolName,
@@ -4158,13 +4214,16 @@ export const useChatStore = defineStore('chat', () => {
               const active = activeAssistantMessageId
                 ? msgs.find(m => m.id === activeAssistantMessageId)
                 : null
+              let settledAssistantId: string | null = null
               if (active?.role === 'assistant') {
                 active.content = text
                 active.isStreaming = false
                 if (active.reasoning) noteReasoningEnd(active.id)
+                settledAssistantId = active.id
               } else {
+                settledAssistantId = uid()
                 addMessage(sid, {
-                  id: uid(),
+                  id: settledAssistantId,
                   role: 'assistant',
                   content: text,
                   timestamp: Date.now(),
@@ -4173,6 +4232,14 @@ export const useChatStore = defineStore('chat', () => {
               }
               activeAssistantMessageId = null
               reasoningAssistantMessageId = null
+
+              // 自动播放「阶段性 assistant 消息」；若带思考过程且开启 reasoning 子项，
+              // 跳过此处（避免与 run.completed 的合并朗读重复）
+              autoPlayInterimMessage(
+                settledAssistantId,
+                text,
+                !!(autoPlaySpeechOptions.value.reasoning && active?.reasoning?.trim()),
+              )
 
               break
             }
@@ -4384,14 +4451,15 @@ export const useChatStore = defineStore('chat', () => {
               handleTerminalWorkspaceRunChange(sid, evt, terminalAssistantMessageId)
               attachWorkspaceChangesToMessages(sid)
 
-              // 自动播放语音
-              if (autoPlaySpeechEnabled.value && runProducedAssistantContent) {
+              // 自动播放语音（reasoning 子项开启时并入思考过程一并朗读）
+              if (getAutoPlayForSession(sid) && runProducedAssistantContent) {
                 const msgs = getSessionMsgs(sid)
                 const lastAssistant = [...msgs].reverse().find(m => m.role === 'assistant')
-                if (lastAssistant?.content) {
+                const speechContent = buildFinalSpeechContent(lastAssistant)
+                if (speechContent) {
                   // 延迟一小会儿再播放，确保 UI 更新完成
                   setTimeout(() => {
-                    playMessageSpeech(lastAssistant.id, lastAssistant.content)
+                    playMessageSpeech(lastAssistant!.id, speechContent)
                   }, 300)
                 }
               }
@@ -4821,13 +4889,16 @@ export const useChatStore = defineStore('chat', () => {
           const active = activeAssistantMessageId
             ? msgs.find(m => m.id === activeAssistantMessageId)
             : null
+          let settledAssistantId: string | null = null
           if (active?.role === 'assistant') {
             active.content = text
             active.isStreaming = false
             if (active.reasoning) noteReasoningEnd(active.id)
+            settledAssistantId = active.id
           } else {
+            settledAssistantId = uid()
             addMessage(sid, {
-              id: uid(),
+              id: settledAssistantId,
               role: 'assistant',
               content: text,
               timestamp: Date.now(),
@@ -4836,6 +4907,14 @@ export const useChatStore = defineStore('chat', () => {
           }
           activeAssistantMessageId = null
           reasoningAssistantMessageId = null
+
+          // 自动播放「阶段性 assistant 消息」；若带思考过程且开启 reasoning 子项，
+          // 跳过此处（避免与 run.completed 的合并朗读重复）
+          autoPlayInterimMessage(
+            settledAssistantId,
+            text,
+            !!(autoPlaySpeechOptions.value.reasoning && active?.reasoning?.trim()),
+          )
 
           break
         }
@@ -5037,13 +5116,14 @@ export const useChatStore = defineStore('chat', () => {
           handleTerminalWorkspaceRunChange(sid, evt, terminalAssistantMessageId)
           attachWorkspaceChangesToMessages(sid)
 
-          // Auto-play speech for every completed assistant message
-          if (autoPlaySpeechEnabled.value && runProducedAssistantContent) {
+          // Auto-play speech for every completed assistant message (reasoning 子项开启时并入思考过程)
+          if (getAutoPlayForSession(sid) && runProducedAssistantContent) {
             const msgs = getSessionMsgs(sid)
             const lastAssistant = [...msgs].reverse().find(m => m.role === 'assistant')
-            if (lastAssistant?.content) {
+            const speechContent = buildFinalSpeechContent(lastAssistant)
+            if (speechContent) {
               setTimeout(() => {
-                playMessageSpeech(lastAssistant.id, lastAssistant.content)
+                playMessageSpeech(lastAssistant!.id, speechContent)
               }, 300)
             }
           }
@@ -5465,8 +5545,62 @@ export const useChatStore = defineStore('chat', () => {
     thinkingObservation.clear()
   }
 
+  // 组装「最终 assistant 消息」的朗读文本：开启 reasoning 子项时把思考过程并入正文，一段读完。
+  function buildFinalSpeechContent(message?: { content?: unknown; reasoning?: unknown } | null): string {
+    if (!message) return ''
+    const content = String(message?.content || '').trim()
+    if (!content) return ''
+    const reasoning = autoPlaySpeechOptions.value.reasoning
+      ? String(message?.reasoning || '').trim()
+      : ''
+    return reasoning ? `${reasoning}\n\n${content}` : content
+  }
+
+  // message.interim 定稿 → 朗读「阶段性 assistant 消息」。
+  // 若该消息带思考过程且开启 reasoning 子项，调用方会传 skip=true，改由 run.completed 合并朗读。
+  function autoPlayInterimMessage(messageId: string | null | undefined, content: unknown, skip = false) {
+    if (!messageId) return
+    if (skip) return
+    if (!getAutoPlayForSession(activeSessionId.value)) return
+    if (!autoPlaySpeechOptions.value.interim) return
+    const text = String(content || '').trim()
+    if (!text) return
+    // 延迟一小会儿，确保消息已落库、UI 渲染完成再朗读
+    setTimeout(() => {
+      playMessageSpeech(messageId, text)
+    }, 120)
+  }
+
+  // 工具旁白：派发 narration 事件，由 ChatInput 里的轻量播放器负责实际 TTS。
+  function narrateTool(text: string) {
+    if (!getAutoPlayForSession(activeSessionId.value)) return
+    if (!autoPlaySpeechOptions.value.tools) return
+    const content = String(text || '').trim()
+    if (!content) return
+    window.dispatchEvent(new CustomEvent('hermes-speech-narration', {
+      detail: { content },
+    }))
+  }
+
   // 播放消息语音
+  // 防重复口播：同一 run 可能被「本地 onEvent」与「会话级 handler」双通道各收到一次
+  // run.completed（切会话/resume/重连时序偶发），两处触发点均会以同一 messageId 调用本函数。
+  // 用「messageId + content + 短时间窗」去重，保证同一条消息只派发一次自动播放。
+  let lastAutoPlayDispatch: { messageId: string; content: string; at: number } | null = null
+  const AUTO_PLAY_DEDUP_MS = 3000
   function playMessageSpeech(messageId: string, content: string) {
+    if (realtimeVoiceActive.value) return // 语音模式激活：stage 自己播，不重复
+    if (!getAutoPlayForSession(activeSessionId.value)) return // 会话/全局关闭
+    const now = Date.now()
+    if (
+      lastAutoPlayDispatch
+      && lastAutoPlayDispatch.messageId === messageId
+      && lastAutoPlayDispatch.content === content
+      && now - lastAutoPlayDispatch.at < AUTO_PLAY_DEDUP_MS
+    ) {
+      return
+    }
+    lastAutoPlayDispatch = { messageId, content, at: now }
     // 触发自定义事件，让 MessageItem 组件处理播放
     const event = new CustomEvent('auto-play-speech', {
       detail: { messageId, content }
@@ -5476,6 +5610,10 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     sessions,
+    autoPlaySessionOverrides,
+    getAutoPlayForSession,
+    setAutoPlaySessionOverride,
+    loadAutoPlaySessionOverrides,
     runtimeMode,
     activeSessionId,
     activeSession,
@@ -5538,6 +5676,9 @@ export const useChatStore = defineStore('chat', () => {
     noteReasoningEnd,
     clearThinkingObservationFor,
     setAutoPlaySpeech,
+    setAutoPlaySpeechOptions,
+    realtimeVoiceActive,
+    setRealtimeVoiceActive,
     playMessageSpeech,
     loadWorkspaceRunChangeFile,
     setSessionReasoningEffort,

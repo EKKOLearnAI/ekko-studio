@@ -52,3 +52,6 @@ CLAUDE.md
 # Client source map artifacts
 packages/client/src/**/*.js
 .hermes/
+
+# Hermes/Ekko runtime data (skills, config) - not source
+.ekko/

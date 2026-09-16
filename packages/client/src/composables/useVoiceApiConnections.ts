@@ -20,6 +20,7 @@ import {
   type SttStoredSettings,
 } from '@/api/studio/stt-settings'
 import { useVoiceSettings } from '@/composables/useVoiceSettings'
+import { isServerTtsProvider } from '@/api/studio/tts'
 import { useSttSettings } from '@/composables/useSttSettings'
 import { useLocalSttModel } from '@/composables/useLocalSttModel'
 import { VOICE_API_PRESETS } from '@/constants/voiceApiPresets'
@@ -38,17 +39,8 @@ function isStoredSttProvider(provider: VoiceApiProvider): provider is StoredSttP
 }
 
 function isStoredTtsProvider(provider: VoiceApiProvider): provider is StoredTtsProvider {
-  return provider === 'edge' ||
-    provider === 'openai' ||
-    provider === 'custom' ||
-    provider === 'mimo' ||
-    provider === 'doubao' ||
-    provider === 'elevenlabs' ||
-    provider === 'gemini' ||
-    provider === 'xai' ||
-    provider === 'mistral' ||
-    provider === 'minimax' ||
-    provider === 'deepinfra'
+  // 单一事实来源：TtsProviderId 集合（含国产 4 家）。硬编码列表会漏新 provider。
+  return isServerTtsProvider(provider)
 }
 
 function isSttProvider(provider: VoiceApiProvider): provider is SttProvider {
@@ -330,6 +322,10 @@ export function useVoiceApiConnections() {
       if (provider === 'mimo') {
         if (hasCloneDataUri && typeof cloneDataUri === 'string') vs.setMimoVoiceCloneDataUri(cloneDataUri)
         if (hasCloneFileName && typeof cloneFileName === 'string') vs.setMimoVoiceCloneFileName(cloneFileName)
+      }
+      if (provider === 'openrouter') {
+        if (hasCloneDataUri && typeof cloneDataUri === 'string') vs.setOpenrouterVoiceCloneDataUri(cloneDataUri)
+        if (hasCloneFileName && typeof cloneFileName === 'string') vs.setOpenrouterVoiceCloneFileName(cloneFileName)
       }
       return res
     }

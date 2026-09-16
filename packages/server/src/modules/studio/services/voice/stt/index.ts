@@ -1,4 +1,5 @@
 import { transcribeDoubaoFile } from './doubao'
+import { transcribeIflytekIat } from './iflytek'
 import { transcribeOpenAiCompatible } from './openai'
 import { transcribeElevenLabs, transcribeXai } from './hermes-cloud'
 import { transcribeWithLocalStt } from './local-model-manager'
@@ -17,7 +18,10 @@ export async function transcribeWithProvider(input: SttTranscribeInput): Promise
     case 'groq':
     case 'mistral':
     case 'deepinfra':
+    case 'zhipu':
       return transcribeOpenAiCompatible(input)
+    case 'iflytek':
+      return transcribeIflytekIat(input)
     case 'xai':
       return transcribeXai(input)
     case 'elevenlabs':

@@ -6,6 +6,8 @@ import {
 import { normalizeSafeTtsBaseUrl } from '../contracts/voice/url-safety'
 
 export type StoredSttProvider =
+  | 'zhipu'
+  | 'iflytek'
   | 'local'
   | 'openai'
   | 'custom'
@@ -27,8 +29,9 @@ const SETTINGS_KEYS = [
   'diarize',
   'format',
   'tagAudioEvents',
+  'appId',
 ] as const
-const SECRET_KEYS = ['apiKey'] as const
+const SECRET_KEYS = ['apiKey', 'apiSecret'] as const
 
 type SttSettingKey = (typeof SETTINGS_KEYS)[number]
 type SttSecretKey = (typeof SECRET_KEYS)[number]
@@ -51,6 +54,8 @@ const STORED_MARKER = '[stored]'
 const MAX_PROMPT_LENGTH = 1000
 const MAX_BASE_URL_PRESETS = 20
 const PROVIDERS: StoredSttProvider[] = [
+  'zhipu',
+  'iflytek',
   'local',
   'openai',
   'custom',
@@ -64,6 +69,8 @@ const PROVIDERS: StoredSttProvider[] = [
 const ACTIVE_PROVIDERS: ActiveSttProvider[] = ['browser', ...PROVIDERS]
 const PROVIDER_SQL_PLACEHOLDERS = PROVIDERS.map(() => '?').join(', ')
 const PROVIDER_LABELS: Record<StoredSttProvider, string> = {
+  zhipu: 'Zhipu GLM-ASR',
+  iflytek: 'iFlytek STT',
   local: 'Local STT',
   openai: 'OpenAI STT',
   custom: 'Custom STT',
