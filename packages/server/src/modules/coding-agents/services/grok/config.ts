@@ -98,9 +98,70 @@ export function grokSettingsConfig(content: string): string {
   return value ? `${value}\n` : ''
 }
 
+interface TomlArrayScanState {
+  quote: '"' | "'" | null
+  multiline: boolean
+}
+
+function scanTomlArrayBrackets(line: string, state: TomlArrayScanState): number {
+  let delta = 0
+  let escaped = false
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    if (state.quote) {
+      if (state.multiline) {
+        if (state.quote === '"' && char === '\\') {
+          escaped = !escaped
+          continue
+        }
+        if (char === state.quote && !escaped) {
+          let quoteCount = 1
+          while (line[index + quoteCount] === state.quote) quoteCount += 1
+          if (quoteCount >= 3) {
+            state.quote = null
+            state.multiline = false
+            index += quoteCount - 1
+          }
+        }
+        escaped = false
+        continue
+      }
+      if (state.quote === '"' && char === '\\' && !escaped) {
+        escaped = true
+        continue
+      }
+      if (char === state.quote && !escaped) {
+        state.quote = null
+      }
+      escaped = false
+      continue
+    }
+    if (char === '#') break
+    if (char === '"' || char === "'") {
+      state.quote = char
+      state.multiline = line.slice(index, index + 3) === char.repeat(3)
+      if (state.multiline) index += 2
+      continue
+    }
+    if (char === '[') delta += 1
+    else if (char === ']') delta -= 1
+  }
+  return delta
+}
+
+function isManagedGrokSection(section: string): boolean {
+  return section === 'models'
+    || section.startsWith('model.')
+    || section.startsWith('mcp_servers.')
+    || section === 'auth'
+    || section.startsWith('auth.')
+    || section === 'account'
+    || section.startsWith('account.')
+}
+
 export function grokRuntimeSettingsConfig(...contents: Array<string | null | undefined>): string {
   const topLevel = new Map<string, string>()
-  const sections = new Map<string, string[]>()
+  const sections = new Map<string, { header: string; lines: string[] }>()
   const runtimeKeys = new Set([
     'model',
     'default',
@@ -113,37 +174,69 @@ export function grokRuntimeSettingsConfig(...contents: Array<string | null | und
     'auth_token',
   ])
 
+  let arraySectionIndex = 0
   for (const content of contents) {
     let section = ''
-    for (const line of String(content || '').split(/\r?\n/)) {
-      const header = line.match(/^\s*\[([^\]]+)\]\s*$/)
-      if (header) {
-        section = header[1].trim()
+    let sectionKey = ''
+    const sectionScanState: TomlArrayScanState = { quote: null, multiline: false }
+    const lines = String(content || '').split(/\r?\n/)
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex]
+      if (sectionScanState.multiline) {
+        const sectionBlock = sections.get(sectionKey)
+        if (sectionBlock && !isManagedGrokSection(section)) sectionBlock.lines.push(line)
+        scanTomlArrayBrackets(line, sectionScanState)
+        continue
+      }
+      const arrayHeader = line.match(/^\s*\[\[([^\]]+)\]\]\s*$/)
+      if (arrayHeader) {
+        section = arrayHeader[1].trim()
+        if (isManagedGrokSection(section)) {
+          sectionKey = ''
+          continue
+        }
+        sectionKey = `array:${arraySectionIndex++}`
+        sections.set(sectionKey, { header: line.trim(), lines: [] })
+        continue
+      }
+      const tableHeader = line.match(/^\s*\[([^\]]+)\]\s*$/)
+      if (tableHeader) {
+        section = tableHeader[1].trim()
+        sectionKey = `table:${section}`
+        if (!sections.has(sectionKey)) sections.set(sectionKey, { header: line.trim(), lines: [] })
         continue
       }
       const assignment = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=/)
       if (!section) {
-        if (assignment && !runtimeKeys.has(assignment[1])) topLevel.set(assignment[1], line)
+        if (assignment && !runtimeKeys.has(assignment[1])) {
+          let mergedLine = line
+          const scanState: TomlArrayScanState = { quote: null, multiline: false }
+          let bracketDepth = scanTomlArrayBrackets(line.slice(line.indexOf('=') + 1), scanState)
+          while ((bracketDepth > 0 || scanState.multiline) && lineIndex + 1 < lines.length) {
+            lineIndex += 1
+            const nextLine = lines[lineIndex]
+            mergedLine += `\n${nextLine}`
+            bracketDepth += scanTomlArrayBrackets(nextLine, scanState)
+          }
+          topLevel.set(assignment[1], mergedLine)
+        }
         continue
       }
-      if (
-        section === 'models'
-        || section.startsWith('model.')
-        || section.startsWith('mcp_servers.')
-        || section === 'auth'
-        || section.startsWith('auth.')
-        || section === 'account'
-        || section.startsWith('account.')
-      ) continue
-      const lines = sections.get(section) || []
-      if (line.trim()) lines.push(line)
-      sections.set(section, lines)
+      if (isManagedGrokSection(section)) {
+        scanTomlArrayBrackets(line, sectionScanState)
+        continue
+      }
+      const sectionBlock = sections.get(sectionKey)
+      if (sectionBlock && line.trim()) sectionBlock.lines.push(line)
+      scanTomlArrayBrackets(line, sectionScanState)
     }
   }
 
   const blocks = [...topLevel.values()]
-  for (const [section, lines] of sections) {
-    if (lines.length) blocks.push(`[${section}]\n${lines.join('\n')}`)
+  for (const [key, { header, lines }] of sections) {
+    if (lines.length || key.startsWith('array:')) {
+      blocks.push(lines.length ? `${header}\n${lines.join('\n')}` : header)
+    }
   }
   return blocks.join('\n\n')
 }

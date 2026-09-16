@@ -111,6 +111,43 @@ describe('Grok runtime isolation', () => {
     expect(updatedPrompt).toContain('Updated workflow instructions.')
   })
 
+  it('keeps multi-line user settings intact in the scoped Grok config', async () => {
+    const rootDir = makeRoot()
+    await prepareScopedGrokRuntime({
+      rootDir,
+      provider: 'custom-provider',
+      model: 'custom-model',
+      displayName: 'Custom Model',
+      proxyBaseUrl: 'http://127.0.0.1:8647/api/coding-agents/codex-proxy/test/v1',
+      contextWindow: 128_000,
+      outputLimit: 8192,
+      reasoningEffort: 'high',
+      systemPrompt: 'Studio instructions.',
+      userInstructions: 'User instructions.',
+      settingsContent: [
+        'allowed_tools = [',
+        '  "bash",',
+        '  "read",',
+        ']',
+        '',
+        '[[profiles]]',
+        'name = "fast"',
+        '',
+        '[tools]',
+        'preamble = """',
+        'keep this line',
+        '[not a section]',
+        '"""',
+      ].join('\n'),
+      managedMcpToml: '[mcp_servers.ekko-studio-use]\ncommand = "studio-mcp"\n',
+    })
+
+    const config = readFileSync(join(rootDir, 'config.toml'), 'utf-8')
+    expect(config).toContain('allowed_tools = [\n  "bash",\n  "read",\n]')
+    expect(config).toContain('[[profiles]]\nname = "fast"')
+    expect(config).toContain('[tools]\npreamble = """\nkeep this line\n[not a section]\n"""')
+  })
+
   it('copies global Grok skills into scoped runtimes', async () => {
     const root = makeRoot()
     const sourceHome = join(root, 'user-grok')
