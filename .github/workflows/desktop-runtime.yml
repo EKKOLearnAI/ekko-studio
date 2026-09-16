@@ -135,6 +135,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+          make_latest: "false"
           fail_on_unmatched_files: true
           files: |
             packages/desktop/release/runtime/${{ steps.names.outputs.asset }}
