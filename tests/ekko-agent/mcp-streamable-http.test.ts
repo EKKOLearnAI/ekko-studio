@@ -133,6 +133,21 @@ describe('Ekko Streamable HTTP MCP', () => {
     await provider.listTools({ mcpServers: {} })
   })
 
+  it.each(['http', 'streamable-http', 'streamableHttp', ' Streamable_HTTP '])(
+    'accepts the %s transport alias the Ekko config layers normalize',
+    async type => {
+      const provider = createMcpToolProvider()
+      const context = {
+        mcpServers: { fetch: { type, url: endpoint } },
+        timeoutMs: 5_000,
+      }
+
+      const tools = await provider.listTools(context)
+      expect(tools.map(tool => tool.definition.name)).toEqual(['remote_echo'])
+      await provider.listTools({ mcpServers: {} })
+    },
+  )
+
   it('proxies provider-unsafe names while preserving the exact remote tool name', async () => {
     remoteTools = [{
       name: 'shared_folder.list_shared_with_me',

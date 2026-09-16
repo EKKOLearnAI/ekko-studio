@@ -28,10 +28,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
+function normalizeServerType(value: unknown): string {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (
+    normalized === 'http'
+    || normalized === 'streamable-http'
+    || normalized === 'streamablehttp'
+  ) {
+    return 'streamable_http'
+  }
+  return normalized
+}
+
 function normalizeServerConfig(value: unknown): McpServerConfig | null {
   if (!isRecord(value) || value.enabled === false) return null
   const supportsParallelToolCalls = value.supports_parallel_tool_calls === true
-  const configuredType = typeof value.type === 'string' ? value.type.trim().toLowerCase() : ''
+  const configuredType = normalizeServerType(value.type)
   const command = typeof value.command === 'string' ? value.command.trim() : ''
   const rawUrl = typeof value.url === 'string' ? value.url.trim() : ''
   const isHttp = configuredType === 'streamable_http' || (!configuredType && !command && !!rawUrl)
