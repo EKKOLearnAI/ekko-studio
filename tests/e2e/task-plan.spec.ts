@@ -21,7 +21,7 @@ test('updates one plan card live and preserves unfinished work on stop with tool
   await page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)').fill('Implement task planning')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
   const run = await (await page.waitForFunction(() => (window as any).__PW_CHAT_SOCKET__?.emitted.find((entry: any) => entry.event === 'run')?.payload)).jsonValue()
-  const active = { ...plan, session_id: run.session_id }
+  const active = { ...plan, session_id: run.session_id, created_at: Date.now(), updated_at: Date.now() }
   await page.evaluate(p => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
     socket.__trigger('run.started', { event: 'run.started', session_id: p.session_id, run_id: p.run_id })
@@ -30,6 +30,24 @@ test('updates one plan card live and preserves unfinished work on stop with tool
   const card = page.getByTestId('task-plan-card')
   await expect(card).toHaveCount(1)
   await expect(card).toContainText('0/3 completed')
+  // Output can grow for a long time without another update_plan call.
+  await page.evaluate(p => {
+    const socket = (window as any).__PW_CHAT_SOCKET__.latest
+    socket.__trigger('message.delta', { event: 'message.delta', session_id: p.session_id, run_id: p.run_id, delta: 'Progress after the plan was created.' })
+  }, active)
+  const progress = page.getByText('Progress after the plan was created.', { exact: true })
+  await expect(progress).toBeVisible()
+  await expect.poll(async () => {
+    const outputBox = await progress.boundingBox()
+    const planBox = await card.boundingBox()
+    return !!outputBox && !!planBox && planBox.y >= outputBox.y + outputBox.height
+  }).toBe(true)
+  await page.evaluate(p => {
+    const socket = (window as any).__PW_CHAT_SOCKET__.latest
+    socket.__trigger('message.delta', { event: 'message.delta', session_id: p.session_id, run_id: p.run_id,
+      delta: '\n\n' + Array.from({ length: 60 }, (_, i) => `Long task progress ${i}`).join('\n\n') })
+  }, active)
+  await expect(card).toBeInViewport()
   await page.evaluate(p => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
     socket.__trigger('plan.updated', { event: 'plan.updated', ...p, revision: 2,
@@ -80,6 +98,11 @@ for (const agent of ['ekko-agent', 'codex']) {
     await expect(page.getByTestId('task-plan-card')).toHaveCount(1)
     await expect(page.getByTestId('task-plan-card')).toContainText('3/3 completed')
     await expect(page.getByText('Task planning is ready', { exact: true })).toBeVisible()
+    await expect.poll(async () => {
+      const outputBox = await page.getByText('Task planning is ready', { exact: true }).boundingBox()
+      const planBox = await page.getByTestId('task-plan-card').boundingBox()
+      return !!outputBox && !!planBox && planBox.y >= outputBox.y + outputBox.height
+    }).toBe(true)
     await page.setViewportSize({ width: 390, height: 844 })
     const card = page.getByTestId('task-plan-card')
     await expect(card).toBeVisible()

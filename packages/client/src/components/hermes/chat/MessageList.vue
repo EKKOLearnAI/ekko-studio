@@ -15,6 +15,7 @@ import { useI18n } from "vue-i18n";
 import { NButton, NInput } from "naive-ui";
 import VirtualMessageList from "./VirtualMessageList.vue";
 import MessageItem from "./MessageItem.vue";
+import { positionTaskPlansAtTurnEnd } from "@/utils/task-plan";
 import LiveReasoningStatus from "./LiveReasoningStatus.vue";
 import ToolRunCard from "./ToolRunCard.vue";
 import MessageQueueFloatPanel from "./MessageQueueFloatPanel.vue";
@@ -231,7 +232,7 @@ const displayMessages = computed(() => {
       }
       return message;
     });
-  return groupCompletedToolsByRun(renderedMessages);
+  return groupCompletedToolsByRun(positionTaskPlansAtTurnEnd(renderedMessages));
 });
 
 function forkDividerId(sessionId: string): string {
