@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { canOpenTerminal, resolveTerminalCwd } from '../../packages/server/src/modules/hermes/sockets/terminal'
+import { canOpenTerminal, resolveTerminalCwd } from '../../packages/server/src/modules/hermes/services/terminal/runtime'
 
 const tmpRoots: string[] = []
 

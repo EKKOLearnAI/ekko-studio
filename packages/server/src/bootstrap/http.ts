@@ -1,3 +1,5 @@
+import { setupMobileTerminal } from '../modules/hermes/sockets/mobile-terminal'
+import { getSessionMetadata as getTerminalSessionMetadata } from '../modules/studio/public/sessions'
 import Koa from 'koa'
 import type { Context } from 'koa'
 import cors from '@koa/cors'
@@ -592,6 +594,15 @@ export async function bootstrap() {
   setChatRunServer(chatRunServer)
   activeGroupChatServer.setChatRunService(chatRunServer)
   chatRunServer.init()
+  const mobileTerminal = setupMobileTerminal(activeGroupChatServer.getIO(), context => {
+    if (context.source === 'single') {
+      const session = getTerminalSessionMetadata(context.sourceId)
+      return session ? { profile: session.profile, workspace: session.workspace || '' } : null
+    }
+    const room = activeGroupChatServer.getStorage().getRoom(context.sourceId)
+    return room ? { profile: context.profile, workspace: room.workspace || '' } : null
+  })
+  additionalShutdownSteps.push({ name: 'Mobile terminal PTY sessions', close: () => mobileTerminal.close() })
   startLocalAppRelayServer(activeGroupChatServer.getIO(), { localBaseUrl: loopbackBaseUrl })
   console.log('[bootstrap] local App relay server ready')
   if (

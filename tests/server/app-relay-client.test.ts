@@ -784,6 +784,56 @@ describe('AppRelayClient', () => {
     })))
   })
 
+  it('bridges the /terminal namespace and rejects unlisted events', async () => {
+    const { startAppRelayClient } = await import('../../packages/server/src/modules/studio/services/app-relay/client')
+    startAppRelayClient({
+      relayUrl: 'https://relay.example.com',
+      machineId: 'hwui_machine_1234567890',
+      publicKey: 'machine-public-key',
+      localBaseUrl: 'http://127.0.0.1:8648',
+      fetchImpl: vi.fn() as any,
+    })
+    const remote = sockets[0]
+    const openAck = vi.fn()
+    remote.__handlers.get('app.socket.open')({
+      id: 'relay-terminal-1',
+      namespace: '/terminal',
+      auth: { token: 'local-user-token' },
+    }, openAck)
+
+    const local = sockets[1]
+    expect(local.__url).toBe('http://127.0.0.1:8648/terminal')
+    expect(local.__options).toMatchObject({ auth: { token: 'local-user-token' } })
+    expect(openAck).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'relay-terminal-1',
+      ok: true,
+      namespace: '/terminal',
+    }))
+
+    local.emit.mockImplementation((event: string, payload: unknown, ack?: (response: unknown) => void) => {
+      if (event === 'terminal.read') {
+        ack?.({ ok: true, data: { chunks: [{ seq: 1, data: 'hello\r\n' }], cursor: 1 } })
+      }
+    })
+    const eventAck = vi.fn()
+    remote.__handlers.get('app.socket.event')({
+      id: 'relay-terminal-1',
+      event: 'terminal.read',
+      payload: { terminalId: 'terminal-a', lease: 'lease-a', cursor: 0 },
+      ack: true,
+    }, eventAck)
+    await vi.waitFor(() => expect(eventAck).toHaveBeenCalledWith(expect.objectContaining({
+      ok: true,
+      namespace: '/terminal',
+      event: 'terminal.read',
+    })))
+    const deniedAck = vi.fn()
+    remote.__handlers.get('app.socket.event')({ id: 'relay-terminal-1', event: 'run', payload: {}, ack: true }, deniedAck)
+    await vi.waitFor(() => expect(deniedAck).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ code: 'event_not_allowed' }),
+    })))
+  })
+
   it('bridges unified App subscriptions through cloud relay transport', async () => {
     const { startAppRelayClient } = await import('../../packages/server/src/modules/studio/services/app-relay/client')
     startAppRelayClient({

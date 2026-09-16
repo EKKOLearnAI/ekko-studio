@@ -833,6 +833,67 @@ describe('LocalAppRelayServer', () => {
     })))
   })
 
+  it('bridges terminal reads with the authenticated Studio token', async () => {
+    const namespace = createMockNamespace()
+    const io = { of: vi.fn(() => namespace) }
+    const { LocalAppRelayServer } = await import('../../packages/server/src/modules/studio/services/app-relay/server')
+    const server = new LocalAppRelayServer(io as any, {
+      machineId: 'hwui_local_machine_1234567890',
+      localBaseUrl: 'http://127.0.0.1:8748',
+    })
+    server.init()
+
+    const app = createMockAppSocket('app-workflow', {
+      role: 'app',
+      token: 'local-user-token',
+      machineId: 'hwui_local_machine_1234567890',
+    })
+    await connectApp(namespace, app)
+    const openAck = vi.fn()
+    app.__handlers.get('socket.open')({
+      id: 'terminal-1',
+      namespace: '/terminal',
+      auth: { token: 'untrusted-token' },
+    }, openAck)
+
+    await vi.waitFor(() => expect(openAck).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'terminal-1',
+      ok: true,
+      namespace: '/terminal',
+    })))
+    expect(clientSocketMocks.io).toHaveBeenCalledWith(
+      'http://127.0.0.1:8748/terminal',
+      expect.objectContaining({ auth: { token: 'local-user-token' } }),
+    )
+
+    const local = clientSocketMocks.sockets[0]
+    local.emit.mockImplementation((event: string, payload: unknown, ack?: (response: unknown) => void) => {
+      if (event === 'terminal.read') {
+        ack?.({ ok: true, data: { chunks: [{ seq: 1, data: 'hello\r\n' }], cursor: 1 } })
+      }
+    })
+    const eventAck = vi.fn()
+    app.__handlers.get('socket.event')({
+      id: 'terminal-1',
+      event: 'terminal.read',
+      payload: { terminalId: 'terminal-a', lease: 'lease-a', cursor: 0 },
+      ack: true,
+    }, eventAck)
+
+    await vi.waitFor(() => expect(eventAck).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'terminal-1',
+      ok: true,
+      namespace: '/terminal',
+      event: 'terminal.read',
+      payload: { ok: true, data: { chunks: [{ seq: 1, data: 'hello\r\n' }], cursor: 1 } },
+    })))
+    const deniedAck = vi.fn()
+    app.__handlers.get('socket.event')({ id: 'terminal-1', event: 'run', payload: {}, ack: true }, deniedAck)
+    await vi.waitFor(() => expect(deniedAck).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ code: 'event_not_allowed' }),
+    })))
+  })
+
   it('bridges unified App subscriptions over local and manually addressed relay', async () => {
     const namespace = createMockNamespace()
     const io = { of: vi.fn(() => namespace) }
