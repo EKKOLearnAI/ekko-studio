@@ -18,6 +18,11 @@ on:
         description: "Pinned full Hermes Agent commit (required with a version override)"
         required: false
         type: string
+      rebuild:
+        description: "Rebuild and replace existing runtime assets after validation"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -81,7 +86,13 @@ jobs:
           TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
           ASSET: ${{ steps.names.outputs.asset }}
           MANIFEST: ${{ steps.names.outputs.manifest }}
+          REBUILD: ${{ inputs.rebuild }}
         run: |
+          if [ "$REBUILD" = "true" ]; then
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+            echo "Rebuilding runtime asset: $ASSET"
+            exit 0
+          fi
           assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' || true)"
           if printf '%s\n' "$assets" | grep -Fx "$ASSET" >/dev/null \
             && printf '%s\n' "$assets" | grep -Fx "$MANIFEST" >/dev/null; then
