@@ -260,6 +260,65 @@ describe('agent runner Responses adapters', () => {
     expect(responsesToOpenAiChat(body, target).messages[1]).not.toHaveProperty('reasoning_content')
   })
 
+  it.each(['reasoning_content', 'reasoning', 'reasoning_text'])('replays inline %s without treating assistant content as reasoning', (field) => {
+    const body = { input: [
+      { role: 'user', content: 'first question', [field]: 'not assistant reasoning' },
+      { role: 'assistant', content: [{ type: 'output_text', text: 'first answer' }], [field]: 'First analysis.' },
+      { role: 'user', content: 'follow up' },
+      { role: 'assistant', content: 'plain answer' },
+    ] }
+    const before = structuredClone(body)
+    expect(responsesToOpenAiChat(body, anthropicTarget).messages).toEqual([
+      { role: 'user', content: 'first question' },
+      { role: 'assistant', content: 'first answer', reasoning_content: 'First analysis.' },
+      { role: 'user', content: 'follow up' },
+      { role: 'assistant', content: 'plain answer', reasoning_content: '' },
+    ])
+    expect(body).toEqual(before)
+    for (const message of responsesToOpenAiChat(body, target).messages) {
+      expect(message).not.toHaveProperty('reasoning_content')
+    }
+  })
+
+  it('prefers inline reasoning and retains standalone reasoning for assistant history', () => {
+    const body = { input: [
+      { type: 'reasoning', summary: [{ type: 'summary_text', text: 'Short summary.' }] },
+      { role: 'assistant', content: 'answer', reasoning_content: 'Full original reasoning.' },
+      { role: 'user', content: 'continue' },
+      { type: 'reasoning', summary: [{ type: 'summary_text', text: 'Next analysis.' }] },
+      { role: 'assistant', content: 'next answer' },
+    ] }
+    expect(responsesToOpenAiChat(body, anthropicTarget).messages).toEqual([
+      { role: 'assistant', content: 'answer', reasoning_content: 'Full original reasoning.' },
+      { role: 'user', content: 'continue' },
+      { role: 'assistant', content: 'next answer', reasoning_content: 'Next analysis.' },
+    ])
+  })
+
+  it('fills missing reasoning across tool batches without leaking earlier reasoning', () => {
+    const body = { input: [
+      { type: 'reasoning', summary: [{ type: 'summary_text', text: 'First tool analysis.' }] },
+      { type: 'function_call', call_id: 'first', name: 'read_file', arguments: '{}' },
+      { type: 'function_call_output', call_id: 'first', output: 'first result' },
+      { type: 'function_call', call_id: 'second', name: 'read_file', arguments: '{}' },
+      { type: 'function_call', call_id: 'third', name: 'read_file', arguments: '{}' },
+      { type: 'function_call_output', call_id: 'third', output: 'third result' },
+      { type: 'function_call_output', call_id: 'second', output: 'second result' },
+      { role: 'assistant', content: 'done' },
+    ] }
+    const messages = responsesToOpenAiChat(body, anthropicTarget).messages
+    expect(messages.map((message: any) => message.role)).toEqual(['assistant', 'tool', 'assistant', 'tool', 'tool', 'assistant'])
+    expect(messages[0].reasoning_content).toBe('First tool analysis.')
+    expect(messages[2].reasoning_content).toBe('')
+    expect(messages[2].tool_calls.map((call: any) => call.id)).toEqual(['second', 'third'])
+    expect(messages[3]).toEqual({ role: 'tool', tool_call_id: 'second', content: 'second result' })
+    expect(messages[4]).toEqual({ role: 'tool', tool_call_id: 'third', content: 'third result' })
+    expect(messages[5].reasoning_content).toBe('')
+    for (const message of responsesToOpenAiChat(body, target).messages) {
+      expect(message).not.toHaveProperty('reasoning_content')
+    }
+  })
+
   it('preserves Responses image inputs for Chat and Anthropic providers', () => {
     const imageUrl = 'data:image/png;base64,AQID'
     const body = {

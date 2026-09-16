@@ -650,10 +650,16 @@ function chatRoleForResponsesRole(role: unknown): string {
   return 'user'
 }
 
-function responsesReasoningText(item: any): string {
+function inlineReasoningText(item: any): string {
   for (const field of ['reasoning_content', 'reasoning', 'reasoning_text']) {
     if (typeof item?.[field] === 'string' && item[field]) return item[field]
   }
+  return ''
+}
+
+function responsesReasoningText(item: any): string {
+  const inline = inlineReasoningText(item)
+  if (inline) return inline
 
   const textParts = (value: unknown): string[] => {
     const entries = Array.isArray(value) ? value : [value]
@@ -696,7 +702,9 @@ function responsesInputToChatMessages(body: any, target: ResponsesAdapterTarget)
       messages.push({
         role: 'assistant',
         content: null,
-        ...(preserveReasoningContent && pendingReasoning
+        // Synthetic/replayed tool calls may have no reasoning item. Keep the
+        // required field present, matching Ekko's Chat Completions adapter.
+        ...(preserveReasoningContent
           ? { reasoning_content: pendingReasoning }
           : {}),
         tool_calls: pendingToolCalls,
@@ -768,8 +776,8 @@ function responsesInputToChatMessages(body: any, target: ResponsesAdapterTarget)
       messages.push({
         role,
         content: responseContentToOpenAiChat(item.content),
-        ...(role === 'assistant' && preserveReasoningContent && pendingReasoning
-          ? { reasoning_content: pendingReasoning }
+        ...(role === 'assistant' && preserveReasoningContent
+          ? { reasoning_content: inlineReasoningText(item) || pendingReasoning }
           : {}),
       })
       pendingReasoning = ''
