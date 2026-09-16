@@ -3536,6 +3536,16 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_22_1: 'Added a standalone task-plan MCP so Hermes and Coding Agents can update chat task plans, with task context refreshed each turn (#3053)',
+    new_0_7_22_2: 'Chat thinking indicators now show the corresponding Agent logo (#3052)',
+    new_0_7_22_3: 'Fixed Ekko Chat history pairing between tool calls and results, and added support for MCP HTTP transport aliases (#3030, #3031)',
+    new_0_7_22_4: 'Fixed Studio-managed Claude OAuth in Hermes Bridge and added a TCP fallback when local socket paths are too long (#3033, #3048)',
+    new_0_7_22_5: 'Restored Studio MCP tools in global Coding Agent sessions and improved executable search paths and missing-command errors (#3044, #3055)',
+    new_0_7_22_6: 'Added version declarations to Studio-generated DSH plugin manifests for compatibility (#3038)',
+    new_0_7_22_7: 'Fixed API URL configuration migration reading the next line when BASE_URL is empty (#3046)',
+    new_0_7_22_8: 'Unified OpenRouter application attribution under Ekko Studio (#3056)',
+    new_0_7_22_9: 'Fixed truncated or incorrectly split multi-line arrays, strings and arrays of tables in scoped Grok session configuration (#3072)',
+    new_0_7_22_10: 'Fixed lost browser executable permissions and symbolic links in desktop runtime bundles, added Hermes 0.21.3 compatibility, and prevented runtime releases from replacing the latest desktop release marker (#3073)',
     new_0_7_21_1: 'Fixed DSH plugin configuration and Agent preset pages failing to open on Windows when startup selected the wrong command script (#3026)',
     new_0_7_21_2: 'DSH configuration startup errors now identify the failed stage and system or exit code without exposing plugin logs or credentials (#3026)',
     new_0_7_20_1: 'Added DeepSeek Harness (DSH) installation management and integration with direct chats, group chats, and workflows, including Agent preset selection and mode preservation on resume; updated English and Chinese guides (#3020, #3023)',
