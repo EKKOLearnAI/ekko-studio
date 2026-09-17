@@ -81,7 +81,7 @@ export interface HermesSessionSearchRow extends HermesSessionRow {
 export interface SessionListOptions {
   offset?: number
   categoryId?: number | null
-  pinnedOnly?: boolean
+  pinned?: boolean
   includeSessionIds?: string[]
   sources?: string[]
   profiles?: string[]
@@ -658,7 +658,7 @@ function sessionFilterSql(
   if (options.includeArchived === false) {
     clauses.push('COALESCE(s.is_archived, 0) = 0')
   }
-  if (options.pinnedOnly) clauses.push('s.is_pinned = 1')
+  if (options.pinned !== undefined) clauses.push(options.pinned ? 's.is_pinned = 1' : 's.is_pinned = 0')
   if (options.categoryId === null) {
     clauses.push(`(s.category_id IS NULL OR NOT EXISTS (SELECT 1 FROM ${SESSION_CATEGORIES_TABLE} c WHERE c.id = s.category_id))`)
   } else if (options.categoryId !== undefined) {

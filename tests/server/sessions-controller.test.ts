@@ -1458,8 +1458,17 @@ describe('session conversations controller', () => {
     localListSessionsMock.mockReturnValue([])
     const ctx: any = { query: { category: 'pinned' }, state: {} }
     await mod.list(ctx)
-    expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 2000, expect.objectContaining({ pinnedOnly: true }))
+    expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 2000, expect.objectContaining({ pinned: true }))
     expect(ctx.body).toEqual({ sessions: [] })
+  })
+
+  it('excludes database pins from both category pages and their totals', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    localListSessionsMock.mockReturnValue([])
+    const ctx: any = { query: { category: '1', pinned: 'false', offset: '0', limit: '10' }, state: {} }
+    await mod.list(ctx)
+    expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 11, expect.objectContaining({ categoryId: 1, pinned: false, offset: 0 }))
+    expect(localCountSessionsMock).toHaveBeenCalledWith(undefined, undefined, expect.objectContaining({ categoryId: 1, pinned: false }))
   })
 
   it('updates whether an accessible session should be pushed', async () => {

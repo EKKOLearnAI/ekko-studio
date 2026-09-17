@@ -17598,12 +17598,13 @@
                 {
                   "type": "string",
                   "enum": [
-                    "none"
+                    "none",
+                    "pinned"
                   ]
                 }
               ]
             },
-            "description": "Filter by category ID; none selects uncategorized sessions."
+            "description": "Filter by category ID; none selects uncategorized sessions, pinned selects database-pinned sessions."
           },
           {
             "name": "exclude",
@@ -17648,6 +17649,15 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "pinned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Filter by database pin state before pagination and counting. The pinned category takes precedence."
           },
           {
             "name": "source",

@@ -339,8 +339,11 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
     }
     for (const parameter of parameters) {
       if (parameter.name === 'category') {
-        parameter.schema = { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'string', enum: ['none'] }] }
-        parameter.description = 'Filter by category ID; none selects uncategorized sessions.'
+        parameter.schema = { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'string', enum: ['none', 'pinned'] }] }
+        parameter.description = 'Filter by category ID; none selects uncategorized sessions, pinned selects database-pinned sessions.'
+      } else if (parameter.name === 'pinned') {
+        parameter.schema = { type: 'boolean' }
+        parameter.description = 'Filter by database pin state before pagination and counting. The pinned category takes precedence.'
       } else if (parameter.name === 'include' || parameter.name === 'exclude') {
         parameter.schema = { type: 'array', items: { type: 'string' } }
         parameter.style = 'form'
