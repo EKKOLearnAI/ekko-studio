@@ -70,6 +70,20 @@ npm run test:e2e
 npm run build
 ```
 
+## npm Publishing
+
+`.github/workflows/npm-publish.yml` publishes `hermes-web-ui` when a GitHub
+Release is published. It can also be run manually with an existing release tag.
+The tag must match `package.json`'s version (with an optional `v` prefix).
+Stable releases use npm's `latest` dist-tag; prerelease versions or GitHub
+prereleases use `next`.
+
+Configure the repository Actions secret `NPM_TOKEN` with npm publish permission
+and non-interactive publishing enabled. The workflow builds and checks the
+packed CLI, client, and server files before publishing the tarball. The token is
+available only to the publish step. A version already published to npm cannot
+be overwritten; use a new version for changed packages.
+
 ## Commit And PR Rules
 
 - Branch from `main` for new work.
