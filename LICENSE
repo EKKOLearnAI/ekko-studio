@@ -4,7 +4,7 @@ Parameters
 
 Licensor:             EKKOLearnAI
 Licensed Work:        Ekko Studio, formerly known as Hermes Studio and Hermes Web UI,
-                      including the hermes-web-ui npm package and CLI,
+                      including the ekko-studio and hermes-web-ui npm packages and CLIs,
                       Ekko Studio desktop applications, web applications,
                       server components, runtime integrations, firmware,
                       release artifacts, documentation, and all associated
@@ -43,7 +43,7 @@ For the purposes of this License:
   components, runtime integrations, release artifacts, packages, command-line
   tools, and associated files in this repository. This includes materials
   distributed or identified under the current Ekko Studio name, the former
-  Hermes Studio and Hermes Web UI names, the hermes-web-ui npm package name, and the
+  Hermes Studio and Hermes Web UI names, the ekko-studio and hermes-web-ui npm package names, and the
   hermes-studio desktop application name.
 
 - "Non-commercial use" means use that is not primarily intended for or

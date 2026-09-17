@@ -73,10 +73,10 @@ function getNpmCliPath() {
     : join(prefix, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
 }
 
-function getGlobalCliScript(prefix: string) {
+function getGlobalCliScript(prefix: string, packageName = 'hermes-web-ui') {
   return process.platform === 'win32'
-    ? join(prefix, 'node_modules', 'hermes-web-ui', 'bin', 'hermes-web-ui.mjs')
-    : join(prefix, 'lib', 'node_modules', 'hermes-web-ui', 'bin', 'hermes-web-ui.mjs')
+    ? join(prefix, 'node_modules', packageName, 'bin', 'hermes-web-ui.mjs')
+    : join(prefix, 'lib', 'node_modules', packageName, 'bin', 'hermes-web-ui.mjs')
 }
 
 describe('update controller', () => {
@@ -102,12 +102,12 @@ describe('update controller', () => {
     delete process.env.HERMES_WEB_UI_PREVIEW_REPO
   })
 
-  it('updates and restarts through the running Node executable, not PATH shims', async () => {
+  it.each(['ekko-studio', 'hermes-web-ui'])('updates and restarts the installed %s package through the running Node executable', async (packageName) => {
     process.env.PORT = '9129'
     const nodeBinDir = getNodeBinDir()
     const npmCli = getNpmCliPath()
     const globalPrefix = getNodePrefix()
-    const cliScript = getGlobalCliScript(globalPrefix)
+    const cliScript = getGlobalCliScript(globalPrefix, packageName)
     const execFileSync = vi.fn((_command: string, args: string[]) => {
       if (args[1] === 'root') {
         return process.platform === 'win32'
@@ -116,14 +116,14 @@ describe('update controller', () => {
       }
       return 'updated'
     })
-    const { handleUpdate, mocks } = await loadUpdateController({ execFileSync })
+    const { handleUpdate, mocks } = await loadUpdateController({ execFileSync, readFileSync: vi.fn(() => JSON.stringify({ name: packageName, version: '0.7.22' })) })
     const ctx = createMockCtx()
 
     await handleUpdate(ctx)
 
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       process.execPath,
-      [npmCli, 'install', '-g', 'hermes-web-ui@latest'],
+      [npmCli, 'install', '-g', `${packageName}@latest`],
       expect.objectContaining({
         encoding: 'utf-8',
         timeout: 10 * 60 * 1000,

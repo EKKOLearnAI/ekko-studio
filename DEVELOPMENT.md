@@ -72,17 +72,28 @@ npm run build
 
 ## npm Publishing
 
-`.github/workflows/npm-publish.yml` publishes `hermes-web-ui` when a GitHub
-Release is published. It can also be run manually with an existing release tag.
-The tag must match `package.json`'s version (with an optional `v` prefix).
-Stable releases use npm's `latest` dist-tag; prerelease versions or GitHub
-prereleases use `next`.
+The source package is `ekko-studio`. `npm run build` followed by
+`npm run pack:npm -- /absolute/output/directory` creates both `ekko-studio` and
+`hermes-web-ui` tarballs with the same version and build. Each tarball carries
+its own package name; the source manifest is not rewritten. Both expose
+`ekko-studio-web` and the existing CLI aliases.
 
-Configure the repository Actions secret `NPM_TOKEN` with npm publish permission
-and non-interactive publishing enabled. The workflow builds and checks the
-packed CLI, client, and server files before publishing the tarball. The token is
-available only to the publish step. A version already published to npm cannot
-be overwritten; use a new version for changed packages.
+`.github/workflows/npm-publish.yml` runs on published GitHub Releases or manually
+with an existing tag matching `package.json`'s version (optionally prefixed by
+`v`). It builds and verifies both packages once, then publishes each in a
+separate job. Stable releases use `latest`; prerelease versions or GitHub
+prerelease events use `next`. If only one publish fails, rerun the failed job.
+
+Configure repository Actions secret `NPM_TOKEN` with publish permission for
+**both** packages (including permission to create `ekko-studio` on its first
+release) and non-interactive publishing enabled. Only the publish jobs receive
+the token. Existing npm versions cannot be overwritten.
+
+Web UI update checks and CLI/Web UI upgrades read the running installation's
+package name, update that package, and restart its CLI by absolute package path.
+Shared data stays under `~/.hermes-web-ui`. The packages provide overlapping
+command aliases and are intended as alternative installations, not simultaneous
+global installs; uninstall the previous package before switching names.
 
 ## Commit And PR Rules
 

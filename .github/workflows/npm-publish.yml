@@ -18,9 +18,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    outputs:
+      dist_tag: ${{ steps.release.outputs.dist_tag }}
+      version: ${{ steps.release.outputs.version }}
     steps:
       - name: Checkout release tag
         uses: actions/checkout@v4
@@ -34,7 +37,6 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
-          registry-url: https://registry.npmjs.org
 
       - name: Validate release version
         id: release
@@ -45,14 +47,15 @@ jobs:
           node <<'NODE'
           const { appendFileSync } = require('node:fs')
           const { name, version, private: isPrivate } = require('./package.json')
-          if (name !== 'hermes-web-ui' || isPrivate) {
-            throw new Error('Expected the public hermes-web-ui package')
+          if (name !== 'ekko-studio' || isPrivate) {
+            throw new Error('Expected the public ekko-studio source package')
           }
           if (![version, `v${version}`].includes(process.env.RELEASE_TAG)) {
             throw new Error(`Release tag must match package version ${version}`)
           }
           const prerelease = version.includes('-') || process.env.RELEASE_PRERELEASE === 'true'
           appendFileSync(process.env.GITHUB_OUTPUT, `dist_tag=${prerelease ? 'next' : 'latest'}\n`)
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`)
           NODE
 
       - name: Install dependencies
@@ -66,32 +69,43 @@ jobs:
       - name: Build package
         run: npm run build
 
-      - name: Pack and verify published files
-        id: package
+      - name: Pack and verify both npm packages
         run: |
-          mkdir -p "$RUNNER_TEMP/npm-package"
-          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/npm-package" > "$RUNNER_TEMP/npm-package/manifest.json"
-          node <<'NODE'
-          const { readFileSync, appendFileSync } = require('node:fs')
-          const { join } = require('node:path')
-          const dir = join(process.env.RUNNER_TEMP, 'npm-package')
-          const [pkg] = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'))
-          const files = new Set(pkg.files.map(file => file.path))
-          const metadata = require('./package.json')
-          const required = ['package.json', 'LICENSE', 'dist/client/index.html', 'dist/server/index.js',
-            ...Object.values(metadata.bin).map(path => path.replace(/^\.\//, ''))]
-          for (const path of required) {
-            if (!files.has(path)) throw new Error(`Missing npm package file: ${path}`)
-          }
-          appendFileSync(process.env.GITHUB_OUTPUT, `tarball=${join(dir, pkg.filename)}\n`)
-          console.log(`Verified ${pkg.filename}: ${pkg.files.length} files`)
-          NODE
+          npm run pack:npm -- "$RUNNER_TEMP/npm-packages"
+
+      - name: Upload verified npm packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/npm-packages/*.tgz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [ekko-studio, hermes-web-ui]
+    steps:
+      - name: Download verified npm packages
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-packages
+          path: npm-packages
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
 
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          PACKAGE_TARBALL: ${{ steps.package.outputs.tarball }}
-          NPM_DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+          PACKAGE_TARBALL: npm-packages/${{ matrix.package }}-${{ needs.build.outputs.version }}.tgz
+          NPM_DIST_TAG: ${{ needs.build.outputs.dist_tag }}
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
             echo "NPM_TOKEN repository secret is not configured" >&2

@@ -15,7 +15,7 @@
   ·
   <a href="https://ekkostudio.xyz/#/docs/getting-started">Documentation</a>
   ·
-  <code>npm install -g hermes-web-ui && hermes-web-ui start</code>
+  <code>npm install -g ekko-studio && ekko-studio-web start</code>
 </p>
 
 <p align="center">
@@ -335,9 +335,14 @@ unavailable, the updater falls back to
 ### npm
 
 ```bash
-npm install -g hermes-web-ui
-hermes-web-ui start
+npm install -g ekko-studio
+ekko-studio-web start
 ```
+
+The legacy package `hermes-web-ui` continues to receive the same releases.
+Both packages expose `ekko-studio-web` and the existing commands. Install either
+package; their global command aliases overlap. To switch, uninstall the old
+package before installing the other. User data remains in `~/.hermes-web-ui`.
 
 Open **http://localhost:8648**
 
@@ -439,6 +444,8 @@ These variables configure Ekko Studio, its local Hermes runtime integration, and
 
 ### CLI Commands
 
+`ekko-studio-web` supports the same commands as `hermes-web-ui` below.
+
 | Command | Description |
 | --- | --- |
 | `hermes-web-ui start [port]` | Start in background; accepts a positional port or `--port <port>` |
@@ -457,7 +464,7 @@ Add `--no-open` to `start` or `client` when no browser should open.
 
 `restart`, `update`, and `upgrade` stop the Agent Bridge broker by default so restarted or updated servers do not reuse stale Python bridge processes. Set `HERMES_AGENT_BRIDGE_STOP_ON_SHUTDOWN=0` before restarting only when you explicitly want to keep the bridge broker and running bridge sessions alive.
 
-`update` / `upgrade` first attempt `npm cache clean --force`, then run `npm install -g hermes-web-ui@latest` and restart. Cache cleanup is best-effort; if it fails, the updater continues with the install.
+`update` / `upgrade` first attempt `npm cache clean --force`, then install the latest version of the running package (`ekko-studio@latest` or `hermes-web-ui@latest`) and restart that package. The Web UI version check uses the same package identity. Cache cleanup is best-effort; if it fails, the updater continues with the install.
 
 ### Auto Configuration
 

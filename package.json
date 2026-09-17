@@ -1,5 +1,5 @@
 {
-  "name": "hermes-web-ui",
+  "name": "ekko-studio",
   "version": "0.7.22",
   "description": "Ekko Studio is a local-first AI workspace for multi-agent chat, coding, and visual workflows, available on desktop and the web.",
   "repository": {
@@ -38,7 +38,8 @@
     "hermes-web-ui": "./bin/hermes-web-ui.mjs",
     "hermes-web-ui-mcp": "./bin/hermes-web-ui-mcp.mjs",
     "hermes-studio-mcp": "./bin/hermes-studio-mcp.mjs",
-    "ekko-studio-mcp": "./bin/ekko-studio-mcp.mjs"
+    "ekko-studio-mcp": "./bin/ekko-studio-mcp.mjs",
+    "ekko-studio-web": "./bin/hermes-web-ui.mjs"
   },
   "scripts": {
     "start": "vite --host --port 8648",
@@ -72,7 +73,8 @@
     "build:desktop:linux": "npm run build && npm run desktop:install && npm --prefix packages/desktop run dist -- --linux --publish never",
     "openapi:generate": "node scripts/generate-openapi.mjs",
     "claude": "claude --dangerously-skip-permissions",
-    "test:workflow-live": "vite-node scripts/workflow-live-acceptance.ts"
+    "test:workflow-live": "vite-node scripts/workflow-live-acceptance.ts",
+    "pack:npm": "node scripts/pack-npm-releases.mjs"
   },
   "files": [
     "bin/",
