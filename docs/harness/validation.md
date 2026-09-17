@@ -55,7 +55,7 @@ loading GUI or updater code, even when Node mode is absent. Test the real packag
 node scripts/verify-desktop-mcp.mjs '<packaged executable>' '<resources directory>'
 ```
 
-This checks all six toolsets with Node mode deliberately removed, validates the
+This checks all five toolsets with Node mode deliberately removed, validates the
 JSON-RPC initialize response, and checks clean exit on stdin EOF. It uses temporary
 state and does not require a running Gateway.
 

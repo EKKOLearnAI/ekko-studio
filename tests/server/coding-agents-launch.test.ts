@@ -1499,7 +1499,7 @@ describe('coding agent launch preparation', () => {
         HERMES_WEB_UI_MANAGED_MCP: '1',
       },
     })
-    for (const name of ['ekko-studio-api', 'ekko-studio-browser', 'ekko-studio-devices', 'ekko-studio-use', 'ekko-studio-plan', 'ekko-studio-interaction']) {
+    for (const name of ['ekko-studio-api', 'ekko-studio-browser', 'ekko-studio-devices', 'ekko-studio-use', 'ekko-studio-plan']) {
       expect(mcp.mcpServers[name].env.ELECTRON_RUN_AS_NODE).toBe('1')
     }
     expect(mcp.mcpServers['ekko-studio-browser']).toMatchObject({
@@ -1622,7 +1622,7 @@ describe('coding agent launch preparation', () => {
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-devices]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-use]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-plan]')
-    expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-interaction\][\s\S]*?tool_timeout_sec = 360/)
+    expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-plan\][\s\S]*?tool_timeout_sec = 360/)
     expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-use\][\s\S]*?tool_timeout_sec = 360/)
   })
 
@@ -1753,7 +1753,7 @@ describe('coding agent launch preparation', () => {
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-devices]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-use]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-plan]')
-    expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-interaction\][\s\S]*?tool_timeout_sec = 360/)
+    expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-plan\][\s\S]*?tool_timeout_sec = 360/)
     expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-use\][\s\S]*?tool_timeout_sec = 360/)
   })
 

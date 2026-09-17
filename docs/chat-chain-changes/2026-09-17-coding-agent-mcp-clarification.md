@@ -1,14 +1,15 @@
 ---
 date: 2026-09-17
-pr: pending
+pr: 3085
 feature: Coding agent MCP user clarification
 impact: Headless coding agents can ask a question in the existing Studio/App interface and continue with the user's answer.
 ---
 
 ## Transport and scope
 
-Coding Agent MCP configuration now includes `ekko-studio-interaction`, exposing
-the direct `ekko_studio_clarify` tool. Claude Code, Codex, Pi, Grok, OpenCode, and
+The existing `ekko-studio-plan` MCP now exposes both `ekko_studio_update_plan`
+and `ekko_studio_clarify` as direct tools. Task cards and user questions share
+one managed MCP server. Claude Code, Codex, Pi, Grok, OpenCode, and
 DSH receive it through their existing managed configuration paths. It accepts
 `context_id`, a `question`, and optional string `choices`; free-text answers are
 allowed even when choices are supplied. There are no new client components.
@@ -36,7 +37,7 @@ a 330-second deadline rather than fetch's default response-header deadline.
 and remaining-time fields. Direct chats answer over `clarify.respond`; group
 chats use the existing manager relay. The HTTP request returns the actual answer
 and an explicit `reason`: `response`, `dismissed`, `timeout`, or `cancelled`.
-No response is never approval. Resolution broadcasts `clarify.resolved` and
+An absent response is never approval. Resolution broadcasts `clarify.resolved` and
 removes pending replay state, including when a user answers from another client.
 
 Completion, failure, stop, replacement by a new turn, session disposal, and
@@ -46,8 +47,8 @@ UI disconnection alone leaves the question available for reconnect/resume.
 Bindings are in-memory and intentionally do not survive server restart.
 
 After upgrading, restart Studio and any existing coding-agent processes so they
-load the additional MCP. Tool use depends on the agent following the injected
-instructions and the managed interaction server being enabled.
+load the updated plan MCP tool catalog. Tool use depends on the agent following the injected
+instructions and the managed plan server being enabled.
 
 ## Validation
 

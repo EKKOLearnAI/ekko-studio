@@ -25,7 +25,6 @@ const STUDIO_MANAGED_NAMES = new Set([
   'ekko-studio-devices',
   'ekko-studio-use',
   'ekko-studio-plan',
-  'ekko-studio-interaction',
 ])
 const MANAGED_ENV_KEY = 'HERMES_WEB_UI_MANAGED_MCP'
 

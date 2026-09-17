@@ -12,7 +12,7 @@ const DEFAULT_PORT = process.env.HERMES_WEB_UI_PORT || process.env.PORT || '8648
 const DEFAULT_BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`
 const DISPLAY_COMMAND = 'ekko-studio-mcp'
 const SERVER_NAME = process.env.HERMES_MCP_SERVER_NAME || DISPLAY_COMMAND
-const TOOLSETS = new Set(['api', 'browser', 'devices', 'use', 'plan', 'interaction'])
+const TOOLSETS = new Set(['api', 'browser', 'devices', 'use', 'plan'])
 const ALLOWED_PUBLIC_REQUEST_HEADERS = new Set([
   'accept',
   'accept-language',
@@ -47,7 +47,7 @@ function printHelp() {
 Ekko Studio MCP stdio server.
 
 Usage:
-  ${DISPLAY_COMMAND} [api|browser|devices|use|plan|interaction]
+  ${DISPLAY_COMMAND} [api|browser|devices|use|plan]
   ${DISPLAY_COMMAND} --help
   ${DISPLAY_COMMAND} --version
 
@@ -58,7 +58,7 @@ Environment:
   HERMES_WEB_UI_PROFILE   Default Hermes profile when a tool call omits profile.
   HERMES_WEB_UI_TOKEN     Optional explicit API token.
   AUTH_TOKEN              Optional explicit API token fallback.
-  HERMES_MCP_TOOLSET      Tool category to expose: api, browser, devices, use, plan, or interaction. Default: api.
+  HERMES_MCP_TOOLSET      Tool category to expose: api, browser, devices, use, or plan. Default: api.
 
 When run without options, this process waits for MCP JSON-RPC messages on stdin.
 `)
@@ -1010,8 +1010,8 @@ const tools = [
   },
   {
     name: 'ekko_studio_clarify',
-    toolset: 'interaction',
-    description: 'Ask the user one necessary clarification question in Studio/App and wait for their response. Provide optional choices or omit them for free text. Use only the latest interaction context_id. A timeout, dismissal, or cancellation is not consent; inspect reason before continuing. Unavailable to background tasks and delegated subagents.',
+    toolset: 'plan',
+    description: 'Ask the user one necessary clarification question during a Coding Agent turn in Studio/App and wait for their response. Provide optional choices or omit them for free text. Use only the latest interaction context_id. A timeout, dismissal, or cancellation is not consent; inspect reason before continuing. Unavailable to background tasks and delegated subagents.',
     inputSchema: inputSchema({
       context_id: { type: 'string', description: 'Current turn interaction context supplied by Studio.' },
       question: { type: 'string', minLength: 1, maxLength: 4000 },
@@ -1802,7 +1802,7 @@ function resolveToolName(name) {
 
 function activeToolsetTools() {
   return tools.filter(tool => tool.toolset === ACTIVE_TOOLSET
-    && (SHARED_TASK_PLAN_ENABLED || tool.name !== 'ekko_studio_update_plan'))
+    && (SHARED_TASK_PLAN_ENABLED || tool.toolset !== 'plan'))
 }
 
 function categoryToolCatalog(query = '') {
@@ -1818,9 +1818,8 @@ function categoryToolByName(name) {
 }
 
 function serverInstructions() {
-  if (ACTIVE_TOOLSET === 'interaction') return 'Use ekko_studio_clarify to ask a necessary question and wait for the user in Studio/App. Use only the latest interaction context_id. Never treat timeout, dismissal, or cancellation as approval.'
   if (ACTIVE_TOOLSET === 'plan') return SHARED_TASK_PLAN_ENABLED
-    ? 'Use ekko_studio_update_plan directly to maintain the current Studio task card. Use only the context_id supplied with the latest input; expired contexts cannot update another turn.'
+    ? 'Use ekko_studio_update_plan directly to maintain the current Studio task card. Use only the context_id supplied with the latest input; expired contexts cannot update another turn. In Coding Agent turns, use ekko_studio_clarify from this same MCP server to ask a necessary question and wait for the user in Studio/App, using the latest interaction context_id. Never treat timeout, dismissal, or cancellation as approval.'
     : ''
   if (ACTIVE_TOOLSET === 'api') {
     return 'Ekko Studio API operations. Use ekko_studio_api_openapi_get without filters for the compact module index, call it again with tag/path/method filters for endpoint details, then call ekko_studio_api_request with the documented relative path and JSON fields.'

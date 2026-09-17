@@ -407,6 +407,11 @@ describe('hermes-web-ui MCP server', () => {
       req.on('data', chunk => { raw += chunk })
       req.on('end', () => {
         requests.push({ path: req.url, method: req.method, body: JSON.parse(raw), profile: req.headers['x-hermes-profile'] })
+        if (req.url === '/api/studio/task-plans/update') {
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: true, revision: 1 }))
+          return
+        }
         answer = () => {
           res.setHeader('content-type', 'application/json')
           res.end(JSON.stringify({ ok: true, response: 'custom-folder', reason: 'response' }))
@@ -415,7 +420,7 @@ describe('hermes-web-ui MCP server', () => {
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const responses = new Map<number, any>()
-    child = spawn(process.execPath, ['bin/ekko-studio-mcp.mjs', 'interaction'], {
+    child = spawn(process.execPath, ['bin/ekko-studio-mcp.mjs', 'plan'], {
       cwd: process.cwd(), env: { ...process.env, HERMES_WEB_UI_URL: `http://127.0.0.1:${(server.address() as any).port}`, HERMES_WEB_UI_PROFILE: 'research' },
     })
     let buffer = ''
@@ -430,8 +435,8 @@ describe('hermes-web-ui MCP server', () => {
     try {
       writeRpc(child, 1, 'tools/list')
       const tools = (await waitForRpc(responses, 1)).result.tools
-      expect(tools.map((tool: any) => tool.name)).toEqual(['ekko_studio_clarify'])
-      expectProviderSafeToolNames('ekko-studio-interaction', tools)
+      expect(tools.map((tool: any) => tool.name)).toEqual(['ekko_studio_clarify', 'ekko_studio_update_plan'])
+      expectProviderSafeToolNames('ekko-studio-plan', tools)
       expect(tools[0].inputSchema.required).toEqual(['context_id', 'question'])
       const input = { context_id: 'current-turn', question: 'Which folder?', choices: ['client', 'server'] }
       writeRpc(child, 2, 'tools/call', { name: 'ekko_studio_clarify', arguments: { ...input, session_id: 'ignored' } })
@@ -439,6 +444,11 @@ describe('hermes-web-ui MCP server', () => {
       expect(answer).toBeTypeOf('function')
       expect(responses.has(2)).toBe(false)
       expect(requests).toEqual([{ path: '/api/studio/clarifications/request', method: 'POST', body: input, profile: 'research' }])
+      const plan = { context_id: 'current-turn', plan: [{ id: 'implement', step: 'Implement', status: 'in_progress' }] }
+      writeRpc(child, 3, 'tools/call', { name: 'ekko_studio_update_plan', arguments: plan })
+      expect(JSON.parse((await waitForRpc(responses, 3)).result.content[0].text)).toEqual({ ok: true, revision: 1 })
+      expect(requests[1]).toEqual({ path: '/api/studio/task-plans/update', method: 'POST', body: plan, profile: 'research' })
+      expect(responses.has(2)).toBe(false)
       if (outcome === 'cancel') {
         child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 2 } })}\n`)
         expect((await waitForRpc(responses, 2)).result.isError).toBe(true)
@@ -449,7 +459,7 @@ describe('hermes-web-ui MCP server', () => {
     } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
   })
 
-  it.each([false, true])('exposes a direct plan tool only outside Ekko (native=%s)', async native => {
+  it.each([false, true])('exposes planning and clarification together only outside Ekko (native=%s)', async native => {
     const requests: any[] = []
     const server = createServer((req, res) => {
       let raw = ''
@@ -478,14 +488,16 @@ describe('hermes-web-ui MCP server', () => {
     try {
       writeRpc(child, 1, 'tools/list')
       const tools = (await waitForRpc(responses, 1)).result.tools
-      expect(tools.map((tool: any) => tool.name)).toEqual(native ? [] : ['ekko_studio_update_plan'])
-      if (!native) expect(tools[0].inputSchema.required).toEqual(['context_id', 'plan'])
+      expect(tools.map((tool: any) => tool.name)).toEqual(native ? [] : ['ekko_studio_clarify', 'ekko_studio_update_plan'])
+      if (!native) expect(tools.find((tool: any) => tool.name === 'ekko_studio_update_plan').inputSchema.required).toEqual(['context_id', 'plan'])
       const input = { context_id: 'current-turn', plan: [{ id: 'check', step: 'Check', status: 'in_progress' }] }
       writeRpc(child, 2, 'tools/call', { name: 'ekko_studio_update_plan', arguments: input })
       const response = (await waitForRpc(responses, 2)).result
       if (native) {
         expect(response.isError).toBe(true)
         expect(response.content[0].text).toContain('not available')
+        writeRpc(child, 3, 'tools/call', { name: 'ekko_studio_clarify', arguments: { context_id: 'current-turn', question: 'Q' } })
+        expect((await waitForRpc(responses, 3)).result.isError).toBe(true)
         expect(requests).toEqual([])
       } else {
         expect(response.isError).not.toBe(true)
