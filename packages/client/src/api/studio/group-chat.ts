@@ -179,6 +179,7 @@ export interface AgentAddResult {
 }
 
 export interface ChatMessage {
+    taskPlan?: import('@/utils/task-plan').TaskPlanSnapshot
     id: string
     roomId: string
     senderId: string

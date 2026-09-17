@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskPlanCard from '../chat/TaskPlanCard.vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
@@ -681,7 +682,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div v-if="isToolMessage" class="group-message tool-message" :class="{ embedded }">
+    <TaskPlanCard v-if="message.taskPlan" :plan="message.taskPlan" />
+    <div v-else-if="isToolMessage" class="group-message tool-message" :class="{ embedded }">
         <div class="msg-body">
             <div v-if="!embedded" class="msg-header">
                 <GroupAgentMessageAvatar

@@ -1,3 +1,4 @@
+import { parseGroupTaskPlanMessage, isOlderGroupTaskPlan } from '@/utils/task-plan'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useSettingsStore } from './settings'
@@ -140,6 +141,7 @@ function needsFinalContentRecovery(message: ChatMessage): boolean {
 }
 
 function mergeFinalMessage(existing: ChatMessage | null, msg: ChatMessage): ChatMessage {
+    if (existing && isOlderGroupTaskPlan(existing, msg)) return existing
     return {
         ...msg,
         content: hasText(msg.content) ? msg.content : existing?.content || msg.content || '',
@@ -679,7 +681,7 @@ export const useGroupChatStore = defineStore('groupChat', () => {
             const byId = new Map(messages.value.map(message => [message.id, message]))
             for (const message of res.messages) {
                 const existing = byId.get(message.id)
-                byId.set(message.id, existing ? { ...existing, ...message } : message)
+                byId.set(message.id, existing && isOlderGroupTaskPlan(existing, message) ? existing : existing ? { ...existing, ...message } : message)
             }
             messages.value = Array.from(byId.values()).sort((a, b) => a.timestamp - b.timestamp)
             if (typeof res.total === 'number' || typeof res.hasMore === 'boolean') {
@@ -2177,6 +2179,11 @@ function mapGroupMessages(msgs: ChatMessage[], activeAgentNames = new Set<string
             continue
         }
 
+        const taskPlan = parseGroupTaskPlanMessage(msg)
+        if (taskPlan) {
+            result.push({ ...msg, role: 'assistant', content: '', taskPlan })
+            continue
+        }
         if (msg.role === 'tool') {
             const tcId = msg.tool_call_id || ''
             const pairKey = groupToolPairKey(msg, tcId)
@@ -2270,7 +2277,7 @@ export function groupAgentRunMessages(messages: ChatMessage[]): ChatMessage[] {
         result.push(grouped)
     }
     for (const grouped of groupedByRun.values()) {
-        grouped.runItems!.sort((left, right) => left.timestamp - right.timestamp)
+        grouped.runItems!.sort((left, right) => Number(Boolean(left.taskPlan)) - Number(Boolean(right.taskPlan)) || left.timestamp - right.timestamp)
     }
     return result
 }

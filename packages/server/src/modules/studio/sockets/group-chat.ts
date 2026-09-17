@@ -1,3 +1,4 @@
+import { parseGroupTaskPlan } from '../services/group-chat/task-plan'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
 import { publishGroupMessage, registerGroupEventAccess } from '../services/webhooks/app-events'
 import { Server, Socket, Namespace } from 'socket.io'
@@ -742,6 +743,15 @@ class ChatStorage {
                )`
         ).run(Date.now())
         const now = Date.now()
+        // Group runs cannot survive a server restart; never leave their persisted cards spinning.
+        const interruptedPlan = db.prepare('UPDATE gc_messages SET content = ? WHERE id = ?')
+        for (const row of db.prepare("SELECT id, content FROM gc_messages WHERE role = 'tool' AND tool_name = 'task_plan'").all() as Array<{ id: string; content: string }>) {
+            const plan = parseGroupTaskPlan(row.content)
+            if (!plan || plan.execution_state !== 'running') continue
+            interruptedPlan.run(JSON.stringify({ ...plan, revision: plan.revision + 1, execution_state: 'interrupted', updated_at: now,
+                plan: plan.plan.map(step => ({ ...step, status: step.status === 'in_progress' ? 'pending' : step.status })),
+            }), row.id)
+        }
         db.prepare(
             `UPDATE gc_execution_queue
              SET status = 'failed', finishedAt = ?, lastError = 'Studio restarted before queued work started'
@@ -1728,7 +1738,8 @@ class ChatStorage {
         return String(content)
     }
 
-    private messageUsageTokens(message: Pick<ChatMessage, 'role' | 'content' | 'tool_calls' | 'reasoning' | 'reasoning_content'>): number {
+    private messageUsageTokens(message: Pick<ChatMessage, 'role' | 'content' | 'tool_calls' | 'reasoning' | 'reasoning_content' | 'tool_name'>): number {
+        if (message.tool_name === 'task_plan') return 0
         const role = message.role || 'user'
         if (role === 'user') return countTokens(this.contentToUsageText(message.content))
         if (role !== 'assistant' && role !== 'tool') return 0
@@ -1752,7 +1763,7 @@ class ChatStorage {
         const where = ['roomId = ?']
         const params: Array<string | number> = [roomId]
         if (options.excludeWorkspaceDiff) {
-            where.push("COALESCE(tool_name, '') <> 'workspace_diff'")
+            where.push("COALESCE(tool_name, '') NOT IN ('workspace_diff', 'task_plan')")
         }
         if (options.throughMessageId) {
             const through = db.prepare(
@@ -2150,13 +2161,13 @@ class ChatStorage {
         if (!db) return []
         const boundary = db.prepare(
             `SELECT timestamp FROM gc_messages
-             WHERE roomId = ? AND COALESCE(tool_name, '') <> 'workspace_diff'
+             WHERE roomId = ? AND COALESCE(tool_name, '') NOT IN ('workspace_diff', 'task_plan')
              ORDER BY timestamp DESC, id DESC
              LIMIT 1 OFFSET ?`,
         ).get(roomId, GROUP_CHAT_CONTEXT_MESSAGE_WINDOW - 1) as { timestamp: number } | undefined
         const rows = db.prepare(
             `SELECT id FROM gc_messages
-             WHERE roomId = ? AND COALESCE(tool_name, '') <> 'workspace_diff'${boundary ? ' AND timestamp >= ?' : ''}
+             WHERE roomId = ? AND COALESCE(tool_name, '') NOT IN ('workspace_diff', 'task_plan')${boundary ? ' AND timestamp >= ?' : ''}
              ORDER BY timestamp DESC, id DESC
              LIMIT ?`,
         ).all(
@@ -2215,6 +2226,23 @@ class ChatStorage {
         db.exec('BEGIN IMMEDIATE')
         try {
             const existing = this.getMessage(msg.id)
+            if (msg.tool_name === 'task_plan' || existing?.tool_name === 'task_plan') {
+                const plan = msg.role === 'tool' ? parseGroupTaskPlan(msg.content) : null
+                if (!plan || msg.run_id !== plan.run_id) throw new Error('Invalid group task plan')
+                if (existing) {
+                    const previous = parseGroupTaskPlan(existing.content)
+                    if (existing.roomId !== msg.roomId || existing.senderId !== msg.senderId || !previous
+                        || previous.session_id !== plan.session_id || previous.plan_id !== plan.plan_id || previous.run_id !== plan.run_id) {
+                        throw new Error('Group task plan identity mismatch')
+                    }
+                    if (previous.revision >= plan.revision) {
+                        const totalTokens = Number(this.getRoom(existing.roomId)?.totalTokens || 0)
+                        db.exec('COMMIT')
+                        return { message: existing, totalTokens }
+                    }
+                    msg = { ...msg, timestamp: existing.timestamp }
+                }
+            }
             if (existing?.tool_name === 'workspace_diff') {
                 this.ensureCurrentRoomTokenAccounting(existing.roomId)
                 const totalTokens = Number(this.getRoom(existing.roomId)?.totalTokens || 0)
@@ -4632,7 +4660,13 @@ export class GroupChatServer {
             reasoning_content: !isHumanMessage ? data.reasoning_content ?? null : null,
         }
 
-        const saved = this.storage.saveMessageAndRefreshRoom(msg)
+        let saved: ReturnType<ChatStorage['saveMessageAndRefreshRoom']>
+        try { saved = this.storage.saveMessageAndRefreshRoom(msg) }
+        catch (error) {
+            logger.warn(error, '[GroupChat] message persistence failed')
+            ack?.({ error: 'Message could not be saved' })
+            return
+        }
         const savedMsg = saved.message
         const totalTokens = saved.totalTokens
 

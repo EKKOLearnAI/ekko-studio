@@ -74,7 +74,7 @@ export function buildProjectedGroupChatHistory(
     }
 
     history.push(...messages
-        .filter((message) => !isWorkspaceDiffToolMessage(message))
+        .filter((message) => !isWorkspaceDiffToolMessage(message) && message.tool_name !== 'task_plan')
         .map((message) => projectGroupChatMessage(message, ownAgent)))
     return history
 }

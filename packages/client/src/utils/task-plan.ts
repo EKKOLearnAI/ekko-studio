@@ -94,3 +94,16 @@ export function positionTaskPlansAtTurnEnd(messages: Message[]): Message[] {
   }
   return result
 }
+
+/** Read a persisted group task card without interpreting ordinary tool output. */
+export function parseGroupTaskPlanMessage(message: { role?: string; tool_name?: string | null; content?: unknown }) {
+  if (message.role !== 'tool' || message.tool_name !== 'task_plan') return null
+  try { return parseTaskPlan(typeof message.content === 'string' ? JSON.parse(message.content) : message.content) }
+  catch { return null }
+}
+
+export function isOlderGroupTaskPlan(current: Parameters<typeof parseGroupTaskPlanMessage>[0] | null | undefined, incoming: Parameters<typeof parseGroupTaskPlanMessage>[0]): boolean {
+  const oldPlan = current && parseGroupTaskPlanMessage(current)
+  const next = parseGroupTaskPlanMessage(incoming)
+  return Boolean(oldPlan && (!next || (oldPlan.session_id === next.session_id && oldPlan.plan_id === next.plan_id && oldPlan.revision >= next.revision)))
+}

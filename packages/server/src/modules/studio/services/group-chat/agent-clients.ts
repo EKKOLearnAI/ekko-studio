@@ -1,3 +1,6 @@
+import { withTaskPlanTurnContext } from '../task-plan-runs'
+import type { TaskPlanSnapshot } from '../../contracts/task-plan'
+import { groupTaskPlanMessage } from './task-plan'
 import { io, Socket } from 'socket.io-client'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { getToken } from '../../public/auth'
@@ -322,6 +325,10 @@ export interface GroupChatRunService {
         reasoning?: string | null
         error?: string
     }>
+    beginGroupTaskPlanRun?(sessionId: string, profile: string, runId: string, isCurrent: () => boolean, publish: (snapshot: TaskPlanSnapshot) => void): {
+        contextId: string
+        finish(state: 'ended' | 'interrupted' | 'failed'): void
+    }
     abortSession(sessionId: string, reason?: string): Promise<void>
     disposeSession?(sessionId: string): Promise<void>
     respondCodingAgentApproval?(sessionId: string, approvalId: string, choice: string): boolean
@@ -1248,6 +1255,11 @@ export class AgentClient implements GroupAgentExecutor {
             }, {
                 profile: this.profile,
                 onEvent: (event, payload = {}) => {
+                    // Keep the terminal card after a user interrupt, while still rejecting an old room session.
+                    if (event === 'plan.updated' && payload.execution_state !== 'running' && this.roomSessionIsCurrent(roomId, sessionId)) {
+                        queueToolEventWrite(() => this.recordTaskPlan(roomId, sessionId, responseRunId, payload))
+                        return
+                    }
                     if (!isCurrent()) {
                         if (!abortRequested) {
                             abortRequested = true
@@ -1262,6 +1274,8 @@ export class AgentClient implements GroupAgentExecutor {
                         sawReasoningDelta = true
                         reasoningContent += payload.delta
                         this.emitMessageReasoningDelta(roomId, runMessageId, payload.delta, sessionId)
+                    } else if (event === 'plan.updated') {
+                        queueToolEventWrite(() => this.recordTaskPlan(roomId, sessionId, responseRunId, payload))
                     } else if (event === 'tool.started') {
                         const toolReasoning = reasoningContent
                         reasoningContent = ''
@@ -1372,6 +1386,9 @@ export class AgentClient implements GroupAgentExecutor {
         let workspaceRunState: WorkspaceDiffRunState | null = null
         let activeSessionId = ''
         let activeReplyInterruptVersion = 0
+        let groupPlan: ReturnType<NonNullable<GroupChatRunService['beginGroupTaskPlanRun']>> | undefined
+        let planWrites = Promise.resolve()
+        let planFailed = false
         let staleStartedRunStopped = false
         let stopStaleStartedRun: ((reason?: string) => Promise<void>) | null = null
         try {
@@ -1447,9 +1464,13 @@ export class AgentClient implements GroupAgentExecutor {
                 : `${routedPrefix}\n\nOriginal message: ${stripMentionRoutingTokens(msg.content, this.name) || msg.content}`
             const runPrompt = 'When calling Hermes Web UI endpoints from tools or skills, include the current Hermes profile as the X-Hermes-Profile header if the endpoint supports profile-scoped behavior.'
             instructions = `${instructions}\n\n${runPrompt}`
-            const bridgeInput: GroupPrimaryAgentBridgeMessage = isContentBlockArray(input)
-                ? await convertContentBlocksForAgent(input)
-                : input
+            groupPlan = this.chatRunService?.beginGroupTaskPlanRun?.(sessionId, this.profile, runMessageId,
+                () => this.replySessionIsCurrent(roomId, sessionId, replyInterruptVersion),
+                snapshot => { planWrites = planWrites.then(() => this.recordTaskPlan(roomId, sessionId, runMessageId, snapshot)).catch(error => { logger.warn(error, '[GroupChat] task plan delivery failed') }) })
+            const planInput = withTaskPlanTurnContext(input, groupPlan?.contextId)
+            const bridgeInput: GroupPrimaryAgentBridgeMessage = isContentBlockArray(planInput)
+                ? await convertContentBlocksForAgent(planInput)
+                : planInput as string
             if (!this.replySessionIsCurrent(roomId, sessionId, replyInterruptVersion)) {
                 await stopStaleStartedRun?.()
                 return
@@ -1601,6 +1622,7 @@ export class AgentClient implements GroupAgentExecutor {
             this.stopTyping(roomId)
             reportStatus('ready')
         } catch (err: any) {
+            planFailed = true
             logger.error(`[AgentClients] ${this.name}: error handling message: ${err.message}`)
             if (activeSessionId && !this.replySessionIsCurrent(roomId, activeSessionId, activeReplyInterruptVersion)) {
                 await stopStaleStartedRun?.()
@@ -1627,6 +1649,10 @@ export class AgentClient implements GroupAgentExecutor {
                 onStatus?.('ready', { runId: runMessageId })
             }
         } finally {
+            try {
+                groupPlan?.finish(!this.replySessionIsCurrent(roomId, activeSessionId, activeReplyInterruptVersion) ? 'interrupted' : planFailed ? 'failed' : 'ended')
+                await planWrites
+            } catch (error) { logger.warn(error, '[GroupChat] task plan finalization failed') }
             if (activeSessionId) {
                 if (this.activeSessions.get(roomId) === activeSessionId) this.activeSessions.delete(roomId)
                 await createGroupPrimaryAgentBridge().destroy(activeSessionId, this.profile).catch((err: any) => {
@@ -1735,6 +1761,11 @@ export class AgentClient implements GroupAgentExecutor {
             }
         }
         return reasoning
+    }
+
+    private async recordTaskPlan(roomId: string, sessionId: string, runId: string, snapshot: unknown): Promise<void> {
+        const message = groupTaskPlanMessage(roomId, sessionId, runId, snapshot)
+        if (message) await this.sendMessage(roomId, message.content, message.id, message.extra, sessionId)
     }
 
     private recordToolStarted(

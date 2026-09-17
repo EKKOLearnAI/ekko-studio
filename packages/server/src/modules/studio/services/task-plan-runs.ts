@@ -4,7 +4,7 @@ import type { TaskPlanSnapshot } from '../contracts/task-plan'
 type PlanUpdate = Pick<TaskPlanSnapshot, 'explanation' | 'plan'>
 type TerminalState = Exclude<TaskPlanSnapshot['execution_state'], 'running'>
 type RunState = { isWorking: boolean; isAborting?: boolean; activeRunMarker?: string; responseRun?: { runMarker?: string } }
-type Binding = { sessionId: string; profile: string; resolve: () => RunState | undefined; snapshot?: TaskPlanSnapshot }
+type Binding = { sessionId: string; profile: string; resolve: () => RunState | undefined; snapshot?: TaskPlanSnapshot; publish?: (snapshot: TaskPlanSnapshot) => void }
 
 export class TaskPlanError extends Error {
   constructor(message: string, public readonly status = 400) { super(message) }
@@ -46,10 +46,10 @@ export class TaskPlanRuns {
     private readonly publish: (sessionId: string, snapshot: TaskPlanSnapshot) => void,
   ) {}
 
-  begin(sessionId: string, profile: string, resolve: Binding['resolve']): string {
+  begin(sessionId: string, profile: string, resolve: Binding['resolve'], publish?: Binding['publish']): string {
     this.finishSession(sessionId, 'interrupted')
     const contextId = randomUUID()
-    this.bindings.set(contextId, { sessionId, profile, resolve })
+    this.bindings.set(contextId, { sessionId, profile, resolve, publish })
     this.sessions.set(sessionId, contextId)
     return contextId
   }
@@ -71,7 +71,7 @@ export class TaskPlanRuns {
     }
     this.commit(snapshot)
     binding.snapshot = snapshot
-    this.publish(binding.sessionId, snapshot)
+    binding.publish ? binding.publish(snapshot) : this.publish(binding.sessionId, snapshot)
     return structuredClone(snapshot)
   }
 
@@ -87,7 +87,7 @@ export class TaskPlanRuns {
       plan: binding.snapshot.plan.map(step => ({ ...step, status: step.status === 'in_progress' ? 'pending' : step.status })),
     }
     this.commit(snapshot)
-    this.publish(binding.sessionId, snapshot)
+    binding.publish ? binding.publish(snapshot) : this.publish(binding.sessionId, snapshot)
   }
 
   finishSession(sessionId: string, state: TerminalState): void {
