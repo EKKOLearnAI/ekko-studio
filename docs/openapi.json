@@ -17525,229 +17525,6 @@
         ]
       }
     },
-    "/api/studio/session-pins": {
-      "get": {
-        "tags": [
-          "Sessions"
-        ],
-        "summary": "List synchronized session pins",
-        "description": "GET /api/studio/session-pins",
-        "operationId": "listPins",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Current pins",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "pinnedIds"
-                  ],
-                  "properties": {
-                    "pinnedIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid pin payload"
-          },
-          "401": {
-            "description": "Authentication required"
-          },
-          "403": {
-            "description": "Profile access denied"
-          }
-        },
-        "parameters": [
-          {
-            "name": "profile",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Profile scope; defaults to the active profile."
-          }
-        ]
-      }
-    },
-    "/api/studio/session-pins/migrate": {
-      "post": {
-        "tags": [
-          "Sessions"
-        ],
-        "summary": "Import legacy browser pins without overwriting server decisions",
-        "description": "POST /api/studio/session-pins/migrate",
-        "operationId": "migratePins",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Current pins",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "pinnedIds"
-                  ],
-                  "properties": {
-                    "pinnedIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid pin payload"
-          },
-          "401": {
-            "description": "Authentication required"
-          },
-          "403": {
-            "description": "Profile access denied"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "pinnedIds"
-                ],
-                "properties": {
-                  "pinnedIds": {
-                    "type": "array",
-                    "maxItems": 10000,
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "profile",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Profile scope; defaults to the active profile."
-          }
-        ]
-      }
-    },
-    "/api/studio/session-pins/{id}": {
-      "put": {
-        "tags": [
-          "Sessions"
-        ],
-        "summary": "Set or clear a session pin",
-        "description": "PUT /api/studio/session-pins/:id",
-        "operationId": "updatePin",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Current pins",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "pinnedIds"
-                  ],
-                  "properties": {
-                    "pinnedIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid pin payload"
-          },
-          "401": {
-            "description": "Authentication required"
-          },
-          "403": {
-            "description": "Profile access denied"
-          }
-        },
-        "parameters": [
-          {
-            "name": "profile",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Profile scope; defaults to the active profile."
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 512
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "pinned"
-                ],
-                "properties": {
-                  "pinned": {
-                    "type": "boolean"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/studio/sessions": {
       "get": {
         "tags": [
@@ -18734,6 +18511,60 @@
                 "required": [
                   "model"
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/sessions/{id}/pin": {
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create pin",
+        "description": "POST /api/studio/sessions/:id/pin",
+        "operationId": "setPinned",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "is_pinned"
+                ],
+                "properties": {
+                  "is_pinned": {
+                    "type": "boolean"
+                  }
+                }
               }
             }
           }

@@ -23,6 +23,23 @@ describe('session store filtering', () => {
     vi.resetModules()
   })
 
+  it('stores pins on sessions, retains categories, and includes old pins before pagination', async () => {
+    const { createSession, getSession, listSessions, setSessionPinned } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    createSession({ id: 'old', profile: 'default', category_id: 1 })
+    createSession({ id: 'new', profile: 'default' })
+    createSession({ id: 'other', profile: 'work' })
+    db.prepare('UPDATE sessions SET last_active = 1 WHERE id = ?').run('old')
+    expect(getSession('old')?.is_pinned).toBe(0)
+    expect(setSessionPinned('old', true)).toBe(true)
+    expect(getSession('old')).toMatchObject({ is_pinned: 1, category_id: 1 })
+    expect(listSessions('default', undefined, 1).map(s => s.id)).toEqual(['old'])
+    expect(listSessions('default', undefined, 100, { pinnedOnly: true }).map(s => s.id)).toEqual(['old'])
+    expect(listSessions('work', undefined, 100, { pinnedOnly: true })).toEqual([])
+    expect(setSessionPinned('old', false)).toBe(true)
+    expect(listSessions('default', undefined, 100, { pinnedOnly: true })).toEqual([])
+    expect(setSessionPinned('missing', true)).toBe(false)
+  })
+
   it('resolves notification title for untitled sessions and bounds assistant preview', async () => {
     const { createSession, addMessage, getSessionNotificationPreview } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     createSession({ id: 'untitled-notice', profile: 'default', source: 'coding_agent' })

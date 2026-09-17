@@ -3,9 +3,6 @@ import * as ctrl from '../controllers/sessions'
 
 export const sessionRoutes = new Router()
 
-sessionRoutes.get('/api/studio/session-pins', ctrl.listPins)
-sessionRoutes.post('/api/studio/session-pins/migrate', ctrl.migratePins)
-sessionRoutes.put('/api/studio/session-pins/:id', ctrl.updatePin)
 sessionRoutes.get('/api/studio/sessions/conversations', ctrl.listConversations)
 sessionRoutes.get('/api/studio/session-categories', ctrl.listCategories)
 sessionRoutes.post('/api/studio/session-categories', ctrl.createCategory)
@@ -45,6 +42,7 @@ sessionRoutes.post('/api/studio/sessions/:id/rename', ctrl.rename)
 sessionRoutes.post('/api/studio/sessions/:id/archive', ctrl.archive)
 sessionRoutes.post('/api/studio/sessions/:id/unarchive', ctrl.unarchive)
 sessionRoutes.post('/api/studio/sessions/:id/push-enabled', ctrl.setPushEnabled)
+sessionRoutes.post('/api/studio/sessions/:id/pin', ctrl.setPinned)
 sessionRoutes.post('/api/studio/sessions/:id/workspace', ctrl.setWorkspace)
 sessionRoutes.post('/api/studio/sessions/:id/category', ctrl.setCategory)
 sessionRoutes.post('/api/studio/sessions/:id/model', ctrl.setModel)

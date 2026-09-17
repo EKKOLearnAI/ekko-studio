@@ -48,9 +48,6 @@ const renameWorkspaceFileMock = vi.fn(async (ctx: any) => { ctx.body = { ok: tru
 const copyWorkspaceFileMock = vi.fn(async (ctx: any) => { ctx.body = { ok: true } })
 
 vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => ({
-  listPins: vi.fn(),
-  updatePin: vi.fn(),
-  migratePins: vi.fn(),
   listConversations: listConversationsMock,
   getConversationMessages: getConversationMessagesMock,
   getConversationMessagesPaginated: getConversationMessagesPaginatedMock,
@@ -73,6 +70,7 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
   archive: archiveMock,
   unarchive: unarchiveMock,
   setPushEnabled: setPushEnabledMock,
+  setPinned: vi.fn(),
   setWorkspace: setWorkspaceMock,
   setCategory: setCategoryMock,
   setModel: setModelMock,

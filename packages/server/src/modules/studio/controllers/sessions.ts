@@ -1,4 +1,3 @@
-import { listSessionPins, migrateSessionPins, setSessionPin, SessionPinValidationError } from '../services/sessions/pins'
 import { getSessionTaskPlans } from '../services/task-plans'
 import {
   deleteHermesSessionForProfile,
@@ -25,6 +24,7 @@ import {
   renameSession as localRenameSession,
   setSessionArchived as localSetSessionArchived,
   setSessionPushEnabled as localSetSessionPushEnabled,
+  setSessionPinned as localSetSessionPinned,
   createSession as localCreateSession,
   addMessages as localAddMessages,
   updateSession as localUpdateSession,
@@ -201,6 +201,7 @@ function mergeHermesHistorySessions(
   for (const [id, session] of historySessionsById) {
     const localSession = localSessionsById.get(id)
     if (localSession?.is_archived != null) session.is_archived = localSession.is_archived
+    session.is_pinned = Number(localSession?.is_pinned || 0)
     session.push_enabled = Number(localSession?.push_enabled || 0) !== 0 ? 1 : 0
   }
 
@@ -482,10 +483,10 @@ export async function list(ctx: any) {
   const requestedOffset = Number(ctx.query.offset)
   const offset = Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0
   const category = ctx.query.category
-  const categoryId = category === 'none' ? null : category === undefined ? undefined : Number(category)
+  const categoryId = category === 'none' ? null : category === undefined || category === 'pinned' ? undefined : Number(category)
   if (categoryId !== undefined && categoryId !== null && (!Number.isSafeInteger(categoryId) || categoryId <= 0)) {
     ctx.status = 400
-    ctx.body = { error: 'category must be a positive integer or none' }
+    ctx.body = { error: 'category must be a positive integer, none, or pinned' }
     return
   }
   const readIds = (raw: unknown): string[] => (Array.isArray(raw) ? raw : raw ? [raw] : [])
@@ -499,6 +500,7 @@ export async function list(ctx: any) {
     ? [...knownProfiles].filter(name => !allowedProfiles || allowedProfiles.has(name))
     : undefined
   const listOptions = {
+    ...(category === 'pinned' ? { pinnedOnly: true } : {}),
     ...(categoryId !== undefined ? { categoryId } : {}),
     ...(includedIds !== undefined ? { includeSessionIds: includedIds } : {}),
     sources: source ? undefined : requestedSessionSources(),
@@ -689,7 +691,7 @@ export async function listHermesSessionGroups(ctx: any) {
     })
   }
 
-  const localIncluded = localSessions.filter(session => includedIds.includes(session.id))
+  const localIncluded = localSessions.filter(session => session.is_pinned || includedIds.includes(session.id))
   const included = mergeHermesHistorySessions(ctx, profile, hermesResult.included, localIncluded)
   ctx.body = { groups, included }
 }
@@ -1439,6 +1441,28 @@ export async function unarchive(ctx: any) {
   ctx.body = { ok: true }
 }
 
+export async function setPinned(ctx: any) {
+  const existing = localGetSession(ctx.params.id)
+  if (!existing) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+  if (denySessionAccess(ctx, existing)) return
+  const { is_pinned } = ctx.request.body || {}
+  if (typeof is_pinned !== 'boolean') {
+    ctx.status = 400
+    ctx.body = { error: 'is_pinned must be a boolean' }
+    return
+  }
+  if (!localSetSessionPinned(ctx.params.id, is_pinned)) {
+    ctx.status = 500
+    ctx.body = { error: 'Failed to update session pin' }
+    return
+  }
+  ctx.body = { ok: true, is_pinned }
+}
+
 export async function setPushEnabled(ctx: any) {
   const existing = localGetSession(ctx.params.id)
   if (!existing) {
@@ -2123,52 +2147,5 @@ export async function getConversationMessagesPaginated(ctx: any) {
     offset: result.offset,
     limit: result.limit,
     hasMore: result.hasMore,
-  }
-}
-
-function pinScope(ctx: any): { userId: number; profile: string } | null {
-  const userId = ctx.state?.user?.id
-  if (!userId) {
-    ctx.status = 401
-    ctx.body = { error: 'Unauthorized' }
-    return null
-  }
-  const profile = requestedProfile(ctx) || getActiveProfileName() || 'default'
-  if (!canAccessProfile(ctx, profile)) {
-    ctx.status = 403
-    ctx.body = { error: 'Profile is not available for this user' }
-    return null
-  }
-  return { userId, profile }
-}
-
-export async function listPins(ctx: any) {
-  const scope = pinScope(ctx)
-  if (scope) ctx.body = { pinnedIds: listSessionPins(scope.userId, scope.profile) }
-}
-
-export async function updatePin(ctx: any) {
-  const scope = pinScope(ctx)
-  if (!scope) return
-  try {
-    const body = ctx.request.body || {}
-    ctx.body = { pinnedIds: setSessionPin(scope.userId, scope.profile, ctx.params.id, body.pinned) }
-  } catch (error) {
-    if (!(error instanceof SessionPinValidationError)) throw error
-    ctx.status = 400
-    ctx.body = { error: error.message }
-  }
-}
-
-export async function migratePins(ctx: any) {
-  const scope = pinScope(ctx)
-  if (!scope) return
-  try {
-    const body = ctx.request.body || {}
-    ctx.body = { pinnedIds: migrateSessionPins(scope.userId, scope.profile, body.pinnedIds) }
-  } catch (error) {
-    if (!(error instanceof SessionPinValidationError)) throw error
-    ctx.status = 400
-    ctx.body = { error: error.message }
   }
 }

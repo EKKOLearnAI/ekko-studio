@@ -483,6 +483,7 @@ export interface Session {
   parentLastMessage?: string | null
   parentLastMessageRole?: string | null
   lastActiveAt?: number
+  isPinned?: boolean
   isArchived?: boolean
   pushEnabled?: boolean
   workspace?: string | null
@@ -1188,6 +1189,7 @@ function mapHermesSession(s: SessionSummary): Session {
     parentLastMessage: s.parent_last_message || null,
     parentLastMessageRole: s.parent_last_message_role || null,
     lastActiveAt: s.last_active != null ? Math.round(s.last_active * 1000) : undefined,
+    isPinned: Boolean(s.is_pinned),
     isArchived: Boolean(s.is_archived),
     pushEnabled: Boolean(s.push_enabled),
     workspace: s.workspace || null,
@@ -1862,6 +1864,7 @@ export const useChatStore = defineStore('chat', () => {
           existing.inputTokens = fresh.inputTokens
           existing.outputTokens = fresh.outputTokens
           existing.workspace = fresh.workspace
+          existing.isPinned = fresh.isPinned
           existing.categoryId = fresh.categoryId
           existing.isLocalOnly = false
           // messageTotal: keep the larger of server count vs what we've loaded,
@@ -1920,6 +1923,7 @@ export const useChatStore = defineStore('chat', () => {
       target.hasMoreBefore = detail.hasMore
       if (detail.session.title) target.title = detail.session.title
       target.workspace = detail.session.workspace || target.workspace || null
+      target.isPinned = Boolean(detail.session.is_pinned)
       target.categoryId = detail.session.category_id ?? null
       if (!pushEnabledWriteTargets.has(sid)) target.pushEnabled = Boolean(detail.session.push_enabled)
       target.isLocalOnly = false
