@@ -114,20 +114,23 @@ describe('ekko-agent skill tools', () => {
     })
   })
 
-  it('does not read the next frontmatter key as an empty description', async () => {
+  it.each(['\n', '\r\n'].flatMap(newline =>
+    [[], [''], [' \t '], ['', ' \t ', '']].map(blankLines => ({ newline, blankLines })),
+  ))('preserves indented descriptions without consuming the next key (%j)', async ({ newline, blankLines }) => {
     const directory = join(skillDirectory, 'blank-description')
     await mkdir(directory, { recursive: true })
     await writeFile(join(directory, 'SKILL.md'), [
       '---',
       'name: blank-description',
-      'description:',
+      'description: \t',
+      ...blankLines,
       'metadata:',
       '  keywords: [blank description]',
       '---',
       '# Blank Description',
       'Body guidance.',
       '',
-    ].join('\n'))
+    ].join(newline))
 
     await expect(inspectLocalSkillValidationIssues(skillDirectory)).resolves.toContainEqual(
       expect.objectContaining({
@@ -140,13 +143,15 @@ describe('ekko-agent skill tools', () => {
     expect(listed.data).toMatchObject({
       skills: [{ name: 'blank-description', description: 'Body guidance.', validationStatus: 'invalid' }],
     })
+    await expect(matchSkillsForUserMessage(skillDirectory, 'blank description')).resolves.toEqual([])
 
     const indented = join(skillDirectory, 'indented-description')
     await mkdir(indented, { recursive: true })
     await writeFile(join(indented, 'SKILL.md'), [
       '---',
       'name: indented-description',
-      'description:',
+      'description: \t',
+      ...blankLines,
       '  Indented guidance.',
       'metadata:',
       '  keywords: [indented description]',
@@ -154,11 +159,14 @@ describe('ekko-agent skill tools', () => {
       '# Indented Description',
       'Body guidance.',
       '',
-    ].join('\n'))
+    ].join(newline))
     const indentedListed = await new SkillListTool(skillDirectory).execute({ query: 'indented-description' })
     expect(indentedListed.data).toMatchObject({
       skills: [{ name: 'indented-description', description: 'Indented guidance.', validationStatus: 'valid' }],
     })
+    await expect(matchSkillsForUserMessage(skillDirectory, 'indented description')).resolves.toMatchObject([
+      { name: 'indented-description' },
+    ])
   })
 
   it('hard-matches only skill names and maintained keywords', async () => {

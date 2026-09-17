@@ -768,7 +768,7 @@ function skillCategory(root: string, directory: string): string {
 function extractSkillDescription(content: string): string {
   const frontmatter = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)
   if (frontmatter) {
-    const match = frontmatter[1].match(/^description:[ \t]*(?:\r?\n[ \t]+)?(.+)$/im)
+    const match = frontmatter[1].match(/^description:[ \t]*(?:\r?\n(?:[ \t]*\r?\n)*[ \t]+)?(.+)$/im)
     const description = match?.[1]?.trim().replace(/^(['"])(.*)\1$/, '$2')
     if (description && description !== '|' && description !== '>') return description.slice(0, 240)
   }
@@ -1050,7 +1050,7 @@ export function skillValidationResult(
 }
 
 function scalarFrontmatterValue(frontmatter: string, key: string): string {
-  const match = frontmatter.match(new RegExp(`^${key}:[ \\t]*(?:\\r?\\n[ \\t]+)?(.+)$`, 'im'))
+  const match = frontmatter.match(new RegExp(`^${key}:[ \\t]*(?:\\r?\\n(?:[ \\t]*\\r?\\n)*[ \\t]+)?(.+)$`, 'im'))
   return match?.[1]?.trim().replace(/^(['"])(.*)\1$/, '$2') || ''
 }
 
