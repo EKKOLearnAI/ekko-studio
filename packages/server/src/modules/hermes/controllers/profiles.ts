@@ -25,7 +25,7 @@ import {
 } from '../services/profiles/lifecycle'
 import { exportProfileWithoutHermes, importProfileWithoutHermes } from '../services/profiles/archive'
 import { HermesSkillInjector } from '../services/skills/injector'
-import type { HermesProfile } from '../services/runtime/cli'
+import { readProfileDisplayName, type HermesProfile } from '../services/runtime/cli'
 import { listUserProfiles } from '../../studio/public/users'
 import { isHermesAgentAvailable } from '../../studio/public/agent-status-registry'
 import { readAppProfileAvatar } from '../services/profiles/app-profile-avatar'
@@ -82,6 +82,7 @@ function listProfilesFromDisk(activeProfileName: string): HermesProfile[] {
     active: activeProfileName === 'default',
     model: '—',
     alias: '',
+    displayName: readProfileDisplayName('default') || undefined,
   }]
   const profilesDir = join(base, 'profiles')
   if (!existsSync(profilesDir)) return profiles
@@ -95,6 +96,7 @@ function listProfilesFromDisk(activeProfileName: string): HermesProfile[] {
       active: name === activeProfileName,
       model: '—',
       alias: '',
+      displayName: readProfileDisplayName(name) || undefined,
     })
   }
   return profiles

@@ -6,6 +6,7 @@ import type { HermesProfile, HermesProfileDetail } from '@/api/hermes/profiles'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useI18n } from 'vue-i18n'
 import ProfileAvatar from './ProfileAvatar.vue'
+import { profileDisplayLabel } from '@/lib/profileDisplay'
 
 const props = defineProps<{ profile: HermesProfile }>()
 const emit = defineEmits<{}>()
@@ -23,6 +24,7 @@ const switching = ref(false)
 const detail = ref<HermesProfileDetail | null>(null)
 
 const isDefault = computed(() => props.profile.name === 'default')
+const profileTitle = computed(() => profileDisplayLabel(props.profile))
 
 async function toggleDetail() {
   if (expanded.value) {
@@ -113,7 +115,8 @@ function handleEditConfig() {
     <div class="card-header">
       <div class="profile-title">
         <ProfileAvatar :name="profile.name" :avatar="profile.avatar" :size="28" />
-        <h3 class="profile-name">{{ profile.name }}</h3>
+        <h3 class="profile-name">{{ profileTitle }}</h3>
+        <span v-if="profile.displayName && profile.displayName !== profile.name" class="profile-id">{{ profile.name }}</span>
       </div>
       <NTag v-if="profile.active" size="tiny" type="primary" :bordered="false">
         {{ t('profiles.active') }}
@@ -226,9 +229,17 @@ function handleEditConfig() {
 
 .profile-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   min-width: 0;
+}
+
+.profile-id {
+  font-size: 11px;
+  font-weight: 500;
+  color: $text-secondary;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 
 .profile-name {

@@ -73,6 +73,7 @@ import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
 import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useProfilesStore } from '@/stores/hermes/profiles'
+import { profileSelectLabel } from '@/lib/profileDisplay'
 import { uploadRuntimeFiles } from '@/api/studio/files'
 import {
   approveWorkflowNode,
@@ -479,7 +480,7 @@ const defaultWorkflowProfile = computed(() =>
 
 const workflowProfileOptions = computed(() => {
   const profiles = profilesStore.profiles.length > 0
-    ? profilesStore.profiles.map(profile => ({ label: profile.name, value: profile.name }))
+    ? profilesStore.profiles.map(profile => ({ label: profileSelectLabel(profile), value: profile.name }))
     : [{ label: 'default', value: 'default' }]
   return profiles
 })

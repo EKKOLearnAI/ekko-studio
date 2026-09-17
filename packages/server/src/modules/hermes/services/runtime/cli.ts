@@ -557,6 +557,8 @@ export interface HermesProfile {
   model: string
   gatewayStatus?: string
   alias: string
+  /** From profile.yaml display_name (presentation only; routing uses `name`). */
+  displayName?: string
 }
 
 export interface HermesProfileDetail {
@@ -567,6 +569,7 @@ export interface HermesProfileDetail {
   skills: number
   hasEnv: boolean
   hasSoulMd: boolean
+  displayName?: string
 }
 
 function readProfileDefaultModel(name: string): string {
@@ -583,6 +586,19 @@ function readProfileDefaultModel(name: string): string {
     logger.warn(err, 'Hermes CLI: failed to read profile config model for %s', name)
   }
   return '—'
+}
+
+/** Read ``profile.yaml`` display_name (matches Hermes ``profiles.read_profile_meta``). */
+export function readProfileDisplayName(name: string): string {
+  const metaPath = join(getProfileDir(name), 'profile.yaml')
+  if (!existsSync(metaPath)) return ''
+  try {
+    const data = YAML.load(readFileSync(metaPath, 'utf-8'), { json: true }) as Record<string, unknown> | null
+    return String(data?.display_name ?? '').trim()
+  } catch (err) {
+    logger.warn(err, 'Hermes CLI: failed to read profile display_name for %s', name)
+  }
+  return ''
 }
 
 /**
@@ -611,6 +627,7 @@ export async function listProfiles(): Promise<HermesProfile[]> {
       model: readProfileDefaultModel(name),
       gatewayStatus: gatewayStatus && gatewayStatus !== '—' && gatewayStatus !== '-' ? gatewayStatus : undefined,
       alias: runtime?.alias || '',
+      displayName: readProfileDisplayName(name) || undefined,
     }
   })
 }
@@ -645,6 +662,7 @@ export async function getProfile(name: string): Promise<HermesProfileDetail> {
       skills: parseInt(result.skills || '0', 10),
       hasEnv: result['.env'] === 'exists',
       hasSoulMd: result['soul.md'] === 'exists',
+      displayName: readProfileDisplayName(name) || undefined,
     }
   } catch (err: any) {
     if (err.code === 1 || err.status === 1) {

@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import SettingRow from './SettingRow.vue'
+import { profileSelectLabel } from '@/lib/profileDisplay'
 
 const settingsStore = useSettingsStore()
 const profilesStore = useProfilesStore()
@@ -22,7 +23,7 @@ const excludeProfiles = computed(() => settingsStore.gatewayAutoStart.exclude ||
 const isDefaultProfile = computed(() => (profilesStore.activeProfileName || profilesStore.activeProfile?.name || 'default') === 'default')
 const profileOptions = computed(() =>
   profilesStore.profiles.map(profile => ({
-    label: profile.name,
+    label: profileSelectLabel(profile),
     value: profile.name,
   })),
 )
