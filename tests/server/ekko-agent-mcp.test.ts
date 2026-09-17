@@ -39,6 +39,8 @@ describe('Ekko MCP server context', () => {
 
     const servers = buildManagedEkkoMcpServers('work')
     expect(servers['ekko-studio-plan']).toBeUndefined()
+    expect(servers['ekko-studio-interaction']).toBeUndefined()
+    expect(Object.keys(servers)).toHaveLength(4)
 
     expect(servers['ekko-studio-api']).toEqual({
       command: process.execPath,
@@ -126,6 +128,28 @@ describe('Ekko MCP server context', () => {
     expect(injectManagedEkkoMcpServers(setup).targets.every(target => target.status === 'updated')).toBe(true)
     expect(setup.config.getMcpServer('ekko-studio-use', 'work')?.env?.HERMES_MCP_NATIVE_TASK_PLAN).toBe('1')
     expect(injectManagedEkkoMcpServers(setup).targets.every(target => target.status === 'unchanged')).toBe(true)
+  })
+
+  it('removes stale managed interaction servers instead of injecting shared tools into Ekko', async () => {
+    const { injectManagedEkkoMcpServers } = await import('../../packages/server/src/modules/ekko/services/mcp')
+    injectManagedEkkoMcpServers(setup)
+    const stale = structuredClone(setup.config.read())
+    for (const profile of Object.values(stale.mcp.profiles)) {
+      for (const name of ['ekko-studio-plan', 'ekko-studio-interaction']) {
+        profile.servers[name] = {
+          command: 'ekko-studio-mcp', args: ['plan'],
+          env: { HERMES_WEB_UI_MANAGED_MCP: '1', HERMES_MCP_USER_CLARIFICATION: '1' },
+          enabled: true,
+        }
+      }
+    }
+    setup.config.replace(stale)
+    injectManagedEkkoMcpServers(setup)
+    for (const profile of ['default', 'work']) {
+      expect(setup.config.getMcpServer('ekko-studio-plan', profile)).toBeUndefined()
+      expect(setup.config.getMcpServer('ekko-studio-interaction', profile)).toBeUndefined()
+      expect(Object.keys(setup.config.listMcpServers(profile))).toHaveLength(4)
+    }
   })
 
   it('preserves a disabled managed server while refreshing its injected definition', async () => {

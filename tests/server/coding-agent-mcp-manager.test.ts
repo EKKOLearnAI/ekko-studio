@@ -79,8 +79,8 @@ describe('coding Agent MCP manager', () => {
   it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] as const)('gives %s a shared plan/clarification MCP with enough time for a user answer', async agent => {
     makeHome()
     const { servers } = await listCodingAgentMcpServers(agent)
-    expect(servers.some(server => server.name === 'ekko-studio-interaction')).toBe(false)
-    const interaction = servers.find(server => server.name === 'ekko-studio-plan')!
+    expect(servers.some(server => server.name === 'ekko-studio-plan')).toBe(false)
+    const interaction = servers.find(server => server.name === 'ekko-studio-interaction')!
     expect(interaction.managed).toBe(true)
     const config = interaction.raw_config
     if (agent === 'codex' || agent === 'grok') expect(config.tool_timeout_sec).toBeGreaterThanOrEqual(360)
@@ -88,6 +88,7 @@ describe('coding Agent MCP manager', () => {
     else if (agent === 'dsh') expect(config.toolCallTimeoutMs).toBeGreaterThanOrEqual(360_000)
     else expect(config.timeout).toBeGreaterThanOrEqual(360_000)
     expect((config.env || config.environment).ELECTRON_RUN_AS_NODE).toBe('1')
+    expect((config.env || config.environment).HERMES_MCP_USER_CLARIFICATION).toBe('1')
   })
 
   it('manages DSH native patches without persisting Studio-managed entries', async () => {
@@ -124,7 +125,7 @@ describe('coding Agent MCP manager', () => {
       'ekko-studio-browser',
       'ekko-studio-devices',
       'ekko-studio-use',
-      'ekko-studio-plan',
+      'ekko-studio-interaction',
     ]))
     expect(initial.servers.find(server => server.name === 'ekko-studio-api')).toMatchObject({
       managed: true,
@@ -359,6 +360,21 @@ describe('coding Agent MCP manager', () => {
     expect((await listCodingAgentMcpServers(agentId)).servers
       .find(server => server.name === 'docs')?.raw_config.args)
       .toEqual(['-y', '@example/docs-mcp'])
+  })
+
+  it('migrates legacy plan overrides and disables the renamed interaction server without duplicates', async () => {
+    const home = makeHome()
+    const path = join(home, 'coding-agent', 'mcp-overrides.json')
+    mkdirSync(join(home, 'coding-agent'), { recursive: true })
+    writeFileSync(path, JSON.stringify({
+      disabled: { codex: { default: ['ekko-studio-plan'] } },
+      configs: { codex: { default: { 'ekko-studio-plan': { command: 'custom-plan' } } } },
+    }))
+    const listed = await listCodingAgentMcpServers('codex')
+    expect(listed.servers.some(server => server.name === 'ekko-studio-plan')).toBe(false)
+    expect(listed.servers.find(server => server.name === 'ekko-studio-interaction')?.raw_config).toMatchObject({ command: 'custom-plan', enabled: false })
+    await upsertCodingAgentMcpServer('codex', 'ekko-studio-plan', { enabled: true })
+    expect((await listCodingAgentMcpServers('codex')).servers.find(server => server.name === 'ekko-studio-interaction')?.raw_config.enabled).not.toBe(false)
   })
 
   it('migrates persisted managed overrides and allows enabling an old disabled entry', async () => {

@@ -109,7 +109,7 @@ describe('shared MCP task plans', () => {
 
   it('explains how to discover the MCP tool and supplies only the current context', () => {
     const text = taskPlanTurnInstruction('current-turn')
-    expect(text).toContain('ekko-studio-plan')
+    expect(text).toContain('ekko-studio-interaction')
     expect(taskPlanRunInstruction()).not.toContain('context_id=')
     expect(text).toContain('ekko_studio_update_plan')
     expect(text).toContain('context_id="current-turn"')

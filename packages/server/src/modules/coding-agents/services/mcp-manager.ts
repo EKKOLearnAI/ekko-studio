@@ -25,6 +25,7 @@ const STUDIO_MANAGED_NAMES = new Set([
   'ekko-studio-devices',
   'ekko-studio-use',
   'ekko-studio-plan',
+  'ekko-studio-interaction',
 ])
 const MANAGED_ENV_KEY = 'HERMES_WEB_UI_MANAGED_MCP'
 
@@ -295,6 +296,7 @@ async function readServers(id: string, scope: CodingAgentConfigScope): Promise<{
     servers = parseTomlServers(file.content)
   }
 
+  servers.delete('ekko-studio-plan')
   const managed = getCodingAgentManagedMcpServerConfigs(id as CodingAgentId, scope.profile)
   for (const [name, config] of Object.entries(managed)) {
     servers.set(name, normalizeConfig(config))

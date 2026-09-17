@@ -7,13 +7,21 @@ impact: Headless coding agents can ask a question in the existing Studio/App int
 
 ## Transport and scope
 
-The existing `ekko-studio-plan` MCP now exposes both `ekko_studio_update_plan`
+The renamed `ekko-studio-interaction` MCP exposes both `ekko_studio_update_plan`
 and `ekko_studio_clarify` as direct tools. Task cards and user questions share
 one managed MCP server. Claude Code, Codex, Pi, Grok, OpenCode, and
 DSH receive it through their existing managed configuration paths. It accepts
 `context_id`, a `question`, and optional string `choices`; free-text answers are
 allowed even when choices are supplied. There are no new client components.
-Ekko keeps its native `clarify` tool, and Pi keeps its native RPC UI support.
+Hermes receives the same server with only `ekko_studio_update_plan`: clarification
+is hidden from discovery, omitted from instructions, and rejected on direct calls.
+Only Coding Agent injection sets `HERMES_MCP_USER_CLARIFICATION=1`; the default is
+off, and Hermes explicitly sets it to `0`. Ekko does not receive this server and
+keeps its native tools. Pi keeps its native RPC UI support.
+
+Existing managed `ekko-studio-plan` entries are renamed without registering a
+second server. Stored Coding Agent overrides and disable settings follow the new
+name. The internal `plan` launch argument is retained for existing configurations.
 
 The latest input of an interactive coding-agent turn receives a
 `studio_interaction_context` instruction. It uses that turn's capability id,
@@ -47,8 +55,8 @@ UI disconnection alone leaves the question available for reconnect/resume.
 Bindings are in-memory and intentionally do not survive server restart.
 
 After upgrading, restart Studio and any existing coding-agent processes so they
-load the updated plan MCP tool catalog. Tool use depends on the agent following the injected
-instructions and the managed plan server being enabled.
+load the updated interaction MCP tool catalog. Tool use depends on the agent following the injected
+instructions and the managed interaction server being enabled.
 
 ## Validation
 

@@ -125,6 +125,7 @@ describe('studio MCP autoinject', () => {
         HERMES_WEB_UI_PROFILE: 'default',
         HERMES_MCP_SERVER_NAME: 'ekko-studio-api',
         HERMES_MCP_TOOLSET: 'api',
+        HERMES_MCP_USER_CLARIFICATION: '0',
         HERMES_WEB_UI_MANAGED_MCP: '1',
       },
       enabled: true,
@@ -167,7 +168,7 @@ describe('studio MCP autoinject', () => {
       'ekko-studio-browser',
       'ekko-studio-devices',
       'ekko-studio-use',
-      'ekko-studio-plan',
+      'ekko-studio-interaction',
     ])
     expect(result.command).toBe(process.execPath)
   })
@@ -334,6 +335,26 @@ describe('studio MCP autoinject', () => {
     await injectBundledMcpServer()
 
     expect(updateConfigYamlForProfileMock).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([true, false])('renames the managed plan server while preserving enabled=%s and hiding clarification', async enabled => {
+    const { injectBundledMcpServer } = await import('../../packages/server/src/modules/hermes/services/mcp/studio-autoinject')
+    await injectBundledMcpServer()
+    const updater = updateConfigYamlForProfileMock.mock.calls[0][1]
+    const current = (await updater({})).data
+    const legacy = current.mcp_servers['ekko-studio-interaction']
+    legacy.enabled = enabled
+    legacy.env.HERMES_MCP_SERVER_NAME = 'ekko-studio-plan'
+    delete legacy.env.HERMES_MCP_USER_CLARIFICATION
+    current.mcp_servers['ekko-studio-plan'] = legacy
+    delete current.mcp_servers['ekko-studio-interaction']
+    const migrated = await updater(current)
+    expect(migrated.write).not.toBe(false)
+    expect(migrated.data.mcp_servers['ekko-studio-plan']).toBeUndefined()
+    const server = migrated.data.mcp_servers['ekko-studio-interaction']
+    expect(server.enabled).toBe(enabled)
+    if (enabled) expect(server.env.HERMES_MCP_USER_CLARIFICATION).toBe('0')
+    expect(Object.keys(migrated.data.mcp_servers)).toHaveLength(5)
   })
 
   it.each([false, true])('migrates Hermes split names without duplicates (new names already present: %s)', async (coexisting) => {

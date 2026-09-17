@@ -614,7 +614,7 @@ describe('coding agent run state', () => {
         model: 'gpt-test',
       })).toBe(false)
 
-      writeFileSync(join(codexHome, 'config.toml'), ['api', 'browser', 'devices', 'use', 'plan'].map(toolset => `[mcp_servers.ekko-studio-${toolset}]\ncommand = "node"\n`).join('\n'))
+      writeFileSync(join(codexHome, 'config.toml'), ['api', 'browser', 'devices', 'use', 'interaction'].map(toolset => `[mcp_servers.ekko-studio-${toolset}]\ncommand = "node"\n`).join('\n'))
       expect(manager.isSessionLaunchCompatible('chat-session-1', {
         agentId: 'codex',
         mode,

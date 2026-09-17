@@ -984,7 +984,7 @@ describe('coding agent launch preparation', () => {
       const servers = agent === 'codex' ? runtime.mcp_servers : runtime.mcpServers
       expect(servers['user.tools']).toEqual(external)
       expect(servers['hermes-studio']).toBeUndefined()
-      for (const toolset of ['api', 'browser', 'devices', 'use', 'plan']) {
+      for (const toolset of ['api', 'browser', 'devices', 'use', 'interaction']) {
         expect(servers[`ekko-studio-${toolset}`]).toMatchObject({ env: { ELECTRON_RUN_AS_NODE: '1' } })
       }
       if (agent === 'codex') {
@@ -999,11 +999,11 @@ describe('coding agent launch preparation', () => {
         expect(launch.args.filter(arg => arg.includes('pi-mcp-adapter'))).toEqual([])
       }
     }
-    await upsertCodingAgentMcpServer(agent, 'ekko-studio-plan', { enabled: false }, { profile: 'default', provider: 'global' })
+    await upsertCodingAgentMcpServer(agent, 'ekko-studio-interaction', { enabled: false }, { profile: 'default', provider: 'global' })
     const disabled = await prepareCodingAgentLaunch(agent, input)
     const content = readFileSync(join(disabled.rootDir, sourceConfig), 'utf8')
-    if (agent === 'codex') expect((parseToml(content).mcp_servers as any)['ekko-studio-plan'].enabled).toBe(false)
-    else expect(JSON.parse(content).mcpServers['ekko-studio-plan']).toBeUndefined()
+    if (agent === 'codex') expect((parseToml(content).mcp_servers as any)['ekko-studio-interaction'].enabled).toBe(false)
+    else expect(JSON.parse(content).mcpServers['ekko-studio-interaction']).toBeUndefined()
     expect(readFileSync(join(source, sourceConfig), 'utf8')).toBe(original)
     expect(readFileSync(join(source, 'settings.json'), 'utf8')).toBe(settings)
     expect(readFileSync(join(source, 'auth.json'), 'utf8')).toBe('{"user":"login-fixture"}')
@@ -1499,7 +1499,7 @@ describe('coding agent launch preparation', () => {
         HERMES_WEB_UI_MANAGED_MCP: '1',
       },
     })
-    for (const name of ['ekko-studio-api', 'ekko-studio-browser', 'ekko-studio-devices', 'ekko-studio-use', 'ekko-studio-plan']) {
+    for (const name of ['ekko-studio-api', 'ekko-studio-browser', 'ekko-studio-devices', 'ekko-studio-use', 'ekko-studio-interaction']) {
       expect(mcp.mcpServers[name].env.ELECTRON_RUN_AS_NODE).toBe('1')
     }
     expect(mcp.mcpServers['ekko-studio-browser']).toMatchObject({
@@ -1621,8 +1621,8 @@ describe('coding agent launch preparation', () => {
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-browser]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-devices]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-use]')
-    expect(codexConfig).toContain('[mcp_servers.ekko-studio-plan]')
-    expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-plan\][\s\S]*?tool_timeout_sec = 360/)
+    expect(codexConfig).toContain('[mcp_servers.ekko-studio-interaction]')
+    expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-interaction\][\s\S]*?tool_timeout_sec = 360/)
     expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-use\][\s\S]*?tool_timeout_sec = 360/)
   })
 
@@ -1752,8 +1752,8 @@ describe('coding agent launch preparation', () => {
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-browser]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-devices]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-use]')
-    expect(codexConfig).toContain('[mcp_servers.ekko-studio-plan]')
-    expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-plan\][\s\S]*?tool_timeout_sec = 360/)
+    expect(codexConfig).toContain('[mcp_servers.ekko-studio-interaction]')
+    expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-interaction\][\s\S]*?tool_timeout_sec = 360/)
     expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-use\][\s\S]*?tool_timeout_sec = 360/)
   })
 
