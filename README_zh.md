@@ -15,7 +15,7 @@
   ·
   <a href="https://ekkostudio.xyz/#/docs/getting-started">使用文档</a>
   ·
-  <code>npm install -g hermes-web-ui && hermes-web-ui start</code>
+  <code>npm install -g ekko-studio && ekko-studio-web start</code>
 </p>
 
 <p align="center">
@@ -23,14 +23,14 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/hermes-web-ui"><img src="https://img.shields.io/npm/v/hermes-web-ui?style=flat-square&color=blue" alt="npm 版本"/></a>
-  <a href="https://github.com/EKKOLearnAI/hermes-studio/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/hermes-web-ui?style=flat-square" alt="许可证"/></a>
+  <a href="https://www.npmjs.com/package/ekko-studio"><img src="https://img.shields.io/npm/v/ekko-studio?style=flat-square&color=blue" alt="npm 版本"/></a>
+  <a href="https://github.com/EKKOLearnAI/hermes-studio/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/ekko-studio?style=flat-square" alt="许可证"/></a>
   <a href="https://github.com/EKKOLearnAI/hermes-studio/stargazers"><img src="https://img.shields.io/github/stars/EKKOLearnAI/hermes-studio?style=flat-square" alt="Star"/></a>
 </p>
 
 Ekko Studio 原名 Hermes Studio / Hermes Web UI。GitHub 仓库仍为
-`EKKOLearnAI/hermes-studio`，npm 包名和服务端 CLI 仍为 `hermes-web-ui`；
-克隆和安装时请继续使用这些名称。
+`EKKOLearnAI/hermes-studio`。主 npm 包名为 `ekko-studio`，启动命令为
+`ekko-studio-web`；旧的 `hermes-web-ui` 包和命令继续保留，并同步发布相同版本。
 
 ## 界面预览
 
@@ -243,13 +243,13 @@ CLI 维护命令：
 
 ```bash
 # 删除持久化的登录 IP 锁记录
-hermes-web-ui clear-login-locks
+ekko-studio-web clear-login-locks
 
 # 删除登录锁并重启正在运行的 Studio 服务
-hermes-web-ui clear-login-locks --restart
+ekko-studio-web clear-login-locks --restart
 
 # 创建或重置默认超级管理员登录名/密码为 admin / 123456
-hermes-web-ui reset-default-login
+ekko-studio-web reset-default-login
 ```
 
 `clear-login-locks` 会删除 `${HERMES_WEB_UI_HOME:-~/.hermes-web-ui}/.login-lock.json`。如果服务正在运行，需要重启服务才能清理内存中的锁定状态。`reset-default-login` 会更新 Studio 账户数据库；如果已存在 `admin` 用户，则会把密码重置为 `123456`，并启用为超级管理员账户。
@@ -329,9 +329,13 @@ hermes-web-ui reset-default-login
 ### npm 安装
 
 ```bash
-npm install -g hermes-web-ui
-hermes-web-ui start
+npm install -g ekko-studio
+ekko-studio-web start
 ```
+
+旧包 `hermes-web-ui` 会继续同步更新。两个包都提供 `ekko-studio-web` 和原有命令。
+选择其中一个包安装即可；全局命令有重叠，切换包名时请先卸载原包再安装新包。
+用户数据仍保存在 `~/.hermes-web-ui`。
 
 打开 **http://localhost:8648**
 
@@ -430,25 +434,27 @@ Studio 启动后端聊天能力时，会优先使用包含 `run_agent.py` 的源
 
 ### CLI 命令
 
+原有 `hermes-web-ui` 命令仍可作为下列 `ekko-studio-web` 命令的别名使用。
+
 | 命令 | 说明 |
 |---|---|
-| `hermes-web-ui start [port]` | 后台启动；支持位置端口或 `--port <port>` |
-| `hermes-web-ui client [port]` | 为远程客户端启动，关闭 Gateway 自动启动并允许跨域 |
-| `hermes-web-ui restart [port]` | 重启；默认会关闭 Bridge Broker |
-| `hermes-web-ui stop` | 停止后台进程 |
-| `hermes-web-ui status` | 查看运行状态 |
-| `hermes-web-ui clear-login-locks [--restart]` | 清理持久登录锁，可选择重启 |
-| `hermes-web-ui reset-default-login` | 创建或重置默认管理员登录 |
-| `hermes-web-ui update` / `upgrade` | 更新到最新版本并重启 |
-| `hermes-web-ui version` / `-v` | 显示版本号 |
-| `hermes-web-ui -h` | 显示帮助信息 |
+| `ekko-studio-web start [port]` | 后台启动；支持位置端口或 `--port <port>` |
+| `ekko-studio-web client [port]` | 为远程客户端启动，关闭 Gateway 自动启动并允许跨域 |
+| `ekko-studio-web restart [port]` | 重启；默认会关闭 Bridge Broker |
+| `ekko-studio-web stop` | 停止后台进程 |
+| `ekko-studio-web status` | 查看运行状态 |
+| `ekko-studio-web clear-login-locks [--restart]` | 清理持久登录锁，可选择重启 |
+| `ekko-studio-web reset-default-login` | 创建或重置默认管理员登录 |
+| `ekko-studio-web update` / `upgrade` | 更新到最新版本并重启 |
+| `ekko-studio-web version` / `-v` | 显示版本号 |
+| `ekko-studio-web -h` | 显示帮助信息 |
 | `hermes-web-ui-mcp [api\|browser\|devices\|use]` | 运行一个受管 Studio MCP 工具集（等同于 `ekko-studio-mcp`） |
 
 如不希望自动打开浏览器，可在 `start` 或 `client` 后添加 `--no-open`。
 
 `restart`、`update` 和 `upgrade` 默认会停止 Agent Bridge broker，避免重启或更新后的服务复用旧 Python bridge 进程。只有明确希望保留 broker 和正在运行的 bridge session 时，才在重启前设置 `HERMES_AGENT_BRIDGE_STOP_ON_SHUTDOWN=0`。
 
-`update` / `upgrade` 会先尝试执行 `npm cache clean --force`，再执行 `npm install -g hermes-web-ui@latest` 并重启。缓存清理是 best-effort；如果清理失败，只提示 warning，升级安装会继续执行。
+`update` / `upgrade` 会先尝试执行 `npm cache clean --force`，再根据当前安装的包名升级 `ekko-studio@latest` 或 `hermes-web-ui@latest`，并重启对应包。Web UI 的版本检查也使用相同的包名。缓存清理失败时会提示警告，但不会中止升级安装。
 
 ### 自动配置
 
