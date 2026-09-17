@@ -41,6 +41,21 @@ describe('group chat approval and context baseline', () => {
     vi.restoreAllMocks()
   })
 
+  it('restores pending clarification notifications only for rooms the requesting socket can manage', async () => {
+    const human = await connectGroupChatClient(port, 'notification-user', 'Notification user')
+    harness.sockets.push(human)
+    const server = groupServer as any
+    vi.spyOn(server, 'pendingClarifySnapshots').mockReturnValue([
+      { roomId: 'allowed-room', clarify_id: 'allowed-question', remaining_timeout_ms: 1000 },
+      { roomId: 'private-room', clarify_id: 'private-question', remaining_timeout_ms: 1000 },
+    ])
+    vi.spyOn(server, 'canSocketManageRoom').mockImplementation((socket: any, roomId: unknown) => socket.id === human.id && roomId === 'allowed-room')
+    const snapshot = await emitAck<any>(human, 'load_pending_approvals', {})
+    expect(snapshot.pendingClarifies).toEqual([
+      { roomId: 'allowed-room', clarify_id: 'allowed-question', remaining_timeout_ms: 1000 },
+    ])
+  })
+
   it('group reply notifications recheck visibility, never replay duplicate messages', async () => {
     const { bindLegacyAppEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/legacy-app-events')
     const allowed = { id: 'notice-allowed', emit: vi.fn(), data: {}, handshake: {auth:{}}, on: vi.fn() }
@@ -238,6 +253,7 @@ describe('group chat approval and context baseline', () => {
     }
 
     await expect(emitAck<any>(owner, 'load_pending_approvals', {})).resolves.toEqual({
+      pendingClarifies: [],
       pendingApprovals: [expect.objectContaining({
         roomId: 'room-1',
         agentName: 'Agent',
@@ -979,7 +995,7 @@ describe('group chat approval and context baseline', () => {
     await expect(clarifyResolved).resolves.toMatchObject({
       clarify_id: 'clarify-expired', resolved: false, reason: 'Remote Agent run timed out',
     })
-    await expect(emitAck<any>(human, 'load_pending_approvals', {})).resolves.toEqual({ pendingApprovals: [] })
+    await expect(emitAck<any>(human, 'load_pending_approvals', {})).resolves.toEqual({ pendingApprovals: [], pendingClarifies: [] })
   })
 
   it('interrupts only the active run generation and denies its pending approvals', async () => {
@@ -1025,6 +1041,7 @@ describe('group chat approval and context baseline', () => {
     expect(respondApproval).toHaveBeenCalledTimes(1)
     expect(respondApproval).toHaveBeenCalledWith('approval-current', 'deny')
     await expect(emitAck<any>(human, 'load_pending_approvals', {})).resolves.toEqual({
+      pendingClarifies: [],
       pendingApprovals: [
         expect.objectContaining({ approval_id: 'approval-next' }),
         expect.objectContaining({ approval_id: 'approval-missing-generation' }),
@@ -1121,7 +1138,7 @@ describe('group chat approval and context baseline', () => {
     await expect(resolved).resolves.toMatchObject({
       approval_id: 'approval-stale', choice: 'deny', reason: 'unknown approval request: approval-stale',
     })
-    await expect(emitAck<any>(human, 'load_pending_approvals', {})).resolves.toEqual({ pendingApprovals: [] })
+    await expect(emitAck<any>(human, 'load_pending_approvals', {})).resolves.toEqual({ pendingApprovals: [], pendingClarifies: [] })
   })
 
   it('does not route a pending approval through a different room', async () => {

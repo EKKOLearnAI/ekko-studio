@@ -3242,11 +3242,11 @@ export class GroupChatServer {
             }))
     }
 
-    private pendingClarifySnapshots(roomId: string) {
+    private pendingClarifySnapshots(roomId: string | null) {
         const pendingRoutes = this.pendingClarifyRoutes
         if (!pendingRoutes) return []
         return [...pendingRoutes.values()]
-            .filter(route => route.roomId === roomId)
+            .filter(route => !roomId || route.roomId === roomId)
             .map(route => ({
                 roomId: route.roomId,
                 agentName: route.agentName,
@@ -3956,7 +3956,11 @@ export class GroupChatServer {
 
         socket.on('join', (data: { roomId?: string; name?: string; historyLimit?: number }, ack?: (response?: unknown) => void) => this.handleJoin(socket, data, ack))
         socket.on('load_pending_approvals', (_data: unknown, ack?: (response?: unknown) => void) => {
-            ack?.({ pendingApprovals: this.pendingApprovalSnapshots(null, socket) })
+            ack?.({
+                pendingApprovals: this.pendingApprovalSnapshots(null, socket),
+                pendingClarifies: this.pendingClarifySnapshots(null)
+                    .filter(request => this.canSocketManageRoom(socket, request.roomId)),
+            })
         })
         socket.on('load_room_agent_activities', (_data: unknown, ack?: (response?: unknown) => void) => {
             this.handleLoadRoomAgentActivities(socket, {}, ack)
