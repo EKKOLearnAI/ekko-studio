@@ -18,7 +18,7 @@ test('uses the session database flag for pins across devices and ignores old bro
       }
     })
     await authenticate(device, TEST_ACCESS_KEY, 'research')
-    const api = await mockHermesApi(device, { sessions: [session] })
+    const api = await mockHermesApi(device, { sessions: [session, { ...session, id: 'recent-session', title: 'Recent conversation', last_active: 1700000000, is_pinned: false }] })
     await mockChatSocket(device)
     await device.route('**/api/studio/sessions/shared-session/pin', async route => {
       session.is_pinned = route.request().postDataJSON().is_pinned
@@ -36,9 +36,12 @@ test('uses the session database flag for pins across devices and ignores old bro
     await page.locator('.n-dropdown-option:visible').filter({ hasText: /^Pin$/ }).click()
     await expect(pinnedHeader(page)).toBeVisible()
     expect(session.is_pinned).toBe(true)
+    await expect(page.locator('.session-group-header').first()).toContainText('Pinned')
+    await expect(page.locator('.session-group-header').nth(1)).toContainText('Recent')
 
     await prepare(otherPage)
     await expect(pinnedHeader(otherPage)).toBeVisible()
+    await expect(otherPage.locator('.session-group-header').first()).toContainText('Pinned')
     await otherPage.locator('.session-item').first().click({ button: 'right' })
     await otherPage.locator('.n-dropdown-option:visible').filter({ hasText: /^Unpin$/ }).click()
     await expect(pinnedHeader(otherPage)).toHaveCount(0)

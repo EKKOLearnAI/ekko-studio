@@ -2489,6 +2489,36 @@ async function handleSessionModelCustomSubmit() {
           {{ t("chat.noSessions") }}
         </div>
 
+        <template v-if="pinnedSessions.length > 0">
+          <div class="session-group-header session-group-header--static">
+            <span class="session-group-label">{{ t("chat.pinned") }}</span>
+            <span class="session-group-count">{{ pinnedSessions.length }}</span>
+          </div>
+          <SessionListItem
+            v-for="s in pinnedSessions"
+            :key="`pinned-${s.id}`"
+            :session="s"
+            :active="s.id === chatStore.activeSessionId"
+            :pinned="true"
+            :can-delete="
+              s.id !== chatStore.activeSessionId ||
+              chatStore.sessions.length > 1
+            "
+            :streaming="chatStore.isSessionWorking(s.id)"
+            :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
+            :selectable="isBatchMode"
+            :selected="isSessionSelected(s)"
+            :show-profile="true"
+            :to="sessionHref(s.id)"
+            :intercept-modified-navigation="desktopChatWindowAvailable"
+            @select="handleSessionClick(s.id)"
+            @open-new="openSessionInNewTab(s.id, s.profile || null)"
+            @contextmenu="handleContextMenu($event, s.id)"
+            @delete="handleDeleteSession(s.id)"
+            @toggle-select="toggleSessionSelection(s)"
+          />
+        </template>
+
         <template
           v-if="
             sessionBrowserPrefsStore.showRecentSessions &&
@@ -2559,36 +2589,6 @@ async function handleSessionModelCustomSubmit() {
             {{ t("common.retry") }}
           </button>
         </div>
-
-        <template v-if="pinnedSessions.length > 0">
-          <div class="session-group-header session-group-header--static">
-            <span class="session-group-label">{{ t("chat.pinned") }}</span>
-            <span class="session-group-count">{{ pinnedSessions.length }}</span>
-          </div>
-          <SessionListItem
-            v-for="s in pinnedSessions"
-            :key="`pinned-${s.id}`"
-            :session="s"
-            :active="s.id === chatStore.activeSessionId"
-            :pinned="true"
-            :can-delete="
-              s.id !== chatStore.activeSessionId ||
-              chatStore.sessions.length > 1
-            "
-            :streaming="chatStore.isSessionWorking(s.id)"
-            :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
-            :selectable="isBatchMode"
-            :selected="isSessionSelected(s)"
-            :show-profile="true"
-            :to="sessionHref(s.id)"
-            :intercept-modified-navigation="desktopChatWindowAvailable"
-            @select="handleSessionClick(s.id)"
-            @open-new="openSessionInNewTab(s.id, s.profile || null)"
-            @contextmenu="handleContextMenu($event, s.id)"
-            @delete="handleDeleteSession(s.id)"
-            @toggle-select="toggleSessionSelection(s)"
-          />
-        </template>
 
         <template v-for="group in categorizedSessions" :key="group.key">
           <div
