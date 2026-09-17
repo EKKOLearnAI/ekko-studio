@@ -3,9 +3,9 @@ Business Source License 1.1
 Parameters
 
 Licensor:             EKKOLearnAI
-Licensed Work:        Hermes Studio, formerly known as Hermes Web UI,
+Licensed Work:        Ekko Studio, formerly known as Hermes Studio and Hermes Web UI,
                       including the hermes-web-ui npm package and CLI,
-                      Hermes Studio desktop applications, web applications,
+                      Ekko Studio desktop applications, web applications,
                       server components, runtime integrations, firmware,
                       release artifacts, documentation, and all associated
                       files in this repository.
@@ -38,12 +38,12 @@ limitations under the License.
 
 For the purposes of this License:
 
-- "Licensed Work" refers to Hermes Studio and all source code,
+- "Licensed Work" refers to Ekko Studio and all source code,
   documentation, firmware, desktop applications, web applications, server
   components, runtime integrations, release artifacts, packages, command-line
   tools, and associated files in this repository. This includes materials
-  distributed or identified under the current Hermes Studio name, the former
-  Hermes Web UI name, the hermes-web-ui npm package name, and the
+  distributed or identified under the current Ekko Studio name, the former
+  Hermes Studio and Hermes Web UI names, the hermes-web-ui npm package name, and the
   hermes-studio desktop application name.
 
 - "Non-commercial use" means use that is not primarily intended for or

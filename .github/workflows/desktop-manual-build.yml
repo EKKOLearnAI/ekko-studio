@@ -206,10 +206,10 @@ jobs:
           assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
           missing=0
           for pattern in \
-            '^Hermes\.Studio-.+-arm64\.zip$' \
-            '^Hermes\.Studio-.+-arm64\.dmg$' \
-            '^Hermes\.Studio-.+-x64\.zip$' \
-            '^Hermes\.Studio-.+-x64\.dmg$'
+            '^Ekko\.Studio-.+-arm64\.zip$' \
+            '^Ekko\.Studio-.+-arm64\.dmg$' \
+            '^Ekko\.Studio-.+-x64\.zip$' \
+            '^Ekko\.Studio-.+-x64\.dmg$'
           do
             if ! printf '%s\n' "$assets" | grep -E "$pattern" >/dev/null; then
               missing=1
@@ -232,10 +232,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/hermes-mac-assets
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Hermes.Studio-*-arm64.zip' --dir /tmp/hermes-mac-assets
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Hermes.Studio-*-arm64.dmg' --dir /tmp/hermes-mac-assets
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Hermes.Studio-*-x64.zip' --dir /tmp/hermes-mac-assets
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Hermes.Studio-*-x64.dmg' --dir /tmp/hermes-mac-assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Ekko.Studio-*-arm64.zip' --dir /tmp/hermes-mac-assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Ekko.Studio-*-arm64.dmg' --dir /tmp/hermes-mac-assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Ekko.Studio-*-x64.zip' --dir /tmp/hermes-mac-assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Ekko.Studio-*-x64.dmg' --dir /tmp/hermes-mac-assets
           ls -lh /tmp/hermes-mac-assets
 
       - name: Generate merged latest-mac.yml
@@ -254,7 +254,7 @@ jobs:
           let version = null
 
           for (const name of names) {
-            const match = /^Hermes\.Studio-(.+)-(arm64|x64)\.(zip|dmg)$/.exec(name)
+            const match = /^Ekko\.Studio-(.+)-(arm64|x64)\.(zip|dmg)$/.exec(name)
             if (!match) continue
             if (version && version !== match[1]) {
               throw new Error(`Mixed macOS asset versions: ${version} and ${match[1]}`)

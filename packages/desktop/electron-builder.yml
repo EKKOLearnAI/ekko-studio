@@ -90,14 +90,14 @@ mac:
   entitlementsInherit: build/entitlements.mac.inherit.plist
   extendInfo:
     NSMicrophoneUsageDescription: "Ekko Studio uses the microphone for voice conversations and speech transcription."
-  artifactName: "Hermes.Studio-${version}-${arch}.${ext}"
+  artifactName: "Ekko.Studio-${version}-${arch}.${ext}"
 
 win:
   icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64]
-  artifactName: "Hermes.Studio-${version}-${arch}.${ext}"
+  artifactName: "Ekko.Studio-${version}-${arch}.${ext}"
 
 linux:
   icon: build/icons
@@ -107,7 +107,7 @@ linux:
     - target: deb
       arch: [x64]   # fpm has no arm64 binary; deb only on x64
   category: Development
-  artifactName: "Hermes.Studio-${version}-${arch}.${ext}"
+  artifactName: "Ekko.Studio-${version}-${arch}.${ext}"
 
 deb:
   afterInstall: build/linux-after-install.tpl

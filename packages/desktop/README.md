@@ -11,6 +11,16 @@ architecture from the project
 The desktop app bundles the Web UI runtime and launches it locally from the
 native shell app.
 
+### Release asset names
+
+Installers use `Ekko.Studio-${version}-${arch}.${ext}`. Publish the new
+artifacts before deploying the website download page with the matching names.
+
+Keep the application ID, signing identity, update feeds, and Linux package
+identity stable. Update manifests reference the actual artifact filenames.
+Validate an upgrade from the previous signed release on macOS and Windows
+before rollout.
+
 ## Command shims
 
 After the packaged desktop app starts, it installs managed command shims:
