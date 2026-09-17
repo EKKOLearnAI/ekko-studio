@@ -75,6 +75,7 @@ async function loadHermesSessions() {
   const requestId = ++hermesSessionsRequestId
   hermesSessionsLoading.value = true
   try {
+    await sessionBrowserPrefsStore.refreshPins().catch(() => undefined)
     const includedIds = [...sessionBrowserPrefsStore.pinnedIds]
     if (routeSessionId.value && !includedIds.includes(routeSessionId.value)) includedIds.push(routeSessionId.value)
     const result = await fetchHermesSessionGroups(HISTORY_GROUP_PAGE_SIZE, effectiveHistoryProfile.value, includedIds)
@@ -99,6 +100,16 @@ async function loadHermesSessions() {
     }
   }
 }
+
+watch(
+  () => sessionBrowserPrefsStore.pinnedIds,
+  ids => {
+    if (hermesSessionsLoaded.value && !hermesSessionsLoading.value &&
+        ids.some(id => !hermesSessions.value.some(session => session.id === id))) {
+      void loadHermesSessions()
+    }
+  },
+)
 
 // Initialize synchronously from the media query so first paint is correct.
 const showSessions = ref(
@@ -718,7 +729,11 @@ async function handleContextMenuSelect(key: string) {
   showContextMenu.value = false
   if (!contextSessionId.value) return
   if (key === 'pin') {
-    sessionBrowserPrefsStore.togglePinned(contextSessionId.value)
+    try {
+      await sessionBrowserPrefsStore.togglePinned(contextSessionId.value)
+    } catch (error: any) {
+      message.error(error?.message || t('common.saveFailed'))
+    }
   } else if (key === 'copy-link') {
     await copySessionLink(contextSessionId.value)
   } else if (key === 'copy-id') {

@@ -816,19 +816,6 @@ async function retrySessionCategories() {
   await loadSessionCategories();
 }
 
-watch(
-  () => [
-    chatStore.sessionsLoaded,
-    ...chatStore.sessions.map((session) => session.id),
-  ],
-  (value) => {
-    const sessionIds = value.slice(1) as string[];
-    if (!value[0] || sessionIds.length === 0) return;
-    sessionBrowserPrefsStore.pruneMissingSessions(sessionIds);
-  },
-  { immediate: true },
-);
-
 const activeSessionTitle = computed(
   () => chatStore.activeSession?.title || t("chat.newChat"),
 );
@@ -1905,7 +1892,11 @@ async function handleContextMenuSelect(key: string) {
     return;
   }
   if (key === "pin") {
-    sessionBrowserPrefsStore.togglePinned(contextSessionId.value);
+    try {
+      await sessionBrowserPrefsStore.togglePinned(contextSessionId.value);
+    } catch (error: any) {
+      message.error(error?.message || t("common.saveFailed"));
+    }
     return;
   }
   if (key.startsWith("category:")) {

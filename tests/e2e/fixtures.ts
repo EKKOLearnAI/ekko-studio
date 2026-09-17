@@ -163,6 +163,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
   const unexpectedRequests: MockedRequest[] = []
   const tokenValidationStatus = options.tokenValidationStatus ?? 200
   let activeProfileName = options.initialProfileName ?? 'research'
+  const sessionPins = new Map<string, Map<string, boolean>>()
   const sessionCategories = [...(options.sessionCategories ?? [])]
   let workflowSchedules: any[] = [...(options.workflowSchedules ?? [])]
   const skillBundles = [...(options.bundles ?? [])]
@@ -489,6 +490,22 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
 
     if (pathname === '/api/studio/sessions') {
       await route.fulfill(jsonResponse({ sessions: options.sessions ?? [] }, tokenValidationStatus))
+      return
+    }
+
+    if (pathname === '/api/studio/session-pins' || pathname.startsWith('/api/studio/session-pins/')) {
+      const profile = url.searchParams.get('profile') || activeProfileName
+      if (!sessionPins.has(profile)) sessionPins.set(profile, new Map())
+      const pins = sessionPins.get(profile)!
+      if (request.method() === 'PUT') {
+        const id = decodeURIComponent(pathname.split('/').at(-1)!)
+        pins.set(id, request.postDataJSON().pinned)
+      } else if (request.method() === 'POST') {
+        for (const id of request.postDataJSON().pinnedIds) {
+          if (!pins.has(id)) pins.set(id, true)
+        }
+      }
+      await route.fulfill(jsonResponse({ pinnedIds: [...pins].filter(([, pinned]) => pinned).map(([id]) => id) }))
       return
     }
 

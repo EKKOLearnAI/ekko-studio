@@ -3,6 +3,9 @@ import * as ctrl from '../controllers/sessions'
 
 export const sessionRoutes = new Router()
 
+sessionRoutes.get('/api/studio/session-pins', ctrl.listPins)
+sessionRoutes.post('/api/studio/session-pins/migrate', ctrl.migratePins)
+sessionRoutes.put('/api/studio/session-pins/:id', ctrl.updatePin)
 sessionRoutes.get('/api/studio/sessions/conversations', ctrl.listConversations)
 sessionRoutes.get('/api/studio/session-categories', ctrl.listCategories)
 sessionRoutes.post('/api/studio/session-categories', ctrl.createCategory)

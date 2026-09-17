@@ -909,6 +909,36 @@ Object.keys(openapi.paths).sort().forEach(key => {
 openapi.paths = sortedPaths
 
 // Add special endpoints after sorting
+// Session pins are scoped to the authenticated user and requested profile.
+for (const [path, method, summary, body] of [
+  ['/api/studio/session-pins', 'get', 'List synchronized session pins', null],
+  ['/api/studio/session-pins/{id}', 'put', 'Set or clear a session pin', {
+    type: 'object', required: ['pinned'], properties: { pinned: { type: 'boolean' } },
+  }],
+  ['/api/studio/session-pins/migrate', 'post', 'Import legacy browser pins without overwriting server decisions', {
+    type: 'object', required: ['pinnedIds'], properties: {
+      pinnedIds: { type: 'array', maxItems: 10000, items: { type: 'string', minLength: 1, maxLength: 512 } },
+    },
+  }],
+]) {
+  openapi.paths[path][method] = {
+    ...openapi.paths[path][method], summary,
+    parameters: [
+      { name: 'profile', in: 'query', schema: { type: 'string' }, description: 'Profile scope; defaults to the active profile.' },
+      ...(path.includes('{id}') ? [{ name: 'id', in: 'path', required: true, schema: { type: 'string', minLength: 1, maxLength: 512 } }] : []),
+    ],
+    ...(body ? { requestBody: { required: true, content: { 'application/json': { schema: body } } } } : {}),
+    responses: {
+      200: { description: 'Current pins', content: { 'application/json': { schema: {
+        type: 'object', required: ['pinnedIds'], properties: { pinnedIds: { type: 'array', items: { type: 'string' } } },
+      } } } },
+      400: { description: 'Invalid pin payload' },
+      401: { description: 'Authentication required' },
+      403: { description: 'Profile access denied' },
+    },
+  }
+}
+
 // Shared task planning is bound to an authenticated, active turn capability.
 openapi.paths['/api/studio/task-plans/update'] = {
   post: {

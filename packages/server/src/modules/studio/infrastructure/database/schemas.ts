@@ -463,6 +463,16 @@ export const USER_PROFILES_INDEXES = {
   idx_user_profiles_default: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_user_profiles_default ON user_profiles(user_id) WHERE is_default = 1',
 }
 
+export const SESSION_PINS_TABLE = 'session_pins'
+
+export const SESSION_PINS_SCHEMA: Record<string, string> = {
+  user_id: 'INTEGER NOT NULL',
+  profile: "TEXT NOT NULL DEFAULT 'default'",
+  session_id: 'TEXT NOT NULL',
+  pinned: 'INTEGER NOT NULL DEFAULT 1',
+  updated_at: 'INTEGER NOT NULL',
+}
+
 export const USER_THEMES_TABLE = 'user_themes'
 
 export const USER_THEMES_SCHEMA: Record<string, string> = {
@@ -1584,6 +1594,9 @@ export function initAllHermesTables(): void {
       indexes: USER_PROFILES_INDEXES,
     })
     syncTable(USER_THEMES_TABLE, USER_THEMES_SCHEMA)
+    syncTable(SESSION_PINS_TABLE, SESSION_PINS_SCHEMA, {
+      primaryKey: 'user_id, profile, session_id',
+    })
 
     // User-scoped Social Messages accounts. Only one account per user may be active.
     syncTable(SOCIAL_MESSAGE_ACCOUNTS_TABLE, SOCIAL_MESSAGE_ACCOUNTS_SCHEMA, {

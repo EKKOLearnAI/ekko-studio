@@ -1,3 +1,4 @@
+import { listSessionPins, migrateSessionPins, setSessionPin, SessionPinValidationError } from '../services/sessions/pins'
 import { getSessionTaskPlans } from '../services/task-plans'
 import {
   deleteHermesSessionForProfile,
@@ -2122,5 +2123,52 @@ export async function getConversationMessagesPaginated(ctx: any) {
     offset: result.offset,
     limit: result.limit,
     hasMore: result.hasMore,
+  }
+}
+
+function pinScope(ctx: any): { userId: number; profile: string } | null {
+  const userId = ctx.state?.user?.id
+  if (!userId) {
+    ctx.status = 401
+    ctx.body = { error: 'Unauthorized' }
+    return null
+  }
+  const profile = requestedProfile(ctx) || getActiveProfileName() || 'default'
+  if (!canAccessProfile(ctx, profile)) {
+    ctx.status = 403
+    ctx.body = { error: 'Profile is not available for this user' }
+    return null
+  }
+  return { userId, profile }
+}
+
+export async function listPins(ctx: any) {
+  const scope = pinScope(ctx)
+  if (scope) ctx.body = { pinnedIds: listSessionPins(scope.userId, scope.profile) }
+}
+
+export async function updatePin(ctx: any) {
+  const scope = pinScope(ctx)
+  if (!scope) return
+  try {
+    const body = ctx.request.body || {}
+    ctx.body = { pinnedIds: setSessionPin(scope.userId, scope.profile, ctx.params.id, body.pinned) }
+  } catch (error) {
+    if (!(error instanceof SessionPinValidationError)) throw error
+    ctx.status = 400
+    ctx.body = { error: error.message }
+  }
+}
+
+export async function migratePins(ctx: any) {
+  const scope = pinScope(ctx)
+  if (!scope) return
+  try {
+    const body = ctx.request.body || {}
+    ctx.body = { pinnedIds: migrateSessionPins(scope.userId, scope.profile, body.pinnedIds) }
+  } catch (error) {
+    if (!(error instanceof SessionPinValidationError)) throw error
+    ctx.status = 400
+    ctx.body = { error: error.message }
   }
 }
