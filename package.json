@@ -74,7 +74,8 @@
     "openapi:generate": "node scripts/generate-openapi.mjs",
     "claude": "claude --dangerously-skip-permissions",
     "test:workflow-live": "vite-node scripts/workflow-live-acceptance.ts",
-    "pack:npm": "node scripts/pack-npm-releases.mjs"
+    "pack:npm": "node scripts/pack-npm-releases.mjs",
+    "publish:npm": "node scripts/publish-npm-releases.mjs"
   },
   "files": [
     "bin/",
