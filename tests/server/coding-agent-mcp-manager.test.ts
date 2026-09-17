@@ -76,13 +76,26 @@ afterEach(() => {
 })
 
 describe('coding Agent MCP manager', () => {
+  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] as const)('gives %s an interaction MCP with enough time for a user answer', async agent => {
+    makeHome()
+    const { servers } = await listCodingAgentMcpServers(agent)
+    const interaction = servers.find(server => server.name === 'ekko-studio-interaction')!
+    expect(interaction.managed).toBe(true)
+    const config = interaction.raw_config
+    if (agent === 'codex' || agent === 'grok') expect(config.tool_timeout_sec).toBeGreaterThanOrEqual(360)
+    else if (agent === 'pi') expect(config.requestTimeoutMs).toBeGreaterThanOrEqual(360_000)
+    else if (agent === 'dsh') expect(config.toolCallTimeoutMs).toBeGreaterThanOrEqual(360_000)
+    else expect(config.timeout).toBeGreaterThanOrEqual(360_000)
+    expect((config.env || config.environment).ELECTRON_RUN_AS_NODE).toBe('1')
+  })
+
   it('manages DSH native patches without persisting Studio-managed entries', async () => {
     const home = makeHome()
     await upsertCodingAgentMcpServer('dsh', 'docs', { command: 'node', args: ['docs.mjs'] })
     const listed = await listCodingAgentMcpServers('dsh')
     expect(listed.servers.find(server => server.name === 'docs')).toMatchObject({ raw_config: { enabled: true }, managed: false })
     const managed = listed.servers.filter(server => server.managed)
-    expect(managed).toHaveLength(5)
+    expect(managed).toHaveLength(6)
     for (const server of managed) expect(server.raw_config.env.ELECTRON_RUN_AS_NODE).toBe('1')
     const path = join(home, '.dsh', 'cordis.patch.yml')
     expect(readFileSync(path, 'utf8')).not.toContain('ekko-studio-api')
@@ -111,6 +124,7 @@ describe('coding Agent MCP manager', () => {
       'ekko-studio-devices',
       'ekko-studio-use',
       'ekko-studio-plan',
+      'ekko-studio-interaction',
     ]))
     expect(initial.servers.find(server => server.name === 'ekko-studio-api')).toMatchObject({
       managed: true,

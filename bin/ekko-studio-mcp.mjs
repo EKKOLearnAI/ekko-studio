@@ -12,7 +12,7 @@ const DEFAULT_PORT = process.env.HERMES_WEB_UI_PORT || process.env.PORT || '8648
 const DEFAULT_BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`
 const DISPLAY_COMMAND = 'ekko-studio-mcp'
 const SERVER_NAME = process.env.HERMES_MCP_SERVER_NAME || DISPLAY_COMMAND
-const TOOLSETS = new Set(['api', 'browser', 'devices', 'use', 'plan'])
+const TOOLSETS = new Set(['api', 'browser', 'devices', 'use', 'plan', 'interaction'])
 const ALLOWED_PUBLIC_REQUEST_HEADERS = new Set([
   'accept',
   'accept-language',
@@ -47,7 +47,7 @@ function printHelp() {
 Ekko Studio MCP stdio server.
 
 Usage:
-  ${DISPLAY_COMMAND} [api|browser|devices|use|plan]
+  ${DISPLAY_COMMAND} [api|browser|devices|use|plan|interaction]
   ${DISPLAY_COMMAND} --help
   ${DISPLAY_COMMAND} --version
 
@@ -58,7 +58,7 @@ Environment:
   HERMES_WEB_UI_PROFILE   Default Hermes profile when a tool call omits profile.
   HERMES_WEB_UI_TOKEN     Optional explicit API token.
   AUTH_TOKEN              Optional explicit API token fallback.
-  HERMES_MCP_TOOLSET      Tool category to expose: api, browser, devices, use, or plan. Default: api.
+  HERMES_MCP_TOOLSET      Tool category to expose: api, browser, devices, use, plan, or interaction. Default: api.
 
 When run without options, this process waits for MCP JSON-RPC messages on stdin.
 `)
@@ -184,14 +184,14 @@ function normalizePublicHeaders(headers) {
   return normalized
 }
 
-// Mobile consent can wait five minutes before producing response headers.
+// User interactions can wait five minutes before producing response headers.
 // Avoid fetch's 300-second headers deadline racing that business deadline.
 async function fetchMobileConsent(url, options) {
   return new Promise((resolve, reject) => {
     const target = new URL(url)
     const transport = target.protocol === 'https:' ? httpsRequest : httpRequest
     let timer
-    const req = transport(target, { method: options.method, headers: options.headers }, res => {
+    const req = transport(target, { method: options.method, headers: options.headers, signal: options.signal }, res => {
       const chunks = []
       res.on('data', chunk => chunks.push(chunk))
       res.on('error', error => { clearTimeout(timer); reject(error) })
@@ -205,7 +205,7 @@ async function fetchMobileConsent(url, options) {
         resolve({ status: res.statusCode || 500, headers, text: async () => text })
       })
     })
-    timer = setTimeout(() => req.destroy(new Error('Mobile consent transport timed out')), 330_000)
+    timer = setTimeout(() => req.destroy(new Error('User interaction transport timed out')), 330_000)
     req.on('error', error => { clearTimeout(timer); reject(error) })
     req.end(options.body)
   })
@@ -224,11 +224,12 @@ async function requestEnvelope(path, options = {}) {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(profile ? { 'X-Hermes-Profile': profile } : {}),
   }
-  const fetchRequest = path === '/api/studio/mobile-calendar/request' || path === '/api/studio/mobile-health/request' ? fetchMobileConsent : fetch
+  const fetchRequest = path === '/api/studio/mobile-calendar/request' || path === '/api/studio/mobile-health/request' || path === '/api/studio/clarifications/request' ? fetchMobileConsent : fetch
   const response = await fetchRequest(`${baseUrl()}${appendQuery(path, options.query)}`, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: options.signal,
   })
   const responseHeaders = {}
   response.headers.forEach((value, key) => {
@@ -1006,6 +1007,16 @@ const tools = [
           },
         },
       }, ['path']),
+  },
+  {
+    name: 'ekko_studio_clarify',
+    toolset: 'interaction',
+    description: 'Ask the user one necessary clarification question in Studio/App and wait for their response. Provide optional choices or omit them for free text. Use only the latest interaction context_id. A timeout, dismissal, or cancellation is not consent; inspect reason before continuing. Unavailable to background tasks and delegated subagents.',
+    inputSchema: inputSchema({
+      context_id: { type: 'string', description: 'Current turn interaction context supplied by Studio.' },
+      question: { type: 'string', minLength: 1, maxLength: 4000 },
+      choices: { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 500 } },
+    }, ['context_id', 'question']),
   },
   {
     name: 'ekko_studio_update_plan',
@@ -1807,6 +1818,7 @@ function categoryToolByName(name) {
 }
 
 function serverInstructions() {
+  if (ACTIVE_TOOLSET === 'interaction') return 'Use ekko_studio_clarify to ask a necessary question and wait for the user in Studio/App. Use only the latest interaction context_id. Never treat timeout, dismissal, or cancellation as approval.'
   if (ACTIVE_TOOLSET === 'plan') return SHARED_TASK_PLAN_ENABLED
     ? 'Use ekko_studio_update_plan directly to maintain the current Studio task card. Use only the context_id supplied with the latest input; expired contexts cannot update another turn.'
     : ''
@@ -1868,7 +1880,7 @@ async function callCategoryToolset(args = {}) {
   return errorText('Invalid category toolset action. Allowed: list, describe, call.')
 }
 
-async function callTool(name, args = {}) {
+async function callTool(name, args = {}, signal) {
   if (!isToolCallable(name)) {
     return errorText(`Tool is not available in the active '${ACTIVE_TOOLSET}' MCP toolset: ${name}`)
   }
@@ -1942,6 +1954,10 @@ async function callTool(name, args = {}) {
       })
       return jsonText(await requestEnvelope(path, options))
     }
+    case 'ekko_studio_clarify':
+      return jsonText(await request('/api/studio/clarifications/request', withAuthArgs(args, {
+        method: 'POST', body: pickDefined(args, ['context_id', 'question', 'choices']), signal,
+      })))
     case 'ekko_studio_update_plan':
       return jsonText(await request('/api/studio/task-plans/update', withAuthArgs(args, {
         method: 'POST', body: pickDefined(args, ['context_id', 'explanation', 'plan']),
@@ -2176,7 +2192,12 @@ async function callTool(name, args = {}) {
   }
 }
 
+const pendingInteractions = new Map()
 async function handle(message) {
+  if (message?.method === 'notifications/cancelled') {
+    pendingInteractions.get(message.params?.requestId)?.abort()
+    return null
+  }
   if (!message || message.id === undefined) return null
 
   try {
@@ -2194,12 +2215,16 @@ async function handle(message) {
         }
       case 'tools/list':
         return { jsonrpc: '2.0', id: message.id, result: { tools: visibleTools() } }
-      case 'tools/call':
-        return {
-          jsonrpc: '2.0',
-          id: message.id,
-          result: await callTool(message.params?.name, message.params?.arguments || {}),
-        }
+      case 'tools/call': {
+        const abort = resolveToolName(message.params?.name) === 'ekko_studio_clarify' ? new AbortController() : undefined
+        if (abort) pendingInteractions.set(message.id, abort)
+        try {
+          return {
+            jsonrpc: '2.0', id: message.id,
+            result: await callTool(message.params?.name, message.params?.arguments || {}, abort?.signal),
+          }
+        } finally { pendingInteractions.delete(message.id) }
+      }
       default:
         return {
           jsonrpc: '2.0',
@@ -2213,6 +2238,7 @@ async function handle(message) {
 }
 
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity })
+rl.on('close', () => { for (const pending of pendingInteractions.values()) pending.abort() })
 rl.on('line', async line => {
   const text = line.trim()
   if (!text) return

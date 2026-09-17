@@ -22155,6 +22155,101 @@
         }
       }
     },
+    "/api/studio/clarifications/request": {
+      "post": {
+        "tags": [
+          "Chat Run"
+        ],
+        "summary": "Ask a user clarification in the current coding-agent turn",
+        "operationId": "requestClarification",
+        "description": "Requires the current interaction context_id and matching authenticated profile. Emits clarify.requested in Studio/App, waits up to five minutes, and returns the answer or an explicit timeout/dismissed/cancelled reason. Expired contexts cannot prompt a later turn. Caller-supplied session/run ids are ignored.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "context_id",
+                  "question"
+                ],
+                "properties": {
+                  "context_id": {
+                    "type": "string"
+                  },
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "choices": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Clarification settled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "clarify_id",
+                    "response",
+                    "reason"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "clarify_id": {
+                      "type": "string"
+                    },
+                    "response": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "response",
+                        "dismissed",
+                        "timeout",
+                        "cancelled"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing context or invalid question/choices."
+          },
+          "409": {
+            "description": "Expired or inactive context, wrong profile, or another question is pending."
+          },
+          "503": {
+            "description": "Chat run service unavailable."
+          }
+        }
+      }
+    },
     "/api/hermes/terminal": {
       "get": {
         "tags": [

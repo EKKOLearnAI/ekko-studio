@@ -94,6 +94,7 @@ const HERMES_MCP_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
   { name: 'ekko-studio-devices', toolset: 'devices' },
   { name: 'ekko-studio-use', toolset: 'use' },
   { name: 'ekko-studio-plan', toolset: 'plan' },
+  { name: 'ekko-studio-interaction', toolset: 'interaction' },
 ]
 const HERMES_MCP_SERVER_NAMES: Set<string> = new Set(HERMES_MCP_SERVERS.map(server => server.name))
 const LEGACY_HERMES_MCP_SERVER_NAMES = new Set([
@@ -1198,9 +1199,14 @@ function managedHermesMcpServerConfig(
   toolset: string,
 ): Record<string, unknown> {
   const override = getManagedMcpServerOverride(agentId, profile, serverName)
-  return Object.keys(override).length
+  const server: Record<string, unknown> = Object.keys(override).length
     ? override
     : hermesMcpServerConfig(profile, serverName, toolset)
+  if (toolset === 'interaction') {
+    if (agentId === 'claude-code' || agentId === 'opencode') server.timeout = Math.max(360_000, Number(server.timeout) || 0)
+    if (agentId === 'dsh') server.toolCallTimeoutMs = Math.max(360_000, Number(server.toolCallTimeoutMs) || 0)
+  }
+  return server
 }
 
 function isManagedHermesMcpServer(value: unknown): boolean {
@@ -1502,7 +1508,7 @@ function codexMcpConfigToml(
     if (Array.isArray(server.args) && server.args.length) lines.push(`args = ${tomlStringArray(server.args.map(String))}`)
     if (disabledManaged.has(item.name)) lines.push('enabled = false')
     lines.push(`startup_timeout_sec = ${typeof server.startup_timeout_sec === 'number' ? server.startup_timeout_sec : 120}`)
-    if (item.toolset === 'use') lines.push(`tool_timeout_sec = ${Math.max(360, Number(server.tool_timeout_sec) || 0)}`)
+    if (item.toolset === 'use' || item.toolset === 'interaction') lines.push(`tool_timeout_sec = ${Math.max(360, Number(server.tool_timeout_sec) || 0)}`)
     if (server.env && typeof server.env === 'object' && !Array.isArray(server.env)) {
       lines.push(`env = ${tomlInlineStringTable(server.env as Record<string, string>)}`)
     }
@@ -1669,7 +1675,7 @@ function piMcpConfig(profile: string, ...externalContents: Array<string | null |
     .filter(item => !disabledManaged.has(item.name))
     .map((item) => {
     const server = managedHermesMcpServerConfig('pi', profile, item.name, item.toolset)
-    const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
+    const requestTimeoutMs = item.toolset === 'api' ? 120_000 : (item.toolset === 'use' || item.toolset === 'interaction') ? 360_000 : 1_860_000
     return [item.name, {
       ...server,
       lifecycle: 'lazy',
@@ -1698,6 +1704,7 @@ function opencodeMcpServerConfig(server: Record<string, unknown>, enabled: boole
       type: 'local',
       command: [command, ...args],
       enabled,
+      ...(typeof server.timeout === 'number' ? { timeout: server.timeout } : {}),
       ...(server.env && typeof server.env === 'object' && !Array.isArray(server.env)
         ? { environment: server.env }
         : {}),
@@ -1707,6 +1714,7 @@ function opencodeMcpServerConfig(server: Record<string, unknown>, enabled: boole
     type: 'remote',
     url: String(server.url || ''),
     enabled,
+    ...(typeof server.timeout === 'number' ? { timeout: server.timeout } : {}),
     ...(server.headers && typeof server.headers === 'object' && !Array.isArray(server.headers)
       ? { headers: server.headers }
       : {}),
@@ -1866,7 +1874,7 @@ export function getCodingAgentManagedMcpServerConfigs(
   return Object.fromEntries(HERMES_MCP_SERVERS.map((item) => {
     const server = managedHermesMcpServerConfig(id, profile || 'default', item.name, item.toolset)
     if (id === 'pi') {
-      const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
+      const requestTimeoutMs = item.toolset === 'api' ? 120_000 : (item.toolset === 'use' || item.toolset === 'interaction') ? 360_000 : 1_860_000
       return [item.name, {
         ...server,
         lifecycle: 'lazy',
@@ -1880,7 +1888,7 @@ export function getCodingAgentManagedMcpServerConfigs(
       return [item.name, {
         ...server,
         startup_timeout_sec: 120,
-        ...(item.toolset === 'use' ? { tool_timeout_sec: Math.max(360, Number(server.tool_timeout_sec) || 0) } : {}),
+        ...((item.toolset === 'use' || item.toolset === 'interaction') ? { tool_timeout_sec: Math.max(360, Number(server.tool_timeout_sec) || 0) } : {}),
         ...(disabledManaged.has(item.name) ? { enabled: false } : {}),
       }]
     }

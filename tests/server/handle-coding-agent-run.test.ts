@@ -117,7 +117,7 @@ describe('handleCodingAgentRun', () => {
     const socket = { join: vi.fn(), emit: vi.fn() }
     for (const context of ['first-turn', 'second-turn']) {
       await handleCodingAgentRun({} as any, socket as any, {
-        session_id: 'session-1', coding_agent_id: 'codex', mode: 'global', input: 'Show a task card', task_plan_context_id: context,
+        session_id: 'session-1', coding_agent_id: 'codex', mode: 'global', input: 'Show a task card', task_plan_context_id: context, interaction_context_id: context,
       }, 'default', sessions as any)
     }
     const calls = sendCodingAgentRunInputMock.mock.calls
@@ -125,6 +125,8 @@ describe('handleCodingAgentRun', () => {
     expect(calls[1][1]).toContain('context_id="second-turn"')
     expect(calls[1][1]).not.toContain('first-turn')
     for (const args of calls) {
+      expect(args[1]).toContain('ekko_studio_clarify')
+      expect(args[1]).toContain('<studio_interaction_context>')
       expect(args[2]).not.toContain('context_id=')
       expect(args[4]).toBe('Show a task card')
     }

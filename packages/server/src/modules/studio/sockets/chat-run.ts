@@ -1,3 +1,4 @@
+import { ClarificationRuns } from '../services/clarification-runs'
 import { TaskPlanRuns, taskPlanRunInstruction } from '../services/task-plan-runs'
 import { saveTaskPlan } from '../repositories/task-plan-store'
 import { getSessionTaskPlans } from '../services/task-plans'
@@ -404,6 +405,10 @@ export class ChatRunSocket {
   private readonly taskPlanRuns = new TaskPlanRuns(saveTaskPlan, (sessionId, snapshot) => {
     this.emitExternalEvent(sessionId, 'plan.updated', { event: 'plan.updated', ...snapshot })
   })
+  private readonly clarificationRuns = new ClarificationRuns((sessionId, event, payload) => {
+    this.emitExternalEvent(sessionId, event, payload)
+    if (event === 'clarify.resolved') this.clearClarifyEventState(sessionId, String(payload.clarify_id))
+  })
   private bridgeResumePolls = new Set<string>()
   private readonly runWaiters = new Map<string, Set<(event: string, payload: any) => void>>()
   private readonly pendingMobileLocations = new Map<string, PendingMobileLocationRequest>()
@@ -426,13 +431,19 @@ export class ChatRunSocket {
     return this.taskPlanRuns.update(contextId, profile, input)
   }
 
+  requestClarification(contextId: string, profile: string, input: Record<string, unknown>, signal?: AbortSignal) {
+    return this.clarificationRuns.request(contextId, profile, input, signal)
+  }
+
   private beginTaskPlanRun(sessionId: string | undefined, profile: string) {
     if (!sessionId) return undefined
+    this.clarificationRuns.finishSession(sessionId)
     return this.taskPlanRuns.begin(sessionId, profile, () => this.sessionMap.get(sessionId))
   }
 
   private finishTaskPlanRun(sessionId: string, event: string, payload?: any, contextId?: string) {
     if (!['run.completed', 'run.failed', 'abort.completed'].includes(event)) return
+    this.clarificationRuns.finishSession(sessionId, contextId)
     const interrupted = event === 'abort.completed' || payload?.interrupted === true || payload?.result?.interrupted === true || this.sessionMap.get(sessionId)?.isAborting
     const executionState = interrupted ? 'interrupted' : event === 'run.failed' ? 'failed' : 'ended'
     try {
@@ -1124,6 +1135,14 @@ export class ChatRunSocket {
         })
         return
       }
+      const mcpResult = this.clarificationRuns.respond(data.session_id, data.clarify_id, data.response)
+      if (mcpResult.handled) {
+        if (!mcpResult.resolved) socket.emit('clarify.resolved', {
+          event: 'clarify.resolved', session_id: data.session_id, clarify_id: data.clarify_id,
+          resolved: false, error: 'Clarification could not be applied.',
+        })
+        return
+      }
       const ekkoResult = respondToEkkoClarification(
         data.session_id,
         data.clarify_id,
@@ -1320,6 +1339,8 @@ export class ChatRunSocket {
   }
 
   respondCodingAgentClarification(sessionId: string, clarifyId: string, response: string): boolean {
+    const result = this.clarificationRuns.respond(sessionId, clarifyId, response)
+    if (result.handled) return result.resolved
     return codingAgentRunManager.resolveClarification(sessionId, clarifyId, response).resolved
   }
 
@@ -1551,12 +1572,17 @@ export class ChatRunSocket {
 
     const isCommand = typeof data.input === 'string' && parseCodingAgentSessionCommand(data.input)
     const planContext = isCommand ? undefined : this.beginTaskPlanRun(data.session_id, profile)
+    const interactionContext = planContext && source !== 'workflow' && data.session_source !== 'workflow'
+      && source !== 'global_agent' && data.session_source !== 'global_agent' ? planContext : undefined
+    if (interactionContext && data.session_id) {
+      this.clarificationRuns.begin(interactionContext, data.session_id, profile, () => this.sessionMap.get(data.session_id!))
+    }
     const instructions = planContext
       ? [data.instructions, taskPlanRunInstruction()].filter(Boolean).join('\n\n')
       : data.instructions
     let started: Awaited<ReturnType<typeof handleCodingAgentRun>>
     try {
-      started = await handleCodingAgentRun(this.nsp, socket, { ...data, task_plan_context_id: planContext, instructions }, profile, this.sessionMap)
+      started = await handleCodingAgentRun(this.nsp, socket, { ...data, task_plan_context_id: planContext, interaction_context_id: interactionContext, instructions }, profile, this.sessionMap)
       if (!started && planContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, planContext)
     } catch (err) {
       if (planContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.failed', undefined, planContext)

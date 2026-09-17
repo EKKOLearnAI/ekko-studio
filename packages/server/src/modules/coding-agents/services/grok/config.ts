@@ -14,6 +14,7 @@ const MANAGED_MCP_NAMES = new Set([
   'ekko-studio-devices',
   'ekko-studio-use',
   'ekko-studio-plan',
+  'ekko-studio-interaction',
   'hermes-studio',
   'hermes-studio-mcp',
   'ekko-studio-mcp',

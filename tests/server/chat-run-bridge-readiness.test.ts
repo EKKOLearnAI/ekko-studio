@@ -1003,6 +1003,37 @@ describe('ChatRunSocket MCP task plan lifecycle', () => {
     expect(begin).not.toHaveBeenCalled()
   })
 
+  it.each(['coding_agent', 'group_chat', 'workflow', 'global_agent'])('binds interactive contexts only on user-facing Coding Agent turns: %s', async source => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { emitted, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    handleCodingAgentRunMock.mockReset()
+    let planContext = ''
+    let interactionContext: string | undefined
+    handleCodingAgentRunMock.mockImplementationOnce((async (_nsp: any, _socket: any, data: any, _profile: any, sessions: any) => {
+      planContext = data.task_plan_context_id
+      interactionContext = data.interaction_context_id
+      Object.assign(sessions.get(data.session_id), { isWorking: true, responseRun: { runMarker: 'coding-turn-1' } })
+      return { runId: 'reused-runtime-id', messageId: 42 }
+    }) as any)
+    await (server as any).handleRun(socket, { session_id: 'session-1', source: source === 'global_agent' ? 'coding_agent' : source, session_source: source === 'coding_agent' ? undefined : source, coding_agent_id: 'codex', input: 'Implement a feature' }, 'default')
+    expect(handleCodingAgentRunMock).toHaveBeenCalledTimes(1)
+    expect(planContext).toBeTruthy()
+    if (source === 'workflow' || source === 'global_agent') {
+      expect(interactionContext).toBeUndefined()
+      expect(() => server.requestClarification(planContext, 'default', { question: 'Q' })).toThrow('expired')
+    } else {
+      expect(interactionContext).toBe(planContext)
+      const result = server.requestClarification(interactionContext!, 'default', { question: 'Q' })
+      const prompt = emitted.find(item => item.event === 'clarify.requested')!
+      expect(prompt.payload.run_id).toBe('coding-turn-1')
+      expect(server.respondCodingAgentClarification('session-1', prompt.payload.clarify_id, 'A')).toBe(true)
+      await expect(result).resolves.toMatchObject({ response: 'A' })
+    }
+    server.emitExternalEvent('session-1', 'run.completed', {})
+    expect(() => server.requestClarification(planContext, 'default', { question: 'Q' })).toThrow('expired')
+  })
+
   const input = { plan: [{ id: 'verify', step: 'Verify the change', status: 'in_progress' }] }
 
   it.each(['run.completed', 'run.failed', 'abort.completed'])('settles a Codex plan before delivering %s', async event => {

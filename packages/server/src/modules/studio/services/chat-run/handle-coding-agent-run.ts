@@ -1,3 +1,4 @@
+import { clarificationTurnInstruction } from '../clarification-runs'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 import type { Server, Socket } from 'socket.io'
 import { chatCodingAgentRunManager as codingAgentRunManager } from '../../public/chat-agent-runtime'
@@ -18,6 +19,7 @@ import { getSession, updateSession } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
 
 export interface CodingAgentRunSocketData {
+  interaction_context_id?: string
   task_plan_context_id?: string
   input: string | ContentBlock[]
   session_id?: string
@@ -164,8 +166,11 @@ export async function handleCodingAgentRun(
       groupSystemPrompt || (includeBaseSystemPrompt ? getSystemPrompt(undefined, { source: data.session_source || data.source }) : ''),
       String(data.instructions || '').trim() === groupSystemPrompt ? '' : String(data.instructions || '').trim(),
     ].filter(Boolean).join('\n')
-    const runtimeInput = withTaskPlanTurnContext(codingInput.text, data.task_plan_context_id) as string
-    const sent = await (Array.isArray(data.input) || data.task_plan_context_id
+    const plannedInput = withTaskPlanTurnContext(codingInput.text, data.task_plan_context_id) as string
+    const runtimeInput = data.interaction_context_id
+      ? `${plannedInput}\n\n${clarificationTurnInstruction(data.interaction_context_id)}`
+      : plannedInput
+    const sent = await (Array.isArray(data.input) || data.task_plan_context_id || data.interaction_context_id
       ? sendCodingAgentRunInput(
         sessionId,
         runtimeInput,
