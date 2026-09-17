@@ -114,6 +114,53 @@ describe('ekko-agent skill tools', () => {
     })
   })
 
+  it('does not read the next frontmatter key as an empty description', async () => {
+    const directory = join(skillDirectory, 'blank-description')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'SKILL.md'), [
+      '---',
+      'name: blank-description',
+      'description:',
+      'metadata:',
+      '  keywords: [blank description]',
+      '---',
+      '# Blank Description',
+      'Body guidance.',
+      '',
+    ].join('\n'))
+
+    await expect(inspectLocalSkillValidationIssues(skillDirectory)).resolves.toContainEqual(
+      expect.objectContaining({
+        name: 'blank-description',
+        status: 'invalid',
+        error: 'SKILL.md frontmatter requires a description.',
+      }),
+    )
+    const listed = await new SkillListTool(skillDirectory).execute({ query: 'blank-description' })
+    expect(listed.data).toMatchObject({
+      skills: [{ name: 'blank-description', description: 'Body guidance.', validationStatus: 'invalid' }],
+    })
+
+    const indented = join(skillDirectory, 'indented-description')
+    await mkdir(indented, { recursive: true })
+    await writeFile(join(indented, 'SKILL.md'), [
+      '---',
+      'name: indented-description',
+      'description:',
+      '  Indented guidance.',
+      'metadata:',
+      '  keywords: [indented description]',
+      '---',
+      '# Indented Description',
+      'Body guidance.',
+      '',
+    ].join('\n'))
+    const indentedListed = await new SkillListTool(skillDirectory).execute({ query: 'indented-description' })
+    expect(indentedListed.data).toMatchObject({
+      skills: [{ name: 'indented-description', description: 'Indented guidance.', validationStatus: 'valid' }],
+    })
+  })
+
   it('hard-matches only skill names and maintained keywords', async () => {
     await expect(matchSkillsForUserMessage(skillDirectory, 'Please prepare a release summary.')).resolves.toMatchObject([
       { name: 'release-notes' },
