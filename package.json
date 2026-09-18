@@ -1,6 +1,6 @@
 {
   "name": "ekko-studio",
-  "version": "0.7.22",
+  "version": "0.7.23",
   "description": "Ekko Studio is a local-first AI workspace for multi-agent chat, coding, and visual workflows, available on desktop and the web.",
   "repository": {
     "type": "git",

@@ -3536,6 +3536,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_23_1: 'Added persistent mobile terminal sessions over App relay, with improved output delivery and input flow control (#3076, #3079)',
+    new_0_7_23_2: 'Added Coding Agent clarification prompts and persistent group chat task cards; task plans now stay at the end of each turn (#3080, #3085)',
+    new_0_7_23_3: 'Session pins now sync across devices and appear above recent sessions, with corrected pin filtering for App pagination (#3091)',
+    new_0_7_23_4: 'Improved group activity and clarification recovery for App notifications, persisted run snapshots, and added task progress notification events and Webhook subscription options (#3090, #3093)',
+    new_0_7_23_5: 'Added the ekko-studio npm package and CLI entry point, preserved upgrades for hermes-web-ui installations, and unified desktop package branding (#3084)',
+    new_0_7_23_6: 'Fixed lost DeepSeek reasoning content when Coding Agents replay message history (#3078)',
+    new_0_7_23_7: 'Fixed Ekko runtime tools failing to load when MCP servers use HTTP transport aliases (#3081)',
+    new_0_7_23_8: 'Fixed empty skill metadata values reading the next field while preserving multiline descriptions and blank lines (#3083)',
     new_0_7_22_1: 'Added a standalone task-plan MCP so Hermes and Coding Agents can update chat task plans, with task context refreshed each turn (#3053)',
     new_0_7_22_2: 'Chat thinking indicators now show the corresponding Agent logo (#3052)',
     new_0_7_22_3: 'Fixed Ekko Chat history pairing between tool calls and results, and added support for MCP HTTP transport aliases (#3030, #3031)',
