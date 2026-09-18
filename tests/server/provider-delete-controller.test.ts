@@ -163,6 +163,26 @@ describe('providers controller delete', () => {
     expect(authAfter.credential_pool['custom:keep-provider']).toEqual([{ label: 'keep' }])
   })
 
+  it('preserves provider-independent model settings when removing the last provider', async () => {
+    writeFileSync(join(hermesHome, 'config.yaml'), [
+      'model:',
+      '  provider: custom:deepseek-proxy',
+      '  default: deepseek-chat',
+      '  context_length: 256000',
+      'custom_providers:',
+      '  - name: deepseek-proxy',
+      '    base_url: https://example.invalid/v1',
+      '    api_key: placeholder',
+      '    model: deepseek-chat',
+      '',
+    ].join('\n'))
+
+    const { remove } = await loadProvidersController()
+    await remove(makeCtx('custom:deepseek-proxy'))
+
+    expect(readYaml(join(hermesHome, 'config.yaml')).model).toEqual({ context_length: 256000 })
+  })
+
   it('removes v12 providers dict entries when requested by source', async () => {
     writeFileSync(join(hermesHome, 'config.yaml'), [
       'model:',

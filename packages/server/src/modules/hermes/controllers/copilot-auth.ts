@@ -10,6 +10,7 @@ import { getActiveEnvPath } from '../services/profiles/profile'
 import { readAppConfig, writeAppConfig } from '../../studio/public/app-config'
 import { readFile } from 'fs/promises'
 import { logger } from '../../studio/public/logging'
+import { preservedModelKeys } from '../services/models/model-section'
 
 const POLL_MAX_DURATION_MS = 15 * 60 * 1000 // 15 minutes hard ceiling
 const SESSION_GC_GRACE_MS = 60 * 1000
@@ -197,7 +198,7 @@ export async function disable(ctx: any): Promise<void> {
       if (typeof modelSection === 'object' && modelSection !== null) {
         const provider = String(modelSection.provider || '').trim().toLowerCase()
         if (provider === 'copilot') {
-          cfg.model = {}
+          cfg.model = preservedModelKeys(modelSection)
           return { data: cfg, result: true }
         }
       }
