@@ -1,13 +1,18 @@
 import { beforeEach, it, expect, vi } from 'vitest'
 const auth=vi.hoisted(()=>({user:{id:1,role:'user'} as any,profiles:['default']}))
+const ownership=vi.hoisted(()=>({sessionUser:'1' as string|null,runUser:1 as number|null}))
 vi.mock('../../packages/server/src/modules/studio/public/auth',()=>({authenticateUserToken:async()=>auth.user}))
 vi.mock('../../packages/server/src/modules/studio/repositories/users-store',()=>({listUserProfiles:()=>auth.profiles.map(profile_name=>({profile_name}))}))
-vi.mock('../../packages/server/src/modules/studio/repositories/session-store',()=>({getSession:()=>({source:'cli',agent:'codex',profile:'default'}),getSessionNotificationPreview:()=>({title:'Title',preview:'Reply'})}))
+vi.mock('../../packages/server/src/modules/studio/repositories/session-store',()=>({getSession:(id:string)=>id==='missing'?null:({source:'cli',agent:'codex',profile:'default',user_id:ownership.sessionUser}),getSessionNotificationPreview:()=>({title:'Title',preview:'Reply'})}))
+vi.mock('../../packages/server/src/modules/studio/repositories/workflow-run-store',()=>({
+ getWorkflowRun:(id:string)=>id==='missing'?null:({id,workflow_id:'w',profile:'default',user_id:ownership.runUser}),
+ getWorkflowRunForSession:(id:string,profile:string)=>id==='node' && profile==='default'?({id:'root',workflow_id:'w',profile:'root-profile',user_id:ownership.runUser}):null,
+}))
 import { bindAppEventSubscription, parseAppSubscription, registerGroupEventAccess } from '../../packages/server/src/modules/studio/services/webhooks/app-events'
 import { publishDomainEvent, publishGroupMessage } from '../../packages/server/src/modules/studio/services/webhooks/domain-events'
 function socket(){const handlers=new Map<string,Function>();return {id:Math.random().toString(),handshake:{auth:{token:'test'}},data:{},emit:vi.fn(),on:(n:string,f:Function)=>{const old=handlers.get(n);handlers.set(n,old?(...args:any[])=>{old(...args);f(...args)}:f)},once:(n:string,f:Function)=>handlers.set(n,f),handlers}}
 const flush=()=>new Promise(r=>setTimeout(r,15))
-beforeEach(()=>{auth.user={id:1,role:'user'};auth.profiles=['default']})
+beforeEach(()=>{auth.user={id:1,role:'user'};auth.profiles=['default'];ownership.sessionUser='1';ownership.runUser=1})
 it('normalizes omitted/blank profile before authorization and validates types',async()=>{
  expect(parseAppSubscription({schema_version:1}).profile).toBe('default')
  expect(()=>parseAppSubscription({schema_version:1,types:['unsafe']})).toThrow()
@@ -104,4 +109,73 @@ it('a failed snapshot provider leaves no live subscription behind', async () => 
   publishAppState(stateEvent('chat.run.updated','default',{session_id:'s'},{state:{status:'running'}}))
   await flush();expect(s.emit).not.toHaveBeenCalled()
  } finally {stop();s.handlers.get('disconnect')!()}
+})
+
+it.each(['admin', 'super_admin'])('does not broadcast chat or workflow events to another %s in the same Profile', async role => {
+ const { publishAppState, stateEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+ const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+ const s=socket();bindAppEventSubscription(s as any)
+ await s.handlers.get('app.events.subscribe')!({schema_version:1,session_ids:['s'],workflow_ids:['w']},vi.fn())
+ const events = [
+  stateEvent('chat.run.completed','default',{session_id:'s',run_id:'r'},{run_id:'r'}),
+  stateEvent('chat.approval.requested','default',{session_id:'s',approval_id:'a'},{approval_id:'a'}),
+  stateEvent('chat.clarification.requested','default',{session_id:'s',clarification_id:'c'},{clarify_id:'c'}),
+  stateEvent('chat.run.updated','default',{session_id:'s'},{state:{status:'running'}}),
+  stateEvent('workflow.run.completed','default',{workflow_id:'w',run_id:'r'},{}),
+  stateEvent('workflow.run.updated','default',{workflow_id:'w',run_id:'r'},{state:{status:'running'}}),
+  stateEvent('chat.clarification.requested','default',{workflow_id:'w',session_id:'node',run_id:'node-runtime',clarification_id:'nc'},{}),
+ ]
+ try {
+  auth.user={id:2,role}
+  events.forEach(event=>businessEvents.publish(event));await flush()
+  expect(s.emit).not.toHaveBeenCalled()
+  auth.user={id:1,role}
+  events.forEach(event=>businessEvents.publish(event));await flush()
+  expect(s.emit).toHaveBeenCalledTimes(events.length)
+  ownership.sessionUser=null;ownership.runUser=null;s.emit.mockClear()
+  events.forEach(event=>publishAppState({...event,id:`ownerless:${event.id}`}));await flush()
+  expect(s.emit).not.toHaveBeenCalled()
+ } finally {s.handlers.get('disconnect')!()}
+})
+
+it('filters reconnect snapshots by owner, including plans and workflow node interactions', async () => {
+ const { stateEvent, planStateEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+ const card=planStateEvent('default',{session_id:'s',run_id:'r'},{session_id:'s',run_id:'r',plan_id:'card',revision:1,created_at:1,updated_at:1,execution_state:'running',plan:[{id:'a',step:'Private step',status:'in_progress'}]})!
+ const events=[stateEvent('chat.run.updated','default',{session_id:'s'},{state:{status:'running'}}),card,
+  stateEvent('workflow.run.updated','default',{workflow_id:'w',run_id:'r'},{state:{status:'running'}}),
+  stateEvent('chat.clarification.requested','default',{workflow_id:'w',session_id:'node',clarification_id:'c'},{})]
+ const s=socket();bindAppEventSubscription(s as any,()=>events)
+ try {
+  auth.user={id:2,role:'super_admin'}
+  const other=vi.fn();await s.handlers.get('app.events.subscribe')!({schema_version:1,include_snapshot:true},other)
+  expect(other.mock.calls[0][0]).toMatchObject({ok:true,snapshot:[]})
+  auth.user={id:1,role:'admin'}
+  const owner=vi.fn();await s.handlers.get('app.events.subscribe')!({schema_version:1,include_snapshot:true},owner)
+  expect(owner.mock.calls[0][0].snapshot).toHaveLength(events.length)
+  expect(JSON.stringify(owner.mock.calls[0][0].snapshot)).not.toContain('user_id')
+ } finally {s.handlers.get('disconnect')!()}
+})
+
+it('rejects missing or mismatched owners and never trusts ownership claimed in payloads', async () => {
+ const { canReceiveAppEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/app-events')
+ const { stateEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+ auth.user={id:2,role:'super_admin'}
+ for (const subject of [{session_id:'s'},{session_id:'missing'},{workflow_id:'w',run_id:'r'},{workflow_id:'w',run_id:'missing'},
+  {workflow_id:'another',session_id:'node'},{workflow_id:'w',session_id:'missing'}]) {
+  expect(canReceiveAppEvent(auth.user,stateEvent('chat.run.updated','default',subject,{user_id:2,state:{user_id:2}}))).toBe(false)
+ }
+})
+
+it('applies ownership to legacy notifications as well as the versioned subscription', async () => {
+ const { bindLegacyAppEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/legacy-app-events')
+ const { stateEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+ const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+ const s=socket();bindLegacyAppEvents(s as any,'chat',()=>true)
+ try {
+  const event=stateEvent('chat.run.completed','default',{session_id:'s',run_id:'r'},{run_id:'r'})
+  auth.user={id:2,role:'super_admin'};businessEvents.publish(event);await flush()
+  expect(s.emit).not.toHaveBeenCalled()
+  auth.user={id:1,role:'admin'};businessEvents.publish(event);await flush()
+  expect(s.emit).toHaveBeenCalledWith('app.notification',expect.objectContaining({sessionId:'s'}))
+ } finally {s.handlers.get('disconnect')!()}
 })

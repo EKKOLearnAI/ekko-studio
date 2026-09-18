@@ -3317,7 +3317,7 @@ export class GroupChatServer {
         const eventSocket = (user: AuthenticatedUser) => ({ id: '', data: { authUser: user } } as unknown as Socket)
         const removeGroupEventAccess = registerGroupEventAccess({ canReceive: (user, roomId, event) => {
             const socket = eventSocket(user)
-            if (!this.canSocketObserveRoom(socket, roomId)) return false
+            if (!this.canSocketReceiveRoomNotification(socket, roomId)) return false
             if (event?.type.startsWith('group.approval.')) return this.canSocketHandleAgentApproval(socket,
                 { roomId, ownerMemberId: String(event.payload.owner_member_id || '') })
             if (event?.type.startsWith('group.clarification.')) return this.canSocketManageRoom(socket, roomId)
@@ -4099,6 +4099,13 @@ export class GroupChatServer {
         const room = typeof this.storage.getRoom === 'function' ? this.storage.getRoom(roomId) : undefined
         if (!room) return false
         return this.canSocketJoinRoom(socket, roomId, room, null)
+    }
+
+    private canSocketReceiveRoomNotification(socket: Socket, roomId: string): boolean {
+        const user = socket.data?.authUser as AuthenticatedUser | undefined
+        const owner = this.storage.getRoom(roomId)?.ownerAuthUserId
+        return Boolean(user && Number.isSafeInteger(user.id) && user.id > 0
+            && owner != null && Number(owner) === user.id && this.canSocketObserveRoom(socket, roomId))
     }
 
     private roomAgentActivityKey(agentId: string, runId: string): string {

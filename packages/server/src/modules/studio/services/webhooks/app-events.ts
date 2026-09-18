@@ -4,6 +4,7 @@ import { businessEvents, APP_BUSINESS_TYPES, type BusinessEvent } from './busine
 import { authenticateUserToken, type AuthenticatedUser } from '../../public/auth'
 import { listUserProfiles } from '../../repositories/users-store'
 import { getSession, getSessionNotificationPreview } from '../../repositories/session-store'
+import { getWorkflowRun, getWorkflowRunForSession } from '../../repositories/workflow-run-store'
 import { groupReplyNotification } from '../group-chat/foreground-notification'
 import { foregroundNotification, foregroundNotificationAgent, foregroundNotificationPreview } from '../chat-run/foreground-notification'
 import { appEventState, type AppStateProvider } from './app-event-state'
@@ -85,8 +86,24 @@ function matches(request: Subscription, event: BusinessEvent): boolean {
   const selected = event.subject.room_id ? request.roomIds : event.subject.workflow_id ? request.workflowIds : request.sessionIds
   return !selected.length || selected.includes(event.subject.room_id || event.subject.workflow_id || event.subject.session_id || '')
 }
-function authorized(user: AuthenticatedUser, event: BusinessEvent): boolean {
-  return event.source === 'group_chat' ? Boolean(event.subject.room_id && groupAccess?.canReceive(user, event.subject.room_id, event)) : allowed(user, event.profile)
+/** Notification ownership is stricter than permission to view a shared Profile. */
+export function canReceiveAppEvent(user: AuthenticatedUser | undefined, event: BusinessEvent): boolean {
+  if (!user || !Number.isSafeInteger(user.id) || user.id <= 0) return false
+  if (event.source === 'group_chat') {
+    return Boolean(event.subject.room_id && groupAccess?.canReceive(user, event.subject.room_id, event))
+  }
+  if (!allowed(user, event.profile)) return false
+  if (event.source === 'workflow') {
+    // Node events carry their own runtime ID; resolve the persisted root by session.
+    const run = event.subject.session_id
+      ? getWorkflowRunForSession(event.subject.session_id, event.profile)
+      : event.subject.run_id ? getWorkflowRun(event.subject.run_id) : null
+    return Boolean(run && run.workflow_id === event.subject.workflow_id && run.user_id === user.id
+      && (event.subject.session_id || run.profile === event.profile))
+  }
+  const session = event.subject.session_id ? getSession(event.subject.session_id) : null
+  return Boolean(session && (session.profile || 'default') === event.profile
+    && session.user_id != null && String(session.user_id) === String(user.id))
 }
 /** One subscription per authenticated socket; local/manual/cloud use the same command. */
 export function bindAppEventSubscription(socket: Socket, localState?: AppStateProvider): void {
@@ -108,7 +125,7 @@ export function bindAppEventSubscription(socket: Socket, localState?: AppStatePr
       subscription = request
       socket.data.appEventVersion = 1
       const snapshot = request.snapshot ? [...appEventState(user, request.profile), ...(localState?.(user, request.profile) || [])]
-        .filter(event => matches(request, event) && authorized(user, event)).map(appEventEnvelope).filter(Boolean) : undefined
+        .filter(event => matches(request, event) && canReceiveAppEvent(user, event)).map(appEventEnvelope).filter(Boolean) : undefined
       ack?.({ ok: true, schema_version: 1, ...(snapshot ? { snapshot, timestamp: Date.now() } : {}) })
     } catch { if (!closed && ticket === revision) { subscription = null; ack?.({ ok: false, error: 'event_subscription_denied' }) } }
   })
@@ -124,7 +141,7 @@ export function bindAppEventSubscription(socket: Socket, localState?: AppStatePr
       // Revalidate JWT/account and current profile/membership on every delivery.
       const user = await authenticateUserToken(token)
       if (!user || !allowed(user, request.profile)) return
-      if (!authorized(user, event)) return
+      if (!canReceiveAppEvent(user, event)) return
       const envelope = appEventEnvelope(event)
       if (!envelope || closed || revision !== ticket) return
       seen.add(event.id); if (seen.size > 2000) seen.delete(seen.values().next().value!)

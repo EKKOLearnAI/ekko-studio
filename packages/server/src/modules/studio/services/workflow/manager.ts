@@ -2251,6 +2251,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
       const createRun = () => {
         const created = createWorkflowRun({
         workflow_id: workflow.id,
+        user_id: input.user?.id ?? input.pushActor?.userId ?? null,
         profile,
         workspace: workflow.workspace,
         start_node_ids: executionPreflight.schedulerStartNodeIds,

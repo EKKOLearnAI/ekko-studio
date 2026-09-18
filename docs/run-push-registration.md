@@ -1,5 +1,31 @@
 # Per-run push snapshots
 
+## App relay notification ownership
+
+The App's versioned `app.event` stream (Android native background notifications
+and foreground banners) authorizes each live event and reconnect snapshot by the
+authenticated **Studio login user ID**, in addition to existing Profile and
+interaction permissions. Legacy `app.notification`, `app.group-notification`
+and `app.workflow-notification` projections use the same ownership check.
+
+- Single-chat notifications belong to the persisted session's `user_id`.
+- Group notifications belong only to the room's `ownerAuthUserId`. Membership,
+  shared Profile access and a super-admin role do not grant notification access.
+  Approval notifications additionally require permission to handle that request.
+- Workflow notifications belong to the initiating `workflow_runs.user_id`,
+  saved on admission from the authenticated user (or the schedule owner).
+  Node interactions and plans resolve their persisted root run, including nodes
+  executing in a different Profile.
+
+Multiple connections belonging to the same owner may receive the event. Missing
+or deleted subjects and records with no owner fail closed; old workflow runs are
+not assigned to whoever is currently connected. Clients cannot override the
+owner through subscription filters or event payloads. This changes notification
+delivery only; shared workspace viewing and task execution permissions are separate.
+
+This relay policy does not change the separate immutable APNs snapshot delivery
+contract described below.
+
 Studio stores the initiating App identity and immutable notification data when accepting a root run. It does not manage push credential registration, refresh, expiry synchronization or receiver replacement.
 
 ## Admission

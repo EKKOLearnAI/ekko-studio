@@ -2,8 +2,8 @@ import { bindLegacyAppEvents } from '../../packages/server/src/modules/studio/se
 import { expect, it, vi } from 'vitest'
 vi.mock('../../packages/server/src/modules/studio/public/auth',()=>({authenticateUserToken:vi.fn(),isAuthEnabled:vi.fn()}))
 vi.mock('../../packages/server/src/modules/studio/repositories/users-store',()=>({listUserProfiles:()=>[{profile_name:'allowed'}]}))
-const run=vi.hoisted(()=>({id:'r',profile:'allowed',status:'completed',node_sessions:[],inputs:{credential:'secret'}}))
-vi.mock('../../packages/server/src/modules/studio/repositories/workflow-run-store',()=>({getWorkflowRunWithEvidence:()=>run}))
+const run=vi.hoisted(()=>({id:'r',workflow_id:'w',user_id:1,profile:'allowed',status:'completed',node_sessions:[],inputs:{credential:'secret'}}))
+vi.mock('../../packages/server/src/modules/studio/repositories/workflow-run-store',()=>({getWorkflowRunWithEvidence:()=>run,getWorkflowRun:()=>run}))
 vi.mock('../../packages/server/src/modules/studio/services/workflow/manager',()=>({getWorkflowManager:vi.fn()}))
 vi.mock('../../packages/server/src/modules/studio/public/logging',()=>({logger:{error:vi.fn(),info:vi.fn()}}))
 import { WorkflowSocketServer } from '../../packages/server/src/modules/studio/sockets/workflow'

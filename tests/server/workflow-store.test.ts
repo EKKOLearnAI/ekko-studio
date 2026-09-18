@@ -152,6 +152,27 @@ describe('workflow store', () => {
     })
   })
 
+  it('persists the initiating account and resolves cross-Profile nodes to that root', async () => {
+    const { createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, getWorkflowRunForSession, updateWorkflowRun } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const run = createWorkflowRun({ workflow_id: 'w', profile: 'root', user_id: 42 })
+    createWorkflowRunNodeSession({ run_id: run.id, workflow_id: 'w', node_id: 'n', session_id: 'node', profile: 'child' })
+    expect(getWorkflowRun(run.id)?.user_id).toBe(42)
+    expect(getWorkflowRunForSession('node', 'child')).toMatchObject({ id: run.id, profile: 'root', user_id: 42 })
+    expect(getWorkflowRunForSession('node', 'wrong')).toBeNull()
+    updateWorkflowRun(run.id, { status: 'completed' })
+    expect(getWorkflowRun(run.id)?.user_id).toBe(42)
+  })
+
+  it('adds nullable ownership to existing runs without assigning them to another account', async () => {
+    const { createWorkflowRun, getWorkflowRun } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const old = createWorkflowRun({ workflow_id: 'w' })
+    state.db!.exec('ALTER TABLE workflow_runs DROP COLUMN user_id')
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    initAllHermesTables()
+    expect(getWorkflowRun(old.id)).toMatchObject({ id: old.id, workflow_id: 'w', user_id: null })
+    expect(createWorkflowRun({ workflow_id: 'w', user_id: 2 }).user_id).toBe(2)
+  })
+
   it('deletes workflow runs and their node session records', async () => {
     const { createWorkflow } = await import('../../packages/server/src/modules/studio/repositories/workflow-store')
     const {

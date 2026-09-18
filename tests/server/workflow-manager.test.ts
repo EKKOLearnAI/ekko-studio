@@ -273,8 +273,9 @@ describe('workflow manager', () => {
     })
     expect(workflow.nodes[0]?.data).not.toHaveProperty('executionPolicy')
     try {
-      const result = await manager.runNow(workflow.id)
+      const result = await manager.runNow(workflow.id, { user: { id: 42, username: 'owner', role: 'super_admin' } })
       expect(result.run.status).toBe('completed')
+      expect(result.run.user_id).toBe(42)
       expect(result.run.snapshot_nodes[0]).toMatchObject({ data: {
         provider: 'custom:test', model: 'model-a', apiMode: 'chat_completions', reasoningEffort: 'high',
       } })

@@ -58,12 +58,12 @@ describe('group chat approval and context baseline', () => {
 
   it('group reply notifications recheck visibility, never replay duplicate messages', async () => {
     const { bindLegacyAppEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/legacy-app-events')
-    const allowed = { id: 'notice-allowed', emit: vi.fn(), data: {}, handshake: {auth:{}}, on: vi.fn() }
-    const denied = { id: 'notice-denied', emit: vi.fn(), data: {}, handshake: {auth:{}}, on: vi.fn() }
+    const allowed = { id: 'notice-allowed', emit: vi.fn(), data: {authUser:{id:1,role:'admin'}}, handshake: {auth:{}}, on: vi.fn() }
+    const denied = { id: 'notice-denied', emit: vi.fn(), data: {authUser:{id:2,role:'super_admin'}}, handshake: {auth:{}}, on: vi.fn() }
     const server = groupServer as any
     const old = server.nsp.sockets
     server.nsp.sockets = new Map([[allowed.id, allowed], [denied.id, denied]])
-    const access = vi.spyOn(server, 'canSocketObserveRoom').mockImplementation((socket: any) => socket.id === allowed.id)
+    vi.spyOn(server, 'canSocketObserveRoom').mockReturnValue(true)
     bindLegacyAppEvents(allowed as any, 'group', event => server.canSocketObserveRoom(allowed, event.subject.room_id))
     bindLegacyAppEvents(denied as any, 'group', event => server.canSocketObserveRoom(denied, event.subject.room_id))
     try {
@@ -72,10 +72,50 @@ describe('group chat approval and context baseline', () => {
       server.notifyGroupReply('room-1', message)
       expect(allowed.emit).toHaveBeenCalledTimes(1)
       expect(denied.emit).not.toHaveBeenCalled()
-      access.mockReturnValue(false)
+      harness.db.prepare('UPDATE gc_rooms SET ownerAuthUserId = 2 WHERE id = ?').run('room-1')
       server.notifyGroupReply('room-1', { ...message, id:'second-message' })
       expect(allowed.emit).toHaveBeenCalledTimes(1)
+      expect(denied.emit).toHaveBeenCalledTimes(1)
     } finally { for (const socket of [allowed, denied]) socket.on.mock.calls.find(call=>call[0] === 'disconnect')?.[1](); server.nsp.sockets = old }
+  })
+
+  it('sends group live events and reconnect snapshots only to the current room owner', async () => {
+    const { authenticateUserToken } = await import('../../packages/server/src/modules/studio/public/auth')
+    const { bindAppEventSubscription } = await import('../../packages/server/src/modules/studio/services/webhooks/app-events')
+    const { stateEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+    const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+    // All candidates may view the room, including a member and a super admin.
+    vi.spyOn(groupServer as any, 'canSocketObserveRoom').mockReturnValue(true)
+    vi.mocked(authenticateUserToken).mockImplementation(async token => ({ id: Number(token), username: token, role: 'super_admin' }))
+    const events = [
+      stateEvent('group.run.updated', 'default', { room_id: 'room-1', run_id: 'r' }, { state: { status: 'replying' } }),
+      stateEvent('group.run.failed', 'default', { room_id: 'room-1', run_id: 'r' }, {}),
+      stateEvent('group.approval.requested', 'default', { room_id: 'room-1', approval_id: 'a' }, { owner_member_id: 'auth:1' }),
+      stateEvent('group.clarification.requested', 'default', { room_id: 'room-1', clarification_id: 'c' }, {}),
+    ]
+    const clients = [1, 1, 2, 3].map((userId, index) => {
+      const handlers = new Map<string, Function>()
+      const s = { id: `owner-test-${index}`, handshake: { auth: { token: String(userId) } }, data: {}, emit: vi.fn(), on: (name: string, fn: Function) => handlers.set(name, fn), handlers }
+      bindAppEventSubscription(s as any, () => events)
+      return s
+    })
+    try {
+      for (const [index, client] of clients.entries()) {
+        const ack = vi.fn()
+        await client.handlers.get('app.events.subscribe')!({ schema_version: 1, include_snapshot: true }, ack)
+        expect(ack.mock.calls[0][0].snapshot).toHaveLength(index < 2 ? events.length : 0)
+      }
+      events.forEach(event => businessEvents.publish(event))
+      await vi.waitFor(() => expect(clients[0].emit).toHaveBeenCalledTimes(events.length))
+      expect(clients[1].emit).toHaveBeenCalledTimes(events.length)
+      expect(clients[2].emit).not.toHaveBeenCalled()
+      expect(clients[3].emit).not.toHaveBeenCalled()
+      harness.db.prepare('UPDATE gc_rooms SET ownerAuthUserId = NULL WHERE id = ?').run('room-1')
+      events.forEach(event => businessEvents.publish({ ...event, id: `ownerless:${event.id}` }))
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(clients[0].emit).toHaveBeenCalledTimes(events.length)
+      expect(clients[2].emit).not.toHaveBeenCalled()
+    } finally { clients.forEach(client => client.handlers.get('disconnect')!()) }
   })
 
   async function joinPair() {

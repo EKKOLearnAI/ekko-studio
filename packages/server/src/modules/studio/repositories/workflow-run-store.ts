@@ -8,6 +8,7 @@ export type WorkflowRunNodeStatus = 'queued' | 'running' | 'completed' | 'failed
 export interface WorkflowRunRecord {
   id: string
   workflow_id: string
+  user_id: number | null
   profile: string
   workspace: string | null
   start_node_ids: string[]
@@ -83,6 +84,7 @@ function rowToRunRecord(row: Record<string, any>): WorkflowRunRecord {
   return {
     id: String(row.id || ''),
     workflow_id: String(row.workflow_id || ''),
+    user_id: row.user_id == null ? null : Number(row.user_id),
     profile: profileName(row.profile),
     workspace: row.workspace == null || row.workspace === '' ? null : String(row.workspace),
     start_node_ids: parseArrayJson(row.start_node_ids_json ?? row.start_node_ids).map(String),
@@ -198,6 +200,7 @@ export function listWorkflowRunLoopEpochs(runId: string): WorkflowRunLoopEpochRe
 export function createWorkflowRun(input: {
   id?: string
   workflow_id: string
+  user_id?: number | null
   profile?: string | null
   workspace?: string | null
   start_node_ids?: string[]
@@ -216,6 +219,7 @@ export function createWorkflowRun(input: {
   const record: WorkflowRunRecord = {
     id: input.id?.trim() || randomUUID(),
     workflow_id: input.workflow_id,
+    user_id: input.user_id ?? null,
     profile: profileName(input.profile),
     workspace: input.workspace?.trim() || null,
     start_node_ids: input.start_node_ids || [],
@@ -235,6 +239,7 @@ export function createWorkflowRun(input: {
   const row = {
     id: record.id,
     workflow_id: record.workflow_id,
+    user_id: record.user_id,
     profile: record.profile,
     workspace: record.workspace,
     start_node_ids_json: JSON.stringify(record.start_node_ids),
@@ -260,8 +265,8 @@ export function createWorkflowRun(input: {
     INSERT INTO ${WORKFLOW_RUNS_TABLE} (
       id, workflow_id, profile, workspace, start_node_ids_json, status,
       snapshot_nodes_json, snapshot_edges_json, compiled_loops_json, requested_timeout_ms, deadline_at,
-      started_at, finished_at, created_at, error, trigger_source, scheduled_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      started_at, finished_at, created_at, error, trigger_source, scheduled_at, user_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     row.id,
     row.workflow_id,
@@ -280,6 +285,7 @@ export function createWorkflowRun(input: {
     row.error,
     row.trigger_source,
     row.scheduled_at,
+    row.user_id,
   )
   return record
 }
@@ -332,6 +338,20 @@ export function getWorkflowRun(id: string): WorkflowRunRecord | null {
     return row ? rowToRunRecord(row) : null
   }
   const row = db.prepare(`SELECT * FROM ${WORKFLOW_RUNS_TABLE} WHERE id = ?`).get(id) as Record<string, any> | undefined
+  return row ? rowToRunRecord(row) : null
+}
+
+/** Node sessions retain their root owner even when a node uses another Profile. */
+export function getWorkflowRunForSession(sessionId: string, profile: string): WorkflowRunRecord | null {
+  const db = getDb()
+  if (!db) {
+    const node = Object.values(jsonGetAll(WORKFLOW_RUN_NODE_SESSIONS_TABLE))
+      .map(rowToNodeSessionRecord).find(item => item.session_id === sessionId && item.profile === profile)
+    return node ? getWorkflowRun(node.run_id) : null
+  }
+  const row = db.prepare(`SELECT r.* FROM ${WORKFLOW_RUNS_TABLE} r
+    JOIN ${WORKFLOW_RUN_NODE_SESSIONS_TABLE} n ON n.run_id = r.id
+    WHERE n.session_id = ? AND n.profile = ? LIMIT 1`).get(sessionId, profile) as Record<string, any> | undefined
   return row ? rowToRunRecord(row) : null
 }
 

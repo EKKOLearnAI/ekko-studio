@@ -285,6 +285,7 @@ export const WORKFLOW_RUNS_TABLE = 'workflow_runs'
 export const WORKFLOW_RUNS_SCHEMA: Record<string, string> = {
   id: 'TEXT PRIMARY KEY',
   workflow_id: 'TEXT NOT NULL',
+  user_id: 'INTEGER',
   profile: "TEXT NOT NULL DEFAULT 'default'",
   workspace: 'TEXT',
   start_node_ids_json: "TEXT NOT NULL DEFAULT '[]'",
