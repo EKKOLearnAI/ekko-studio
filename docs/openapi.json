@@ -12839,6 +12839,54 @@
         ]
       }
     },
+    "/api/studio/app-connections/{id}/push": {
+      "patch": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Update push",
+        "description": "PATCH /api/studio/app-connections/:id/push",
+        "operationId": "updateAppConnectionPushController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/app-uploads": {
       "post": {
         "tags": [
@@ -17313,6 +17361,65 @@
                 ]
               }
             }
+          }
+        }
+      }
+    },
+    "/api/studio/push/registration": {
+      "put": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Update registration",
+        "description": "PUT /api/studio/push/registration",
+        "operationId": "pushRegistrationController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Delete registration",
+        "description": "DELETE /api/studio/push/registration",
+        "operationId": "pushRegistrationController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           }
         }
       }

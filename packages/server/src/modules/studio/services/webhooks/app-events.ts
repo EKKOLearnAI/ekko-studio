@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { businessEvents, APP_BUSINESS_TYPES, type BusinessEvent } from './business-events'
 import { authenticateUserToken, type AuthenticatedUser } from '../../public/auth'
 import { listUserProfiles } from '../../repositories/users-store'
+import { isAppConnectionPushEnabled } from '../../repositories/app-connections-store'
 import { getSession, getSessionNotificationPreview } from '../../repositories/session-store'
 import { getWorkflowRun, getWorkflowRunForSession } from '../../repositories/workflow-run-store'
 import { groupReplyNotification } from '../group-chat/foreground-notification'
@@ -124,7 +125,7 @@ export function bindAppEventSubscription(socket: Socket, localState?: AppStatePr
       if (closed || ticket !== revision) return
       subscription = request
       socket.data.appEventVersion = 1
-      const snapshot = request.snapshot ? [...appEventState(user, request.profile), ...(localState?.(user, request.profile) || [])]
+      const snapshot = request.snapshot ? (isAppConnectionPushEnabled(token) ? [...appEventState(user, request.profile), ...(localState?.(user, request.profile) || [])] : [])
         .filter(event => matches(request, event) && canReceiveAppEvent(user, event)).map(appEventEnvelope).filter(Boolean) : undefined
       ack?.({ ok: true, schema_version: 1, ...(snapshot ? { snapshot, timestamp: Date.now() } : {}) })
     } catch { if (!closed && ticket === revision) { subscription = null; ack?.({ ok: false, error: 'event_subscription_denied' }) } }
@@ -141,6 +142,7 @@ export function bindAppEventSubscription(socket: Socket, localState?: AppStatePr
       // Revalidate JWT/account and current profile/membership on every delivery.
       const user = await authenticateUserToken(token)
       if (!user || !allowed(user, request.profile)) return
+      if (!isAppConnectionPushEnabled(token)) return
       if (!canReceiveAppEvent(user, event)) return
       const envelope = appEventEnvelope(event)
       if (!envelope || closed || revision !== ticket) return

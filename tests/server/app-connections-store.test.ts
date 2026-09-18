@@ -22,6 +22,31 @@ describe('App connections store', () => {
     vi.resetModules()
   })
 
+  it('defaults legacy and new devices to enabled and preserves a toggle across token renewal', async () => {
+    const store = await import('../../packages/server/src/modules/studio/repositories/app-connections-store')
+    const input = { deviceCode: 'phone-push', deviceName: 'Phone', deviceBrand: '', deviceModel: '',
+      connectionType: 'lan' as const, userId: 7, token: 'token-a', tokenExpiresAt: 5000, now: 1000 }
+    const first = store.upsertAppConnection(input)
+    expect(first.push_enabled).toBe(1)
+    db.exec('ALTER TABLE app_connections DROP COLUMN push_enabled')
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    initAllHermesTables()
+    expect(store.listAppConnections()[0].push_enabled).toBe(1)
+    store.updateAppConnectionPushEnabled(first.id, false)
+    expect(store.isAppConnectionPushEnabled('token-a')).toBe(false)
+    const renewed = store.upsertAppConnection({ ...input, token: 'token-b' })
+    expect(renewed.id).toBe(first.id); expect(renewed.push_enabled).toBe(0)
+    expect(store.isAppConnectionPushEnabled('token-b')).toBe(false)
+    expect(store.isAppConnectionPushEnabled('browser-jwt')).toBe(true)
+    const other = store.upsertAppConnection({ ...input, deviceCode: 'other', token: 'other-token' })
+    expect(other.push_enabled).toBe(1)
+    expect(store.isAppConnectionPushEnabled('other-token')).toBe(true)
+    store.updateAppConnectionPushEnabled(first.id, true)
+    expect(store.isAppConnectionPushEnabled('token-b')).toBe(true)
+    store.revokeAppConnection(first.id)
+    expect(store.updateAppConnectionPushEnabled(first.id, true)).toBeNull()
+  })
+
   it('stores only a hash of each five-minute authorization code and consumes it once', async () => {
     const store = await import('../../packages/server/src/modules/studio/repositories/app-connections-store')
     const issued = store.createAppAuthorizationCode(42, 1_000)

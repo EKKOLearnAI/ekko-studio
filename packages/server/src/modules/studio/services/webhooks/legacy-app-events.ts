@@ -1,6 +1,7 @@
 import type { Socket } from 'socket.io'
 import { appEventEnvelope, canReceiveAppEvent } from './app-events'
 import { authenticateUserToken } from '../../public/auth'
+import { isAppConnectionPushEnabled } from '../../repositories/app-connections-store'
 import { businessEvents, type BusinessEvent } from './business-events'
 
 /** Compatibility projection for old clients; new clients use only /chat-run app.event. */
@@ -10,6 +11,7 @@ export function bindLegacyAppEvents(socket: Socket, kind: 'chat' | 'group' | 'wo
   let closed = false
   let chain = Promise.resolve()
   const deliver = (event: BusinessEvent) => {
+    if (!isAppConnectionPushEnabled(String(socket.handshake.auth?.token || ''))) return
     if (closed || socket.data.appEventVersion === 1 || socket.handshake.auth?.appEventVersion === 1 || !canReceive(event)) return
     if (!canReceiveAppEvent(socket.data.user || socket.data.authUser, event)) return
     if (kind === 'chat' && !event.type.startsWith('chat.')) return

@@ -1,68 +1,108 @@
-# Per-run push snapshots
+# User-scoped mobile notifications
 
-## App relay notification ownership
+## Ownership shared by Android and iOS
 
-The App's versioned `app.event` stream (Android native background notifications
-and foreground banners) authorizes each live event and reconnect snapshot by the
-authenticated **Studio login user ID**, in addition to existing Profile and
-interaction permissions. Legacy `app.notification`, `app.group-notification`
-and `app.workflow-notification` projections use the same ownership check.
+Both the App relay event stream and the APNs consumer use `canReceiveAppEvent`.
+The recipient is the authenticated **Studio login user**, not a Profile, cloud
+account ID, last viewer or phone that submitted a run.
 
-- Single-chat notifications belong to the persisted session's `user_id`.
-- Group notifications belong only to the room's `ownerAuthUserId`. Membership,
-  shared Profile access and a super-admin role do not grant notification access.
-  Approval notifications additionally require permission to handle that request.
-- Workflow notifications belong to the initiating `workflow_runs.user_id`,
-  saved on admission from the authenticated user (or the schedule owner).
-  Node interactions and plans resolve their persisted root run, including nodes
-  executing in a different Profile.
+- Single chat: the session's persisted `user_id`, with current Profile access.
+- Group: only `ownerAuthUserId`, with current room access. Approval notifications
+  additionally require permission to handle that request.
+- Workflow: persisted `workflow_runs.user_id` (including the schedule owner),
+  with current Profile access.
 
-Multiple connections belonging to the same owner may receive the event. Missing
-or deleted subjects and records with no owner fail closed; old workflow runs are
-not assigned to whoever is currently connected. Clients cannot override the
-owner through subscription filters or event payloads. This changes notification
-delivery only; shared workspace viewing and task execution permissions are separate.
+Missing owners/subjects and disabled users receive nothing. Sharing a Profile,
+being a group member or being a super-admin does not make someone the recipient.
+This does not change permissions to view a workspace or execute tasks.
 
-This relay policy does not change the separate immutable APNs snapshot delivery
-contract described below.
+## Device registration and token storage
 
-Studio stores the initiating App identity and immutable notification data when accepting a root run. It does not manage push credential registration, refresh, expiry synchronization or receiver replacement.
+After native iOS registration and account-server grant renewal, the App calls
+`PUT /api/studio/push/registration` through its authenticated Studio connection.
+Registration is independent of task submission. It retries after reconnect and
+refreshes on foreground, Studio/login changes and APNs token rotation.
 
-## Admission
+The request body is `{schema_version:1, studio_device_id, installation_ref,
+cloud_user_id, platform:'ios', app_id, apns_environment, apns_token, grant_id,
+push_token}`. Only an active App connection JWT can register; a browser login
+cannot. Studio derives `user_id`, installation and connection identity from the
+JWT and connection store. Body-supplied Studio and installation IDs must match;
+cloud connections also require the authenticated cloud account ID to match.
+No client-supplied Studio user ID is used.
 
-- Single chat: the App `run` event includes optional `push_snapshot`. Studio creates an independent root run ID and captures metadata before queuing. The snapshot field is removed before dispatching the chat input to agent execution. The socket later draining a queued run cannot change its destination.
-- Group chat: the human message ID is the root run ID. The message submission carries its snapshot; trusted child/handoff links retain the original target. Snapshot credentials are not persisted in group messages or broadcast to members.
-- Workflow: `POST /api/studio/workflows/:id/run` accepts the optional snapshot alongside the existing input. Admission persists it with the newly created workflow run; node runs inherit the root target.
-- Web/scheduled/guest executions do not infer a phone recipient. Missing/invalid optional push data produces a run without a notification snapshot, never a backfill or fallback to another phone.
+`user_push_devices` stores the Studio user, installation, connection ID and
+connection-token hash, app/environment, recipient hash and encrypted registration.
+It supports multiple phones per user. A phone/app/environment has one current
+owner; re-registration replaces its old owner/credentials. The same APNs address
+for an app/environment is not duplicated across installations.
 
-## Stored data
+APNs addresses and dedicated push credentials are encrypted with AES-256-GCM
+using the mode-0600 `.push-token-key` under `config.appHome`. Studio login tokens
+are never stored in the registration. The gateway retains its existing hashed
+grant contract and validates login session, account entitlement and recipient
+scope on each send. It does not need a new APNs device table.
 
-`run_push_targets` contains `kind`, `profile`, `run_id`, `subject_id`, the authenticated local user and phone installation, **`studio_device_id`**, and `push_snapshot_ciphertext`. The Studio ID comes from `getAppRelayDeviceIdentity().device_id`, the same identity used by App LAN/cloud connections. It is not the phone's `device_id`, a socket ID, or an App connection list ID. Body-supplied Studio/installation IDs must match before accepting a snapshot.
+`DELETE /api/studio/push/registration` removes the authenticated connection's
+registrations, used when notification permission is denied. Delivery rechecks
+connection identity, token rotation/expiry/revocation and user status. Account
+logout revokes the gateway login session, invalidating its grants. Offline local
+logout alone cannot revoke remote state until a server learns of it. APNs
+`apns_recipient_unregistered` and `apns_invalid_recipient` responses remove the
+failed registration; a late response cannot delete a newer registration.
 
-The snapshot is encrypted using AES-256-GCM and a mode-0600 `.push-token-key` under `config.appHome`. It includes only platform, application/environment, APNs address, dedicated push token/grant ID, cloud account and destination Studio/installation. App login tokens and claimed expiry are not copied. Token renewal/rotation, switching accounts or connecting another Studio cannot overwrite an existing run. `run_push_links` maps child runs/messages to the same immutable root.
+## Events and routing
 
-## Reading and routing
+Each App connection in Device Connections has a **Push notifications** switch,
+enabled by default for new and existing devices. The connection owner and
+super-admin can change it through
+`PATCH /api/studio/app-connections/:id/push` with `{push_enabled:boolean}`.
+The preference is persisted on the connection and survives login/token renewal;
+LAN and cloud connection rows have separate preferences.
 
-`readRunPushNotification(ref)` reads only the selected run, decrypts its snapshot and returns a credential/recipient pair plus a separate allowlisted click route. The route contains `studio_device_id`, `cloud_user_id`, `run_kind`, `run_id`, `profile` and the appropriate session/room/workflow ID. Credential/address fields do not appear in the click route or public events. It does not consult a mutable device table or a local expiry cache.
+Disabling it skips APNs delivery and notification observer events/snapshots for
+that connection. Other devices and ordinary chat streams are unaffected. Device
+registration is retained so enabling the switch resumes future notifications
+without reconnecting. Already delivered or in-flight notifications are not recalled.
 
-The App uses this route to reconnect the saved Studio before opening the task. A removed/unreachable original connection or account mismatch must not redirect the notification to another Studio.
+Completion/failure and approval/clarification request events trigger sending;
+there is no polling of run records or delayed notification queue. Eligible owner
+devices receive one request each, even when the task originated on desktop or a
+schedule and has no `push_snapshot` or `push_target_id`.
 
-## Event-driven delivery
+Group final assistant replies notify the group owner. Child chat events from
+groups/workflows are excluded; workflow terminal events notify the workflow
+owner. Replay, restored/background snapshots, interrupted runs, resolved
+interactions and progress events do not send. Single-chat intermediate completions
+with queued work follow the same suppression policy as Android.
 
-`services/notifications/run-push.ts` is an independent consumer of the webhook business-event hub. `ensureBusinessConsumers()` installs it for both chat and domain producers, so a workflow/group event can be the first event after startup; it does not depend on a foreground App socket or a configured HTTP webhook endpoint.
+Studio POSTs to `/push/v1/send` using the current Device Connections cloud route:
+official uses `config.appRelay.url` (default `https://api.ekkostudio.xyz`), and
+Cloudflare uses `https://cn.ekkostudio.xyz`. Each notification event reads the
+current setting, so route changes apply without restarting Studio. Requests use
+the current device's dedicated credential. The payload contains bounded display text and a separate
+`ekko_run` click route with Studio ID, cloud account ID, run kind/ID, Profile and
+session/room/workflow ID. Tokens and raw errors/commands never appear in this
+route or public events. App clicks reconnect the exact saved Studio and verify
+the account before opening the subject.
 
-| Webhook event | Push category |
-| --- | --- |
-| `chat.run.completed`, `chat.run.failed` | completion / failure |
-| `chat.approval.requested`, `chat.clarification.requested` | approval / interaction |
-| `group.message.created` (final assistant reply), `group.run.failed` | completion / failure |
-| `group.approval.requested`, `group.clarification.requested` | approval / interaction |
-| `workflow.run.completed`, `workflow.run.failed` | completion / failure |
+A bounded in-memory set suppresses duplicates per device/event (interactions by
+request ID). Requests have a 10-second timeout, reject redirects and do not retry.
+Failure on one phone does not prevent delivery to other phones or affect the task.
+There is no durable delivery outbox or replay after process restart. APNs acceptance
+does not establish when iOS displayed the notification.
 
-The group producers publish persisted reply/error facts and authenticated pending-interaction facts. Group runtime IDs link to the initiating root. Workflow nodes inherit the workflow root; their completion/failure events do not produce extra push notifications. Workflow node approvals are currently automatically answered with `once`, so they do not produce a user-action push; a node clarification retains the root workflow destination. Resolved interactions remain webhook events but do not send another push. Interrupted/replayed events, tool progress, missing snapshots and Android snapshots are skipped.
+## Upgrade and validation
 
-For each accepted event Studio reads only its immutable run snapshot and POSTs once to `/push/v1/send` on `config.appRelay.url`. The dedicated credential goes in `Authorization: Bearer`; the JSON contract is `{schema_version:1,event_id,event_type,recipient,notification:{title,body},ekko_run}`. `recipient` contains the saved platform/app/environment/APNs address, and `ekko_run` contains the saved click route. Titles/previews are bounded, with raw errors, commands and tool output excluded. The account server's pending endpoint must supply a generic notification when the preview is empty.
+Update both Studio and App. Older Apps only attach per-run snapshots and do not
+register devices, so they must be upgraded and connected once before receiving
+notifications through the new consumer. Legacy `run_push_targets`/`run_push_links`
+and their admission parsing remain for older clients and run provenance, but are
+not used to select notification recipients. Existing run snapshots are not migrated
+into the device table. Current App submissions no longer include push credentials.
 
-A bounded in-memory set suppresses duplicate terminal/interaction events (chat/workflow by root, group replies by response run/message). There is no persisted delivery history or replay after restart. The request has a 10-second timeout and rejects redirects. Every response, including 401/429/5xx, and every network failure ends the attempt; no credential checks/renewals, repairs, retries, delivery outbox or later backfill occur. Push errors do not affect the run or other consumers.
-
-The account server's APNs send endpoint and signed-device validation are still pending. The Studio consumer and request contract are implemented; actual APNs delivery cannot work until that endpoint is implemented and configured. Existing Android notification behavior is unchanged.
+Unit tests cover multiple owner phones, foreign users, device reassignment, token
+rotation, revoked/expired connections, permissions, group/workflow ownership,
+invalid-token cleanup and per-device failure isolation. Signed iPhone testing is
+still required for foreground/background delivery, permission changes, logout,
+multiple phones and notification clicks.

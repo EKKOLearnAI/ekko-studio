@@ -1,5 +1,7 @@
 import { beforeEach, it, expect, vi } from 'vitest'
 const auth=vi.hoisted(()=>({user:{id:1,role:'user'} as any,profiles:['default']}))
+const mutedTokens=vi.hoisted(()=>new Set<string>())
+vi.mock('../../packages/server/src/modules/studio/repositories/app-connections-store',()=>({isAppConnectionPushEnabled:(token:string)=>!mutedTokens.has(token),listAppConnections:()=>[]}))
 const ownership=vi.hoisted(()=>({sessionUser:'1' as string|null,runUser:1 as number|null}))
 vi.mock('../../packages/server/src/modules/studio/public/auth',()=>({authenticateUserToken:async()=>auth.user}))
 vi.mock('../../packages/server/src/modules/studio/repositories/users-store',()=>({listUserProfiles:()=>auth.profiles.map(profile_name=>({profile_name}))}))
@@ -12,7 +14,7 @@ import { bindAppEventSubscription, parseAppSubscription, registerGroupEventAcces
 import { publishDomainEvent, publishGroupMessage } from '../../packages/server/src/modules/studio/services/webhooks/domain-events'
 function socket(){const handlers=new Map<string,Function>();return {id:Math.random().toString(),handshake:{auth:{token:'test'}},data:{},emit:vi.fn(),on:(n:string,f:Function)=>{const old=handlers.get(n);handlers.set(n,old?(...args:any[])=>{old(...args);f(...args)}:f)},once:(n:string,f:Function)=>handlers.set(n,f),handlers}}
 const flush=()=>new Promise(r=>setTimeout(r,15))
-beforeEach(()=>{auth.user={id:1,role:'user'};auth.profiles=['default'];ownership.sessionUser='1';ownership.runUser=1})
+beforeEach(()=>{mutedTokens.clear();auth.user={id:1,role:'user'};auth.profiles=['default'];ownership.sessionUser='1';ownership.runUser=1})
 it('normalizes omitted/blank profile before authorization and validates types',async()=>{
  expect(parseAppSubscription({schema_version:1}).profile).toBe('default')
  expect(()=>parseAppSubscription({schema_version:1,types:['unsafe']})).toThrow()
@@ -177,5 +179,36 @@ it('applies ownership to legacy notifications as well as the versioned subscript
   expect(s.emit).not.toHaveBeenCalled()
   auth.user={id:1,role:'admin'};businessEvents.publish(event);await flush()
   expect(s.emit).toHaveBeenCalledWith('app.notification',expect.objectContaining({sessionId:'s'}))
+ } finally {s.handlers.get('disconnect')!()}
+})
+
+
+it('mutes only the selected device immediately, including snapshots, and resumes without reconnect', async () => {
+ const a=socket(), b=socket(); b.handshake.auth.token='other'
+ const { stateEvent }=await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+ const snapshot=stateEvent('chat.run.updated','default',{session_id:'s'},{state:{status:'running'}})
+ bindAppEventSubscription(a as any,()=>[snapshot]);bindAppEventSubscription(b as any)
+ await a.handlers.get('app.events.subscribe')!({schema_version:1},vi.fn())
+ await b.handlers.get('app.events.subscribe')!({schema_version:1},vi.fn())
+ mutedTokens.add('test')
+ try {
+  const ack=vi.fn();await a.handlers.get('app.events.subscribe')!({schema_version:1,include_snapshot:true},ack)
+  expect(ack.mock.calls[0][0]).toMatchObject({ok:true,snapshot:[]})
+  publishDomainEvent('workflow.run.completed','default',{workflow_id:'w',run_id:'muted'},{title:'W'})
+  await flush();expect(a.emit).not.toHaveBeenCalled();expect(b.emit).toHaveBeenCalledTimes(1)
+  mutedTokens.delete('test')
+  publishDomainEvent('workflow.run.completed','default',{workflow_id:'w',run_id:'enabled'},{title:'W'})
+  await flush();expect(a.emit).toHaveBeenCalledTimes(1);expect(b.emit).toHaveBeenCalledTimes(2)
+ } finally {a.handlers.get('disconnect')!();b.handlers.get('disconnect')!()}
+})
+
+it('also applies device preferences to legacy notification subscriptions', async () => {
+ const { bindLegacyAppEvents }=await import('../../packages/server/src/modules/studio/services/webhooks/legacy-app-events')
+ const s=socket();bindLegacyAppEvents(s as any,'workflow',()=>true)
+ try {
+  mutedTokens.add('test');publishDomainEvent('workflow.run.completed','default',{workflow_id:'w',run_id:'off'},{title:'W'})
+  await flush();expect(s.emit).not.toHaveBeenCalled()
+  mutedTokens.delete('test');publishDomainEvent('workflow.run.completed','default',{workflow_id:'w',run_id:'on'},{title:'W'})
+  await flush();expect(s.emit).toHaveBeenCalledWith('app.workflow-notification',expect.objectContaining({runId:'on'}))
  } finally {s.handlers.get('disconnect')!()}
 })

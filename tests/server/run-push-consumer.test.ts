@@ -2,119 +2,184 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import type { BusinessEvent } from '../../packages/server/src/modules/studio/services/webhooks/business-events'
 
-describe('run snapshot push consumer', () => {
-  let db: any, home: string
-  const fetchMock = vi.fn(), enqueue = vi.fn(), social = vi.fn()
+describe('user device APNs delivery', () => {
+  let db: any, home: string, connections: any[], users: Map<number, any>, session: any, workflow: any
+  const fetchMock = vi.fn(), inspect = vi.fn()
+  let appRelayRoute: 'official' | 'cloudflare' | undefined
+  const paths = ['infrastructure/database/index', 'public/config', 'public/auth', 'public/system-info',
+    'repositories/app-connections-store', 'repositories/users-store', 'repositories/session-store',
+    'repositories/workflow-run-store', 'services/webhooks/app-event-state', 'services/config/app-config']
+  const hash = (value: string) => createHash('sha256').update(value).digest('hex')
   beforeEach(async () => {
     vi.resetModules()
     const { DatabaseSync } = await import('node:sqlite')
-    db = new DatabaseSync(':memory:')
-    home = mkdtempSync(join(tmpdir(), 'run-push-consumer-'))
+    db = new DatabaseSync(':memory:'); home = mkdtempSync(join(tmpdir(), 'user-push-'))
+    connections = []; users = new Map(); workflow = null
+    appRelayRoute = undefined
+    session = { title: 'Saved task', profile: 'default', user_id: 7 }
     vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({ getDb: () => db }))
     vi.doMock('../../packages/server/src/modules/studio/public/config', () => ({ config: { appHome: home, appRelay: { url: 'https://push.test' } } }))
-    vi.doMock('../../packages/server/src/modules/studio/repositories/session-store', () => ({ getSession: () => ({ title: 'Saved task' }) }))
-    vi.doMock('../../packages/server/src/modules/studio/public/auth', () => ({ inspectAppUserToken: vi.fn() }))
-    vi.doMock('../../packages/server/src/modules/studio/public/system-info', () => ({ getAppRelayDeviceIdentity: vi.fn() }))
-    vi.doMock('../../packages/server/src/modules/studio/services/webhooks/dispatcher', () => ({ getChatWebhookDispatcher: () => ({ enqueue }) }))
-    vi.doMock('../../packages/server/src/modules/studio/public/social-messages', () => ({ notifySessionPush: social }))
+    vi.doMock('../../packages/server/src/modules/studio/services/config/app-config', () => ({ readAppConfig: async () => ({ appRelayRoute }) }))
+    vi.doMock('../../packages/server/src/modules/studio/public/auth', () => ({ inspectAppUserToken: inspect }))
+    vi.doMock('../../packages/server/src/modules/studio/public/system-info', () => ({ getAppRelayDeviceIdentity: async () => ({ device_id: 'studio-a' }) }))
+    vi.doMock('../../packages/server/src/modules/studio/repositories/app-connections-store', () => ({ listAppConnections: () => connections, hashAppCredential: hash }))
+    vi.doMock('../../packages/server/src/modules/studio/repositories/users-store', () => ({ findUserById: (id: number) => users.get(id), listUserProfiles: () => [{ profile_name: 'default' }] }))
+    vi.doMock('../../packages/server/src/modules/studio/repositories/session-store', () => ({ getSession: () => session, getSessionNotificationPreview: () => session }))
+    vi.doMock('../../packages/server/src/modules/studio/repositories/workflow-run-store', () => ({ getWorkflowRun: () => workflow, getWorkflowRunForSession: () => workflow }))
+    vi.doMock('../../packages/server/src/modules/studio/services/webhooks/app-event-state', () => ({ appEventState: () => [] }))
+    inspect.mockReset().mockImplementation(async (token: string) => {
+      const c = connections.find(row => row.token_hash === hash(token))
+      return c ? { status: c.revoked_at ? 'revoked' : 'active', user: users.get(c.user_id), deviceCode: c.device_code, connectionType: 'cloud' } : null
+    })
     fetchMock.mockReset().mockResolvedValue({ status: 200, body: { cancel: vi.fn() } })
-    enqueue.mockReset(); social.mockReset()
-    vi.stubGlobal('fetch', fetchMock)
   })
   afterEach(() => {
-    db.close(); rmSync(home, { recursive: true, force: true }); vi.unstubAllGlobals()
-    for (const path of ['infrastructure/database/index', 'public/config', 'repositories/session-store', 'public/auth', 'public/system-info', 'services/webhooks/dispatcher', 'public/social-messages']) {
-      vi.doUnmock(`../../packages/server/src/modules/studio/${path}`)
-    }
-    vi.resetModules()
+    db.close(); rmSync(home, { recursive: true, force: true })
+    paths.forEach(path => vi.doUnmock(`../../packages/server/src/modules/studio/${path}`)); vi.resetModules()
   })
-  async function fixture(kind: 'chat' | 'group' | 'workflow' = 'chat', runId = 'root-a', platform = 'ios') {
-    const s = await import('../../packages/server/src/modules/studio/repositories/run-push-store')
-    const { prepareRunPushSnapshot } = await import('../../packages/server/src/modules/studio/services/notifications/push-registration')
-    const actor = { userId: 7, deviceId: 'phone-a', studioDeviceId: 'studio-a' }
-    const snapshot = { schema_version: 1, studio_device_id: 'studio-a', installation_ref: 'phone-a', cloud_user_id: 12,
-      grant_id: 'grant-a', push_token: 'push_' + 'a'.repeat(43), platform, app_id: 'com.ekkostudio.ai',
-      apns_environment: platform === 'ios' ? 'development' : '', apns_token: platform === 'ios' ? 'ab'.repeat(32) : '' }
-    const target = s.bindRunPushTarget({ kind, profile: 'default', runId }, 'subject-a', actor,
-      { ciphertext: prepareRunPushSnapshot(actor, snapshot), platform })
-    const event: BusinessEvent = { schema_version: 1, id: 'event-a', type: 'chat.run.completed', occurred_at: new Date().toISOString(),
-      profile: 'default', source: 'chat', push_target_id: target.id, subject: { session_id: 'subject-a', run_id: 'runtime-a' }, payload: { output: 'Done' } }
-    const { createRunPushConsumer } = await import('../../packages/server/src/modules/studio/services/notifications/run-push')
-    return { s, target, snapshot, event, consume: createRunPushConsumer(fetchMock) }
+  function event(patch: Partial<BusinessEvent> = {}): BusinessEvent {
+    return { schema_version: 1, id: 'event-a', type: 'chat.run.completed', occurred_at: '2026-09-18T12:00:00Z',
+      profile: 'default', source: 'chat', subject: { session_id: 'session-a', run_id: 'runtime-a' },
+      payload: { run_id: 'runtime-a', output: 'Done' }, ...patch }
   }
-  it('uses only the saved token and Studio route, with one attempt even after gateway errors', async () => {
-    const { event, consume, snapshot } = await fixture()
-    fetchMock.mockResolvedValue({ status: 401, body: { cancel: vi.fn() } })
-    await consume(event)
-    await consume({ ...event, id: 'duplicate', subject: { ...event.subject, run_id: 'other-runtime-id' } })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, request] = fetchMock.mock.calls[0]
-    expect(String(url)).toBe('https://push.test/push/v1/send')
-    expect(request.headers.Authorization).toBe(`Bearer ${snapshot.push_token}`)
-    expect(request.redirect).toBe('error')
-    expect(request.signal).toBeInstanceOf(AbortSignal)
-    const body = JSON.parse(request.body)
-    expect(body).toMatchObject({ event_type: 'completion', recipient: { apns_token: snapshot.apns_token },
-      ekko_run: { studio_device_id: 'studio-a', run_id: 'root-a', session_id: 'subject-a' }, notification: { title: 'Saved task', body: 'Done' } })
-    expect(JSON.stringify(body.ekko_run)).not.toContain(snapshot.push_token)
-    expect(JSON.stringify(body)).not.toContain(snapshot.push_token)
+  async function register(userId = 7, deviceId = 'phone-a', tokenByte = 'ab') {
+    const token = `login-${userId}-${deviceId}`
+    users.set(userId, { id: userId, username: `user-${userId}`, role: 'admin', status: 'active' })
+    const connection = { id: connections.length + 1, user_id: userId, device_code: deviceId, connection_type: 'cloud',
+      cloud_user_id: userId + 100, token_hash: hash(token), token_expires_at: Date.now() / 1000 + 3600, revoked_at: null }
+    connections.push(connection)
+    const body = { schema_version: 1, platform: 'ios', studio_device_id: 'studio-a', installation_ref: deviceId,
+      cloud_user_id: userId + 100, grant_id: 'grant-a', push_token: 'push_' + 'a'.repeat(43),
+      app_id: 'com.ekkostudio.ai', apns_environment: 'production', apns_token: tokenByte.repeat(32) }
+    const { updateUserPushRegistration } = await import('../../packages/server/src/modules/studio/services/notifications/user-push-registration')
+    await updateUserPushRegistration(token, body)
+    return { body, token, connection, update: updateUserPushRegistration }
+  }
+  async function consumer() {
+    return (await import('../../packages/server/src/modules/studio/services/notifications/run-push')).createRunPushConsumer(fetchMock)
+  }
+  it('follows the current relay route on each event without recreating the consumer', async () => {
+    await register()
+    const consume = await consumer()
+    await consume(event())
+    appRelayRoute = 'cloudflare'
+    await consume(event({ id: 'cloudflare-event' }))
+    appRelayRoute = 'official'
+    await consume(event({ id: 'official-event' }))
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://push.test/push/v1/send',
+      'https://cn.ekkostudio.xyz/push/v1/send',
+      'https://push.test/push/v1/send',
+    ])
   })
-  it('isolates timeout/network failures and preserves separate roots even when runtime IDs repeat', async () => {
-    const a = await fixture(), b = await fixture('chat', 'root-b')
-    fetchMock.mockRejectedValue(new Error('timeout, token should not be logged'))
-    await expect(a.consume(a.event)).resolves.toBeUndefined()
-    await a.consume(a.event)
-    await a.consume(b.event)
+  it('notifies all owner devices for desktop runs without snapshots and excludes another user', async () => {
+    await register(); await register(7, 'phone-b', 'bc'); await register(8, 'phone-c', 'cd')
+    const consume = await consumer(); await consume(event()); await consume(event())
     expect(fetchMock).toHaveBeenCalledTimes(2)
+    const bodies = fetchMock.mock.calls.map(([, request]) => JSON.parse(request.body))
+    expect(bodies.map(body => body.recipient.apns_token)).toEqual(['ab'.repeat(32), 'bc'.repeat(32)])
+    expect(bodies[0]).toMatchObject({ notification: { title: 'Saved task', body: 'Done' },
+      ekko_run: { cloud_user_id: 107, run_kind: 'chat', session_id: 'session-a', run_id: 'runtime-a' } })
+    expect(JSON.stringify(bodies)).not.toContain('push_')
   })
-  it('skips unbound, Android, replayed, interrupted and child terminal events', async () => {
-    const { event, consume } = await fixture()
-    const android = await fixture('chat', 'android', 'android')
-    for (const patch of [ { push_target_id: undefined }, { source: 'workflow' }, { source: 'group_chat' },
-      { profile: 'other' }, { payload: { replayed: true } }, { payload: { restored: true } },
-      { payload: { interrupted: true } }, { payload: { stop_reason: 'aborted' } }, { type: 'chat.tool.failed' }, { type: 'chat.approval.resolved' },
-      { type: 'chat.plan.updated' }, { type: 'group.plan.updated' }, { type: 'workflow.plan.updated' } ]) {
-      await consume({ ...event, ...patch })
-    }
-    await consume(android.event)
-    expect(fetchMock).not.toHaveBeenCalled()
-    // Other queued roots must not suppress this root's actual completion.
-    await consume({ ...event, payload: { queue_remaining: 1, output: 'First root complete' } })
+  it('mutes APNs without deleting registration and token refresh does not re-enable the connection', async () => {
+    const a = await register(); await register(7, 'phone-b', 'bc')
+    a.connection.push_enabled = 0
+    await a.update(a.token, { ...a.body, apns_token: 'de'.repeat(32) })
+    const consume = await consumer(); await consume(event())
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).recipient.apns_token).toBe('bc'.repeat(32))
+    expect((await import('../../packages/server/src/modules/studio/repositories/user-push-store')).listUserPushDevices()).toHaveLength(2)
+    a.connection.push_enabled = 1
+    await consume(event({ id: 'enabled' })); expect(fetchMock).toHaveBeenCalledTimes(3)
   })
-  it('sends each distinct interaction and terminal once without exposing commands or errors', async () => {
-    const { event, consume } = await fixture()
-    for (const [type, subject] of [ ['chat.approval.requested', { approval_id: 'approval-a' }],
-      ['chat.clarification.requested', { clarification_id: 'clarify-a' }], ['chat.run.failed', {}] ] as const) {
-      const next = { ...event, type, subject: { ...event.subject, ...subject }, payload: { command: 'SECRET', error: 'SECRET' } }
-      await consume(next); await consume(next)
-    }
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(fetchMock.mock.calls.map(([, r]) => JSON.parse(r.body).event_type)).toEqual(['approval', 'interaction', 'failure'])
-    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('SECRET')
+
+  it('encrypts tokens at rest, replaces rotated tokens, and reassigns a phone to its new user', async () => {
+    const a = await register(); const store = await import('../../packages/server/src/modules/studio/repositories/user-push-store')
+    expect(JSON.stringify(store.listUserPushDevices())).not.toContain(a.body.apns_token)
+    expect(JSON.stringify(store.listUserPushDevices())).not.toContain(a.body.push_token)
+    await a.update(a.token, { ...a.body, apns_token: 'de'.repeat(32) })
+    expect(store.listUserPushDevices()).toHaveLength(1)
+    const consume = await consumer(); await consume(event())
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).recipient.apns_token).toBe('de'.repeat(32))
+    await register(8, 'phone-a', 'de'); fetchMock.mockClear()
+    expect(store.listUserPushDevices()).toHaveLength(1)
+    await consume(event({ id: 'next' })); expect(fetchMock).not.toHaveBeenCalled()
+    session.user_id = 8
+    await consume(event({ id: 'next' })); expect(fetchMock).toHaveBeenCalledTimes(1)
   })
-  it('consumes group persisted failures/interactions and workflow terminals without a preceding chat event', async () => {
-    const group = await fixture('group')
-    group.s.linkPushRun('group_message', 'subject-a', 'error-message', group.target)
-    group.s.linkPushRun('group_runtime', 'subject-a', 'runtime-g', group.target)
-    const { publishGroupMessage, publishGroupInteraction, publishDomainEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/domain-events')
-    const room = { id: 'subject-a', name: 'Room', summaryProfile: 'default' }
-    publishGroupInteraction(room, 'group.approval.requested', 'runtime-g', 'approval-g')
-    publishGroupInteraction(room, 'group.clarification.requested', 'runtime-g', 'clarify-g')
-    publishGroupMessage(room, { id: 'error-message', run_id: 'runtime-g', senderType: 'agent', role: 'assistant', content: 'SECRET raw error', finish_reason: 'error' }, [])
-    await fixture('workflow', 'workflow-root')
-    publishDomainEvent('workflow.run.completed', 'default', { workflow_id: 'subject-a', run_id: 'workflow-root' }, { title: 'Workflow' })
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
-    expect(fetchMock.mock.calls.map(([, r]) => JSON.parse(r.body).event_type)).toEqual(['approval', 'interaction', 'failure', 'completion'])
-    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('SECRET')
-    expect(enqueue.mock.calls.map(([e]) => e.type)).toEqual(['group.approval.requested', 'group.clarification.requested', 'group.message.created', 'group.run.failed', 'workflow.run.completed'])
-    expect(social).not.toHaveBeenCalled()
-    const { buildChatWebhookEnvelope } = await import('../../packages/server/src/modules/studio/services/webhooks/envelope')
-    for (const [event] of enqueue.mock.calls) {
-      const envelope = buildChatWebhookEnvelope(event, false)
-      expect(JSON.stringify(envelope)).not.toMatch(/SECRET|push_target_id|push_token|apns_token/)
+  it('rejects forged identities, foreign installations, web credentials and revoked connections', async () => {
+    const a = await register()
+    await expect(a.update('web', a.body)).rejects.toThrow('authentication_failed')
+    for (const patch of [{ installation_ref: 'other' }, { studio_device_id: 'other' }, { cloud_user_id: 999 }, { apns_token: 'bad' }, { platform: 'android' }]) {
+      await expect(a.update(a.token, { ...a.body, ...patch })).rejects.toThrow('invalid_push_registration')
     }
+    await a.update(a.token, { ...a.body, user_id: 8 })
+    expect((await import('../../packages/server/src/modules/studio/repositories/user-push-store')).listUserPushDevices()[0].user_id).toBe(7)
+    a.connection.revoked_at = 1
+    await expect(a.update(a.token, a.body)).rejects.toThrow('authentication_failed')
+    await (await consumer())(event()); expect(fetchMock).not.toHaveBeenCalled()
+  })
+  it('honors Profile removal, disabled users, ownerless sessions and expired or rotated login connections', async () => {
+    const a = await register(), consume = await consumer()
+    await consume(event({ profile: 'foreign' }))
+    session.user_id = null; await consume(event()); session.user_id = 7
+    users.get(7).status = 'disabled'; await consume(event()); users.get(7).status = 'active'
+    a.connection.token_expires_at = 0; await consume(event())
+    expect(fetchMock).not.toHaveBeenCalled()
+    a.connection.token_expires_at = Date.now() / 1000 + 3600
+    await a.update(a.token, a.body); a.connection.token_hash = 'rotated'
+    await consume(event()); expect(fetchMock).not.toHaveBeenCalled()
+  })
+  it('unregisters only the authenticated connection and preserves other phones', async () => {
+    const a = await register(); await register(7, 'phone-b', 'bc')
+    await a.update(a.token, null, true)
+    await (await consumer())(event()); expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).recipient.apns_token).toBe('bc'.repeat(32))
+  })
+  it('uses the shared group owner policy and the persisted workflow owner', async () => {
+    await register(); await register(8, 'other', 'bc')
+    const { registerGroupEventAccess } = await import('../../packages/server/src/modules/studio/services/webhooks/app-events')
+    registerGroupEventAccess({ canReceive: user => user.id === 7 })
+    const consume = await consumer()
+    await consume(event({ type: 'group.message.created', source: 'group_chat', subject: { room_id: 'room-a', message_id: 'reply-a' },
+      payload: { room: { id: 'room-a', name: 'Room' }, message: { id: 'reply-a', senderName: 'Agent', senderType: 'agent', role: 'assistant', content: 'Group reply' } } }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).ekko_run).toMatchObject({ run_kind: 'group', room_id: 'room-a', cloud_user_id: 107 })
+    workflow = { id: 'workflow-run', workflow_id: 'workflow-a', user_id: 8, profile: 'default' }
+    await consume(event({ type: 'workflow.run.completed', source: 'workflow', subject: { workflow_id: 'workflow-a', run_id: 'workflow-run' }, payload: { display: { title: 'Workflow' } } }))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).ekko_run.cloud_user_id).toBe(108)
+  })
+  it('ignores replay, child runs, queued terminals and resolved events without exposing errors or commands', async () => {
+    await register(); const consume = await consumer()
+    for (const patch of [{ source: 'workflow' }, { source: 'group_chat' }, { type: 'chat.approval.resolved' },
+      { payload: { replayed: true } }, { payload: { interrupted: true } }, { payload: { run_id: 'runtime-a', queue_remaining: 1 } }]) await consume(event(patch))
+    expect(fetchMock).not.toHaveBeenCalled()
+    await consume(event({ type: 'chat.approval.requested', subject: { session_id: 'session-a', approval_id: 'approval-a' }, payload: { approval_id: 'approval-a', command: 'SECRET' } }))
+    await consume(event({ type: 'chat.run.failed', payload: { run_id: 'runtime-a', error: 'SECRET' } }))
+    expect(fetchMock).toHaveBeenCalledTimes(2); expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('SECRET')
+  })
+  it('isolates a failed phone and allows later turns with the same runtime ID', async () => {
+    await register(); await register(7, 'phone-b', 'bc')
+    fetchMock.mockRejectedValueOnce(new Error('network'))
+    const consume = await consumer(); await expect(consume(event())).resolves.toBeUndefined()
+    await consume(event()); expect(fetchMock).toHaveBeenCalledTimes(2)
+    await consume(event({ occurred_at: '2026-09-18T12:01:00Z' })); expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+  it('removes invalid APNs addresses without deleting a registration refreshed during delivery', async () => {
+    const a = await register(), consume = await consumer()
+    fetchMock.mockImplementationOnce(async () => {
+      await a.update(a.token, { ...a.body, apns_token: 'cd'.repeat(32) })
+      return { status: 410, json: async () => ({ error: 'apns_recipient_unregistered' }) }
+    })
+    await consume(event())
+    const store = await import('../../packages/server/src/modules/studio/repositories/user-push-store')
+    expect(store.listUserPushDevices()).toHaveLength(1)
+    fetchMock.mockResolvedValueOnce({ status: 422, json: async () => ({ error: 'apns_invalid_recipient' }) })
+    await consume(event({ id: 'later' })); expect(store.listUserPushDevices()).toHaveLength(0)
   })
 })
