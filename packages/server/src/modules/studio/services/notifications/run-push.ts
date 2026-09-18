@@ -1,4 +1,5 @@
 import { config } from '../../public/config'
+import { logger } from '../../public/logging'
 import { getPushTargetById } from '../../repositories/run-push-store'
 import { getSession } from '../../repositories/session-store'
 import type { BusinessEvent } from '../webhooks/business-events'
@@ -15,9 +16,40 @@ const PUSH_EVENTS: Record<string, 'completion' | 'failure' | 'approval' | 'inter
 const plain = (value: unknown, max: number) => typeof value === 'string'
   ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : ''
 
-/** Independent consumer: no dispatcher queue, retries, grant lookup or token renewal. */
-export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(...args)) {
-  const attempted = new Set<string>()
+type PushResponse = { accepted?: boolean; apns_id?: string }
+type RunPushConsumerOptions = {
+  retryDelaysMs?: number[]
+  wait?: (delayMs: number) => Promise<void>
+}
+
+const retryableStatus = (status: number) => status === 408 || status === 429 || status >= 500
+const waitFor = (delayMs: number) => new Promise<void>(resolve => setTimeout(resolve, delayMs))
+const errorKind = (error: unknown) => error instanceof DOMException && error.name === 'TimeoutError'
+  ? 'timeout' : error instanceof Error && error.name === 'AbortError' ? 'aborted'
+    : error instanceof TypeError ? 'network' : 'unknown'
+
+async function providerResponse(response: Response): Promise<PushResponse> {
+  try {
+    const value = await response.json() as Record<string, unknown>
+    return {
+      ...(typeof value.accepted === 'boolean' ? { accepted: value.accepted } : {}),
+      ...(typeof value.apns_id === 'string' ? { apns_id: value.apns_id } : {}),
+    }
+  } catch {
+    await response.body?.cancel().catch(() => {})
+    return {}
+  }
+}
+
+/** Independent consumer: no dispatcher queue, grant lookup or token renewal. */
+export function createRunPushConsumer(
+  send: typeof fetch = (...args) => fetch(...args),
+  options: RunPushConsumerOptions = {},
+) {
+  const settled = new Set<string>()
+  const inFlight = new Set<string>()
+  const retryDelaysMs = options.retryDelaysMs || [250, 1_000]
+  const wait = options.wait || waitFor
   return async (event: BusinessEvent): Promise<void> => {
     const kind = PUSH_EVENTS[event.type], payload = event.payload
     if (!kind || !event.push_target_id || payload.replayed === true || payload.restored === true || payload.background_snapshot === true) return
@@ -55,17 +87,44 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
       const occurrence = interaction ? `${kind}:${interaction}` : run.kind === 'group'
         ? `reply:${event.subject.run_id || event.subject.message_id || event.id}` : 'terminal'
       const key = `${run.id}:${occurrence}`
-      if (attempted.has(key)) return
-      attempted.add(key)
-      if (attempted.size > 2000) attempted.delete(attempted.values().next().value!)
-      const response = await send(new URL('/push/v1/send', config.appRelay.url), {
-        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${snapshot.credential}` },
-        body: JSON.stringify({ schema_version: 1, event_id: event.id, event_type: kind,
-          recipient: snapshot.recipient, notification: { title, body }, ekko_run: snapshot.route }),
-      })
-      // The response (including 401/429/5xx) ends the attempt. Never log credential-bearing responses.
-      await response.body?.cancel()
+      if (settled.has(key) || inFlight.has(key)) return
+      inFlight.add(key)
+      try {
+        for (let attempt = 1; attempt <= retryDelaysMs.length + 1; attempt++) {
+          try {
+            const response = await send(new URL('/push/v1/send', config.appRelay.url), {
+              method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${snapshot.credential}` },
+              body: JSON.stringify({ schema_version: 1, event_id: event.id, event_type: kind,
+                recipient: snapshot.recipient, notification: { title, body }, ekko_run: snapshot.route }),
+            })
+            const result = await providerResponse(response)
+            const accepted = response.status >= 200 && response.status < 300 && result.accepted !== false
+            const fields = { eventType: event.type, runKind: run.kind, status: response.status, accepted,
+              ...(result.apns_id ? { apnsId: result.apns_id } : {}), attempt }
+            if (accepted) {
+              settled.add(key)
+              logger.info(fields, '[run-push] notification accepted')
+              break
+            }
+            const retry = retryableStatus(response.status) && attempt <= retryDelaysMs.length
+            logger.warn({ ...fields, retry }, '[run-push] notification rejected')
+            if (!retry) {
+              if (!retryableStatus(response.status)) settled.add(key)
+              break
+            }
+          } catch (error) {
+            const retry = attempt <= retryDelaysMs.length
+            logger.warn({ eventType: event.type, runKind: run.kind, attempt, retry, errorKind: errorKind(error) },
+              '[run-push] notification request failed')
+            if (!retry) break
+          }
+          await wait(retryDelaysMs[attempt - 1])
+        }
+      } finally {
+        inFlight.delete(key)
+        if (settled.size > 2000) settled.delete(settled.values().next().value!)
+      }
     } catch { /* Push failure must not affect run completion or other webhook consumers. */ }
   }
 }

@@ -6,7 +6,7 @@ import type { BusinessEvent } from '../../packages/server/src/modules/studio/ser
 
 describe('run snapshot push consumer', () => {
   let db: any, home: string
-  const fetchMock = vi.fn(), enqueue = vi.fn(), social = vi.fn()
+  const fetchMock = vi.fn(), enqueue = vi.fn(), social = vi.fn(), info = vi.fn(), warn = vi.fn()
   beforeEach(async () => {
     vi.resetModules()
     const { DatabaseSync } = await import('node:sqlite')
@@ -14,18 +14,19 @@ describe('run snapshot push consumer', () => {
     home = mkdtempSync(join(tmpdir(), 'run-push-consumer-'))
     vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({ getDb: () => db }))
     vi.doMock('../../packages/server/src/modules/studio/public/config', () => ({ config: { appHome: home, appRelay: { url: 'https://push.test' } } }))
+    vi.doMock('../../packages/server/src/modules/studio/public/logging', () => ({ logger: { info, warn } }))
     vi.doMock('../../packages/server/src/modules/studio/repositories/session-store', () => ({ getSession: () => ({ title: 'Saved task' }) }))
     vi.doMock('../../packages/server/src/modules/studio/public/auth', () => ({ inspectAppUserToken: vi.fn() }))
     vi.doMock('../../packages/server/src/modules/studio/public/system-info', () => ({ getAppRelayDeviceIdentity: vi.fn() }))
     vi.doMock('../../packages/server/src/modules/studio/services/webhooks/dispatcher', () => ({ getChatWebhookDispatcher: () => ({ enqueue }) }))
     vi.doMock('../../packages/server/src/modules/studio/public/social-messages', () => ({ notifySessionPush: social }))
-    fetchMock.mockReset().mockResolvedValue({ status: 200, body: { cancel: vi.fn() } })
-    enqueue.mockReset(); social.mockReset()
+    fetchMock.mockReset().mockResolvedValue({ status: 200, json: vi.fn().mockResolvedValue({ accepted: true, apns_id: 'apns-a' }) })
+    enqueue.mockReset(); social.mockReset(); info.mockReset(); warn.mockReset()
     vi.stubGlobal('fetch', fetchMock)
   })
   afterEach(() => {
     db.close(); rmSync(home, { recursive: true, force: true }); vi.unstubAllGlobals()
-    for (const path of ['infrastructure/database/index', 'public/config', 'repositories/session-store', 'public/auth', 'public/system-info', 'services/webhooks/dispatcher', 'public/social-messages']) {
+    for (const path of ['infrastructure/database/index', 'public/config', 'public/logging', 'repositories/session-store', 'public/auth', 'public/system-info', 'services/webhooks/dispatcher', 'public/social-messages']) {
       vi.doUnmock(`../../packages/server/src/modules/studio/${path}`)
     }
     vi.resetModules()
@@ -42,11 +43,11 @@ describe('run snapshot push consumer', () => {
     const event: BusinessEvent = { schema_version: 1, id: 'event-a', type: 'chat.run.completed', occurred_at: new Date().toISOString(),
       profile: 'default', source: 'chat', push_target_id: target.id, subject: { session_id: 'subject-a', run_id: 'runtime-a' }, payload: { output: 'Done' } }
     const { createRunPushConsumer } = await import('../../packages/server/src/modules/studio/services/notifications/run-push')
-    return { s, target, snapshot, event, consume: createRunPushConsumer(fetchMock) }
+    return { s, target, snapshot, event, consume: createRunPushConsumer(fetchMock, { retryDelaysMs: [1, 1], wait: vi.fn() }) }
   }
-  it('uses only the saved token and Studio route, with one attempt even after gateway errors', async () => {
+  it('uses only the saved token and Studio route, without retrying permanent gateway errors', async () => {
     const { event, consume, snapshot } = await fixture()
-    fetchMock.mockResolvedValue({ status: 401, body: { cancel: vi.fn() } })
+    fetchMock.mockResolvedValue({ status: 401, json: vi.fn().mockResolvedValue({ ok: false }) })
     await consume(event)
     await consume({ ...event, id: 'duplicate', subject: { ...event.subject, run_id: 'other-runtime-id' } })
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -61,13 +62,40 @@ describe('run snapshot push consumer', () => {
     expect(JSON.stringify(body.ekko_run)).not.toContain(snapshot.push_token)
     expect(JSON.stringify(body)).not.toContain(snapshot.push_token)
   })
-  it('isolates timeout/network failures and preserves separate roots even when runtime IDs repeat', async () => {
+  it('retries network failures and preserves separate roots even when runtime IDs repeat', async () => {
     const a = await fixture(), b = await fixture('chat', 'root-b')
-    fetchMock.mockRejectedValue(new Error('timeout, token should not be logged'))
+    fetchMock.mockRejectedValueOnce(new TypeError('timeout, token should not be logged'))
+      .mockResolvedValue({ status: 200, json: vi.fn().mockResolvedValue({ accepted: true }) })
     await expect(a.consume(a.event)).resolves.toBeUndefined()
     await a.consume(a.event)
     await a.consume(b.event)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ errorKind: 'network', retry: true }),
+      '[run-push] notification request failed')
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(a.snapshot.push_token)
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(a.snapshot.apns_token)
+  })
+  it.each([429, 503])('retries HTTP %i and records only safe provider fields', async status => {
+    const { event, consume, snapshot } = await fixture()
+    fetchMock.mockResolvedValueOnce({ status, json: vi.fn().mockResolvedValue({ error: snapshot.push_token }) })
+      .mockResolvedValue({ status: 200, json: vi.fn().mockResolvedValue({ accepted: true, apns_id: 'apns-ok' }) })
+    await consume(event)
     expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ status, retry: true }),
+      '[run-push] notification rejected')
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ status: 200, accepted: true, apnsId: 'apns-ok', attempt: 2 }),
+      '[run-push] notification accepted')
+    expect(JSON.stringify([warn.mock.calls, info.mock.calls])).not.toContain(snapshot.push_token)
+    expect(JSON.stringify([warn.mock.calls, info.mock.calls])).not.toContain(snapshot.apns_token)
+  })
+  it('allows a later delivery after all transient retries are exhausted', async () => {
+    const { event, consume } = await fixture()
+    fetchMock.mockResolvedValue({ status: 503, json: vi.fn().mockResolvedValue({ ok: false }) })
+    await consume(event)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    fetchMock.mockResolvedValue({ status: 200, json: vi.fn().mockResolvedValue({ accepted: true }) })
+    await consume({ ...event, id: 'replayed-by-event-bus' })
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
   it('skips unbound, Android, replayed, interrupted and child terminal events', async () => {
     const { event, consume } = await fixture()
