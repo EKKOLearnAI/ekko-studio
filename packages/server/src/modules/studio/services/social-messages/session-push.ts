@@ -229,7 +229,10 @@ export class SessionPushNotifier {
     const storedTarget = await this.dependencies.readTarget(userId)
     const target = await this.dependencies.resolveTarget(userId, storedTarget)
     if (!target) {
-      logger.warn({ sessionId, userId, event }, '[session-push] skipped notification: no active target')
+      // This notifier is only for Telegram/Feishu/Weixin-style social
+      // destinations. A missing social destination is normal and says
+      // nothing about the independent mobile run-push/APNs target.
+      logger.debug({ sessionId, userId, event }, '[social-messages] skipped notification: no configured social target')
       return 0
     }
     const content = formatSessionPushContent(agent || session.agent, event, this.dependencies.readLocale(userId))

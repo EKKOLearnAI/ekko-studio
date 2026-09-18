@@ -906,6 +906,11 @@ export class ChatRunSocket {
               platform: String((pushSnapshot as any)?.platform || 'unknown'),
             })
             pushTargetId = target.id
+            logger.info({
+              runKind: target.kind,
+              platform: target.platform,
+              snapshotPresent: Boolean(target.push_snapshot_ciphertext),
+            }, '[run-push] target bound')
             socket.emit('run.push.bound', { session_id: data.session_id, queue_id: data.queue_id, run_id: target.run_id })
           }
         } catch {
