@@ -56,7 +56,13 @@ const NODE_ENVIRONMENT_MISSING_CODE = 'node_environment_missing'
 const POSIX_LAUNCHER_FILE = 'launch.sh'
 const WINDOWS_LAUNCHER_FILE = 'launch.ps1'
 const CLAUDE_CODE_SKIP_PERMISSIONS_ARGS = ['--dangerously-skip-permissions']
-const CLAUDE_CODE_ROOT_PERMISSION_ARGS = ['--permission-mode', 'auto']
+const CLAUDE_CODE_TASK_PLAN_TOOL = 'mcp__ekko-studio-interaction__ekko_studio_update_plan'
+const CLAUDE_CODE_ROOT_PERMISSION_ARGS = [
+  '--permission-mode',
+  'auto',
+  '--allowedTools',
+  CLAUDE_CODE_TASK_PLAN_TOOL,
+]
 // Claude Code auto-compact is on by default, but Studio never tells it the
 // model context window, so it can compact too late for the 20MB proxy body
 // limit. Mirror Hermes' 50% compression budget and pass Studio's window.

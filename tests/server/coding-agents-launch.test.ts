@@ -1069,8 +1069,10 @@ describe('coding agent launch preparation', () => {
         '--mcp-config', join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code', 'mcp.json'),
         '--permission-mode',
         'auto',
+        '--allowedTools',
+        'mcp__ekko-studio-interaction__ekko_studio_update_plan',
       ],
-      shellCommand: `cd ${join(home, 'coding-agent', 'workspace', 'default', 'global')} && claude --append-system-prompt-file ${join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code', 'hermes-rules.md')} --mcp-config ${join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code', 'mcp.json')} --permission-mode auto`,
+      shellCommand: `cd ${join(home, 'coding-agent', 'workspace', 'default', 'global')} && claude --append-system-prompt-file ${join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code', 'hermes-rules.md')} --mcp-config ${join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code', 'mcp.json')} --permission-mode auto --allowedTools mcp__ekko-studio-interaction__ekko_studio_update_plan`,
     })
   })
 
@@ -1928,9 +1930,12 @@ describe('coding agent launch preparation', () => {
       join(result.rootDir, 'hermes-rules.md'),
       '--permission-mode',
       'auto',
+      '--allowedTools',
+      'mcp__ekko-studio-interaction__ekko_studio_update_plan',
     ])
     const launcher = readFileSync(join(result.rootDir, 'launch.sh'), 'utf-8')
     expect(launcher).toContain('--permission-mode auto')
+    expect(launcher).toContain('--allowedTools mcp__ekko-studio-interaction__ekko_studio_update_plan')
     expect(launcher).not.toContain('--dangerously-skip-permissions')
     expect(result.rootDir).toBe(join(home, 'coding-agent', 'model', 'default', 'openrouter', 'claude-code'))
   })
