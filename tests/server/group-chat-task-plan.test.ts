@@ -19,6 +19,8 @@ beforeEach(async () => {
 afterEach(() => { harness?.cleanup(); vi.restoreAllMocks() })
 
 it('broadcasts one versioned card, persists it for history, and rejects stale updates', async () => {
+  const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+  const publish = vi.spyOn(businessEvents, 'publish')
   const human = await connectGroupChatClient(harness.port, 'human', 'Human')
   const agent = await connectGroupChatClient(harness.port, 'worker', 'Worker', { source: 'agent', agentSocketSecret: GROUP_CHAT_AGENT_SOCKET_SECRET })
   harness.sockets.push(human, agent)
@@ -39,8 +41,14 @@ it('broadcasts one versioned card, persists it for history, and rejects stale up
   expect(harness.groupServer.getStorage().getMessageCount('room')).toBe(1)
   expect(stored.timestamp).toBe(1000)
   expect(buildProjectedGroupChatHistory('', [stored], { name: 'Worker', agentId: 'worker' })).toEqual([])
+  const events = publish.mock.calls.map(([event]) => event).filter(event => event.type === 'group.plan.updated')
+  expect(events.map(event => event.chat?.task_plan?.revision)).toEqual([1, 2])
+  expect(events[0].id).not.toBe(events[1].id)
+  expect(events[1].subject).toMatchObject({ room_id: 'room', session_id: 'agent-session', run_id: 'group-run', plan_id: 'plan' })
+  expect(events[1].chat?.task_plan).toMatchObject({ execution_state: 'interrupted', progress: { completed: 1, pending: 1, percent: 50 } })
   const rejoin = await emitAck<any>(human, 'join', { roomId: 'room', inviteCode: 'ROOM1', name: 'Human' })
   expect(rejoin.messages).toEqual(expect.arrayContaining([expect.objectContaining({ id: stored.id, content: stored.content })]))
+  expect(publish.mock.calls.map(([event]) => event).filter(event => event.type === 'group.plan.updated')).toHaveLength(2)
 })
 
 it('isolates room and session identities and rejects malformed or foreign snapshots', () => {
@@ -63,4 +71,20 @@ it('marks persisted running plans interrupted during server recovery', () => {
   expect(JSON.parse(storage.getMessage(card.id)!.content)).toMatchObject({ execution_state: 'interrupted', revision: 2 })
   storage.init()
   expect(JSON.parse(storage.getMessage(card.id)!.content).revision).toBe(2)
+})
+
+it('restores an active group card through the unified snapshot, with owner-only pending approvals', async () => {
+  const { appEventState } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+  const storage=harness.groupServer.getStorage()
+  harness.db.prepare('UPDATE gc_rooms SET ownerAuthUserId = 1 WHERE id = ?').run('room')
+  const card=groupTaskPlanMessage('room','agent-session','native-run',snapshot())!
+  storage.saveMessageAndRefreshRoom({ ...card.extra, id:card.id,content:card.content,roomId:'room',senderId:'worker',senderName:'Worker',senderType:'agent' })
+  const server=harness.groupServer as any
+  server.roomAgentActivityState.set('room',new Map([['run',{roomId:'room',agentId:'worker',runId:'native-run',status:'replying',agentSessionId:'private-session'}]]))
+  server.pendingApprovalRoutes.set('request',{roomId:'room',runId:'native-run',approvalId:'approval',ownerMemberId:'auth:1',timeoutMs:5000,requestedAt:Date.now(),command:'secret command'})
+  const owner=appEventState({id:1,role:'user'} as any,'default')
+  expect(owner.map(event=>event.type)).toEqual(['group.run.updated','group.plan.updated','group.approval.requested'])
+  expect(owner.find(event=>event.type==='group.plan.updated')?.chat?.task_plan?.progress).toMatchObject({total:2,completed:1})
+  expect(JSON.stringify(owner)).not.toMatch(/private-session|secret command/)
+  expect(appEventState({id:777,role:'user',profiles:[]} as any,'default')).toHaveLength(0)
 })

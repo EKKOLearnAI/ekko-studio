@@ -1,3 +1,4 @@
+import { bindRunPushTarget, pushRunTransaction, type PushActor } from '../../repositories/run-push-store'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import {
@@ -78,6 +79,8 @@ export interface WorkflowExecutionPreflightResult {
 }
 
 export interface WorkflowRunNowInput {
+  pushActor?: PushActor
+  pushSnapshot?: { ciphertext: string | null; platform: string }
   profile?: string | null
   startNodeIds?: string[]
   input?: string | null
@@ -1535,7 +1538,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
           ...(node.data.agentMode !== 'global' && node.data.reasoningEffort !== 'default'
             ? { reasoning_effort: node.data.reasoningEffort }
             : {}),
-        }, { profile, user: args.user, timeoutMs: remainingTimeoutMs, approvalChoice: 'once' })
+        }, { profile, user: args.user, timeoutMs: remainingTimeoutMs, approvalChoice: 'once', pushRoot: { kind: 'workflow', profile, runId: run.id } })
         if (isCanceled()) throw new Error(getWorkflowRun(run.id)?.error || 'Workflow run canceled')
         if (!runResult.ok) {
           const rawError = runResult.error || `node ${node.id} failed`
@@ -2060,6 +2063,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
             user: args.user,
             timeoutMs: remainingTimeoutMs,
             approvalChoice: 'once',
+            pushRoot: { kind: 'workflow', profile, runId: run.id },
           })
           if (!runResult.ok) {
             const error = runResult.error || `node ${node.id} failed`
@@ -2244,7 +2248,8 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
       const startedAt = Date.now()
       const runDeadline = input.timeoutMs && input.timeoutMs > 0 ? startedAt + input.timeoutMs : null
       const snapshot = workflowRunSnapshotGraph(workflow.nodes, workflow.edges, executionPreflight.compiled)
-      run = createWorkflowRun({
+      const createRun = () => {
+        const created = createWorkflowRun({
         workflow_id: workflow.id,
         profile,
         workspace: workflow.workspace,
@@ -2261,6 +2266,10 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
         trigger_source: input.triggerSource === 'scheduled' ? 'scheduled' : 'manual',
         scheduled_at: input.triggerSource === 'scheduled' ? input.scheduledAt ?? null : null,
       })
+        if (input.pushActor) bindRunPushTarget({ kind: 'workflow', profile, runId: created.id }, workflow.id, input.pushActor, input.pushSnapshot)
+        return created
+      }
+      run = input.pushActor ? pushRunTransaction(createRun) : createRun()
     } finally {
       releaseAdmission()
     }

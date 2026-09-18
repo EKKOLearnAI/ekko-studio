@@ -2345,7 +2345,7 @@ export default {
         deliveryId: 'Delivery ID',
       },
       events: {
-        messageCreated: 'User message created',
+        runUpdated: 'Run state updated', planUpdated: 'Task card progress updated', groupMessageCreated: 'Group message created', messageCreated: 'User message created',
         runQueued: 'Run queued',
         runStarted: 'Run started',
         toolStarted: 'Tool started',

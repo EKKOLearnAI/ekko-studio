@@ -98,6 +98,30 @@ describe('group chat approval and context baseline', () => {
     return new Promise(resolve => setTimeout(resolve, ms))
   }
 
+  it('publishes authenticated group interactions through webhooks with the initiating run target', async () => {
+    const { agent, human, agentSessionId } = await joinPair()
+    const { bindRunPushTarget, linkPushRun } = await import('../../packages/server/src/modules/studio/repositories/run-push-store')
+    const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+    const target = bindRunPushTarget({ kind: 'group', profile: 'default', runId: 'human-root' }, 'room-1',
+      { userId: 1, deviceId: 'phone-a', studioDeviceId: 'studio-a' })
+    linkPushRun('group_runtime', 'room-1', 'agent-runtime', target)
+    const events: any[] = []
+    const stop = businessEvents.subscribe('test-group-interactions', event => { if (event.type.startsWith('group.')) events.push(event) })
+    try {
+      for (const [request, resolved, id] of [ ['approval.requested', 'approval.resolved', 'approval_id'], ['clarify.requested', 'clarify.resolved', 'clarify_id'] ]) {
+        const requested = once(human, request)
+        agent.emit(request, { roomId: 'room-1', agentName: 'Agent', agentSessionId, runId: 'agent-runtime', [id]: id, command: 'SECRET', question: 'SECRET' })
+        await requested
+        const finished = once(human, resolved)
+        agent.emit(resolved, { roomId: 'room-1', agentName: 'Agent', agentSessionId, [id]: id, resolved: true })
+        await finished
+      }
+      expect(events.map(event => event.type)).toEqual(['group.approval.requested', 'group.approval.resolved', 'group.clarification.requested', 'group.clarification.resolved'])
+      expect(events.every(event => event.push_target_id === target.id && event.subject.run_id === 'agent-runtime')).toBe(true)
+      expect(JSON.stringify(events)).not.toContain('SECRET')
+    } finally { stop() }
+  })
+
   it('relays context status without overwriting the persisted room token count', async () => {
     const { agent, human, agentSessionId } = await joinPair()
     const statusEvent = once<any>(human, 'context_status')

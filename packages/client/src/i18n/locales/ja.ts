@@ -1879,7 +1879,7 @@ export default {
       localInboxPayloadTitle: '受信した Webhook ペイロード',
       clearInboxConfirm: 'ローカルテスト受信箱のすべてのイベントを消去しますか？',
       columns: { name: '名前', url: 'URL', events: 'イベント', profiles: 'プロファイル', status: '状態', actions: '操作', receivedAt: '受信日時', event: 'イベント', eventId: 'イベント ID', deliveryId: '配信 ID' },
-      events: { messageCreated: 'ユーザーメッセージ作成', runQueued: '実行をキューに追加', runStarted: '実行開始', toolStarted: 'ツール開始', toolCompleted: 'ツール完了', toolFailed: 'ツール失敗', approvalRequested: '承認要求', approvalResolved: '承認処理済み', clarificationRequested: '確認要求', clarificationResolved: '確認処理済み', completed: '実行完了', failed: '実行失敗' },
+      events: { runUpdated: '実行状態を更新', planUpdated: 'タスクカードの進捗更新', groupMessageCreated: 'グループメッセージ作成', messageCreated: 'ユーザーメッセージ作成', runQueued: '実行をキューに追加', runStarted: '実行開始', toolStarted: 'ツール開始', toolCompleted: 'ツール完了', toolFailed: 'ツール失敗', approvalRequested: '承認要求', approvalResolved: '承認処理済み', clarificationRequested: '確認要求', clarificationResolved: '確認処理済み', completed: '実行完了', failed: '実行失敗' },
       status: { enabled: '有効', disabled: '無効' },
       runtime: { idle: '待機中', delivering: '配信中', retrying: '再試行待ち', success: '配信済み', failed: '失敗', dropped: '破棄済み' },
       actions: { add: 'Webhook を追加', localTest: 'ローカルテスト受信先を使用', test: 'テスト', enable: '有効化', disable: '無効化', refresh: '更新', clear: '消去', view: '表示' },

@@ -1,3 +1,7 @@
+import { publishAppState, stateEvent, planStateEvent } from '../services/webhooks/app-event-state'
+import type { BusinessEvent } from '../services/webhooks/business-events'
+import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/notifications/push-registration'
+import { bindRunPushTarget, type PushRunRef, getRunPushTarget } from '../repositories/run-push-store'
 import { ClarificationRuns } from '../services/clarification-runs'
 import { TaskPlanRuns, taskPlanRunInstruction } from '../services/task-plan-runs'
 import { saveTaskPlan } from '../repositories/task-plan-store'
@@ -691,7 +695,39 @@ export class ChatRunSocket {
   // --- Connection handler ---
 
   private onConnection(socket: Socket) {
-    bindAppEventSubscription(socket)
+    bindAppEventSubscription(socket, (_user, profile) => {
+      const result: BusinessEvent[] = []
+      for (const [sessionId, state] of this.sessionMap) {
+        if (!state.isWorking || (state.profile || getSession(sessionId)?.profile || 'default') !== profile) continue
+        const source = state.source || getSession(sessionId)?.source
+        if (source === 'group_chat') continue
+        const subject = { session_id: sessionId, run_id: state.runId, workflow_id: state.webhookWorkflowId }
+        if (source !== 'workflow') result.push(stateEvent('chat.run.updated', profile, subject,
+          { state: { session_id: sessionId, status: 'running', timestamp: Date.now(), started_at: state.runStartedAt } }))
+        const pending = new Map<string, BusinessEvent>()
+        for (const { event, data } of buildResumeEvents(state.events)) {
+          if (!['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(event)) continue
+          const id = data?.approval_id || data?.clarify_id
+          if (!id) continue
+          const key = `${event.split('.')[0]}:${id}`
+          if (event.endsWith('.resolved')) {
+            if (!data.stale && (data.resolved !== false || ['timeout', 'aborted', 'cancelled', 'canceled'].includes(data.reason))) pending.delete(key)
+            continue
+          }
+          if (data.remaining_timeout_ms === 0) continue
+          const type = `chat.${event.replace('clarify.', 'clarification.')}`
+          pending.set(key, stateEvent(type, profile, { ...subject,
+            ...(event.startsWith('approval.') ? { approval_id: id } : { clarification_id: id }) }, data))
+        }
+        result.push(...pending.values())
+        for (const card of getSessionTaskPlans(sessionId, [], true, state.runId)) {
+          if (card.run_id !== state.runId) continue
+          const event = planStateEvent(profile, subject, card)
+          if (event) result.push(event)
+        }
+      }
+      return result
+    })
     bindLegacyAppEvents(socket, 'chat', event => {
       const user = socket.data.user as AuthenticatedUser | undefined
       return Boolean(user && this.canAccessProfile(user, event.profile)
@@ -758,6 +794,7 @@ export class ChatRunSocket {
     }
 
     socket.on('run', async (data: {
+      push_snapshot?: unknown
       input: string | ContentBlock[]
       display_input?: string | ContentBlock[] | null
       display_role?: 'user' | 'command'
@@ -801,6 +838,9 @@ export class ChatRunSocket {
       reasoning_effort?: string
       push_enabled?: boolean
     }) => {
+      const pushSnapshot = data.push_snapshot
+      delete data.push_snapshot
+      let pushTargetId: string | undefined
       let runProfile: string
       try {
         runProfile = resolveRunProfile(data.session_id, data.profile)
@@ -858,6 +898,20 @@ export class ChatRunSocket {
             }
           }
         }
+        try {
+          const actor = await authenticatedPushActor(socket.handshake.auth?.token)
+          if (actor) {
+            const target = bindRunPushTarget({ kind: 'chat', profile: runProfile, runId: randomUUID() }, data.session_id, actor, {
+              ciphertext: prepareRunPushSnapshot(actor, pushSnapshot),
+              platform: String((pushSnapshot as any)?.platform || 'unknown'),
+            })
+            pushTargetId = target.id
+            socket.emit('run.push.bound', { session_id: data.session_id, queue_id: data.queue_id, run_id: target.run_id })
+          }
+        } catch {
+          socket.emit('run.failed', { session_id: data.session_id, queue_id: data.queue_id, error: 'Run device binding failed' })
+          return
+        }
         if (state.isWorking) {
           const queueId = data.queue_id || `queue_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
           state.queue.push({
@@ -893,6 +947,7 @@ export class ChatRunSocket {
             commandPassthrough: data.allow_command_passthrough,
             reasoningEffort: data.reasoning_effort,
             originSocketId: socket.id,
+            pushTargetId,
           })
           const queuedPayload = {
             event: 'run.queued',
@@ -923,7 +978,7 @@ export class ChatRunSocket {
         state.source = source
       }
       try {
-        await this.handleRun(socket, data, runProfile)
+        await this.handleRun(socket, data, runProfile, false, undefined, pushTargetId)
       } catch (err) {
         const payload = {
           event: 'run.failed',
@@ -933,6 +988,7 @@ export class ChatRunSocket {
         }
         if (data.session_id) {
           observeChatRunWebhookEvent({
+            pushTargetId,
             event: 'run.failed',
             sessionId: data.session_id,
             profile: runProfile,
@@ -1407,8 +1463,10 @@ export class ChatRunSocket {
     profile: string,
     skipUserMessage = false,
     backgroundContinuationContext?: BackgroundContinuationContext,
+    pushTargetId?: string,
   ) {
     const source = resolveRunSource(data.source, data.session_id)
+    if (data.session_id) getOrCreateSession(this.sessionMap, data.session_id).pushTargetId = pushTargetId
     if (data.session_id) {
       const target = socket.data?.mobileDeviceTarget as MobileDeviceTarget | undefined
       if (target && target.profile === profile && source !== 'workflow' && source !== 'group_chat' && !backgroundContinuationContext) {
@@ -1478,6 +1536,7 @@ export class ChatRunSocket {
         }
         if (data.session_id) {
           observeChatRunWebhookEvent({
+            pushTargetId,
             event: 'run.failed',
             sessionId: data.session_id,
             profile,
@@ -1515,6 +1574,7 @@ export class ChatRunSocket {
         if (data.session_id) this.observeQueueInsertionRunEvent(data.session_id, event, payload)
         if (data.session_id) this.finishTaskPlanRun(data.session_id, event, payload, planContext)
         observeChatRunWebhookEvent({
+          pushTargetId,
           event,
           sessionId: String(data.session_id || payload?.session_id || ''),
           profile,
@@ -1550,6 +1610,7 @@ export class ChatRunSocket {
       const onEvent = (event: string, payload: any) => {
         if (data.session_id) this.observeQueueInsertionRunEvent(data.session_id, event, payload)
         observeChatRunWebhookEvent({
+          pushTargetId,
           event,
           sessionId: String(data.session_id || payload?.session_id || ''),
           profile,
@@ -1603,6 +1664,7 @@ export class ChatRunSocket {
         : contentBlocksToString(data.display_input ?? data.input)
       const messageId = data.queue_id || started.messageId
       observeChatRunWebhookEvent({
+        pushTargetId,
         event: 'message.created',
         sessionId: data.session_id,
         profile,
@@ -1635,6 +1697,7 @@ export class ChatRunSocket {
         },
       })
       observeChatRunWebhookEvent({
+        pushTargetId,
         event: 'run.started',
         sessionId: data.session_id,
         profile,
@@ -2298,7 +2361,7 @@ export class ChatRunSocket {
       background_delegation_id: next.backgroundDelegationId,
       background_claim_id: next.backgroundClaimId,
       autonomous: next.autonomous,
-    }, runProfile, skipUserMessage, backgroundContinuationContext)
+    }, runProfile, skipUserMessage, backgroundContinuationContext, next.pushTargetId)
   }
 
   // --- Helpers ---
@@ -2353,6 +2416,7 @@ export class ChatRunSocket {
       user?: AuthenticatedUser
       timeoutMs?: number
       approvalChoice?: ChatRunAutoApprovalChoice
+      pushRoot?: PushRunRef
       onEvent?: (event: string, payload: any) => void
     } = {},
   ): Promise<ChatRunAndWaitResult> {
@@ -2360,6 +2424,7 @@ export class ChatRunSocket {
     if (!sessionId) throw new Error('session_id is required')
     const profile = options.profile || data.profile || getSession(sessionId)?.profile || getActiveProfileName() || 'default'
     const source = resolveRunSource(data.source, sessionId)
+    const pushTargetId = options.pushRoot ? getRunPushTarget(options.pushRoot)?.id : undefined
     const state = getOrCreateSession(this.sessionMap, sessionId)
     state.events = []
     state.isWorking = !isCodingAgentExecution(source, data)
@@ -2416,6 +2481,7 @@ export class ChatRunSocket {
           }
           observeChatRunWebhookEvent({
             event: 'approval.resolved',
+            pushTargetId,
             sessionId,
             profile,
             source,
@@ -2496,12 +2562,13 @@ export class ChatRunSocket {
         emit: (event: string, payload: any) => onEvent(event, payload),
       } as unknown as Socket
 
-      this.handleRun(fakeSocket, { ...data, onEvent }, profile)
+      this.handleRun(fakeSocket, { ...data, onEvent }, profile, false, undefined, pushTargetId)
         .catch(err => {
           const error = err instanceof Error ? err.message : String(err)
           const payload = { event: 'run.failed', session_id: sessionId, error }
           observeChatRunWebhookEvent({
             event: 'run.failed',
+            pushTargetId,
             sessionId,
             profile,
             source,
@@ -2581,6 +2648,7 @@ export class ChatRunSocket {
     const session = getSession(sessionId)
     const storedAgent = String(session?.agent || '')
     observeChatRunWebhookEvent({
+      pushTargetId: state?.isWorking ? state.pushTargetId : undefined,
       event,
       sessionId,
       profile,
@@ -2854,6 +2922,7 @@ export class ChatRunSocket {
     const session = getSession(sessionId)
     const storedAgent = String(session?.agent || '')
     observeChatRunWebhookEvent({
+      pushTargetId: state?.isWorking ? state.pushTargetId : undefined,
       event,
       sessionId,
       profile,
@@ -2905,6 +2974,13 @@ export class ChatRunSocket {
       status = payload.ok === false || payload.action === 'error' ? 'failed' : 'completed'
     }
     if (!status) return
+
+    const state = this.sessionMap.get(sessionId)
+    const source = state?.source || getSession(sessionId)?.source
+    if (source !== 'group_chat' && source !== 'workflow') publishAppState(stateEvent('chat.run.updated', profile,
+      { session_id: sessionId, run_id: state?.runId || payload.run_id },
+      { state: { session_id: sessionId, status, timestamp: Date.now(), started_at: state?.runStartedAt,
+        reset_progress: event === 'run.started' } }))
 
     this.nsp.to(`pending-interactions:${profile}`).emit('session.activity', {
       event: 'session.activity',

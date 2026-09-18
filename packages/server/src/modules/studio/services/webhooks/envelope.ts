@@ -1,12 +1,13 @@
 import { createHash } from 'crypto'
 import type { ChatWebhookEventType } from '../../public/chat-webhooks'
+import { taskPlanWebhookContent, type WebhookTaskPlan } from './task-plan'
 
 export const CHAT_WEBHOOK_SCHEMA_VERSION = 1
 export const MAX_WEBHOOK_CONTENT_BYTES = 64 * 1024
 
 export type ChatRunWebhookSource = 'chat' | 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
 export type ChatRunWebhookAgent = 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
-export type ChatWebhookLifecycleStatus = 'created' | 'queued' | 'started' | 'requested' | 'resolved' | 'completed' | 'failed'
+export type ChatWebhookLifecycleStatus = 'created' | 'queued' | 'started' | 'requested' | 'resolved' | 'completed' | 'failed' | 'updated'
 export type ChatWebhookMessageRole = 'user' | 'command' | 'assistant'
 
 export interface ChatRunWebhookEvent {
@@ -15,9 +16,9 @@ export interface ChatRunWebhookEvent {
   occurred_at: string
   profile: string
   source: ChatRunWebhookSource
-  agent: ChatRunWebhookAgent
+  agent?: ChatRunWebhookAgent
   subject: {
-    session_id: string
+    session_id?: string
     run_id?: string
     queue_id?: string
     message_id?: string
@@ -27,6 +28,7 @@ export interface ChatRunWebhookEvent {
     room_id?: string
     workflow_id?: string
     workflow_node_id?: string
+    plan_id?: string
   }
   summary: {
     status: ChatWebhookLifecycleStatus
@@ -44,6 +46,8 @@ export interface ChatRunWebhookEvent {
   content?: string
   content_truncated?: boolean
   content_role?: ChatWebhookMessageRole
+  task_plan?: WebhookTaskPlan
+  state?: Record<string, unknown>
 }
 
 export interface ChatRunWebhookEnvelope extends Omit<ChatRunWebhookEvent, 'content' | 'content_truncated' | 'content_role'> {
@@ -80,10 +84,11 @@ export function buildChatWebhookEnvelope(
   const envelope: ChatRunWebhookEnvelope = {
     schema_version: CHAT_WEBHOOK_SCHEMA_VERSION,
     ...metadata,
+    ...(metadata.task_plan ? { task_plan: taskPlanWebhookContent(metadata.task_plan, includeAssistantContent) } : {}),
   }
   const shouldIncludeContent = (
-    (includeAssistantContent && event.type === 'chat.run.completed')
-    || (includeUserContent && event.type === 'chat.message.created')
+    (includeAssistantContent && (event.type === 'chat.run.completed' || (event.type === 'group.message.created' && contentRole === 'assistant')))
+    || (includeUserContent && (event.type === 'chat.message.created' || (event.type === 'group.message.created' && contentRole === 'user')))
   )
   if (shouldIncludeContent && content) {
     const value = truncateChatWebhookContent(content)

@@ -254,6 +254,24 @@ describe('group chat baseline behavior', () => {
     })).resolves.toBe('Unauthorized')
   })
 
+  it('atomically binds mobile human messages to separate group roots', async () => {
+    const storage = groupServer.getStorage()
+    storage.saveRoom('push-room', 'Push Room', 'PUSH')
+    const phone = await connectGroupChatClient(port, 'owner', 'Owner')
+    harness.sockets.push(phone)
+    await emitAck(phone, 'join', { roomId: 'push-room', name: 'Owner', inviteCode: 'PUSH' })
+    const serverSocket = groupServer.getIO().of('/group-chat').sockets.get(phone.id!)!
+    serverSocket.data.pushActor = { userId: 7, deviceId: 'phone-a', studioDeviceId: 'studio-a' }
+    const first = await emitAck<any>(phone, 'message', { roomId: 'push-room', content: 'First', handoffChainId: 'spoof' })
+    const second = await emitAck<any>(phone, 'message', { roomId: 'push-room', content: 'Second' })
+    expect(first.error).toBeUndefined()
+    expect(second.error).toBeUndefined()
+    const targets = harness.db.prepare('SELECT * FROM run_push_targets ORDER BY created_at').all() as any[]
+    expect(targets.map(target => target.run_id)).toEqual([first.id, second.id])
+    expect(targets.every(target => target.device_id === 'phone-a' && target.studio_device_id === 'studio-a' && target.kind === 'group')).toBe(true)
+    expect(storage.getRecentMessagesForUI('push-room')).toHaveLength(2)
+  })
+
   it('allows only the room owner to broadcast with @all', async () => {
     const storage = groupServer.getStorage()
     storage.saveRoom('room-1', 'Shared Room', 'ROOM1')

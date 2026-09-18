@@ -1,3 +1,4 @@
+import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/notifications/push-registration'
 import type { Context } from 'koa'
 import { assertWorkflowNodeSkillDependencies, getWorkflowManager, preflightWorkflowExecutionDefinition, preflightWorkflowRerunDefinition, type WorkflowRerunFromNodeInput, type WorkflowRunNowInput, type WorkflowUpdateInput, compileWorkflowGraphPreflight } from '../services/workflow/manager'
 import { getWorkflowRunWithEvidence, listWorkflowRunsWithEvidence, createWorkflowSchedule, deleteWorkflowSchedule, getWorkflowSchedule, listWorkflowSchedules, updateWorkflowSchedule } from '../public/workflows'
@@ -667,7 +668,9 @@ export async function runNow(ctx: Context) {
     const accepted = new Promise<{ kind: 'accepted' }>(resolve => {
       accept = () => resolve({ kind: 'accepted' })
     })
-    const execution = manager.runNow(id, { ...runInput, onAccepted: accept })
+    const auth = ctx.get('authorization')
+    const pushActor = await authenticatedPushActor(auth.startsWith('Bearer ') ? auth.slice(7) : '')
+    const execution = manager.runNow(id, { ...runInput, ...(pushActor ? { pushActor, pushSnapshot: { ciphertext: prepareRunPushSnapshot(pushActor, body.push_snapshot), platform: String((body.push_snapshot as any)?.platform || 'unknown') } } : {}), onAccepted: accept })
     const outcome = await Promise.race([
       accepted,
       execution.then(() => ({ kind: 'completed-before-acceptance' as const })),

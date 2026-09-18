@@ -2383,7 +2383,7 @@ export default {
         deliveryId: 'Delivery ID',
       },
       events: {
-        messageCreated: '用户消息已创建',
+        runUpdated: '运行状态更新', planUpdated: '任务卡片进度更新', groupMessageCreated: '群聊消息已创建', messageCreated: '用户消息已创建',
         runQueued: '运行已排队',
         runStarted: '运行已开始',
         toolStarted: '工具已开始',

@@ -1,6 +1,11 @@
+import { registerAppEventState, publishAppState, stateEvent, planStateEvent } from '../services/webhooks/app-event-state'
+import type { BusinessEvent } from '../services/webhooks/business-events'
+import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/notifications/push-registration'
+import { bindRunPushTarget, findPushRunLink, linkPushRun, pushRunTransaction, type PushActor } from '../repositories/run-push-store'
 import { parseGroupTaskPlan } from '../services/group-chat/task-plan'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
-import { publishGroupMessage, registerGroupEventAccess } from '../services/webhooks/app-events'
+import { registerGroupEventAccess } from '../services/webhooks/app-events'
+import { publishGroupMessage, publishGroupInteraction } from '../services/webhooks/domain-events'
 import { Server, Socket, Namespace } from 'socket.io'
 import type { Server as HttpServer } from 'http'
 import { mkdirSync } from 'fs'
@@ -89,6 +94,7 @@ function buildOutboundGroupMessage(message: ChatMessage): ChatMessage {
 }
 
 type IncomingGroupChatMessage = Omit<Partial<ChatMessage>, 'content'> & {
+    push_snapshot?: unknown
     roomId?: string
     content: string | Array<Record<string, unknown>>
     id?: string
@@ -1806,6 +1812,20 @@ class ChatStorage {
         ).map(buildOutboundGroupMessage)
     }
 
+    getRunTaskPlanMessages(roomId: string, runIds: string[]): Array<{ run_id: string; content: string }> {
+        const db = this.db()
+        if (!db || !runIds.length) return []
+        const rows: Array<{ run_id: string; content: string }> = []
+        for (let start = 0; start < runIds.length; start += 200) {
+            const ids = runIds.slice(start, start + 200)
+            rows.push(...db.prepare(`SELECT run_id, content FROM gc_messages
+                WHERE roomId = ? AND tool_name = 'task_plan' AND role = 'tool' AND senderType = 'agent'
+                AND run_id IN (${ids.map(() => '?').join(',')}) ORDER BY timestamp ASC, id ASC`)
+                .all(roomId, ...ids) as Array<{ run_id: string; content: string }>)
+        }
+        return rows
+    }
+
     getHistoryPageForUI(
         roomId: string,
         limit = 150,
@@ -2223,7 +2243,7 @@ class ChatStorage {
     saveMessageAndRefreshRoom(msg: ChatMessage, options: { preserveExistingTimestamp?: boolean } = {}): { message: ChatMessage; totalTokens: number } {
         const db = this.db()
         if (!db) return { message: msg, totalTokens: 0 }
-        db.exec('BEGIN IMMEDIATE')
+        db.exec('SAVEPOINT group_message_save')
         try {
             const existing = this.getMessage(msg.id)
             if (msg.tool_name === 'task_plan' || existing?.tool_name === 'task_plan') {
@@ -2237,7 +2257,7 @@ class ChatStorage {
                     }
                     if (previous.revision >= plan.revision) {
                         const totalTokens = Number(this.getRoom(existing.roomId)?.totalTokens || 0)
-                        db.exec('COMMIT')
+                        db.exec('RELEASE group_message_save')
                         return { message: existing, totalTokens }
                     }
                     msg = { ...msg, timestamp: existing.timestamp }
@@ -2246,7 +2266,7 @@ class ChatStorage {
             if (existing?.tool_name === 'workspace_diff') {
                 this.ensureCurrentRoomTokenAccounting(existing.roomId)
                 const totalTokens = Number(this.getRoom(existing.roomId)?.totalTokens || 0)
-                db.exec('COMMIT')
+                db.exec('RELEASE group_message_save')
                 return { message: existing, totalTokens }
             }
             const movedFromRoomId = existing && existing.roomId !== msg.roomId ? existing.roomId : null
@@ -2283,10 +2303,10 @@ class ChatStorage {
                 )
                 this.updateRoomTotalTokens(movedFromRoomId, sourceTotalTokens)
             }
-            db.exec('COMMIT')
+            db.exec('RELEASE group_message_save')
             return { message: storedMessage, totalTokens }
         } catch (err) {
-            try { db.exec('ROLLBACK') } catch { /* ignore */ }
+            try { db.exec('ROLLBACK TO group_message_save'); db.exec('RELEASE group_message_save') } catch { /* ignore */ }
             throw err
         }
     }
@@ -3294,10 +3314,45 @@ export class GroupChatServer {
         })
         servers.slice(1).forEach((httpServer) => this.io.attach(httpServer))
         this.nsp = this.io.of('/group-chat')
-        const removeGroupEventAccess = registerGroupEventAccess({ canReceive: (user, roomId) => this.canSocketObserveRoom({
-            id: '', data: { authUser: user },
-        } as unknown as Socket, roomId) })
-        for (const server of servers) server.once('close', removeGroupEventAccess)
+        const eventSocket = (user: AuthenticatedUser) => ({ id: '', data: { authUser: user } } as unknown as Socket)
+        const removeGroupEventAccess = registerGroupEventAccess({ canReceive: (user, roomId, event) => {
+            const socket = eventSocket(user)
+            if (!this.canSocketObserveRoom(socket, roomId)) return false
+            if (event?.type.startsWith('group.approval.')) return this.canSocketHandleAgentApproval(socket,
+                { roomId, ownerMemberId: String(event.payload.owner_member_id || '') })
+            if (event?.type.startsWith('group.clarification.')) return this.canSocketManageRoom(socket, roomId)
+            return true
+        } })
+        const removeGroupState = registerAppEventState('group', (user) => {
+            const result: BusinessEvent[] = []
+            const socket = eventSocket(user)
+            for (const [roomId, activities] of this.roomAgentActivityState) {
+                if (!this.canSocketObserveRoom(socket, roomId)) continue
+                const profile = this.storage.getRoom(roomId)?.summaryProfile || 'default'
+                for (const activity of activities.values()) result.push(this.groupActivityEvent(activity))
+                const runs = new Set([...activities.values()].map(activity => activity.runId))
+                for (const message of this.storage.getRunTaskPlanMessages(roomId, [...runs])) {
+                    try {
+                        const event = planStateEvent(profile, { room_id: roomId, run_id: message.run_id || undefined }, JSON.parse(message.content))
+                        if (event) result.push(event)
+                    } catch { /* malformed persisted card */ }
+                }
+            }
+            for (const route of this.pendingApprovalRoutes.values()) {
+                if (!this.canSocketHandleAgentApproval(socket, route)) continue
+                result.push(stateEvent('group.approval.requested', this.storage.getRoom(route.roomId)?.summaryProfile || 'default',
+                    { room_id: route.roomId, run_id: route.runId, approval_id: route.approvalId },
+                    { owner_member_id: route.ownerMemberId, timeout_ms: route.timeoutMs, requested_at: route.requestedAt }))
+            }
+            for (const route of this.pendingClarifyRoutes.values()) {
+                if (!this.canSocketManageRoom(socket, route.roomId)) continue
+                result.push(stateEvent('group.clarification.requested', this.storage.getRoom(route.roomId)?.summaryProfile || 'default',
+                    { room_id: route.roomId, run_id: route.runId, clarification_id: route.clarifyId },
+                    { timeout_ms: route.timeoutMs, requested_at: route.requestedAt }))
+            }
+            return result
+        })
+        for (const server of servers) server.once('close', () => { removeGroupEventAccess(); removeGroupState() })
         this.nsp.use(this.authMiddleware.bind(this))
         this.nsp.on('connection', this.onConnection.bind(this))
 
@@ -3368,8 +3423,10 @@ export class GroupChatServer {
         const room = this.storage.getRoom(roomId)
         if (!room) return
         // Publish persisted message facts; the App adapter chooses which replies notify.
-        if (this.notifiedGroupMessages.has(message.id)) return
-        this.notifiedGroupMessages.add(message.id)
+        const plan = message.tool_name === 'task_plan' ? parseGroupTaskPlan(message.content) : null
+        const eventKey = plan ? `${message.id}:plan:${plan.revision}` : message.id
+        if (this.notifiedGroupMessages.has(eventKey)) return
+        this.notifiedGroupMessages.add(eventKey)
         if (this.notifiedGroupMessages.size > 2000) this.notifiedGroupMessages.delete(this.notifiedGroupMessages.values().next().value!)
         publishGroupMessage(room, message as unknown as Record<string, unknown>, this.storage.getRoomAgents(roomId))
     }
@@ -3928,6 +3985,8 @@ export class GroupChatServer {
             if (!user) return next(new Error('Unauthorized'))
             socket.data.authUser = user
         }
+        try { socket.data.pushActor = await authenticatedPushActor(String(token)) }
+        catch { return next(new Error('App device authentication failed')) }
         next()
     }
 
@@ -4051,7 +4110,14 @@ export class GroupChatServer {
         return visible
     }
 
+    private groupActivityEvent(activity: GroupAgentActivity): BusinessEvent {
+        return stateEvent('group.run.updated', this.storage.getRoom(activity.roomId)?.summaryProfile || 'default',
+            { room_id: activity.roomId, run_id: activity.runId },
+            { state: { roomId: activity.roomId, agentId: activity.agentId, runId: activity.runId, status: activity.status } })
+    }
+
     private emitRoomAgentActivity(activity: GroupAgentActivity): void {
+        publishAppState(this.groupActivityEvent(activity))
         const payload = this.publicRoomAgentActivity(activity)
         const sockets = this.nsp.sockets?.values?.()
         if (!sockets) return
@@ -4156,10 +4222,15 @@ export class GroupChatServer {
     }
 
     private emitToAgentApprovalOwner(
-        route: Pick<PendingGroupApprovalRoute, 'roomId' | 'ownerMemberId'>,
+        route: Pick<PendingGroupApprovalRoute, 'roomId' | 'ownerMemberId'> & Partial<Pick<PendingGroupApprovalRoute, 'runId'>>,
         event: string,
         payload: Record<string, unknown>,
     ): void {
+        if (event === 'approval.requested' || event === 'approval.resolved') {
+            const room = this.storage.getRoom(route.roomId)
+            if (room) publishGroupInteraction(room, `group.${event}`, route.runId || '', String(payload.approval_id || ''),
+                typeof payload.resolved === 'boolean' ? payload.resolved : undefined, { ...payload, owner_member_id: route.ownerMemberId })
+        }
         const sockets = this.nsp.sockets?.values?.()
         if (!sockets) return
         for (const socket of sockets) {
@@ -4210,6 +4281,11 @@ export class GroupChatServer {
     }
 
     private emitToRoomManagers(roomId: string, event: string, payload: Record<string, unknown>): void {
+        if (event === 'clarify.requested' || event === 'clarify.resolved') {
+            const room = this.storage.getRoom(roomId)
+            if (room) publishGroupInteraction(room, event === 'clarify.requested' ? 'group.clarification.requested' : 'group.clarification.resolved',
+                String(payload.runId || ''), String(payload.clarify_id || ''), typeof payload.resolved === 'boolean' ? payload.resolved : undefined, payload)
+        }
         const emitted = new Set<string>()
         const sockets = this.nsp.sockets?.values?.()
         if (!sockets) return
@@ -4664,8 +4740,26 @@ export class GroupChatServer {
             reasoning_content: !isHumanMessage ? data.reasoning_content ?? null : null,
         }
 
+        const isAgentReply = msg.role === 'assistant' && member?.source === 'agent'
+        const trustedMetadata = isAgentReply ? this.consumeTrustedAgentMessageMetadata(roomId, msg.id) : null
+        const pushActor = isHumanMessage ? socket.data?.pushActor as PushActor | null : null
         let saved: ReturnType<ChatStorage['saveMessageAndRefreshRoom']>
-        try { saved = this.storage.saveMessageAndRefreshRoom(msg) }
+        try {
+            const save = () => {
+                if (pushActor) {
+                    const target = bindRunPushTarget({ kind: 'group', profile: this.storage.getRoom(roomId)?.summaryProfile || 'default', runId: msg.id }, roomId, pushActor, {
+                        ciphertext: prepareRunPushSnapshot(pushActor, data.push_snapshot),
+                        platform: String((data.push_snapshot as any)?.platform || 'unknown'),
+                    })
+                    linkPushRun('group_root', roomId, msg.id, target)
+                } else if (trustedMetadata?.handoffChainId) {
+                    const root = findPushRunLink('group_root', roomId, trustedMetadata.handoffChainId)
+                    if (root) linkPushRun('group_message', roomId, msg.id, root)
+                }
+                return this.storage.saveMessageAndRefreshRoom(msg)
+            }
+            saved = pushActor || trustedMetadata ? pushRunTransaction(save) : save()
+        }
         catch (error) {
             logger.warn(error, '[GroupChat] message persistence failed')
             ack?.({ error: 'Message could not be saved' })
@@ -4679,14 +4773,10 @@ export class GroupChatServer {
         this.nsp.to(roomId).emit('room_updated', { roomId, totalTokens })
         ack?.({ id: savedMsg.id })
 
-        const isAgentReply = savedMsg.role === 'assistant' && member?.source === 'agent'
         const structuredAgentTargetId = isAgentReply && Array.isArray(savedMsg.mentions)
             ? String(savedMsg.mentions.find(mention => mention.type === 'agent')?.participantId || '')
             : ''
         const hasStructuredAgentTargets = Boolean(structuredAgentTargetId)
-        const trustedMetadata = isAgentReply
-            ? this.consumeTrustedAgentMessageMetadata(roomId, savedMsg.id)
-            : null
         // Agent sockets are untrusted transport. Only metadata issued by this
         // server for the exact message may participate in chained routing.
         const mentionDepth = isAgentReply
@@ -4694,7 +4784,7 @@ export class GroupChatServer {
             : normalizeMentionDepth(data.mentionDepth)
         const handoffChainId = isAgentReply
             ? (trustedMetadata?.handoffChainId || '')
-            : (data.handoffChainId || savedMsg.id)
+            : savedMsg.id
         const continuationAttemptId = trustedMetadata?.continuationAttemptId || ''
         // Any human who has successfully joined the room may interact with its
         // Agents. Room management remains separately protected by
@@ -5180,7 +5270,7 @@ export class GroupChatServer {
             this.takePendingApprovalRoute(routeKey)
         }
         const ownerMemberId = pendingRoute?.ownerMemberId || this.groupAgentOwnerMemberId(roomId, agentName)
-        this.emitToAgentApprovalOwner({ roomId, ownerMemberId }, 'approval.resolved', {
+        this.emitToAgentApprovalOwner({ roomId, ownerMemberId, runId: pendingRoute?.runId }, 'approval.resolved', {
             event: 'approval.resolved',
             roomId,
             agentName,
@@ -5325,6 +5415,7 @@ export class GroupChatServer {
                 logger.warn(`[GroupChat] failed to cancel interrupted Ekko clarification ${route.clarifyId}: ${err?.message || err}`)
             }
             this.emitToRoomManagers(route.roomId, 'clarify.resolved', {
+                runId: route.runId,
                 event: 'clarify.resolved',
                 roomId: route.roomId,
                 agentName: route.agentName,
@@ -5362,6 +5453,7 @@ export class GroupChatServer {
         this.pendingClarifyRoutes.set(routeKey, route)
         this.schedulePendingClarifyExpiry(routeKey, route)
         this.emitToRoomManagers(roomId, 'clarify.requested', {
+            runId: route.runId,
             event: 'clarify.requested',
             roomId,
             agentName,
@@ -5383,6 +5475,7 @@ export class GroupChatServer {
         const route = this.takePendingClarifyRoute(this.pendingClarifyRouteKey(roomId, data.clarify_id))
         if (!route || route.agentName !== agentName) return
         this.emitToRoomManagers(roomId, 'clarify.resolved', {
+            runId: route.runId,
             event: 'clarify.resolved',
             roomId,
             agentName,
@@ -5502,6 +5595,7 @@ export class GroupChatServer {
             if (!route || route.agentName !== agentName) continue
             this.takePendingClarifyRoute(routeKey)
             this.emitToRoomManagers(roomId, 'clarify.resolved', {
+                runId: route.runId,
                 event: 'clarify.resolved',
                 roomId,
                 agentName,

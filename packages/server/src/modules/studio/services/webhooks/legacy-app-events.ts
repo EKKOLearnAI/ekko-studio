@@ -15,7 +15,7 @@ export function bindLegacyAppEvents(socket: Socket, kind: 'chat' | 'group' | 'wo
     if (kind === 'group' && event.type !== 'group.message.created') return
     if (kind === 'workflow' && !event.type.startsWith('workflow.run.')) return
     const envelope = appEventEnvelope(event)
-    if (!envelope || seen.has(event.id)) return
+    if (!envelope || !('display' in envelope) || !envelope.display || ('notify' in envelope && envelope.notify === false) || seen.has(event.id)) return
     seen.add(event.id); if (seen.size > 2000) seen.delete(seen.values().next().value!)
     const d = envelope.display as Record<string, unknown>
     const common = { title:d.title,content:d.preview ?? d.content,agent:d.agent,profile:event.profile,timestamp:Date.parse(event.occurred_at),resolved:event.type.endsWith('.resolved'),kind:event.type.endsWith('.failed')?'failure':'completion' }

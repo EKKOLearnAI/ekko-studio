@@ -1879,7 +1879,7 @@ export default {
       localInboxPayloadTitle: '수신한 웹훅 페이로드',
       clearInboxConfirm: '로컬 테스트 수신함의 모든 이벤트를 지울까요?',
       columns: { name: '이름', url: 'URL', events: '이벤트', profiles: '프로필', status: '상태', actions: '작업', receivedAt: '수신 시간', event: '이벤트', eventId: '이벤트 ID', deliveryId: '전송 ID' },
-      events: { messageCreated: '사용자 메시지 생성됨', runQueued: '실행 대기열 추가됨', runStarted: '실행 시작됨', toolStarted: '도구 시작됨', toolCompleted: '도구 완료됨', toolFailed: '도구 실패', approvalRequested: '승인 요청됨', approvalResolved: '승인 처리됨', clarificationRequested: '확인 요청됨', clarificationResolved: '확인 처리됨', completed: '실행 완료', failed: '실행 실패' },
+      events: { runUpdated: '실행 상태 업데이트', planUpdated: '작업 카드 진행 상황 업데이트', groupMessageCreated: '그룹 메시지 생성됨', messageCreated: '사용자 메시지 생성됨', runQueued: '실행 대기열 추가됨', runStarted: '실행 시작됨', toolStarted: '도구 시작됨', toolCompleted: '도구 완료됨', toolFailed: '도구 실패', approvalRequested: '승인 요청됨', approvalResolved: '승인 처리됨', clarificationRequested: '확인 요청됨', clarificationResolved: '확인 처리됨', completed: '실행 완료', failed: '실행 실패' },
       status: { enabled: '활성화됨', disabled: '비활성화됨' },
       runtime: { idle: '대기', delivering: '전송 중', retrying: '재시도 대기', success: '전송됨', failed: '실패', dropped: '삭제됨' },
       actions: { add: '웹훅 추가', localTest: '로컬 테스트 수신기 사용', test: '테스트', enable: '활성화', disable: '비활성화', refresh: '새로고침', clear: '지우기', view: '보기' },

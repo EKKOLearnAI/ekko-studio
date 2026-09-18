@@ -3,7 +3,8 @@ const auth=vi.hoisted(()=>({user:{id:1,role:'user'} as any,profiles:['default']}
 vi.mock('../../packages/server/src/modules/studio/public/auth',()=>({authenticateUserToken:async()=>auth.user}))
 vi.mock('../../packages/server/src/modules/studio/repositories/users-store',()=>({listUserProfiles:()=>auth.profiles.map(profile_name=>({profile_name}))}))
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store',()=>({getSession:()=>({source:'cli',agent:'codex',profile:'default'}),getSessionNotificationPreview:()=>({title:'Title',preview:'Reply'})}))
-import { bindAppEventSubscription, parseAppSubscription, publishDomainEvent, publishGroupMessage, registerGroupEventAccess } from '../../packages/server/src/modules/studio/services/webhooks/app-events'
+import { bindAppEventSubscription, parseAppSubscription, registerGroupEventAccess } from '../../packages/server/src/modules/studio/services/webhooks/app-events'
+import { publishDomainEvent, publishGroupMessage } from '../../packages/server/src/modules/studio/services/webhooks/domain-events'
 function socket(){const handlers=new Map<string,Function>();return {id:Math.random().toString(),handshake:{auth:{token:'test'}},data:{},emit:vi.fn(),on:(n:string,f:Function)=>{const old=handlers.get(n);handlers.set(n,old?(...args:any[])=>{old(...args);f(...args)}:f)},once:(n:string,f:Function)=>handlers.set(n,f),handlers}}
 const flush=()=>new Promise(r=>setTimeout(r,15))
 beforeEach(()=>{auth.user={id:1,role:'user'};auth.profiles=['default']})
@@ -66,4 +67,41 @@ it('real Socket.IO transport restores subscriptions and emits the same envelope 
   publishDomainEvent('workflow.run.failed','default',{workflow_id:'w',run_id:'live2'},{title:'W'})
   await vi.waitFor(()=>expect(received).toHaveLength(2))
  } finally {client.disconnect();await new Promise<void>(resolve=>server.close(()=>resolve()));http.close()}
+})
+
+it('returns an authorized state snapshot on the same subscription without replaying completion alerts', async () => {
+ const { registerAppEventState, stateEvent, planStateEvent, publishAppState } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+ const groupAccess = registerGroupEventAccess({canReceive:(_u, room, event)=>room==='visible' && (!event?.type.includes('.approval.') || event.payload.owner_member_id==='owner')})
+ const running = stateEvent('chat.run.updated','default',{session_id:'s',run_id:'r'},{state:{session_id:'s',status:'running',timestamp:10}})
+ const card = planStateEvent('default',{session_id:'s',run_id:'r'},{session_id:'s',run_id:'r',plan_id:'p',revision:2,created_at:1,updated_at:2,execution_state:'running',plan:[{id:'a',step:'Verify',status:'in_progress'}],secret:'never'})!
+ const stop = registerAppEventState('test',()=>[running,card,
+  stateEvent('group.run.updated','other',{room_id:'hidden'},{state:{status:'replying'}}),
+  stateEvent('group.approval.requested','other',{room_id:'visible',approval_id:'a'},{owner_member_id:'another-user'}),
+  stateEvent('group.approval.requested','other',{room_id:'visible',approval_id:'b'},{owner_member_id:'owner',command:'secret command',timeout_ms:5000}),
+  stateEvent('chat.run.updated','denied',{session_id:'private'},{state:{status:'running'}})])
+ const s=socket();bindAppEventSubscription(s as any)
+ try {
+  const ack=vi.fn();await s.handlers.get('app.events.subscribe')!({schema_version:1,include_snapshot:true},ack)
+  const response=ack.mock.calls[0][0]
+  expect(response.ok).toBe(true);expect(response.snapshot.map((e:any)=>e.type)).toEqual(['chat.run.updated','chat.plan.updated','group.approval.requested'])
+  expect(response.snapshot[1]).toMatchObject({notify:false,task_plan:{revision:2,progress:{total:1,in_progress:1,completed:0}}})
+  expect(JSON.stringify(response.snapshot)).not.toMatch(/secret|another-user|owner_member_id|private/)
+  expect(s.emit).not.toHaveBeenCalled()
+  publishAppState(stateEvent('chat.run.updated','default',{session_id:'s'},{state:{status:'completed'}}))
+  await flush();expect(s.emit).toHaveBeenCalledWith('app.event',expect.objectContaining({type:'chat.run.updated',notify:false,state:{status:'completed'}}))
+  auth.profiles=[];const denied=vi.fn();await s.handlers.get('app.events.subscribe')!({schema_version:1,include_snapshot:true},denied)
+  expect(denied).toHaveBeenCalledWith({ok:false,error:'event_subscription_denied'})
+ } finally {s.handlers.get('disconnect')!();stop();groupAccess()}
+})
+
+it('a failed snapshot provider leaves no live subscription behind', async () => {
+ const { registerAppEventState, stateEvent, publishAppState } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+ const stop=registerAppEventState('broken',()=>{throw Error('unavailable')})
+ const s=socket();bindAppEventSubscription(s as any);const ack=vi.fn()
+ try {
+  await s.handlers.get('app.events.subscribe')!({schema_version:1,include_snapshot:true},ack)
+  expect(ack).toHaveBeenCalledWith({ok:false,error:'event_subscription_denied'})
+  publishAppState(stateEvent('chat.run.updated','default',{session_id:'s'},{state:{status:'running'}}))
+  await flush();expect(s.emit).not.toHaveBeenCalled()
+ } finally {stop();s.handlers.get('disconnect')!()}
 })

@@ -59,6 +59,8 @@ export interface SessionMessage {
 }
 
 export interface QueuedRun {
+  /** Captured at admission, independent of whichever socket drains the queue. */
+  pushTargetId?: string
   queue_id: string
   input: string | ContentBlock[]
   displayInput?: string | ContentBlock[] | null
@@ -129,6 +131,7 @@ export interface QueueInsertionControl {
 }
 
 export interface SessionState {
+  pushTargetId?: string
   messages: SessionMessage[]
   messageTotal?: number
   messageLoadedCount?: number

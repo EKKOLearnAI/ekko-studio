@@ -313,9 +313,13 @@ describe('App business event production', () => {
       server.emitExternalEvent('external','run.completed',{run_id:'run-1'})
       server.emitExternalEvent('external','approval.requested',{approval_id:'a'})
       server.emitExternalEvent('external','approval.resolved',{approval_id:'a',resolved:true})
-      expect(events.map(event=>event.type)).toEqual(['chat.run.completed','chat.approval.requested','chat.approval.resolved'])
-      expect(events[1].subject.approval_id).toBe(events[2].subject.approval_id)
-      expect(events[1].id).not.toBe(events[2].id)
+      expect(events.map(event=>event.type)).toEqual(['chat.run.completed','chat.run.updated','chat.approval.requested','chat.approval.resolved'])
+      expect(events[1]).toMatchObject({
+        subject: { session_id: 'external', run_id: 'run-1' },
+        payload: { state: { session_id: 'external', status: 'completed' } },
+      })
+      expect(events[2].subject.approval_id).toBe(events[3].subject.approval_id)
+      expect(events[2].id).not.toBe(events[3].id)
     } finally { stop() }
   })
 })
