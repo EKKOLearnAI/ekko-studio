@@ -6,6 +6,8 @@ export const appConnectionRoutes = new Router()
 
 appConnectionRoutes.put('/api/studio/push/registration', pushCtrl.pushRegistrationController)
 appConnectionRoutes.delete('/api/studio/push/registration', pushCtrl.pushRegistrationController)
+appConnectionRoutes.put('/api/studio/live-activities/registration', pushCtrl.liveActivityRegistrationController)
+appConnectionRoutes.delete('/api/studio/live-activities/registration', pushCtrl.liveActivityRegistrationController)
 appConnectionRoutes.patch('/api/studio/app-connections/:id/push', ctrl.updateAppConnectionPushController)
 
 appConnectionRoutes.get('/api/app-connections', ctrl.listAppConnectionsController)
