@@ -14,7 +14,8 @@ const stopMock = vi.hoisted(() => vi.fn(() => true))
 const startCodingAgentRunMock = vi.hoisted(() => vi.fn(async () => ({ agentSessionId: 'agent-session-1' })))
 const compactStoredCodingAgentSessionMock = vi.hoisted(() => vi.fn())
 const isContextWindowExceededErrorMock = vi.hoisted(() => vi.fn(() => false))
-const resetCodexNativeThreadAfterContextOverflowMock = vi.hoisted(() => vi.fn())
+const resetNativeSessionAfterContextOverflowMock = vi.hoisted(() => vi.fn())
+const nativeContextRecoveryMessageMock = vi.hoisted(() => vi.fn((agent: string) => `${agent} recovered`))
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   addMessage: addMessageMock,
@@ -44,7 +45,8 @@ vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-ma
 
 vi.mock('../../packages/server/src/modules/coding-agents/services/context-recovery', () => ({
   isContextWindowExceededError: isContextWindowExceededErrorMock,
-  resetCodexNativeThreadAfterContextOverflow: resetCodexNativeThreadAfterContextOverflowMock,
+  resetNativeSessionAfterContextOverflow: resetNativeSessionAfterContextOverflowMock,
+  nativeContextRecoveryMessage: nativeContextRecoveryMessageMock,
 }))
 
 vi.mock('../../packages/server/src/modules/coding-agents/services/index', () => ({
@@ -191,7 +193,7 @@ describe('coding agent session commands', () => {
     const overflow = new Error('context_length_exceeded: input exceeds the context window')
     compactMock.mockRejectedValue(overflow)
     isContextWindowExceededErrorMock.mockReturnValue(true)
-    resetCodexNativeThreadAfterContextOverflowMock.mockReturnValue({
+    resetNativeSessionAfterContextOverflowMock.mockReturnValue({
       reset: true,
       previousNativeSessionId: 'thread-1',
     })
@@ -206,7 +208,7 @@ describe('coding agent session commands', () => {
     }, { name: 'compact', rawName: 'compact', args: '' }, 'default', new Map())
 
     expect(isContextWindowExceededErrorMock).toHaveBeenCalledWith(overflow)
-    expect(resetCodexNativeThreadAfterContextOverflowMock).toHaveBeenCalledWith('session-1')
+    expect(resetNativeSessionAfterContextOverflowMock).toHaveBeenCalledWith('session-1', 'codex')
     expect(stopMock).toHaveBeenCalledWith('session-1', { reportClosed: false })
     expect(state.runId).toBeUndefined()
     expect(state.activeRunMarker).toBeUndefined()
@@ -218,8 +220,28 @@ describe('coding agent session commands', () => {
       compacted: false,
       resetNativeThread: true,
     })
-    expect(command.message).toContain('kept the visible conversation and workspace')
-    expect(command.message).toContain('fresh Codex context')
+    expect(nativeContextRecoveryMessageMock).toHaveBeenCalledWith('Codex')
+    expect(command.message).toBe('Codex recovered')
+  })
+
+  it('recovers an oversized Pi native session after compact RPC failure', async () => {
+    const overflow = new Error('413 Payload Too Large')
+    compactMock.mockRejectedValue(overflow)
+    isContextWindowExceededErrorMock.mockReturnValue(true)
+    resetNativeSessionAfterContextOverflowMock.mockReturnValue({ reset: true, previousNativeSessionId: 'pi-1' })
+    getSessionMock.mockReturnValue({ id: 'session-1', agent: 'pi', agent_native_session_id: 'pi-1' })
+    getRunInfoMock.mockReturnValue({ exists: true, agentId: 'pi' })
+    const { handleCodingAgentSessionCommand } = await import('../../packages/server/src/modules/coding-agents/services/session-command')
+    const { socket, nsp, emitted } = makeSocket()
+
+    await handleCodingAgentSessionCommand(nsp, socket as any, { session_id: 'session-1' }, { name: 'compact', rawName: 'compact', args: '' }, 'default', new Map())
+
+    expect(resetNativeSessionAfterContextOverflowMock).toHaveBeenCalledWith('session-1', 'pi')
+    expect(stopMock).toHaveBeenCalledWith('session-1', { reportClosed: false })
+    expect(nativeContextRecoveryMessageMock).toHaveBeenCalledWith('Pi')
+    expect(emitted.filter(item => item.event === 'session.command').at(-1)?.payload).toMatchObject({
+      ok: true, resetNativeThread: true, compacted: false, message: 'Pi recovered',
+    })
   })
 
   it('reports native compact failure without compressing Studio transcript', async () => {

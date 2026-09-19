@@ -27,31 +27,43 @@ describe('coding agent context recovery', () => {
     expect(isContextWindowExceededError(new Error('method not found'))).toBe(false)
   })
 
-  it('detaches only an existing Codex native thread while preserving the Studio session', async () => {
+  it.each([
+    ['claude-code', 'claude'],
+    ['codex', 'codex'],
+    ['grok', 'grok'],
+    ['pi', 'pi'],
+  ])('detaches an existing %s native session while preserving Studio history', async (agentId, storedAgent) => {
     getSessionMock.mockReturnValue({
       id: 'session-1',
-      agent: 'codex',
-      agent_native_session_id: 'thread-1',
+      agent: storedAgent,
+      agent_native_session_id: 'native-1',
       message_count: 4172,
     })
-    const { resetCodexNativeThreadAfterContextOverflow } = await import('../../packages/server/src/modules/coding-agents/services/context-recovery')
+    const { resetNativeSessionAfterContextOverflow } = await import('../../packages/server/src/modules/coding-agents/services/context-recovery')
 
-    expect(resetCodexNativeThreadAfterContextOverflow('session-1')).toEqual({
+    expect(resetNativeSessionAfterContextOverflow('session-1', agentId)).toEqual({
       reset: true,
-      previousNativeSessionId: 'thread-1',
+      previousNativeSessionId: 'native-1',
     })
     expect(updateSessionMock).toHaveBeenCalledWith('session-1', { agent_native_session_id: '' })
   })
 
+  it('does not reset unsupported native runtimes', async () => {
+    getSessionMock.mockReturnValue({ id: 'session-1', agent: 'opencode', agent_native_session_id: 'native-1' })
+    const { resetNativeSessionAfterContextOverflow } = await import('../../packages/server/src/modules/coding-agents/services/context-recovery')
+    expect(resetNativeSessionAfterContextOverflow('session-1', 'opencode').reset).toBe(false)
+    expect(updateSessionMock).not.toHaveBeenCalled()
+  })
+
   it.each([
     null,
-    { id: 'session-1', agent: 'claude', agent_native_session_id: 'native-1' },
+    { id: 'session-1', agent: 'grok', agent_native_session_id: 'native-1' },
     { id: 'session-1', agent: 'codex', agent_native_session_id: '' },
   ])('does not reset ineligible sessions', async (session) => {
     getSessionMock.mockReturnValue(session)
-    const { resetCodexNativeThreadAfterContextOverflow } = await import('../../packages/server/src/modules/coding-agents/services/context-recovery')
+    const { resetNativeSessionAfterContextOverflow } = await import('../../packages/server/src/modules/coding-agents/services/context-recovery')
 
-    expect(resetCodexNativeThreadAfterContextOverflow('session-1').reset).toBe(false)
+    expect(resetNativeSessionAfterContextOverflow('session-1', 'codex').reset).toBe(false)
     expect(updateSessionMock).not.toHaveBeenCalled()
   })
 })
