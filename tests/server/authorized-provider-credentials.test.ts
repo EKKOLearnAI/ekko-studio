@@ -308,6 +308,45 @@ describe('Studio authorized provider runtime credentials', () => {
     })
   })
 
+  it('uses the Hermes-synchronized anthropic alias when the dashboard alias is stale', async () => {
+    const authPath = writeAuth({
+      providers: {
+        'claude-oauth': {
+          tokens: {
+            access_token: 'stale-dashboard-token',
+            refresh_token: 'stale-dashboard-refresh',
+            expires_at_ms: NOW - 3600 * 1000,
+            last_refresh: '2026-08-27T06:00:00.000Z',
+          },
+        },
+      },
+      credential_pool: {
+        'claude-oauth': [{ source: 'dashboard_pkce', access_token: 'stale-dashboard-token', refresh_token: 'stale-dashboard-refresh', expires_at_ms: NOW - 3600 * 1000 }],
+        anthropic: [{
+          source: 'hermes_pkce',
+          access_token: 'fresh-hermes-token',
+          refresh_token: 'fresh-hermes-refresh',
+          expires_at_ms: NOW + 3600 * 1000,
+          last_refresh: '2026-08-27T08:00:00.000Z',
+        }],
+      },
+    })
+    const fetcher = vi.fn<typeof fetch>()
+
+    await expect(resolveAuthorizedProviderRuntimeCredentials({
+      profile: 'default',
+      provider: 'claude-oauth',
+    }, { profileDir, now: () => NOW, fetch: fetcher })).resolves.toMatchObject({
+      apiKey: 'fresh-hermes-token',
+      source: 'hermes_pkce',
+      expiresAtMs: NOW + 3600 * 1000,
+      lastRefresh: '2026-08-27T08:00:00.000Z',
+    })
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(JSON.parse(readFileSync(authPath, 'utf-8')).credential_pool.anthropic[0].refresh_token)
+      .toBe('fresh-hermes-refresh')
+  })
+
   it('refreshes MiniMax and preserves its region-specific routing state', async () => {
     const authPath = writeAuth({
       providers: {
