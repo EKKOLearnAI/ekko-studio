@@ -49,6 +49,18 @@ const initialBottomScrollOptions = { frames: 8, keepAliveMs: 1200 };
 let thinkingStartedAt = 0;
 let thinkingTimer: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * Origin per session for runs whose reported start has not arrived yet.
+ *
+ * switchSession() activates a session synchronously but only learns its
+ * `runStartedAt` from the async resume payload. Falling back to `Date.now()`
+ * during that window made a run that was already minutes old restart from zero
+ * every time the session was re-opened, and the later arrival of the real start
+ * could not correct it. Remember the first origin seen per session instead, so
+ * the window is only ever counted once.
+ */
+const provisionalThinkingOrigins = new Map<string, number>();
+
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
   if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
@@ -572,7 +584,17 @@ watch(
     // devices and restarted every time you navigated away and back.
     const sid = chatStore.activeSessionId;
     const reportedStart = sid ? chatStore.runStartedAt.get(sid) || 0 : 0;
-    thinkingStartedAt = reportedStart > 0 ? reportedStart : Date.now();
+    if (reportedStart > 0) {
+      if (sid) provisionalThinkingOrigins.delete(sid);
+      thinkingStartedAt = reportedStart;
+    } else if (sid && provisionalThinkingOrigins.has(sid)) {
+      // Resume for this session is still in flight; reuse the origin this
+      // session already got so re-opening a working run does not restart it.
+      thinkingStartedAt = provisionalThinkingOrigins.get(sid)!;
+    } else {
+      thinkingStartedAt = Date.now();
+      if (sid) provisionalThinkingOrigins.set(sid, thinkingStartedAt);
+    }
     thinkingElapsedMs.value = Math.max(0, Date.now() - thinkingStartedAt);
     thinkingTimer = setInterval(() => {
       thinkingElapsedMs.value = Math.max(0, Date.now() - thinkingStartedAt);
