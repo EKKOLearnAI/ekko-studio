@@ -1,3 +1,4 @@
+import { notificationPreview } from './notification-preview'
 import { listAppConnections } from '../../repositories/app-connections-store'
 import { findUserById } from '../../repositories/users-store'
 import { listUserPushDevices, removeUserPushDevice } from '../../repositories/user-push-store'
@@ -55,9 +56,11 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
           body: JSON.stringify({ schema_version: 1, event_id: event.id, event_type: kind,
             recipient: { platform: 'ios', app_id: registration.app_id,
               apns_environment: registration.apns_environment, apns_token: registration.apns_token },
-            // The gateway selects fixed Android-equivalent text by event/domain.
-            // Keep conversation titles and generated output out of push requests.
-            notification: { title: '', body: '' },
+            // Explicit server opt-in; default retains the existing privacy boundary.
+            // Custom content requires a gateway that honors notification title/body.
+            notification: process.env.STUDIO_PUSH_CONTENT_PREVIEW === '1'
+              ? notificationPreview('display' in envelope ? envelope.display : undefined, kind === 'completion')
+              : { title: '', body: '' },
             ekko_run: { schema_version: 1, studio_device_id: registration.studio_device_id, cloud_user_id: registration.cloud_user_id,
               run_kind: runKind, run_id: event.subject.run_id || event.subject.message_id || event.id, profile: event.profile,
               [runKind === 'chat' ? 'session_id' : runKind === 'group' ? 'room_id' : 'workflow_id']: subjectId } }),
