@@ -13,6 +13,8 @@ const getPiSessionStateMock = vi.hoisted(() => vi.fn())
 const stopMock = vi.hoisted(() => vi.fn(() => true))
 const startCodingAgentRunMock = vi.hoisted(() => vi.fn(async () => ({ agentSessionId: 'agent-session-1' })))
 const compactStoredCodingAgentSessionMock = vi.hoisted(() => vi.fn())
+const isContextWindowExceededErrorMock = vi.hoisted(() => vi.fn(() => false))
+const resetCodexNativeThreadAfterContextOverflowMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   addMessage: addMessageMock,
@@ -38,6 +40,11 @@ vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-ma
     getPiSessionState: getPiSessionStateMock,
     stop: stopMock,
   },
+}))
+
+vi.mock('../../packages/server/src/modules/coding-agents/services/context-recovery', () => ({
+  isContextWindowExceededError: isContextWindowExceededErrorMock,
+  resetCodexNativeThreadAfterContextOverflow: resetCodexNativeThreadAfterContextOverflowMock,
 }))
 
 vi.mock('../../packages/server/src/modules/coding-agents/services/index', () => ({
@@ -178,6 +185,41 @@ describe('coding agent session commands', () => {
     expect(commands[0].payload).toMatchObject({ ok: false, terminal: !running, compacted: false,
       message: expect.stringContaining('managed by OpenCode internally') })
     expect(commands[0].payload.started).toBeUndefined()
+  })
+
+  it('detaches an oversized Codex native thread when native compact cannot fit', async () => {
+    const overflow = new Error('context_length_exceeded: input exceeds the context window')
+    compactMock.mockRejectedValue(overflow)
+    isContextWindowExceededErrorMock.mockReturnValue(true)
+    resetCodexNativeThreadAfterContextOverflowMock.mockReturnValue({
+      reset: true,
+      previousNativeSessionId: 'thread-1',
+    })
+    getSessionMock.mockReturnValue({ id: 'session-1', agent: 'codex' })
+    const state = { messages: [], isWorking: false, runId: 'run-1', activeRunMarker: 'marker-1' }
+    getOrCreateSessionMock.mockReturnValue(state)
+    const { handleCodingAgentSessionCommand } = await import('../../packages/server/src/modules/coding-agents/services/session-command')
+    const { socket, nsp, emitted } = makeSocket()
+
+    await handleCodingAgentSessionCommand(nsp, socket as any, {
+      session_id: 'session-1',
+    }, { name: 'compact', rawName: 'compact', args: '' }, 'default', new Map())
+
+    expect(isContextWindowExceededErrorMock).toHaveBeenCalledWith(overflow)
+    expect(resetCodexNativeThreadAfterContextOverflowMock).toHaveBeenCalledWith('session-1')
+    expect(stopMock).toHaveBeenCalledWith('session-1', { reportClosed: false })
+    expect(state.runId).toBeUndefined()
+    expect(state.activeRunMarker).toBeUndefined()
+    const command = emitted.filter(item => item.event === 'session.command').at(-1)?.payload
+    expect(command).toMatchObject({
+      ok: true,
+      action: 'compact',
+      terminal: true,
+      compacted: false,
+      resetNativeThread: true,
+    })
+    expect(command.message).toContain('kept the visible conversation and workspace')
+    expect(command.message).toContain('fresh Codex context')
   })
 
   it('reports native compact failure without compressing Studio transcript', async () => {

@@ -5,6 +5,7 @@ import { calcAndUpdateUsage, getOrCreateSession } from '../../studio/public/run-
 import type { SessionState } from '../../studio/contracts/runs/session'
 import { codingAgentRunManager } from './runtime/run-manager'
 import { compactStoredCodingAgentSession, startCodingAgentRun } from './index'
+import { isContextWindowExceededError, resetCodexNativeThreadAfterContextOverflow } from './context-recovery'
 
 export type CodingAgentCommandName = 'context' | 'compact' | 'usage' | 'status'
 
@@ -275,6 +276,24 @@ export async function handleCodingAgentSessionCommand(
         compacted: result.compacted,
       })
     } catch (err) {
+      if (compactAgentId === 'codex' && isContextWindowExceededError(err)) {
+        const recovery = resetCodexNativeThreadAfterContextOverflow(sessionId)
+        if (recovery.reset) {
+          codingAgentRunManager.stop(sessionId, { reportClosed: false })
+          state.isWorking = false
+          state.runId = undefined
+          state.abortController = undefined
+          state.activeRunMarker = undefined
+          emitCommand({
+            action: 'compact',
+            terminal: true,
+            message: 'Codex compaction could not fit inside the model context window. Studio kept the visible conversation and workspace, then detached the oversized native thread. Send the next message to continue in a fresh Codex context.',
+            compacted: false,
+            resetNativeThread: true,
+          })
+          return
+        }
+      }
       emitCommand({
         ok: false,
         action: 'compact',
