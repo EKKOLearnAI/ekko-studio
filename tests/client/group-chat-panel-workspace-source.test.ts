@@ -13,6 +13,8 @@ describe('GroupChatPanel workspace save handling', () => {
       expect(source).toContain("selectedAgentType.value === 'grok'")
       expect(source).toContain("{ label: 'OpenCode', value: 'opencode' }")
       expect(source).toContain("selectedAgentType.value === 'opencode'")
+      expect(source).toContain("{ label: 'Cursor', value: 'cursor' }")
+      expect(source).toContain("selectedAgentType.value === 'cursor'")
     }
   })
 
@@ -542,7 +544,7 @@ describe('GroupChatPanel workspace save handling', () => {
     expect(source).toContain('normalizeCodingAgentApiMode(')
     expect(source).toContain("v-if=\"selectedAgentType !== 'hermes' && !usesGlobalAgentMode\"")
     for (const modelSource of [source, linkView]) {
-      expect(modelSource).toContain("const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(selectedAgentType.value))")
+      expect(modelSource).toContain("const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(selectedAgentType.value))")
       expect(modelSource).toContain("v-if=\"!usesGlobalAgentMode\"")
     }
     expect(source).toContain('@update:value="handleAgentModeChange"')

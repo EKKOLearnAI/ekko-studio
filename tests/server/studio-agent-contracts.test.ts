@@ -12,12 +12,13 @@ import {
 } from '../../packages/server/src/modules/studio'
 
 describe('Studio agent contracts', () => {
-  it('keeps the three families distinct from the eight runtimes', () => {
+  it('keeps the three families distinct from the nine runtimes', () => {
     expect(AGENT_FAMILIES).toEqual(['hermes', 'ekko', 'coding'])
-    expect(AGENT_RUNTIMES).toEqual(['hermes', 'ekko', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'])
+    expect(AGENT_RUNTIMES).toEqual(['hermes', 'ekko', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'])
     expect(AGENT_RUNTIMES.map(agentFamilyForRuntime)).toEqual([
       'hermes',
       'ekko',
+      'coding',
       'coding',
       'coding',
       'coding',
@@ -31,6 +32,7 @@ describe('Studio agent contracts', () => {
     expect(isAgentFamily('coding')).toBe(true)
     expect(isAgentRuntime('claude-code')).toBe(true)
     expect(isAgentRuntime('grok')).toBe(true)
+    expect(isAgentRuntime('cursor')).toBe(true)
     expect(isAgentRuntime('claude')).toBe(false)
     expect(isAgentRuntime('ekko-agent')).toBe(false)
   })

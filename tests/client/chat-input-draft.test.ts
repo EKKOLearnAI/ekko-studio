@@ -392,7 +392,7 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.get('.n-slider-stub').classes()).not.toContain('reasoning-effort-slider--max')
   })
 
-  it.each(['opencode', 'codex', 'claude', 'pi', 'grok'] as const)('shows the supported commands for %s', async agent => {
+  it.each(['opencode', 'cursor', 'codex', 'claude', 'pi', 'grok'] as const)('shows the supported commands for %s', async agent => {
     const wrapper = mountForSession(`session-commands-${agent}`, { source: 'coding_agent', agent })
     await wrapper.get('textarea').setValue('/')
     await nextTick()
@@ -400,7 +400,7 @@ describe('ChatInput draft persistence', () => {
     for (const name of ['context', 'usage', 'status']) {
       expect(commands.some(text => text.includes(`/${name}`))).toBe(true)
     }
-    expect(commands.some(text => text.includes('/compact'))).toBe(agent !== 'opencode')
+    expect(commands.some(text => text.includes('/compact'))).toBe(agent !== 'opencode' && agent !== 'cursor')
     wrapper.unmount()
   })
 

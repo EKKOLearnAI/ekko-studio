@@ -104,6 +104,7 @@ const groupAgentTypeDefinitions: Array<{ label: string; value: GroupAgentType }>
   { label: 'Codex', value: 'codex' },
   { label: 'Pi', value: 'pi' },
   { label: 'Grok', value: 'grok' },
+  { label: 'Cursor', value: 'cursor' },
   { label: 'OpenCode', value: 'opencode' },
   { label: 'DeepSeek Harness', value: 'dsh' },
 ]
@@ -136,6 +137,8 @@ function getAgentModelGroups(profile: string) {
             ? 'pi'
             : selectedAgentType.value === 'grok'
               ? 'grok'
+            : selectedAgentType.value === 'cursor'
+              ? 'cursor'
             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
               ? 'opencode'
               : 'codex'
@@ -185,7 +188,7 @@ const agentReasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
   { label: t('chat.reasoningEffort.options.max'), value: 'max' },
 ])
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -291,7 +294,8 @@ function handleAgentTypeChange(agent: GroupAgentType): void {
   }
   error.value = ''
   selectedAgentType.value = agent
-  if (!['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(agent)) selectedAgentMode.value = 'scoped'
+  if (agent === 'cursor') selectedAgentMode.value = 'global'
+  else if (!['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(agent)) selectedAgentMode.value = 'scoped'
   syncAgentModelSelection(selectedProfile.value)
 }
 
@@ -677,7 +681,7 @@ onUnmounted(() => {
               @update:value="handleAgentProfileChange"
             />
           </div>
-          <div v-if="supportsGlobalAgentMode" class="field">
+          <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="field">
             <label>{{ t('codingAgents.launchModeScope') }}</label>
             <NSelect
               v-model:value="selectedAgentMode"

@@ -395,6 +395,13 @@ const TOOL_DEFINITIONS: CodingAgentDefinition[] = [
     command: 'dsh',
     packageName: '@deepseek-ai/dsh',
   },
+  {
+    id: 'cursor',
+    name: 'Cursor',
+    provider: 'Cursor',
+    command: 'agent',
+    packageName: 'cursor-agent',
+  },
 ]
 
 const CONFIG_FILE_DEFINITIONS: Record<CodingAgentId, Array<Omit<CodingAgentConfigFileDefinition, 'absolutePath'> & { scopedPath: string }>> = {
@@ -434,6 +441,9 @@ const CONFIG_FILE_DEFINITIONS: Record<CodingAgentId, Array<Omit<CodingAgentConfi
     // Keep the native names as compatibility aliases for older clients.
     { key: 'config', path: '~/.config/opencode/opencode.json', scopedPath: OPENCODE_CONFIG_FILE, language: 'json' },
     { key: 'agents', path: '~/.config/opencode/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
+  ],
+  cursor: [
+    { key: 'mcp', path: '~/.cursor/mcp.json', scopedPath: '.cursor/mcp.json', language: 'json' },
   ],
 }
 
@@ -874,12 +884,13 @@ function storedCodingAgentMode(session: HermesSessionRow | null): 'scoped' | 'gl
   return session?.provider === 'global' ? 'global' : 'scoped'
 }
 
-function persistedAgentId(id: string): 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' {
+function persistedAgentId(id: string): 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' {
   if (id === 'codex') return 'codex'
   if (id === 'pi') return 'pi'
   if (id === 'grok') return 'grok'
   if (id === 'dsh') return 'dsh'
   if (id === 'opencode') return 'opencode'
+  if (id === 'cursor') return 'cursor'
   return 'claude'
 }
 
@@ -1215,7 +1226,7 @@ function managedHermesMcpServerConfig(
     if (env?.[HERMES_MCP_MANAGED_ENV_KEY] === '1') {
       server.env = { ...env, HERMES_MCP_SERVER_NAME: serverName, HERMES_MCP_USER_CLARIFICATION: '1' }
     }
-    if (agentId === 'claude-code' || agentId === 'opencode') server.timeout = Math.max(360_000, Number(server.timeout) || 0)
+    if (agentId === 'claude-code' || agentId === 'opencode' || agentId === 'cursor') server.timeout = Math.max(360_000, Number(server.timeout) || 0)
     if (agentId === 'dsh') server.toolCallTimeoutMs = Math.max(360_000, Number(server.toolCallTimeoutMs) || 0)
   }
   return server
@@ -1297,6 +1308,37 @@ function claudeMcpConfigJson(profile: string, ...existingContents: Array<string 
     mcpServers[server.name] = config
   }
   return `${JSON.stringify({ mcpServers }, null, 2)}\n`
+}
+
+function cursorMcpConfigJson(profile: string, ...existingContents: Array<string | null | undefined>): string {
+  const mcpServers: Record<string, unknown> = {}
+  for (const content of existingContents) {
+    Object.assign(mcpServers, parseClaudeMcpServers(content))
+  }
+  for (const server of HERMES_MCP_SERVERS) {
+    if (getDisabledManagedMcpServers('cursor', profile).has(server.name)) continue
+    mcpServers[server.name] = managedHermesMcpServerConfig('cursor', profile, server.name, server.toolset)
+  }
+  return `${JSON.stringify({ mcpServers }, null, 2)}\n`
+}
+
+async function prepareCursorMcp(rootDir: string, profile: string): Promise<{
+  files: Array<{ key: string; path: string; absolutePath: string }>
+  args: string[]
+}> {
+  const livePath = getLiveConfigFileDefinition('cursor', 'mcp')?.absolutePath || ''
+  const runtimePath = join(rootDir, '.cursor', 'mcp.json')
+  const content = cursorMcpConfigJson(profile, livePath ? await safeReadFile(livePath) : null)
+  await mkdir(dirname(runtimePath), { recursive: true })
+  await writeFile(runtimePath, content, { mode: 0o600 })
+  if (livePath) {
+    await mkdir(dirname(livePath), { recursive: true })
+    await writeFile(livePath, content, { mode: 0o600 })
+  }
+  return {
+    files: [{ key: 'mcp', path: '.cursor/mcp.json', absolutePath: livePath || runtimePath }],
+    args: ['--approve-mcps'],
+  }
 }
 
 function parseCodexExternalMcpBlocks(...contents: Array<string | null | undefined>): string[] {
@@ -1881,7 +1923,7 @@ export function getCodingAgentManagedMcpServerConfigs(
   id: CodingAgentId,
   profile = 'default',
 ): Record<string, Record<string, unknown>> {
-  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(id)) return {}
+  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(id)) return {}
   const disabledManaged = getDisabledManagedMcpServers(id, profile)
   return Object.fromEntries(HERMES_MCP_SERVERS.map((item) => {
     const server = managedHermesMcpServerConfig(id, profile || 'default', item.name, item.toolset)
@@ -2627,7 +2669,24 @@ async function npmExecution(args: string[], env: NodeJS.ProcessEnv): Promise<Com
   return commandExecution(npmBin, args)
 }
 
+let npmInvocationCount = 0
+
+function codingAgentUsesNpm(id: CodingAgentId): boolean {
+  return id !== 'cursor'
+}
+
+export function getCodingAgentNpmInvocationCount(): number {
+  return npmInvocationCount
+}
+
+export function resetCodingAgentNpmInvocationCount(): void {
+  npmInvocationCount = 0
+}
+
 async function runNpm(args: string[], options: { timeout?: number; env?: NodeJS.ProcessEnv } = {}) {
+  if (args.includes('install') || args.includes('uninstall') || args.includes('view')) {
+    npmInvocationCount += 1
+  }
   const env = {
     ...getCurrentNodeEnv(),
     ...options.env,
@@ -2930,12 +2989,24 @@ async function resolveCodexToolSearchConfig(): Promise<{ toolSearch: boolean; al
   return codexToolSearchConfig(status.version)
 }
 
+const CURSOR_CLI_INSTALL_URL = 'https://cursor.com/install'
+
 export async function checkUpdateAgent(id: string): Promise<CodingAgentUpdateResult> {
   const tool = getCodingAgentDefinition(id)
   if (!tool) {
     const err = new Error('Unknown coding agent')
     ;(err as any).status = 400
     throw err
+  }
+  if (!codingAgentUsesNpm(tool.id)) {
+    const status = await getCodingAgentStatus(tool)
+    return {
+      success: true,
+      tool: status,
+      latestVersion: '',
+      updateAvailable: false,
+      message: `Update the Cursor CLI from ${CURSOR_CLI_INSTALL_URL}`,
+    }
   }
   try {
     const env = await commandEnv()
@@ -2968,25 +3039,32 @@ export async function installCodingAgent(id: string): Promise<CodingAgentMutatio
 
   installingTools.add(tool.id)
   try {
-    const env = await commandEnv()
-    await runNpm(withCodingAgentRegistry(
-      tool.id,
-      ['install', '-g', tool.packageName],
-    ), {
-      timeout: 10 * 60 * 1000,
-      env,
-    })
-    if (tool.id === 'pi' && !userSettingsProvidesPiMcpAdapter(await readPiSettings())) {
-      await installBundledPiMcpAdapter()
+    if (codingAgentUsesNpm(tool.id)) {
+      const env = await commandEnv()
+      await runNpm(withCodingAgentRegistry(
+        tool.id,
+        ['install', '-g', tool.packageName],
+      ), {
+        timeout: 10 * 60 * 1000,
+        env,
+      })
+      if (tool.id === 'pi' && !userSettingsProvidesPiMcpAdapter(await readPiSettings())) {
+        await installBundledPiMcpAdapter()
+      }
+      cachedGlobalNpmBin = undefined
     }
-    cachedGlobalNpmBin = undefined
     const status = await getCodingAgentStatus(tool)
     const allStatus = await getCodingAgentsStatus()
     return {
       success: status.installed,
       tool: status,
       tools: allStatus.tools,
-      message: status.installed ? 'Installed' : status.error || 'Install completed but the command was not found',
+      message: status.installed
+        ? 'Installed'
+        : tool.id === 'cursor'
+          ? `Install the Cursor CLI from ${CURSOR_CLI_INSTALL_URL}`
+          : status.error || 'Install completed but the command was not found',
+      code: !status.installed && tool.id === 'cursor' ? 'MANUAL_INSTALL' : undefined,
     }
   } catch (err: any) {
     const status = await getCodingAgentStatus(tool)
@@ -3018,22 +3096,24 @@ export async function deleteCodingAgent(id: string): Promise<CodingAgentMutation
 
   deletingTools.add(tool.id)
   try {
-    const env = await commandEnv()
-    const packagePrefixes = await getCommandPackagePrefixes(tool, env)
-    const uninstallArgsList = packagePrefixes.length > 0
-      ? packagePrefixes.map(prefix => ['uninstall', '-g', '--prefix', prefix, tool.packageName])
-      : [['uninstall', '-g', tool.packageName]]
-    for (const uninstallArgs of uninstallArgsList) {
-      await runNpm(uninstallArgs, {
-        timeout: 10 * 60 * 1000,
-        env,
-      })
-    }
-    if (tool.id === 'pi') {
-      await runNpm(['uninstall', '--prefix', getPiMcpAdapterRoot(), 'pi-mcp-adapter'], {
-        timeout: 10 * 60 * 1000,
-        env,
-      })
+    if (codingAgentUsesNpm(tool.id)) {
+      const env = await commandEnv()
+      const packagePrefixes = await getCommandPackagePrefixes(tool, env)
+      const uninstallArgsList = packagePrefixes.length > 0
+        ? packagePrefixes.map(prefix => ['uninstall', '-g', '--prefix', prefix, tool.packageName])
+        : [['uninstall', '-g', tool.packageName]]
+      for (const uninstallArgs of uninstallArgsList) {
+        await runNpm(uninstallArgs, {
+          timeout: 10 * 60 * 1000,
+          env,
+        })
+      }
+      if (tool.id === 'pi') {
+        await runNpm(['uninstall', '--prefix', getPiMcpAdapterRoot(), 'pi-mcp-adapter'], {
+          timeout: 10 * 60 * 1000,
+          env,
+        })
+      }
     }
     codingAgentRunManager.stopMatching(launch => launch.agentId === tool.id, { reportClosed: true })
     cachedGlobalNpmBin = undefined
@@ -3319,6 +3399,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       files = prepared.files
       args = prepared.args
       env = prepared.env
+    } else if (tool.id === 'cursor') {
+      const prepared = await prepareCursorMcp(rootDir, scope.profile)
+      files = prepared.files
+      args = prepared.args
+      env = {}
     } else if (tool.id === 'opencode') {
       const prepared = await ensureOpenCodeScopedBaseConfigFiles(scope, systemPrompt, workspaceDir)
       // Share native configuration, but keep each conversation's dynamic
@@ -3753,6 +3838,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     files.push(...prepared.files)
     args = prepared.args
     env = { ...prepared.env, [DSH_API_KEY_ENV]: proxyTarget.token }
+  } else if (tool.id === 'cursor') {
+    const prepared = await prepareCursorMcp(rootDir, scope.profile)
+    files.push(...prepared.files)
+    args = prepared.args
+    env = {}
   } else {
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerCodexProxyTarget({
@@ -3869,7 +3959,7 @@ async function startCodingAgentRunInternal(
   const requestedMode = resolvedInput.mode === 'global' ? 'global' : 'scoped'
   const requestedProvider = String(resolvedInput.provider || '').trim().toLowerCase()
   assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider)
-  if (requestedMode !== 'global' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
+  if (id !== 'cursor' && requestedMode !== 'global' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
     const err = new Error('Coding agent provider credentials are missing. Re-select the provider/model or update the provider API key before continuing this session.')
     ;(err as any).status = 400
     throw err

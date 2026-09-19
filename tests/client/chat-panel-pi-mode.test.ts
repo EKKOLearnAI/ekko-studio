@@ -6,7 +6,8 @@ describe('ChatPanel Pi effective mode', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
 
     expect(source).toContain('{ label: t("codingAgents.launchModeGlobal"), value: "global" }')
-    expect(source).toContain('return agent === "ekko-agent" ? "scoped" : requestedMode;')
+    expect(source).toContain('if (agent === "ekko-agent") return "scoped";')
+    expect(source).toContain('if (agent === "cursor") return "global";')
     expect(source).toContain('const mode = effectiveNewChatMode(newChatAgent.value, newChatAgentMode.value);')
     expect(source).not.toContain('newChatAgent.value === "pi" && newChatAgentMode.value !== "scoped"')
   })

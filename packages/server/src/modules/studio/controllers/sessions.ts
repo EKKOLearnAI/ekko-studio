@@ -224,6 +224,7 @@ function isCodingAgentSession(session?: { source?: string | null; agent?: string
     session?.agent === 'pi' ||
     session?.agent === 'grok' ||
     session?.agent === 'opencode' ||
+    session?.agent === 'cursor' ||
     Boolean(session?.agent_session_id)
 }
 

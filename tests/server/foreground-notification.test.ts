@@ -24,5 +24,6 @@ it('normalizes stored agent identity without arbitrary avatar URLs', () => {
  expect(foregroundNotificationAgent('codex')).toBe('codex')
  expect(foregroundNotificationAgent('Claude')).toBe('claude-code')
  expect(foregroundNotificationAgent('ekko')).toBe('ekko-agent')
+ expect(foregroundNotificationAgent('cursor')).toBe('cursor')
  expect(foregroundNotificationAgent('https://example/avatar.png')).toBe('')
 })

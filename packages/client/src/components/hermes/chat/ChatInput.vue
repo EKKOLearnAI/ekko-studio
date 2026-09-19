@@ -244,6 +244,7 @@ const isCodingAgentSession = computed(() => {
     || session.agent === 'pi'
     || session.agent === 'grok'
     || session.agent === 'opencode'
+    || session.agent === 'cursor'
   )
 })
 const isForkCommandSession = computed(() => !!chatStore.activeSession && chatStore.activeSession.source !== 'coding_agent')
@@ -271,7 +272,12 @@ const filteredBridgeCommands = computed(() => {
     ? bridgeCommands.value
     : isCodingAgentSession.value
       ? bridgeCommands.value.filter(command => CODING_AGENT_SLASH_COMMANDS.includes(command.name)
-        && !(command.name === 'compact' && (chatStore.activeSession?.codingAgentId === 'opencode' || chatStore.activeSession?.agent === 'opencode')))
+        && !(command.name === 'compact' && (
+          chatStore.activeSession?.codingAgentId === 'opencode'
+          || chatStore.activeSession?.agent === 'opencode'
+          || chatStore.activeSession?.codingAgentId === 'cursor'
+          || chatStore.activeSession?.agent === 'cursor'
+        )))
       : isForkCommandSession.value
         ? bridgeCommands.value.filter(command => command.name === 'fork')
         : []

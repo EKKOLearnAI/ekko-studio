@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { getDb } from '../infrastructure/database'
 import { GC_AGENT_PRESETS_TABLE } from '../infrastructure/database/schemas'
 
-export type GroupAgentPresetAgent = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+export type GroupAgentPresetAgent = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
 export const GROUP_AGENT_PRESET_NAME_CONFLICT = 'GROUP_AGENT_PRESET_NAME_CONFLICT'
 
 export interface GroupAgentPresetRecord {

@@ -5,7 +5,7 @@ export const GROUP_AGENT_PAIRING_REQUEST_TTL_MS = 10 * 60_000
 export const GROUP_AGENT_PAIRING_TICKET_TTL_MS = 2 * 60_000
 
 export type RemoteGroupAgentDescriptor = {
-  agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+  agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
   agentMode: 'scoped' | 'global'
   profile: string
   provider: string
@@ -18,10 +18,10 @@ export type RemoteGroupAgentDescriptor = {
   avatar: string
 }
 
-const REMOTE_AGENT_TYPES = new Set<RemoteGroupAgentDescriptor['agent']>(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh'])
+const REMOTE_AGENT_TYPES = new Set<RemoteGroupAgentDescriptor['agent']>(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor'])
 const REMOTE_AGENT_API_MODES = new Set(['', 'chat_completions', 'codex_responses', 'anthropic_messages'])
 const REMOTE_AGENT_REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-const REMOTE_GLOBAL_MODE_AGENTS = new Set<RemoteGroupAgentDescriptor['agent']>(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh'])
+const REMOTE_GLOBAL_MODE_AGENTS = new Set<RemoteGroupAgentDescriptor['agent']>(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor'])
 const PAIRING_AUDIT_RETENTION_MS = 7 * 24 * 60 * 60_000
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -41,7 +41,7 @@ export function normalizeRemoteGroupAgentDescriptor(
   const input = value as Record<string, unknown>
   const agent = String(input.agent || 'hermes').trim() as RemoteGroupAgentDescriptor['agent']
   if (!REMOTE_AGENT_TYPES.has(agent)) throw new Error('Invalid remote Agent type')
-  const agentMode = input.agentMode === 'global' ? 'global' : 'scoped'
+  const agentMode = agent === 'cursor' ? 'global' : input.agentMode === 'global' ? 'global' : 'scoped'
   if (agentMode === 'global' && !REMOTE_GLOBAL_MODE_AGENTS.has(agent)) {
     throw new Error('Remote Agent global mode is only available for Claude, Codex, Pi, Grok, and OpenCode')
   }

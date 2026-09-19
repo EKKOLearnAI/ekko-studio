@@ -45,7 +45,7 @@ describe('group chat REST route baseline', () => {
       source: 'user-cli',
       path: '/usr/local/bin/hermes',
     })
-    for (const id of ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] as const) {
+    for (const id of ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'] as const) {
       updateAgentStatus(id, { installed: true, source: 'user-cli', path: `/usr/local/bin/${id}` })
     }
     storage = {

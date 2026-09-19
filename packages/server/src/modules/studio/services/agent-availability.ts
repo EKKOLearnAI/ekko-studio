@@ -14,6 +14,7 @@ const AGENT_ALIASES: Record<string, AgentStatusId> = {
   grok: 'grok',
   opencode: 'opencode',
   dsh: 'dsh',
+  cursor: 'cursor',
 }
 
 const AGENT_NAMES: Record<AgentStatusId, string> = {
@@ -25,6 +26,7 @@ const AGENT_NAMES: Record<AgentStatusId, string> = {
   grok: 'Grok',
   opencode: 'OpenCode',
   dsh: 'DeepSeek Harness',
+  cursor: 'Cursor',
 }
 
 export const AGENT_NOT_INSTALLED = 'AGENT_NOT_INSTALLED'

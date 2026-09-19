@@ -420,6 +420,7 @@ const workflowAgentDefinitions: WorkflowSelectOption[] = [
   { label: 'Codex', value: 'codex' },
   { label: 'Pi', value: 'pi' },
   { label: 'Grok', value: 'grok' },
+  { label: 'Cursor', value: 'cursor' },
   { label: 'OpenCode', value: 'opencode' },
   { label: 'DeepSeek Harness', value: 'dsh' },
 ]
@@ -656,7 +657,7 @@ function makeNode(
     data: {
       title,
       agent,
-      agentMode: data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(agent) ? 'global' : 'scoped',
+      agentMode: agent === 'cursor' || (data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(agent)) ? 'global' : 'scoped',
       provider: data.provider || defaultModelSelection.value.provider,
       model: data.model || defaultModelSelection.value.model,
       apiMode: data.apiMode || defaultApiMode(data.provider || defaultModelSelection.value.provider),
@@ -2562,7 +2563,7 @@ function workflowValidationError(): string | null {
     const label = workflowNodeLabel(node)
     if (node.data.agent === 'dsh' && (!node.data.agentPreset || node.data.agentPresetReady === false)) return t('dshPresets.selectMode')
     if (!node.data.title.trim()) return t('workflow.validation.nodeNameRequired', { node: node.id })
-    const usesGlobalCodingAgent = ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(node.data.agent)
+    const usesGlobalCodingAgent = ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(node.data.agent)
       && node.data.agentMode === 'global'
     if (!usesGlobalCodingAgent && !node.data.provider.trim()) return t('workflow.validation.providerRequired', { node: label })
     if (!usesGlobalCodingAgent && !node.data.model.trim()) return t('workflow.validation.modelRequired', { node: label })
@@ -2806,7 +2807,8 @@ function updateNodeData(id: string, patch: Partial<WorkflowAgentNodeEditableData
       ...node.data,
       ...patch,
       ...(agentChanged ? { agentPreset: undefined, agentPresetReady: undefined } : {}),
-      ...(agentChanged && !['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(nextAgent) ? { agentMode: 'scoped' as const } : {}),
+      ...(agentChanged && nextAgent === 'cursor' ? { agentMode: 'global' as const } : {}),
+      ...(agentChanged && nextAgent !== 'cursor' && !['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(nextAgent) ? { agentMode: 'scoped' as const } : {}),
       skills: agentChanged ? [] : patch.skills ?? node.data.skills,
     }
     return {

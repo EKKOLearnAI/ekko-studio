@@ -163,7 +163,7 @@ export async function handleCodingAgentRun(
   try {
     const codingInput = convertContentBlocksForCodingAgent(data.input)
     await writeModelRunProfileToken(socketUser, profile)
-    const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || (agentId === 'opencode' || agentId === 'dsh')
+    const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || agentId === 'cursor' || (agentId === 'opencode' || agentId === 'dsh')
     const runPrompt = [
       groupSystemPrompt
         ? [groupSystemPrompt, studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
