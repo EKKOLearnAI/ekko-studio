@@ -59,7 +59,9 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
             // Explicit server opt-in; default retains the existing privacy boundary.
             // Custom content requires a gateway that honors notification title/body.
             notification: process.env.STUDIO_PUSH_CONTENT_PREVIEW === '1'
-              ? notificationPreview('display' in envelope ? envelope.display : undefined, kind === 'completion')
+              ? notificationPreview(event.type === 'chat.run.completed'
+                ? { ...('display' in envelope ? envelope.display as Record<string, unknown> : {}), content: typeof payload.output === 'string' ? payload.output : '', preview: '' }
+                : 'display' in envelope ? envelope.display : undefined, kind === 'completion')
               : { title: '', body: '' },
             ekko_run: { schema_version: 1, studio_device_id: registration.studio_device_id, cloud_user_id: registration.cloud_user_id,
               run_kind: runKind, run_id: event.subject.run_id || event.subject.message_id || event.id, profile: event.profile,

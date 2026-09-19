@@ -37,6 +37,7 @@ describe('user device APNs delivery', () => {
     fetchMock.mockReset().mockResolvedValue({ status: 200, body: { cancel: vi.fn() } })
   })
   afterEach(() => {
+    vi.unstubAllEnvs()
     db.close(); rmSync(home, { recursive: true, force: true })
     paths.forEach(path => vi.doUnmock(`../../packages/server/src/modules/studio/${path}`)); vi.resetModules()
   })
@@ -95,6 +96,16 @@ describe('user device APNs delivery', () => {
     expect(JSON.parse(body).notification).toEqual({ title: '', body: '' })
     expect(body).not.toContain('PRIVATE')
     expect(Buffer.byteLength(body, 'utf8')).toBeLessThan(4096)
+  })
+  it('opt-in sends current final reply without historical preview fallback', async () => {
+    vi.stubEnv('STUDIO_PUSH_CONTENT_PREVIEW', '1')
+    await register()
+    session.preview = 'OLD PRIVATE REPLY'
+    const consume = await consumer()
+    await consume(event({ payload: { run_id: 'runtime-a', output: '' } }))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).notification).toEqual({ title: 'Saved task', body: '' })
+    await consume(event({ id: 'next', payload: { run_id: 'runtime-b', output: '**Done** ```hidden' } }))
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).notification).toEqual({ title: 'Saved task', body: 'Done' })
   })
   it('mutes APNs without deleting registration and token refresh does not re-enable the connection', async () => {
     const a = await register(); await register(7, 'phone-b', 'bc')

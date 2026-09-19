@@ -3,7 +3,7 @@ export function notificationPreview(value: unknown, completion: boolean) {
   const display = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   const plain = (input: unknown, limit: number): string => {
     if (typeof input !== 'string') return ''
-    const text = input.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, ' ')
+    const text = input.replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g, ' ')
       .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
       .replace(/^\s{0,3}[#>]+\s*/gm, '').replace(/[*_`~]/g, '')
       .replace(/[\u0000-\u001f\u007f\s]+/g, ' ').trim()
