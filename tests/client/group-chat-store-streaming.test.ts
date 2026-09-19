@@ -125,6 +125,134 @@ describe('group chat store streaming merge', () => {
     groupChatApiMock.socket.disconnect.mockClear()
   })
 
+  it('restores live text and reasoning on repeated room switches and keeps consuming deltas', async () => {
+    vi.useFakeTimers()
+    const store = await createJoinedStore()
+    const snapshots = new Map<string, ChatMessage[]>([
+      ['room-1', [assistantMessage({ content: 'Stage one', reasoning: 'Thinking one', isStreaming: true, finish_reason: 'streaming' })]],
+      ['room-2', []],
+    ])
+    groupChatApiMock.getRoomDetail.mockImplementation(async (id: string) => ({
+      room: { ...room, id }, messages: [], agents: [], members: [],
+    }))
+    groupChatApiMock.socket.emit.mockImplementation((event: string, data?: any, ack?: Function) => {
+      if (event === 'join') ack?.({ messages: structuredClone(snapshots.get(data.roomId)), members: [], agents: [] })
+      return groupChatApiMock.socket
+    })
+
+    for (let round = 0; round < 2; round++) {
+      await store.joinRoom('room-2')
+      expect(store.messages).toHaveLength(0)
+      emitSocket('message_stream_delta', { roomId: 'room-1', id: 'msg-1', delta: 'hidden' })
+      await store.joinRoom('room-1')
+      expect(store.messages).toEqual([expect.objectContaining({ content: 'Stage one', reasoning: 'Thinking one', isStreaming: true })])
+      emitSocket('message_stream_delta', { roomId: 'room-1', id: 'msg-1', delta: ' continued' })
+      emitSocket('message_reasoning_delta', { roomId: 'room-1', id: 'msg-1', delta: ' continued' })
+      await vi.advanceTimersByTimeAsync(100)
+      expect(store.messages[0]).toMatchObject({ content: 'Stage one continued', reasoning: 'Thinking one continued' })
+    }
+    emitSocket('message', assistantMessage({ content: 'Done', finish_reason: 'stop' }))
+    expect(store.messages[0]).toMatchObject({ content: 'Done', isStreaming: false })
+  })
+
+  it('flushes queued deltas before merging a reconnect snapshot that already includes them', async () => {
+    vi.useFakeTimers()
+    const store = await createJoinedStore()
+    emitSocket('message_stream_start', assistantMessage({ content: 'A' }))
+    emitSocket('message_stream_delta', { roomId: 'room-1', id: 'msg-1', delta: 'B' })
+    emitSocket('message_reasoning_delta', { roomId: 'room-1', id: 'msg-1', delta: 'thinking' })
+    groupChatApiMock.socket.emit.mockImplementation((event: string, _data?: any, ack?: Function) => {
+      if (event === 'join') ack?.({ messages: [assistantMessage({ content: 'AB', reasoning: 'thinking', reasoning_content: 'thinking', isStreaming: true })] })
+      return groupChatApiMock.socket
+    })
+    emitSocket('connect', undefined)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(store.messages[0]).toMatchObject({ content: 'AB', reasoning: 'thinking', isStreaming: true })
+  })
+
+  it('settles a live row from a persisted reconnect snapshot and does not revive it with a stale live row', async () => {
+    const store = await createJoinedStore()
+    emitSocket('message_stream_start', assistantMessage({ content: 'Partial' }))
+    let snapshot = assistantMessage({ content: 'Complete', finish_reason: 'stop' })
+    groupChatApiMock.socket.emit.mockImplementation((event: string, _data?: any, ack?: Function) => {
+      if (event === 'join') ack?.({ messages: [snapshot] })
+      return groupChatApiMock.socket
+    })
+    emitSocket('connect', undefined)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(store.messages[0]).toMatchObject({ content: 'Complete', isStreaming: false })
+    snapshot = assistantMessage({ content: 'Partial', isStreaming: true, finish_reason: 'streaming' })
+    emitSocket('connect', undefined)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(store.messages[0]).toMatchObject({ content: 'Complete', isStreaming: false })
+  })
+
+  it('clears previous room typing and context before the new join acknowledgment arrives', async () => {
+    const store = await createJoinedStore()
+    emitSocket('typing', { roomId: 'room-1', userId: 'other', userName: 'Other' })
+    emitSocket('context_status', { roomId: 'room-1', agentName: 'Old Worker', status: 'compressing' })
+    store.emitTyping()
+    let ack: Function | undefined
+    groupChatApiMock.getRoomDetail.mockResolvedValue({ room: { ...room, id: 'room-2' }, messages: [], agents: [], members: [] })
+    groupChatApiMock.socket.emit.mockImplementation((event: string, _data?: any, callback?: Function) => {
+      if (event === 'join') ack = callback
+      return groupChatApiMock.socket
+    })
+    const joining = store.joinRoom('room-2')
+    await vi.waitFor(() => expect(ack).toBeDefined())
+    expect(store.currentRoomId).toBe('room-2')
+    expect(store.typingNames).toEqual([])
+    expect(store.contextStatus).toBeNull()
+    expect(groupChatApiMock.socket.emit).toHaveBeenCalledWith('stop_typing', { roomId: 'room-1' })
+    ack?.({ contextStatuses: [{ agentName: 'New Worker', status: 'replying' }], typingUsers: [{ userId: 'new', userName: 'New' }] })
+    await joining
+    expect(store.typingNames).toEqual(['New'])
+    expect(store.contextStatus?.agentName).toBe('New Worker')
+  })
+
+  it('ignores slower previous room requests when switching quickly', async () => {
+    const store = await createJoinedStore()
+    let resolveOld!: (value: any) => void
+    groupChatApiMock.getRoomDetail.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    const old = store.joinRoom('room-2')
+    groupChatApiMock.getRoomDetail.mockResolvedValueOnce({ room: { ...room, id: 'room-3' }, messages: [], agents: [], members: [] })
+    await store.joinRoom('room-3')
+    resolveOld({ room: { ...room, id: 'room-2' }, messages: [], agents: [], members: [] })
+    await old
+    expect(store.currentRoomId).toBe('room-3')
+    expect(store.isJoining).toBe(false)
+  })
+
+  it('restores room summary snapshots and ignores older updates within the same summary version', async () => {
+    const store = await createJoinedStore()
+    const summary = (status: string, updatedAt: number) => ({ roomId: 'room-1', version: 1, status, updatedAt, summary: '' })
+    emitSocket('room_summary_updated', summary('summarizing', 10))
+    groupChatApiMock.socket.emit.mockImplementation((event: string, _data?: any, ack?: Function) => {
+      if (event === 'join') ack?.({ roomSummary: summary('idle', 20) })
+      return groupChatApiMock.socket
+    })
+    emitSocket('connect', undefined)
+    await vi.waitFor(() => expect(store.roomSummaryStates.get('room-1')?.status).toBe('idle'))
+    emitSocket('room_summary_updated', summary('summarizing', 10))
+    store.applyRoomSummaryState(summary('summarizing', 15) as any)
+    expect(store.roomSummaryStates.get('room-1')?.status).toBe('idle')
+    emitSocket('room_summary_updated', { ...summary('summarizing', 30), roomId: 'room-2' })
+    expect(store.roomSummaryStates.get('room-1')?.status).toBe('idle')
+  })
+
+  it('clears transient indicators on disconnect and restores only the new snapshot', async () => {
+    const store = await createJoinedStore()
+    emitSocket('typing', { roomId: 'room-1', userId: 'other', userName: 'Other' })
+    emitSocket('context_status', { roomId: 'room-1', agentName: 'Worker', status: 'replying' })
+    emitSocket('disconnect', 'transport close')
+    expect(store.typingNames).toEqual([])
+    expect(store.contextStatus).toBeNull()
+    emitSocket('connect', undefined)
+    await Promise.resolve()
+    expect(store.typingNames).toEqual([])
+    expect(store.contextStatus).toBeNull()
+  })
+
   it('settles a historical Tool call without a persisted result instead of spinning forever', async () => {
     const store = await createJoinedStore([
       assistantMessage({

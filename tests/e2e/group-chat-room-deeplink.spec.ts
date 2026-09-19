@@ -450,7 +450,7 @@ function makeSocket(url, options) {
       if (event === 'join' && typeof ack === 'function') {
         const roomId = payload && payload.roomId
         const retracted = new Set(JSON.parse(window.localStorage.getItem('__pw_group_retracted__') || '[]'))
-        setTimeout(() => ack({ roomId, roomName: roomNames[roomId] || roomId, members: [], messages: (roomMessages[roomId] || []).filter(message => !retracted.has(message.id)), agents: roomAgents[roomId] || [], rooms: [], typingUsers: [], contextStatuses: [], executionQueue: state.executionQueues[roomId] || [] }), 0)
+        setTimeout(() => ack({ roomId, roomName: roomNames[roomId] || roomId, members: [], messages: [...(roomMessages[roomId] || []), ...(state.liveSnapshots?.[roomId] || [])].filter(message => !retracted.has(message.id)), agents: roomAgents[roomId] || [], rooms: [], typingUsers: [], contextStatuses: [], executionQueue: state.executionQueues[roomId] || [], ...(state.joinStates?.[roomId] || {}) }), state.joinDelays?.[roomId] || 0)
       }
       if (event === 'load_room_agent_activities' && typeof ack === 'function') {
         setTimeout(() => ack({ activities: [] }), 0)
@@ -1479,6 +1479,118 @@ test.describe('group chat room deep links', () => {
     await expect(panel.locator('.diff-file-name')).toHaveText('example.ts')
     await expect(panel.locator('.diff-code')).toContainText('new')
     await expect(panel.getByRole('button', { name: 'Edit' })).toHaveCount(0)
+  })
+
+  test('preserves every room-list Agent avatar after clearing history and switching rooms', async ({ page }) => {
+    await setup(page, '/#/hermes/group-chat/room/room-alpha')
+    await connectGroupSocket(page)
+    const roster = [1, 2, 3].map(index => ({
+      ...(agentsByRoom['room-alpha'][0] as object), id: `clear-worker-${index}`,
+      agentId: `clear-agent-${index}`, name: `Worker ${index}`,
+      avatar: JSON.stringify({ type: 'generated', seed: `clear-worker-${index}` }),
+    }))
+    let cleared = false
+    await page.route(/\/api\/studio\/group-chat\/rooms\/room-alpha(?:\?.*)?$/, route => route.fulfill({
+      contentType: 'application/json', body: JSON.stringify({
+        room: baseRooms[0], agents: roster, members: [],
+        messages: cleared ? [] : messagesByRoom['room-alpha'], total: 0, hasMore: false,
+      }),
+    }))
+    await page.route('**/api/studio/group-chat/rooms/room-alpha/clear-context', async route => {
+      expect(route.request().method()).toBe('POST')
+      cleared = true
+      await page.evaluate(agents => {
+        (window as any).__PW_GROUP_SOCKET__.joinStates = { 'room-alpha': { agents, messages: [] } }
+      }, roster)
+      // The real clear endpoint returns room metadata without an Agent roster.
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, room: { ...baseRooms[0], totalTokens: 0 } }) })
+    })
+    await triggerGroupSocket(page, 'agents_updated', { roomId: 'room-alpha', agents: roster })
+    const alphaGrid = page.locator('.room-item', { hasText: 'Alpha Room' }).locator('.room-agent-grid')
+    await expect(alphaGrid).toHaveAttribute('data-agent-count', '3')
+    const avatarIds = roster.map(agent => agent.id)
+    await page.getByRole('button', { name: 'Clear context', exact: true }).click()
+    await page.locator('.n-popconfirm').getByRole('button', { name: 'Confirm', exact: true }).click()
+    await expect(page.getByText('Alpha room message', { exact: true })).toHaveCount(0)
+    await expect(alphaGrid).toHaveAttribute('data-agent-count', '3')
+    for (const name of ['Beta Room', 'Alpha Room', 'Beta Room']) {
+      await page.locator('.room-item', { hasText: name }).click()
+      await expect(page.locator('.room-title-text')).toHaveText(name)
+      await expect(alphaGrid).toHaveAttribute('data-agent-count', '3')
+      expect(await alphaGrid.locator('[data-agent-id]').evaluateAll(elements => elements.map(element => element.getAttribute('data-agent-id')))).toEqual(avatarIds)
+      await expect(alphaGrid.locator('svg')).toHaveCount(3)
+    }
+    await alphaGrid.screenshot({ path: '/tmp/ekko-clear-room-avatars.png' })
+  })
+
+  test('isolates typing and summary indicators while switching rooms and clears idle summaries', async ({ page }) => {
+    await setup(page, '/#/hermes/group-chat/room/room-alpha')
+    await connectGroupSocket(page)
+    const member = { id: 'typing-member', userId: 'typing-user', name: 'Typing Member', joinedAt: 1 }
+    const summary = { roomId: 'room-alpha', version: 1, status: 'summarizing', updatedAt: 10, summary: '' }
+    await triggerGroupSocket(page, 'member_joined', { roomId: 'room-alpha', members: [member] })
+    await triggerGroupSocket(page, 'typing', { roomId: 'room-alpha', userId: member.userId, userName: member.name })
+    await triggerGroupSocket(page, 'room_summary_updated', summary)
+    await expect(page.locator('.agent-avatar-rail-typing')).toHaveCount(1)
+    await expect(page.locator('.group-summary-inline-status.is-summarizing')).toBeVisible()
+    await triggerGroupSocket(page, 'room_summary_updated', { ...summary, status: 'idle', updatedAt: 20 })
+    await expect(page.locator('.group-summary-inline-status')).toHaveCount(0)
+
+    await page.evaluate(({ member, summary }) => {
+      const state = (window as any).__PW_GROUP_SOCKET__
+      state.joinStates = {
+        'room-alpha': { members: [member], typingUsers: [{ userId: member.userId, userName: member.name }], roomSummary: { ...summary, updatedAt: 30 } },
+        'room-beta': { roomSummary: { ...summary, roomId: 'room-beta', status: 'idle' } },
+      }
+    }, { member, summary })
+    for (let round = 0; round < 2; round++) {
+      await page.locator('.room-item', { hasText: 'Beta Room' }).click()
+      await expect(page.locator('.room-title-text')).toHaveText('Beta Room')
+      await expect(page.locator('.agent-avatar-rail-typing')).toHaveCount(0)
+      await expect(page.locator('.group-summary-inline-status')).toHaveCount(0)
+      await triggerGroupSocket(page, 'room_summary_updated', { ...summary, updatedAt: 30 })
+      await expect(page.locator('.group-summary-inline-status')).toHaveCount(0)
+      await page.locator('.room-item', { hasText: 'Alpha Room' }).click()
+      await expect(page.locator('.room-title-text')).toHaveText('Alpha Room')
+      await expect(page.locator('.agent-avatar-rail-typing')).toHaveCount(1)
+      await expect(page.locator('.group-summary-inline-status.is-summarizing')).toBeVisible()
+    }
+    await triggerGroupSocket(page, 'stop_typing', { roomId: 'room-alpha', userId: member.userId })
+    await triggerGroupSocket(page, 'room_summary_updated', { ...summary, status: 'idle', updatedAt: 40 })
+    await expect(page.locator('.agent-avatar-rail-typing')).toHaveCount(0)
+    await expect(page.locator('.group-summary-inline-status')).toHaveCount(0)
+  })
+
+  test('restores live text and reasoning after switching rooms and continues streaming', async ({ page }) => {
+    await setup(page, '/#/hermes/group-chat/room/room-beta')
+    await connectGroupSocket(page)
+    const liveMessage = {
+      id: 'switch-run_part_0', roomId: 'room-beta', senderId: 'switch-agent',
+      senderName: 'Switch Worker', role: 'assistant', run_id: 'switch-run',
+      content: 'Recovered stage text', reasoning: 'Recovered thinking',
+      reasoning_content: 'Recovered thinking', timestamp: 1_900_000_000,
+      isStreaming: true, finish_reason: 'streaming',
+    }
+    await page.evaluate(message => {
+      (window as any).__PW_GROUP_SOCKET__.liveSnapshots = { 'room-beta': [message] }
+    }, liveMessage)
+
+    for (let round = 0; round < 2; round++) {
+      await page.locator('.room-item', { hasText: 'Alpha Room' }).click()
+      await expect(page.locator('.room-title-text')).toHaveText('Alpha Room')
+      await page.locator('.room-item', { hasText: 'Beta Room' }).click()
+      await expect(page.locator('.room-title-text')).toHaveText('Beta Room')
+      const message = page.locator('.group-message', { hasText: 'Recovered stage text' })
+      await expect(message).toBeVisible()
+      await message.locator('.thinking-header').click()
+      await expect(message.locator('.thinking-body')).toContainText('Recovered thinking')
+      await triggerGroupSocket(page, 'message_stream_delta', { roomId: 'room-beta', id: liveMessage.id, delta: ' continued' })
+      await triggerGroupSocket(page, 'message_reasoning_delta', { roomId: 'room-beta', id: liveMessage.id, delta: ' continued' })
+      await expect(message).toContainText('Recovered stage text continued')
+      await expect(message.locator('.thinking-body')).toContainText('Recovered thinking continued')
+    }
+    await triggerGroupSocket(page, 'message', { ...liveMessage, content: 'Switch run finished', isStreaming: false, finish_reason: 'stop' })
+    await expect(page.getByText('Switch run finished', { exact: true })).toBeVisible()
   })
 
   test('clicking another room updates URL and reload preserves it', async ({ page }) => {
