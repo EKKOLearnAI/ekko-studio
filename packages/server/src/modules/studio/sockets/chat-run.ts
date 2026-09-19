@@ -1,3 +1,6 @@
+import { codingAgentId } from '../services/chat-run/types'
+import { studioMcpCapabilities } from '../public/runs/mcp-capabilities'
+import { hermesStudioMcpCapabilities } from '../services/chat-run/studio-mcp'
 import { publishAppState, stateEvent, planStateEvent } from '../services/webhooks/app-event-state'
 import type { BusinessEvent } from '../services/webhooks/business-events'
 import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/notifications/push-registration'
@@ -27,6 +30,8 @@ import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/wor
 import { getSessionCategory } from '../repositories/session-category-store'
 import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../public/profile-config'
 import {
+  getChatCodingAgentMcpServers,
+  resolveChatEkkoMcpServers,
   chatCodingAgentRunManager as codingAgentRunManager,
   createPrimaryAgentBridge,
   getChatEkkoAgent as getGlobalEkkoAgent,
@@ -1466,26 +1471,37 @@ export class ChatRunSocket {
     pushTargetId?: string,
   ) {
     const source = resolveRunSource(data.source, data.session_id)
+    const surface = data.session_source || source
     if (data.session_id) getOrCreateSession(this.sessionMap, data.session_id).pushTargetId = pushTargetId
     if (data.session_id) {
       const target = socket.data?.mobileDeviceTarget as MobileDeviceTarget | undefined
-      if (target && target.profile === profile && source !== 'workflow' && source !== 'group_chat' && !backgroundContinuationContext) {
+      if (target && target.profile === profile && surface !== 'workflow' && surface !== 'group_chat' && !backgroundContinuationContext) {
         this.mobileRunTargets.set(data.session_id, { ...target })
       } else this.mobileRunTargets.delete(data.session_id)
     }
-    const locationInstruction = mobileLocationRunInstruction(data.session_id, source)
+    const ekkoMcpServers = isEkkoAgentExecution(data)
+      ? resolveChatEkkoMcpServers(profile, data.mcpServers || data.mcp_servers) || {}
+      : undefined
+    const mcpCapabilities = ekkoMcpServers
+      ? studioMcpCapabilities(ekkoMcpServers)
+      : isCodingAgentExecution(source, data)
+        ? studioMcpCapabilities(getChatCodingAgentMcpServers(codingAgentId(data), profile))
+        : await hermesStudioMcpCapabilities(profile)
+    const mobileTarget = data.session_id ? this.mobileRunTargets.get(data.session_id) : undefined
+    const mobileSessionId = mcpCapabilities.use && mobileTarget ? data.session_id : undefined
+    const locationInstruction = mobileLocationRunInstruction(mobileSessionId, surface)
     if (locationInstruction) {
       data.instructions = [String(data.instructions || '').trim(), locationInstruction]
         .filter(Boolean)
         .join('\n\n')
     }
-    const calendarInstruction = mobileCalendarRunInstruction(data.session_id, source)
+    const calendarInstruction = mobileCalendarRunInstruction(mobileSessionId, surface)
     if (calendarInstruction) {
       data.instructions = [String(data.instructions || '').trim(), calendarInstruction]
         .filter(Boolean)
         .join('\n\n')
     }
-    const healthInstruction = mobileHealthRunInstruction(data.session_id, source)
+    const healthInstruction = mobileHealthRunInstruction(mobileTarget?.platform === 'ios' ? mobileSessionId : undefined, surface)
     if (healthInstruction) {
       data.instructions = [String(data.instructions || '').trim(), healthInstruction].filter(Boolean).join('\n\n')
     }
@@ -1564,11 +1580,11 @@ export class ChatRunSocket {
         return
       }
 
-      const planContext = this.beginTaskPlanRun(data.session_id, profile)
+      const planContext = mcpCapabilities.interaction ? this.beginTaskPlanRun(data.session_id, profile) : undefined
       if (planContext) data.instructions = [data.instructions, taskPlanRunInstruction()].filter(Boolean).join('\n\n')
       let fullInstructions = data.instructions
-        ? `${getSystemPrompt(undefined, { source })}\n${data.instructions}`
-        : getSystemPrompt(undefined, { source })
+        ? `${getSystemPrompt(undefined, { source, mcpCapabilities })}\n${data.instructions}`
+        : getSystemPrompt(undefined, { source, mcpCapabilities })
 
       const onEvent = (event: string, payload: any) => {
         if (data.session_id) this.observeQueueInsertionRunEvent(data.session_id, event, payload)
@@ -1627,7 +1643,7 @@ export class ChatRunSocket {
       await handleEkkoAgentRun(
         this.nsp,
         socket,
-        { ...data, onEvent },
+        { ...data, onEvent, resolved_mcp_servers: ekkoMcpServers },
         profile,
         this.sessionMap,
         this.dequeueNextQueuedRun.bind(this),
@@ -1638,7 +1654,7 @@ export class ChatRunSocket {
     }
 
     const isCommand = typeof data.input === 'string' && parseCodingAgentSessionCommand(data.input)
-    const planContext = isCommand ? undefined : this.beginTaskPlanRun(data.session_id, profile)
+    const planContext = isCommand || !mcpCapabilities.interaction ? undefined : this.beginTaskPlanRun(data.session_id, profile)
     const interactionContext = planContext && source !== 'workflow' && data.session_source !== 'workflow'
       && source !== 'global_agent' && data.session_source !== 'global_agent' ? planContext : undefined
     if (interactionContext && data.session_id) {
@@ -1649,7 +1665,7 @@ export class ChatRunSocket {
       : data.instructions
     let started: Awaited<ReturnType<typeof handleCodingAgentRun>>
     try {
-      started = await handleCodingAgentRun(this.nsp, socket, { ...data, task_plan_context_id: planContext, interaction_context_id: interactionContext, instructions }, profile, this.sessionMap)
+      started = await handleCodingAgentRun(this.nsp, socket, { ...data, task_plan_context_id: planContext, interaction_context_id: interactionContext, instructions, studio_mcp_capabilities: mcpCapabilities }, profile, this.sessionMap)
       if (!started && planContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, planContext)
     } catch (err) {
       if (planContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.failed', undefined, planContext)

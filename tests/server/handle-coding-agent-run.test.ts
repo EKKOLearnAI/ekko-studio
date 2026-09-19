@@ -31,6 +31,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/model-run-pr
 
 vi.mock('../../packages/server/src/modules/studio/public/runs/prompt', () => ({
   getSystemPrompt: getSystemPromptMock,
+  studioMcpUsageGuidelines: vi.fn(() => ''),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
@@ -52,6 +53,8 @@ vi.mock('../../packages/server/src/modules/coding-agents/services/session-comman
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', () => ({
+  getChatCodingAgentMcpServers: vi.fn(() => ({ 'ekko-studio-interaction': { command: 'studio' }, 'ekko-studio-use': { command: 'studio' } })),
+  resolveChatEkkoMcpServers: vi.fn(() => ({ 'ekko-studio-use': { command: 'studio' } })),
   chatCodingAgentRunManager: managerMock,
   startChatCodingAgentRun: startCodingAgentRunMock,
   sendChatCodingAgentRunInput: sendCodingAgentRunInputMock,
@@ -501,4 +504,27 @@ describe('handleCodingAgentRun', () => {
     expect(sendCodingAgentRunInputMock).not.toHaveBeenCalled()
     expect(startCodingAgentRunMock).not.toHaveBeenCalled()
   })
+
+  it('drops task and clarification instructions after disabling MCP on a reused session', async () => {
+    const { getChatCodingAgentMcpServers } = await import('../../packages/server/src/modules/studio/public/chat-agent-runtime')
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    managerMock.runIdForSession.mockReturnValue('reused-runtime')
+    managerMock.isSessionLaunchCompatible.mockReturnValue(true)
+    const sessions = new Map([['session-1', { messages: [], events: [], queue: [], isWorking: false }]])
+    const socket = { join: vi.fn(), emit: vi.fn() }
+    for (const enabled of [true, false]) {
+      vi.mocked(getChatCodingAgentMcpServers).mockReturnValueOnce({ 'ekko-studio-interaction': { enabled } })
+      await handleCodingAgentRun({} as any, socket as any, {
+        session_id: 'session-1', coding_agent_id: 'codex', input: 'Do work',
+        task_plan_context_id: 'plan-context', interaction_context_id: 'clarify-context',
+      }, 'research', sessions as any)
+    }
+    expect(sendCodingAgentRunInputMock.mock.calls[0][1]).toContain('ekko_studio_update_plan')
+    expect(sendCodingAgentRunInputMock.mock.calls[1][1]).toBe('Do work')
+    expect(getSystemPromptMock).toHaveBeenLastCalledWith(undefined, expect.objectContaining({
+      mcpCapabilities: expect.objectContaining({ interaction: false }),
+    }))
+    expect(startCodingAgentRunMock).not.toHaveBeenCalled()
+  })
+
 })

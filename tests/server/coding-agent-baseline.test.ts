@@ -24,9 +24,12 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/model-run-pr
 }))
 vi.mock('../../packages/server/src/modules/studio/public/runs/prompt', () => ({
   getSystemPrompt: getSystemPromptMock,
+  studioMcpUsageGuidelines: vi.fn(() => ''),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', () => ({
+  getChatCodingAgentMcpServers: vi.fn(() => ({ 'ekko-studio-interaction': { command: 'studio' }, 'ekko-studio-use': { command: 'studio' } })),
+  resolveChatEkkoMcpServers: vi.fn(() => ({ 'ekko-studio-use': { command: 'studio' } })),
   chatCodingAgentRunManager: managerMock,
   startChatCodingAgentRun: startCodingAgentRunMock,
   sendChatCodingAgentRunInput: sendCodingAgentRunInputMock,

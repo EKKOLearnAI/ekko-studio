@@ -1,3 +1,5 @@
+import { hermesStudioMcpCapabilities } from '../chat-run/studio-mcp'
+import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
 import { findPushRunLink, linkPushRun, type PushRunRef } from '../../repositories/run-push-store'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 import type { TaskPlanSnapshot } from '../../contracts/task-plan'
@@ -1403,7 +1405,8 @@ export class AgentClient implements GroupAgentExecutor {
             this.startTyping(roomId)
 
             const conversationHistory = this.groupConversationHistory(runtimeContext)
-            let instructions = this.groupSystemPrompt(roomId, msg)
+            const mcpCapabilities = await hermesStudioMcpCapabilities(this.profile)
+            let instructions = [this.groupSystemPrompt(roomId, msg), studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
             const bridge = createGroupPrimaryAgentBridge()
             const sessionId = groupRuntimeSessionId(roomId, this.profile, this.name)
             this.activeSessions.set(roomId, sessionId)
@@ -1471,9 +1474,9 @@ export class AgentClient implements GroupAgentExecutor {
                 : `${routedPrefix}\n\nOriginal message: ${stripMentionRoutingTokens(msg.content, this.name) || msg.content}`
             const runPrompt = 'When calling Hermes Web UI endpoints from tools or skills, include the current Hermes profile as the X-Hermes-Profile header if the endpoint supports profile-scoped behavior.'
             instructions = `${instructions}\n\n${runPrompt}`
-            groupPlan = this.chatRunService?.beginGroupTaskPlanRun?.(sessionId, this.profile, runMessageId,
+            groupPlan = mcpCapabilities.interaction ? this.chatRunService?.beginGroupTaskPlanRun?.(sessionId, this.profile, runMessageId,
                 () => this.replySessionIsCurrent(roomId, sessionId, replyInterruptVersion),
-                snapshot => { planWrites = planWrites.then(() => this.recordTaskPlan(roomId, sessionId, runMessageId, snapshot)).catch(error => { logger.warn(error, '[GroupChat] task plan delivery failed') }) })
+                snapshot => { planWrites = planWrites.then(() => this.recordTaskPlan(roomId, sessionId, runMessageId, snapshot)).catch(error => { logger.warn(error, '[GroupChat] task plan delivery failed') }) }) : undefined
             const planInput = withTaskPlanTurnContext(input, groupPlan?.contextId)
             const bridgeInput: GroupPrimaryAgentBridgeMessage = isContentBlockArray(planInput)
                 ? await convertContentBlocksForAgent(planInput)

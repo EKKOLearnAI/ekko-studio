@@ -1,3 +1,5 @@
+import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
+import { studioMcpCapabilities } from '../../public/runs/mcp-capabilities'
 import { saveTaskPlan } from '../../repositories/task-plan-store'
 import type { TaskPlanSnapshot } from '../../contracts/task-plan'
 import type { Server, Socket } from 'socket.io'
@@ -101,6 +103,7 @@ export interface EkkoAgentRunSocketData {
   api_key?: string
   apiMode?: string
   api_mode?: string
+  resolved_mcp_servers?: Record<string, unknown>
   mcpServers?: Record<string, unknown>
   mcp_servers?: Record<string, unknown>
   peerExcludeSocketId?: string
@@ -490,7 +493,11 @@ export async function handleEkkoAgentRun(
   const storageText = data.storage_message !== undefined ? data.storage_message : displayText
   const shouldPersistUserMessage = !skipUserMessage && displayInput !== null
   const now = Math.floor(Date.now() / 1000)
-  const instructions = String(data.instructions || '').trim()
+  const mcpServers = data.resolved_mcp_servers ?? resolveEkkoMcpServers(profile, data.mcpServers || data.mcp_servers)
+  const instructions = [
+    String(data.instructions || '').trim(),
+    studioMcpUsageGuidelines(studioMcpCapabilities(mcpServers)),
+  ].filter(Boolean).join('\n\n')
   const instructionMessages: AgentMessage[] = instructions
     ? [{ role: 'system', content: instructions }]
     : []
@@ -620,7 +627,6 @@ export async function handleEkkoAgentRun(
     model: modelConfig.model,
     accessToken: apiKey,
   })
-  const mcpServers = resolveEkkoMcpServers(profile, data.mcpServers || data.mcp_servers)
   const modelClient = createProviderModelClient(createModelClient(providerConfig, { fetch: authorizedProviderFetch }), {
     providerConfig,
     fallback: fallbackProviderConfig

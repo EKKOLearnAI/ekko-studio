@@ -3583,4 +3583,24 @@ describe('OpenCode Free coding agents', () => {
       provider: 'opencode-free', model: 'gpt-5', mode: 'scoped',
     })).rejects.toMatchObject({ status: 400 })
   })
+
+  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] as const)('updates %s launch guidance when managed MCPs are disabled, isolated by profile', async agent => {
+    const home = makeHome()
+    const adapter = join(home, 'coding-agent', 'pi-mcp-adapter', 'node_modules', 'pi-mcp-adapter', 'index.ts')
+    mkdirSync(dirname(adapter), { recursive: true })
+    writeFileSync(adapter, 'export default {}')
+    const input = { mode: 'global' as const, profile: 'default', sessionId: 'guidance', agentSessionId: 'guidance-run' }
+    const first = await prepareCodingAgentLaunch(agent, input)
+    expect(readFileSync(first.promptFile!, 'utf8')).toContain('ekko_studio_api_openapi_get')
+    for (const name of ['api', 'browser', 'devices', 'use', 'interaction']) {
+      await upsertCodingAgentMcpServer(agent, `ekko-studio-${name}`, { enabled: false }, { profile: 'default' })
+    }
+    const disabled = await prepareCodingAgentLaunch(agent, input)
+    const prompt = readFileSync(disabled.promptFile!, 'utf8')
+    expect(prompt).not.toContain('ekko_studio_')
+    expect(prompt).toContain('# 输出格式规范')
+    const other = await prepareCodingAgentLaunch(agent, { ...input, profile: 'research' })
+    expect(readFileSync(other.promptFile!, 'utf8')).toContain('ekko_studio_api_openapi_get')
+  })
+
 })

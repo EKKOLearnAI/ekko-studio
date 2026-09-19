@@ -122,6 +122,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/workspace-di
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
   getProfileDir: (profile: string) => `/tmp/hermes-bridge-final-context/${profile || 'default'}`,
   saveEnvValueForProfile: saveEnvValueForProfileMock,
+  readConfigYamlForProfile: vi.fn(async () => ({})),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/auth', () => ({

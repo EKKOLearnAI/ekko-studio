@@ -1,3 +1,4 @@
+import { studioMcpCapabilities } from '../../studio/public/runs/mcp-capabilities'
 import { prepareDshRuntime, DSH_API_KEY_ENV } from './dsh/runtime-config'
 import { readDshMcpServers, validateDshSettings } from './dsh/config'
 import { createDshHost } from './dsh/host'
@@ -21,7 +22,7 @@ import { hermesPromptDocument, writeManagedPromptFile } from './prompt-file'
 import type { ApiMode, CodingAgentImageInput } from '../protocol/types'
 import { PROVIDER_PRESETS } from '../../studio/contracts/providers'
 import { getModelContextLength, getModelRuntimeCapabilities } from '../../studio/public/provider-runtime'
-import { getSystemPrompt } from '../../studio/public/runs/prompt'
+import { getSystemPrompt, studioMcpUsageGuidelines } from '../../studio/public/runs/prompt'
 import { codingAgentRunManager } from './runtime/run-manager'
 import { mergePiSettings, userSettingsProvidesPiMcpAdapter } from './pi/settings'
 import { PI_EXTENDED_THINKING_LEVEL_MAP, piModelSupportsThinking } from './pi/thinking'
@@ -3208,6 +3209,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     throw err
   }
 
+  const mcpCapabilities = studioMcpCapabilities(getCodingAgentManagedMcpServerConfigs(tool.id, input.profile || 'default'))
   const mode = input.mode === 'global' ? 'global' : 'scoped'
   if (mode === 'global') {
     const scope = normalizeConfigScope({ profile: input.profile, provider: 'global' })
@@ -3267,7 +3269,9 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       }
     }
     const rootDir = getScopedRuntimeConfigRoot(tool.id, scope, input)
-    const systemPrompt = String(input.groupSystemPrompt || '').trim() || getSystemPrompt()
+    const systemPrompt = input.groupSystemPrompt?.trim()
+      ? [input.groupSystemPrompt.trim(), studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
+      : getSystemPrompt(undefined, { mcpCapabilities })
     await mkdir(rootDir, { recursive: true })
 
     let promptFile = ''
@@ -3398,7 +3402,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const apiMode = freeRuntime?.apiMode || normalizeLaunchApiMode(input.apiMode, preset?.api_mode || 'chat_completions')
   const reasoningEffort = String(input.reasoningEffort || '').trim()
   const groupSystemPrompt = String(input.groupSystemPrompt || '').trim()
-  const scopedSystemPrompt = tool.id === 'pi' && groupSystemPrompt ? getSystemPrompt() : groupSystemPrompt || getSystemPrompt()
+  const scopedSystemPrompt = tool.id === 'pi' && groupSystemPrompt
+    ? getSystemPrompt(undefined, { mcpCapabilities })
+    : groupSystemPrompt
+      ? [groupSystemPrompt, studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
+      : getSystemPrompt(undefined, { mcpCapabilities })
   const isolatedInput = tool.id === 'pi' || tool.id === 'dsh'
     ? {
         ...input,

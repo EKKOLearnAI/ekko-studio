@@ -1,3 +1,4 @@
+import { hermesStudioMcpCapabilities } from './studio-mcp'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 /**
  * CLI Bridge run handler — handles runs that use the agent bridge
@@ -465,7 +466,7 @@ export async function handleBridgeRun(
   // message of every request. Compose only when a caller hands us nothing.
   let fullInstructions = callbackContext?.instructions
     || instructions
-    || getSystemPrompt(undefined, { source: data.session_source || data.source })
+    || getSystemPrompt(undefined, { source: data.session_source || data.source, mcpCapabilities: await hermesStudioMcpCapabilities(profile) })
   const sessionRow = getSession(session_id)
   if (sessionRow && !sessionRow.user_id && socketUser?.id != null) {
     updateSession(session_id, { user_id: String(socketUser.id) })

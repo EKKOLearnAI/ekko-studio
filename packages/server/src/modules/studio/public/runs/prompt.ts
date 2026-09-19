@@ -1,3 +1,5 @@
+import type { StudioMcpCapabilities } from './mcp-capabilities'
+
 /**
  * LLM System Prompts and Instructions
  *
@@ -151,6 +153,16 @@ export const HERMES_MCP_USAGE_GUIDELINES = [
   'Do not use ekko_studio_use_chat_run, Ekko Studio session tools, /api/studio/chat-run/*, or /api/studio/sessions/* as an internal delegation mechanism. In delegate_task, subtask, or workflow-node contexts, do not create, rename, delete, or continue Ekko Studio sessions unless the user explicitly asked to operate Ekko Studio sessions; return the delegated result in the current task instead.',
 ];
 
+export function studioMcpUsageGuidelines(capabilities?: StudioMcpCapabilities): string {
+  if (!capabilities) return ''
+  const rules: string[] = []
+  if (capabilities.api) rules.push(...HERMES_MCP_USAGE_GUIDELINES.slice(0, 3))
+  if (capabilities.browser) rules.push(HERMES_MCP_USAGE_GUIDELINES[3])
+  if (Object.values(capabilities).some(Boolean)) rules.push(HERMES_MCP_USAGE_GUIDELINES[4])
+  if (capabilities.api || capabilities.use) rules.push(HERMES_MCP_USAGE_GUIDELINES[5])
+  return rules.join('\n')
+}
+
 export const WORKFLOW_NODE_SYSTEM_CONTEXT = `
 You are executing one node in a workflow.
 
@@ -166,7 +178,7 @@ Return the result for this node clearly and concisely. Do not describe the workf
  */
 export function getSystemPrompt(
   customPrompt?: string,
-  options?: { source?: string | null; outputLanguage?: 'zh' | 'en' },
+  options?: { source?: string | null; outputLanguage?: 'zh' | 'en'; mcpCapabilities?: StudioMcpCapabilities },
 ): string {
   const parts: string[] = [];
 
@@ -178,7 +190,8 @@ export function getSystemPrompt(
     parts.push(WORKFLOW_NODE_SYSTEM_CONTEXT.trim());
   }
 
-  parts.push(HERMES_MCP_USAGE_GUIDELINES.join('\n'));
+  const mcpGuidance = studioMcpUsageGuidelines(options?.mcpCapabilities);
+  if (mcpGuidance) parts.push(mcpGuidance);
   parts.push(options?.outputLanguage === 'en'
     ? AI_OUTPUT_FORMAT_GUIDELINES_EN
     : AI_OUTPUT_FORMAT_GUIDELINES);
