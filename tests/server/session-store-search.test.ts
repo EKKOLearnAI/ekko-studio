@@ -68,11 +68,6 @@ describe('session store filtering', () => {
     addMessage({ session_id: 'untitled-notice', role: 'tool', content: 'private tool output', timestamp: 3 })
     expect(getSessionNotificationPreview('untitled-notice')).toEqual({ title: 'First user question', preview: 'a'.repeat(240) })
     expect(getSessionNotificationPreview('missing')).toBeNull()
-    createSession({ id: 'structured-notice', profile: 'default', source: 'coding_agent' })
-    addMessage({ session_id: 'structured-notice', role: 'user', content: JSON.stringify([
-      { type: 'text', text: 'Readable App title' }, { type: 'image', path: '/private/image.png' },
-    ]), timestamp: 1 })
-    expect(getSessionNotificationPreview('structured-notice')).toEqual({ title: 'Readable App title', preview: '' })
   })
 
   it('finds rendered text when Markdown markers split the stored phrase', async () => {

@@ -387,42 +387,20 @@ export function getSession(id: string): HermesSessionRow | null {
   return row ? mapSessionRow(row) : null
 }
 
-function notificationTitleText(value: unknown): string {
-  const source = typeof value === 'string' ? value.trim() : ''
-  if (!source) return ''
-  if (source.startsWith('[') || source.startsWith('{')) {
-    try {
-      const parsed = JSON.parse(source) as unknown
-      const parts = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object'
-        && Array.isArray((parsed as Record<string, unknown>).content)
-        ? (parsed as Record<string, unknown>).content as unknown[] : []
-      const text = parts.flatMap(part => part && typeof part === 'object'
-        && (part as Record<string, unknown>).type === 'text'
-        && typeof (part as Record<string, unknown>).text === 'string'
-        ? [(part as Record<string, unknown>).text as string] : []).join('\n').trim()
-      if (text) return text.slice(0, 120)
-    } catch { /* Keep malformed structured text bounded below. */ }
-  }
-  return source.slice(0, 120)
-}
-
-/** Bounded notification text; never materialize tool output or another turn's reply. */
+/** Bounded notification text; never materialize full chat history or tool output. */
 export function getSessionNotificationPreview(id: string): { title: string; preview: string } | null {
   if (!isSqliteAvailable()) return null
-  const db = getDb()!
-  const row = db.prepare(`
-    SELECT COALESCE(NULLIF(s.title, ''), NULLIF(s.preview, ''), '') AS title,
+  const row = getDb()!.prepare(`
+    SELECT SUBSTR(COALESCE(NULLIF(s.title, ''), NULLIF(s.preview, ''),
+      (SELECT SUBSTR(m.content, 1, 63) FROM ${MESSAGES_TABLE} m
+       WHERE m.session_id = s.id AND m.role = 'user' AND m.content != ''
+       ORDER BY m.timestamp, m.id LIMIT 1), ''), 1, 120) AS title,
       COALESCE((SELECT SUBSTR(COALESCE(NULLIF(m.display_content, ''), m.content), 1, 240)
        FROM ${MESSAGES_TABLE} m WHERE m.session_id = s.id AND m.role = 'assistant' AND m.content != ''
        ORDER BY m.timestamp DESC, m.id DESC LIMIT 1), '') AS preview
     FROM ${SESSIONS_TABLE} s WHERE s.id = ?
   `).get(id) as { title: string; preview: string } | undefined
-  if (!row) return null
-  if (row.title) return { title: notificationTitleText(row.title), preview: row.preview }
-  const firstUser = db.prepare(`SELECT content FROM ${MESSAGES_TABLE}
-    WHERE session_id = ? AND role = 'user' AND content != '' ORDER BY timestamp, id LIMIT 1`
-  ).get(id) as { content: string } | undefined
-  return { title: notificationTitleText(firstUser?.content), preview: row.preview }
+  return row || null
 }
 
 /** Session and branch metadata without loading this session's message bodies. */
