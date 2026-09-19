@@ -5,6 +5,10 @@ describe('notification preview', () => {
   expect(notificationPreview({title:'Chat',content:'**Done** [report](https://example.test)\n```secret```'},true)).toEqual({title:'Chat',body:'Done report'})
   expect(notificationPreview({title:'Group',preview:'hello'},true).body).toBe('hello')
  })
+ it('derives a safe title from structured user text without exposing attachments', () => {
+  const title=JSON.stringify([{type:'text',text:'Notification preview test'},{type:'file',path:'/private/secret'}])
+  expect(notificationPreview({title,content:'Done'},true)).toEqual({title:'Notification preview test',body:'Done'})
+ })
  it('never takes raw errors, prompts, or non-completion body', () => {
   expect(notificationPreview({output:'secret',command:'secret'},true)).toEqual({title:'',body:''})
   expect(notificationPreview({title:'Chat',content:'secret'},false)).toEqual({title:'Chat',body:''})

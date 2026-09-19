@@ -1,6 +1,6 @@
 # System notification content preview — draft
 
-The consumer retains Studio-user/device permission routing. By default it still sends blank title/body. Explicit server configuration `STUDIO_PUSH_CONTENT_PREVIEW=1` opts into display title/body transmission. This temporary integration gate is not a finished end-user preference UI and must not be silently enabled on deployment.
+The consumer retains Studio-user/device permission routing. By default it still sends blank title/body. Explicit server configuration `STUDIO_PUSH_CONTENT_PREVIEW=1` opts into display title/body transmission. Deployments accepting the lock-screen privacy tradeoff must set this environment value; otherwise the gateway intentionally renders generic fallback text.
 
 Uses only the existing appEventEnvelope display fields (content for chat, preview for group), 40/160 grapheme limits, basic Markdown cleanup. No arbitrary raw error/command fallback. A visible AI reply may still contain private material; these formatting rules are NOT a sensitive-data classifier.
 
@@ -14,3 +14,5 @@ Known incomplete requirements:
 Validation: focused preview + existing push consumer tests, harness check, production build. See PR for current results. Do not mark ready until these missing gates are addressed.
 
 Validation update: added consumer opt-in integration regression failed before repair; 16 focused tests now pass, harness and production build pass. Empty current output never falls back to old chat text.
+
+Real-device acceptance on 2026-09-19 exposed two deployment gaps: the first PR3106+PR3111 LPK omitted `STUDIO_PUSH_CONTENT_PREVIEW=1`, so the gateway correctly showed generic fallback text; an untitled structured mobile session also needed safe text extraction rather than raw JSON. The follow-up adds a regression for structured titles; the replacement LPK explicitly enables the reviewed preview mode.
