@@ -13,8 +13,6 @@ const PUSH_EVENTS: Record<string, 'completion' | 'failure' | 'approval' | 'inter
   'group.approval.requested': 'approval', 'group.clarification.requested': 'interaction',
   'workflow.run.completed': 'completion', 'workflow.run.failed': 'failure',
 }
-const plain = (value: unknown, max: number) => typeof value === 'string'
-  ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : ''
 
 /** Event-driven delivery to current devices of the same owner used by Android. */
 export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(...args)) {
@@ -28,7 +26,6 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
     try {
       const envelope = appEventEnvelope(event)
       if (!envelope || ('notify' in envelope && envelope.notify === false)) return
-      const display = 'display' in envelope ? envelope.display as { title?: string; preview?: string; content?: string } | undefined : undefined
       const runKind = event.source === 'group_chat' ? 'group' : event.source === 'workflow' ? 'workflow' : 'chat'
       const subjectId = runKind === 'group' ? event.subject.room_id : runKind === 'workflow' ? event.subject.workflow_id : event.subject.session_id
       if (!subjectId) return
@@ -58,7 +55,9 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
           body: JSON.stringify({ schema_version: 1, event_id: event.id, event_type: kind,
             recipient: { platform: 'ios', app_id: registration.app_id,
               apns_environment: registration.apns_environment, apns_token: registration.apns_token },
-            notification: { title: plain(display?.title, 120), body: kind === 'completion' ? plain(display?.preview || display?.content, 240) : '' },
+            // The gateway selects fixed Android-equivalent text by event/domain.
+            // Keep conversation titles and generated output out of push requests.
+            notification: { title: '', body: '' },
             ekko_run: { schema_version: 1, studio_device_id: registration.studio_device_id, cloud_user_id: registration.cloud_user_id,
               run_kind: runKind, run_id: event.subject.run_id || event.subject.message_id || event.id, profile: event.profile,
               [runKind === 'chat' ? 'session_id' : runKind === 'group' ? 'room_id' : 'workflow_id']: subjectId } }),

@@ -80,10 +80,13 @@ Studio POSTs to `/push/v1/send` using the current Device Connections cloud route
 official uses `config.appRelay.url` (default `https://api.ekkostudio.xyz`), and
 Cloudflare uses `https://cn.ekkostudio.xyz`. Each notification event reads the
 current setting, so route changes apply without restarting Studio. Requests use
-the current device's dedicated credential. The payload contains bounded display text and a separate
+the current device's dedicated credential. The payload leaves notification title/body empty so the gateway selects fixed
+Android-equivalent text by event type and chat/group/workflow domain. Conversation
+titles and generated replies never leave Studio in push requests. It carries a separate
 `ekko_run` click route with Studio ID, cloud account ID, run kind/ID, Profile and
 session/room/workflow ID. Tokens and raw errors/commands never appear in this
-route or public events. App clicks reconnect the exact saved Studio and verify
+route or public events. The gateway sets `aps.badge: 1` as a new-reminder
+indicator (not an unread total); the App clears it on foreground entry. App clicks reconnect the exact saved Studio and verify
 the account before opening the subject.
 
 A bounded in-memory set suppresses duplicates per device/event (interactions by

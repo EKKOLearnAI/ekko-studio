@@ -81,9 +81,20 @@ describe('user device APNs delivery', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     const bodies = fetchMock.mock.calls.map(([, request]) => JSON.parse(request.body))
     expect(bodies.map(body => body.recipient.apns_token)).toEqual(['ab'.repeat(32), 'bc'.repeat(32)])
-    expect(bodies[0]).toMatchObject({ notification: { title: 'Saved task', body: 'Done' },
+    expect(bodies[0]).toMatchObject({ notification: { title: '', body: '' },
       ekko_run: { cloud_user_id: 107, run_kind: 'chat', session_id: 'session-a', run_id: 'runtime-a' } })
     expect(JSON.stringify(bodies)).not.toContain('push_')
+  })
+  it('never includes long private titles or generated output in push requests', async () => {
+    await register()
+    session.title = 'PRIVATE TITLE'.repeat(1000)
+    const consume = await consumer()
+    await consume(event({ payload: { run_id: 'runtime-a', output: 'PRIVATE REPLY😀'.repeat(10000) } }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const body = fetchMock.mock.calls[0][1].body
+    expect(JSON.parse(body).notification).toEqual({ title: '', body: '' })
+    expect(body).not.toContain('PRIVATE')
+    expect(Buffer.byteLength(body, 'utf8')).toBeLessThan(4096)
   })
   it('mutes APNs without deleting registration and token refresh does not re-enable the connection', async () => {
     const a = await register(); await register(7, 'phone-b', 'bc')
