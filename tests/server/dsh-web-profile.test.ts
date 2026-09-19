@@ -28,7 +28,7 @@ async function fixture() {
     await writeFile(join(directory, 'cordis.patch.yml'), name === 'dsh-web-app'
       ? '- insert:\n  - id: webserver\n    name: webserver\n  - id: agent-presets\n    name: presets\n    config:\n      default: standard\n' : '[]\n')
   }
-  const manifest = { dependencies: { 'my-web-plugin': '1.0.0' }, dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'my-web-plugin'] } } }
+  const manifest = { name: '', version: '', dependencies: { 'my-web-plugin': '1.0.0' }, dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'my-web-plugin'] } } }
   await writeFile(join(profile, 'package.json'), JSON.stringify(manifest))
   await writeFile(join(bundle, 'package.json'), JSON.stringify({ name: 'my-web-plugin', dsh: { bundle: { patch: './cordis.patch.yml' } } }))
   await writeFile(join(bundle, 'cordis.patch.yml'), '[]\n')
@@ -82,13 +82,13 @@ it('uses the same persistent authoring roots in management and ACP, including ho
 // generates is loaded that way, so each must carry a version even though none is published.
 it('declares a version on every generated plugin manifest', async () => {
   const input = await fixture()
-  const readVersion = async (path: string) => JSON.parse(await readFile(path, 'utf8')).version
+  const readManifest = async (path: string) => JSON.parse(await readFile(path, 'utf8'))
 
   const web = await prepareDshWebProfile(input)
-  expect(await readVersion(join(input.rootDir, 'profiles', web.profile, 'package.json'))).toMatch(/^\d+\.\d+\.\d+/)
+  expect(await readManifest(join(input.rootDir, 'profiles', web.profile, 'package.json'))).toMatchObject({ name: web.profile, version: '0.0.0' })
 
   const management = await prepareDshManagementProfile(input)
   const managementDir = join(input.rootDir, 'profiles', management.profile)
-  expect(await readVersion(join(managementDir, 'package.json'))).toMatch(/^\d+\.\d+\.\d+/)
-  expect(await readVersion(join(managementDir, 'node_modules/studio-dsh-ui/package.json'))).toMatch(/^\d+\.\d+\.\d+/)
+  expect(await readManifest(join(managementDir, 'package.json'))).toMatchObject({ name: 'studio-plugins', version: '0.0.0' })
+  expect(await readManifest(join(managementDir, 'node_modules/studio-dsh-ui/package.json'))).toMatchObject({ name: 'studio-dsh-ui', version: '0.0.0' })
 })

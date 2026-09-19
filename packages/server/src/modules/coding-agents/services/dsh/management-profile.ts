@@ -31,7 +31,9 @@ export async function prepareDshManagementProfile(input: { command: string; sour
   }
   // Keep a version on every generated manifest: DSH's package-inventory request extension
   // rejects an owning manifest whose name or version is missing.
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ ...manifest, version: manifest.version ?? '0.0.0', dsh: { ...manifest.dsh, profile: { ...manifest.dsh.profile, patchReload: 'startup' } } }))
+  const name = typeof manifest.name === 'string' && manifest.name.trim() ? manifest.name : profile
+  const version = typeof manifest.version === 'string' && manifest.version.trim() ? manifest.version : '0.0.0'
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ ...manifest, name, version, dsh: { ...manifest.dsh, profile: { ...manifest.dsh.profile, patchReload: 'startup' } } }))
   for (const [target, sourcePath] of [[join(directory, 'cordis.patch.yml'), join(source, 'cordis.patch.yml')], [join(input.rootDir, 'cordis.patch.yml'), join(input.sourceHome, 'cordis.patch.yml')]]) {
     const content = await optionalDshFile(sourcePath, '[]')
     layers.push(content)
