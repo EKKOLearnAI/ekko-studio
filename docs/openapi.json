@@ -16509,6 +16509,65 @@
         ]
       }
     },
+    "/api/studio/live-activities/registration": {
+      "put": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Update registration",
+        "description": "PUT /api/studio/live-activities/registration",
+        "operationId": "liveActivityRegistrationController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Delete registration",
+        "description": "DELETE /api/studio/live-activities/registration",
+        "operationId": "liveActivityRegistrationController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/api/studio/logs": {
       "get": {
         "tags": [
