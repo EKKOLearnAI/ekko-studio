@@ -81,20 +81,21 @@ describe('user device APNs delivery', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     const bodies = fetchMock.mock.calls.map(([, request]) => JSON.parse(request.body))
     expect(bodies.map(body => body.recipient.apns_token)).toEqual(['ab'.repeat(32), 'bc'.repeat(32)])
-    expect(bodies[0]).toMatchObject({ notification: { title: '', body: '' },
+    expect(bodies[0]).toMatchObject({ notification: { title: 'Saved task', body: 'Done' },
       ekko_run: { cloud_user_id: 107, run_kind: 'chat', session_id: 'session-a', run_id: 'runtime-a' } })
     expect(JSON.stringify(bodies)).not.toContain('push_')
   })
-  it('never includes long private titles or generated output in push requests', async () => {
+  it('sends bounded plain-text previews from this reply, without splitting emoji', async () => {
     await register()
-    session.title = 'PRIVATE TITLE'.repeat(1000)
+    session.title = '👨‍👩‍👧‍👦'.repeat(41)
+    session.preview = 'OLD REPLY'
     const consume = await consumer()
-    await consume(event({ payload: { run_id: 'runtime-a', output: 'PRIVATE REPLY😀'.repeat(10000) } }))
+    await consume(event({ payload: { run_id: 'runtime-a', output: '**' + '👍🏽'.repeat(161) + '**' } }))
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const body = fetchMock.mock.calls[0][1].body
-    expect(JSON.parse(body).notification).toEqual({ title: '', body: '' })
-    expect(body).not.toContain('PRIVATE')
-    expect(Buffer.byteLength(body, 'utf8')).toBeLessThan(4096)
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.notification).toEqual({ title: '👨‍👩‍👧‍👦'.repeat(40), body: '👍🏽'.repeat(160) })
+    await consume(event({ id: 'empty-final', payload: { run_id: 'runtime-a', output: '' } }))
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).notification.body).toBe('')
   })
   it('mutes APNs without deleting registration and token refresh does not re-enable the connection', async () => {
     const a = await register(); await register(7, 'phone-b', 'bc')
@@ -159,6 +160,7 @@ describe('user device APNs delivery', () => {
     await consume(event({ type: 'group.message.created', source: 'group_chat', subject: { room_id: 'room-a', message_id: 'reply-a' },
       payload: { room: { id: 'room-a', name: 'Room' }, message: { id: 'reply-a', senderName: 'Agent', senderType: 'agent', role: 'assistant', content: 'Group reply' } } }))
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).notification).toEqual({ title: 'Room', body: 'Group reply' })
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).ekko_run).toMatchObject({ run_kind: 'group', room_id: 'room-a', cloud_user_id: 107 })
     workflow = { id: 'workflow-run', workflow_id: 'workflow-a', user_id: 8, profile: 'default' }
     await consume(event({ type: 'workflow.run.completed', source: 'workflow', subject: { workflow_id: 'workflow-a', run_id: 'workflow-run' }, payload: { display: { title: 'Workflow' } } }))

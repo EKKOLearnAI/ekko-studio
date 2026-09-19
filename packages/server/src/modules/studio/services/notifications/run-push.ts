@@ -5,6 +5,8 @@ import type { BusinessEvent } from '../webhooks/business-events'
 import { appRelayUrlForRoute, getAppRelayRoute } from '../app-relay/route'
 import { appEventEnvelope, canReceiveAppEvent } from '../webhooks/app-events'
 import { decryptPushSecret } from './push-secrets'
+import { getSessionNotificationPreview } from '../../repositories/session-store'
+import { pushPreview } from './push-preview'
 
 const PUSH_EVENTS: Record<string, 'completion' | 'failure' | 'approval' | 'interaction'> = {
   'chat.run.completed': 'completion', 'chat.run.failed': 'failure',
@@ -26,9 +28,20 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
     try {
       const envelope = appEventEnvelope(event)
       if (!envelope || ('notify' in envelope && envelope.notify === false)) return
+      const display = 'display' in envelope ? envelope.display as { title?: string; preview?: string; content?: string } | undefined : undefined
       const runKind = event.source === 'group_chat' ? 'group' : event.source === 'workflow' ? 'workflow' : 'chat'
       const subjectId = runKind === 'group' ? event.subject.room_id : runKind === 'workflow' ? event.subject.workflow_id : event.subject.session_id
       if (!subjectId) return
+      // Use unsliced source text so the old foreground-preview UTF-16 limits
+      // cannot split an emoji before grapheme-aware push clipping.
+      const session = runKind === 'chat' ? getSessionNotificationPreview(subjectId) : null
+      const room = payload.room as { name?: string } | undefined
+      const message = payload.message as { content?: string } | undefined
+      const title = runKind === 'chat' ? session?.title : runKind === 'group' ? room?.name : display?.title
+      const reply = runKind === 'chat' ? payload.output
+        : runKind === 'group' ? message?.content : display?.preview || display?.content
+      const notification = { title: pushPreview(title || display?.title, 40),
+        body: kind === 'completion' ? pushPreview(reply, 160, true) : '' }
       const pushUrl = new URL('/push/v1/send', appRelayUrlForRoute(await getAppRelayRoute()))
       const connections = listAppConnections()
       await Promise.allSettled(listUserPushDevices().map(async device => {
@@ -55,9 +68,7 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
           body: JSON.stringify({ schema_version: 1, event_id: event.id, event_type: kind,
             recipient: { platform: 'ios', app_id: registration.app_id,
               apns_environment: registration.apns_environment, apns_token: registration.apns_token },
-            // The gateway selects fixed Android-equivalent text by event/domain.
-            // Keep conversation titles and generated output out of push requests.
-            notification: { title: '', body: '' },
+            notification,
             ekko_run: { schema_version: 1, studio_device_id: registration.studio_device_id, cloud_user_id: registration.cloud_user_id,
               run_kind: runKind, run_id: event.subject.run_id || event.subject.message_id || event.id, profile: event.profile,
               [runKind === 'chat' ? 'session_id' : runKind === 'group' ? 'room_id' : 'workflow_id']: subjectId } }),
