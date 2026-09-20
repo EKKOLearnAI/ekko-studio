@@ -1,3 +1,4 @@
+import { catchUpLiveActivities } from './live-activity-catchup'
 import { inspectAppUserToken } from '../../public/auth'
 import { getAppRelayDeviceIdentity } from '../../public/system-info'
 import { hashAppCredential, listAppConnections } from '../../repositories/app-connections-store'
@@ -26,4 +27,5 @@ export async function updateLiveActivityDestination(token: string, value: unknow
   saveLiveActivityDestination({ user_id: app.user.id, device_id: app.deviceCode, connection_id: connection.id,
     connection_token_hash: connection.token_hash, app_id: String(body.app_id), environment: String(body.apns_environment),
     destination_id: String(body.destination_id), ciphertext: encryptPushSecret(JSON.stringify(saved)), enabled: 1 })
+  void catchUpLiveActivities(connection.id).catch(() => { console.warn('[live-activity] catchup_failed') })
 }

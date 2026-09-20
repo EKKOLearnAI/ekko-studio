@@ -46,6 +46,8 @@ export function normalizeGatewayAutoStartConfig(value: unknown): GatewayAutoStar
 }
 
 export interface AppConfig {
+  // Disabled unless the deployed gateway accepts relevance_score. Persisted in appHome/config.json.
+  liveActivityRelevanceEnabled?: boolean
   // Network entry used by Studio's cloud App Relay connection.
   appRelayRoute?: 'official' | 'cloudflare'
 

@@ -1,10 +1,11 @@
+import { readAppConfig } from '../config/app-config'
 import { getLiveActivityUsage } from '../../repositories/live-activity-usage'
 import { notificationPreview } from './notification-preview'
 import { getChatRunServer } from '../chat-run/server-registry'
 import { createHash, randomUUID } from 'node:crypto'
 import { listAppConnections } from '../../repositories/app-connections-store'
 import { listLiveActivityDestinations } from '../../repositories/live-activity-store'
-import { getLiveActivityRun, listActiveLiveActivityRuns, saveLiveActivityRun, type LiveActivityRunRecord } from '../../repositories/live-activity-runtime-store'
+import { getLiveActivityRun, listActiveLiveActivityRuns, saveLiveActivityRun, getLiveActivityLastStart, recordLiveActivityStart, type LiveActivityRunRecord } from '../../repositories/live-activity-runtime-store'
 import { findUserById } from '../../repositories/users-store'
 import { getSession, getSessionNotificationPreview } from '../../repositories/session-store'
 import type { BusinessEvent } from '../webhooks/business-events'
@@ -122,6 +123,12 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
     const body: Record<string, unknown> = { schema_version: 1, event_id: randomUUID(), event: action,
       destination_id: device.destination_id, activity_ref: state.activity_ref, revision: state.revision,
       occurred_at: now, expires_at: now + (action === 'end' ? 600 : 120), content_state: { ...content(event, state, action === 'end'), ...displayFields(event, registration, state) } }
+    // Opt-in only after gateway supports top-level relevance_score -> aps.relevance-score.
+    // Business event time, not dispatch/heartbeat time: heartbeats cannot steal priority.
+    if ((await readAppConfig()).liveActivityRelevanceEnabled === true) {
+      const businessAt = event.chat?.task_plan?.updated_at ?? Date.parse(event.occurred_at)
+      if (Number.isFinite(businessAt) && businessAt > 0) body.relevance_score = action === 'end' ? 0 : businessAt / 1000
+    }
     if (action === 'start') body.ekko_run = { schema_version: 1, studio_device_id: registration.studio_device_id,
       cloud_user_id: registration.cloud_user_id, profile: event.profile, run_kind: runKind(event), run_id: event.subject.run_id || event.id,
       [runKind(event) === 'chat' ? 'session_id' : runKind(event) === 'group' ? 'room_id' : 'workflow_id']: subjectId(event) }
@@ -136,6 +143,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
       agent: agent(event), revision: state.revision, http: response.status, status: result.status, error: result.error })
     if (response.status >= 200 && response.status < 300) {
       state.started = 1; state.terminal = action === 'end' ? 1 : 0; saveLiveActivityRun(state)
+      if (action === 'start') recordLiveActivityStart(device.destination_id, Date.now())
     }
     const deadline = Date.now() + (action === 'end' ? 580_000 : 110_000)
     const controller = new AbortController()
@@ -163,21 +171,27 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
       if (polling.get(key)?.controller === controller) polling.delete(key)
     }
   }
-  const consume = async (event: BusinessEvent, heartbeat = false): Promise<void> => {
+  const consume = async (event: BusinessEvent, heartbeat = false, targetConnectionId?: number): Promise<void> => {
     const plan = event.type.endsWith('.plan.updated') ? event.chat?.task_plan : null
     if (!plan && !terminal(event) && !event.type.includes('approval.requested') && !event.type.includes('clarification.requested')) return
     if (!subjectId(event) || event.payload.replayed === true || event.payload.restored === true) return
     try {
       const connections = listAppConnections()
       await Promise.allSettled(listLiveActivityDestinations().map(async device => {
+        if (targetConnectionId !== undefined && device.connection_id !== targetConnectionId) return
         if (!device.enabled || !validConnection(device, connections)) return
         const user = findUserById(device.user_id); if (!user || user.status !== 'active' || !canReceiveAppEvent(user, event)) return
         let registration: Record<string, any>; try { registration = JSON.parse(decryptPushSecret(device.ciphertext)) } catch { console.warn('[live-activity] registration_unreadable', { connection: device.connection_id }); return }
         const key = stableKey(event, device.destination_id)
         if (heartbeat && (latest.get(key) !== event || !active(event))) return
         const previous = latest.get(key)
-        if (!heartbeat && plan && previous?.chat?.task_plan && previous.subject.run_id === event.subject.run_id
+        if (!heartbeat && targetConnectionId === undefined && plan && previous?.chat?.task_plan && previous.subject.run_id === event.subject.run_id
           && previous.chat.task_plan.plan_id === plan.plan_id && previous.chat.task_plan.revision >= plan.revision) return
+        if (targetConnectionId !== undefined) {
+          if (!active(event)) return
+          const stored = getLiveActivityRun(key)
+          if (stored?.terminal) return // registration never revives a terminal activity
+        }
         cancelRefresh(key)
         latest.set(key, event)
         // A terminal event must not wait behind an update receipt poll; new turns also supersede old polls.
@@ -187,6 +201,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
           const legacy = listActiveLiveActivityRuns(device.destination_id)
             .filter(row => row.run_key.startsWith(legacyKeyPrefix(event, device.destination_id)))
           for (const row of legacy) await dispatch(event, device, registration, row.run_key, 'end')
+          if (targetConnectionId !== undefined && (!active(event) || getLiveActivityRun(key)?.terminal)) return
           if (plan && !terminal(event) && latest.get(key) !== event) return
           let state = getLiveActivityRun(key)
           if (heartbeat && (!state?.started || state.terminal || latest.get(key) !== event || !active(event))) return
@@ -206,6 +221,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
               return
             }
             if (!plan) return
+            if (targetConnectionId !== undefined && Date.now() - getLiveActivityLastStart(device.destination_id) < 30 * 60_000) return
             await dispatch(event, device, registration, key, 'start')
             if (getLiveActivityRun(key)?.started && !terminal(event)) scheduleRefresh(key, event)
             return

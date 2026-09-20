@@ -1,3 +1,4 @@
+import { ensureBusinessConsumers } from '../services/webhooks/business-consumers'
 import type { Context } from 'koa'
 import { PushRegistrationError, updateUserPushRegistration } from '../services/notifications/user-push-registration'
 import { updateLiveActivityDestination } from '../services/notifications/live-activity-registration'
@@ -15,6 +16,7 @@ export async function pushRegistrationController(ctx: Context): Promise<void> {
 }
 
 export async function liveActivityRegistrationController(ctx: Context): Promise<void> {
+  ensureBusinessConsumers()
   const authorization = ctx.get('authorization')
   try {
     await updateLiveActivityDestination(authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '',

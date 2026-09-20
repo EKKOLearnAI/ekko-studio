@@ -438,6 +438,13 @@ export class ChatRunSocket {
     this.nsp = io.of('/chat-run')
   }
 
+  getLiveActivityPlans() {
+    return this.taskPlanRuns.activeSnapshots().filter(entry => {
+      const source = this.sessionMap.get(entry.snapshot.session_id)?.source || getSession(entry.snapshot.session_id)?.source
+      return source !== 'group_chat' && source !== 'workflow'
+    })
+  }
+
   isLiveActivityRunActive(sessionId: string, profile: string, runId: string): boolean {
     const state = this.sessionMap.get(sessionId)
     return !!state?.isWorking && !state.isAborting && (state.activeRunMarker || state.responseRun?.runMarker || state.runId) === runId

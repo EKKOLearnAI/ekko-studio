@@ -1,0 +1,11 @@
+# Registration recovery and priority rollout
+
+Registration catch-up is limited to ordinary active chat tasks, including coding agents. Runtime snapshots must match the current turn and not be aborting. Group/workflow bindings are excluded. Authorize the caller first, select at most one most recently updated authorized task, and target only its registering connection. Consumer ownership/connection checks are repeated. Existing active activities update; terminal records are never revived by registration. Duplicate in-flight recovery is coalesced, registration triggers are throttled for two minutes, and catch-up start is suppressed for 30 minutes following a recorded start for the destination. Normal live starts are NOT globally budget-limited by this change. These safeguards do not reveal/reset Apple's budget or guarantee creation.
+
+Priority is disabled by default. Persist `liveActivityRelevanceEnabled: true` in the Studio user-data `config.json` only AFTER the gateway contract below is implemented and deployed. Never enable it on the current strict unknown-field gateway.
+
+Proposed top-level send field: `relevance_score`, finite nonnegative number. Gateway must accept on start/update/end, persist it, include it in idempotency/payload budgeting and map to APNs `aps["relevance-score"]`. Studio uses the real business snapshot timestamp in Unix seconds; heartbeat/catch-up reuse it; end sends zero. This gives newest business activity a higher score without heartbeat promotion. Gateway must confirm accepted numeric range and APNs behavior before enabling. No start/end cycling or alert per update is introduced. iOS retains final control of island presentation.
+
+Global config already lives in config.appHome/config.json, uses a locked read/merge/write and backup; database settings live under persistent appHome. The separate default-on PR preserves all existing false/0 values. Normal upgrades preserve the configured user-data mount; uninstall/cleared data or broken mount continuity do not.
+
+Before release: gateway approval/deployment for relevance; catch-up authorization tests; actual device multi-activity acceptance; persistent appHome mount and restart checks. Repeated foreground registration can still return accepted without creating a card when Apple's budget is exhausted. No claim of immediate display or iOS forced ordering.

@@ -53,6 +53,11 @@ describe('Studio Live Activity orchestration', () => {
   await consume(e)
   expect(JSON.parse(fetchMock.mock.calls[0][1].body).content_state).toMatchObject({title:'Build App',agent:expected})
  })
+
+ it('omits unsupported priority by default and uses business time only when explicitly enabled',async()=>{
+  const consume=await setup();await consume(event('chat.plan.updated'))
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('relevance_score')
+ })
  it('does not start cards for terminal-only or unknown-total work',async()=>{const consume=await setup();await consume(event('chat.run.completed'));await consume({...event('chat.plan.updated'),chat:{task_plan:{...event('chat.plan.updated').chat.task_plan,progress:{total:0,completed:0}}}});expect(fetchMock).not.toHaveBeenCalled()})
 })
 
@@ -184,6 +189,19 @@ describe('Studio Live Activity plan-trigger policy', () => {
   expect(states[1]).toMatchObject({startedAtEpoch:1789862400.25,inputTokens:42,outputTokens:7})
   expect(states[1]).not.toHaveProperty('appearance')
   expect(states[1]).not.toHaveProperty('totalTokens')
+  vi.doUnmock('../../packages/server/src/modules/studio/services/chat-run/server-registry')
+ })
+
+ it('gates priority and preserves business priority across heartbeat',async()=>{
+  vi.doMock('../../packages/server/src/modules/studio/services/config/app-config',()=>({readAppConfig:async()=>({liveActivityRelevanceEnabled:true})}))
+  vi.doMock('../../packages/server/src/modules/studio/services/chat-run/server-registry',()=>({getChatRunServer:()=>({isLiveActivityRunActive:()=>true})}))
+  const consume=await setup(), e=event('chat.plan.updated','run-a',1)
+  await consume(e);await vi.advanceTimersByTimeAsync(120000)
+  const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body))
+  expect(bodies[0].relevance_score).toBe(e.chat.task_plan.updated_at/1000)
+  expect(bodies[1].relevance_score).toBe(bodies[0].relevance_score)
+  await consume(event('chat.run.completed','run-a',2))
+  expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body).relevance_score).toBe(0)
   vi.doUnmock('../../packages/server/src/modules/studio/services/chat-run/server-registry')
  })
 
