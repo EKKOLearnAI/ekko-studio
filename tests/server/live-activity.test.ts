@@ -91,4 +91,30 @@ describe('Studio Live Activity plan-trigger policy', () => {
   expect(body.dismissal_at).toBe(body.occurred_at+60)
  })
 
+ it('refreshes only a verified active run without changing progress or starting another activity',async()=>{
+  let running=true
+  vi.doMock('../../packages/server/src/modules/studio/services/chat-run/server-registry',()=>({getChatRunServer:()=>({isLiveActivityRunActive:()=>running})}))
+  const consume=await setup()
+  await consume(event('chat.plan.updated','run-a',1))
+  await vi.advanceTimersByTimeAsync(120_000)
+  const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body))
+  expect(bodies.map(b=>b.event)).toEqual(['start','update'])
+  expect(bodies[1].content_state).toEqual(bodies[0].content_state)
+  expect(bodies[1].stale_at-bodies[0].stale_at).toBe(120)
+  running=false
+  await vi.advanceTimersByTimeAsync(240_000)
+  expect(fetchMock).toHaveBeenCalledTimes(2)
+  vi.doUnmock('../../packages/server/src/modules/studio/services/chat-run/server-registry')
+ })
+
+ it('cancels heartbeat after terminal even if a runtime snapshot still reports working',async()=>{
+  vi.doMock('../../packages/server/src/modules/studio/services/chat-run/server-registry',()=>({getChatRunServer:()=>({isLiveActivityRunActive:()=>true})}))
+  const consume=await setup()
+  await consume(event('chat.plan.updated','run-a',1))
+  await consume(event('chat.run.completed','run-a',2))
+  await vi.advanceTimersByTimeAsync(600_000)
+  expect(fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body).event)).toEqual(['start','end'])
+  vi.doUnmock('../../packages/server/src/modules/studio/services/chat-run/server-registry')
+ })
+
 })

@@ -438,6 +438,12 @@ export class ChatRunSocket {
     this.nsp = io.of('/chat-run')
   }
 
+  isLiveActivityRunActive(sessionId: string, profile: string, runId: string): boolean {
+    const state = this.sessionMap.get(sessionId)
+    return !!state?.isWorking && !state.isAborting && (state.activeRunMarker || state.responseRun?.runMarker || state.runId) === runId
+      && (state.profile || getSession(sessionId)?.profile || 'default') === profile
+  }
+
   updateTaskPlan(contextId: string, profile: string, input: Record<string, unknown>) {
     return this.taskPlanRuns.update(contextId, profile, input)
   }
