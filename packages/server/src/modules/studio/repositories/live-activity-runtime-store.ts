@@ -24,6 +24,11 @@ export function getLiveActivityRun(key: string): LiveActivityRunRecord | null {
   if (!getDb()) return null
   return database().prepare('SELECT * FROM live_activity_runs WHERE run_key=?').get(key) as unknown as LiveActivityRunRecord || null
 }
+export function listActiveLiveActivityRuns(destinationId: string): LiveActivityRunRecord[] {
+  if (!getDb()) return []
+  return database().prepare('SELECT * FROM live_activity_runs WHERE destination_id=? AND started=1 AND terminal=0')
+    .all(destinationId) as unknown as LiveActivityRunRecord[]
+}
 export function saveLiveActivityRun(value: LiveActivityRunRecord): void {
   database().prepare(`INSERT INTO live_activity_runs
     (run_key,destination_id,activity_ref,revision,started,terminal,title,completed,total,updated_at)

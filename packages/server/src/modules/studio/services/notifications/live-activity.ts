@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { listAppConnections } from '../../repositories/app-connections-store'
 import { listLiveActivityDestinations } from '../../repositories/live-activity-store'
-import { getLiveActivityRun, saveLiveActivityRun, type LiveActivityRunRecord } from '../../repositories/live-activity-runtime-store'
+import { getLiveActivityRun, listActiveLiveActivityRuns, saveLiveActivityRun, type LiveActivityRunRecord } from '../../repositories/live-activity-runtime-store'
 import { findUserById } from '../../repositories/users-store'
 import { getSession } from '../../repositories/session-store'
 import type { BusinessEvent } from '../webhooks/business-events'
@@ -26,8 +26,10 @@ function title(event: BusinessEvent): string {
   return bounded((event.payload.display as Record<string, unknown> | undefined)?.title, 40) || 'Ekko Studio 任务'
 }
 function ref(event: BusinessEvent, destination: string): string {
-  return createHash('sha256').update(`${destination}\0${runKind(event)}\0${subjectId(event)}\0${event.subject.run_id || event.id}`).digest('hex').slice(0, 32)
+  return createHash('sha256').update(`${destination}\0${runKind(event)}\0${subjectId(event)}\0${event.chat?.task_plan?.plan_id || event.subject.plan_id || event.id}`).digest('hex').slice(0, 32)
 }
+const stableKey = (event: BusinessEvent, destination: string) => `${destination}:${runKind(event)}:${subjectId(event)}`
+const legacyKeyPrefix = (event: BusinessEvent, destination: string) => `${stableKey(event, destination)}:`
 function validConnection(device: ReturnType<typeof listLiveActivityDestinations>[number], connections: ReturnType<typeof listAppConnections>) {
   return connections.find(row => row.id === device.connection_id && row.user_id === device.user_id && row.device_code === device.device_id
     && row.token_hash === device.connection_token_hash && row.revoked_at == null && row.token_expires_at > Date.now() / 1000)
@@ -56,7 +58,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
     if (action === 'start') body.ekko_run = { schema_version: 1, studio_device_id: registration.studio_device_id,
       cloud_user_id: registration.cloud_user_id, profile: event.profile, run_kind: runKind(event), run_id: event.subject.run_id || event.id,
       [runKind(event) === 'chat' ? 'session_id' : runKind(event) === 'group' ? 'room_id' : 'workflow_id']: subjectId(event) }
-    if (action === 'end') body.dismissal_at = now + 120; else body.stale_at = now + 300
+    if (action === 'end') body.dismissal_at = now; else body.stale_at = now + 300
     const url = new URL('/push/v1/live-activities/send', appRelayUrlForRoute(await getAppRelayRoute()))
     const response = await send(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registration.push_token}` }, body: JSON.stringify(body) })
@@ -75,11 +77,14 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
         if (!device.enabled || !validConnection(device, connections)) return
         const user = findUserById(device.user_id); if (!user || user.status !== 'active' || !canReceiveAppEvent(user, event)) return
         let registration: Record<string, any>; try { registration = JSON.parse(decryptPushSecret(device.ciphertext)) } catch { return }
-        const key = `${device.destination_id}:${runKind(event)}:${subjectId(event)}:${event.subject.run_id || ''}`
+        const key = stableKey(event, device.destination_id)
         await serialized(key, async () => {
+          const legacy = listActiveLiveActivityRuns(device.destination_id)
+            .filter(row => row.run_key.startsWith(legacyKeyPrefix(event, device.destination_id)))
+          for (const row of legacy) await dispatch(event, device, registration, row.run_key, 'end')
           let state = getLiveActivityRun(key)
-          if (!state) state = { run_key:key,destination_id:device.destination_id,activity_ref:ref(event,device.destination_id),revision:0,started:0,terminal:0,title:title(event),completed:0,total:0,updated_at:Date.now() }
-          if (state.terminal) return
+          if (state?.terminal && !plan) return
+          if (!state || state.terminal) state = { run_key:key,destination_id:device.destination_id,activity_ref:ref(event,device.destination_id),revision:0,started:0,terminal:0,title:title(event),completed:0,total:0,updated_at:Date.now() }
           if (plan) {
             state.completed = Number(plan.progress?.completed) || 0; state.total = Number(plan.progress?.total) || 0
             if (!state.total) return
