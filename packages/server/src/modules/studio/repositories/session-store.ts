@@ -222,7 +222,7 @@ export function createSession(data: {
       message_count: 0, tool_call_count: 0,
       input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0,
       billing_provider: null, estimated_cost_usd: 0, actual_cost_usd: null,
-      cost_status: '', preview: '', last_active: now, is_archived: 0, is_pinned: 0, push_enabled: data.push_enabled ? 1 : 0, workspace: data.workspace || null,
+      cost_status: '', preview: '', last_active: now, is_archived: 0, is_pinned: 0, push_enabled: data.push_enabled === false || data.push_enabled === 0 ? 0 : 1, workspace: data.workspace || null,
       category_id: data.category_id ?? null,
       history_revision: 0,
     }
@@ -251,7 +251,7 @@ export function createSession(data: {
     now,
     data.workspace || null,
     data.category_id ?? null,
-    data.push_enabled ? 1 : 0,
+    data.push_enabled === false || data.push_enabled === 0 ? 0 : 1,
   )
   return getSession(data.id)!
 }
