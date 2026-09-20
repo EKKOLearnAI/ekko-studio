@@ -1,3 +1,4 @@
+import { getLiveActivityUsage } from '../../repositories/live-activity-usage'
 import { notificationPreview } from './notification-preview'
 import { getChatRunServer } from '../chat-run/server-registry'
 import { createHash, randomUUID } from 'node:crypto'
@@ -24,10 +25,14 @@ function displayFields(event: BusinessEvent, registration: Record<string, any>, 
   if (['light', 'dark'].includes(registration.appearance)) result.appearance = registration.appearance
   const started = getChatRunServer()?.getLiveActivityStartedAt?.(event.subject.session_id, event.profile, event.subject.run_id)
   if (result.startedAtEpoch === undefined && typeof started === 'number' && Number.isFinite(started) && started >= 0) result.startedAtEpoch = started
-  // Only per-event usage, never lifetime session totals. Unknown values stay absent.
+  const through = terminal(event) ? Date.parse(event.occurred_at) : Date.now()
+  const recorded = typeof result.startedAtEpoch === 'number' && runKind(event) === 'chat'
+    ? getLiveActivityUsage(event.subject.session_id || '', event.profile, result.startedAtEpoch, through) : undefined
+  if (recorded) Object.assign(result, recorded)
+  // If no model-call ledger exists, use only explicitly reported event usage.
   const summary = event.chat?.summary
   for (const [key, value] of [['inputTokens', summary?.input_tokens], ['outputTokens', summary?.output_tokens]] as const) {
-    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) result[key] = value
+    if (!recorded && typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) result[key] = value
   }
   state.display_json = JSON.stringify(result)
   return result
