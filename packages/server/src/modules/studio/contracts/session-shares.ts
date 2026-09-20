@@ -2,7 +2,7 @@ export const SESSION_SHARE_LIFETIME_MS = 30 * 24 * 60 * 60_000
 export const SESSION_SHARE_CACHE_MS = 10_000
 
 export const SESSION_SHARE_PERMISSION_KEYS = [
-  'input', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal',
+  'input', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal', 'switchModel', 'reasoningEffort', 'switchWorkspace',
 ] as const
 export type SessionSharePermission = typeof SESSION_SHARE_PERMISSION_KEYS[number]
 export type SessionSharePermissions = Record<SessionSharePermission, boolean>

@@ -63,7 +63,9 @@ export const SESSION_SHARES_SCHEMA: Record<string, string> = {
   token_hash: 'TEXT NOT NULL',
   permissions: 'TEXT NOT NULL',
   workspace_root: 'TEXT NOT NULL',
-  workspace_real_root: 'TEXT NOT NULL',
+  // Allow existing tables to migrate. Legacy grants without a pinned real path
+  // remain unable to access workspace files until a new share is created.
+  workspace_real_root: "TEXT NOT NULL DEFAULT ''",
   extra_paths: "TEXT NOT NULL DEFAULT '[]'",
   policy_version: 'INTEGER NOT NULL DEFAULT 1',
   created_at: 'INTEGER NOT NULL',

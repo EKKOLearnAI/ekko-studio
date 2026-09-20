@@ -39,19 +39,13 @@ export class ShareAppIdentityVerifier {
     const body = await response.json().catch(() => null) as any
     if (body?.ok !== true || !Number.isSafeInteger(body?.user?.id) || body.user.id <= 0
       || typeof body.user.displayName !== 'string') throw new SessionShareError('share_identity_unavailable', 503)
-    if (body.access?.hstudio?.active !== true) throw new SessionShareError('share_app_entitlement_required', 403)
+    // Device admission owns entitlement checks. Sharing only verifies identity.
     // /me verified the signature and session; decoding only shortens the cache
     // lifetime, it never establishes identity.
     let tokenExpiry = this.now() + SESSION_SHARE_CACHE_MS
     if (proof) {
       if (!Number.isFinite(body.expiresAt) || body.expiresAt <= this.now()) throw new SessionShareError('share_app_login_required', 401)
       tokenExpiry = Math.min(tokenExpiry, body.expiresAt)
-    }
-    const entitlementExpiry = body.access.hstudio.expiresAt
-    if (entitlementExpiry != null) {
-      if (!Number.isFinite(entitlementExpiry)) throw new SessionShareError('share_identity_unavailable', 503)
-      if (entitlementExpiry <= this.now()) throw new SessionShareError('share_app_entitlement_required', 403)
-      tokenExpiry = Math.min(tokenExpiry, entitlementExpiry)
     }
     try {
       const exp = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).exp

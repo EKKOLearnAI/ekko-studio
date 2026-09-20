@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ShareAppIdentityVerifier } from '../../packages/server/src/modules/studio/services/session-shares/app-identity'
 
-const account = () => Response.json({ ok: true, access: { hstudio: { active: true, expiresAt: null } }, user: { id: 123, displayName: 'Verified name', email: 'private@example.test' } })
+const account = () => Response.json({ ok: true, user: { id: 123, displayName: 'Verified name', email: 'private@example.test' } })
 
 describe('share App account verification', () => {
   it('uses the configured cloud account endpoint and keeps only a short-lived verified identity', async () => {
@@ -58,7 +58,7 @@ describe('share App account verification', () => {
 
   it('verifies share-scoped proofs against the official endpoint and isolates cached scopes', async () => {
     const now = Date.now()
-    const fetcher = vi.fn(async () => Response.json({ ok: true, user: { id: 123, displayName: 'Verified' }, access: { hstudio: { active: true, expiresAt: null } }, expiresAt: now + 5000 }))
+    const fetcher = vi.fn(async () => Response.json({ ok: true, user: { id: 123, displayName: 'Verified' }, expiresAt: now + 5000 }))
     const verifier = new ShareAppIdentityVerifier(async () => 'https://cloud.test', fetcher as any, () => now)
     await expect(verifier.verify('ssp1_proof')).rejects.toThrow('share_app_login_required')
     expect((await verifier.verify('ssp1_proof', 'share-a')).validUntil).toBe(now + 5000)
@@ -68,14 +68,16 @@ describe('share App account verification', () => {
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
 
-  it('requires active Studio entitlement and bounds the cache by its expiry', async () => {
+  it('verifies identity without requiring or interpreting purchase metadata', async () => {
     const now = Date.now()
-    for (const access of [undefined, { hstudio: { active: false } }, { hstudio: { active: true, expiresAt: now - 1 } }]) {
-      const verifier = new ShareAppIdentityVerifier(async () => 'https://cloud.test', (async () => Response.json({ ok: true, user: { id: 1, displayName: 'A' }, access })) as any, () => now)
-      await expect(verifier.verify('token')).rejects.toThrow('share_app_entitlement_required')
+    for (const access of [undefined, { hstudio: { active: false } },
+      { hstudio: { active: true, expiresAt: now - 1 } }, { hstudio: { expiresAt: 'legacy' } }]) {
+      const verifier = new ShareAppIdentityVerifier(async () => 'https://cloud.test', (async () => Response.json({
+        ok: true, user: { id: 1, displayName: 'A' }, access, expiresAt: now + 5000,
+      })) as any, () => now)
+      expect(await verifier.verify('token')).toEqual({ id: 1, name: 'A', validUntil: now + 10_000 })
+      expect(await verifier.verify('ssp1_proof', 'share-a')).toEqual({ id: 1, name: 'A', validUntil: now + 5000 })
     }
-    const verifier = new ShareAppIdentityVerifier(async () => 'https://cloud.test', (async () => Response.json({ ok: true, user: { id: 1, displayName: 'A' }, access: { hstudio: { active: true, expiresAt: now + 500 } } })) as any, () => now)
-    expect((await verifier.verify('token')).validUntil).toBe(now + 500)
   })
 
   it('rejects empty, oversized and header-injection credentials before network IO', async () => {

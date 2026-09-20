@@ -1,3 +1,4 @@
+import { authorizeSessionShare } from '../services/session-shares/access'
 import { sessionShareService } from '../services/session-shares/service'
 import { getSessionTaskPlans } from '../services/task-plans'
 import {
@@ -1521,6 +1522,7 @@ export async function setWorkspace(ctx: any) {
   const id = ctx.params.id
   const existing = getSession(id)
   if (denySessionAccess(ctx, existing)) return
+  if (ctx.state?.sessionShare) sessionShareService.authorizeWorkspaceSwitch(ctx.state.sessionShare.token, ctx.state.sessionShare.actor, workspace)
   if (!existing) {
     createSession({ id, profile: requestedProfile(ctx) || 'default', title: '' })
   }
@@ -1599,7 +1601,9 @@ export async function setModel(ctx: any) {
   if (!existing) {
     createSession({ id, profile, title: '', model: cleanModel, provider: cleanProvider, api_mode: cleanApiMode || '', reasoning_effort: '', workspace })
   }
-  const updates: Record<string, string> = { model: cleanModel, provider: cleanProvider, reasoning_effort: '' }
+  const updates: Record<string, string> = { model: cleanModel, provider: cleanProvider }
+  // A model-only share grant must never overwrite a concurrent reasoning update.
+  if (!ctx.state?.sessionShare) updates.reasoning_effort = ''
   if (cleanApiMode) updates.api_mode = cleanApiMode
   else if (codingAgentSession && existing && existing.provider !== cleanProvider) updates.api_mode = ''
   if (!codingAgentSession && existing && !existing.workspace && workspace) updates.workspace = workspace
@@ -1610,12 +1614,13 @@ export async function setModel(ctx: any) {
   ) {
     updates.agent_native_session_id = ''
   }
+  if (ctx.state?.sessionShare) authorizeSessionShare(ctx.state.sessionShare, 'switchModel', id)
   updateSession(id, updates as any)
   getChatRunServer()?.emitSessionSettingsUpdated(id, {
     model: cleanModel,
     provider: cleanProvider,
     api_mode: updates.api_mode ?? existing?.api_mode ?? '',
-    reasoning_effort: '',
+    reasoning_effort: updates.reasoning_effort ?? getSession(id)?.reasoning_effort ?? '',
   })
   if (!codingAgentSession) {
     await notifyBridgeSessionModelChanged(id, cleanModel, cleanProvider, profile)

@@ -51,6 +51,22 @@ describe('session share grants', () => {
     return service.create(7, sender, 'session-1', { permissions })
   }
 
+  it('upgrades an existing share table before creating new invitations and keeps legacy paths closed', async () => {
+    const legacy = await issued({ workspaceRead: true })
+    service.claim(legacy.token, recipient)
+    db.exec('ALTER TABLE session_shares DROP COLUMN workspace_real_root')
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    initAllHermesTables()
+    initAllHermesTables()
+    expect((db.prepare('PRAGMA table_info(session_shares)').all() as any[])
+      .find(column => column.name === 'workspace_real_root')).toMatchObject({ notnull: 1, dflt_value: "''" })
+    expect(store.find(legacy.record.id).workspace_real_root).toBe('')
+    await expect(service.authorizePath(legacy.token, recipient, 'workspaceRead', root)).rejects.toThrow('share_workspace_required')
+    const created = await issued({ workspaceRead: true })
+    expect(store.find(created.record.id).workspace_real_root).toBeTruthy()
+    expect(service.list(7, 'session-1')).toHaveLength(2)
+  })
+
   it('creates independent records with hashed tokens, fixed thirty-day expiry and deny-by-default permissions', async () => {
     const first = await issued()
     const second = await issued()
@@ -58,7 +74,7 @@ describe('session share grants', () => {
     expect(second.token).not.toBe(first.token)
     expect(second.record.id).not.toBe(first.record.id)
     expect(first.record.expires_at).toBe(now + SESSION_SHARE_LIFETIME_MS)
-    expect(Object.values(first.record.permissions)).toEqual(Array(7).fill(false))
+    expect(Object.values(first.record.permissions)).toEqual(Array(10).fill(false))
     expect(first.record).toMatchObject({ sharer_app_user_id: sender.id, sharer_name_snapshot: 'Alice', recipient_app_user_id: null })
     const rows = db.prepare('SELECT * FROM session_shares').all()
     expect(rows).toHaveLength(2)
@@ -66,6 +82,24 @@ describe('session share grants', () => {
     expect(first.record.token_hash).toHaveLength(64)
     expect(publicSessionShare(first.record)).not.toHaveProperty('token_hash')
     expect(publicSessionShare(first.record)).not.toHaveProperty('workspace_root')
+  })
+
+  it('requires explicit outside-directory grants for workspace changes without rebasing other shares', async () => {
+    const initial = join(root, 'initial'), extra = join(root, 'extra'), child = join(extra, 'child')
+    await mkdir(initial); await mkdir(child, { recursive: true })
+    session.workspace = initial
+    const { token, record } = await service.create(7, sender, session.id, { permissions: { switchWorkspace: true, input: true }, extraPaths: [{ path: extra, writable: false }] })
+    service.claim(token, recipient)
+    expect(() => service.authorizeWorkspaceSwitch(token, recipient, child)).toThrow('share_path_forbidden')
+    await service.change(7, session.id, record.id, { permissions: { outsideWorkspace: true } })
+    expect(service.authorizeWorkspaceSwitch(token, recipient, child)).toBe(child)
+    session.workspace = child
+    expect(service.authorize(token, recipient, 'input').share.workspace_root).toBe(initial)
+    expect(service.authorizeWorkspaceSwitch(token, recipient, initial)).toBe(initial)
+    expect(() => service.authorizeWorkspaceSwitch(token, recipient, root)).toThrow('share_path_forbidden')
+    await service.change(7, session.id, record.id, { permissions: { outsideWorkspace: false } })
+    expect(() => service.authorize(token, recipient, 'input')).toThrow('share_workspace_changed')
+    expect(() => service.authorizeWorkspaceSwitch(token, recipient, child)).toThrow('share_path_forbidden')
   })
 
   it('rejects group and workflow sessions and invalidates a session whose source changes', async () => {
@@ -148,7 +182,7 @@ describe('session share grants', () => {
     const invalid = vi.fn()
     disposers.push(service.watch(token, recipient, 'terminal', invalid))
     service.authorize(token, recipient, 'terminal')
-    const changed = await service.change(7, sender, 'session-1', record.id, { permissions: { terminal: false, input: true } })
+    const changed = await service.change(7, 'session-1', record.id, { permissions: { terminal: false, input: true } })
     expect(invalid).toHaveBeenCalledTimes(1)
     expect(() => service.authorize(token, recipient, 'terminal')).toThrow('share_permission_denied')
     expect(service.authorize(token, recipient, 'input').share.policy_version).toBe(3)
@@ -160,11 +194,11 @@ describe('session share grants', () => {
     service.claim(token, recipient)
     const invalid = vi.fn()
     disposers.push(service.watch(token, recipient, 'read', invalid))
-    const revoked = await service.change(7, sender, 'session-1', record.id, { revoke: true })
+    const revoked = await service.change(7, 'session-1', record.id, { revoke: true })
     expect(invalid).toHaveBeenCalledTimes(1)
     expect(() => service.authorize(token, recipient, 'read')).toThrow('share_revoked')
     expect(() => service.claim(token, recipient)).toThrow('share_revoked')
-    expect(await service.change(7, sender, 'session-1', record.id, { revoke: true })).toEqual(revoked)
+    expect(await service.change(7, 'session-1', record.id, { revoke: true })).toEqual(revoked)
     expect(store.find(record.id)).not.toBeNull()
   })
 
@@ -182,11 +216,17 @@ describe('session share grants', () => {
     expect(() => service.claim(unclaimed.token, recipient)).toThrow('share_expired')
   })
 
-  it('prevents another App account or another local owner from managing the record', async () => {
+  it('uses local ownership rather than App attribution to manage records', async () => {
     const { record } = await issued()
-    await expect(service.change(7, other, 'session-1', record.id, { revoke: true })).rejects.toThrow('share_not_found')
-    expect(service.list(7, other, 'session-1')).toEqual([])
-    await expect(service.change(8, sender, 'session-1', record.id, { revoke: true })).rejects.toThrow('share_session_unavailable')
+    const second = await service.create(7, other, 'session-1')
+    expect(service.list(7, 'session-1').map((row: any) => row.id)).toEqual(expect.arrayContaining([record.id, second.record.id]))
+    await expect(service.change(7, 'session-1', second.record.id, { revoke: true })).resolves.toMatchObject({ revoked_at: now })
+    await expect(service.change(8, 'session-1', record.id, { revoke: true })).rejects.toThrow('share_session_unavailable')
+    // Even a different active Studio user with access to the same session
+    // cannot manage a record created by this owner.
+    owner.id = 8
+    expect(service.list(8, 'session-1')).toEqual([])
+    await expect(service.change(8, 'session-1', record.id, { revoke: true })).rejects.toThrow('share_not_found')
   })
 
   it('fails closed when session disappears or owner loses account/profile access, even with a warm cache', async () => {
@@ -269,7 +309,7 @@ describe('session share grants', () => {
       service.claim(token, recipient)
       return original(next, version)
     })
-    await expect(service.change(7, sender, 'session-1', record.id, { permissions: { input: true } })).rejects.toThrow('share_policy_conflict')
+    await expect(service.change(7, 'session-1', record.id, { permissions: { input: true } })).rejects.toThrow('share_policy_conflict')
     expect(store.find(record.id)).toMatchObject({ recipient_app_user_id: recipient.id, permissions: { input: false } })
   })
 })

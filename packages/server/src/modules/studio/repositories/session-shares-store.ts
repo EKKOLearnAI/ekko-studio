@@ -28,9 +28,9 @@ export const sessionSharesStore = {
   findByHash(hash: string): SessionShareRecord | null {
     return decode(db().prepare(`SELECT * FROM ${SESSION_SHARES_TABLE} WHERE token_hash = ?`).get(hash))
   },
-  list(sessionId: string, appUserId: number): SessionShareRecord[] {
-    return db().prepare(`SELECT * FROM ${SESSION_SHARES_TABLE} WHERE session_id = ? AND sharer_app_user_id = ? ORDER BY created_at DESC, id`)
-      .all(sessionId, appUserId).map(row => decode(row)!)
+  list(sessionId: string, ownerId: number): SessionShareRecord[] {
+    return db().prepare(`SELECT * FROM ${SESSION_SHARES_TABLE} WHERE session_id = ? AND created_by_user_id = ? ORDER BY created_at DESC, id`)
+      .all(sessionId, ownerId).map(row => decode(row)!)
   },
   claim(id: string, actor: SessionShareAppUser, now: number): SessionShareRecord | null {
     db().prepare(`UPDATE ${SESSION_SHARES_TABLE} SET recipient_app_user_id = ?, recipient_name_snapshot = ?,

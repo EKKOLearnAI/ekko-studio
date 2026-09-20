@@ -1272,6 +1272,11 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
     if (method === 'get' && /^\/api\/studio\/sessions\/\{id\}\/(workspace-files\/list|workspace-file\/(read|diff|content)|workspace-run-changes(?:\/\{changeId\}\/files\/\{fileId\})?)$/.test(path)) permission = 'workspaceRead'
     if (['put workspace-file/write', 'post workspace-file/mkdir', 'delete workspace-file/delete', 'post workspace-file/rename', 'post workspace-file/copy'].includes(`${method} ${path.replace('/api/studio/sessions/{id}/', '')}`)) permission = 'workspaceWrite'
     if ((method === 'post' && path === '/api/studio/uploads') || /^\/api\/studio\/app-uploads(?:\/\{id\}(?:\/chunks|\/complete)?)?$/.test(path)) permission = 'upload'
+    if (method === 'get' && path === '/api/studio/sessions/{id}/share-models') permission = 'switchModel'
+    if (method === 'get' && path === '/api/studio/sessions/{id}/share-workspaces') permission = 'switchWorkspace'
+    if (method === 'post' && path === '/api/studio/sessions/{id}/model') permission = 'switchModel'
+    if (method === 'post' && path === '/api/studio/sessions/{id}/reasoning-effort') permission = 'reasoningEffort'
+    if (method === 'post' && path === '/api/studio/sessions/{id}/workspace') permission = 'switchWorkspace'
     if (!permission) continue
     operation.security = [...(operation.security || [{ BearerAuth: [] }]), { AppAccessToken: [], SessionShareToken: [] }]
     operation['x-session-share-permission'] = permission
@@ -1279,8 +1284,24 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
   }
 }
 const sharePermissionSchema = { type: 'object', additionalProperties: false, properties: Object.fromEntries(
-  ['input', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal'].map(key => [key, { type: 'boolean', default: false }]),
+  ['input', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal', 'switchModel', 'reasoningEffort', 'switchWorkspace'].map(key => [key, { type: 'boolean', default: false }]),
 ) }
+sharePermissionSchema.properties.switchModel.description = 'Change the shared session model using the scoped share-models catalog. Does not grant reasoning-effort changes.'
+sharePermissionSchema.properties.reasoningEffort.description = 'Change the shared session reasoning effort independently of model selection.'
+sharePermissionSchema.properties.switchWorkspace.description = 'Select an existing directory within the original workspace, or an explicit extraPaths grant when outsideWorkspace is enabled. Does not grant filesystem read/write or expand the share scope.'
+for (const [suffix, description] of [
+  ['share-models', 'Selectable models for this session. Returns provider/model labels and IDs without provider secrets or endpoints.'],
+  ['share-workspaces', 'Browse only directories that this share may select as workspace. Empty path returns authorized roots; an absolute path returns child directories.'],
+]) {
+  const operation = openapi.paths[`/api/studio/sessions/{id}/${suffix}`]?.get
+  if (!operation) continue
+  operation.security = [{ AppAccessToken: [], SessionShareToken: [] }]
+  operation.description = `${description} ${operation.description || ''}`
+  if (suffix === 'share-workspaces') operation.parameters = [
+    ...(operation.parameters || []).filter(parameter => parameter.name !== 'path'),
+    { name: 'path', in: 'query', required: false, schema: { type: 'string' }, description: 'Existing absolute directory in the share scope. Omit to list authorized roots.' },
+  ]
+}
 const shareChangeSchema = { type: 'object', additionalProperties: false, properties: {
   permissions: sharePermissionSchema,
   extraPaths: { type: 'array', maxItems: 16, items: { type: 'object', additionalProperties: false, required: ['path', 'writable'], properties: {
@@ -1308,8 +1329,12 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
       ? ({ post: 'createSessionShare', get: 'listSessionShares', patch: 'updateSessionShare', delete: 'revokeSessionShare' })[method]
       : ({ claim: 'claimSessionShare', access: 'getSessionShareAccess', check: 'checkSessionSharePermission' })[path.split('/').pop()]
     operation.parameters = [...path.matchAll(/\{([^}]+)\}/g)].map(match => ({ name: match[1], in: 'path', required: true, schema: { type: 'string' } }))
-    operation.security = management ? [{ BearerAuth: [], AppAccessToken: [] }] : [{ AppAccessToken: [], SessionShareToken: [] }]
-    if (management && ['post', 'patch'].includes(method)) operation.requestBody = shareBody(shareChangeSchema)
+    operation.security = management ? [{ BearerAuth: [] }] : [{ AppAccessToken: [], SessionShareToken: [] }]
+    if (management && ['post', 'patch'].includes(method)) operation.requestBody = shareBody(method === 'post'
+      ? { ...shareChangeSchema, required: ['sharer'], properties: { ...shareChangeSchema.properties,
+        sharer: { type: 'object', additionalProperties: false, required: ['id', 'name'], description: 'App-provided attribution only. Management authority comes from the authenticated local Studio owner, not this metadata.',
+          properties: { id: { type: 'integer', minimum: 1 }, name: { type: 'string', maxLength: 200 } } },
+      } } : shareChangeSchema)
     if (path.endsWith('/claim')) operation.requestBody = shareBody({ type: 'object', additionalProperties: false, required: ['confirm'], properties: { confirm: { type: 'boolean', enum: [true] } } })
     if (path.endsWith('/check')) operation.requestBody = shareBody({ type: 'object', additionalProperties: false, required: ['action', 'sessionId'], properties: {
       action: { type: 'string', enum: ['read', ...Object.keys(sharePermissionSchema.properties)] }, sessionId: { type: 'string' },

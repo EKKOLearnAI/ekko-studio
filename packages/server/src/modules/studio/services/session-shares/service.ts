@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { realpathSync, statSync } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import {
@@ -127,10 +128,9 @@ export class SessionShareService {
     return { record, token }
   }
 
-  list(ownerId: number, actor: SessionShareAppUser, sessionId: string) {
-    assertActor(actor)
+  list(ownerId: number, sessionId: string) {
     this.assertOwnerSession(ownerId, sessionId)
-    return this.deps.store.list(sessionId, actor.id).filter(row => row.created_by_user_id === ownerId)
+    return this.deps.store.list(sessionId, ownerId)
   }
 
   claim(token: string, actor: SessionShareAppUser): SessionShareRecord {
@@ -145,12 +145,11 @@ export class SessionShareService {
     return claimed
   }
 
-  async change(ownerId: number, actor: SessionShareAppUser, sessionId: string, shareId: string,
+  async change(ownerId: number, sessionId: string, shareId: string,
     input: { permissions?: unknown; extraPaths?: unknown; revoke?: boolean }): Promise<SessionShareRecord> {
-    assertActor(actor)
     this.assertOwnerSession(ownerId, sessionId)
     const record = this.deps.store.find(shareId)
-    if (!record || record.session_id !== sessionId || record.created_by_user_id !== ownerId || record.sharer_app_user_id !== actor.id) {
+    if (!record || record.session_id !== sessionId || record.created_by_user_id !== ownerId) {
       throw new SessionShareError('share_not_found', 404)
     }
     if (input.revoke && record.revoked_at !== null) return record
@@ -176,12 +175,37 @@ export class SessionShareService {
     if (sessionId !== undefined && sessionId !== record.session_id) throw new SessionShareError('share_session_mismatch', 403)
     if (action === 'terminal' && this.deps.owner(record.created_by_user_id)?.role !== 'super_admin') throw new SessionShareError('share_terminal_forbidden')
     if (action !== 'read' && !record.permissions[action]) throw new SessionShareError('share_permission_denied', 403)
-    if (action !== 'read' && (session.workspace ? resolve(session.workspace) : '') !== record.workspace_root) {
-      throw new SessionShareError('share_workspace_changed', 403)
+    if (action !== 'read' && action !== 'switchWorkspace' && (session.workspace ? resolve(session.workspace) : '') !== record.workspace_root) {
+      if (!record.permissions.switchWorkspace || !this.workspaceWithinGrant(record, session.workspace || '')) {
+        throw new SessionShareError('share_workspace_changed', 403)
+      }
     }
     if (record.permissions.outsideWorkspace && this.deps.owner(record.created_by_user_id)?.role !== 'super_admin'
       && action !== 'read') throw new SessionShareError('share_extra_paths_forbidden', 403)
     return { share: record, action }
+  }
+
+  private workspaceWithinGrant(share: SessionShareRecord, path: string): boolean {
+    const sensitive = (value: string) => value.split(/[\\/]/).some(part => /^\.env(?:\.|$)/i.test(part)
+      || ['.token', '.model-run-token', 'auth.json', '.ssh', '.aws', '.gnupg'].includes(part.toLowerCase()))
+    if (!path || path.length > 4096 || !isAbsolute(path) || sensitive(path)) return false
+    const roots = [{ path: share.workspace_root, real: share.workspace_real_root },
+      ...(share.permissions.outsideWorkspace ? share.extra_paths.map(root => ({ path: root.path, real: root.realPath })) : [])]
+    try {
+      const actual = realpathSync(path)
+      return !sensitive(actual) && statSync(path).isDirectory() && roots.some(root => {
+        try {
+          return root.path && root.real && realpathSync(root.path) === root.real
+            && isPathWithin(resolve(path), root.path) && isPathWithin(actual, root.real)
+        } catch { return false }
+      })
+    } catch { return false }
+  }
+
+  authorizeWorkspaceSwitch(token: string, actor: SessionShareAppUser, path: unknown): string {
+    const { share } = this.authorize(token, actor, 'switchWorkspace')
+    if (typeof path !== 'string' || !this.workspaceWithinGrant(share, path)) throw new SessionShareError('share_path_forbidden')
+    return resolve(path)
   }
 
   /** Called with a server-resolved resource owner, never an unverified request ID. */
@@ -196,7 +220,7 @@ export class SessionShareService {
     if (await realpath(share.workspace_root).catch(() => '') !== share.workspace_real_root) {
       throw new SessionShareError('share_workspace_changed', 403)
     }
-    const fullPath = resolve(share.workspace_root, path)
+    const fullPath = resolve(this.deps.session(share.session_id)?.workspace || share.workspace_root, path)
     // A directory grant never turns runtime credentials into shareable files.
     if (fullPath.split(/[\\/]/).some(part => /^\.env(?:\.|$)/i.test(part)
       || ['.token', '.model-run-token', 'auth.json', '.ssh', '.aws', '.gnupg'].includes(part.toLowerCase()))) {

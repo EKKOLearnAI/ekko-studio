@@ -3,6 +3,7 @@ import { inspectAppUserToken } from '../public/auth'
 import { publicSessionShare, SessionShareError, type SessionShareAction } from '../contracts/session-shares'
 import { sessionShareService } from '../services/session-shares/service'
 import { shareAppIdentityVerifier } from '../services/session-shares/app-identity'
+import { logger } from '../public/logging'
 
 function bearer(ctx: Context): string {
   const value = ctx.get('Authorization')
@@ -22,46 +23,55 @@ function body(ctx: any, keys: string[]): Record<string, unknown> {
   return value
 }
 
-async function manageIdentity(ctx: Context) {
-  const token = bearer(ctx)
-  let local = await inspectAppUserToken(token)
+async function manageOwner(ctx: Context): Promise<number> {
+  const local = await inspectAppUserToken(bearer(ctx))
   if (local?.status !== 'active' || !local.user || local.user.id !== ctx.state.user?.id) {
     throw new SessionShareError('share_app_device_required', 401)
   }
-  const actor = await shareAppIdentityVerifier.verify(ctx.get('X-App-Access-Token'))
-  local = await inspectAppUserToken(token)
-  if (local?.status !== 'active' || !local.user || local.user.id !== ctx.state.user?.id) {
-    throw new SessionShareError('share_app_device_required', 401)
-  }
-  return { ownerId: local.user.id, actor }
+  return local.user.id
+}
+
+/** App-provided attribution only; it never grants management or recipient access. */
+function sharerMetadata(value: unknown): { id: number; name: string } {
+  const actor = value as any
+  if (!actor || typeof actor !== 'object' || Array.isArray(actor)
+    || Object.keys(actor).some(key => !['id', 'name'].includes(key))
+    || !Number.isSafeInteger(actor.id) || actor.id <= 0 || typeof actor.name !== 'string'
+    || actor.name.length > 200) throw new SessionShareError('share_invalid_sharer', 400)
+  return { id: actor.id, name: actor.name }
 }
 
 async function respond(ctx: Context, handler: () => Promise<void>): Promise<void> {
   ctx.set('Cache-Control', 'no-store')
   ctx.set('Referrer-Policy', 'no-referrer')
   try { await handler() } catch (error) {
-    if (!(error instanceof SessionShareError)) throw error
+    if (!(error instanceof SessionShareError)) {
+      logger.error({ event: 'session-share.request-failed', method: ctx.method, path: ctx.path, err: error }, 'Session share request failed')
+      throw error
+    }
+    logger.warn({ event: 'session-share.request-rejected', method: ctx.method, path: ctx.path, code: error.code, status: error.status }, 'Session share request rejected')
     ctx.status = error.status
     ctx.body = { error: error.code, code: error.code }
   }
 }
 
-/** Create a separate 30-day App invitation. Requires Studio App JWT and X-App-Access-Token. */
+/** Create a separate 30-day App invitation. Authorized by the existing Studio App device JWT. */
 export async function create(ctx: any): Promise<void> {
   await respond(ctx, async () => {
-    const input = body(ctx, ['permissions', 'extraPaths'])
-    const { ownerId, actor } = await manageIdentity(ctx)
+    const input = body(ctx, ['permissions', 'extraPaths', 'sharer'])
+    const ownerId = await manageOwner(ctx)
+    const actor = sharerMetadata(input.sharer)
     const result = await sessionShareService.create(ownerId, actor, ctx.params.sessionId, input)
     ctx.status = 201
     ctx.body = { share: publicSessionShare(result.record), token: result.token }
   })
 }
 
-/** List this App account's invitations for a session. Never returns token plaintext or hashes. */
+/** List this Studio owner's invitations for a session. Never returns token plaintext or hashes. */
 export async function list(ctx: any): Promise<void> {
   await respond(ctx, async () => {
-    const { ownerId, actor } = await manageIdentity(ctx)
-    ctx.body = { shares: sessionShareService.list(ownerId, actor, ctx.params.sessionId)
+    const ownerId = await manageOwner(ctx)
+    ctx.body = { shares: sessionShareService.list(ownerId, ctx.params.sessionId)
       .map(record => ({ ...publicSessionShare(record), extraPaths: record.extra_paths.map(({ path, writable }) => ({ path, writable })) })) }
   })
 }
@@ -70,8 +80,8 @@ export async function list(ctx: any): Promise<void> {
 export async function update(ctx: any): Promise<void> {
   await respond(ctx, async () => {
     const input = body(ctx, ['permissions', 'extraPaths'])
-    const { ownerId, actor } = await manageIdentity(ctx)
-    const share = await sessionShareService.change(ownerId, actor, ctx.params.sessionId, ctx.params.shareId, input)
+    const ownerId = await manageOwner(ctx)
+    const share = await sessionShareService.change(ownerId, ctx.params.sessionId, ctx.params.shareId, input)
     ctx.body = { share: publicSessionShare(share) }
   })
 }
@@ -80,8 +90,8 @@ export async function update(ctx: any): Promise<void> {
 export async function revoke(ctx: any): Promise<void> {
   await respond(ctx, async () => {
     body(ctx, [])
-    const { ownerId, actor } = await manageIdentity(ctx)
-    const share = await sessionShareService.change(ownerId, actor, ctx.params.sessionId, ctx.params.shareId, { revoke: true })
+    const ownerId = await manageOwner(ctx)
+    const share = await sessionShareService.change(ownerId, ctx.params.sessionId, ctx.params.shareId, { revoke: true })
     ctx.body = { share: publicSessionShare(share) }
   })
 }
@@ -116,5 +126,22 @@ export async function check(ctx: any): Promise<void> {
     const actor = await shareAppIdentityVerifier.verify(ctx.get('X-App-Access-Token'), shareToken(ctx))
     const { share } = sessionShareService.authorize(shareToken(ctx), actor, input.action as SessionShareAction, input.sessionId)
     ctx.body = { allowed: true, sessionId: share.session_id, policyVersion: share.policy_version, expiresAt: share.expires_at }
+  })
+}
+
+/** Session-scoped selectors for recipients. Never expose provider configuration or arbitrary host directories. */
+export async function models(ctx: Context): Promise<void> {
+  await respond(ctx, async () => {
+    if (!ctx.state.sessionShare) throw new SessionShareError('share_recipient_required')
+    const { sessionShareModels } = await import('../services/session-shares/settings')
+    ctx.body = { groups: await sessionShareModels(ctx.state.sessionShare) }
+  })
+}
+
+export async function workspaces(ctx: Context): Promise<void> {
+  await respond(ctx, async () => {
+    if (!ctx.state.sessionShare) throw new SessionShareError('share_recipient_required')
+    const { sessionShareWorkspaces } = await import('../services/session-shares/settings')
+    ctx.body = await sessionShareWorkspaces(ctx.state.sessionShare, ctx.query.path)
   })
 }

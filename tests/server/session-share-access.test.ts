@@ -52,6 +52,12 @@ beforeEach(async () => {
       return recipient
     } } }
   })
+  vi.doMock('../../packages/server/src/modules/studio/public/session-agent-runtime', async importOriginal => ({
+    ...await importOriginal<any>(),
+    getSessionAvailableModelGroups: async () => [{ provider: 'custom:test', label: 'Test', models: ['model-a', 'disabled'],
+      api_key: 'private-provider-key', base_url: 'https://private-provider.test', api_mode: 'chat_completions', model_meta: { disabled: { disabled: true } } }],
+    notifyHermesSessionModelChanged: vi.fn(),
+  }))
   vi.doMock('../../packages/server/src/modules/studio/public/chat-agent-runtime', async importOriginal => ({
     ...await importOriginal<any>(),
     createPrimaryAgentBridge: () => ({ statusIfLoaded: async () => ({ exists: false }), interrupt: vi.fn(async () => ({})) }),
@@ -93,7 +99,7 @@ afterEach(async () => {
   if (io) await new Promise<void>(resolve => io.close(() => resolve()))
   db.close()
   await rm(root, { recursive: true, force: true })
-  for (const path of ['infrastructure/database/index', 'repositories/users-store', 'services/files/upload-paths', 'services/session-shares/app-identity', 'public/profile-config', 'public/process-tree', 'public/chat-agent-runtime']) {
+  for (const path of ['infrastructure/database/index', 'repositories/users-store', 'services/files/upload-paths', 'services/session-shares/app-identity', 'public/profile-config', 'public/process-tree', 'public/chat-agent-runtime', 'public/session-agent-runtime']) {
     vi.doUnmock(`../../packages/server/src/modules/studio/${path}`)
   }
   vi.doUnmock('../../packages/server/src/modules/hermes/services/profiles/profile')
@@ -191,7 +197,7 @@ describe('existing APIs with session share credentials', () => {
     expect(await renewed.timeout(1000).emitWithAck('terminal.list', {})).toMatchObject({ data: { terminals: [{ id: terminalId }] } })
     renewed.disconnect()
     invalidIdentityTokens.clear()
-    await service.change(7, sender, 's1', first.record.id, { revoke: true })
+    await service.change(7, 's1', first.record.id, { revoke: true })
     expect(processes[0].kill).toHaveBeenCalledOnce()
     await expect(connect(first.token)).rejects.toThrow('share_revoked')
   })
@@ -212,6 +218,55 @@ describe('existing APIs with session share credentials', () => {
     expect((await request(token, '/api/studio/sessions/s1', 'DELETE')).status).toBe(403)
   })
 
+  it('gates settings independently, validates the catalog and preserves reasoning when changing models', async () => {
+    const { updateSession, getSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    updateSession('s1', { source: 'coding_agent', agent: 'codex', model: 'before', reasoning_effort: 'high' })
+    const readonly = await issue()
+    for (const [suffix, body] of [['model', { model: 'model-a', provider: 'custom:test' }], ['reasoning-effort', { reasoningEffort: 'low' }], ['workspace', { workspace: join(root, 'workspace') }]] as const) {
+      expect((await request(readonly.token, '/api/studio/sessions/s1/' + suffix, 'POST', body)).status).toBe(403)
+    }
+    for (const suffix of ['share-models', 'share-workspaces']) expect((await request(readonly.token, '/api/studio/sessions/s1/' + suffix)).status).toBe(403)
+    const model = await issue({ switchModel: true })
+    const catalog = await request(model.token, '/api/studio/sessions/s1/share-models')
+    expect(catalog).toMatchObject({ status: 200, body: { groups: [{ provider: 'custom:test', models: ['model-a'] }] } })
+    expect(JSON.stringify(catalog.body)).not.toMatch(/private-provider|api_key|base_url/)
+    expect((await request(model.token, '/api/studio/sessions/s2/model', 'POST', { model: 'model-a', provider: 'custom:test' })).status).toBe(403)
+    for (const body of [{ model: 'disabled', provider: 'custom:test' }, { model: 'not-listed', provider: 'custom:test' }, { model: 'model-a', provider: 'custom:test', reasoningEffort: 'low' }, { model: 'model-a', provider: 'custom:test', apiKey: 'injected' }]) {
+      expect((await request(model.token, '/api/studio/sessions/s1/model', 'POST', body)).status).toBe(400)
+    }
+    expect((await request(model.token, '/api/studio/sessions/s1/model', 'POST', { model: 'model-a', provider: 'custom:test', apiMode: 'anthropic_messages' })).status).toBe(200)
+    expect(getSession('s1')).toMatchObject({ model: 'model-a', provider: 'custom:test', api_mode: 'chat_completions', reasoning_effort: 'high' })
+    expect((await request(model.token, '/api/studio/sessions/s1/reasoning-effort', 'POST', { reasoningEffort: 'low' })).status).toBe(403)
+    const effort = await issue({ reasoningEffort: true })
+    expect((await request(effort.token, '/api/studio/sessions/s1/model', 'POST', { model: 'model-a', provider: 'custom:test' })).status).toBe(403)
+    expect((await request(effort.token, '/api/studio/sessions/s1/reasoning-effort', 'POST', { reasoningEffort: 'invalid' })).status).toBe(400)
+    expect((await request(effort.token, '/api/studio/sessions/s1/reasoning-effort', 'POST', { reasoningEffort: 'low' })).status).toBe(200)
+    expect(getSession('s1')?.reasoning_effort).toBe('low')
+    await service.change(7, 's1', model.record.id, { permissions: { switchModel: false } })
+    expect((await request(model.token, '/api/studio/sessions/s1/model', 'POST', { model: 'model-a', provider: 'custom:test' })).status).toBe(403)
+  })
+
+  it('switches only within granted roots and applies relative file paths to the new workspace', async () => {
+    const base = join(root, 'workspace'), child = join(base, 'child')
+    await mkdir(child); await mkdir(join(base, '.ssh'))
+    await symlink(root, join(base, 'escape'))
+    await symlink(join(base, '.ssh'), join(base, 'hidden-alias'))
+    await writeFile(join(child, 'note.txt'), 'child file')
+    const { token } = await issue({ switchWorkspace: true, workspaceRead: true })
+    const fixed = await issue({ input: true })
+    const folders = await request(token, '/api/studio/sessions/s1/share-workspaces?path=' + encodeURIComponent(base))
+    expect(folders.status).toBe(200)
+    expect(folders.body.folders.map((folder: any) => folder.name)).toEqual(['child'])
+    for (const path of [root, join(base, '..'), join(base, 'escape'), join(base, '.ssh'), join(base, 'hidden-alias'), 'child', null]) {
+      expect((await request(token, '/api/studio/sessions/s1/workspace', 'POST', { workspace: path })).status).toBe(403)
+    }
+    expect((await request(token, '/api/studio/sessions/s1/workspace', 'POST', { workspace: child })).status).toBe(200)
+    expect((await request(token, '/api/studio/sessions/s1/workspace-file/read?path=note.txt')).body.content).toBe('child file')
+    expect((await request(fixed.token, '/api/studio/chat-run/runs', 'POST', { session_id: 's1', input: 'hello' })).body.code).toBe('share_workspace_changed')
+    expect((await request(token, '/api/studio/sessions/s1/workspace', 'POST', { workspace: base })).status).toBe(200)
+    expect((await request(token, '/api/studio/sessions/s2/workspace', 'POST', { workspace: child })).status).toBe(403)
+  })
+
   it('enforces file actions and both rename paths in the real workspace controllers', async () => {
     const { token, record } = await issue({ workspaceRead: true, workspaceWrite: true })
     const workspace = join(root, 'workspace')
@@ -227,7 +282,7 @@ describe('existing APIs with session share credentials', () => {
     expect((await request(token, '/api/studio/sessions/s1/workspace-file/rename', 'POST', { oldPath: 'visible.txt', newPath: '../moved.txt' })).status).toBe(403)
     expect(await readFile(join(workspace, 'visible.txt'), 'utf8')).toBe('allowed')
     expect((await request(token, '/api/studio/sessions/s1/workspace-file/content?path=visible.txt&download=1')).status).toBe(403)
-    await service.change(7, sender, 's1', record.id, { permissions: { workspaceWrite: false, download: true } })
+    await service.change(7, 's1', record.id, { permissions: { workspaceWrite: false, download: true } })
     expect((await request(token, '/api/studio/sessions/s1/workspace-file/write', 'PUT', { path: 'visible.txt', content: 'changed' })).status).toBe(403)
     expect((await request(token, '/api/studio/files/download?path=visible.txt')).body).toBe('allowed')
     expect((await request(token, '/api/studio/sessions/s1/export?mode=compressed')).status).toBe(403)
@@ -251,7 +306,7 @@ describe('existing APIs with session share credentials', () => {
     await rm(dirname(result.body.files[0].path), { recursive: true })
     await symlink(otherRoot, dirname(result.body.files[0].path))
     expect((await request(first.token, path)).status).toBe(403)
-    await service.change(7, sender, 's1', first.record.id, { revoke: true })
+    await service.change(7, 's1', first.record.id, { revoke: true })
     expect((await request(first.token, path)).status).toBe(410)
   })
 
@@ -268,13 +323,17 @@ describe('existing APIs with session share credentials', () => {
     denied = once(client, 'run.failed')
     client.emit('run', { session_id: 's1', input: '/branch' })
     expect((await denied).error).toBe('share_session_command_forbidden')
+    denied = once(client, 'run.failed')
+    client.emit('run', { session_id: 's1', input: 'hello', workspace: root })
+    expect((await denied).error).toBe('share_workspace_changed')
     const accepted = once(client, 'accepted')
-    client.emit('run', { session_id: 's1', input: 'hello', apiKey: 'override', mcpServers: {}, group_room_id: 'foreign', instructions: 'override' })
+    client.emit('run', { session_id: 's1', input: 'hello', apiKey: 'override', mcpServers: {}, group_room_id: 'foreign', instructions: 'override', model: 'forged', provider: 'forged', reasoning_effort: 'max' })
     const { data } = await accepted
     expect(data).toMatchObject({ session_id: 's1', input: 'hello', workspace: join(root, 'workspace'), source: 'cli' })
+    expect(data.model).not.toBe('forged'); expect(data.provider).not.toBe('forged'); expect(data.reasoning_effort).not.toBe('max')
     for (const key of ['apiKey', 'mcpServers', 'group_room_id', 'instructions']) expect(data).not.toHaveProperty(key)
     const disconnected = once(client, 'disconnect')
-    await service.change(7, sender, 's1', record.id, { permissions: { input: false } })
+    await service.change(7, 's1', record.id, { permissions: { input: false } })
     await disconnected
     const readonly = await socket(token)
     denied = once(readonly, 'run.failed')

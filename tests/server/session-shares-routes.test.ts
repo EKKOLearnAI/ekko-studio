@@ -10,10 +10,12 @@ describe('App-only session share HTTP lifecycle', () => {
   let origin: string
   let db: DatabaseSync
   let session: any
+  const verifyIdentity = vi.fn()
   const local = { id: 7, role: 'super_admin', status: 'active', username: 'owner' }
 
   beforeEach(async () => {
     vi.resetModules()
+    verifyIdentity.mockReset()
     session = { id: 's1', profile: 'default', workspace: null }
     db = new DatabaseSync(':memory:')
     vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({ getDb: () => db, getStoragePath: () => ':memory:' }))
@@ -24,11 +26,12 @@ describe('App-only session share HTTP lifecycle', () => {
     }))
     vi.doMock('../../packages/server/src/modules/studio/services/session-shares/app-identity', async () => {
       const { SessionShareError } = await import('../../packages/server/src/modules/studio/contracts/session-shares')
-      return { shareAppIdentityVerifier: { verify: async (token: string) => {
+      verifyIdentity.mockImplementation(async (token: string) => {
         const users: Record<string, any> = { alice: { id: 101, name: 'Alice from cloud' }, bob: { id: 202, name: 'Bob from cloud' }, mallory: { id: 303, name: 'Mallory' } }
         if (!users[token]) throw new SessionShareError('share_app_login_required', 401)
         return users[token]
-      } } }
+      })
+      return { shareAppIdentityVerifier: { verify: verifyIdentity } }
     })
     const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
     initAllHermesTables()
@@ -62,15 +65,15 @@ describe('App-only session share HTTP lifecycle', () => {
       ...(data === undefined ? {} : { body: JSON.stringify(data) }) })
     return { status: response.status, body: await response.json().catch(() => null), headers: response.headers }
   }
-  const manager = { Authorization: 'Bearer device-jwt', 'X-App-Access-Token': 'alice' }
+  const manager = { Authorization: 'Bearer device-jwt' }
   const guest = (token: string, actor = 'bob') => ({ 'X-App-Access-Token': actor, 'X-Session-Share-Token': token })
-  const create = (permissions = {}) => request('/api/studio/sessions/s1/shares', 'POST', { permissions }, manager)
+  const create = (permissions = {}) => request('/api/studio/sessions/s1/shares', 'POST', { permissions, sharer: { id: 101, name: 'Alice from App' } }, manager)
 
   it('creates, explicitly claims, authorizes only the bound session, changes permissions and revokes', async () => {
     const created = await create({ input: true, terminal: true })
     expect(created.status).toBe(201)
     const { token, share } = created.body
-    expect(share.sharer_name_snapshot).toBe('Alice from cloud')
+    expect(share.sharer_name_snapshot).toBe('Alice from App')
     expect(share.expires_at - share.created_at).toBe(SESSION_SHARE_LIFETIME_MS)
     expect(created.headers.get('cache-control')).toBe('no-store')
     expect(created.headers.get('referrer-policy')).toBe('no-referrer')
@@ -88,13 +91,34 @@ describe('App-only session share HTTP lifecycle', () => {
     expect((await request('/api/studio/session-shares/access', 'GET', undefined, guest(token))).status).toBe(410)
   })
 
-  it('requires both a local App device identity and a verified cloud identity for management', async () => {
-    expect((await request('/api/studio/sessions/s1/shares', 'POST', {}, { ...manager, Authorization: 'Bearer browser-jwt' })).status).toBe(401)
-    expect((await request('/api/studio/sessions/s1/shares', 'POST', {}, { Authorization: 'Bearer device-jwt' })).status).toBe(401)
-    expect((await request('/api/studio/sessions/s1/shares', 'POST', {}, { 'X-App-Access-Token': 'alice' })).status).toBe(401)
+  it('manages shares using only the existing Studio device identity, even when cloud identity is unavailable', async () => {
+    verifyIdentity.mockRejectedValue(new Error('Cloud must not be called for management'))
+    const created = await create()
+    expect(created.status).toBe(201)
+    const path = `/api/studio/sessions/s1/shares/${created.body.share.id}`
+    expect((await request('/api/studio/sessions/s1/shares', 'GET', undefined, manager)).body.shares).toHaveLength(1)
+    expect((await request(path, 'PATCH', { permissions: { input: true } }, manager)).status).toBe(200)
+    expect((await request(path, 'DELETE', undefined, manager)).status).toBe(200)
+    expect(verifyIdentity).not.toHaveBeenCalled()
+    expect((await request('/api/studio/sessions/s1/shares', 'GET', undefined, { Authorization: 'Bearer browser-jwt' })).status).toBe(401)
+    expect((await request('/api/studio/sessions/s1/shares', 'GET', undefined, { 'X-App-Access-Token': 'alice' })).status).toBe(401)
+    session = null
+    expect((await request('/api/studio/sessions/s1/shares', 'GET', undefined, manager)).status).toBe(403)
   })
 
-  it('does not accept caller identities, arbitrary expiry or query-string invitation tokens', async () => {
+  it('validates attribution and never allows it to override the Studio owner', async () => {
+    for (const sharer of [null, { id: -1, name: 'A' }, { id: '101', name: 'A' }, { id: 101 }, { id: 101, name: 'x'.repeat(201) }, { id: 101, name: 'A', ownerId: 7 }]) {
+      expect((await request('/api/studio/sessions/s1/shares', 'POST', { sharer }, manager)).status).toBe(400)
+    }
+    const first = await create()
+    const second = await request('/api/studio/sessions/s1/shares', 'POST', { sharer: { id: 999, name: 'Other attribution' } }, manager)
+    expect(second.status).toBe(201)
+    const listed = await request('/api/studio/sessions/s1/shares', 'GET', undefined, manager)
+    expect(listed.body.shares.map((row: any) => row.id)).toEqual(expect.arrayContaining([first.body.share.id, second.body.share.id]))
+    expect(verifyIdentity).not.toHaveBeenCalled()
+  })
+
+  it('does not accept caller recipient identities, arbitrary expiry or query-string invitation tokens', async () => {
     for (const input of [{ sharer_app_user_id: 999 }, { expires_at: Date.now() }, { recipient_app_user_id: 202 }]) {
       expect((await request('/api/studio/sessions/s1/shares', 'POST', input, manager)).status).toBe(400)
     }
