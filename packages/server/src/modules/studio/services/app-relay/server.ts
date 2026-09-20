@@ -45,6 +45,8 @@ const ALLOWED_REQUEST_HEADERS = new Set([
   'range',
   'x-hermes-profile',
   'x-request-id',
+  'x-app-access-token',
+  'x-session-share-token',
 ])
 const ALLOWED_CHAT_RUN_CLIENT_EVENTS = new Set([
   'app.events.subscribe',

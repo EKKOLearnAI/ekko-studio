@@ -129,6 +129,10 @@
       "description": "Cross-agent chat session management"
     },
     {
+      "name": "Session Shares",
+      "description": "App-bound single-session share tokens, first claim, permissions and revocation"
+    },
+    {
       "name": "Logs",
       "description": "Cross-agent log file access"
     },
@@ -17632,6 +17636,187 @@
         ]
       }
     },
+    "/api/studio/session-shares/access": {
+      "get": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Get access",
+        "description": "GET /api/studio/session-shares/access",
+        "operationId": "getSessionShareAccess",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": []
+      }
+    },
+    "/api/studio/session-shares/check": {
+      "post": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Create check",
+        "description": "POST /api/studio/session-shares/check",
+        "operationId": "checkSessionSharePermission",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "sessionId"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "read",
+                      "input",
+                      "upload",
+                      "download",
+                      "workspaceRead",
+                      "workspaceWrite",
+                      "outsideWorkspace",
+                      "terminal"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/session-shares/claim": {
+      "post": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Create claim",
+        "description": "POST /api/studio/session-shares/claim",
+        "operationId": "claimSessionShare",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "confirm"
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/sessions": {
       "get": {
         "tags": [
@@ -19489,6 +19674,376 @@
             "required": true,
             "schema": {
               "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/sessions/{sessionId}/shares": {
+      "post": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Create shares",
+        "description": "POST /api/studio/sessions/:sessionId/shares",
+        "operationId": "createSessionShare",
+        "security": [
+          {
+            "BearerAuth": [],
+            "AppAccessToken": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "New independent invitation; secret is returned only at creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "share",
+                    "token"
+                  ],
+                  "properties": {
+                    "share": {
+                      "$ref": "#/components/schemas/SessionShare"
+                    },
+                    "token": {
+                      "type": "string",
+                      "pattern": "^sst1_[A-Za-z0-9_-]{43}$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "permissions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "input": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "upload": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "download": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "workspaceRead": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "workspaceWrite": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "outsideWorkspace": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "terminal": {
+                        "type": "boolean",
+                        "default": false
+                      }
+                    }
+                  },
+                  "extraPaths": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "writable"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "description": "Existing absolute directory explicitly allowed outside the session workspace. Super administrator only."
+                        },
+                        "writable": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "List shares",
+        "description": "GET /api/studio/sessions/:sessionId/shares",
+        "operationId": "listSessionShares",
+        "security": [
+          {
+            "BearerAuth": [],
+            "AppAccessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/sessions/{sessionId}/shares/{shareId}": {
+      "patch": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Update :shareId",
+        "description": "PATCH /api/studio/sessions/:sessionId/shares/:shareId",
+        "operationId": "updateSessionShare",
+        "security": [
+          {
+            "BearerAuth": [],
+            "AppAccessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "shareId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "permissions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "input": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "upload": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "download": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "workspaceRead": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "workspaceWrite": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "outsideWorkspace": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "terminal": {
+                        "type": "boolean",
+                        "default": false
+                      }
+                    }
+                  },
+                  "extraPaths": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "writable"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "description": "Existing absolute directory explicitly allowed outside the session workspace. Super administrator only."
+                        },
+                        "writable": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Delete :shareId",
+        "description": "DELETE /api/studio/sessions/:sessionId/shares/:shareId",
+        "operationId": "revokeSessionShare",
+        "security": [
+          {
+            "BearerAuth": [],
+            "AppAccessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "shareId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ]
@@ -22446,9 +23001,112 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "API Token"
+      },
+      "AppAccessToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-App-Access-Token",
+        "description": "Cloud App access token, verified against /api/app/auth/me."
+      },
+      "SessionShareToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Session-Share-Token",
+        "description": "sst1_ invitation secret; never accepted as a Studio login JWT."
       }
     },
-    "schemas": {},
+    "schemas": {
+      "SessionShare": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "sharer_app_user_id": {
+            "type": "integer"
+          },
+          "sharer_name_snapshot": {
+            "type": "string"
+          },
+          "recipient_app_user_id": {
+            "type": "integer",
+            "nullable": true
+          },
+          "recipient_name_snapshot": {
+            "type": "string",
+            "nullable": true
+          },
+          "permissions": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": "boolean",
+                "default": false
+              },
+              "upload": {
+                "type": "boolean",
+                "default": false
+              },
+              "download": {
+                "type": "boolean",
+                "default": false
+              },
+              "workspaceRead": {
+                "type": "boolean",
+                "default": false
+              },
+              "workspaceWrite": {
+                "type": "boolean",
+                "default": false
+              },
+              "outsideWorkspace": {
+                "type": "boolean",
+                "default": false
+              },
+              "terminal": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          "policy_version": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix epoch milliseconds"
+          },
+          "updated_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix epoch milliseconds"
+          },
+          "expires_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix epoch milliseconds"
+          },
+          "claimed_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix epoch milliseconds",
+            "nullable": true
+          },
+          "revoked_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix epoch milliseconds",
+            "nullable": true
+          }
+        }
+      }
+    },
     "responses": {
       "Unauthorized": {
         "description": "Unauthorized - Invalid or missing authentication token",

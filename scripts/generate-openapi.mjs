@@ -75,6 +75,7 @@ const tagMappings = {
   'modules/ekko/routes/config.ts': { name: 'Ekko Config', description: 'Ekko runtime configuration management' },
   'modules/studio/routes/workflows.ts': { name: 'Workflows', description: 'Cross-agent workflow orchestration' },
   'modules/studio/routes/sessions.ts': { name: 'Sessions', description: 'Cross-agent chat session management' },
+  'modules/studio/routes/session-shares.ts': { name: 'Session Shares', description: 'App-bound single-session share tokens, first claim, permissions and revocation' },
   'modules/studio/routes/logs.ts': { name: 'Logs', description: 'Cross-agent log file access' },
   'modules/studio/routes/social-messages.ts': { name: 'Social Messages', description: 'Unified outbound messaging for configured social platforms' },
   'modules/studio/routes/group-chat.ts': { name: 'Group Chat', description: 'Cross-agent group chat management' },
@@ -1254,6 +1255,59 @@ openapi.paths['/api/coding-agents/dsh/agent-presets/{presetId}'] = {
 }
 openapi.paths['/api/coding-agents/dsh/agent-presets/{presetId}/default'] = { put: { ...pluginAuth, operationId: 'defaultDshAgentPreset', summary: 'Set the native preset default for new sessions', parameters: presetParameters, responses: { '200': pluginResponse(presetRosterSchema), ...presetErrors } } }
 openapi.paths['/api/coding-agents/dsh/agent-presets/{presetId}/location'] = { post: { ...pluginAuth, operationId: 'locateDshAgentPreset', summary: 'Open a custom preset directory on the DSH host or return its path', parameters: presetParameters, responses: { '200': pluginResponse({ oneOf: [{ type: 'object', required: ['opened'], properties: { opened: { type: 'boolean', enum: [true] } } }, { type: 'object', required: ['opened', 'path'], properties: { opened: { type: 'boolean', enum: [false] }, path: { type: 'string' } } }] }), ...presetErrors } } }
+
+// Share identities use separate headers so App relays cannot replace the cloud
+// account credential with a local Studio JWT.
+openapi.components.securitySchemes.AppAccessToken = { type: 'apiKey', in: 'header', name: 'X-App-Access-Token', description: 'Cloud App access token, verified against /api/app/auth/me.' }
+openapi.components.securitySchemes.SessionShareToken = { type: 'apiKey', in: 'header', name: 'X-Session-Share-Token', description: 'sst1_ invitation secret; never accepted as a Studio login JWT.' }
+const sharePermissionSchema = { type: 'object', additionalProperties: false, properties: Object.fromEntries(
+  ['input', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal'].map(key => [key, { type: 'boolean', default: false }]),
+) }
+const shareChangeSchema = { type: 'object', additionalProperties: false, properties: {
+  permissions: sharePermissionSchema,
+  extraPaths: { type: 'array', maxItems: 16, items: { type: 'object', additionalProperties: false, required: ['path', 'writable'], properties: {
+    path: { type: 'string', description: 'Existing absolute directory explicitly allowed outside the session workspace. Super administrator only.' }, writable: { type: 'boolean' },
+  } } },
+} }
+const shareBody = schema => ({ required: true, content: { 'application/json': { schema } } })
+openapi.components.schemas.SessionShare = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    id: { type: 'string' }, session_id: { type: 'string' },
+    sharer_app_user_id: { type: 'integer' }, sharer_name_snapshot: { type: 'string' },
+    recipient_app_user_id: { type: 'integer', nullable: true }, recipient_name_snapshot: { type: 'string', nullable: true },
+    permissions: sharePermissionSchema, policy_version: { type: 'integer' },
+    ...Object.fromEntries(['created_at', 'updated_at', 'expires_at', 'claimed_at', 'revoked_at'].map(key => [key, {
+      type: 'integer', format: 'int64', description: 'Unix epoch milliseconds', ...(['claimed_at', 'revoked_at'].includes(key) ? { nullable: true } : {}),
+    }])),
+  },
+}
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  const management = /^\/api\/studio\/sessions\/\{sessionId\}\/shares/.test(path)
+  if (!management && !path.startsWith('/api/studio/session-shares/')) continue
+  for (const [method, operation] of Object.entries(methods)) {
+    operation.operationId = management
+      ? ({ post: 'createSessionShare', get: 'listSessionShares', patch: 'updateSessionShare', delete: 'revokeSessionShare' })[method]
+      : ({ claim: 'claimSessionShare', access: 'getSessionShareAccess', check: 'checkSessionSharePermission' })[path.split('/').pop()]
+    operation.parameters = [...path.matchAll(/\{([^}]+)\}/g)].map(match => ({ name: match[1], in: 'path', required: true, schema: { type: 'string' } }))
+    operation.security = management ? [{ BearerAuth: [], AppAccessToken: [] }] : [{ AppAccessToken: [], SessionShareToken: [] }]
+    if (management && ['post', 'patch'].includes(method)) operation.requestBody = shareBody(shareChangeSchema)
+    if (path.endsWith('/claim')) operation.requestBody = shareBody({ type: 'object', additionalProperties: false, required: ['confirm'], properties: { confirm: { type: 'boolean', enum: [true] } } })
+    if (path.endsWith('/check')) operation.requestBody = shareBody({ type: 'object', additionalProperties: false, required: ['action', 'sessionId'], properties: {
+      action: { type: 'string', enum: ['read', ...Object.keys(sharePermissionSchema.properties)] }, sessionId: { type: 'string' },
+    } })
+    operation.responses = { ...operation.responses, '401': { description: 'Missing or invalid App identity / Studio App device credential' },
+      '403': { description: 'Recipient, session, resource, owner or permission mismatch' }, '404': { description: 'Share not found' },
+      '409': { description: 'Already claimed by another App user, or concurrent policy change' }, '410': { description: 'Share expired or revoked' },
+      '503': { description: 'Identity verification or transactional storage unavailable' } }
+    if (management && method === 'post') {
+      delete operation.responses['200']
+      operation.responses['201'] = { description: 'New independent invitation; secret is returned only at creation', content: { 'application/json': { schema: {
+        type: 'object', required: ['share', 'token'], properties: { share: { $ref: '#/components/schemas/SessionShare' }, token: { type: 'string', pattern: '^sst1_[A-Za-z0-9_-]{43}$' } },
+      } } } }
+    }
+  }
+}
 
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')
