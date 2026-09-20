@@ -4,7 +4,7 @@ import { listAppConnections } from '../../repositories/app-connections-store'
 import { listLiveActivityDestinations } from '../../repositories/live-activity-store'
 import { getLiveActivityRun, listActiveLiveActivityRuns, saveLiveActivityRun, type LiveActivityRunRecord } from '../../repositories/live-activity-runtime-store'
 import { findUserById } from '../../repositories/users-store'
-import { getSession } from '../../repositories/session-store'
+import { getSession, getSessionNotificationPreview } from '../../repositories/session-store'
 import type { BusinessEvent } from '../webhooks/business-events'
 import { canReceiveAppEvent } from '../webhooks/app-events'
 import { appRelayUrlForRoute, getAppRelayRoute } from '../app-relay/route'
@@ -46,7 +46,15 @@ function agent(event: BusinessEvent): string {
   return ['claude', 'codex', 'hermes', 'ekko', 'pi', 'grok', 'opencode', 'deepseek'].includes(normalized) ? normalized : 'ekko'
 }
 function title(event: BusinessEvent): string {
-  if (event.source === 'chat') return bounded(getSession(event.subject.session_id || '')?.title, 40) || 'Ekko Studio 任务'
+  if (event.source === 'chat') {
+    const id = event.subject.session_id || ''
+    const explicit = bounded(getSession(id)?.title, 40)
+    if (explicit) return explicit
+    const fallback = getSessionNotificationPreview(id)?.title || ''
+    // A truncated structured-message JSON is not a readable title. Never expose its raw envelope.
+    if (/^\s*[\[{]/.test(fallback)) return bounded(event.chat?.task_plan?.explanation, 40) || 'Ekko Studio 任务'
+    return bounded(fallback, 40) || bounded(event.chat?.task_plan?.explanation, 40) || 'Ekko Studio 任务'
+  }
   return bounded((event.payload.display as Record<string, unknown> | undefined)?.title, 40) || 'Ekko Studio 任务'
 }
 function ref(event: BusinessEvent, destination: string): string {
