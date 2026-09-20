@@ -150,4 +150,16 @@ describe('Studio Live Activity plan-trigger policy', () => {
   expect(JSON.parse(fetchMock.mock.calls[2][1].body).content_state.currentStep).toBe('Newest step')
  })
 
+ it('keeps real per-run start and usage across complete snapshots without inventing values',async()=>{
+  vi.doMock('../../packages/server/src/modules/studio/services/chat-run/server-registry',()=>({getChatRunServer:()=>({getLiveActivityStartedAt:()=>1789862400.25,isLiveActivityRunActive:()=>false})}))
+  const consume=await setup(), first=event('chat.plan.updated','run-a',1)
+  first.chat.summary={status:'updated',input_tokens:42,output_tokens:7}
+  await consume(first);await consume(event('chat.plan.updated','run-a',2))
+  const states=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body).content_state)
+  expect(states[1]).toMatchObject({startedAtEpoch:1789862400.25,inputTokens:42,outputTokens:7})
+  expect(states[1]).not.toHaveProperty('appearance')
+  expect(states[1]).not.toHaveProperty('totalTokens')
+  vi.doUnmock('../../packages/server/src/modules/studio/services/chat-run/server-registry')
+ })
+
 })

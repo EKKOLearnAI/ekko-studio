@@ -2,7 +2,7 @@ import { getDb } from '../infrastructure/database'
 
 export interface LiveActivityRunRecord {
   run_key: string; destination_id: string; activity_ref: string; revision: number; started: number; terminal: number
-  title: string; completed: number; total: number; updated_at: number
+  display_json?: string; title: string; completed: number; total: number; updated_at: number
 }
 const initialized = new WeakSet<object>()
 function database() {
@@ -16,6 +16,8 @@ function database() {
     CREATE TABLE IF NOT EXISTS live_activity_start_budget (
       destination_id TEXT PRIMARY KEY, last_start_at INTEGER NOT NULL
     );`)
+    const columns = db.prepare('PRAGMA table_info(live_activity_runs)').all() as {name: string}[]
+    if (!columns.some(column => column.name === 'display_json')) db.exec("ALTER TABLE live_activity_runs ADD COLUMN display_json TEXT NOT NULL DEFAULT '{}'")
     initialized.add(db)
   }
   return db
@@ -31,12 +33,12 @@ export function listActiveLiveActivityRuns(destinationId: string): LiveActivityR
 }
 export function saveLiveActivityRun(value: LiveActivityRunRecord): void {
   database().prepare(`INSERT INTO live_activity_runs
-    (run_key,destination_id,activity_ref,revision,started,terminal,title,completed,total,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_key) DO UPDATE SET
+    (run_key,destination_id,activity_ref,revision,started,terminal,title,completed,total,updated_at,display_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_key) DO UPDATE SET
     activity_ref=excluded.activity_ref,revision=excluded.revision,started=excluded.started,terminal=excluded.terminal,title=excluded.title,
-    completed=excluded.completed,total=excluded.total,updated_at=excluded.updated_at`)
+    completed=excluded.completed,total=excluded.total,updated_at=excluded.updated_at,display_json=excluded.display_json`)
     .run(value.run_key,value.destination_id,value.activity_ref,value.revision,value.started,value.terminal,
-      value.title,value.completed,value.total,value.updated_at)
+      value.title,value.completed,value.total,value.updated_at,value.display_json || '{}')
 }
 export function getLiveActivityLastStart(destinationId: string): number {
   if (!getDb()) return 0

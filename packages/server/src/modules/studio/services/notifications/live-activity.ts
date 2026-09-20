@@ -17,6 +17,20 @@ const terminal = (event: BusinessEvent) => event.type.endsWith('.run.completed')
 const runKind = (event: BusinessEvent) => event.source === 'group_chat' ? 'group' : event.source === 'workflow' ? 'workflow' : 'chat'
 const subjectId = (event: BusinessEvent) => event.subject.room_id || event.subject.workflow_id || event.subject.session_id || ''
 const bounded = (value: unknown, max: number) => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : ''
+function displayFields(event: BusinessEvent, registration: Record<string, any>, state: LiveActivityRunRecord) {
+  let result: Record<string, string | number> = {}
+  try { result = JSON.parse(state.display_json || '{}') } catch { /* old row */ }
+  if (['light', 'dark'].includes(registration.appearance)) result.appearance = registration.appearance
+  const started = getChatRunServer()?.getLiveActivityStartedAt?.(event.subject.session_id, event.profile, event.subject.run_id)
+  if (result.startedAtEpoch === undefined && typeof started === 'number' && Number.isFinite(started) && started >= 0) result.startedAtEpoch = started
+  // Only per-event usage, never lifetime session totals. Unknown values stay absent.
+  const summary = event.chat?.summary
+  for (const [key, value] of [['inputTokens', summary?.input_tokens], ['outputTokens', summary?.output_tokens]] as const) {
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) result[key] = value
+  }
+  state.display_json = JSON.stringify(result)
+  return result
+}
 function content(event: BusinessEvent, state: LiveActivityRunRecord, ending = false) {
   const plan = event.chat?.task_plan, steps = Array.isArray(plan?.plan) ? plan!.plan : []
   const inProgress = steps.find(step => step.status === 'in_progress') as { step?: unknown } | undefined
@@ -95,7 +109,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
     const now = Math.floor(Date.now() / 1000)
     const body: Record<string, unknown> = { schema_version: 1, event_id: randomUUID(), event: action,
       destination_id: device.destination_id, activity_ref: state.activity_ref, revision: state.revision,
-      occurred_at: now, expires_at: now + (action === 'end' ? 600 : 120), content_state: content(event, state, action === 'end') }
+      occurred_at: now, expires_at: now + (action === 'end' ? 600 : 120), content_state: { ...content(event, state, action === 'end'), ...displayFields(event, registration, state) } }
     if (action === 'start') body.ekko_run = { schema_version: 1, studio_device_id: registration.studio_device_id,
       cloud_user_id: registration.cloud_user_id, profile: event.profile, run_kind: runKind(event), run_id: event.subject.run_id || event.id,
       [runKind(event) === 'chat' ? 'session_id' : runKind(event) === 'group' ? 'room_id' : 'workflow_id']: subjectId(event) }
@@ -170,6 +184,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
             state.completed = Number(plan.progress?.completed) || 0; state.total = Number(plan.progress?.total) || 0
             if (!state.total) return
           }
+          state.title = title(event)
           state.updated_at = Date.now()
           saveLiveActivityRun(state)
           if (!state.started) {
