@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { listAppConnections } from '../../repositories/app-connections-store'
 import { listLiveActivityDestinations } from '../../repositories/live-activity-store'
-import { countActiveLiveActivityRuns, getLiveActivityLastStart, getLiveActivityRun, recordLiveActivityStart, saveLiveActivityRun, type LiveActivityRunRecord } from '../../repositories/live-activity-runtime-store'
+import { getLiveActivityRun, saveLiveActivityRun, type LiveActivityRunRecord } from '../../repositories/live-activity-runtime-store'
 import { findUserById } from '../../repositories/users-store'
 import { getSession } from '../../repositories/session-store'
 import type { BusinessEvent } from '../webhooks/business-events'
@@ -9,9 +9,6 @@ import { canReceiveAppEvent } from '../webhooks/app-events'
 import { appRelayUrlForRoute, getAppRelayRoute } from '../app-relay/route'
 import { decryptPushSecret } from './push-secrets'
 
-const START_DELAY_MS = 15_000
-const START_COOLDOWN_MS = 30 * 60_000
-const MAX_ACTIVE_PER_DESTINATION = 2
 const terminal = (type: string) => type.endsWith('.run.completed') || type.endsWith('.run.failed')
 const runKind = (event: BusinessEvent) => event.source === 'group_chat' ? 'group' : event.source === 'workflow' ? 'workflow' : 'chat'
 const subjectId = (event: BusinessEvent) => event.subject.room_id || event.subject.workflow_id || event.subject.session_id || ''
@@ -36,19 +33,20 @@ function validConnection(device: ReturnType<typeof listLiveActivityDestinations>
     && row.token_hash === device.connection_token_hash && row.revoked_at == null && row.token_expires_at > Date.now() / 1000)
 }
 
-/** Maps verified task-plan and terminal events to budget-safe ActivityKit requests. */
+/** Starts a Live Activity as soon as a verified task plan exists, then updates that activity through the run lifecycle. */
 export function createLiveActivityConsumer(send: typeof fetch = (...args) => fetch(...args)) {
-  const timers = new Map<string, ReturnType<typeof setTimeout>>()
-  const latest = new Map<string, BusinessEvent>()
+  const pending = new Map<string, Promise<void>>()
+  async function serialized(key: string, operation: () => Promise<void>): Promise<void> {
+    const previous = pending.get(key) || Promise.resolve()
+    const current = previous.catch(() => {}).then(operation)
+    pending.set(key, current)
+    try { await current } finally { if (pending.get(key) === current) pending.delete(key) }
+  }
   async function dispatch(event: BusinessEvent, device: ReturnType<typeof listLiveActivityDestinations>[number], registration: Record<string, any>, key: string, requested?: 'start'|'update'|'end') {
     let state = getLiveActivityRun(key)
     if (!state || state.terminal) return
     const ending = requested === 'end' || terminal(event.type)
     const action = requested || (!state.started ? 'start' : ending ? 'end' : 'update')
-    if (action === 'start') {
-      const now = Date.now()
-      if (getLiveActivityLastStart(device.destination_id) + START_COOLDOWN_MS > now || countActiveLiveActivityRuns(device.destination_id) >= MAX_ACTIVE_PER_DESTINATION) return
-    }
     if (!state.started && action !== 'start') return
     state = { ...state, revision: state.revision + 1, updated_at: Date.now() }
     const now = Math.floor(Date.now() / 1000)
@@ -64,7 +62,6 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registration.push_token}` }, body: JSON.stringify(body) })
     if (response.status >= 200 && response.status < 300) {
       state.started = 1; state.terminal = action === 'end' ? 1 : 0; saveLiveActivityRun(state)
-      if (action === 'start') recordLiveActivityStart(device.destination_id, Date.now())
     }
     await response.body?.cancel()
   }
@@ -79,21 +76,28 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
         const user = findUserById(device.user_id); if (!user || user.status !== 'active' || !canReceiveAppEvent(user, event)) return
         let registration: Record<string, any>; try { registration = JSON.parse(decryptPushSecret(device.ciphertext)) } catch { return }
         const key = `${device.destination_id}:${runKind(event)}:${subjectId(event)}:${event.subject.run_id || ''}`
-        let state = getLiveActivityRun(key)
-        if (!state) state = { run_key:key,destination_id:device.destination_id,activity_ref:ref(event,device.destination_id),revision:0,started:0,terminal:0,title:title(event),completed:0,total:0,updated_at:Date.now() }
-        if (state.terminal) return
-        if (plan) {
-          state.completed = Number(plan.progress?.completed) || 0; state.total = Number(plan.progress?.total) || 0
-          if (!state.total) return
-        }
-        state.updated_at=Date.now();saveLiveActivityRun(state);latest.set(key,event)
-        if (!state.started) {
-          if (terminal(event.type)) { timers.get(key) && clearTimeout(timers.get(key)!);timers.delete(key);state.terminal=1;saveLiveActivityRun(state);return }
-          if (!plan || timers.has(key)) return
-          timers.set(key,setTimeout(()=>{timers.delete(key);const current=latest.get(key);if(current) void dispatch(current,device,registration,key,'start')},START_DELAY_MS))
-          return
-        }
-        await dispatch(event,device,registration,key,terminal(event.type)?'end':'update')
+        await serialized(key, async () => {
+          let state = getLiveActivityRun(key)
+          if (!state) state = { run_key:key,destination_id:device.destination_id,activity_ref:ref(event,device.destination_id),revision:0,started:0,terminal:0,title:title(event),completed:0,total:0,updated_at:Date.now() }
+          if (state.terminal) return
+          if (plan) {
+            state.completed = Number(plan.progress?.completed) || 0; state.total = Number(plan.progress?.total) || 0
+            if (!state.total) return
+          }
+          state.updated_at = Date.now()
+          saveLiveActivityRun(state)
+          if (!state.started) {
+            if (terminal(event.type)) {
+              state.terminal = 1
+              saveLiveActivityRun(state)
+              return
+            }
+            if (!plan) return
+            await dispatch(event, device, registration, key, 'start')
+            return
+          }
+          await dispatch(event, device, registration, key, terminal(event.type) ? 'end' : 'update')
+        })
       }))
     } catch { /* Live Activity delivery never changes task outcomes. */ }
   }
