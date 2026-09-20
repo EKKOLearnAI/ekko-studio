@@ -41,6 +41,13 @@ function validConnection(device: ReturnType<typeof listLiveActivityDestinations>
     && row.token_hash === device.connection_token_hash && row.revoked_at == null && row.token_expires_at > Date.now() / 1000)
 }
 
+async function liveActivityResult(response: Response): Promise<{ status: string }> {
+  let result: { status?: unknown } = {}
+  try { result = await response.json() as { status?: unknown } } catch { /* non-JSON failures are not delivery receipts */ }
+  try { await response.body?.cancel() } catch { /* already consumed */ }
+  return { status: typeof result.status === 'string' ? result.status : '' }
+}
+
 /** Starts a Live Activity as soon as a verified task plan exists, then updates that activity through the run lifecycle. */
 export function createLiveActivityConsumer(send: typeof fetch = (...args) => fetch(...args)) {
   const pending = new Map<string, Promise<void>>()
@@ -66,12 +73,19 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
       [runKind(event) === 'chat' ? 'session_id' : runKind(event) === 'group' ? 'room_id' : 'workflow_id']: subjectId(event) }
     if (action === 'end') body.dismissal_at = now; else body.stale_at = now + 300
     const url = new URL('/push/v1/live-activities/send', appRelayUrlForRoute(await getAppRelayRoute()))
-    const response = await send(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registration.push_token}` }, body: JSON.stringify(body) })
+    const request = { method: 'POST', redirect: 'error' as const,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registration.push_token}` }, body: JSON.stringify(body) }
+    let response = await send(url, { ...request, signal: AbortSignal.timeout(10_000) })
+    let result = await liveActivityResult(response)
     if (response.status >= 200 && response.status < 300) {
       state.started = 1; state.terminal = action === 'end' ? 1 : 0; saveLiveActivityRun(state)
     }
-    await response.body?.cancel()
+    const deadline = Date.now() + (action === 'end' ? 580_000 : 110_000)
+    while (response.status === 202 && ['queued', 'pending_token', 'dispatching'].includes(result.status) && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 5_000))
+      response = await send(url, { ...request, signal: AbortSignal.timeout(10_000) })
+      result = await liveActivityResult(response)
+    }
   }
   return async (event: BusinessEvent): Promise<void> => {
     const plan = event.type.endsWith('.plan.updated') ? event.chat?.task_plan : null

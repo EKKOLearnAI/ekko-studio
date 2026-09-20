@@ -1689,11 +1689,12 @@ function piMcpConfig(profile: string, ...externalContents: Array<string | null |
     .map((item) => {
     const server = managedHermesMcpServerConfig('pi', profile, item.name, item.toolset)
     const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
+    const interaction = item.toolset === 'plan'
     return [item.name, {
       ...server,
-      lifecycle: 'lazy',
-      directTools: false,
-      toolPrefix: 'none',
+      lifecycle: interaction ? 'eager' : 'lazy',
+      directTools: interaction,
+      toolPrefix: interaction ? 'server' : 'none',
       requestTimeoutMs,
     }]
   }))
@@ -1901,9 +1902,9 @@ export function getCodingAgentManagedMcpServerConfigs(
       const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
       return [item.name, {
         ...server,
-        lifecycle: 'lazy',
-        directTools: false,
-        toolPrefix: 'none',
+        lifecycle: item.toolset === 'plan' ? 'eager' : 'lazy',
+        directTools: item.toolset === 'plan',
+        toolPrefix: item.toolset === 'plan' ? 'server' : 'none',
         requestTimeoutMs,
         ...(disabledManaged.has(item.name) ? { enabled: false } : {}),
       }]

@@ -726,6 +726,7 @@ describe('coding agent launch preparation', () => {
     expect(runtimeMcp.mcpServers['ekko-studio-browser']).toMatchObject({ directTools: false, lifecycle: 'lazy' })
     expect(runtimeMcp.mcpServers['ekko-studio-devices']).toMatchObject({ directTools: false, lifecycle: 'lazy' })
     expect(runtimeMcp.mcpServers['ekko-studio-use']).toMatchObject({ directTools: false, lifecycle: 'lazy' })
+    expect(runtimeMcp.mcpServers['ekko-studio-interaction']).toMatchObject({ directTools: true, lifecycle: 'eager', toolPrefix: 'server' })
     const runtimeModels = JSON.parse(readFileSync(join(result.rootDir, 'models.json'), 'utf-8'))
     expect(runtimeModels.providers['hermes-studio'].apiKey).toMatch(/^hwui_/)
     expect(runtimeModels.providers['hermes-studio'].apiKey).not.toBe('sk-runtime-secret')
