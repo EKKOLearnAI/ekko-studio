@@ -170,7 +170,7 @@ describe('ChatRunSocket global pending interactions', () => {
       queue_remaining: 0,
     })
     expect(emitted).toContainEqual({
-      room: 'pending-interactions:default',
+      room: ['pending-interactions:default', 'session:session-running'],
       event: 'session.activity',
       payload: expect.objectContaining({
         session_id: 'session-running',

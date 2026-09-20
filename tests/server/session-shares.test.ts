@@ -68,6 +68,16 @@ describe('session share grants', () => {
     expect(publicSessionShare(first.record)).not.toHaveProperty('workspace_root')
   })
 
+  it('rejects group and workflow sessions and invalidates a session whose source changes', async () => {
+    const { token } = await issued({ input: true })
+    service.claim(token, recipient)
+    for (const source of ['group_chat', 'workflow']) {
+      session.source = source
+      await expect(issued()).rejects.toThrow('share_session_unavailable')
+      expect(() => service.authorize(token, recipient, 'read')).toThrow('share_session_unavailable')
+    }
+  })
+
   it('initializes its schema and indexes idempotently', async () => {
     const original = await issued()
     const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')

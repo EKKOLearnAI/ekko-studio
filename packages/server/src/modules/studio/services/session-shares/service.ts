@@ -12,7 +12,7 @@ import { findUserById, userCanAccessProfile } from '../../repositories/users-sto
 import { isPathWithin, isNearestExistingRealPathWithin } from '../files/path'
 
 interface ShareOwner { id: number; role: string; status: string }
-interface ShareSession { id: string; profile: string; workspace: string | null }
+interface ShareSession { id: string; profile: string; workspace: string | null; source?: string }
 export interface ShareDependencies {
   store: typeof sessionSharesStore
   session: (id: string) => ShareSession | null
@@ -41,14 +41,14 @@ export class SessionShareService {
   private readonly cache = new Map<string, { record: SessionShareRecord; until: number }>()
   private readonly observers = new Map<string, Set<() => void>>()
   constructor(private readonly deps: ShareDependencies = {
-    store: sessionSharesStore, session: getSession, owner: findUserById,
-    canAccessProfile: userCanAccessProfile, now: Date.now,
+    store: sessionSharesStore, session: id => getSession(id), owner: id => findUserById(id),
+    canAccessProfile: (id, profile) => userCanAccessProfile(id, profile), now: Date.now,
   }) {}
 
   private assertOwnerSession(ownerId: number, sessionId: string) {
     const session = this.deps.session(sessionId)
     const owner = this.deps.owner(ownerId)
-    if (!session || !owner || owner.status !== 'active'
+    if (!session || ['workflow', 'group_chat'].includes(session.source || '') || !owner || owner.status !== 'active'
       || (owner.role !== 'super_admin' && !this.deps.canAccessProfile(ownerId, session.profile || 'default'))) {
       throw new SessionShareError('share_session_unavailable', 403)
     }
@@ -174,6 +174,7 @@ export class SessionShareService {
     const session = this.assertActive(record)
     if (record.recipient_app_user_id !== actor.id) throw new SessionShareError('share_recipient_required', 403)
     if (sessionId !== undefined && sessionId !== record.session_id) throw new SessionShareError('share_session_mismatch', 403)
+    if (action === 'terminal' && this.deps.owner(record.created_by_user_id)?.role !== 'super_admin') throw new SessionShareError('share_terminal_forbidden')
     if (action !== 'read' && !record.permissions[action]) throw new SessionShareError('share_permission_denied', 403)
     if (action !== 'read' && (session.workspace ? resolve(session.workspace) : '') !== record.workspace_root) {
       throw new SessionShareError('share_workspace_changed', 403)

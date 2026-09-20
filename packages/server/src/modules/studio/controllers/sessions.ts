@@ -1,3 +1,4 @@
+import { sessionShareService } from '../services/session-shares/service'
 import { getSessionTaskPlans } from '../services/task-plans'
 import {
   deleteHermesSessionForProfile,
@@ -733,6 +734,9 @@ export async function get(ctx: any) {
     return
   }
   if (denySessionAccess(ctx, session)) return
+  if (ctx.state?.sessionShare) {
+    delete session.parent_title; delete session.parent_last_message; delete session.parent_last_message_role
+  }
   ctx.body = { session }
 }
 
@@ -766,6 +770,13 @@ export async function getWorkspaceRunChangeFile(ctx: any) {
     ctx.status = 404
     ctx.body = { error: 'Workspace change file not found' }
     return
+  }
+  if (ctx.state?.sessionShare) {
+    const access = ctx.state.sessionShare
+    const change = listWorkspaceRunChangesForSession(ctx.params.id).find(item => item.change_id === ctx.params.changeId)
+    if (!change || pathResolve(change.workspace) !== access.share.workspace_root) { ctx.status = 403; ctx.body = { error: 'share_workspace_changed' }; return }
+    await sessionShareService.authorizePath(access.token, access.actor, 'workspaceRead', file.path)
+    if (file.old_path) await sessionShareService.authorizePath(access.token, access.actor, 'workspaceRead', file.old_path)
   }
   ctx.body = { file }
 }
@@ -812,6 +823,8 @@ async function resolveSessionWorkspacePath(
     allowEmpty: options.allowEmpty,
     missingWorkspaceMessage: 'Session workspace not found',
   })
+  const shareAccess = ctx.state?.sessionShare
+  if (shareAccess) await sessionShareService.authorizePath(shareAccess.token, shareAccess.actor, ctx.state.sessionShareFileAction || 'workspaceRead', resolved.fullPath)
   return { session, ...resolved }
 }
 
@@ -840,7 +853,14 @@ export async function listWorkspaceFiles(ctx: any) {
       return
     }
     const entries = await readdir(fullPath, { withFileTypes: true })
-    const mapped = await Promise.all(entries.map(async entry => {
+    const visibleEntries = ctx.state?.sessionShare ? (await Promise.all(entries.map(async entry => {
+      const access = ctx.state.sessionShare
+      try {
+        await sessionShareService.authorizePath(access.token, access.actor, 'workspaceRead', pathResolve(fullPath, entry.name))
+        return entry
+      } catch { return null }
+    }))).filter((entry): entry is typeof entries[number] => entry !== null) : entries
+    const mapped = await Promise.all(visibleEntries.map(async entry => {
       const entryFullPath = pathResolve(fullPath, entry.name)
       const stat = await fsStat(entryFullPath)
       return {
@@ -2041,6 +2061,14 @@ export async function exportSession(ctx: any) {
   }
   if (denySessionAccess(ctx, session)) return
 
+  if (ctx.state?.sessionShare) {
+    delete session.parent_title; delete session.parent_last_message; delete session.parent_last_message_role
+    if (mode === 'compressed') {
+      const access = ctx.state.sessionShare
+      sessionShareService.authorize(access.token, access.actor, 'input', session.id)
+    }
+  }
+
   const ext = (ctx.query.ext as string) || (mode === 'compressed' ? 'txt' : 'json')
   const title = session.title || 'session'
   const safeName = title.replace(/[^a-zA-Z0-9一-鿿_-]/g, '_').slice(0, 50)
@@ -2129,9 +2157,9 @@ export async function getConversationMessagesPaginated(ctx: any) {
       title: session.title,
       parent_session_id: (session as any).parent_session_id,
       fork_point_message_id: (session as any).fork_point_message_id,
-      parent_title: (session as any).parent_title,
-      parent_last_message: (session as any).parent_last_message,
-      parent_last_message_role: (session as any).parent_last_message_role,
+      parent_title: ctx.state?.sessionShare ? undefined : (session as any).parent_title,
+      parent_last_message: ctx.state?.sessionShare ? undefined : (session as any).parent_last_message,
+      parent_last_message_role: ctx.state?.sessionShare ? undefined : (session as any).parent_last_message_role,
       started_at: session.started_at,
       ended_at: session.ended_at,
       last_active: session.last_active,

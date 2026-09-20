@@ -1,3 +1,5 @@
+import { authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
+import { bindSessionShareSocket } from '../services/session-shares/socket-access'
 import { codingAgentId } from '../services/chat-run/types'
 import { studioMcpCapabilities } from '../public/runs/mcp-capabilities'
 import { hermesStudioMcpCapabilities } from '../services/chat-run/studio-mcp'
@@ -666,6 +668,17 @@ export class ChatRunSocket {
 
   private async authMiddleware(socket: Socket, next: (err?: Error) => void) {
     const token = socket.handshake.auth?.token as string | undefined
+    const shareToken = socketShareToken(socket.handshake.auth)
+    if (shareToken) {
+      try {
+        const access = await authenticateSessionShare(shareToken, String(socket.handshake.auth?.appAccessToken || ''))
+        assertShareProfile(access, socket.handshake.query?.profile)
+        socket.handshake.query.profile = access.share.profile
+        socket.data.sessionShare = access
+        socket.data.user = sessionShareExecutionUser(access)
+        return next()
+      } catch (error) { return next(error instanceof Error ? error : new Error('share_access_denied')) }
+    }
     const appToken = token ? await inspectAppUserToken(token) : null
     if (appToken) {
       if (appToken.status !== 'active' || !appToken.user) return next(new Error('App device authentication failed'))
@@ -700,55 +713,70 @@ export class ChatRunSocket {
   // --- Connection handler ---
 
   private onConnection(socket: Socket) {
-    bindAppEventSubscription(socket, (_user, profile) => {
-      const result: BusinessEvent[] = []
-      for (const [sessionId, state] of this.sessionMap) {
-        if (!state.isWorking || (state.profile || getSession(sessionId)?.profile || 'default') !== profile) continue
-        const source = state.source || getSession(sessionId)?.source
-        if (source === 'group_chat') continue
-        const subject = { session_id: sessionId, run_id: state.runId, workflow_id: state.webhookWorkflowId }
-        if (source !== 'workflow') result.push(stateEvent('chat.run.updated', profile, subject,
-          { state: { session_id: sessionId, status: 'running', timestamp: Date.now(), started_at: state.runStartedAt } }))
-        const pending = new Map<string, BusinessEvent>()
-        for (const { event, data } of buildResumeEvents(state.events)) {
-          if (!['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(event)) continue
-          const id = data?.approval_id || data?.clarify_id
-          if (!id) continue
-          const key = `${event.split('.')[0]}:${id}`
-          if (event.endsWith('.resolved')) {
-            if (!data.stale && (data.resolved !== false || ['timeout', 'aborted', 'cancelled', 'canceled'].includes(data.reason))) pending.delete(key)
-            continue
-          }
-          if (data.remaining_timeout_ms === 0) continue
-          const type = `chat.${event.replace('clarify.', 'clarification.')}`
-          pending.set(key, stateEvent(type, profile, { ...subject,
-            ...(event.startsWith('approval.') ? { approval_id: id } : { clarification_id: id }) }, data))
-        }
-        result.push(...pending.values())
-        for (const card of getSessionTaskPlans(sessionId, [], true, state.runId)) {
-          if (card.run_id !== state.runId) continue
-          const event = planStateEvent(profile, subject, card)
-          if (event) result.push(event)
-        }
+    const shared = socket.data.sessionShare as SessionShareAccess | undefined
+    if (shared) bindSessionShareSocket(socket, shared, () => {
+      const state = this.sessionMap.get(shared.share.session_id)
+      if (!state) return
+      state.queue = state.queue.filter(item => item.originSocketId !== socket.id)
+      if (state.queueInsertion && !state.queue.some(item => item.queue_id === state.queueInsertion?.queueId)) {
+        this.clearQueueInsertion(shared.share.session_id, state, 'share_access_denied')
       }
-      return result
+      this.nsp.to(`session:${shared.share.session_id}`).emit('run.queued', {
+        event: 'run.queued', session_id: shared.share.session_id,
+        queue_length: state.queue.length, queued_messages: this.serializeQueuedMessages(state.queue),
+      })
     })
-    bindLegacyAppEvents(socket, 'chat', event => {
-      const user = socket.data.user as AuthenticatedUser | undefined
-      return Boolean(user && this.canAccessProfile(user, event.profile)
-        && socket.rooms.has(`pending-interactions:${event.profile}`))
-    })
+    if (!shared) {
+      bindAppEventSubscription(socket, (_user, profile) => {
+        const result: BusinessEvent[] = []
+        for (const [sessionId, state] of this.sessionMap) {
+          if (!state.isWorking || (state.profile || getSession(sessionId)?.profile || 'default') !== profile) continue
+          const source = state.source || getSession(sessionId)?.source
+          if (source === 'group_chat') continue
+          const subject = { session_id: sessionId, run_id: state.runId, workflow_id: state.webhookWorkflowId }
+          if (source !== 'workflow') result.push(stateEvent('chat.run.updated', profile, subject,
+            { state: { session_id: sessionId, status: 'running', timestamp: Date.now(), started_at: state.runStartedAt } }))
+          const pending = new Map<string, BusinessEvent>()
+          for (const { event, data } of buildResumeEvents(state.events)) {
+            if (!['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(event)) continue
+            const id = data?.approval_id || data?.clarify_id
+            if (!id) continue
+            const key = `${event.split('.')[0]}:${id}`
+            if (event.endsWith('.resolved')) {
+              if (!data.stale && (data.resolved !== false || ['timeout', 'aborted', 'cancelled', 'canceled'].includes(data.reason))) pending.delete(key)
+              continue
+            }
+            if (data.remaining_timeout_ms === 0) continue
+            const type = `chat.${event.replace('clarify.', 'clarification.')}`
+            pending.set(key, stateEvent(type, profile, { ...subject,
+              ...(event.startsWith('approval.') ? { approval_id: id } : { clarification_id: id }) }, data))
+          }
+          result.push(...pending.values())
+          for (const card of getSessionTaskPlans(sessionId, [], true, state.runId)) {
+            if (card.run_id !== state.runId) continue
+            const event = planStateEvent(profile, subject, card)
+            if (event) result.push(event)
+          }
+        }
+        return result
+      })
+      bindLegacyAppEvents(socket, 'chat', event => {
+        const user = socket.data.user as AuthenticatedUser | undefined
+        return Boolean(user && this.canAccessProfile(user, event.profile)
+          && socket.rooms.has(`pending-interactions:${event.profile}`))
+      })
+    }
     const socketUser = socket.data.user as AuthenticatedUser | undefined
     const socketProfile = (socket.handshake.query?.profile as string) || 'default'
     const currentProfile = () => socketProfile || getActiveProfileName() || 'default'
     const mobileTarget = socket.data.mobileDeviceTarget as MobileDeviceTarget | undefined
     if (mobileTarget) socket.join(mobileDeviceRoom(mobileTarget))
-    socket.join(`pending-interactions:${currentProfile()}`)
+    if (!shared) { socket.join('studio-account'); socket.join(`pending-interactions:${currentProfile()}`) }
     socket.emit('session.activity.snapshot', {
       event: 'session.activity.snapshot',
       profile: currentProfile(),
       sessions: Array.from(this.sessionMap.entries()).flatMap(([sessionId, state]) => {
-        if (!state.isWorking) return []
+        if (!state.isWorking || (shared && sessionId !== shared.share.session_id)) return []
         const profile = state.profile || getSession(sessionId)?.profile || 'default'
         return profile === currentProfile() ? [{ session_id: sessionId, status: 'running' }] : []
       }),
@@ -904,7 +932,7 @@ export class ChatRunSocket {
           }
         }
         try {
-          const actor = await authenticatedPushActor(socket.handshake.auth?.token)
+          const actor = shared ? null : await authenticatedPushActor(socket.handshake.auth?.token)
           if (actor) {
             const target = bindRunPushTarget({ kind: 'chat', profile: runProfile, runId: randomUUID() }, data.session_id, actor, {
               ciphertext: prepareRunPushSnapshot(actor, pushSnapshot),
@@ -952,6 +980,7 @@ export class ChatRunSocket {
             commandPassthrough: data.allow_command_passthrough,
             reasoningEffort: data.reasoning_effort,
             originSocketId: socket.id,
+            authorize: shared ? async () => { await refreshSessionShare(shared, 'input', data.session_id) } : undefined,
             pushTargetId,
           })
           const queuedPayload = {
@@ -1165,6 +1194,7 @@ export class ChatRunSocket {
         return
       }
       try {
+        if (shared && !buildResumeEvents(this.sessionMap.get(data.session_id)?.events || []).some(entry => entry.event === 'approval.requested' && entry.data?.approval_id === data.approval_id)) throw new Error('Approval does not belong to this session')
         const result = await this.bridge.approvalRespond(data.approval_id, data.choice || 'deny')
         const resolved = Boolean(result.resolved)
         this.emitToSession(socket, data.session_id, 'approval.resolved', {
@@ -1246,6 +1276,7 @@ export class ChatRunSocket {
         return
       }
       try {
+        if (shared && !buildResumeEvents(this.sessionMap.get(data.session_id)?.events || []).some(entry => entry.event === 'clarify.requested' && entry.data?.clarify_id === data.clarify_id)) throw new Error('Clarification does not belong to this session')
         const result = await this.bridge.clarifyRespond(data.clarify_id, data.response || '')
         const resolved = Boolean((result as any)?.resolved)
         this.emitToSession(socket, data.session_id, 'clarify.resolved', {
@@ -1989,9 +2020,9 @@ export class ChatRunSocket {
       taskPlans,
       parentSessionId: sessionDetail?.parent_session_id || null,
       forkPointMessageId: sessionDetail?.fork_point_message_id || null,
-      parentTitle: sessionDetail?.parent_title || null,
-      parentLastMessage: sessionDetail?.parent_last_message || null,
-      parentLastMessageRole: sessionDetail?.parent_last_message_role || null,
+      parentTitle: socket.data?.sessionShare ? null : sessionDetail?.parent_title || null,
+      parentLastMessage: socket.data?.sessionShare ? null : sessionDetail?.parent_last_message || null,
+      parentLastMessageRole: socket.data?.sessionShare ? null : sessionDetail?.parent_last_message_role || null,
       workspace: sessionDetail?.workspace || null,
       model: sessionDetail?.model || '',
       provider: sessionDetail?.provider || '',
@@ -2330,6 +2361,16 @@ export class ChatRunSocket {
   }
 
   private runQueuedItem(socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile = 'default') {
+    if (next.authorize) {
+      const authorize = next.authorize
+      void authorize().then(() => this.runQueuedItem(socket, sessionId, { ...next, authorize: undefined }, fallbackProfile)).catch(() => {
+        const state = this.sessionMap.get(sessionId)
+        if (state) state.isWorking = false
+        this.nsp.to(`session:${sessionId}`).emit('run.failed', { event: 'run.failed', session_id: sessionId, queue_id: next.queue_id, error: 'share_access_denied' })
+        this.dequeueNextQueuedRun(socket, sessionId, fallbackProfile)
+      })
+      return
+    }
     const state = this.sessionMap.get(sessionId)
     if (state) state.runStartedAt = Date.now()
     const skipUserMessage = next.displayInput === null
@@ -2744,7 +2785,7 @@ export class ChatRunSocket {
       state.profile = undefined
       this.sessionMap.delete(sessionId)
     }
-    this.nsp.emit('session.command', {
+    this.nsp.to(['studio-account', `session:${sessionId}`]).emit('session.command', {
       event: 'session.command',
       session_id: sessionId,
       command: 'clear',
@@ -2755,7 +2796,7 @@ export class ChatRunSocket {
       deleted,
       memory_cleared: hadMemoryState,
     })
-    this.nsp.emit('resumed', {
+    this.nsp.to(['studio-account', `session:${sessionId}`]).emit('resumed', {
       session_id: sessionId,
       messages: [],
       messageTotal: 0,
@@ -2772,7 +2813,7 @@ export class ChatRunSocket {
       queueMessages: [],
       queueInsertion: null,
     })
-    this.nsp.emit('run.queued', {
+    this.nsp.to(['studio-account', `session:${sessionId}`]).emit('run.queued', {
       event: 'run.queued',
       session_id: sessionId,
       queue_length: 0,
@@ -2998,7 +3039,7 @@ export class ChatRunSocket {
       { state: { session_id: sessionId, status, timestamp: Date.now(), started_at: state?.runStartedAt,
         reset_progress: event === 'run.started' } }))
 
-    this.nsp.to(`pending-interactions:${profile}`).emit('session.activity', {
+    this.nsp.to([`pending-interactions:${profile}`, `session:${sessionId}`]).emit('session.activity', {
       event: 'session.activity',
       session_id: sessionId,
       status,

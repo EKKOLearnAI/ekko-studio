@@ -1260,6 +1260,24 @@ openapi.paths['/api/coding-agents/dsh/agent-presets/{presetId}/location'] = { po
 // account credential with a local Studio JWT.
 openapi.components.securitySchemes.AppAccessToken = { type: 'apiKey', in: 'header', name: 'X-App-Access-Token', description: 'Cloud App access token, verified against /api/app/auth/me.' }
 openapi.components.securitySchemes.SessionShareToken = { type: 'apiKey', in: 'header', name: 'X-Session-Share-Token', description: 'sst1_ invitation secret; never accepted as a Studio login JWT.' }
+// These existing routes accept a second, session-scoped authentication mechanism.
+const shareReadPaths = ['/api/studio/sessions/{id}', '/api/studio/sessions/{id}/context', '/api/studio/sessions/{id}/usage',
+  '/api/studio/sessions/conversations/{id}/messages', '/api/studio/sessions/conversations/{id}/messages/paginated']
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  for (const [method, operation] of Object.entries(methods)) {
+    let permission = ''
+    if (method === 'get' && shareReadPaths.includes(path)) permission = 'read'
+    if (method === 'post' && path === '/api/studio/chat-run/runs') permission = 'input'
+    if (method === 'get' && ['/api/studio/files/download', '/api/studio/sessions/{id}/export'].includes(path)) permission = 'download'
+    if (method === 'get' && /^\/api\/studio\/sessions\/\{id\}\/(workspace-files\/list|workspace-file\/(read|diff|content)|workspace-run-changes(?:\/\{changeId\}\/files\/\{fileId\})?)$/.test(path)) permission = 'workspaceRead'
+    if (['put workspace-file/write', 'post workspace-file/mkdir', 'delete workspace-file/delete', 'post workspace-file/rename', 'post workspace-file/copy'].includes(`${method} ${path.replace('/api/studio/sessions/{id}/', '')}`)) permission = 'workspaceWrite'
+    if ((method === 'post' && path === '/api/studio/uploads') || /^\/api\/studio\/app-uploads(?:\/\{id\}(?:\/chunks|\/complete)?)?$/.test(path)) permission = 'upload'
+    if (!permission) continue
+    operation.security = [...(operation.security || [{ BearerAuth: [] }]), { AppAccessToken: [], SessionShareToken: [] }]
+    operation['x-session-share-permission'] = permission
+    operation.description = `${operation.description || ''}\nApp session sharing: requires the claimed recipient identity and ${permission} permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.`.trim()
+  }
+}
 const sharePermissionSchema = { type: 'object', additionalProperties: false, properties: Object.fromEntries(
   ['input', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal'].map(key => [key, { type: 'boolean', default: false }]),
 ) }

@@ -12897,11 +12897,15 @@
           "Studio Files"
         ],
         "summary": "Create app-uploads",
-        "description": "POST /api/studio/app-uploads",
+        "description": "POST /api/studio/app-uploads\nApp session sharing: requires the claimed recipient identity and upload permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "open",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -12935,7 +12939,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "upload"
       }
     },
     "/api/studio/app-uploads/{id}": {
@@ -12944,11 +12949,15 @@
           "Studio Files"
         ],
         "summary": "Delete :id",
-        "description": "DELETE /api/studio/app-uploads/:id",
+        "description": "DELETE /api/studio/app-uploads/:id\nApp session sharing: requires the claimed recipient identity and upload permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "abort",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -12968,7 +12977,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "upload"
       }
     },
     "/api/studio/app-uploads/{id}/chunks": {
@@ -12977,11 +12987,15 @@
           "Studio Files"
         ],
         "summary": "Update chunks",
-        "description": "PUT /api/studio/app-uploads/:id/chunks",
+        "description": "PUT /api/studio/app-uploads/:id/chunks\nApp session sharing: requires the claimed recipient identity and upload permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "appendChunk",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -13012,7 +13026,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "upload"
       }
     },
     "/api/studio/app-uploads/{id}/complete": {
@@ -13021,11 +13036,15 @@
           "Studio Files"
         ],
         "summary": "Create complete",
-        "description": "POST /api/studio/app-uploads/:id/complete",
+        "description": "POST /api/studio/app-uploads/:id/complete\nApp session sharing: requires the claimed recipient identity and upload permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "complete",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -13048,7 +13067,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "upload"
       }
     },
     "/api/studio/chat-run/runs": {
@@ -13057,11 +13077,15 @@
           "Chat Run"
         ],
         "summary": "Run chat and wait for completion",
-        "description": "Starts a Ekko Studio chat run through the chat-run transport and waits for a terminal result. Use this from HTTP/MCP callers that cannot consume Socket.IO streams.",
+        "description": "Starts a Ekko Studio chat run through the chat-run transport and waits for a terminal result. Use this from HTTP/MCP callers that cannot consume Socket.IO streams.\nApp session sharing: requires the claimed recipient identity and input permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "runChatOnce",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "requestBody": {
@@ -13278,7 +13302,8 @@
           "504": {
             "description": "Run timed out"
           }
-        }
+        },
+        "x-session-share-permission": "input"
       }
     },
     "/api/studio/files/copy": {
@@ -13358,11 +13383,15 @@
           "Studio Files"
         ],
         "summary": "Get download",
-        "description": "GET /api/studio/files/download",
+        "description": "GET /api/studio/files/download\nApp session sharing: requires the claimed recipient identity and download permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "download",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -13404,7 +13433,8 @@
               ]
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "download"
       }
     },
     "/api/studio/files/list": {
@@ -18112,11 +18142,15 @@
           "Sessions"
         ],
         "summary": "Get messages",
-        "description": "GET /api/studio/sessions/conversations/:id/messages",
+        "description": "GET /api/studio/sessions/conversations/:id/messages\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "getConversationMessages",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -18150,7 +18184,8 @@
               ]
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "read"
       }
     },
     "/api/studio/sessions/conversations/{id}/messages/paginated": {
@@ -18159,11 +18194,15 @@
           "Sessions"
         ],
         "summary": "Get paginated",
-        "description": "GET /api/studio/sessions/conversations/:id/messages/paginated",
+        "description": "GET /api/studio/sessions/conversations/:id/messages/paginated\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "getConversationMessagesPaginated",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -18202,7 +18241,8 @@
               "type": "integer"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "read"
       }
     },
     "/api/studio/sessions/count": {
@@ -18506,11 +18546,15 @@
           "Sessions"
         ],
         "summary": "Get :id",
-        "description": "GET /api/studio/sessions/:id",
+        "description": "GET /api/studio/sessions/:id\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "get",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -18533,7 +18577,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "read"
       },
       "delete": {
         "tags": [
@@ -18657,11 +18702,15 @@
           "Sessions"
         ],
         "summary": "Get context",
-        "description": "GET /api/studio/sessions/:id/context",
+        "description": "GET /api/studio/sessions/:id/context\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "getContext",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -18684,7 +18733,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "read"
       }
     },
     "/api/studio/sessions/{id}/export": {
@@ -18693,11 +18743,15 @@
           "Sessions"
         ],
         "summary": "Get export",
-        "description": "GET /api/studio/sessions/:id/export",
+        "description": "GET /api/studio/sessions/:id/export\nApp session sharing: requires the claimed recipient identity and download permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "exportSession",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -18743,7 +18797,8 @@
               ]
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "download"
       }
     },
     "/api/studio/sessions/{id}/model": {
@@ -19065,11 +19120,15 @@
           "Sessions"
         ],
         "summary": "Get usage",
-        "description": "GET /api/studio/sessions/:id/usage",
+        "description": "GET /api/studio/sessions/:id/usage\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "usageSingle",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19092,7 +19151,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "read"
       }
     },
     "/api/studio/sessions/{id}/workspace": {
@@ -19152,11 +19212,15 @@
           "Sessions"
         ],
         "summary": "Get content",
-        "description": "GET /api/studio/sessions/:id/workspace-file/content",
+        "description": "GET /api/studio/sessions/:id/workspace-file/content\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "readWorkspaceFileContent",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19203,7 +19267,8 @@
               "type": "boolean"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/copy": {
@@ -19212,11 +19277,15 @@
           "Sessions"
         ],
         "summary": "Create copy",
-        "description": "POST /api/studio/sessions/:id/workspace-file/copy",
+        "description": "POST /api/studio/sessions/:id/workspace-file/copy\nApp session sharing: requires the claimed recipient identity and workspaceWrite permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "copyWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19259,7 +19328,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "workspaceWrite"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/delete": {
@@ -19268,11 +19338,15 @@
           "Sessions"
         ],
         "summary": "Delete delete",
-        "description": "DELETE /api/studio/sessions/:id/workspace-file/delete",
+        "description": "DELETE /api/studio/sessions/:id/workspace-file/delete\nApp session sharing: requires the claimed recipient identity and workspaceWrite permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "deleteWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19292,7 +19366,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceWrite"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/diff": {
@@ -19301,11 +19376,15 @@
           "Sessions"
         ],
         "summary": "Get diff",
-        "description": "GET /api/studio/sessions/:id/workspace-file/diff",
+        "description": "GET /api/studio/sessions/:id/workspace-file/diff\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "diffWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19336,7 +19415,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/mkdir": {
@@ -19345,11 +19425,15 @@
           "Sessions"
         ],
         "summary": "Create mkdir",
-        "description": "POST /api/studio/sessions/:id/workspace-file/mkdir",
+        "description": "POST /api/studio/sessions/:id/workspace-file/mkdir\nApp session sharing: requires the claimed recipient identity and workspaceWrite permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "mkdirWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19388,7 +19472,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "workspaceWrite"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/read": {
@@ -19397,11 +19482,15 @@
           "Sessions"
         ],
         "summary": "Get read",
-        "description": "GET /api/studio/sessions/:id/workspace-file/read",
+        "description": "GET /api/studio/sessions/:id/workspace-file/read\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "readWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19432,7 +19521,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/rename": {
@@ -19441,11 +19531,15 @@
           "Sessions"
         ],
         "summary": "Create rename",
-        "description": "POST /api/studio/sessions/:id/workspace-file/rename",
+        "description": "POST /api/studio/sessions/:id/workspace-file/rename\nApp session sharing: requires the claimed recipient identity and workspaceWrite permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "renameWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19488,7 +19582,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "workspaceWrite"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/write": {
@@ -19497,11 +19592,15 @@
           "Sessions"
         ],
         "summary": "Update write",
-        "description": "PUT /api/studio/sessions/:id/workspace-file/write",
+        "description": "PUT /api/studio/sessions/:id/workspace-file/write\nApp session sharing: requires the claimed recipient identity and workspaceWrite permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "writeWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19544,7 +19643,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "workspaceWrite"
       }
     },
     "/api/studio/sessions/{id}/workspace-files/list": {
@@ -19553,11 +19653,15 @@
           "Sessions"
         ],
         "summary": "Get list",
-        "description": "GET /api/studio/sessions/:id/workspace-files/list",
+        "description": "GET /api/studio/sessions/:id/workspace-files/list\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "listWorkspaceFiles",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19588,7 +19692,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{id}/workspace-run-changes": {
@@ -19597,11 +19702,15 @@
           "Sessions"
         ],
         "summary": "Get workspace-run-changes",
-        "description": "GET /api/studio/sessions/:id/workspace-run-changes",
+        "description": "GET /api/studio/sessions/:id/workspace-run-changes\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "listWorkspaceRunChanges",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19624,7 +19733,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{id}/workspace-run-changes/{changeId}/files/{fileId}": {
@@ -19633,11 +19743,15 @@
           "Sessions"
         ],
         "summary": "Get :fileId",
-        "description": "GET /api/studio/sessions/:id/workspace-run-changes/:changeId/files/:fileId",
+        "description": "GET /api/studio/sessions/:id/workspace-run-changes/:changeId/files/:fileId\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "getWorkspaceRunChangeFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -19676,7 +19790,8 @@
               "type": "integer"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{sessionId}/shares": {
@@ -21130,11 +21245,15 @@
           "Studio Files"
         ],
         "summary": "Create uploads",
-        "description": "POST /api/studio/uploads",
+        "description": "POST /api/studio/uploads\nApp session sharing: requires the claimed recipient identity and upload permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "handleUpload",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -21147,7 +21266,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "x-session-share-permission": "upload"
       }
     },
     "/api/studio/usage/stats": {
