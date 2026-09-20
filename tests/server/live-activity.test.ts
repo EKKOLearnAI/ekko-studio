@@ -41,6 +41,18 @@ describe('Studio Live Activity orchestration', () => {
   await consume(e)
   expect(JSON.parse(fetchMock.mock.calls[0][1].body).content_state.title).toBe('Build App')
  })
+
+ it.each([
+  ['coding_agent','claude-code','claude'],['coding_agent','codex','codex'],
+  ['coding_agent','pi','pi'],['coding_agent','grok','grok'],
+  ['coding_agent','opencode','opencode'],['coding_agent','dsh','deepseek'],
+  ['chat','bridge','hermes'],['chat','ekko-agent','ekko'],
+ ])('preserves title and normalized agent for %s / %s',async(source,runtime,expected)=>{
+  const consume=await setup(), e=event('chat.plan.updated')
+  e.source=source;e.chat.agent=runtime
+  await consume(e)
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body).content_state).toMatchObject({title:'Build App',agent:expected})
+ })
  it('does not start cards for terminal-only or unknown-total work',async()=>{const consume=await setup();await consume(event('chat.run.completed'));await consume({...event('chat.plan.updated'),chat:{task_plan:{...event('chat.plan.updated').chat.task_plan,progress:{total:0,completed:0}}}});expect(fetchMock).not.toHaveBeenCalled()})
 })
 
