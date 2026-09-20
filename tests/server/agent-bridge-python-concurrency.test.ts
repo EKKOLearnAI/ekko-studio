@@ -1360,6 +1360,57 @@ assert [(msg["role"], msg["content"]) for msg in messages] == [
 `)
   })
 
+  it('reports the gateway approval outcome on the broadcast approval.resolved event', () => {
+    runPython(String.raw`
+${harness}
+
+pool, _fake_db = make_pool()
+
+def notify_gateway_approval(session_id, run_id, request_id, queue_request):
+    session = bridge.AgentSession(session_id=session_id, agent=object(), current_run_id=run_id)
+    record = bridge.RunRecord(run_id=run_id, session_id=session_id)
+    with pool._lock:
+        pool._sessions[session_id] = session
+        pool._runs[run_id] = record
+    if queue_request:
+        approval.queue_gateway_approval(session_id, request_id)
+    pool._gateway_approval_notify(session_id)({
+        "request_id": request_id,
+        "command": "printf harmless gateway",
+        "description": "harmless test command",
+    })
+    approval_id = next(
+        key for key, value in pool._gateway_approval_requests.items() if value[0] == session_id
+    )
+    return record, approval_id
+
+# A runtime that queued the request resolves, and the event says so.
+record, approval_id = notify_gateway_approval("session-ok", "run-ok", "request-ok", True)
+result = pool.respond_approval(approval_id, "once")
+assert result["resolved"] is True, result
+resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
+assert len(resolved_events) == 1, resolved_events
+assert resolved_events[0]["resolved"] is True, resolved_events[0]
+assert resolved_events[0]["choice"] == "once", resolved_events[0]
+
+# A runtime that never registered the request does not resolve, and the event says so.
+record, approval_id = notify_gateway_approval("session-stale", "run-stale", "request-stale", False)
+result = pool.respond_approval(approval_id, "once")
+assert result["resolved"] is False, result
+resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
+assert len(resolved_events) == 1, resolved_events
+assert resolved_events[0]["resolved"] is False, resolved_events[0]
+
+# A runtime older than v0.20.5 emits no request_id at all: same honest outcome.
+record, approval_id = notify_gateway_approval("session-legacy", "run-legacy", "", False)
+result = pool.respond_approval(approval_id, "deny")
+assert result["resolved"] is False, result
+resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
+assert len(resolved_events) == 1, resolved_events
+assert resolved_events[0]["resolved"] is False, resolved_events[0]
+`)
+  })
+
   it('remembers execute_code approvals inside the bridge without patching upstream files', () => {
     runPython(String.raw`
 ${harness}
