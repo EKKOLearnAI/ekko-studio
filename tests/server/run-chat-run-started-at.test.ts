@@ -6,6 +6,19 @@ const handleCodingAgentRunMock = vi.hoisted(() => vi.fn(async () => {}))
 const loadSessionStateFromDbMock = vi.hoisted(() => vi.fn())
 const ensureReadyMock = vi.hoisted(() => vi.fn())
 const getRuntimeStateMock = vi.hoisted(() => vi.fn())
+const bindAppEventSubscriptionMock = vi.hoisted(() => vi.fn())
+const publishAppStateMock = vi.hoisted(() => vi.fn())
+const getSessionTaskPlansMock = vi.hoisted(() => vi.fn(() => [] as any[]))
+vi.mock('../../packages/server/src/modules/studio/services/webhooks/app-events', () => ({
+  bindAppEventSubscription: bindAppEventSubscriptionMock,
+}))
+vi.mock('../../packages/server/src/modules/studio/services/webhooks/app-event-state', async importOriginal => ({
+  ...await importOriginal<typeof import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')>(),
+  publishAppState: publishAppStateMock,
+}))
+vi.mock('../../packages/server/src/modules/studio/services/task-plans', () => ({
+  getSessionTaskPlans: getSessionTaskPlansMock,
+}))
 const userCanAccessProfileMock = vi.hoisted(() => vi.fn((_user: unknown, _profile: string) => true))
 const getSessionMock = vi.hoisted(() => vi.fn((sessionId?: string) => sessionId
   ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai' }
@@ -137,6 +150,9 @@ function makeServerHarness() {
 describe('ChatRunSocket reports when the run started', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    bindAppEventSubscriptionMock.mockClear()
+    publishAppStateMock.mockClear()
+    getSessionTaskPlansMock.mockReset().mockReturnValue([])
     ensureReadyMock.mockReset()
     getRuntimeStateMock.mockReset()
     bridgeMock.statusIfLoaded.mockReset()
@@ -164,6 +180,35 @@ describe('ChatRunSocket reports when the run started', () => {
     const resumed = socket.emit.mock.calls.find((call: any[]) => call[0] === 'resumed')
     expect(resumed).toBeTruthy()
     expect(resumed![1]).toMatchObject({ isWorking: true, runStartedAt: startedAt })
+  })
+
+  it.each([
+    { activeRunMarker: 'turn-current', responseRun: { runMarker: 'older-response' } },
+    { responseRun: { runMarker: 'turn-current' } },
+  ])('uses the task card turn ID for live progress and reconnect snapshots: %j', async turnState => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const state = { messages: [], events: [], queue: [], isWorking: true, profile: 'default',
+      runId: 'persistent-agent-instance', ...turnState }
+    ;(server as any).sessionMap.set('s-progress', state)
+    const card = { session_id: 's-progress', run_id: 'turn-current', plan_id: 'card-current', revision: 2,
+      execution_state: 'running', created_at: 1, updated_at: 2,
+      plan: [{ id: 'inspect', step: 'Inspect', status: 'completed' }, { id: 'verify', step: 'Verify', status: 'in_progress' }] }
+    getSessionTaskPlansMock.mockReturnValue([card, { ...card, plan_id: 'card-old', run_id: 'turn-old' }])
+
+    ;(server as any).onConnection(socket)
+    const snapshot = bindAppEventSubscriptionMock.mock.calls[0][1]({ id: 1 }, 'default')
+    expect(snapshot.map((event: any) => event.type)).toEqual(['chat.run.updated', 'chat.plan.updated'])
+    expect(snapshot[0].subject.run_id).toBe(card.run_id)
+    expect(snapshot[1].chat.task_plan).toMatchObject({ run_id: card.run_id, progress: { completed: 1, total: 2 } })
+    expect(getSessionTaskPlansMock).toHaveBeenCalledWith('s-progress', [], true, card.run_id)
+
+    ;(server as any).emitSessionActivity('default', 'run.started', { session_id: 's-progress', run_id: 'response-id' })
+    expect(publishAppStateMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      subject: { session_id: 's-progress', run_id: card.run_id },
+      payload: { state: expect.objectContaining({ status: 'running', reset_progress: true }) },
+    }))
   })
 
   it('leaves it unset for a session that is not working', async () => {

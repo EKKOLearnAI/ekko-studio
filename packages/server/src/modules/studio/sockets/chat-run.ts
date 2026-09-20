@@ -733,7 +733,9 @@ export class ChatRunSocket {
           if (!state.isWorking || (state.profile || getSession(sessionId)?.profile || 'default') !== profile) continue
           const source = state.source || getSession(sessionId)?.source
           if (source === 'group_chat') continue
-          const subject = { session_id: sessionId, run_id: state.runId, workflow_id: state.webhookWorkflowId }
+          // Task cards belong to a turn; coding-agent runId can span many turns.
+          const runId = state.activeRunMarker || state.responseRun?.runMarker || state.runId
+          const subject = { session_id: sessionId, run_id: runId, workflow_id: state.webhookWorkflowId }
           if (source !== 'workflow') result.push(stateEvent('chat.run.updated', profile, subject,
             { state: { session_id: sessionId, status: 'running', timestamp: Date.now(), started_at: state.runStartedAt } }))
           const pending = new Map<string, BusinessEvent>()
@@ -752,8 +754,8 @@ export class ChatRunSocket {
               ...(event.startsWith('approval.') ? { approval_id: id } : { clarification_id: id }) }, data))
           }
           result.push(...pending.values())
-          for (const card of getSessionTaskPlans(sessionId, [], true, state.runId)) {
-            if (card.run_id !== state.runId) continue
+          for (const card of getSessionTaskPlans(sessionId, [], true, runId)) {
+            if (card.run_id !== runId) continue
             const event = planStateEvent(profile, subject, card)
             if (event) result.push(event)
           }
@@ -3034,8 +3036,9 @@ export class ChatRunSocket {
 
     const state = this.sessionMap.get(sessionId)
     const source = state?.source || getSession(sessionId)?.source
+    const runId = state?.activeRunMarker || state?.responseRun?.runMarker || payload.run_marker || state?.runId || payload.run_id
     if (source !== 'group_chat' && source !== 'workflow') publishAppState(stateEvent('chat.run.updated', profile,
-      { session_id: sessionId, run_id: state?.runId || payload.run_id },
+      { session_id: sessionId, run_id: runId },
       { state: { session_id: sessionId, status, timestamp: Date.now(), started_at: state?.runStartedAt,
         reset_progress: event === 'run.started' } }))
 
