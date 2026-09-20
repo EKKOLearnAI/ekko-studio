@@ -1286,7 +1286,7 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
 const sharePermissionSchema = { type: 'object', additionalProperties: false, properties: Object.fromEntries(
   ['input', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal', 'switchModel', 'reasoningEffort', 'switchWorkspace'].map(key => [key, { type: 'boolean', default: false }]),
 ) }
-sharePermissionSchema.properties.switchModel.description = 'Change the shared session model using the scoped share-models catalog. Does not grant reasoning-effort changes.'
+sharePermissionSchema.properties.switchModel.description = 'Change the shared session model using the scoped share-models catalog, and edit the current Hermes/Ekko model context limit. Does not grant reasoning-effort changes.'
 sharePermissionSchema.properties.reasoningEffort.description = 'Change the shared session reasoning effort independently of model selection.'
 sharePermissionSchema.properties.switchWorkspace.description = 'Select an existing directory within the original workspace, or an explicit extraPaths grant when outsideWorkspace is enabled. Does not grant filesystem read/write or expand the share scope.'
 for (const [suffix, description] of [
@@ -1309,6 +1309,25 @@ const shareChangeSchema = { type: 'object', additionalProperties: false, propert
   } } },
 } }
 const shareBody = schema => ({ required: true, content: { 'application/json': { schema } } })
+const shareContextPath = openapi.paths['/api/studio/sessions/{id}/share-context-length']
+for (const method of ['get', 'put']) {
+  const operation = shareContextPath[method]
+  operation.operationId = method === 'get' ? 'getSessionShareContextLength' : 'setSessionShareContextLength'
+  operation.security = [{ AppAccessToken: [], SessionShareToken: [] }]
+  operation['x-session-share-permission'] = method === 'get' ? 'read' : 'switchModel'
+  operation.description = 'Read or edit the current shared Hermes/Ekko model context limit. Profile and session are server-bound. Writes require switchModel and matching current provider/model; the value is model-level within the shared Profile. Coding Agents do not support this operation.'
+  operation.responses['200'] = { description: 'Current context limit', content: { 'application/json': { schema: {
+    type: 'object', required: ['context_length'], properties: { context_length: { type: 'integer', minimum: 1 } },
+  } } } }
+  operation.responses['403'] = { description: 'Permission denied or session/profile mismatch' }
+  operation.responses['410'] = { description: 'Share expired or revoked' }
+}
+shareContextPath.put.requestBody = shareBody({ type: 'object', additionalProperties: false,
+  required: ['provider', 'model', 'context_limit'], properties: {
+    provider: { type: 'string', minLength: 1 }, model: { type: 'string', minLength: 1 },
+    context_limit: { type: 'integer', minimum: 1000, maximum: 10000000 },
+  },
+})
 openapi.components.schemas.SessionShare = {
   type: 'object', additionalProperties: false,
   properties: {

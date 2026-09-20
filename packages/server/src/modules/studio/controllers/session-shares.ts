@@ -145,3 +145,19 @@ export async function workspaces(ctx: Context): Promise<void> {
     ctx.body = await sessionShareWorkspaces(ctx.state.sessionShare, ctx.query.path)
   })
 }
+
+export async function contextLength(ctx: Context): Promise<void> {
+  await respond(ctx, async () => {
+    if (!ctx.state.sessionShare) throw new SessionShareError('share_recipient_required')
+    const { sessionShareContextLength } = await import('../services/session-shares/settings')
+    ctx.body = sessionShareContextLength(ctx.state.sessionShare)
+  })
+}
+
+export async function setContextLength(ctx: Context): Promise<void> {
+  await respond(ctx, async () => {
+    if (!ctx.state.sessionShare) throw new SessionShareError('share_recipient_required')
+    const { setSessionShareContextLength } = await import('../services/session-shares/settings')
+    ctx.body = setSessionShareContextLength(ctx.state.sessionShare, ctx.request.body)
+  })
+}

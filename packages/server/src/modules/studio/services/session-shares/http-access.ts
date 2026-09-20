@@ -16,6 +16,8 @@ export function sessionShareHttpOperation(method: string, path: string, query: R
     const suffix = match[2] || ''
     if (method === 'GET' && ['', 'context', 'usage'].includes(suffix)) return { action: 'read', sessionId }
     if (method === 'GET' && suffix === 'share-models') return { action: 'switchModel', sessionId }
+    if (method === 'GET' && suffix === 'share-context-length') return { action: 'read', sessionId }
+    if (method === 'PUT' && suffix === 'share-context-length') return { action: 'switchModel', sessionId }
     if (method === 'GET' && suffix === 'share-workspaces') return { action: 'switchWorkspace', sessionId }
     if (method === 'POST' && suffix === 'model') return { action: 'switchModel', sessionId }
     if (method === 'POST' && suffix === 'reasoning-effort') return { action: 'reasoningEffort', sessionId }

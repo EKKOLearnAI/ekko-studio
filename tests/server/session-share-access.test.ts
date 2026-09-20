@@ -57,6 +57,11 @@ beforeEach(async () => {
     getSessionAvailableModelGroups: async () => [{ provider: 'custom:test', label: 'Test', models: ['model-a', 'disabled'],
       api_key: 'private-provider-key', base_url: 'https://private-provider.test', api_mode: 'chat_completions', model_meta: { disabled: { disabled: true } } }],
     notifyHermesSessionModelChanged: vi.fn(),
+    getHermesModelContextLength: ({ profile, provider, model }: any) => {
+      const row = db.prepare('SELECT context_limit FROM model_context WHERE profile = ? AND provider = ? AND model = ?')
+        .get(profile, provider || '', model || '') as any
+      return row?.context_limit || 128_000
+    },
   }))
   vi.doMock('../../packages/server/src/modules/studio/public/chat-agent-runtime', async importOriginal => ({
     ...await importOriginal<any>(),
@@ -128,6 +133,43 @@ async function socket(token: string) {
 function once(socket: Socket, event: string): Promise<any> { return new Promise(resolve => socket.once(event, resolve)) }
 
 describe('existing APIs with session share credentials', () => {
+  it('reads context limits with read access and edits only the bound model with switchModel access', async () => {
+    const { updateSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    const { readModelContextRecord } = await import('../../packages/server/src/modules/studio/public/provider-context')
+    updateSession('s1', { provider: 'custom:test', model: 'model-a' })
+    const readonly = await issue()
+    const editor = await issue({ switchModel: true })
+    const path = '/api/studio/sessions/s1/share-context-length'
+    const input = { provider: 'custom:test', model: 'model-a', context_limit: 64_000 }
+    expect(await request(readonly.token, path)).toMatchObject({ status: 200, body: { context_length: 128_000 } })
+    expect((await request(readonly.token, path, 'PUT', input)).status).toBe(403)
+    expect((await request(editor.token, '/api/studio/sessions/s2/share-context-length', 'PUT', input)).status).toBe(403)
+    expect((await request(editor.token, '/api/hermes/model-context/custom%3Atest/model-a', 'PUT', input)).status).toBe(403)
+    for (const invalid of [{ ...input, context_limit: 999 }, { ...input, context_limit: 10_000_001 },
+      { ...input, context_limit: 1234.5 }, { ...input, context_limit: '64000' },
+      { ...input, model: 'other' }, { ...input, provider: 'other' }, { ...input, profile: 'other' }]) {
+      expect((await request(editor.token, path, 'PUT', invalid)).status).toBeGreaterThanOrEqual(400)
+    }
+    expect(await request(editor.token, path, 'PUT', input)).toMatchObject({ status: 200, body: { context_length: 64_000 } })
+    expect(readModelContextRecord('default', 'custom:test', 'model-a')).toMatchObject({ available: true, row: { context_limit: 64_000 } })
+    expect(await request(readonly.token, path)).toMatchObject({ status: 200, body: { context_length: 64_000 } })
+    updateSession('s1', { model: 'model-b' })
+    expect((await request(editor.token, path, 'PUT', input)).status).toBe(400)
+    updateSession('s1', { model: 'model-a', agent: 'ekko-agent', source: 'coding_agent' })
+    expect((await request(editor.token, path, 'PUT', input)).status).toBe(200)
+    for (const agent of ['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh']) {
+      updateSession('s1', { agent, source: 'coding_agent' } as any)
+      expect((await request(editor.token, path)).status).toBe(400)
+      expect((await request(editor.token, path, 'PUT', input)).status).toBe(400)
+    }
+    updateSession('s1', { agent: 'hermes', source: 'cli' })
+    await service.change(7, 's1', editor.record.id, { permissions: { switchModel: false } })
+    expect((await request(editor.token, path, 'PUT', input)).status).toBe(403)
+    expect((await request(editor.token, path)).status).toBe(200)
+    await service.change(7, 's1', editor.record.id, { revoke: true })
+    expect((await request(editor.token, path)).status).toBe(410)
+  })
+
   it('authenticates on the production chat namespace without leaking global snapshots or broadcasts', async () => {
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const server = new ChatRunSocket(io) as any

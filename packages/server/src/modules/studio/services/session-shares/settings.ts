@@ -1,10 +1,44 @@
 import { readdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { SessionShareError, type SessionShareAction } from '../../contracts/session-shares'
-import { getSessionAvailableModelGroups } from '../../public/session-agent-runtime'
+import { getHermesModelContextLength, getSessionAvailableModelGroups } from '../../public/session-agent-runtime'
+import { upsertModelContextRecord } from '../../public/provider-context'
 import { getSession } from '../../repositories/session-store'
 import { authorizeSessionShare, type SessionShareAccess } from './access'
 import { sessionShareService } from './service'
+
+function contextSession(access: SessionShareAccess, action: 'read' | 'switchModel') {
+  const share = authorizeSessionShare(access, action)
+  const session = getSession(share.session_id)
+  if (!session) throw new SessionShareError('share_session_unavailable', 404)
+  const agent = String(session.agent || 'hermes').toLowerCase()
+  if (agent !== 'ekko-agent' && (session.source === 'coding_agent' || !['hermes', ''].includes(agent))) {
+    throw new SessionShareError('share_context_limit_unsupported', 400)
+  }
+  return { session, profile: share.profile }
+}
+
+export function sessionShareContextLength(access: SessionShareAccess) {
+  const { session, profile } = contextSession(access, 'read')
+  return { context_length: getHermesModelContextLength({ profile, provider: session.provider, model: session.model }) }
+}
+
+export function setSessionShareContextLength(access: SessionShareAccess, input: any) {
+  const { session, profile } = contextSession(access, 'switchModel')
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+    || Object.keys(input).some(key => !['provider', 'model', 'context_limit'].includes(key))
+    || !Number.isInteger(input.context_limit) || input.context_limit < 1000 || input.context_limit > 10_000_000) {
+    throw new SessionShareError('share_invalid_request', 400)
+  }
+  // The recipient can edit only the model currently selected on the shared session.
+  // Requiring its identity also rejects a save from an editor opened before a model switch.
+  if (!session.provider || !session.model || input.provider !== session.provider || input.model !== session.model) {
+    throw new SessionShareError('share_model_unavailable', 400)
+  }
+  const result = upsertModelContextRecord(profile, session.provider, session.model, input.context_limit)
+  if (!result.available) throw new SessionShareError('share_context_limit_unavailable', 503)
+  return { context_length: input.context_limit }
+}
 
 /** Return selectable labels/IDs only; provider credentials never leave Studio. */
 export async function sessionShareModels(access: SessionShareAccess) {
