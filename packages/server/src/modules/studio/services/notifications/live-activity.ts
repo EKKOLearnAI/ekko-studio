@@ -19,7 +19,13 @@ function content(event: BusinessEvent, state: LiveActivityRunRecord, ending = fa
   const waiting = event.type.includes('approval.requested') || event.type.includes('clarification.requested'), failed = event.type.endsWith('.failed')
   return { title: state.title, status: ending ? failed ? 'failed' : 'completed' : waiting ? 'waiting_confirmation' : 'running',
     currentStep: bounded(ending ? failed ? '任务失败' : '任务完成' : waiting ? '等待确认' : inProgress?.step || '任务正在运行', 80),
-    completedSteps: state.completed, totalSteps: state.total }
+    completedSteps: state.completed, totalSteps: state.total, agent: agent(event) }
+}
+function agent(event: BusinessEvent): string {
+  const raw = bounded(event.chat?.agent || (event.source === 'chat' ? getSession(event.subject.session_id || '')?.agent : ''), 32).toLowerCase()
+  const aliases: Record<string, string> = { 'claude-code': 'claude', 'ekko-agent': 'ekko', bridge: 'hermes', dsh: 'deepseek' }
+  const normalized = aliases[raw] || raw
+  return ['claude', 'codex', 'hermes', 'ekko', 'pi', 'grok', 'opencode', 'deepseek'].includes(normalized) ? normalized : 'ekko'
 }
 function title(event: BusinessEvent): string {
   if (event.source === 'chat') return bounded(getSession(event.subject.session_id || '')?.title, 40) || 'Ekko Studio 任务'
