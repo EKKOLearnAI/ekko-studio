@@ -1,13 +1,15 @@
 # System notification content preview — draft
 
-The consumer retains Studio-user/device permission routing. By default it still sends blank title/body. Explicit server configuration `STUDIO_PUSH_CONTENT_PREVIEW=1` opts into display title/body transmission. Deployments accepting the lock-screen privacy tradeoff must set this environment value; otherwise the gateway intentionally renders generic fallback text.
+The consumer retains Studio-user/device permission routing. Preview is enabled by default when `STUDIO_PUSH_CONTENT_PREVIEW` is unset; `1` explicitly enables it, and `0` disables it and sends blank title/body for generic gateway fallback. Existing deployments explicitly configured with `0` remain opted out. Restart Studio after changing this environment value.
+
+**Privacy change:** session titles and bounded current-reply summaries are sent through the push gateway and APNs and may appear on the lock screen according to iOS preview settings. This is not a sensitive-data filter; use `0` for deployments that must not transmit content.
 
 Uses only the existing appEventEnvelope display fields (content for chat, preview for group), 40/160 grapheme limits, basic Markdown cleanup. No arbitrary raw error/command fallback. A visible AI reply may still contain private material; these formatting rules are NOT a sensitive-data classifier.
 
 Known incomplete requirements:
 - Gateway contract must confirm honoring title/body, empty-field fallback and end-to-end payload size enforcement. This repository does not own the APNs final serializer.
 - Chat APNs now uses only current payload.output (never historical session preview), with full-text cleanup before truncation, including unclosed fenced blocks. Android/group event display formatting still needs separate full-pipeline checks.
-- Consent/settings UX, per-user/device preview setting and full privacy policy are not yet implemented; environment opt-in is for staged integration only.
+- Consent/settings UX, per-user/device preview setting and full privacy policy are not yet implemented; the deployment-wide environment switch is not a per-user consent control.
 - Real iOS and Android content/routing acceptance is not done.
 - Live Activity delivery, tokens and state are separate and not part of this PR.
 

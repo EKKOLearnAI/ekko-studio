@@ -99,6 +99,13 @@ describe('user device APNs delivery', () => {
     expect(body).not.toContain('PRIVATE')
     expect(Buffer.byteLength(body, 'utf8')).toBeLessThan(4096)
   })
+  it('defaults to current title and reply when the preview setting is absent', async () => {
+    vi.stubEnv('STUDIO_PUSH_CONTENT_PREVIEW', undefined)
+    await register()
+    const consume = await consumer()
+    await consume(event({ payload: { run_id: 'runtime-a', output: '**Current reply**' } }))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).notification).toEqual({ title: 'Saved task', body: 'Current reply' })
+  })
   it('opt-in sends current final reply without historical preview fallback', async () => {
     vi.stubEnv('STUDIO_PUSH_CONTENT_PREVIEW', '1')
     await register()
