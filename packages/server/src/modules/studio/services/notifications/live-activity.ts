@@ -73,7 +73,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
     if (action === 'start') body.ekko_run = { schema_version: 1, studio_device_id: registration.studio_device_id,
       cloud_user_id: registration.cloud_user_id, profile: event.profile, run_kind: runKind(event), run_id: event.subject.run_id || event.id,
       [runKind(event) === 'chat' ? 'session_id' : runKind(event) === 'group' ? 'room_id' : 'workflow_id']: subjectId(event) }
-    if (action === 'end') body.dismissal_at = now; else body.stale_at = now + 300
+    if (action === 'end') body.dismissal_at = now + (terminal(event.type) ? 60 : 0); else body.stale_at = now + 300
     const url = new URL('/push/v1/live-activities/send', appRelayUrlForRoute(await getAppRelayRoute()))
     const request = { method: 'POST', redirect: 'error' as const,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registration.push_token}` }, body: JSON.stringify(body) }
@@ -122,9 +122,9 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
         const user = findUserById(device.user_id); if (!user || user.status !== 'active' || !canReceiveAppEvent(user, event)) return
         let registration: Record<string, any>; try { registration = JSON.parse(decryptPushSecret(device.ciphertext)) } catch { console.warn('[live-activity] registration_unreadable', { connection: device.connection_id }); return }
         const key = stableKey(event, device.destination_id)
-        // A new run is authoritative. Do not let the previous turn's receipt poll block this turn.
+        // A terminal event must not wait behind an update receipt poll; new turns also supersede old polls.
         const activePoll = polling.get(key)
-        if (activePoll && activePoll.runId !== (event.subject.run_id || '')) activePoll.controller.abort()
+        if (activePoll && (terminal(event.type) || activePoll.runId !== (event.subject.run_id || ''))) activePoll.controller.abort()
         await serialized(key, async () => {
           const legacy = listActiveLiveActivityRuns(device.destination_id)
             .filter(row => row.run_key.startsWith(legacyKeyPrefix(event, device.destination_id)))
