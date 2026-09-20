@@ -22,6 +22,8 @@ const clients: Socket[] = []
 const sender = { id: 101, name: 'Alice' }
 const recipient = { id: 202, name: 'Bob' }
 const delivered = vi.fn()
+const speechSynthesize = vi.fn()
+const speechTranscribe = vi.fn()
 
 beforeEach(async () => {
   vi.resetModules()
@@ -31,6 +33,10 @@ beforeEach(async () => {
   identityValid = true
   invalidIdentityTokens.clear()
   delivered.mockClear()
+  speechSynthesize.mockReset().mockResolvedValue({ audio: Buffer.from('mp3-audio'), contentType: 'audio/mpeg', engine: 'test', provider: 'edge' })
+  speechTranscribe.mockReset().mockResolvedValue({ text: 'recognized speech', provider: 'openai', model: 'test', durationMs: 20 })
+  vi.doMock('../../packages/server/src/modules/studio/services/voice/tts/providers', () => ({ getTtsProvider: () => ({ synthesize: speechSynthesize }) }))
+  vi.doMock('../../packages/server/src/modules/studio/services/voice/stt', async importOriginal => ({ ...await importOriginal<any>(), transcribeWithProvider: speechTranscribe }))
   processes.length = 0
   terminalService = undefined
   vi.doMock('../../packages/server/src/modules/studio/public/profile-config', () => ({ getProfileDir: () => root, getActiveProfileDir: () => root, getActiveProfileName: () => 'default', listProfileNamesFromDisk: () => ['default'] }))
@@ -104,7 +110,7 @@ afterEach(async () => {
   if (io) await new Promise<void>(resolve => io.close(() => resolve()))
   db.close()
   await rm(root, { recursive: true, force: true })
-  for (const path of ['infrastructure/database/index', 'repositories/users-store', 'services/files/upload-paths', 'services/session-shares/app-identity', 'public/profile-config', 'public/process-tree', 'public/chat-agent-runtime', 'public/session-agent-runtime']) {
+  for (const path of ['infrastructure/database/index', 'repositories/users-store', 'services/files/upload-paths', 'services/session-shares/app-identity', 'public/profile-config', 'public/process-tree', 'public/chat-agent-runtime', 'public/session-agent-runtime', 'services/voice/tts/providers', 'services/voice/stt']) {
     vi.doUnmock(`../../packages/server/src/modules/studio/${path}`)
   }
   vi.doUnmock('../../packages/server/src/modules/hermes/services/profiles/profile')
@@ -396,5 +402,69 @@ describe('existing APIs with session share credentials', () => {
     expect((await denied).error).toBe('share_app_login_required')
     expect(delivered).not.toHaveBeenCalled()
     await disconnected
+  })
+})
+
+describe('shared speech authorization', () => {
+  const synthPath = '/api/studio/sessions/s1/share-voice/synthesize'
+  const transcribePath = '/api/studio/sessions/s1/share-voice/transcribe'
+  const audioBody = '--voice\r\nContent-Disposition: form-data; name="audio"; filename="speech.mp3"\r\nContent-Type: audio/mpeg\r\n\r\naudio-bytes\r\n--voice--\r\n'
+  const audioHeaders = { 'Content-Type': 'multipart/form-data; boundary=voice' }
+
+  it('defaults to denied and bounds voice grants to one session without exposing settings', async () => {
+    const denied = await issue({ input: true, upload: true })
+    for (const path of [synthPath, transcribePath]) expect((await request(denied.token, path, 'POST', { text: 'hello' })).status).toBe(403)
+    const allowed = await issue({ voice: true })
+    for (const path of [synthPath, transcribePath]) expect((await request(allowed.token, path.replace('/s1/', '/s2/'), 'POST', { text: 'hello' })).status).toBe(403)
+    for (const path of ['/api/studio/tts/settings', '/api/studio/stt/settings']) expect((await request(allowed.token, path)).status).toBe(403)
+    for (const path of ['/api/studio/tts/synthesize', '/api/studio/stt/transcribe']) expect((await request(allowed.token, path, 'POST', { text: 'hello' })).status).toBe(403)
+    expect(speechSynthesize).not.toHaveBeenCalled()
+    expect(speechTranscribe).not.toHaveBeenCalled()
+    expect((await request(allowed.token, synthPath, 'POST', { text: 'hello' })).body).toBe('mp3-audio')
+    expect(speechSynthesize).toHaveBeenCalledWith(expect.objectContaining({ text: 'hello' }), expect.objectContaining({ format: 'mp3' }))
+    // Speech alone does not authorize sending the recognized text.
+    expect((await request(allowed.token, '/api/studio/chat-run/runs', 'POST', { session_id: 's1', input: 'hello' })).status).toBe(403)
+    await service.change(7, 's1', allowed.record.id, { permissions: { voice: false } })
+    expect((await request(allowed.token, synthPath, 'POST', { text: 'hello' })).status).toBe(403)
+  })
+
+  it('uses the bound Profile active STT settings and rejects provider/options overrides', async () => {
+    const settings = await import('../../packages/server/src/modules/studio/public/voice-settings')
+    settings.saveSttProviderSetting('default', 'openai', { settings: { model: 'host-model' }, secrets: { apiKey: 'host-secret' } })
+    settings.saveActiveSttProvider('default', 'openai')
+    const allowed = await issue({ voice: true })
+    const result = await request(allowed.token, transcribePath, 'POST', audioBody, audioHeaders)
+    expect(result).toMatchObject({ status: 200, body: { text: 'recognized speech' } })
+    expect(speechTranscribe).toHaveBeenCalledWith(expect.objectContaining({ provider: 'openai', audio: Buffer.from('audio-bytes'), settings: expect.objectContaining({ model: 'host-model' }), secrets: expect.objectContaining({ apiKey: 'host-secret' }) }))
+    expect(JSON.stringify(result.body)).not.toContain('host-secret')
+    for (const name of ['provider', 'apiKey', 'profile']) {
+      const overridden = `--voice\r\nContent-Disposition: form-data; name="${name}"\r\n\r\nother\r\n` + audioBody
+      expect((await request(allowed.token, transcribePath, 'POST', overridden, audioHeaders)).status).toBe(400)
+    }
+    for (const body of [{ text: 'hello', provider: 'custom' }, { text: 'hello', options: { apiKey: 'evil', baseUrl: 'https://evil.test' } }, { text: 'hello', profile: 'other' }, { text: 'x'.repeat(5001) }]) {
+      expect((await request(allowed.token, synthPath, 'POST', body)).status).toBeGreaterThanOrEqual(400)
+    }
+    expect(speechTranscribe).toHaveBeenCalledTimes(1)
+    const { SttNoSpeechDetectedError } = await import('../../packages/server/src/modules/studio/services/voice/stt/types')
+    speechTranscribe.mockRejectedValueOnce(new SttNoSpeechDetectedError('no speech'))
+    expect(await request(allowed.token, transcribePath, 'POST', audioBody, audioHeaders)).toMatchObject({ status: 200, body: { text: '', provider: 'openai' } })
+    expect(speechSynthesize).not.toHaveBeenCalled()
+  })
+
+  it('aborts pending synthesis when voice permission is revoked', async () => {
+    const allowed = await issue({ voice: true })
+    let started!: () => void
+    const ready = new Promise<void>(resolve => { started = resolve })
+    let signal!: AbortSignal
+    speechSynthesize.mockImplementationOnce(({ signal: incoming }) => {
+      signal = incoming
+      started()
+      return new Promise((_resolve, reject) => incoming.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true }))
+    })
+    const result = request(allowed.token, synthPath, 'POST', { text: 'hello' }).catch(error => error)
+    await ready
+    await service.change(7, 's1', allowed.record.id, { permissions: { voice: false } })
+    await result
+    expect(signal.aborted).toBe(true)
   })
 })

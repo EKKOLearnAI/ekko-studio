@@ -2,7 +2,7 @@ export const SESSION_SHARE_LIFETIME_MS = 30 * 24 * 60 * 60_000
 export const SESSION_SHARE_CACHE_MS = 10_000
 
 export const SESSION_SHARE_PERMISSION_KEYS = [
-  'input', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal', 'switchModel', 'reasoningEffort', 'switchWorkspace',
+  'input', 'voice', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal', 'switchModel', 'reasoningEffort', 'switchWorkspace',
 ] as const
 export type SessionSharePermission = typeof SESSION_SHARE_PERMISSION_KEYS[number]
 export type SessionSharePermissions = Record<SessionSharePermission, boolean>
@@ -40,7 +40,7 @@ export class SessionShareError extends Error {
 }
 
 export function sharePermissions(value: unknown, previous?: SessionSharePermissions): SessionSharePermissions {
-  const result = previous ? { ...previous } : Object.fromEntries(SESSION_SHARE_PERMISSION_KEYS.map(key => [key, false])) as SessionSharePermissions
+  const result = { ...Object.fromEntries(SESSION_SHARE_PERMISSION_KEYS.map(key => [key, false])), ...previous } as SessionSharePermissions
   if (value === undefined) return result
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SessionShareError('share_invalid_permissions', 400)
   for (const [key, enabled] of Object.entries(value)) {

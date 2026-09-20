@@ -17764,6 +17764,7 @@
                     "enum": [
                       "read",
                       "input",
+                      "voice",
                       "upload",
                       "download",
                       "workspaceRead",
@@ -19278,6 +19279,164 @@
         "x-session-share-permission": "switchModel"
       }
     },
+    "/api/studio/sessions/{id}/share-voice/synthesize": {
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create synthesize",
+        "description": "Requires voice permission on the claimed shared session. Uses the share-bound Profile active speech provider and stored settings; provider, credential and option overrides are rejected. No upload permission is required. Sending recognized text additionally requires input.",
+        "operationId": "synthesizeSessionShareSpeech",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MP3 speech audio",
+            "content": {
+              "audio/mpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid text/audio, unsupported provider or missing host configuration"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Voice permission denied or session/profile mismatch"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-session-share-permission": "voice"
+      }
+    },
+    "/api/studio/sessions/{id}/share-voice/transcribe": {
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create transcribe",
+        "description": "Requires voice permission on the claimed shared session. Uses the share-bound Profile active speech provider and stored settings; provider, credential and option overrides are rejected. No upload permission is required. Sending recognized text additionally requires input.",
+        "operationId": "transcribeSessionShareSpeech",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recognized speech; text is empty when no speech is detected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "durationMs": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid text/audio, unsupported provider or missing host configuration"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Voice permission denied or session/profile mismatch"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-session-share-permission": "voice",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "audio"
+                ],
+                "properties": {
+                  "audio": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/sessions/{id}/share-workspaces": {
       "get": {
         "tags": [
@@ -20131,6 +20290,11 @@
                         "type": "boolean",
                         "default": false
                       },
+                      "voice": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Use session-scoped speech transcription and synthesis with the sharer Profile voice settings. Sending transcribed messages still requires input. Defaults to false for existing shares."
+                      },
                       "upload": {
                         "type": "boolean",
                         "default": false
@@ -20340,6 +20504,11 @@
                       "input": {
                         "type": "boolean",
                         "default": false
+                      },
+                      "voice": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Use session-scoped speech transcription and synthesis with the sharer Profile voice settings. Sending transcribed messages still requires input. Defaults to false for existing shares."
                       },
                       "upload": {
                         "type": "boolean",
@@ -23467,6 +23636,11 @@
               "input": {
                 "type": "boolean",
                 "default": false
+              },
+              "voice": {
+                "type": "boolean",
+                "default": false,
+                "description": "Use session-scoped speech transcription and synthesis with the sharer Profile voice settings. Sending transcribed messages still requires input. Defaults to false for existing shares."
               },
               "upload": {
                 "type": "boolean",

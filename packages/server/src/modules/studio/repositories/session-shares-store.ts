@@ -1,6 +1,6 @@
 import { getDb } from '../infrastructure/database'
 import { SESSION_SHARES_TABLE } from '../infrastructure/database/schemas'
-import { SessionShareError, type SessionShareRecord, type SessionShareAppUser } from '../contracts/session-shares'
+import { sharePermissions, SessionShareError, type SessionShareRecord, type SessionShareAppUser } from '../contracts/session-shares'
 
 function db() {
   const value = getDb()
@@ -12,7 +12,7 @@ function db() {
 
 function decode(row: any): SessionShareRecord | null {
   if (!row) return null
-  return { ...row, permissions: JSON.parse(row.permissions), extra_paths: JSON.parse(row.extra_paths) }
+  return { ...row, permissions: sharePermissions(JSON.parse(row.permissions)), extra_paths: JSON.parse(row.extra_paths) }
 }
 
 export const sessionSharesStore = {

@@ -55,11 +55,12 @@ Studio 向自身配置的 App 线路 `/api/app/auth/session-share-identity` 核�
 
 ## 现有接口的权限映射
 
-领取后的基本 `read` 权限可以读取绑定 session 的历史、上下文、用量并恢复消息流。七项可配置权限默认 false：
+领取后的基本 `read` 权限可以读取绑定 session 的历史、上下文、用量并恢复消息流。可配置权限默认 false：
 
 | 字段 | 现有接口或操作 |
 | --- | --- |
 | `input` | `POST /api/studio/chat-run/runs`；Socket `run`、`abort`、排队操作、批准和澄清回复 |
+| `voice` | 会话限定的语音识别、合成；App 语音输入和对话还需 `input` |
 | `upload` | `/api/studio/uploads` 和 `/api/studio/app-uploads` 的创建、分片、完成、取消 |
 | `download` | `/api/studio/files/download`、session 导出、`workspace-file/content?download=1` |
 | `workspaceRead` | session 的 `workspace-files/list`、文件读取、预览、diff 和运行文件变更 |
@@ -102,3 +103,12 @@ App 保存分享连接和领取记录时按账号隔离，使用 `https://ekkost
 ## 验证
 
 相关测试包含 `session-shares`、`session-share-app-identity`、`session-shares-routes`、`session-share-access`、普通账号鉴权、排队执行、会话文件控制器、App 上传、Relay 和移动终端 Socket 测试。集成测试使用隔离 SQLite、临时目录和模拟云端身份/PTY，不创建真实分享或运行真实 Agent。
+
+## 语音权限
+
+`voice`（允许使用语音）默认关闭，旧分享记录也按关闭处理。开启后允许朗读回复；App 的语音输入和语音对话还需开启 `input`，识别后的文本发送继续执行原有 `input` 鉴权。
+
+- `POST /api/studio/sessions/:id/share-voice/synthesize`：仅接受 `{ text }`，最多 5,000 字符，输出 MP3。
+- `POST /api/studio/sessions/:id/share-voice/transcribe`：仅接受 multipart 单个 `audio` 文件，无需 `upload` 权限。
+
+Studio 使用分享绑定 Profile 已配置的语音服务，拒绝接收者指定 provider、凭据或 options，不开放全局语音设置。沿用语音请求体限制和中转媒体大小限制。关闭语音权限会中止服务端待完成请求，App 停止录音和播放，丢弃迟到结果。直连和云端中转均使用同一组会话限定接口。

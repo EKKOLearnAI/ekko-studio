@@ -74,7 +74,7 @@ describe('session share grants', () => {
     expect(second.token).not.toBe(first.token)
     expect(second.record.id).not.toBe(first.record.id)
     expect(first.record.expires_at).toBe(now + SESSION_SHARE_LIFETIME_MS)
-    expect(Object.values(first.record.permissions)).toEqual(Array(10).fill(false))
+    expect(Object.values(first.record.permissions)).toEqual(Array(11).fill(false))
     expect(first.record).toMatchObject({ sharer_app_user_id: sender.id, sharer_name_snapshot: 'Alice', recipient_app_user_id: null })
     const rows = db.prepare('SELECT * FROM session_shares').all()
     expect(rows).toHaveLength(2)
@@ -152,6 +152,17 @@ describe('session share grants', () => {
     expect(() => service.authorize(token, recipient, 'admin')).toThrow('share_unknown_action')
     expect(() => service.authorize(token, recipient, 'upload')).toThrow('share_permission_denied')
     expect(service.authorize(token, recipient, 'input').share.session_id).toBe('session-1')
+  })
+
+  it('normalizes old persisted shares to voice denied and supports explicit grants', async () => {
+    const { record } = await issued({ input: true })
+    const oldPermissions = { ...record.permissions }
+    delete oldPermissions.voice
+    const { SESSION_SHARES_TABLE } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    db.prepare(`UPDATE ${SESSION_SHARES_TABLE} SET permissions = ? WHERE id = ?`).run(JSON.stringify(oldPermissions), record.id)
+    expect(store.find(record.id).permissions).toMatchObject({ input: true, voice: false })
+    await service.change(7, 'session-1', record.id, { permissions: { voice: true } })
+    expect(store.find(record.id).permissions).toMatchObject({ input: true, voice: true })
   })
 
   it('rejects unknown, non-boolean and overbroad external path permissions', async () => {

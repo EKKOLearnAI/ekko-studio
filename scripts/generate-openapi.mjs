@@ -1284,8 +1284,9 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
   }
 }
 const sharePermissionSchema = { type: 'object', additionalProperties: false, properties: Object.fromEntries(
-  ['input', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal', 'switchModel', 'reasoningEffort', 'switchWorkspace'].map(key => [key, { type: 'boolean', default: false }]),
+  ['input', 'voice', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal', 'switchModel', 'reasoningEffort', 'switchWorkspace'].map(key => [key, { type: 'boolean', default: false }]),
 ) }
+sharePermissionSchema.properties.voice.description = 'Use session-scoped speech transcription and synthesis with the sharer Profile voice settings. Sending transcribed messages still requires input. Defaults to false for existing shares.'
 sharePermissionSchema.properties.switchModel.description = 'Change the shared session model using the scoped share-models catalog, and edit the current Hermes/Ekko model context limit. Does not grant reasoning-effort changes.'
 sharePermissionSchema.properties.reasoningEffort.description = 'Change the shared session reasoning effort independently of model selection.'
 sharePermissionSchema.properties.switchWorkspace.description = 'Select an existing directory within the original workspace, or an explicit extraPaths grant when outsideWorkspace is enabled. Does not grant filesystem read/write or expand the share scope.'
@@ -1309,6 +1310,22 @@ const shareChangeSchema = { type: 'object', additionalProperties: false, propert
   } } },
 } }
 const shareBody = schema => ({ required: true, content: { 'application/json': { schema } } })
+for (const kind of ['synthesize', 'transcribe']) {
+  const operation = openapi.paths[`/api/studio/sessions/{id}/share-voice/${kind}`].post
+  operation.operationId = kind === 'synthesize' ? 'synthesizeSessionShareSpeech' : 'transcribeSessionShareSpeech'
+  operation.security = [{ AppAccessToken: [], SessionShareToken: [] }]
+  operation['x-session-share-permission'] = 'voice'
+  operation.description = 'Requires voice permission on the claimed shared session. Uses the share-bound Profile active speech provider and stored settings; provider, credential and option overrides are rejected. No upload permission is required. Sending recognized text additionally requires input.'
+  operation.requestBody = kind === 'synthesize'
+    ? shareBody({ type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1, maxLength: 5000 } } })
+    : { required: true, content: { 'multipart/form-data': { schema: { type: 'object', additionalProperties: false, required: ['audio'], properties: { audio: { type: 'string', format: 'binary' } } } } } }
+  operation.responses['200'] = kind === 'synthesize'
+    ? { description: 'MP3 speech audio', content: { 'audio/mpeg': { schema: { type: 'string', format: 'binary' } } } }
+    : { description: 'Recognized speech; text is empty when no speech is detected', content: { 'application/json': { schema: { type: 'object', properties: { text: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, durationMs: { type: 'number' } } } } } }
+  operation.responses['400'] = { description: 'Invalid text/audio, unsupported provider or missing host configuration' }
+  operation.responses['403'] = { description: 'Voice permission denied or session/profile mismatch' }
+  operation.responses['410'] = { description: 'Share expired or revoked' }
+}
 const shareContextPath = openapi.paths['/api/studio/sessions/{id}/share-context-length']
 for (const method of ['get', 'put']) {
   const operation = shareContextPath[method]
