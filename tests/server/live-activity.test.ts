@@ -34,6 +34,13 @@ describe('Studio Live Activity orchestration', () => {
   const consume=await setup();await consume(event('chat.plan.updated'))
   expect(JSON.parse(fetchMock.mock.calls[0][1].body).content_state.title).toBe('检查任务标题')
  })
+
+ it('uses session title for real coding_agent event sources, not only chat sources',async()=>{
+  const consume=await setup(), e=event('chat.plan.updated')
+  e.source='coding_agent';e.chat.agent='pi'
+  await consume(e)
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body).content_state.title).toBe('Build App')
+ })
  it('does not start cards for terminal-only or unknown-total work',async()=>{const consume=await setup();await consume(event('chat.run.completed'));await consume({...event('chat.plan.updated'),chat:{task_plan:{...event('chat.plan.updated').chat.task_plan,progress:{total:0,completed:0}}}});expect(fetchMock).not.toHaveBeenCalled()})
 })
 

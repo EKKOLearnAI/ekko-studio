@@ -41,13 +41,13 @@ function content(event: BusinessEvent, state: LiveActivityRunRecord, ending = fa
     completedSteps: state.completed, totalSteps: state.total, agent: agent(event) }
 }
 function agent(event: BusinessEvent): string {
-  const raw = bounded(event.chat?.agent || (event.source === 'chat' ? getSession(event.subject.session_id || '')?.agent : ''), 32).toLowerCase()
+  const raw = bounded(event.chat?.agent || (runKind(event) === 'chat' ? getSession(event.subject.session_id || '')?.agent : ''), 32).toLowerCase()
   const aliases: Record<string, string> = { 'claude-code': 'claude', 'ekko-agent': 'ekko', bridge: 'hermes', dsh: 'deepseek' }
   const normalized = aliases[raw] || raw
   return ['claude', 'codex', 'hermes', 'ekko', 'pi', 'grok', 'opencode', 'deepseek'].includes(normalized) ? normalized : 'ekko'
 }
 function title(event: BusinessEvent): string {
-  if (event.source === 'chat') {
+  if (runKind(event) === 'chat') {
     const id = event.subject.session_id || ''
     const saved = getSession(id)
     const preview = getSessionNotificationPreview(id)
@@ -78,7 +78,7 @@ async function liveActivityResult(response: Response): Promise<{ status: string;
 export function createLiveActivityConsumer(send: typeof fetch = (...args) => fetch(...args)) {
   const refreshes = new Map<string, ReturnType<typeof setTimeout>>()
   const latest = new Map<string, BusinessEvent>()
-  const active = (event: BusinessEvent) => event.source === 'chat' && !!event.subject.run_id
+  const active = (event: BusinessEvent) => runKind(event) === 'chat' && !!event.subject.run_id
     && getChatRunServer()?.isLiveActivityRunActive(event.subject.session_id, event.profile, event.subject.run_id) === true
   function cancelRefresh(key: string) {
     const timer = refreshes.get(key)
