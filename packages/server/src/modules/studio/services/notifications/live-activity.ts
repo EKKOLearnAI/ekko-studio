@@ -1,3 +1,4 @@
+import { notificationPreview } from './notification-preview'
 import { getChatRunServer } from '../chat-run/server-registry'
 import { createHash, randomUUID } from 'node:crypto'
 import { listAppConnections } from '../../repositories/app-connections-store'
@@ -48,12 +49,10 @@ function agent(event: BusinessEvent): string {
 function title(event: BusinessEvent): string {
   if (event.source === 'chat') {
     const id = event.subject.session_id || ''
-    const explicit = bounded(getSession(id)?.title, 40)
-    if (explicit) return explicit
-    const fallback = getSessionNotificationPreview(id)?.title || ''
-    // A truncated structured-message JSON is not a readable title. Never expose its raw envelope.
-    if (/^\s*[\[{]/.test(fallback)) return bounded(event.chat?.task_plan?.explanation, 40) || 'Ekko Studio 任务'
-    return bounded(fallback, 40) || bounded(event.chat?.task_plan?.explanation, 40) || 'Ekko Studio 任务'
+    const saved = getSession(id)
+    const preview = getSessionNotificationPreview(id)
+    return notificationPreview({ title: saved?.title || preview?.title }, false).title
+      || bounded(event.chat?.task_plan?.explanation, 40) || 'Ekko Studio 任务' 
   }
   return bounded((event.payload.display as Record<string, unknown> | undefined)?.title, 40) || 'Ekko Studio 任务'
 }
