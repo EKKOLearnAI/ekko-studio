@@ -2332,27 +2332,39 @@ export class CodingAgentRunManager {
     })
   }
 
-  private recoverFailedNativeCompact(run: ManagedCodingAgentRun, error: unknown) {
-    if (!run.nativeCompactCommandActive) return
-    run.nativeCompactCommandActive = false
-    if (!isContextWindowExceededError(error)) return
+  private recoverNativeContextOverflow(run: ManagedCodingAgentRun, error: unknown, command = 'context-recovery'): boolean {
+    if (!isContextWindowExceededError(error)) return false
     const recovery = resetNativeSessionAfterContextOverflow(run.launch.sessionId, run.launch.agentId)
-    if (!recovery.reset) return
+    if (!recovery.reset) return false
     run.launch.agentNativeSessionId = ''
     run.nativeResumeReady = false
+    if (run.state) run.state.contextTokens = undefined
     run.disposeAfterTurn = true
-    const agentName = run.launch.agentId === 'grok' ? 'Grok' : 'Claude Code'
+    const agentName = run.launch.agentId === 'codex'
+      ? 'Codex'
+      : run.launch.agentId === 'grok'
+        ? 'Grok'
+        : run.launch.agentId === 'pi'
+          ? 'Pi'
+          : 'Claude Code'
     this.emitToChat(run.launch.sessionId, 'session.command', {
       event: 'session.command',
       session_id: run.launch.sessionId,
-      command: 'compact',
-      action: 'compact',
+      command,
+      action: command,
       ok: true,
       terminal: true,
       compacted: false,
       resetNativeThread: true,
       message: nativeContextRecoveryMessage(agentName),
     })
+    return true
+  }
+
+  private recoverFailedNativeCompact(run: ManagedCodingAgentRun, error: unknown) {
+    if (!run.nativeCompactCommandActive) return
+    run.nativeCompactCommandActive = false
+    this.recoverNativeContextOverflow(run, error, 'compact')
   }
 
   private failClaudePrintTurn(run: ManagedCodingAgentRun, errorText: string) {
@@ -3090,6 +3102,7 @@ export class CodingAgentRunManager {
   }
 
   private failCodexExecTurn(run: ManagedCodingAgentRun, message: string, usage?: unknown) {
+    this.recoverNativeContextOverflow(run, message)
     this.handleClaudePrintResponseEvent(run, {
       type: 'response.failed',
       data: {

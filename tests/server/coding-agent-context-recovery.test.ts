@@ -17,6 +17,7 @@ describe('coding agent context recovery', () => {
     new Error('{"error":{"code":"context_length_exceeded","message":"Your input exceeds the context window"}}'),
     new Error('maximum context length is 128000 tokens'),
     { error: '413 Payload Too Large' },
+    { error: { type: 'api_error', message: 'request failed', provider_error: { error: { code: 'context_length_exceeded', message: 'Your input exceeds the context window' } } } },
   ])('recognizes context overflow errors', async (error) => {
     const { isContextWindowExceededError } = await import('../../packages/server/src/modules/coding-agents/services/context-recovery')
     expect(isContextWindowExceededError(error)).toBe(true)
@@ -45,7 +46,7 @@ describe('coding agent context recovery', () => {
       reset: true,
       previousNativeSessionId: 'native-1',
     })
-    expect(updateSessionMock).toHaveBeenCalledWith('session-1', { agent_native_session_id: '' })
+    expect(updateSessionMock).toHaveBeenCalledWith('session-1', { agent_native_session_id: '', context_tokens: null })
   })
 
   it('does not reset unsupported native runtimes', async () => {

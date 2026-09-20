@@ -36,7 +36,7 @@ export function resetNativeSessionAfterContextOverflow(
   if (!previousNativeSessionId) {
     return { reset: false, previousNativeSessionId: '' }
   }
-  updateSession(sessionId, { agent_native_session_id: '' })
+  updateSession(sessionId, { agent_native_session_id: '', context_tokens: null })
   return { reset: true, previousNativeSessionId }
 }
 

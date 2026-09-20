@@ -123,6 +123,44 @@ describe('coding agent completion errors', () => {
     }))
   })
 
+  it('detaches a scoped Codex runner after a normal turn exceeds context', () => {
+    initAllHermesTables()
+    const manager = new CodingAgentRunManager()
+    const emitted = vi.fn()
+    ;(manager as any).emitToChat = emitted
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const sessionId = `chat-native-turn-overflow-${suffix}`
+    createSession({
+      id: sessionId, profile: 'default', source: 'coding_agent', agent: 'codex',
+      agent_session_id: `agent-${suffix}`, agent_native_session_id: `native-${suffix}`,
+      model: 'test-model', provider: 'test-provider', api_mode: 'chat_completions',
+      reasoning_effort: '', agent_preset: '', title: '', workspace: process.cwd(),
+    })
+    const run: any = {
+      launch: { agentId: 'codex', sessionId, agentNativeSessionId: `native-${suffix}`, model: 'test-model' },
+      state: { queue: [], events: [], isWorking: true, contextTokens: 500_000 },
+      nativeResumeReady: true,
+      printCompleted: false,
+      printResponseId: 'response-1',
+      printMessageId: 'message-1',
+    }
+
+    ;(manager as any).failCodexExecTurn(run, JSON.stringify({
+      error: { provider_error: { error: { code: 'context_length_exceeded', message: 'Your input exceeds the context window' } } },
+    }))
+
+    expect(getSession(sessionId)?.agent_native_session_id).toBe('')
+    expect(getSession(sessionId)?.context_tokens).toBeNull()
+    expect(run.launch.agentNativeSessionId).toBe('')
+    expect(run.nativeResumeReady).toBe(false)
+    expect(run.state.contextTokens).toBeUndefined()
+    expect(run.disposeAfterTurn).toBe(true)
+    expect(emitted).toHaveBeenCalledWith(sessionId, 'session.command', expect.objectContaining({
+      command: 'context-recovery', resetNativeThread: true,
+    }))
+    manager.shutdown()
+  })
+
   it('does not detach a native session after a non-overflow compact failure', () => {
     initAllHermesTables()
     const manager = new CodingAgentRunManager()
