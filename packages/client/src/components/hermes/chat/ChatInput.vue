@@ -845,14 +845,27 @@ watch(
   { flush: 'post' },
 )
 
-const totalTokens = computed(() => {
+const hasAuthoritativeContextUsage = computed(() => {
   const context = chatStore.activeSession?.contextTokens
-  if (typeof context === 'number' && Number.isFinite(context) && context > 0) return context
-  const input = chatStore.activeSession?.inputTokens ?? 0
-  const output = chatStore.activeSession?.outputTokens ?? 0
+  return typeof context === 'number' && Number.isFinite(context) && context >= 0
+})
+
+const totalTokens = computed(() => {
+  const session = chatStore.activeSession
+  const context = session?.contextTokens
+  if (typeof context === 'number' && Number.isFinite(context) && context >= 0) return context
+  // Coding Agent input/output totals are cumulative billing usage, not the
+  // current native context window. Keep the meter hidden until the runtime
+  // reports an authoritative context snapshot.
+  if (session?.source === 'coding_agent') return 0
+  const input = session?.inputTokens ?? 0
+  const output = session?.outputTokens ?? 0
   return input + output
 })
-const showContextUsage = computed(() => !!chatStore.activeSession)
+const showContextUsage = computed(() => {
+  const session = chatStore.activeSession
+  return Boolean(session) && (session?.source !== 'coding_agent' || hasAuthoritativeContextUsage.value)
+})
 
 const remainingTokens = computed(() => Math.max(0, contextLength.value - totalTokens.value))
 

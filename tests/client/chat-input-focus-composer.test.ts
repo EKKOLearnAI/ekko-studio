@@ -128,6 +128,35 @@ describe('ChatInput focusComposer', () => {
     messageWarningMock.mockReset()
   })
 
+  it('hides cumulative Coding Agent usage until native context is known', async () => {
+    const wrapper = mountForSession('coding-context-unknown', {
+      source: 'coding_agent',
+      inputTokens: 115_200_000,
+      outputTokens: 42_000,
+      contextTokens: undefined,
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.context-usage-row').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('115.2M')
+    wrapper.unmount()
+  })
+
+  it('shows authoritative Coding Agent context instead of cumulative usage', async () => {
+    const wrapper = mountForSession('coding-context-known', {
+      source: 'coding_agent',
+      inputTokens: 115_200_000,
+      outputTokens: 42_000,
+      contextTokens: 26_094,
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.context-usage-row').exists()).toBe(true)
+    expect(wrapper.find('.context-info').text()).toContain('26.1k')
+    expect(wrapper.find('.context-info').text()).not.toContain('115.2M')
+    wrapper.unmount()
+  })
+
   it('puts the caret in the message box on a desktop viewport', async () => {
     const wrapper = mountForSession('session-focus-desktop')
     const textarea = wrapper.find('textarea').element as HTMLTextAreaElement
