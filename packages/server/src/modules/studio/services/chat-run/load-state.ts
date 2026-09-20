@@ -79,8 +79,8 @@ export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<strin
     const hasPersistedUsage = !!latestUsage || totals.inputTokens > 0 || totals.outputTokens > 0
     inputTokens = hasPersistedUsage ? totals.inputTokens : pageUsage.inputTokens
     outputTokens = hasPersistedUsage ? totals.outputTokens : pageUsage.outputTokens
-    if (latestUsage) {
-      contextTokens = Number(latestUsage.input_tokens || 0) + Number(latestUsage.output_tokens || 0)
+    if (session?.context_tokens != null) {
+      contextTokens = Number(session.context_tokens)
     }
 
     logger.info('[chat-run-socket] loaded session %s from DB (%d messages)', sid, messages.length)

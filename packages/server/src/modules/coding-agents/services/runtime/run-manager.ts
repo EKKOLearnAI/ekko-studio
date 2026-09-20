@@ -1279,6 +1279,9 @@ export class CodingAgentRunManager {
     }
     const usage = await calcAndUpdateUsage(run.launch.sessionId, run.state, emitUsage, {
       nativeSource: 'coding_agent',
+      // Scoped provider rows are billing/request usage. Native global rows are
+      // the only legacy path where the latest usage is also the active context.
+      contextFromLatestUsage: run.launch.mode !== 'scoped',
     })
     const contextTokens = usage.contextInputTokens != null || usage.contextOutputTokens != null
       ? (usage.contextInputTokens || 0) + (usage.contextOutputTokens || 0)
@@ -2974,6 +2977,10 @@ export class CodingAgentRunManager {
     }
 
     const type = String(event.type || '').trim()
+    if (type === 'event_msg' && event.payload?.type === 'token_count') {
+      this.updateCodexNativeContextUsage(run, event.payload.info)
+      return
+    }
     if (type === 'thread.started') {
       this.recordCodexNativeSessionId(run, String(event.thread_id || event.threadId || '').trim())
       return
@@ -3007,8 +3014,28 @@ export class CodingAgentRunManager {
     }
   }
 
+  private updateCodexNativeContextUsage(run: ManagedCodingAgentRun, value: any) {
+    const raw = value?.last_token_usage?.total_tokens
+      ?? value?.lastTokenUsage?.totalTokens
+      ?? value?.tokenUsage?.last?.totalTokens
+    const contextTokens = typeof raw === 'number' && Number.isFinite(raw) && raw >= 0
+      ? Math.floor(raw)
+      : null
+    if (contextTokens == null) return
+    updateContextTokenUsage(run.launch.sessionId, run.state, (event: string, payload: any) => {
+      this.emitToChat(run.launch.sessionId, event, payload)
+    }, contextTokens, {
+      inputTokens: run.state.inputTokens ?? 0,
+      outputTokens: run.state.outputTokens ?? 0,
+    })
+  }
+
   private handleCodexProtocolEvent(run: ManagedCodingAgentRun, method: string, params: any) {
     this.recordCodexNativeSessionId(run, this.codexNativeSessionIdFrom(params))
+    if (method === 'thread/tokenUsage/updated') {
+      this.updateCodexNativeContextUsage(run, params)
+      return
+    }
     if (method === 'thread/started') {
       this.recordCodexNativeSessionId(run, String(params.thread_id || params.threadId || '').trim())
       return

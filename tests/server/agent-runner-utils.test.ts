@@ -1258,6 +1258,13 @@ describe('coding agent run state', () => {
       params: { delta: 'I am GPT-5-Codex' },
     }))
     ;(manager as any).handleCodexExecLine(run, JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { total_tokens: 18_765 }, model_context_window: 243_200 },
+      },
+    }))
+    ;(manager as any).handleCodexExecLine(run, JSON.stringify({
       type: 'turn.completed',
       usage: { input_tokens: 12, output_tokens: 7, total_tokens: 19 },
     }))
@@ -1275,11 +1282,38 @@ describe('coding agent run state', () => {
     expect(emitted.map(event => event.event)).toContain('message.delta')
     expect(emitted.map(event => event.event)).toContain('usage.updated')
     expect(emitted.find(event => event.event === 'usage.updated' && event.payload.contextTokens != null)?.payload).toEqual(expect.objectContaining({
-      contextTokens: expect.any(Number),
+      contextTokens: 18_765,
     }))
     expect(emitted.find(event => event.event === 'run.completed')?.payload).not.toHaveProperty('usage')
     const eventNames = emitted.map(event => event.event)
     expect(eventNames.lastIndexOf('usage.updated')).toBeLessThan(eventNames.indexOf('run.completed'))
+    manager.shutdown()
+  })
+
+  it('does not replace native Codex context with proxy billing usage', async () => {
+    initAllHermesTables()
+    const manager = new CodingAgentRunManager()
+    const state: any = { messages: [], isWorking: false, events: [], queue: [], contextTokens: 26_094 }
+    const emitted: Array<{ event: string; payload: any }> = []
+    ;(manager as any).emitToChat = (_sessionId: string, event: string, payload: any) => emitted.push({ event, payload })
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const agentSessionId = `agent-session-codex-billing-${suffix}`
+    const chatSessionId = `chat-session-codex-billing-${suffix}`
+    manager.start({
+      agentSessionId, agentId: 'codex', profile: 'default', provider: 'test-provider', model: 'gpt-5-codex',
+      sessionId: chatSessionId, command: 'codex', args: [], shellCommand: 'codex', workspaceDir: process.cwd(), state,
+    })
+    manager.handleProxyUsageEvent(agentSessionId, {
+      type: 'response.completed',
+      data: { response: { id: 'proxy-large', model: 'gpt-5-codex', usage: { input_tokens: 533_665, output_tokens: 182 } } },
+    } as any)
+    const run = (manager as any).runs.get(agentSessionId)
+    await (manager as any).refreshCodingAgentUsage(run)
+
+    expect(state.contextTokens).toBe(26_094)
+    expect(emitted).not.toContainEqual(expect.objectContaining({
+      event: 'usage.updated', payload: expect.objectContaining({ contextTokens: 533_847 }),
+    }))
     manager.shutdown()
   })
 

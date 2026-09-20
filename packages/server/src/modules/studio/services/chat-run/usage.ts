@@ -3,9 +3,7 @@
  * snapshot-aware computation, client notification.
  */
 
-import {
-  getSessionDetail,
-} from '../../repositories/session-store'
+import { getSessionDetail, updateSession } from '../../repositories/session-store'
 import { deleteCompressionSnapshot, getCompressionSnapshot } from '../../repositories/compression-snapshot'
 import { getRecordedUsageTotals, getUsage } from '../../repositories/usage-store'
 import { countTokens, SUMMARY_PREFIX } from '../context-compressor'
@@ -84,6 +82,7 @@ export async function calcAndUpdateUsage(
   options: {
     truncateToolResultsForContext?: boolean
     nativeSource?: 'coding_agent'
+    contextFromLatestUsage?: boolean
   } = {},
 ): Promise<{
   inputTokens: number
@@ -94,7 +93,7 @@ export async function calcAndUpdateUsage(
   try {
     if (options.nativeSource) {
       const totals = getRecordedUsageTotals(sid, options.nativeSource)
-      const latest = getUsage(sid)
+      const latest = options.contextFromLatestUsage === false ? undefined : getUsage(sid)
       const usage = {
         inputTokens: totals.inputTokens,
         outputTokens: totals.outputTokens,
@@ -110,8 +109,6 @@ export async function calcAndUpdateUsage(
         ...usage,
         ...(latest
           ? {
-              // Accounting keeps ordinary and cached input disjoint, but both
-              // occupy the model's context window.
               contextInputTokens: Number(latest.input_tokens || 0) + Number(latest.cache_read_tokens || 0) + Number(latest.cache_write_tokens || 0),
               contextOutputTokens: Number(latest.output_tokens || 0),
             }
@@ -221,6 +218,11 @@ export function updateContextTokenUsage(
   }
   const normalizedContextTokens = Math.floor(contextTokens)
   state.contextTokens = normalizedContextTokens
+  try {
+    updateSession(sid, { context_tokens: normalizedContextTokens })
+  } catch (err) {
+    logger.warn(err, '[chat-run-socket] failed to persist context usage for session %s', sid)
+  }
   emit('usage.updated', {
     event: 'usage.updated',
     session_id: sid,

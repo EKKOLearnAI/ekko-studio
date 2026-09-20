@@ -33,6 +33,7 @@ export interface HermesSessionRow {
   tool_call_count: number
   input_tokens: number
   output_tokens: number
+  context_tokens: number | null
   cache_read_tokens: number
   cache_write_tokens: number
   reasoning_tokens: number
@@ -141,6 +142,7 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
     tool_call_count: Number(row.tool_call_count || 0),
     input_tokens: Number(row.input_tokens || 0),
     output_tokens: Number(row.output_tokens || 0),
+    context_tokens: row.context_tokens != null ? Number(row.context_tokens) : null,
     cache_read_tokens: Number(row.cache_read_tokens || 0),
     cache_write_tokens: Number(row.cache_write_tokens || 0),
     reasoning_tokens: Number(row.reasoning_tokens || 0),
@@ -220,7 +222,7 @@ export function createSession(data: {
       fork_point_message_id: null,
       started_at: now, ended_at: null, end_reason: null,
       message_count: 0, tool_call_count: 0,
-      input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0,
+      input_tokens: 0, output_tokens: 0, context_tokens: null, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0,
       billing_provider: null, estimated_cost_usd: 0, actual_cost_usd: null,
       cost_status: '', preview: '', last_active: now, is_archived: 0, is_pinned: 0, push_enabled: data.push_enabled ? 1 : 0, workspace: data.workspace || null,
       category_id: data.category_id ?? null,

@@ -85,6 +85,7 @@ describe('loadSessionStateFromDb', () => {
       model: 'gpt-test',
       provider: 'openai',
       source: 'cli',
+      context_tokens: 6_543,
     })
     getSessionDetailPaginatedMock.mockReturnValue({
       messages: [
@@ -133,7 +134,7 @@ describe('loadSessionStateFromDb', () => {
     expect(buildSnapshotAwareHistoryMock).not.toHaveBeenCalled()
     expect(state.inputTokens).toBe(28_000)
     expect(state.outputTokens).toBe(2_000)
-    expect(state.contextTokens).toBe(9_000)
+    expect(state.contextTokens).toBe(6_543)
   })
 
   it('restores the persisted tool-result anchor for a Hermes background delegation', async () => {

@@ -87,6 +87,7 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   tool_call_count: 'INTEGER NOT NULL DEFAULT 0',
   input_tokens: 'INTEGER NOT NULL DEFAULT 0',
   output_tokens: 'INTEGER NOT NULL DEFAULT 0',
+  context_tokens: 'INTEGER',
   cache_read_tokens: 'INTEGER NOT NULL DEFAULT 0',
   cache_write_tokens: 'INTEGER NOT NULL DEFAULT 0',
   reasoning_tokens: 'INTEGER NOT NULL DEFAULT 0',
