@@ -1,6 +1,6 @@
 # App 单聊分享 token
 
-分享后的消息、历史、文件和终端复用现有单聊接口与 Socket 协议。消息仍走原来的单聊流程，不新增访客消息类型或另一套聊天接口；Studio 在入口增加临时 token 鉴权。本次实现后端接口，App 页面及云端接收人转发通道不在此改动内。
+分享后的消息、历史、文件和终端复用现有单聊接口与 Socket 协议。消息仍走原来的单聊流程，不新增访客消息类型或另一套聊天接口；Studio 在入口增加临时 token 鉴权。App 在单聊 Header 提供分享抽屉；接收方通过官网链接领取，支持直连和云端受限转发。
 
 ## 记录与生命周期
 
@@ -17,7 +17,7 @@ HTTP 使用两个请求头：
 
 ```http
 X-Session-Share-Token: sst1_...
-X-App-Access-Token: <接收人的 App 云端 access token>
+X-App-Access-Token: <接收人的短时分享身份凭证 ssp1_...>
 ```
 
 现有 `/chat-run` 和 `/terminal` Socket.IO 连接使用：
@@ -26,14 +26,16 @@ X-App-Access-Token: <接收人的 App 云端 access token>
 {
   "auth": {
     "shareToken": "sst1_...",
-    "appAccessToken": "<接收人的 App 云端 access token>"
+    "appAccessToken": "<接收人的短时分享身份凭证 ssp1_...>"
   }
 }
 ```
 
 直连也支持 HTTP `Authorization: Bearer sst1_...` 或 Socket `auth.token=sst1_...`，仍需 App 云端凭据。经过已有 App Relay 时优先使用独立分享字段，防止 relay 注入本地 JWT 时覆盖 token。分享凭据优先：同时携带普通 JWT 不会扩大分享权限。URL query 不接受分享 token。
 
-Studio 向自身配置的 App 线路 `/api/app/auth/me` 核验账号状态、ID 和名称，不接受客户端提交的身份或任意验证 URL。身份缓存最多 10 秒且不超过 access token 到期时间；云端故障时失败关闭。这里的“仅 App”由登录身份和产品入口定义，不以 User-Agent 作为鉴权依据。
+接收者先用自己的 App 登录向账号服务 `POST /api/app/auth/session-share-proof` 申请 `ssp1_` 身份凭证。凭证固定绑定分享 token 的 SHA-256，最长 5 分钟，具有独立 audience/type，不能调用账号、支付、设备管理或普通 Relay。App 不向分享者的服务器发送完整云端登录 token；云端转发也签发同样的限定凭证。
+
+Studio 向自身配置的 App 线路 `/api/app/auth/session-share-identity` 核验此凭证、分享哈希、账号和登录设备状态、ID、名称及 Studio 使用权益。不接受客户端提交的身份或任意验证 URL。分享管理仍使用 `/api/app/auth/me` 验证分享者身份和权益。身份缓存最多 10 秒且不超过 access token 到期时间；云端故障时失败关闭。这里的“仅 App”由登录身份和产品入口定义，不以 User-Agent 作为鉴权依据。
 
 管理接口另外需要 `Authorization: Bearer <Studio app_access JWT>`。普通网页账号 JWT 和分享 token 都不能创建或管理分享。
 
@@ -91,7 +93,11 @@ Socket 和 PTY 通过 `watch` 监听策略变化；本进程权限修改会关�
 
 多个 Studio 进程共用数据库时，其他进程的策略缓存最多滞后 10 秒；跨进程即时撤销需要额外广播。路径检查并非操作系统沙箱，无法替代对有宿主机执行权限的并发进程的隔离。
 
-已有 App Relay 转发两个 HTTP 分享请求头及 Socket auth 字段；此次不修改云端设备绑定规则。未绑定目标设备的接收人需要可直达 Studio 的地址，或后续 App/云端提供接收人 relay 通道。
+云端 `session-share` Relay 无需绑定分享者设备，只允许指定 session 的接口和 `/chat-run`、`/terminal`，并固定身份凭据及终端上下文。云端转发继续要求现有云端权益；直连由 Studio 检查 Studio 使用权益。
+
+App 保存分享连接和领取记录时按账号隔离，使用 `https://ekkostudio.xyz/share/session/#HSC1.…` 官网链接和 `hermes-studio://share/session?sessionInvite=…` 唤起。官网不解析会话或领取 token。App 在凭证到期前更新身份并重新连接对应 Socket，重新恢复单聊状态。
+
+部署依赖：先发布云端身份凭证和 Relay 接口、官网落地页，再发布支持凭证验证的 Studio 与 App。旧云端没有权益字段时失败关闭，不降级跳过购买校验。
 
 ## 验证
 

@@ -24,7 +24,7 @@ export function socketShareToken(auth: Record<string, unknown> = {}): string {
 }
 
 export async function authenticateSessionShare(token: string, appAccessToken: string): Promise<SessionShareAccess> {
-  const actor = await shareAppIdentityVerifier.verify(appAccessToken)
+  const actor = await shareAppIdentityVerifier.verify(appAccessToken, token)
   const { share } = sessionShareService.authorize(token, actor, 'read')
   return { token, appAccessToken, actor, share }
 }
@@ -36,7 +36,7 @@ export function authorizeSessionShare(access: SessionShareAccess, action: Sessio
 }
 
 export async function refreshSessionShare(access: SessionShareAccess, action: SessionShareAction, sessionId = access.share.session_id) {
-  const actor = await shareAppIdentityVerifier.verify(access.appAccessToken)
+  const actor = await shareAppIdentityVerifier.verify(access.appAccessToken, access.token)
   if (actor.id !== access.actor.id) throw new SessionShareError('share_recipient_required')
   return authorizeSessionShare(access, action, sessionId)
 }

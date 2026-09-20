@@ -91,7 +91,7 @@ export async function claim(ctx: any): Promise<void> {
   await respond(ctx, async () => {
     const input = body(ctx, ['confirm'])
     if (input.confirm !== true) throw new SessionShareError('share_claim_confirmation_required', 400)
-    const actor = await shareAppIdentityVerifier.verify(ctx.get('X-App-Access-Token'))
+    const actor = await shareAppIdentityVerifier.verify(ctx.get('X-App-Access-Token'), shareToken(ctx))
     ctx.body = { share: publicSessionShare(sessionShareService.claim(shareToken(ctx), actor)) }
   })
 }
@@ -99,7 +99,7 @@ export async function claim(ctx: any): Promise<void> {
 /** Resolve the currently bound session and permissions, without returning account/session internals. */
 export async function access(ctx: any): Promise<void> {
   await respond(ctx, async () => {
-    const actor = await shareAppIdentityVerifier.verify(ctx.get('X-App-Access-Token'))
+    const actor = await shareAppIdentityVerifier.verify(ctx.get('X-App-Access-Token'), shareToken(ctx))
     const { share } = sessionShareService.authorize(shareToken(ctx), actor, 'read')
     ctx.body = { share: publicSessionShare(share) }
   })
@@ -113,7 +113,7 @@ export async function check(ctx: any): Promise<void> {
     if (typeof input.action !== 'string' || typeof input.sessionId !== 'string' || !input.sessionId) {
       throw new SessionShareError('share_invalid_request', 400)
     }
-    const actor = await shareAppIdentityVerifier.verify(ctx.get('X-App-Access-Token'))
+    const actor = await shareAppIdentityVerifier.verify(ctx.get('X-App-Access-Token'), shareToken(ctx))
     const { share } = sessionShareService.authorize(shareToken(ctx), actor, input.action as SessionShareAction, input.sessionId)
     ctx.body = { allowed: true, sessionId: share.session_id, policyVersion: share.policy_version, expiresAt: share.expires_at }
   })
