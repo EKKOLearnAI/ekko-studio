@@ -456,6 +456,78 @@ describe('resumeBridgeRun', () => {
     expect('resolved' in approvalResolved[0].payload).toBe(false)
   })
 
+  it.each([
+    { name: 'null', resolved: null },
+    { name: 'the number 0', resolved: 0 },
+    { name: 'an empty string', resolved: '' },
+    { name: 'the string "true"', resolved: 'true' },
+  ])('drops a non-boolean resolved value of $name rather than forwarding it (control)', async ({ resolved }) => {
+    const { resumeBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    const { nsp, emitted } = createNamespace()
+    const socket = { id: 'socket-1', connected: true, emit: vi.fn() }
+    const sessionMap = new Map<string, any>()
+    sessionMap.set('session-resume', {
+      messages: [{ id: 1, session_id: 'session-resume', role: 'user', content: 'hello', timestamp: 1 }],
+      isWorking: true,
+      events: [],
+      queue: [],
+    })
+
+    const bridge = {
+      getResult: vi.fn(async () => ({
+        ok: true,
+        run_id: 'run-resume',
+        session_id: 'session-resume',
+        status: 'running',
+        output: '',
+        deltas: [],
+        events: [],
+      })),
+      getOutput: vi.fn(async () => ({
+        ok: true,
+        run_id: 'run-resume',
+        session_id: 'session-resume',
+        status: 'complete',
+        delta: '',
+        cursor: 0,
+        output: '',
+        done: true,
+        result: { final_response: '' },
+        error: null,
+        events: [{
+          event: 'approval.resolved',
+          run_id: 'run-resume',
+          approval_id: 'approval-odd',
+          choice: 'once',
+          resolved,
+        }],
+        event_cursor: 1,
+      })),
+    }
+
+    await resumeBridgeRun(
+      nsp as any,
+      socket as any,
+      {
+        sessionId: 'session-resume',
+        runId: 'run-resume',
+        profile: 'default',
+        instructions: 'system prompt',
+        model: 'gpt-test',
+        provider: 'openai',
+      },
+      sessionMap,
+      bridge as any,
+      vi.fn(),
+    )
+
+    // A non-boolean carries no outcome the client can trust: forwarding it would
+    // make `resolved === false` in the client store depend on the loose value.
+    const approvalResolved = emitted.filter(item => item.event === 'approval.resolved')
+    expect(approvalResolved).toHaveLength(1)
+    expect('resolved' in approvalResolved[0].payload).toBe(false)
+  })
+
   it('completes a timed-out abort when the resumed bridge run reaches a terminal state', async () => {
     const { resumeBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
     const { nsp, emitted } = createNamespace()

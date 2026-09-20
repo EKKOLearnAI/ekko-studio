@@ -241,6 +241,28 @@ def wait_for(condition, timeout=20):
     return False
 `
 
+const gatewayApprovalPrelude = String.raw`
+pool, _fake_db = make_pool()
+
+def notify_gateway_approval(session_id, run_id, request_id, queue_request):
+    session = bridge.AgentSession(session_id=session_id, agent=object(), current_run_id=run_id)
+    record = bridge.RunRecord(run_id=run_id, session_id=session_id)
+    with pool._lock:
+        pool._sessions[session_id] = session
+        pool._runs[run_id] = record
+    if queue_request:
+        approval.queue_gateway_approval(session_id, request_id)
+    pool._gateway_approval_notify(session_id)({
+        "request_id": request_id,
+        "command": "printf harmless gateway",
+        "description": "harmless test command",
+    })
+    approval_id = next(
+        key for key, value in pool._gateway_approval_requests.items() if value[0] == session_id
+    )
+    return record, approval_id
+`
+
 describe('agent bridge Python session concurrency', () => {
   it('denies only the interrupted session run generation approval queues', () => {
     runPython(String.raw`
@@ -1360,29 +1382,10 @@ assert [(msg["role"], msg["content"]) for msg in messages] == [
 `)
   })
 
-  it('reports the gateway approval outcome on the broadcast approval.resolved event', () => {
+  it('reports a resolved gateway approval outcome on the broadcast approval.resolved event', () => {
     runPython(String.raw`
 ${harness}
-
-pool, _fake_db = make_pool()
-
-def notify_gateway_approval(session_id, run_id, request_id, queue_request):
-    session = bridge.AgentSession(session_id=session_id, agent=object(), current_run_id=run_id)
-    record = bridge.RunRecord(run_id=run_id, session_id=session_id)
-    with pool._lock:
-        pool._sessions[session_id] = session
-        pool._runs[run_id] = record
-    if queue_request:
-        approval.queue_gateway_approval(session_id, request_id)
-    pool._gateway_approval_notify(session_id)({
-        "request_id": request_id,
-        "command": "printf harmless gateway",
-        "description": "harmless test command",
-    })
-    approval_id = next(
-        key for key, value in pool._gateway_approval_requests.items() if value[0] == session_id
-    )
-    return record, approval_id
+${gatewayApprovalPrelude}
 
 # A runtime that queued the request resolves, and the event says so.
 record, approval_id = notify_gateway_approval("session-ok", "run-ok", "request-ok", True)
@@ -1392,6 +1395,13 @@ resolved_events = [event for event in record.events if event["event"] == "approv
 assert len(resolved_events) == 1, resolved_events
 assert resolved_events[0]["resolved"] is True, resolved_events[0]
 assert resolved_events[0]["choice"] == "once", resolved_events[0]
+`)
+  })
+
+  it('reports an unresolved gateway approval outcome when the runtime never registered the request', () => {
+    runPython(String.raw`
+${harness}
+${gatewayApprovalPrelude}
 
 # A runtime that never registered the request does not resolve, and the event says so.
 record, approval_id = notify_gateway_approval("session-stale", "run-stale", "request-stale", False)
@@ -1400,14 +1410,64 @@ assert result["resolved"] is False, result
 resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
 assert len(resolved_events) == 1, resolved_events
 assert resolved_events[0]["resolved"] is False, resolved_events[0]
+assert resolved_events[0]["choice"] == "once", resolved_events[0]
+`)
+  })
+
+  it('reports an unresolved gateway approval outcome for a runtime that sends no request id', () => {
+    runPython(String.raw`
+${harness}
+${gatewayApprovalPrelude}
 
 # A runtime older than v0.20.5 emits no request_id at all: same honest outcome.
+# The empty request_id short-circuits before resolve_gateway_approval is called.
 record, approval_id = notify_gateway_approval("session-legacy", "run-legacy", "", False)
+before = len(approval._resolved_gateway_requests)
 result = pool.respond_approval(approval_id, "deny")
+assert result["resolved"] is False, result
+assert len(approval._resolved_gateway_requests) == before, approval._resolved_gateway_requests
+resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
+assert len(resolved_events) == 1, resolved_events
+assert resolved_events[0]["resolved"] is False, resolved_events[0]
+assert resolved_events[0]["choice"] == "deny", resolved_events[0]
+`)
+  })
+
+  it('reports an unresolved gateway approval outcome when the approval gateway raises', () => {
+    runPython(String.raw`
+${harness}
+${gatewayApprovalPrelude}
+
+# The except Exception branch: a gateway that raises must not be reported as resolved.
+def raising_resolve_gateway_approval(session_key, choice, request_id=None):
+    raise RuntimeError("gateway unavailable")
+
+approval.resolve_gateway_approval = raising_resolve_gateway_approval
+
+record, approval_id = notify_gateway_approval("session-raise", "run-raise", "request-raise", True)
+result = pool.respond_approval(approval_id, "once")
 assert result["resolved"] is False, result
 resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
 assert len(resolved_events) == 1, resolved_events
 assert resolved_events[0]["resolved"] is False, resolved_events[0]
+`)
+  })
+
+  it('keeps reporting the interrupt-path approval.resolved event without an outcome (control)', () => {
+    runPython(String.raw`
+${harness}
+${gatewayApprovalPrelude}
+
+# Control for the respond_approval branch only: the session-interrupt path
+# resolves gateway approvals of its own and is untouched by the fix, so its
+# event carries a reason and still no resolved key on either arm.
+record, approval_id = notify_gateway_approval("session-interrupt", "run-interrupt", "request-interrupt", True)
+pool._cancel_pending_approvals_for_generation("session-interrupt", "run-interrupt")
+resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
+assert len(resolved_events) == 1, resolved_events
+assert "resolved" not in resolved_events[0], resolved_events[0]
+assert resolved_events[0]["reason"] == "Session interrupted", resolved_events[0]
+assert resolved_events[0]["choice"] == "deny", resolved_events[0]
 `)
   })
 
