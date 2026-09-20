@@ -58,6 +58,7 @@ export async function compactCodexThread(
     let beforeTokens: number | null = null
     let afterTokens: number | null = null
     let latestTokens: number | null = null
+    let firstPostCompactTokens: number | null = null
 
     const settle = (fn: () => void) => {
       if (settled) return
@@ -104,8 +105,17 @@ export async function compactCodexThread(
         if (totalTokens != null) {
           latestTokens = totalTokens
           if (compactAccepted) {
-            if (beforeTokens == null) beforeTokens = totalTokens
+            // Codex may emit an old snapshot followed by the compacted usage,
+            // or only the compacted usage. Keep a single post-acceptance value
+            // as after-only; once a second value arrives, the first is before.
+            if (firstPostCompactTokens == null) {
+              firstPostCompactTokens = totalTokens
+            } else if (beforeTokens == null) {
+              beforeTokens = firstPostCompactTokens
+            }
             afterTokens = totalTokens
+          } else {
+            beforeTokens = totalTokens
           }
         }
         return

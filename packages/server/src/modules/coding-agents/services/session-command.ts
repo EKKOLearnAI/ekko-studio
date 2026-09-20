@@ -1,7 +1,7 @@
 import type { Server, Socket } from 'socket.io'
 import { addMessage, getSession, updateSessionStats } from '../../studio/public/sessions'
 import { getModelContextLength } from '../../studio/public/provider-runtime'
-import { calcAndUpdateUsage, getOrCreateSession } from '../../studio/public/run-state'
+import { calcAndUpdateUsage, getOrCreateSession, updateContextTokenUsage } from '../../studio/public/run-state'
 import type { SessionState } from '../../studio/contracts/runs/session'
 import { codingAgentRunManager } from './runtime/run-manager'
 import { compactStoredCodingAgentSession, startCodingAgentRun } from './index'
@@ -269,11 +269,23 @@ export async function handleCodingAgentSessionCommand(
       if ('started' in result) {
         return
       }
+      const beforeTokens = result.beforeTokens ?? state.contextTokens ?? null
+      const afterTokens = result.afterTokens ?? null
+      if (result.compacted && afterTokens != null) {
+        updateContextTokenUsage(sessionId, state, emit, afterTokens)
+      }
+      // Native Codex/Pi compaction is complete at this point. Clear any stale
+      // in-memory working flag so reconnect/resume does not keep showing the
+      // session as running after the compact app-server has exited.
+      state.isWorking = false
       emitCommand({
         action: 'compact',
         terminal: true,
-        message: compactionCompletionMessage(result),
+        message: compactionCompletionMessage({ ...result, beforeTokens }),
         compacted: result.compacted,
+        beforeTokens,
+        afterTokens,
+        ...(afterTokens != null ? { contextTokens: afterTokens } : {}),
       })
     } catch (err) {
       if (isContextWindowExceededError(err)) {

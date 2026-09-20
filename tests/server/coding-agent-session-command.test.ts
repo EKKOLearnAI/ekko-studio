@@ -5,6 +5,7 @@ const getSessionMock = vi.hoisted(() => vi.fn())
 const updateSessionStatsMock = vi.hoisted(() => vi.fn())
 const getOrCreateSessionMock = vi.hoisted(() => vi.fn(() => ({ messages: [], isWorking: false })))
 const calcAndUpdateUsageMock = vi.hoisted(() => vi.fn())
+const updateContextTokenUsageMock = vi.hoisted(() => vi.fn())
 const getModelContextLengthMock = vi.hoisted(() => vi.fn(() => 256_000))
 const compactMock = vi.hoisted(() => vi.fn())
 const getRunInfoMock = vi.hoisted(() => vi.fn())
@@ -26,7 +27,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
 vi.mock('../../packages/server/src/modules/studio/public/run-state', () => ({
   getOrCreateSession: getOrCreateSessionMock,
   calcAndUpdateUsage: calcAndUpdateUsageMock,
-  updateContextTokenUsage: vi.fn(),
+  updateContextTokenUsage: updateContextTokenUsageMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/provider-runtime', () => ({
@@ -241,6 +242,36 @@ describe('coding agent session commands', () => {
     expect(nativeContextRecoveryMessageMock).toHaveBeenCalledWith('Pi')
     expect(emitted.filter(item => item.event === 'session.command').at(-1)?.payload).toMatchObject({
       ok: true, resetNativeThread: true, compacted: false, message: 'Pi recovered',
+    })
+  })
+
+  it('publishes compacted context usage and refreshes the session state', async () => {
+    compactMock.mockResolvedValue({ compacted: true, beforeTokens: null, afterTokens: 26094 })
+    getSessionMock.mockReturnValue({ id: 'session-1', agent: 'codex' })
+    const state = { messages: [], isWorking: false, contextTokens: 818838 }
+    getOrCreateSessionMock.mockReturnValue(state)
+    const { handleCodingAgentSessionCommand } = await import('../../packages/server/src/modules/coding-agents/services/session-command')
+    const { socket, nsp, emitted } = makeSocket()
+
+    await handleCodingAgentSessionCommand(nsp, socket as any, {
+      session_id: 'session-1',
+    }, { name: 'compact', rawName: 'compact', args: '' }, 'default', new Map())
+
+    expect(updateContextTokenUsageMock).toHaveBeenCalledWith(
+      'session-1',
+      state,
+      expect.any(Function),
+      26094,
+    )
+    expect(state.isWorking).toBe(false)
+    const command = emitted.filter(item => item.event === 'session.command').at(-1)?.payload
+    expect(command).toMatchObject({
+      action: 'compact',
+      compacted: true,
+      beforeTokens: 818838,
+      afterTokens: 26094,
+      contextTokens: 26094,
+      message: 'Compaction completed. Before: 818838 tokens. After: 26094 tokens.',
     })
   })
 

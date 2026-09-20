@@ -2922,6 +2922,10 @@ export const useChatStore = defineStore('chat', () => {
       if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
     }
 
+    if (action === 'compact' && target && (evt as any).contextTokens != null) {
+      target.contextTokens = (evt as any).contextTokens
+    }
+
     if (action === 'destroy') {
       streamStates.value.delete(sid)
       serverWorking.value.delete(sid)
