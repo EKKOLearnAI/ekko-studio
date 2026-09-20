@@ -487,7 +487,8 @@ describe('coding agent resumed session config', () => {
     const resumed = startRunMock.mock.calls[0][0]
     expect(resumed.provider).toBe('opencode-free')
     expect(resumed.model).toBe('muse-spark-free')
-    expect(readConfigYamlForProfileMock).not.toHaveBeenCalled()
+    expect(readConfigYamlForProfileMock).toHaveBeenCalledWith('default')
+    readConfigYamlForProfileMock.mockClear()
     getSessionMock.mockReturnValue(null)
     await startCodingAgentRun('codex', {
       sessionId: 'session-new-free', provider: 'opencode-free', model: 'mimo-v2.5-free',

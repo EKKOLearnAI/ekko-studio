@@ -25,6 +25,11 @@ export async function prepareDshRuntime(input: {
   baseUrl?: string
   contextWindow?: number
   outputLimit?: number
+  compression?: {
+    enabled: boolean
+    threshold: number
+    targetRatio: number
+  }
   imageInput?: boolean
   reasoningEffort?: string
   installationCommand?: string
@@ -69,6 +74,14 @@ export async function prepareDshRuntime(input: {
   await writeFile(streamPluginPath, DSH_STREAM_PLUGIN, { mode: 0o600 })
   const overlay: unknown[] = [
     { insert: [{ id: 'ekko-studio-assistant-stream', name: pathToFileURL(streamPluginPath).href }] },
+    ...(input.compression ? [{
+      id: 'compaction-basic',
+      config: {
+        auto: input.compression.enabled,
+        thresholdRatio: input.compression.threshold,
+        retainRatio: Math.min(input.compression.targetRatio, Math.max(0.01, input.compression.threshold - 0.01)),
+      },
+    }] : []),
     { id: 'session-persistence-jsonl', config: { root: join(input.rootDir, 'sessions'), compression: 'none' } },
     { id: 'skill-filesystem', config: { customSkillDirs: [join(input.sourceHome, 'skills'), input.sharedSkills] } },
     { id: 'sandbox-policy', config: { mode: 'danger-full-access' } },

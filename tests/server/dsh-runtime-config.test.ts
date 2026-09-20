@@ -42,7 +42,8 @@ describe('DSH runtime home', () => {
     await writeFile(join(sourceHome, 'profiles/acp/custom.txt'), 'plugin asset')
     const input = { sourceHome, rootDir, sharedSkills, systemPrompt: 'Studio system prompt',
       managedMcp: { 'ekko-studio-api': { command: 'node', args: ['api.mjs'], env: { ELECTRON_RUN_AS_NODE: '1' } } },
-      model: 'custom/model', baseUrl: 'http://127.0.0.1:1234/proxy/v1', contextWindow: 90000, outputLimit: 9000, imageInput: true }
+      model: 'custom/model', baseUrl: 'http://127.0.0.1:1234/proxy/v1', contextWindow: 90000, outputLimit: 9000,
+      compression: { enabled: true, threshold: 0.5, targetRatio: 0.2 }, imageInput: true }
     const prepared = await prepareDshRuntime(input)
     expect(prepared.args).toEqual(['--profile', 'acp', '--patch', join(rootDir, 'studio.patch.yml')])
     const overlay = parse(await readFile(join(rootDir, 'studio.patch.yml'), 'utf8'))
@@ -51,6 +52,9 @@ describe('DSH runtime home', () => {
       models: [{ id: input.model, contextWindow: 90000, maxTokens: 9000, input: ['text', 'image'] }],
     })
     expect(overlay.find((row: any) => row.id === 'skill-filesystem').config.customSkillDirs).toEqual([join(sourceHome, 'skills'), sharedSkills])
+    expect(overlay.find((row: any) => row.id === 'compaction-basic').config).toEqual({
+      auto: true, thresholdRatio: 0.5, retainRatio: 0.2,
+    })
     expect(overlay.find((row: any) => row.id === 'session-persistence-jsonl').config.root).toBe(join(rootDir, 'sessions'))
     expect(await readFile(prepared.promptFile, 'utf8')).toContain('Native preferences')
     expect(await readFile(prepared.promptFile, 'utf8')).toContain('Studio system prompt')

@@ -67,6 +67,13 @@ function makeHome() {
     providerEnvironmentMap: {},
     readConfigYaml: async () => ({}),
     readConfigYamlForProfile: async () => ({
+      compression: {
+        enabled: true,
+        threshold: 0.5,
+        target_ratio: 0.2,
+        protect_last_n: 20,
+        protect_first_n: 3,
+      },
       custom_providers: [{
         name: 'test',
         base_url: 'https://api.example.com/v1',
@@ -298,6 +305,8 @@ describe('coding agent launch preparation', () => {
     expect(providerIndex).toBeLessThan(providerSectionIndex)
     expect(providerSectionIndex).toBeLessThan(hooksSectionIndex)
     expect(config.slice(0, config.indexOf('\n['))).toContain('model = "codex-model"')
+    expect(config.slice(0, config.indexOf('\n['))).toContain('model_auto_compact_token_limit = 121600')
+    expect(config.slice(0, config.indexOf('\n['))).toContain('model_auto_compact_token_limit_scope = "total"')
   })
 
   it('preserves complete multiline top-level arrays when strings and comments contain brackets', async () => {
@@ -737,6 +746,7 @@ describe('coding agent launch preparation', () => {
       baseUrl: 'https://api.example.com/v1', apiKey: 'test-key', apiMode: 'codex_responses',
     })
     const settings = JSON.parse(readFileSync(join(result.rootDir, 'settings.json'), 'utf-8'))
+    expect(settings.compaction).toMatchObject({ enabled: true, reserveTokens: 128000, keepRecentTokens: 51200 })
     expect(settings.extensions).toContain(userAdapter)
     expect(settings.extensions).toContain(join(scopedDir, 'custom.ts'))
     expect(settings.extensions).not.toContain(bundle)

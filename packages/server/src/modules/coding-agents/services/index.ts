@@ -47,6 +47,7 @@ import type { CodingAgentRuntime } from '../../studio/contracts/agents/runtime'
 import { defaultCodingAgentWorkspace } from '../../studio/public/workspace-manager'
 import { isolateUnhealthyRuntimeMcpServers } from './mcp-runtime-isolation'
 import { getCodingAgentGlobalHome } from '../../studio/public/coding-agent-global-home'
+import { resolveCodingAgentCompressionPolicy } from './compression-policy'
 
 const execFileAsync = promisify(execFile)
 const LAUNCH_API_MODES = new Set<ApiMode>(['chat_completions', 'codex_responses', 'anthropic_messages'])
@@ -64,10 +65,6 @@ const CLAUDE_CODE_ROOT_PERMISSION_ARGS = [
   '--allowedTools',
   CLAUDE_CODE_TASK_PLAN_TOOL,
 ]
-// Claude Code auto-compact is on by default, but Studio never tells it the
-// model context window, so it can compact too late for the 20MB proxy body
-// limit. Mirror Hermes' 50% compression budget and pass Studio's window.
-const CLAUDE_CODE_AUTO_COMPACT_PERCENT = 50
 const PI_MCP_ADAPTER_PACKAGE = 'pi-mcp-adapter'
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org'
 const PI_PROVIDER_ID = 'hermes-studio'
@@ -1421,6 +1418,8 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
     'model_reasoning_effort',
     'developer_instructions',
     'disable_response_storage',
+    'model_auto_compact_token_limit',
+    'model_auto_compact_token_limit_scope',
     'experimental_bearer_token',
     'forced_login_method',
     'preferred_auth_method',
@@ -1569,7 +1568,11 @@ async function readPiSettings(scope?: Required<CodingAgentConfigScope>): Promise
   return mergePiSettings(sources, getPiMcpAdapterEntry())
 }
 
-function piSettingsConfig(existing: Record<string, unknown> = {}, runtimeExtensionPath = ''): string {
+function piSettingsConfig(
+  existing: Record<string, unknown> = {},
+  runtimeExtensionPath = '',
+  compressionPolicy?: ReturnType<typeof resolveCodingAgentCompressionPolicy>,
+): string {
   const bundledAdapterEntry = getPiMcpAdapterEntry()
   const configuredExtensions = Array.isArray(existing.extensions)
     ? existing.extensions.filter(value => typeof value === 'string' && value.trim() && value !== bundledAdapterEntry)
@@ -1581,6 +1584,16 @@ function piSettingsConfig(existing: Record<string, unknown> = {}, runtimeExtensi
     ...existing,
     defaultProjectTrust: 'never',
     enableSkillCommands: true,
+    ...(compressionPolicy ? {
+      compaction: {
+        ...(existing.compaction && typeof existing.compaction === 'object' && !Array.isArray(existing.compaction)
+          ? existing.compaction as Record<string, unknown>
+          : {}),
+        enabled: compressionPolicy.enabled,
+        reserveTokens: compressionPolicy.reserveTokens,
+        keepRecentTokens: compressionPolicy.keepRecentTokens,
+      },
+    } : {}),
     extensions: [...extensions],
   }, null, 2)}\n`
 }
@@ -3407,6 +3420,21 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     : groupSystemPrompt
       ? [groupSystemPrompt, studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
       : getSystemPrompt(undefined, { mcpCapabilities })
+  const studioManagedCompression = tool.id === 'codex' || tool.id === 'claude-code'
+    || tool.id === 'pi' || tool.id === 'grok' || tool.id === 'dsh'
+  let profileConfig: Record<string, any> = {}
+  if (studioManagedCompression) {
+    try { profileConfig = await readConfigYamlForProfile(scope.profile) } catch {}
+  }
+  const contextWindow = studioManagedCompression
+    ? getModelContextLength({ profile: scope.profile, provider, model })
+    : 1
+  // Codex reserves the final 5% of the catalog window internally, so map the
+  // shared Studio ratio against the same effective window Codex reports.
+  const compressionContextWindow = tool.id === 'codex'
+    ? Math.max(1, Math.floor(contextWindow * 0.95))
+    : contextWindow
+  const compressionPolicy = resolveCodingAgentCompressionPolicy(profileConfig, compressionContextWindow)
   const isolatedInput = tool.id === 'pi' || tool.id === 'dsh'
     ? {
         ...input,
@@ -3438,7 +3466,6 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   let env: Record<string, string> = {}
 
   if (tool.id === 'claude-code') {
-    const contextWindow = getModelContextLength({ profile: scope.profile, provider, model })
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerClaudeCodeProxyTarget({
           provider,
@@ -3477,7 +3504,8 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         ANTHROPIC_DEFAULT_OPUS_MODEL: model,
         ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: modelName,
         CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(contextWindow),
-        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CLAUDE_CODE_AUTO_COMPACT_PERCENT),
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(compressionPolicy.enabled ? compressionPolicy.thresholdPercent : 100),
+        ...(compressionPolicy.enabled ? {} : { DISABLE_COMPACT: '1' }),
         ENABLE_TOOL_SEARCH: 'true',
       },
     }
@@ -3549,6 +3577,8 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       .join('\n\n')
     const configToml = [
       ...userRuntimeConfig.topLevelLines,
+      `model_auto_compact_token_limit = ${compressionPolicy.enabled ? compressionPolicy.triggerTokens : compressionPolicy.contextWindow}`,
+      'model_auto_compact_token_limit_scope = "total"',
       `model_catalog_json = ${JSON.stringify(catalogPath)}`,
       `model_provider = ${JSON.stringify(providerId)}`,
       `model = ${JSON.stringify(model)}`,
@@ -3623,7 +3653,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     await mkdir(sessionsDir, { recursive: true })
     await writeRuntimeFile('studio_extension', PI_STUDIO_EXTENSION_FILE, piStudioRuntimeExtension())
     await writeRuntimeFile('dynamic_prompt', PI_DYNAMIC_PROMPT_FILE, '')
-    await writeRuntimeFile('settings', 'settings.json', piSettingsConfig(settings, studioExtensionPath))
+    await writeRuntimeFile('settings', 'settings.json', piSettingsConfig(settings, studioExtensionPath, compressionPolicy))
     await writeRuntimeFile('models', 'models.json', piModelsConfig({
       baseUrl: piBaseUrl,
       apiKey: piApiKey,
@@ -3711,6 +3741,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       proxyBaseUrl: proxyTarget?.baseUrl || baseUrl,
       contextWindow: capabilities.contextWindow,
       outputLimit: capabilities.outputLimit,
+      autoCompactThresholdPercent: compressionPolicy.enabled ? compressionPolicy.thresholdPercent : 100,
       reasoningEffort,
       systemPrompt: scopedSystemPrompt,
       userInstructions: [globalInstructions.trim(), scopedInstructions.trim()]
@@ -3746,6 +3777,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       sharedSkills: join(getGlobalConfigHome(), '.agents', 'skills'),
       rootDir, systemPrompt: scopedSystemPrompt, model, baseUrl: proxyTarget.baseUrl,
       contextWindow: capabilities.contextWindow, outputLimit: capabilities.outputLimit,
+      compression: compressionPolicy,
       imageInput: capabilities.input.includes('image'),
       reasoningEffort,
       managedMcp: getCodingAgentManagedMcpServerConfigs('dsh', scope.profile),

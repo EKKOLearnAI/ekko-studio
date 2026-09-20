@@ -380,6 +380,7 @@ export async function prepareScopedGrokRuntime(input: {
   proxyBaseUrl: string
   contextWindow: number
   outputLimit: number
+  autoCompactThresholdPercent?: number
   reasoningEffort: string
   systemPrompt: string
   userInstructions: string
@@ -403,6 +404,7 @@ export async function prepareScopedGrokRuntime(input: {
     `env_key = ${tomlString(GROK_API_KEY_ENV)}`,
     'api_backend = "responses"',
     `context_window = ${Math.max(1, Math.floor(input.contextWindow))}`,
+    `auto_compact_threshold_percent = ${Math.max(0, Math.min(100, Math.round(input.autoCompactThresholdPercent ?? 85)))}`,
     `max_completion_tokens = ${Math.max(1, Math.floor(input.outputLimit))}`,
     '',
     input.managedMcpToml.trim(),

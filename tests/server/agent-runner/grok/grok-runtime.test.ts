@@ -73,6 +73,7 @@ describe('Grok runtime isolation', () => {
       proxyBaseUrl: 'http://127.0.0.1:8647/api/coding-agents/codex-proxy/test/v1',
       contextWindow: 128_000,
       outputLimit: 8192,
+      autoCompactThresholdPercent: 50,
       reasoningEffort: 'high',
       systemPrompt: 'Studio instructions.',
       userInstructions: 'User instructions.',
@@ -93,6 +94,7 @@ describe('Grok runtime isolation', () => {
     expect(config).toContain('[model.hermes-studio]')
     expect(config).toContain('api_backend = "responses"')
     expect(config).toContain('env_key = "HERMES_STUDIO_GROK_API_KEY"')
+    expect(config).toContain('auto_compact_threshold_percent = 50')
     expect(config).not.toContain('api_key =')
     expect(config).not.toContain('stale-native')
     expect(config).not.toContain('stale-refresh-token')
