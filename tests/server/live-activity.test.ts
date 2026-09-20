@@ -52,7 +52,7 @@ describe('Studio Live Activity plan-trigger policy', () => {
  async function setup(){const {updateLiveActivityDestination}=await import('../../packages/server/src/modules/studio/services/notifications/live-activity-registration');await updateLiveActivityDestination('login',{schema_version:1,platform:'ios',studio_device_id:'studio-a',installation_ref:'phone-a',cloud_user_id:107,grant_id:'grant-a',push_token:'push_'+'a'.repeat(43),app_id:'com.ekkostudio.ai',apns_environment:'development',destination_id:'dest-a',enabled:true});return (await import('../../packages/server/src/modules/studio/services/notifications/live-activity')).createLiveActivityConsumer(fetchMock)}
  it('starts immediately when the first valid plan appears, even if the run completes right away',async()=>{const consume=await setup();await consume(event('chat.plan.updated'));expect(fetchMock).toHaveBeenCalledTimes(1);await consume(event('chat.run.completed'));expect(fetchMock).toHaveBeenCalledTimes(2);const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body));expect(bodies.map(b=>b.event)).toEqual(['start','end'])})
  it('updates one activity for repeated plans from the same run instead of starting duplicates',async()=>{const consume=await setup();await consume(event('chat.plan.updated','run-a',1));await consume(event('chat.plan.updated','run-a',2));expect(fetchMock).toHaveBeenCalledTimes(2);const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body));expect(bodies.map(b=>b.event)).toEqual(['start','update']);expect(bodies[1].activity_ref).toBe(bodies[0].activity_ref)})
- it('serializes concurrent plan events so only one request can start the activity',async()=>{const consume=await setup();await Promise.all([consume(event('chat.plan.updated','run-a',1)),consume(event('chat.plan.updated','run-a',2))]);const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body));expect(bodies.map(b=>b.event)).toEqual(['start','update']);expect(new Set(bodies.map(b=>b.activity_ref)).size).toBe(1)})
+ it('serializes concurrent plan events so only one request can start the activity',async()=>{const consume=await setup();await Promise.all([consume(event('chat.plan.updated','run-a',1)),consume(event('chat.plan.updated','run-a',2))]);const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body));expect(bodies.map(b=>b.event)).toEqual(['start']);expect(bodies[0].content_state.completedSteps).toBe(1);expect(new Set(bodies.map(b=>b.activity_ref)).size).toBe(1)})
  it('keeps one activity across separate runs in the same session',async()=>{const consume=await setup();await consume(event('chat.plan.updated','run-a',1));await consume(event('chat.plan.updated','run-b',2));const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body));expect(bodies.map(b=>b.event)).toEqual(['start','update']);expect(new Set(bodies.map(b=>b.activity_ref)).size).toBe(1)})
  it('starts separate activities for separate sessions',async()=>{const consume=await setup();await consume(event('chat.plan.updated','run-a',1,'session-a'));await consume(event('chat.plan.updated','run-b',1,'session-b'));expect(fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body).event)).toEqual(['start','start'])})
  it('ends the session activity when a later run emits the terminal event',async()=>{const consume=await setup();await consume(event('chat.plan.updated','run-a',1));await consume(event('chat.run.completed','run-b',2));const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body));expect(bodies.map(b=>b.event)).toEqual(['start','end']);expect(bodies[1].activity_ref).toBe(bodies[0].activity_ref);expect(bodies[1].dismissal_at).toBe(bodies[1].occurred_at+60)})
@@ -115,6 +115,39 @@ describe('Studio Live Activity plan-trigger policy', () => {
   await vi.advanceTimersByTimeAsync(600_000)
   expect(fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body).event)).toEqual(['start','end'])
   vi.doUnmock('../../packages/server/src/modules/studio/services/chat-run/server-registry')
+ })
+
+ it('ends an interrupted plan as cancelled immediately, retaining real progress',async()=>{
+  const consume=await setup()
+  await consume(event('chat.plan.updated','run-a',1))
+  const stopped=event('chat.plan.updated','run-a',2)
+  stopped.chat.task_plan.execution_state='interrupted'
+  await consume(stopped)
+  const body=JSON.parse(fetchMock.mock.calls[1][1].body)
+  expect(body.event).toBe('end');expect(body.content_state.status).toBe('cancelled')
+  expect(body.content_state.completedSteps).toBe(1)
+  expect(body.dismissal_at).toBe(body.occurred_at)
+  await consume(event('chat.run.completed','run-a',3))
+  expect(fetchMock).toHaveBeenCalledTimes(2)
+ })
+ it('does not create an activity for a terminal-only plan',async()=>{
+  const consume=await setup(), stopped=event('chat.plan.updated','run-a',1)
+  stopped.chat.task_plan.execution_state='interrupted'
+  await consume(stopped)
+  expect(fetchMock).not.toHaveBeenCalled()
+ })
+ it('a newer plan supersedes pending receipt polling and queued older snapshots',async()=>{
+  const consume=await setup()
+  fetchMock.mockResolvedValueOnce({status:200,json:async()=>({status:'accepted'}),body:null})
+    .mockResolvedValueOnce({status:202,json:async()=>({status:'pending_token'}),body:null})
+    .mockResolvedValue({status:200,json:async()=>({status:'accepted'}),body:null})
+  await consume(event('chat.plan.updated','run-a',1))
+  const old=consume(event('chat.plan.updated','run-a',2));await vi.advanceTimersByTimeAsync(0)
+  const next=event('chat.plan.updated','run-a',3);next.chat.task_plan.plan[0].step='Newest step'
+  const fresh=consume(next);await vi.advanceTimersByTimeAsync(0)
+  expect(fetchMock).toHaveBeenCalledTimes(3)
+  await Promise.all([old,fresh])
+  expect(JSON.parse(fetchMock.mock.calls[2][1].body).content_state.currentStep).toBe('Newest step')
  })
 
 })

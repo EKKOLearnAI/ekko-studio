@@ -10,16 +10,19 @@ import { canReceiveAppEvent } from '../webhooks/app-events'
 import { appRelayUrlForRoute, getAppRelayRoute } from '../app-relay/route'
 import { decryptPushSecret } from './push-secrets'
 
-const terminal = (type: string) => type.endsWith('.run.completed') || type.endsWith('.run.failed')
+const cancelled = (event: BusinessEvent) => event.chat?.task_plan?.execution_state === 'interrupted'
+  || event.payload.interrupted === true || event.type.endsWith('.abort.completed')
+const terminal = (event: BusinessEvent) => event.type.endsWith('.run.completed') || event.type.endsWith('.run.failed')
+  || cancelled(event) || ['ended', 'failed'].includes(String(event.chat?.task_plan?.execution_state))
 const runKind = (event: BusinessEvent) => event.source === 'group_chat' ? 'group' : event.source === 'workflow' ? 'workflow' : 'chat'
 const subjectId = (event: BusinessEvent) => event.subject.room_id || event.subject.workflow_id || event.subject.session_id || ''
 const bounded = (value: unknown, max: number) => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : ''
 function content(event: BusinessEvent, state: LiveActivityRunRecord, ending = false) {
   const plan = event.chat?.task_plan, steps = Array.isArray(plan?.plan) ? plan!.plan : []
   const inProgress = steps.find(step => step.status === 'in_progress') as { step?: unknown } | undefined
-  const waiting = event.type.includes('approval.requested') || event.type.includes('clarification.requested'), failed = event.type.endsWith('.failed')
-  return { title: state.title, status: ending ? failed ? 'failed' : 'completed' : waiting ? 'waiting_confirmation' : 'running',
-    currentStep: bounded(ending ? failed ? '任务失败' : '任务完成' : waiting ? '等待确认' : inProgress?.step || '任务正在运行', 80),
+  const waiting = event.type.includes('approval.requested') || event.type.includes('clarification.requested'), failed = event.type.endsWith('.failed') || event.chat?.task_plan?.execution_state === 'failed'
+  return { title: state.title, status: ending ? cancelled(event) ? 'cancelled' : failed ? 'failed' : 'completed' : waiting ? 'waiting_confirmation' : 'running',
+    currentStep: bounded(ending ? cancelled(event) ? '任务已取消' : failed ? '任务失败' : '任务完成' : waiting ? '等待确认' : inProgress?.step || '任务正在运行', 80),
     completedSteps: state.completed, totalSteps: state.total, agent: agent(event) }
 }
 function agent(event: BusinessEvent): string {
@@ -85,7 +88,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
   async function dispatch(event: BusinessEvent, device: ReturnType<typeof listLiveActivityDestinations>[number], registration: Record<string, any>, key: string, requested?: 'start'|'update'|'end') {
     let state = getLiveActivityRun(key)
     if (!state || state.terminal) return
-    const ending = requested === 'end' || terminal(event.type)
+    const ending = requested === 'end' || terminal(event)
     const action = requested || (!state.started ? 'start' : ending ? 'end' : 'update')
     if (!state.started && action !== 'start') return
     state = { ...state, revision: state.revision + 1, updated_at: Date.now() }
@@ -96,7 +99,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
     if (action === 'start') body.ekko_run = { schema_version: 1, studio_device_id: registration.studio_device_id,
       cloud_user_id: registration.cloud_user_id, profile: event.profile, run_kind: runKind(event), run_id: event.subject.run_id || event.id,
       [runKind(event) === 'chat' ? 'session_id' : runKind(event) === 'group' ? 'room_id' : 'workflow_id']: subjectId(event) }
-    if (action === 'end') body.dismissal_at = now + (terminal(event.type) ? 60 : 0); else body.stale_at = now + 300
+    if (action === 'end') body.dismissal_at = now + (terminal(event) && !cancelled(event) ? 60 : 0); else body.stale_at = now + 300
     const url = new URL('/push/v1/live-activities/send', appRelayUrlForRoute(await getAppRelayRoute()))
     const request = { method: 'POST', redirect: 'error' as const,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registration.push_token}` }, body: JSON.stringify(body) }
@@ -136,7 +139,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
   }
   const consume = async (event: BusinessEvent, heartbeat = false): Promise<void> => {
     const plan = event.type.endsWith('.plan.updated') ? event.chat?.task_plan : null
-    if (!plan && !terminal(event.type) && !event.type.includes('approval.requested') && !event.type.includes('clarification.requested')) return
+    if (!plan && !terminal(event) && !event.type.includes('approval.requested') && !event.type.includes('clarification.requested')) return
     if (!subjectId(event) || event.payload.replayed === true || event.payload.restored === true) return
     try {
       const connections = listAppConnections()
@@ -146,18 +149,22 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
         let registration: Record<string, any>; try { registration = JSON.parse(decryptPushSecret(device.ciphertext)) } catch { console.warn('[live-activity] registration_unreadable', { connection: device.connection_id }); return }
         const key = stableKey(event, device.destination_id)
         if (heartbeat && (latest.get(key) !== event || !active(event))) return
+        const previous = latest.get(key)
+        if (!heartbeat && plan && previous?.chat?.task_plan && previous.subject.run_id === event.subject.run_id
+          && previous.chat.task_plan.plan_id === plan.plan_id && previous.chat.task_plan.revision >= plan.revision) return
         cancelRefresh(key)
         latest.set(key, event)
         // A terminal event must not wait behind an update receipt poll; new turns also supersede old polls.
         const activePoll = polling.get(key)
-        if (activePoll && (terminal(event.type) || activePoll.runId !== (event.subject.run_id || ''))) activePoll.controller.abort()
+        if (activePoll && ((!heartbeat && !!plan) || terminal(event) || activePoll.runId !== (event.subject.run_id || ''))) activePoll.controller.abort()
         await serialized(key, async () => {
           const legacy = listActiveLiveActivityRuns(device.destination_id)
             .filter(row => row.run_key.startsWith(legacyKeyPrefix(event, device.destination_id)))
           for (const row of legacy) await dispatch(event, device, registration, row.run_key, 'end')
+          if (plan && !terminal(event) && latest.get(key) !== event) return
           let state = getLiveActivityRun(key)
           if (heartbeat && (!state?.started || state.terminal || latest.get(key) !== event || !active(event))) return
-          if (state?.terminal && !plan) return
+          if (state?.terminal && (!plan || terminal(event))) return
           if (!state || state.terminal) state = { run_key:key,destination_id:device.destination_id,activity_ref:ref(event,device.destination_id),revision:0,started:0,terminal:0,title:title(event),completed:0,total:0,updated_at:Date.now() }
           if (plan) {
             state.completed = Number(plan.progress?.completed) || 0; state.total = Number(plan.progress?.total) || 0
@@ -166,19 +173,19 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
           state.updated_at = Date.now()
           saveLiveActivityRun(state)
           if (!state.started) {
-            if (terminal(event.type)) {
+            if (terminal(event)) {
               state.terminal = 1
               saveLiveActivityRun(state)
               return
             }
             if (!plan) return
             await dispatch(event, device, registration, key, 'start')
-            if (getLiveActivityRun(key)?.started) scheduleRefresh(key, event)
+            if (getLiveActivityRun(key)?.started && !terminal(event)) scheduleRefresh(key, event)
             return
           }
-          await dispatch(event, device, registration, key, terminal(event.type) ? 'end' : 'update')
-          if (plan && !terminal(event.type)) scheduleRefresh(key, event)
-          else latest.delete(key)
+          await dispatch(event, device, registration, key, terminal(event) ? 'end' : 'update')
+          if (plan && !terminal(event)) scheduleRefresh(key, event)
+          else if (latest.get(key) === event) latest.delete(key)
         }).catch(() => { console.warn('[live-activity] delivery_exception', { connection: device.connection_id }) })
       }))
     } catch { /* Live Activity delivery never changes task outcomes. */ }
