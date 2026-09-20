@@ -41,16 +41,18 @@ function validConnection(device: ReturnType<typeof listLiveActivityDestinations>
     && row.token_hash === device.connection_token_hash && row.revoked_at == null && row.token_expires_at > Date.now() / 1000)
 }
 
-async function liveActivityResult(response: Response): Promise<{ status: string }> {
-  let result: { status?: unknown } = {}
-  try { result = await response.json() as { status?: unknown } } catch { /* non-JSON failures are not delivery receipts */ }
+async function liveActivityResult(response: Response): Promise<{ status: string; error: string }> {
+  let result: { status?: unknown; error?: unknown } = {}
+  try { result = await response.json() as { status?: unknown; error?: unknown } } catch { /* non-JSON failures are not delivery receipts */ }
   try { await response.body?.cancel() } catch { /* already consumed */ }
-  return { status: typeof result.status === 'string' ? result.status : '' }
+  return { status: typeof result.status === 'string' && /^[a-z_]{1,48}$/.test(result.status) ? result.status : '',
+    error: typeof result.error === 'string' && /^[a-z_]{1,64}$/.test(result.error) && !result.error.startsWith('push_') ? result.error : '' }
 }
 
 /** Starts a Live Activity as soon as a verified task plan exists, then updates that activity through the run lifecycle. */
 export function createLiveActivityConsumer(send: typeof fetch = (...args) => fetch(...args)) {
   const pending = new Map<string, Promise<void>>()
+  const polling = new Map<string, { controller: AbortController; runId: string }>()
   async function serialized(key: string, operation: () => Promise<void>): Promise<void> {
     const previous = pending.get(key) || Promise.resolve()
     const current = previous.catch(() => {}).then(operation)
@@ -77,14 +79,36 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registration.push_token}` }, body: JSON.stringify(body) }
     let response = await send(url, { ...request, signal: AbortSignal.timeout(10_000) })
     let result = await liveActivityResult(response)
+    // Never log request bodies, destination IDs, task text, or credentials.
+    console.info('[live-activity] delivery', { connection: device.connection_id, action,
+      agent: agent(event), revision: state.revision, http: response.status, status: result.status, error: result.error })
     if (response.status >= 200 && response.status < 300) {
       state.started = 1; state.terminal = action === 'end' ? 1 : 0; saveLiveActivityRun(state)
     }
     const deadline = Date.now() + (action === 'end' ? 580_000 : 110_000)
-    while (response.status === 202 && ['queued', 'pending_token', 'dispatching'].includes(result.status) && Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 5_000))
-      response = await send(url, { ...request, signal: AbortSignal.timeout(10_000) })
-      result = await liveActivityResult(response)
+    const controller = new AbortController()
+    polling.set(key, { controller, runId: event.subject.run_id || '' })
+    try {
+      while (response.status === 202 && ['queued', 'pending_token', 'dispatching'].includes(result.status) && Date.now() < deadline) {
+        const continued = await new Promise<boolean>(resolve => {
+          let timer: ReturnType<typeof setTimeout>
+          const cancel = () => finish(false)
+          const finish = (value: boolean) => {
+            clearTimeout(timer)
+            controller.signal.removeEventListener('abort', cancel)
+            resolve(value)
+          }
+          timer = setTimeout(() => finish(true), 5_000)
+          controller.signal.addEventListener('abort', cancel, { once: true })
+        })
+        if (!continued) break
+        response = await send(url, { ...request, signal: AbortSignal.timeout(10_000) })
+        result = await liveActivityResult(response)
+        console.info('[live-activity] receipt', { connection: device.connection_id, action,
+          revision: state.revision, http: response.status, status: result.status, error: result.error })
+      }
+    } finally {
+      if (polling.get(key)?.controller === controller) polling.delete(key)
     }
   }
   return async (event: BusinessEvent): Promise<void> => {
@@ -96,8 +120,11 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
       await Promise.allSettled(listLiveActivityDestinations().map(async device => {
         if (!device.enabled || !validConnection(device, connections)) return
         const user = findUserById(device.user_id); if (!user || user.status !== 'active' || !canReceiveAppEvent(user, event)) return
-        let registration: Record<string, any>; try { registration = JSON.parse(decryptPushSecret(device.ciphertext)) } catch { return }
+        let registration: Record<string, any>; try { registration = JSON.parse(decryptPushSecret(device.ciphertext)) } catch { console.warn('[live-activity] registration_unreadable', { connection: device.connection_id }); return }
         const key = stableKey(event, device.destination_id)
+        // A new run is authoritative. Do not let the previous turn's receipt poll block this turn.
+        const activePoll = polling.get(key)
+        if (activePoll && activePoll.runId !== (event.subject.run_id || '')) activePoll.controller.abort()
         await serialized(key, async () => {
           const legacy = listActiveLiveActivityRuns(device.destination_id)
             .filter(row => row.run_key.startsWith(legacyKeyPrefix(event, device.destination_id)))
@@ -122,7 +149,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
             return
           }
           await dispatch(event, device, registration, key, terminal(event.type) ? 'end' : 'update')
-        })
+        }).catch(() => { console.warn('[live-activity] delivery_exception', { connection: device.connection_id }) })
       }))
     } catch { /* Live Activity delivery never changes task outcomes. */ }
   }
