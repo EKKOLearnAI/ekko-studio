@@ -32,7 +32,7 @@ function title(event: BusinessEvent): string {
   return bounded((event.payload.display as Record<string, unknown> | undefined)?.title, 40) || 'Ekko Studio 任务'
 }
 function ref(event: BusinessEvent, destination: string): string {
-  return createHash('sha256').update(`${destination}\0${runKind(event)}\0${subjectId(event)}\0${event.chat?.task_plan?.plan_id || event.subject.plan_id || event.id}`).digest('hex').slice(0, 32)
+  return createHash('sha256').update(`${destination}\0${runKind(event)}\0${subjectId(event)}\0${event.subject.run_id || event.chat?.task_plan?.run_id || event.chat?.task_plan?.plan_id || event.subject.plan_id || event.id}`).digest('hex').slice(0, 32)
 }
 const stableKey = (event: BusinessEvent, destination: string) => `${destination}:${runKind(event)}:${subjectId(event)}`
 const legacyKeyPrefix = (event: BusinessEvent, destination: string) => `${stableKey(event, destination)}:`

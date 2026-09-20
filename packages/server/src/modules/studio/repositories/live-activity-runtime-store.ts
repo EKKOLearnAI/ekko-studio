@@ -33,7 +33,7 @@ export function saveLiveActivityRun(value: LiveActivityRunRecord): void {
   database().prepare(`INSERT INTO live_activity_runs
     (run_key,destination_id,activity_ref,revision,started,terminal,title,completed,total,updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_key) DO UPDATE SET
-    revision=excluded.revision,started=excluded.started,terminal=excluded.terminal,title=excluded.title,
+    activity_ref=excluded.activity_ref,revision=excluded.revision,started=excluded.started,terminal=excluded.terminal,title=excluded.title,
     completed=excluded.completed,total=excluded.total,updated_at=excluded.updated_at`)
     .run(value.run_key,value.destination_id,value.activity_ref,value.revision,value.started,value.terminal,
       value.title,value.completed,value.total,value.updated_at)

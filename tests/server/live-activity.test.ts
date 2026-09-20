@@ -60,4 +60,18 @@ describe('Studio Live Activity plan-trigger policy', () => {
  it('keeps the started state across consumer recreation and sends an update, not another start',async()=>{let consume=await setup();await consume(event('chat.plan.updated','run-a',1));vi.resetModules();consume=(await import('../../packages/server/src/modules/studio/services/notifications/live-activity')).createLiveActivityConsumer(fetchMock);await consume(event('chat.plan.updated','run-a',2));expect(fetchMock).toHaveBeenCalledTimes(2);expect(fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body).event)).toEqual(['start','update'])})
  it('polls a pending update with the exact same request until accepted',async()=>{const consume=await setup();fetchMock.mockResolvedValueOnce({status:202,json:vi.fn().mockResolvedValue({status:'queued'}),body:null}).mockResolvedValueOnce({status:202,json:vi.fn().mockResolvedValue({status:'pending_token'}),body:null}).mockResolvedValueOnce({status:200,json:vi.fn().mockResolvedValue({status:'accepted'}),body:null});const pending=consume(event('chat.plan.updated','run-a',1));await vi.advanceTimersByTimeAsync(10_000);await pending;expect(fetchMock).toHaveBeenCalledTimes(3);expect(fetchMock.mock.calls.map(([,r])=>r.body)).toEqual([fetchMock.mock.calls[0][1].body,fetchMock.mock.calls[0][1].body,fetchMock.mock.calls[0][1].body])})
  it('does not let a pending terminal receipt block a new turn in the same session',async()=>{const consume=await setup();fetchMock.mockResolvedValueOnce({status:200,json:vi.fn().mockResolvedValue({status:'accepted'}),body:null}).mockResolvedValueOnce({status:202,json:vi.fn().mockResolvedValue({status:'pending_token'}),body:null}).mockResolvedValueOnce({status:200,json:vi.fn().mockResolvedValue({status:'accepted'}),body:null});await consume(event('chat.plan.updated','run-a',1));const ending=consume(event('chat.run.completed','run-a',2));await vi.advanceTimersByTimeAsync(0);const next=consume(event('chat.plan.updated','run-b',1));await ending;await next;const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body));expect(bodies.map(b=>b.event)).toEqual(['start','end','start']);expect(fetchMock).toHaveBeenCalledTimes(3)})
+ it('uses a fresh activity reference for a new run even when the plan ID is reused',async()=>{
+  const consume=await setup()
+  const first=event('chat.plan.updated','run-a',1)
+  first.chat.task_plan.plan_id='same-session-plan'
+  await consume(first)
+  await consume(event('chat.run.completed','run-a',2))
+  const second=event('chat.plan.updated','run-b',1)
+  second.chat.task_plan.plan_id='same-session-plan'
+  await consume(second)
+  const starts=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body)).filter(b=>b.event==='start')
+  expect(starts).toHaveLength(2)
+  expect(starts[1].activity_ref).not.toBe(starts[0].activity_ref)
+ })
+
 })
