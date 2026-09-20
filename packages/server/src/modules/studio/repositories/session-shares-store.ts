@@ -29,7 +29,7 @@ export const sessionSharesStore = {
     return decode(db().prepare(`SELECT * FROM ${SESSION_SHARES_TABLE} WHERE token_hash = ?`).get(hash))
   },
   list(sessionId: string, ownerId: number): SessionShareRecord[] {
-    return db().prepare(`SELECT * FROM ${SESSION_SHARES_TABLE} WHERE session_id = ? AND created_by_user_id = ? ORDER BY created_at DESC, id`)
+    return db().prepare(`SELECT * FROM ${SESSION_SHARES_TABLE} WHERE session_id = ? AND created_by_user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC, id`)
       .all(sessionId, ownerId).map(row => decode(row)!)
   },
   claim(id: string, actor: SessionShareAppUser, now: number): SessionShareRecord | null {

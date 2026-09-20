@@ -67,7 +67,7 @@ export async function create(ctx: any): Promise<void> {
   })
 }
 
-/** List this Studio owner's invitations for a session. Never returns token plaintext or hashes. */
+/** List this Studio owner's non-revoked invitations for a session. Never returns token plaintext or hashes. */
 export async function list(ctx: any): Promise<void> {
   await respond(ctx, async () => {
     const ownerId = await manageOwner(ctx)

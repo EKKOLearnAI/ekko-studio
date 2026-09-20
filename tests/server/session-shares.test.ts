@@ -221,6 +221,8 @@ describe('session share grants', () => {
     const second = await service.create(7, other, 'session-1')
     expect(service.list(7, 'session-1').map((row: any) => row.id)).toEqual(expect.arrayContaining([record.id, second.record.id]))
     await expect(service.change(7, 'session-1', second.record.id, { revoke: true })).resolves.toMatchObject({ revoked_at: now })
+    expect(service.list(7, 'session-1').map((row: any) => row.id)).toEqual([record.id])
+    expect(store.find(second.record.id)).toMatchObject({ revoked_at: now })
     await expect(service.change(8, 'session-1', record.id, { revoke: true })).rejects.toThrow('share_session_unavailable')
     // Even a different active Studio user with access to the same session
     // cannot manage a record created by this owner.

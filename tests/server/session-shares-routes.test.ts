@@ -106,6 +106,21 @@ describe('App-only session share HTTP lifecycle', () => {
     expect((await request('/api/studio/sessions/s1/shares', 'GET', undefined, manager)).status).toBe(403)
   })
 
+  it('omits revoked invitations from list responses while keeping revocation effective', async () => {
+    const first = (await create()).body
+    const second = (await create()).body
+    const listPath = '/api/studio/sessions/s1/shares'
+    await request('/api/studio/session-shares/claim', 'POST', { confirm: true }, guest(first.token))
+    expect((await request(`${listPath}/${first.share.id}`, 'DELETE', undefined, manager)).status).toBe(200)
+    const listed = await request(listPath, 'GET', undefined, manager)
+    expect(listed.status).toBe(200)
+    expect(listed.body.shares.map((row: any) => row.id)).toEqual([second.share.id])
+    expect((await request('/api/studio/session-shares/access', 'GET', undefined, guest(first.token))).status).toBe(410)
+    expect((await request(`${listPath}/${first.share.id}`, 'DELETE', undefined, manager)).status).toBe(200)
+    expect((await request(`${listPath}/${second.share.id}`, 'DELETE', undefined, manager)).status).toBe(200)
+    expect((await request(listPath, 'GET', undefined, manager)).body.shares).toEqual([])
+  })
+
   it('validates attribution and never allows it to override the Studio owner', async () => {
     for (const sharer of [null, { id: -1, name: 'A' }, { id: '101', name: 'A' }, { id: 101 }, { id: 101, name: 'x'.repeat(201) }, { id: 101, name: 'A', ownerId: 7 }]) {
       expect((await request('/api/studio/sessions/s1/shares', 'POST', { sharer }, manager)).status).toBe(400)
