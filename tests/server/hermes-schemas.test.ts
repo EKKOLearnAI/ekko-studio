@@ -179,7 +179,7 @@ describe('Hermes schema initialization', () => {
     expect(columns.some(column => column.name === 'reasoning_effort')).toBe(true)
     expect(columns.some(column => column.name === 'push_enabled')).toBe(true)
     expect(db.prepare(`SELECT push_enabled FROM "${SESSIONS_TABLE}" WHERE id = ?`).get('legacy-session'))
-      .toEqual({ push_enabled: 0 })
+      .toEqual({ push_enabled: 1 })
     const indexes = db.prepare(`PRAGMA index_list("${SESSIONS_TABLE}")`).all() as Array<{ name: string }>
     expect(indexes.some(index => index.name === 'idx_sessions_category_id')).toBe(true)
   })
