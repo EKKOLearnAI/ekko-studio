@@ -10,6 +10,7 @@ import {
   isRunMode,
   isRunSurface,
 } from '../../packages/server/src/modules/studio'
+import type { GroupChatRunService } from '../../packages/server/src/modules/studio/services/group-chat/agent-clients'
 
 describe('Studio agent contracts', () => {
   it('keeps the three families distinct from the nine runtimes', () => {
@@ -43,5 +44,13 @@ describe('Studio agent contracts', () => {
     expect(isRunSurface('workflow')).toBe(true)
     expect(isRunSurface('coding_agent')).toBe(false)
     expect(isRunMode('global')).toBe(true)
+  })
+
+  it('accepts cursor as a group-chat coding_agent_id', () => {
+    type GroupCodingAgentId = NonNullable<
+      Parameters<GroupChatRunService['runAndWait']>[0]['coding_agent_id']
+    >
+    const id: GroupCodingAgentId = 'cursor'
+    expect(id).toBe('cursor')
   })
 })

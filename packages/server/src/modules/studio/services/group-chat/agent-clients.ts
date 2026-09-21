@@ -24,7 +24,7 @@ import {
     discardWorkspaceRunCheckpoint,
     startWorkspaceRunCheckpoint,
 } from '../chat-run/workspace-diff-tracker'
-import type { ContentBlock } from '../chat-run/types'
+import type { ChatCodingAgentId, ContentBlock } from '../chat-run/types'
 import type { StoredMessage } from './types'
 import type { GroupRoomSummaryService, GroupRuntimeContext } from './room-summary'
 import {
@@ -297,7 +297,7 @@ export interface GroupChatRunService {
             workspace?: string | null
             source?: string
             session_source?: 'group_chat'
-            coding_agent_id?: 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'ekko-agent'
+            coding_agent_id?: ChatCodingAgentId
             mode?: 'scoped' | 'global'
             profile?: string
             reasoning_effort?: string
