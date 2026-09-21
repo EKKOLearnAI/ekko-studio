@@ -1,5 +1,5 @@
 import { notificationPreview } from './notification-preview'
-import { getSessionContextMessage } from '../../repositories/session-store'
+import { chatCompletionText } from './chat-completion-text'
 import { listAppConnections } from '../../repositories/app-connections-store'
 import { findUserById } from '../../repositories/users-store'
 import { listUserPushDevices, removeUserPushDevice } from '../../repositories/user-push-store'
@@ -51,11 +51,7 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
         if (attempted.has(key)) return
         attempted.add(key)
         if (attempted.size > 5000) attempted.delete(attempted.values().next().value!)
-        const messageId = Number(event.subject.message_id)
-        const exactMessage = event.type === 'chat.run.completed' && Number.isSafeInteger(messageId)
-          ? getSessionContextMessage(subjectId, messageId) : null
-        const currentOutput = typeof payload.output === 'string' && payload.output
-          ? payload.output : exactMessage?.role === 'assistant' ? exactMessage.display_content || exactMessage.content : ''
+        const currentOutput = chatCompletionText(event)
         const response = await send(pushUrl, {
           method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registration.push_token}` },
