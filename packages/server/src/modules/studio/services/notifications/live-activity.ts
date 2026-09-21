@@ -123,11 +123,12 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
     const body: Record<string, unknown> = { schema_version: 1, event_id: randomUUID(), event: action,
       destination_id: device.destination_id, activity_ref: state.activity_ref, revision: state.revision,
       occurred_at: now, expires_at: now + (action === 'end' ? 600 : 120), content_state: { ...content(event, state, action === 'end'), ...displayFields(event, registration, state) } }
-    // Opt-in only after gateway supports top-level relevance_score -> aps.relevance-score.
+    // Supported gateway v1 extension; an explicit false keeps old gateways compatible.
     // Business event time, not dispatch/heartbeat time: heartbeats cannot steal priority.
-    if ((await readAppConfig()).liveActivityRelevanceEnabled === true) {
+    if ((await readAppConfig()).liveActivityRelevanceEnabled !== false) {
       const businessAt = event.chat?.task_plan?.updated_at ?? Date.parse(event.occurred_at)
-      if (Number.isFinite(businessAt) && businessAt > 0) body.relevance_score = action === 'end' ? 0 : businessAt / 1000
+      const score = action === 'end' ? 0 : businessAt / 1000
+      if (Number.isFinite(score) && score >= 0 && score <= Number.MAX_SAFE_INTEGER) body.relevance_score = score
     }
     if (action === 'start') body.ekko_run = { schema_version: 1, studio_device_id: registration.studio_device_id,
       cloud_user_id: registration.cloud_user_id, profile: event.profile, run_kind: runKind(event), run_id: event.subject.run_id || event.id,

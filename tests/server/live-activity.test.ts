@@ -54,9 +54,15 @@ describe('Studio Live Activity orchestration', () => {
   expect(JSON.parse(fetchMock.mock.calls[0][1].body).content_state).toMatchObject({title:'Build App',agent:expected})
  })
 
- it('omits unsupported priority by default and uses business time only when explicitly enabled',async()=>{
+ it('sends business priority by default when the setting is absent',async()=>{
   const consume=await setup();await consume(event('chat.plan.updated'))
-  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('relevance_score')
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body).relevance_score).toBe(Date.now()/1000)
+ })
+
+ it('preserves explicit opt-out for old gateways on start update and end',async()=>{
+  vi.doMock('../../packages/server/src/modules/studio/services/config/app-config',()=>({readAppConfig:async()=>({liveActivityRelevanceEnabled:false})}))
+  const consume=await setup();await consume(event('chat.plan.updated'));await consume(event('chat.plan.updated',2));await consume(event('chat.run.completed',3))
+  for(const [,request] of fetchMock.mock.calls) expect(JSON.parse(request.body)).not.toHaveProperty('relevance_score')
  })
  it('does not start cards for terminal-only or unknown-total work',async()=>{const consume=await setup();await consume(event('chat.run.completed'));await consume({...event('chat.plan.updated'),chat:{task_plan:{...event('chat.plan.updated').chat.task_plan,progress:{total:0,completed:0}}}});expect(fetchMock).not.toHaveBeenCalled()})
 })
