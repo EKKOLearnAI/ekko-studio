@@ -49,6 +49,7 @@ describe('getModelContextLength', () => {
 
   afterEach(() => {
     vi.doUnmock('os')
+    vi.doUnmock('../../packages/server/src/modules/studio/public/provider-context')
     if (originalHermesHome === undefined) delete process.env.HERMES_HOME
     else process.env.HERMES_HOME = originalHermesHome
     if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA
@@ -57,6 +58,15 @@ describe('getModelContextLength', () => {
     else process.env.APPDATA = originalAppData
     if (homeDir) rmSync(homeDir, { recursive: true, force: true })
     homeDir = ''
+  })
+
+  it.each([false, true])('prefers the manually edited model window (config file exists: %s)', async withConfig => {
+    if (withConfig) writeConfig('model:\n  default: policy-model\n  provider: test\n  context_length: 256000\n')
+    const readModelContextRecord = vi.fn(() => ({ available: true, row: { context_limit: 80000 } }))
+    vi.doMock('../../packages/server/src/modules/studio/public/provider-context', () => ({ readModelContextRecord }))
+    const { getModelContextLength } = await loadModelContext()
+    expect(getModelContextLength({ profile: 'default', provider: 'test', model: 'policy-model' })).toBe(80000)
+    expect(readModelContextRecord).toHaveBeenCalledWith('default', 'test', 'policy-model')
   })
 
   it('does not borrow a same-named model context from another provider when the configured provider is uncached', async () => {

@@ -6,6 +6,7 @@ import { writeManagedPromptFile } from '../prompt-file'
 import { updateDshMcpServer } from './config'
 import { DSH_STREAM_PLUGIN } from './stream-plugin'
 import { anchorDshPatch, prepareDshWebProfile } from './web-profile'
+import type { CodingAgentContextPolicy } from '../context-policy'
 
 export const DSH_MODEL_PROVIDER = 'ekko-studio'
 export const DSH_API_KEY_ENV = 'HERMES_DSH_API_KEY'
@@ -25,6 +26,7 @@ export async function prepareDshRuntime(input: {
   baseUrl?: string
   contextWindow?: number
   outputLimit?: number
+  contextPolicy?: CodingAgentContextPolicy
   imageInput?: boolean
   reasoningEffort?: string
   installationCommand?: string
@@ -49,6 +51,11 @@ export async function prepareDshRuntime(input: {
         // Scoped children and auxiliary model calls must use Studio's route.
         doc.delete('agent-default-model')
         doc.delete('subagent-model-selection')
+      }
+      if (input.contextPolicy) {
+        // Settings are applied after composition config; stale native settings
+        // must not replace the policy selected by Studio.
+        doc.delete('compaction-basic')
       }
       content = String(doc)
     }
@@ -76,6 +83,17 @@ export async function prepareDshRuntime(input: {
     { id: 'permission', config: { defaultPreset: 'danger-full-access', presets: { 'danger-full-access': { sandbox: 'danger-full-access', approval: 'never' } } } },
   ]
   if (web) overlay.push({ id: 'settings', config: { path: join(input.rootDir, 'settings.yaml'), watch: false } })
+  if (input.contextPolicy) overlay.push({
+    id: 'compaction-basic',
+    disabled: false,
+    config: {
+      auto: true,
+      thresholdRatio: input.contextPolicy.threshold,
+      // Retention must stay below the trigger even for a small threshold.
+      retainRatio: Math.min(0.16, input.contextPolicy.threshold / 2),
+      modelPolicies: [],
+    },
+  })
   if (input.model) {
     overlay.push(
       { id: 'llm-deepseek', disabled: true },

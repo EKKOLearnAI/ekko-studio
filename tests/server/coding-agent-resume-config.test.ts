@@ -475,7 +475,7 @@ describe('coding agent resumed session config', () => {
     expect(startRunMock).not.toHaveBeenCalled()
   })
 
-  it('starts and resumes OpenCode Free without reading upstream credentials', async () => {
+  it('starts and resumes OpenCode Free using profile compression settings without resolving upstream credentials', async () => {
     makeHome()
     getSessionMock.mockReturnValue({
       id: 'session-free', profile: 'default', source: 'coding_agent', agent: 'codex',
@@ -487,7 +487,7 @@ describe('coding agent resumed session config', () => {
     const resumed = startRunMock.mock.calls[0][0]
     expect(resumed.provider).toBe('opencode-free')
     expect(resumed.model).toBe('muse-spark-free')
-    expect(readConfigYamlForProfileMock).not.toHaveBeenCalled()
+    expect(readConfigYamlForProfileMock).toHaveBeenCalledWith('default')
     getSessionMock.mockReturnValue(null)
     await startCodingAgentRun('codex', {
       sessionId: 'session-new-free', provider: 'opencode-free', model: 'mimo-v2.5-free',

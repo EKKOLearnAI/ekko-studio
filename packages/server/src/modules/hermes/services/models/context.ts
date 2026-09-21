@@ -437,8 +437,8 @@ export function getModelContextLength(input?: string | ModelContextLengthOptions
     : input || {}
   const profile = options.profile
   const profileDir = getProfileDir(profile)
-  const config = loadConfig(profileDir)
-  if (!config) return fallbackContextLength(options)
+  // Explicit model/database overrides are valid even before config.yaml exists.
+  const config = loadConfig(profileDir) || {}
 
   let model = String(options.model || '').trim() || getDefaultModel(config)
   if (!model) return fallbackContextLength(options)
