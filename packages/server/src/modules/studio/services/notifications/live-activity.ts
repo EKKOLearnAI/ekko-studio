@@ -115,7 +115,6 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
   async function dispatch(event: BusinessEvent, device: ReturnType<typeof listLiveActivityDestinations>[number], registration: Record<string, any>, key: string, requested?: 'start'|'update'|'end') {
     let state = getLiveActivityRun(key)
     if (!state || state.terminal) return
-    if (requested !== 'end' && runKind(event) === 'chat' && getSession(subjectId(event))?.push_enabled === 0) return
     const ending = requested === 'end' || terminal(event)
     const action = requested || (!state.started ? 'start' : ending ? 'end' : 'update')
     if (!state.started && action !== 'start') return
@@ -185,8 +184,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
         const user = findUserById(device.user_id); if (!user || user.status !== 'active' || !canReceiveAppEvent(user, event)) return
         let registration: Record<string, any>; try { registration = JSON.parse(decryptPushSecret(device.ciphertext)) } catch { console.warn('[live-activity] registration_unreadable', { connection: device.connection_id }); return }
         const key = stableKey(event, device.destination_id)
-        const sessionMuted = runKind(event) === 'chat' && getSession(subjectId(event))?.push_enabled === 0
-        const muted = sessionMuted || connections.find(row => row.id === device.connection_id)?.push_enabled === 0
+        const muted = connections.find(row => row.id === device.connection_id)?.push_enabled === 0
         if (muted) {
           cancelRefresh(key); latest.delete(key); polling.get(key)?.controller.abort()
           await serialized(key, async () => {
