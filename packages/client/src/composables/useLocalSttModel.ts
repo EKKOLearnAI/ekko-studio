@@ -1,15 +1,17 @@
+import { useSettingsApi, useSettingsProfileScope } from '@/composables/useSettingsProfile'
 import { ref } from 'vue'
-import {
-  downloadLocalSttModel,
-  fetchLocalSttModelStatus,
-  type LocalSttModelDownloadSource,
-  type LocalSttModelStatus,
-} from '@/api/studio/local-stt-model'
+import * as settingsApi0 from '@/api/studio/local-stt-model'
+import type { LocalSttModelDownloadSource, LocalSttModelStatus } from '@/api/studio/local-stt-model'
 
-const status = ref<LocalSttModelStatus | null>(null)
-const loading = ref(false)
+
+const sharedStatus = ref<LocalSttModelStatus | null>(null)
+const sharedLoading = ref(false)
 
 export function useLocalSttModel() {
+  const settingsScope = useSettingsProfileScope()
+  const status = settingsScope ? ref<LocalSttModelStatus | null>(null) : sharedStatus
+  const loading = settingsScope ? ref(false) : sharedLoading
+  const { downloadLocalSttModel, fetchLocalSttModelStatus } = useSettingsApi(settingsApi0)
   async function refresh(): Promise<LocalSttModelStatus> {
     loading.value = true
     try {

@@ -2027,6 +2027,8 @@ export default {
     visibilitySaveFailed: '儲存可見模型失敗',
     showAllModels: '顯示全部模型',
     clearVisibleModels: '取消全選',
+    profileLabel: '設定 Profile',
+    profileSwitchFailed: '切換模型設定 Profile 失敗。',
     generalTitle: '通用模型',
     combinationTitle: '組合模型（Hermes）',
     fallbackTitle: '備援模型',

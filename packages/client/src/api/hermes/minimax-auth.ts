@@ -1,4 +1,4 @@
-import { request } from '../client'
+import { request as defaultRequest } from '../client'
 
 export interface MiniMaxStartResult {
   session_id: string
@@ -12,13 +12,20 @@ export interface MiniMaxPollResult {
   error: string | null
 }
 
-export async function startMiniMaxLogin(region: 'global' | 'cn'): Promise<MiniMaxStartResult> {
-  return request<MiniMaxStartResult>('/api/hermes/auth/minimax/start', {
-    method: 'POST',
-    body: JSON.stringify({ region }),
-  })
+
+export function createApi(request: typeof defaultRequest = (...args) => defaultRequest(...args)) {
+  async function startMiniMaxLogin(region: 'global' | 'cn'): Promise<MiniMaxStartResult> {
+    return request<MiniMaxStartResult>('/api/hermes/auth/minimax/start', {
+      method: 'POST',
+      body: JSON.stringify({ region }),
+    })
+  }
+
+  async function pollMiniMaxLogin(sessionId: string): Promise<MiniMaxPollResult> {
+    return request<MiniMaxPollResult>(`/api/hermes/auth/minimax/poll/${sessionId}`)
+  }
+
+  return { startMiniMaxLogin, pollMiniMaxLogin }
 }
 
-export async function pollMiniMaxLogin(sessionId: string): Promise<MiniMaxPollResult> {
-  return request<MiniMaxPollResult>(`/api/hermes/auth/minimax/poll/${sessionId}`)
-}
+export const { startMiniMaxLogin, pollMiniMaxLogin } = createApi()

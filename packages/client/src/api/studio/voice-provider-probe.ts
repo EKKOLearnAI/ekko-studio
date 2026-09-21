@@ -1,4 +1,4 @@
-import { request } from '../client'
+import { request as defaultRequest } from '../client'
 import type { VoiceApiKind, VoiceApiProviderCompatibility } from '@/types/voice-api'
 
 export interface VoiceProviderProbeRequest {
@@ -26,16 +26,23 @@ export interface VoiceProviderProbeResponse {
   normalizedBaseUrl?: string
 }
 
-export async function probeVoiceProvider(req: VoiceProviderProbeRequest): Promise<VoiceProviderProbeResponse> {
-  return request<VoiceProviderProbeResponse>('/api/voice/providers/probe', {
-    method: 'POST',
-    signal: req.signal,
-    body: JSON.stringify({
-      kind: req.kind,
-      provider: req.provider,
-      compatibility: req.compatibility,
-      baseUrl: req.baseUrl,
-      apiKey: req.apiKey,
-    }),
-  })
+
+export function createApi(request: typeof defaultRequest = (...args) => defaultRequest(...args)) {
+  async function probeVoiceProvider(req: VoiceProviderProbeRequest): Promise<VoiceProviderProbeResponse> {
+    return request<VoiceProviderProbeResponse>('/api/voice/providers/probe', {
+      method: 'POST',
+      signal: req.signal,
+      body: JSON.stringify({
+        kind: req.kind,
+        provider: req.provider,
+        compatibility: req.compatibility,
+        baseUrl: req.baseUrl,
+        apiKey: req.apiKey,
+      }),
+    })
+  }
+
+  return { probeVoiceProvider }
 }
+
+export const { probeVoiceProvider } = createApi()

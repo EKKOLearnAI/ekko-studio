@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { useSettingsApi, useSettingsProfileScope } from '@/composables/useSettingsProfile'
+const { transcribeSpeech } = useSettingsApi(settingsApi0)
+const settingsScope = useSettingsProfileScope()
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NInput, NSelect, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSpeech, type MimoTtsOptions, type OpenaiTtsOptions } from '@/composables/useSpeech'
 import { usePcmStreamRecorder } from '@/composables/usePcmStreamRecorder'
-import { transcribeSpeech } from '@/api/studio/stt'
+import * as settingsApi0 from '@/api/studio/stt'
+
 import { isServerTtsProvider } from '@/api/studio/tts'
 import { useVoiceApiConnections } from '@/composables/useVoiceApiConnections'
 import { useVoiceSettings } from '@/composables/useVoiceSettings'
@@ -192,10 +196,10 @@ function mimoOptionsFor(connection: VoiceApiConnection): MimoTtsOptions {
     voiceDesignDesc: typeof options.voiceDesignDesc === 'string' ? options.voiceDesignDesc : undefined,
     voiceCloneDataUri: typeof options.voiceCloneDataUri === 'string'
       ? options.voiceCloneDataUri
-      : voiceSettings.mimoVoiceCloneDataUri.value || undefined,
+      : (settingsScope ? settingsScope.voiceClone.dataUri || undefined : voiceSettings.mimoVoiceCloneDataUri.value || undefined),
     voiceCloneFormat: options.voiceCloneFormat === 'mp3' || options.voiceCloneFormat === 'wav'
       ? options.voiceCloneFormat
-      : voiceSettings.mimoVoiceCloneFormat.value,
+      : (settingsScope ? settingsScope.voiceClone.format : voiceSettings.mimoVoiceCloneFormat.value),
     stylePrompt: typeof options.stylePrompt === 'string' ? options.stylePrompt : undefined,
   }
 }
@@ -213,11 +217,12 @@ async function handleTtsTest(connection: VoiceApiConnection) {
   }
 
   setCardTestState(connection.id, 'loading', t('settings.voice.testing'))
+  const profileArgs: [] | [string] = settingsScope ? [settingsScope.profile] : []
   try {
     if (connection.provider === 'mimo') {
-      await speech.mimoPlay(connection.id, text, mimoOptionsFor(connection))
+      await speech.mimoPlay(connection.id, text, mimoOptionsFor(connection), ...profileArgs)
     } else if (isServerTtsProvider(connection.provider)) {
-      await speech.openaiPlay(connection.id, text, openaiOptionsFor(connection))
+      await speech.openaiPlay(connection.id, text, openaiOptionsFor(connection), ...profileArgs)
     }
     setCardTestState(connection.id, 'success', t('settings.voice.testSuccess'))
   } catch (err) {

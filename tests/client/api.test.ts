@@ -87,6 +87,20 @@ describe('API Client', () => {
       expect(options.headers['X-Hermes-Profile']).toBe('default')
     })
 
+    it.each(['X-Hermes-Profile', 'x-hermes-profile'])('preserves the explicit %s header without merging the global Profile', async (header) => {
+      localStorage.setItem('hermes_active_profile_name', 'default')
+      mockFetch.mockResolvedValue({ ok: true, status: 200, json: () => ({ success: true }) })
+      await request('/api/hermes/config/moa', {
+        method: 'PUT',
+        headers: { [header]: 'research', 'If-Match': '"revision-1"' },
+        body: JSON.stringify({ moa: {} }),
+      })
+      const headers = new Headers(mockFetch.mock.calls[0][1].headers)
+      expect(headers.get('X-Hermes-Profile')).toBe('research')
+      expect(headers.get('If-Match')).toBe('"revision-1"')
+      expect(localStorage.getItem('hermes_active_profile_name')).toBe('default')
+    })
+
     it('does not add the active profile header to profile-wide session collection requests', async () => {
       localStorage.setItem('hermes_active_profile_name', 'research')
       mockFetch.mockResolvedValue({ ok: true, status: 200, json: () => ({ data: 1 }) })

@@ -1,4 +1,4 @@
-import { request } from '../client'
+import { request as defaultRequest } from '../client'
 
 export interface DisplayConfig {
   compact?: boolean
@@ -170,88 +170,6 @@ export interface MoaConfig {
   enabled: boolean
 }
 
-export async function fetchConfig(sections?: string[]): Promise<AppConfig> {
-  const query = sections ? `?sections=${sections.join(',')}` : ''
-  return request<AppConfig>(`/api/hermes/config${query}`)
-}
-
-export async function updateConfigSection(
-  section: string,
-  values: Record<string, any>,
-  options?: { restart?: boolean },
-): Promise<void> {
-  await request('/api/hermes/config', {
-    method: 'PUT',
-    body: JSON.stringify({ section, values, ...options }),
-  })
-}
-
-export async function fetchAuxiliaryModels(): Promise<AuxiliaryModelsResponse> {
-  return request<AuxiliaryModelsResponse>('/api/hermes/config/auxiliary-models')
-}
-
-export async function saveAuxiliaryModels(auxiliary: AuxiliaryModelsConfig): Promise<{
-  success: boolean
-  auxiliary: AuxiliaryModelsConfig
-}> {
-  return request<{ success: boolean; auxiliary: AuxiliaryModelsConfig }>('/api/hermes/config/auxiliary-models', {
-    method: 'PUT',
-    body: JSON.stringify({ auxiliary }),
-  })
-}
-
-export async function fetchDelegationModel(): Promise<DelegationModelResponse> {
-  return request<DelegationModelResponse>('/api/hermes/config/delegation-model')
-}
-
-export async function saveDelegationModel(delegation: DelegationModelConfig): Promise<{
-  success: boolean
-  delegation: DelegationModelConfig
-}> {
-  return request<{ success: boolean; delegation: DelegationModelConfig }>('/api/hermes/config/delegation-model', {
-    method: 'PUT',
-    body: JSON.stringify({ delegation }),
-  })
-}
-
-export async function fetchFallbackProviders(): Promise<FallbackProvidersResponse> {
-  return request<FallbackProvidersResponse>('/api/hermes/config/fallback-providers')
-}
-
-export async function saveFallbackProviders(fallbackProviders: FallbackProviderEntry[]): Promise<{
-  success: boolean
-  fallback_providers: FallbackProviderEntry[]
-}> {
-  return request<{ success: boolean; fallback_providers: FallbackProviderEntry[] }>('/api/hermes/config/fallback-providers', {
-    method: 'PUT',
-    body: JSON.stringify({ fallback_providers: fallbackProviders }),
-  })
-}
-
-export async function fetchMoaConfig(): Promise<MoaConfig> {
-  return request<MoaConfig>('/api/hermes/config/moa')
-}
-
-export async function saveMoaConfig(moa: MoaConfig): Promise<{
-  success: boolean
-  moa: MoaConfig
-}> {
-  return request<{ success: boolean; moa: MoaConfig }>('/api/hermes/config/moa', {
-    method: 'PUT',
-    body: JSON.stringify({ moa }),
-  })
-}
-
-export async function saveCredentials(
-  platform: string,
-  values: Record<string, any>,
-): Promise<void> {
-  await request('/api/hermes/config/credentials', {
-    method: 'PUT',
-    body: JSON.stringify({ platform, values }),
-  })
-}
-
 export interface ClearCredentialsResult {
   success: boolean
   platform: string
@@ -261,12 +179,6 @@ export interface ClearCredentialsResult {
     code: string
     message: string
   }
-}
-
-export async function clearCredentials(platform: string): Promise<ClearCredentialsResult> {
-  return request<ClearCredentialsResult>(`/api/hermes/config/credentials/${encodeURIComponent(platform)}`, {
-    method: 'DELETE',
-  })
 }
 
 export interface WeixinQrCode {
@@ -281,21 +193,116 @@ export interface WeixinQrStatus {
   base_url?: string
 }
 
-export async function fetchWeixinQrCode(): Promise<WeixinQrCode> {
-  return request<WeixinQrCode>('/api/hermes/weixin/qrcode')
+
+export function createApi(request: typeof defaultRequest = (...args) => defaultRequest(...args)) {
+  async function fetchConfig(sections?: string[]): Promise<AppConfig> {
+    const query = sections ? `?sections=${sections.join(',')}` : ''
+    return request<AppConfig>(`/api/hermes/config${query}`)
+  }
+
+  async function updateConfigSection(
+    section: string,
+    values: Record<string, any>,
+    options?: { restart?: boolean },
+  ): Promise<void> {
+    await request('/api/hermes/config', {
+      method: 'PUT',
+      body: JSON.stringify({ section, values, ...options }),
+    })
+  }
+
+  async function fetchAuxiliaryModels(): Promise<AuxiliaryModelsResponse> {
+    return request<AuxiliaryModelsResponse>('/api/hermes/config/auxiliary-models')
+  }
+
+  async function saveAuxiliaryModels(auxiliary: AuxiliaryModelsConfig): Promise<{
+    success: boolean
+    auxiliary: AuxiliaryModelsConfig
+  }> {
+    return request<{ success: boolean; auxiliary: AuxiliaryModelsConfig }>('/api/hermes/config/auxiliary-models', {
+      method: 'PUT',
+      body: JSON.stringify({ auxiliary }),
+    })
+  }
+
+  async function fetchDelegationModel(): Promise<DelegationModelResponse> {
+    return request<DelegationModelResponse>('/api/hermes/config/delegation-model')
+  }
+
+  async function saveDelegationModel(delegation: DelegationModelConfig): Promise<{
+    success: boolean
+    delegation: DelegationModelConfig
+  }> {
+    return request<{ success: boolean; delegation: DelegationModelConfig }>('/api/hermes/config/delegation-model', {
+      method: 'PUT',
+      body: JSON.stringify({ delegation }),
+    })
+  }
+
+  async function fetchFallbackProviders(): Promise<FallbackProvidersResponse> {
+    return request<FallbackProvidersResponse>('/api/hermes/config/fallback-providers')
+  }
+
+  async function saveFallbackProviders(fallbackProviders: FallbackProviderEntry[]): Promise<{
+    success: boolean
+    fallback_providers: FallbackProviderEntry[]
+  }> {
+    return request<{ success: boolean; fallback_providers: FallbackProviderEntry[] }>('/api/hermes/config/fallback-providers', {
+      method: 'PUT',
+      body: JSON.stringify({ fallback_providers: fallbackProviders }),
+    })
+  }
+
+  async function fetchMoaConfig(): Promise<MoaConfig> {
+    return request<MoaConfig>('/api/hermes/config/moa')
+  }
+
+  async function saveMoaConfig(moa: MoaConfig): Promise<{
+    success: boolean
+    moa: MoaConfig
+  }> {
+    return request<{ success: boolean; moa: MoaConfig }>('/api/hermes/config/moa', {
+      method: 'PUT',
+      body: JSON.stringify({ moa }),
+    })
+  }
+
+  async function saveCredentials(
+    platform: string,
+    values: Record<string, any>,
+  ): Promise<void> {
+    await request('/api/hermes/config/credentials', {
+      method: 'PUT',
+      body: JSON.stringify({ platform, values }),
+    })
+  }
+
+  async function clearCredentials(platform: string): Promise<ClearCredentialsResult> {
+    return request<ClearCredentialsResult>(`/api/hermes/config/credentials/${encodeURIComponent(platform)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async function fetchWeixinQrCode(): Promise<WeixinQrCode> {
+    return request<WeixinQrCode>('/api/hermes/weixin/qrcode')
+  }
+
+  async function pollWeixinQrStatus(qrcode: string): Promise<WeixinQrStatus> {
+    return request<WeixinQrStatus>(`/api/hermes/weixin/qrcode/status?qrcode=${encodeURIComponent(qrcode)}`)
+  }
+
+  async function saveWeixinCredentials(data: {
+    account_id: string
+    token: string
+    base_url?: string
+  }): Promise<void> {
+    await request('/api/hermes/weixin/save', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  return { fetchConfig, updateConfigSection, fetchAuxiliaryModels, saveAuxiliaryModels, fetchDelegationModel, saveDelegationModel, fetchFallbackProviders, saveFallbackProviders, fetchMoaConfig, saveMoaConfig, saveCredentials, clearCredentials, fetchWeixinQrCode, pollWeixinQrStatus, saveWeixinCredentials }
 }
 
-export async function pollWeixinQrStatus(qrcode: string): Promise<WeixinQrStatus> {
-  return request<WeixinQrStatus>(`/api/hermes/weixin/qrcode/status?qrcode=${encodeURIComponent(qrcode)}`)
-}
-
-export async function saveWeixinCredentials(data: {
-  account_id: string
-  token: string
-  base_url?: string
-}): Promise<void> {
-  await request('/api/hermes/weixin/save', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-}
+export const { fetchConfig, updateConfigSection, fetchAuxiliaryModels, saveAuxiliaryModels, fetchDelegationModel, saveDelegationModel, fetchFallbackProviders, saveFallbackProviders, fetchMoaConfig, saveMoaConfig, saveCredentials, clearCredentials, fetchWeixinQrCode, pollWeixinQrStatus, saveWeixinCredentials } = createApi()

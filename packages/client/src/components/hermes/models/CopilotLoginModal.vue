@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { useSettingsApi } from '@/composables/useSettingsProfile'
 import { ref, onUnmounted } from 'vue'
 import { NModal, NButton, NSpin, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { startCopilotLogin, pollCopilotLogin } from '@/api/hermes/copilot-auth'
+import * as copilotAuthApi from '@/api/hermes/copilot-auth'
+const { startCopilotLogin, pollCopilotLogin } = useSettingsApi(copilotAuthApi)
 import { copyToClipboard } from '@/utils/clipboard'
 
 const { t } = useI18n()

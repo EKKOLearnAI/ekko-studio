@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { useSettingsApi } from '@/composables/useSettingsProfile'
+import { useModelSettingsModels } from '@/composables/useModelSettings'
 import { ref, watch, computed, onMounted, nextTick } from 'vue'
 import { NModal, NForm, NFormItem, NInput, NInputNumber, NButton, NSelect, NRadioGroup, NRadioButton, useMessage, useDialog } from 'naive-ui'
-import { useModelsStore } from '@/stores/hermes/models'
 import { useI18n } from 'vue-i18n'
 import CodexLoginModal from './CodexLoginModal.vue'
 import NousLoginModal from './NousLoginModal.vue'
@@ -9,8 +10,11 @@ import CopilotLoginModal from './CopilotLoginModal.vue'
 import XaiOAuthLoginModal from './XaiOAuthLoginModal.vue'
 import AnthropicLoginModal from './AnthropicLoginModal.vue'
 import MiniMaxOAuthLoginModal from './MiniMaxOAuthLoginModal.vue'
-import { checkCopilotToken, enableCopilot, type CopilotTokenSource } from '@/api/hermes/copilot-auth'
-import { fetchProviderModels } from '@/api/hermes/system'
+import * as copilotAuthApi from '@/api/hermes/copilot-auth'
+import type { CopilotTokenSource } from '@/api/hermes/copilot-auth'
+const { checkCopilotToken, enableCopilot } = useSettingsApi(copilotAuthApi)
+import * as systemApi from '@/api/hermes/system'
+const { fetchProviderModels } = useSettingsApi(systemApi)
 import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
 import { inferApiKeyFunPresetProvider, isApiKeyFunBaseUrl, type ApiKeyFunPresetProvider } from '@/utils/providerBaseUrl'
 
@@ -21,7 +25,7 @@ const emit = defineEmits<{
   saved: [globalModelsAlreadyRefreshed?: boolean]
 }>()
 
-const modelsStore = useModelsStore()
+const modelsStore = useModelSettingsModels()
 const message = useMessage()
 const dialog = useDialog()
 

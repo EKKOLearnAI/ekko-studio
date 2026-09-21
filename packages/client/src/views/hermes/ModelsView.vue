@@ -1,28 +1,40 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, provide, ref, shallowRef, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NSpin, NTabPane, NTabs, useMessage } from 'naive-ui'
+import { NButton, NSelect, NSpin, NTabPane, NTabs, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import AuxiliaryModelsPanel from '@/components/hermes/models/AuxiliaryModelsPanel.vue'
 import CombinationModelsPanel from '@/components/hermes/models/CombinationModelsPanel.vue'
 import ProvidersPanel from '@/components/hermes/models/ProvidersPanel.vue'
 import ProviderFormModal from '@/components/hermes/models/ProviderFormModal.vue'
 import VoiceSettings from '@/components/hermes/settings/VoiceSettings.vue'
-import { useModelsStore } from '@/stores/hermes/models'
-import { useAppStore } from '@/stores/hermes/app'
+import { createModelSettings, MODEL_SETTINGS } from '@/composables/useModelSettings'
+import { SETTINGS_PROFILE_SCOPE } from '@/composables/useSettingsProfile'
+import { fetchProfiles, type HermesProfile } from '@/api/hermes/profiles'
 import { useProfilesStore } from '@/stores/hermes/profiles'
-import { checkCopilotToken } from '@/api/hermes/copilot-auth'
+import { createApi as createCopilotApi } from '@/api/hermes/copilot-auth'
 
 const { t } = useI18n()
 const props = defineProps<{ sidebarCollapsed?: boolean }>()
 const emit = defineEmits<{ toggleSidebar: [] }>()
-const modelsStore = useModelsStore()
-const appStore = useAppStore()
 const profilesStore = useProfilesStore()
 const message = useMessage()
 const route = useRoute()
 const router = useRouter()
+const selectedProfile = ref(typeof route.query.profile === 'string' ? route.query.profile : profilesStore.activeProfileName || '')
+const profiles = ref<HermesProfile[]>([])
+const settings = shallowRef(createModelSettings(selectedProfile.value || 'default'))
+provide(MODEL_SETTINGS, settings)
+provide(SETTINGS_PROFILE_SCOPE, settings)
+const modelsStore = computed(() => settings.value.models)
 const showModal = ref(false)
+const profileLoading = ref(true)
+const profileOptions = computed(() => profiles.value.map(profile => ({
+  label: profile.name,
+  value: profile.name,
+})))
+const profileBusy = computed(() => profileLoading.value)
+let profileLoadId = 0
 type ModelsTab = 'general' | 'auxiliary' | 'combination' | 'stt' | 'tts'
 
 const MODELS_TABS = new Set<ModelsTab>(['general', 'auxiliary', 'combination', 'stt', 'tts'])
@@ -45,37 +57,65 @@ function handleTabUpdate(tab: ModelsTab) {
 }
 
 async function loadProvidersForProfile() {
-  if (!profilesStore.activeProfileName || profilesStore.profiles.length === 0) {
-    await profilesStore.fetchProfiles()
+  const loadId = ++profileLoadId
+  const current = settings.value
+  profileLoading.value = true
+  try {
+    if (!selectedProfile.value) return
+    try { await createCopilotApi(current.request).checkCopilotToken() } catch { /* ignore */ }
+    if (loadId !== profileLoadId) return
+    await current.models.fetchProviders()
+  } finally {
+    if (loadId === profileLoadId) profileLoading.value = false
   }
-  // 先 invalidate 后端 copilot 缓存（gh logout / VS Code 退出后下一次 list 立刻反映），
-  // 再拉 providers 与 appStore 的模型显示名配置。check-token 失败不阻断。
-  try { await checkCopilotToken() } catch { /* ignore */ }
-  await modelsStore.fetchProviders()
+}
+
+watch(selectedProfile, () => {
+  showModal.value = false
+  if (!selectedProfile.value) return
+  settings.value = createModelSettings(selectedProfile.value)
+  void loadProvidersForProfile()
+})
+
+function handleProfileUpdate(name: string) {
+  if (profileBusy.value || name === selectedProfile.value) return
+  if (profileOptions.value.some(option => option.value === name)) selectedProfile.value = name
 }
 
 onMounted(async () => {
-  await loadProvidersForProfile()
+  try {
+    // Load accessible choices without changing the global Profile store.
+    profiles.value = await fetchProfiles()
+    const selected = profiles.value.find(profile => profile.name === selectedProfile.value)?.name || profiles.value[0]?.name || ''
+    if (selected !== selectedProfile.value) {
+      selectedProfile.value = selected
+      if (selected) return // The watcher loads the new scope.
+    }
+    await loadProvidersForProfile()
+  } catch (err: any) {
+    profileLoading.value = false
+    message.error(err?.message || t('models.profileSwitchFailed'))
+  }
 })
 
 let catalogPoll: ReturnType<typeof setInterval> | undefined
 let pollingCatalog = false
 onMounted(() => {
   catalogPoll = setInterval(async () => {
-    const freeProvider = modelsStore.providers.find(group => group.provider === 'opencode-free')
-    if (pollingCatalog || !freeProvider || !['loading', 'error'].includes(freeProvider.catalog_status || '')) return
+    const freeProvider = modelsStore.value.providers.find(group => group.provider === 'opencode-free')
+    if (profileBusy.value || pollingCatalog || !freeProvider || !['loading', 'error'].includes(freeProvider.catalog_status || '')) return
     pollingCatalog = true
     try {
-      await modelsStore.fetchProviders({ background: true })
-      if (modelsStore.providers.find(group => group.provider === 'opencode-free')?.catalog_status === 'ready') {
-        await appStore.reloadModels({ preserveSelection: true })
-      }
+      await modelsStore.value.fetchProviders({ background: true })
     } finally {
       pollingCatalog = false
     }
   }, 3000)
 })
-onUnmounted(() => { if (catalogPoll) clearInterval(catalogPoll) })
+onUnmounted(() => {
+  profileLoadId++
+  if (catalogPoll) clearInterval(catalogPoll)
+})
 
 function openCreateModal() {
   showModal.value = true
@@ -107,17 +147,14 @@ function handleModalClose() {
 
 async function handleSaved(globalModelsAlreadyRefreshed = false) {
   if (!globalModelsAlreadyRefreshed) {
-    await Promise.all([
-      modelsStore.fetchProviders(),
-      appStore.reloadModels({ preserveSelection: true }),
-    ])
+    await modelsStore.value.fetchProviders()
   }
   handleModalClose()
 }
 
 async function handleRefreshModelCache() {
   try {
-    await modelsStore.refreshModelCache()
+    await modelsStore.value.refreshModelCache()
     message.success(t('models.refreshModelCacheSuccess'))
   } catch (e: any) {
     message.error(e?.message || t('models.refreshModelCacheFailed'))
@@ -153,11 +190,28 @@ async function handleRefreshModelCache() {
         </NButton>
         <h2 class="header-title">{{ t('models.title') }}</h2>
       </div>
-      <div v-if="activeTab === 'general'" class="header-actions">
+      <div class="header-actions">
+        <div class="models-profile-picker">
+          <span class="models-profile-label">{{ t('models.profileLabel') }}</span>
+          <NSelect
+            data-testid="models-profile-select"
+            class="models-profile-select"
+            size="small"
+            :value="selectedProfile"
+            :options="profileOptions"
+            :loading="profileBusy"
+            :disabled="profileBusy || modelsStore.refreshingModelCache"
+            :aria-label="t('models.profileLabel')"
+            :placeholder="t('models.profileLabel')"
+            filterable
+            @update:value="handleProfileUpdate"
+          />
+        </div>
         <NButton
+          v-if="activeTab === 'general'"
           size="small"
           :loading="modelsStore.refreshingModelCache"
-          :disabled="modelsStore.loading"
+          :disabled="modelsStore.loading || profileBusy || !selectedProfile"
           :aria-label="t('models.refreshModelCache')"
           :title="t('models.refreshModelCache')"
           @click="handleRefreshModelCache"
@@ -168,10 +222,12 @@ async function handleRefreshModelCache() {
           <span class="header-action-label">{{ t('models.refreshModelCache') }}</span>
         </NButton>
         <NButton
+          v-if="activeTab === 'general'"
           type="primary"
           size="small"
           :aria-label="t('models.addProvider')"
           :title="t('models.addProvider')"
+          :disabled="profileBusy || !selectedProfile"
           @click="openCreateModal"
         >
           <template #icon>
@@ -183,7 +239,8 @@ async function handleRefreshModelCache() {
     </header>
 
     <div class="models-content">
-      <NTabs v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
+      <NSpin v-if="profileBusy" class="models-profile-loading" />
+      <NTabs v-else-if="selectedProfile" :key="selectedProfile" v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
         <NTabPane name="general" :tab="t('models.generalTitle')">
           <NSpin :show="modelsStore.loading && modelsStore.providers.length === 0">
             <ProvidersPanel />
@@ -196,16 +253,17 @@ async function handleRefreshModelCache() {
           <CombinationModelsPanel />
         </NTabPane>
         <NTabPane name="stt" :tab="t('settings.voice.sttProvidersTitle')">
-          <VoiceSettings :key="`stt-${profilesStore.activeProfileName || 'default'}`" kind="stt" />
+          <VoiceSettings :key="`stt-${selectedProfile || 'default'}`" kind="stt" />
         </NTabPane>
         <NTabPane name="tts" :tab="t('settings.voice.ttsProvidersTitle')">
-          <VoiceSettings :key="`tts-${profilesStore.activeProfileName || 'default'}`" kind="tts" />
+          <VoiceSettings :key="`tts-${selectedProfile || 'default'}`" kind="tts" />
         </NTabPane>
       </NTabs>
     </div>
 
     <ProviderFormModal
-      v-if="showModal"
+      v-if="showModal && !profileBusy && selectedProfile"
+      :key="selectedProfile"
       @close="handleModalClose"
       @saved="handleSaved"
     />
@@ -246,6 +304,29 @@ async function handleRefreshModelCache() {
   padding: 20px;
 }
 
+.models-profile-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.models-profile-label {
+  font-size: 12px;
+  color: $text-secondary;
+  white-space: nowrap;
+}
+
+.models-profile-select {
+  width: 180px;
+}
+
+.models-profile-loading {
+  display: flex;
+  justify-content: center;
+  padding: 32px;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -255,6 +336,19 @@ async function handleRefreshModelCache() {
 }
 
 @media (max-width: 640px) {
+  .page-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .header-actions {
+    flex: 1;
+  }
+
+  .models-profile-select {
+    width: 130px;
+  }
+
   .header-actions {
     flex-wrap: nowrap;
   }

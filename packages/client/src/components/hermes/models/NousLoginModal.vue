@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { useSettingsApi } from '@/composables/useSettingsProfile'
 import { ref, onUnmounted } from 'vue'
 import { NModal, NButton, NSpin, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { startNousLogin, pollNousLogin } from '@/api/hermes/nous-auth'
+import * as nousAuthApi from '@/api/hermes/nous-auth'
+const { startNousLogin, pollNousLogin } = useSettingsApi(nousAuthApi)
 import { copyToClipboard } from '@/utils/clipboard'
 
 const { t } = useI18n()

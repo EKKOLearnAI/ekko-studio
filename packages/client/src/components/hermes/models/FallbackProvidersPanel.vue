@@ -1,22 +1,19 @@
 <script setup lang="ts">
+import { useSettingsApi } from '@/composables/useSettingsProfile'
+import { useModelSettingsModels, useModelSettingsApp, useModelSettingsProfile } from '@/composables/useModelSettings'
 import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NSpin, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import {
-  fetchFallbackProviders,
-  saveFallbackProviders,
-  type FallbackProviderEntry,
-} from '@/api/hermes/config'
-import { useAppStore } from '@/stores/hermes/app'
-import { useModelsStore } from '@/stores/hermes/models'
-import { useProfilesStore } from '@/stores/hermes/profiles'
+import * as configApi from '@/api/hermes/config'
+import type { FallbackProviderEntry } from '@/api/hermes/config'
+const { fetchFallbackProviders, saveFallbackProviders } = useSettingsApi(configApi)
 import ModelPickerModal from './ModelPickerModal.vue'
 
 const { t } = useI18n()
 const message = useMessage()
-const appStore = useAppStore()
-const modelsStore = useModelsStore()
-const profilesStore = useProfilesStore()
+const appStore = useModelSettingsApp()
+const modelsStore = useModelSettingsModels()
+const profilesStore = useModelSettingsProfile()
 
 const loading = ref(false)
 const saving = ref(false)

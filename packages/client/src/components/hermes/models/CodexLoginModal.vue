@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { useSettingsApi } from '@/composables/useSettingsProfile'
 import { ref, onUnmounted } from 'vue'
 import { NModal, NButton, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { startCodexLogin, pollCodexLogin } from '@/api/hermes/codex-auth'
+import * as codexAuthApi from '@/api/hermes/codex-auth'
+const { startCodexLogin, pollCodexLogin } = useSettingsApi(codexAuthApi)
 import { copyToClipboard } from '@/utils/clipboard'
 
 const { t } = useI18n()

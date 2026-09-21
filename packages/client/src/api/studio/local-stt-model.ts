@@ -1,4 +1,4 @@
-import { request } from '@/api/client'
+import { request as defaultRequest } from '@/api/client'
 
 export type LocalSttModelDownloadSource = 'cf' | 'github'
 export type LocalSttModelJobStatus = 'queued' | 'running' | 'completed' | 'failed'
@@ -29,13 +29,20 @@ export interface LocalSttModelStatus {
   job: LocalSttModelDownloadJob | null
 }
 
-export function fetchLocalSttModelStatus(): Promise<LocalSttModelStatus> {
-  return request<LocalSttModelStatus>('/api/studio/stt/local-model')
+export function createApi(request: typeof defaultRequest = (...args) => defaultRequest(...args)) {
+  function fetchLocalSttModelStatus(): Promise<LocalSttModelStatus> {
+    return request<LocalSttModelStatus>('/api/studio/stt/local-model')
+  }
+
+  function downloadLocalSttModel(source: LocalSttModelDownloadSource): Promise<{ success: boolean; job: LocalSttModelDownloadJob }> {
+    return request<{ success: boolean; job: LocalSttModelDownloadJob }>('/api/studio/stt/local-model/download', {
+      method: 'POST',
+      body: JSON.stringify({ source }),
+    })
+  }
+
+
+  return { fetchLocalSttModelStatus, downloadLocalSttModel }
 }
 
-export function downloadLocalSttModel(source: LocalSttModelDownloadSource): Promise<{ success: boolean; job: LocalSttModelDownloadJob }> {
-  return request<{ success: boolean; job: LocalSttModelDownloadJob }>('/api/studio/stt/local-model/download', {
-    method: 'POST',
-    body: JSON.stringify({ source }),
-  })
-}
+export const { fetchLocalSttModelStatus, downloadLocalSttModel } = createApi()

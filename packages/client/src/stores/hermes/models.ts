@@ -6,7 +6,13 @@ import { hasApiKey } from '@/api/client'
 import { useAppStore } from './app'
 import { useProfilesStore } from './profiles'
 
-export const useModelsStore = defineStore('models', () => {
+export function createModelsState(dependencies: {
+  api: ReturnType<typeof systemApi.createApi>
+  profile: () => string
+  onChanged: (options?: { preserveSelection?: boolean }) => Promise<void>
+  onLoaded?: (response: systemApi.AvailableModelsResponse) => void
+}) {
+  const systemApi = dependencies.api
   const providers = ref<AvailableModelGroup[]>([])
   const allProviders = ref<AvailableModelGroup[]>([])
   const defaultModel = ref('')
@@ -34,13 +40,13 @@ export const useModelsStore = defineStore('models', () => {
     ),
   )
 
-  async function fetchProviders(options: { background?: boolean } = {}) {
+  async function fetchProviders(fetchOptions: { background?: boolean } = {}) {
     if (!hasApiKey()) return
-    if (!options.background) loading.value = true
+    if (!fetchOptions.background) loading.value = true
     try {
-      const profile = useProfilesStore().activeProfileName || 'default'
+      const profile = dependencies.profile()
       const res = await systemApi.fetchAvailableModelsForProfile(profile)
-      if (profile !== (useProfilesStore().activeProfileName || 'default')) return
+      if (profile !== (dependencies.profile())) return
       // MoA is a virtual Hermes runtime provider used by chat model pickers,
       // not a credential-backed provider that belongs in model settings or
       // auxiliary-model configuration.
@@ -48,10 +54,11 @@ export const useModelsStore = defineStore('models', () => {
       allProviders.value = res.allProviders
       defaultModel.value = res.default
       defaultProvider.value = res.default_provider || ''
+      dependencies.onLoaded?.(res)
     } catch (err) {
       console.error('Failed to fetch providers:', err)
     } finally {
-      if (!options.background) loading.value = false
+      if (!fetchOptions.background) loading.value = false
     }
   }
 
@@ -61,7 +68,7 @@ export const useModelsStore = defineStore('models', () => {
     try {
       await systemApi.refreshProviderModelCache()
       await fetchProviders()
-      await useAppStore().reloadModels()
+      await dependencies.onChanged()
     } finally {
       refreshingModelCache.value = false
     }
@@ -71,8 +78,7 @@ export const useModelsStore = defineStore('models', () => {
     await systemApi.updateDefaultModel({ default: modelId, provider })
     defaultModel.value = modelId
     defaultProvider.value = provider
-    const appStore = useAppStore()
-    await appStore.reloadModels()
+    await dependencies.onChanged()
   }
 
   async function setDefaultProvider(providerId: string) {
@@ -91,13 +97,13 @@ export const useModelsStore = defineStore('models', () => {
   async function addProvider(data: CustomProvider) {
     await systemApi.addCustomProvider(data)
     await fetchProviders()
-    await useAppStore().reloadModels({ preserveSelection: true })
+    await dependencies.onChanged({ preserveSelection: true })
   }
 
   async function removeProvider(name: string, options: { source?: 'custom_providers' | 'providers'; providerKey?: string } = {}) {
     await systemApi.removeCustomProvider(name, options)
     await fetchProviders()
-    await useAppStore().reloadModels()
+    await dependencies.onChanged()
   }
 
   async function fetchProviderEditor(providerId: string): Promise<ProviderEditorDetail> {
@@ -117,7 +123,7 @@ export const useModelsStore = defineStore('models', () => {
       detail = contextUpdate.provider
     }
     await fetchProviders()
-    await useAppStore().reloadModels()
+    await dependencies.onChanged()
     return detail
   }
 
@@ -125,7 +131,7 @@ export const useModelsStore = defineStore('models', () => {
     const result = await systemApi.refreshProviderModels(providerId, options)
     if (result.applied) {
       await fetchProviders()
-      await useAppStore().reloadModels()
+      await dependencies.onChanged()
     }
     return result
   }
@@ -134,7 +140,7 @@ export const useModelsStore = defineStore('models', () => {
     const result = await systemApi.restoreProviderModels(providerId)
     if (result.applied) {
       await fetchProviders()
-      await useAppStore().reloadModels()
+      await dependencies.onChanged()
     }
     return result
   }
@@ -160,4 +166,10 @@ export const useModelsStore = defineStore('models', () => {
     refreshProviderModels,
     restoreProviderModels,
   }
-})
+}
+
+export const useModelsStore = defineStore('models', () => createModelsState({
+  api: systemApi,
+  profile: () => useProfilesStore().activeProfileName || 'default',
+  onChanged: options => useAppStore().reloadModels(options),
+}))

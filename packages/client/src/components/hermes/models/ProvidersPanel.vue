@@ -1,10 +1,10 @@
 <script setup lang="ts">
+import { useModelSettingsModels } from '@/composables/useModelSettings'
 import ProviderCard from './ProviderCard.vue'
-import { useModelsStore } from '@/stores/hermes/models'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
-const modelsStore = useModelsStore()
+const modelsStore = useModelSettingsModels()
 </script>
 
 <template>
