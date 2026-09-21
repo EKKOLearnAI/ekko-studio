@@ -89,10 +89,10 @@ describe('user device APNs delivery', () => {
     expect(JSON.stringify(bodies)).not.toContain('push_')
   })
 
-  it('honors the session push opt-out for ordinary APNs too', async () => {
+  it('ignores the legacy session push opt-out for ordinary APNs', async () => {
     await register(); session.push_enabled = 0
     await (await consumer())(event())
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
   it('never includes long private titles or generated output in push requests', async () => {
     await register()
