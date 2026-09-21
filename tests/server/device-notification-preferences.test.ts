@@ -19,7 +19,7 @@ it('social task delivery is disabled and generic HTTP webhook subscription is re
  const {readFileSync}=await import('node:fs')
  const consumers=readFileSync('packages/server/src/modules/studio/services/webhooks/business-consumers.ts','utf8')
  expect(consumers).toContain("businessEvents.subscribe('http-webhook'")
- expect(consumers).not.toContain("businessEvents.subscribe('social-messages'")
+ expect(consumers.replace(/^\s*\/\/.*$/gm,'')).not.toContain("businessEvents.subscribe('social-messages'")
  const controller=readFileSync('packages/server/src/modules/studio/controllers/social-messages.ts','utf8')
  expect(controller).toContain("code: 'social_push_disabled'")
 })

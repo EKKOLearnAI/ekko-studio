@@ -12597,38 +12597,6 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "content": {
-                    "type": "string"
-                  },
-                  "contextToken": {
-                    "type": "string"
-                  },
-                  "platform": {
-                    "type": "string"
-                  },
-                  "recipient": {
-                    "type": "string"
-                  },
-                  "recipientType": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "content",
-                  "platform",
-                  "recipient"
-                ]
-              }
-            }
-          }
         }
       }
     },
@@ -17452,6 +17420,47 @@
                 "required": [
                   "slug"
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/push/preference": {
+      "put": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Update preference",
+        "description": "PUT /api/studio/push/preference",
+        "operationId": "deviceNotificationPreferenceController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
