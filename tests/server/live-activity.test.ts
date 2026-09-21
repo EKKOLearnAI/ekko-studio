@@ -64,6 +64,18 @@ describe('Studio Live Activity orchestration', () => {
   const consume=await setup();await consume(event('chat.plan.updated'));await consume(event('chat.plan.updated',2));await consume(event('chat.run.completed',3))
   for(const [,request] of fetchMock.mock.calls) expect(JSON.parse(request.body)).not.toHaveProperty('relevance_score')
  })
+
+ it('does not start a muted session and closes an existing card with a redacted terminal snapshot',async()=>{
+  let muted=false
+  vi.doMock('../../packages/server/src/modules/studio/repositories/session-store',()=>({getSession:()=>({title:'Private title',profile:'default',user_id:7,agent:'pi',push_enabled:muted?0:1}),getSessionNotificationPreview:()=>({})}))
+  const consume=await setup();await consume(event('chat.plan.updated'))
+  muted=true
+  await consume(event('chat.push.disabled',2))
+  const end=JSON.parse(fetchMock.mock.calls[1][1].body)
+  expect(end.event).toBe('end');expect(end.dismissal_at).toBe(end.occurred_at)
+  expect(end.content_state).toEqual({title:'Ekko Studio',status:'cancelled',currentStep:'',completedSteps:0,totalSteps:0})
+  await consume(event('chat.plan.updated',3));expect(fetchMock).toHaveBeenCalledTimes(2)
+ })
  it('does not start cards for terminal-only or unknown-total work',async()=>{const consume=await setup();await consume(event('chat.run.completed'));await consume({...event('chat.plan.updated'),chat:{task_plan:{...event('chat.plan.updated').chat.task_plan,progress:{total:0,completed:0}}}});expect(fetchMock).not.toHaveBeenCalled()})
 })
 

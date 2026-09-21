@@ -13,9 +13,9 @@ import { canReceiveAppEvent } from '../webhooks/app-events'
 import { appRelayUrlForRoute, getAppRelayRoute } from '../app-relay/route'
 import { decryptPushSecret } from './push-secrets'
 
-const cancelled = (event: BusinessEvent) => event.chat?.task_plan?.execution_state === 'interrupted'
+const cancelled = (event: BusinessEvent) => event.type === 'chat.push.disabled' || event.chat?.task_plan?.execution_state === 'interrupted'
   || event.payload.interrupted === true || event.type.endsWith('.abort.completed')
-const terminal = (event: BusinessEvent) => event.type.endsWith('.run.completed') || event.type.endsWith('.run.failed')
+const terminal = (event: BusinessEvent) => event.type === 'chat.push.disabled' || event.type.endsWith('.run.completed') || event.type.endsWith('.run.failed')
   || cancelled(event) || ['ended', 'failed'].includes(String(event.chat?.task_plan?.execution_state))
 const runKind = (event: BusinessEvent) => event.source === 'group_chat' ? 'group' : event.source === 'workflow' ? 'workflow' : 'chat'
 const subjectId = (event: BusinessEvent) => event.subject.room_id || event.subject.workflow_id || event.subject.session_id || ''
@@ -115,6 +115,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
   async function dispatch(event: BusinessEvent, device: ReturnType<typeof listLiveActivityDestinations>[number], registration: Record<string, any>, key: string, requested?: 'start'|'update'|'end') {
     let state = getLiveActivityRun(key)
     if (!state || state.terminal) return
+    if (requested !== 'end' && runKind(event) === 'chat' && getSession(subjectId(event))?.push_enabled === 0) return
     const ending = requested === 'end' || terminal(event)
     const action = requested || (!state.started ? 'start' : ending ? 'end' : 'update')
     if (!state.started && action !== 'start') return
@@ -122,7 +123,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
     const now = Math.floor(Date.now() / 1000)
     const body: Record<string, unknown> = { schema_version: 1, event_id: randomUUID(), event: action,
       destination_id: device.destination_id, activity_ref: state.activity_ref, revision: state.revision,
-      occurred_at: now, expires_at: now + (action === 'end' ? 600 : 120), content_state: { ...content(event, state, action === 'end'), ...displayFields(event, registration, state) } }
+      occurred_at: now, expires_at: now + (action === 'end' ? 600 : 120), content_state: event.type === 'chat.push.disabled' ? { title: 'Ekko Studio', status: 'cancelled', currentStep: '', completedSteps: 0, totalSteps: 0 } : { ...content(event, state, action === 'end'), ...displayFields(event, registration, state) } }
     // Supported gateway v1 extension; an explicit false keeps old gateways compatible.
     // Business event time, not dispatch/heartbeat time: heartbeats cannot steal priority.
     if ((await readAppConfig()).liveActivityRelevanceEnabled !== false) {
@@ -184,6 +185,16 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
         const user = findUserById(device.user_id); if (!user || user.status !== 'active' || !canReceiveAppEvent(user, event)) return
         let registration: Record<string, any>; try { registration = JSON.parse(decryptPushSecret(device.ciphertext)) } catch { console.warn('[live-activity] registration_unreadable', { connection: device.connection_id }); return }
         const key = stableKey(event, device.destination_id)
+        const sessionMuted = runKind(event) === 'chat' && getSession(subjectId(event))?.push_enabled === 0
+        const muted = sessionMuted || connections.find(row => row.id === device.connection_id)?.push_enabled === 0
+        if (muted) {
+          cancelRefresh(key); latest.delete(key); polling.get(key)?.controller.abort()
+          await serialized(key, async () => {
+            const existing = getLiveActivityRun(key)
+            if (existing?.started && !existing.terminal) await dispatch({ ...event, type: 'chat.push.disabled' }, device, registration, key, 'end')
+          })
+          return
+        }
         if (heartbeat && (latest.get(key) !== event || !active(event))) return
         const previous = latest.get(key)
         if (!heartbeat && targetConnectionId === undefined && plan && previous?.chat?.task_plan && previous.subject.run_id === event.subject.run_id

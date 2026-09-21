@@ -1,3 +1,4 @@
+import { getSession } from "../../repositories/session-store"
 import { notificationPreview } from './notification-preview'
 import { chatCompletionText } from './chat-completion-text'
 import { listAppConnections } from '../../repositories/app-connections-store'
@@ -31,6 +32,7 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
       const runKind = event.source === 'group_chat' ? 'group' : event.source === 'workflow' ? 'workflow' : 'chat'
       const subjectId = runKind === 'group' ? event.subject.room_id : runKind === 'workflow' ? event.subject.workflow_id : event.subject.session_id
       if (!subjectId) return
+      if (runKind === 'chat' && getSession(subjectId)?.push_enabled === 0) return
       const pushUrl = new URL('/push/v1/send', appRelayUrlForRoute(await getAppRelayRoute()))
       const connections = listAppConnections()
       await Promise.allSettled(listUserPushDevices().map(async device => {

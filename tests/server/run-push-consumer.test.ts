@@ -88,6 +88,12 @@ describe('user device APNs delivery', () => {
       ekko_run: { cloud_user_id: 107, run_kind: 'chat', session_id: 'session-a', run_id: 'runtime-a' } })
     expect(JSON.stringify(bodies)).not.toContain('push_')
   })
+
+  it('honors the session push opt-out for ordinary APNs too', async () => {
+    await register(); session.push_enabled = 0
+    await (await consumer())(event())
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
   it('never includes long private titles or generated output in push requests', async () => {
     await register()
     session.title = 'PRIVATE TITLE'.repeat(1000)

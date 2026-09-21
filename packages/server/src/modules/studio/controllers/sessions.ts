@@ -1,3 +1,5 @@
+import { businessEvents } from '../services/webhooks/business-events'
+import { ensureBusinessConsumers } from '../services/webhooks/business-consumers'
 import { authorizeSessionShare } from '../services/session-shares/access'
 import { sessionShareService } from '../services/session-shares/service'
 import { getSessionTaskPlans } from '../services/task-plans'
@@ -1504,6 +1506,12 @@ export async function setPushEnabled(ctx: any) {
     ctx.status = 500
     ctx.body = { error: 'Failed to update session push setting' }
     return
+  }
+  if (!rawEnabled) {
+    ensureBusinessConsumers()
+    businessEvents.publish({ schema_version: 1, id: `push-disabled:${ctx.params.id}:${Date.now()}`,
+      type: 'chat.push.disabled', source: 'chat', profile: existing.profile || 'default',
+      occurred_at: new Date().toISOString(), subject: { session_id: ctx.params.id }, payload: {} })
   }
   getChatRunServer()?.emitSessionSettingsUpdated(ctx.params.id, {
     push_enabled: rawEnabled,
