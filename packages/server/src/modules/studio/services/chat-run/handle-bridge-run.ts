@@ -121,8 +121,8 @@ function fallbackTitleFromText(text: string, limit: number, ellipsis: boolean): 
 }
 
 function firstUserTextVariants(content: unknown): string[] {
-  const raw = normalizeTitleText(content)
-  if (!raw.startsWith('[')) return raw ? [raw] : []
+  const raw = String(content || '')
+  if (!raw.trimStart().startsWith('[')) return raw ? [raw] : []
 
   try {
     const blocks = JSON.parse(raw) as unknown
@@ -132,7 +132,9 @@ function firstUserTextVariants(content: unknown): string[] {
       .filter(block => block.type === 'text')
       .map(block => String(block.text ?? ''))
       .join('\n')
-    return text.trim() ? [text] : raw ? [raw] : []
+    // A plain-text JSON prompt has the same stored shape as content blocks.
+    // Keep both forms so its original fallback title remains replaceable.
+    return text.trim() ? [raw, text] : raw ? [raw] : []
   } catch (error) {
     logger.debug(error, '[chat-run-socket] failed to parse first user content title candidates')
     return raw ? [raw] : []
@@ -146,6 +148,8 @@ function addTitleVariants(variants: Set<string>, text: string): void {
   variants.add(fallbackTitleFromText(normalized, 40, true))
   variants.add(fallbackTitleFromText(normalized, 63, false))
   variants.add(fallbackTitleFromText(normalized, 100, false))
+  // Session creation truncates before title comparison collapses whitespace.
+  variants.add(normalizeTitleText(text.replace(/[\r\n]/g, ' ').substring(0, 100)))
 }
 
 function isReplaceableLocalTitle(sessionId: string): boolean {
