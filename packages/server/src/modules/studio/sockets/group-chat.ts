@@ -48,6 +48,7 @@ import {
 } from '../services/group-chat/handoff-depth'
 import { buildOutboundToolMessage } from '../services/chat-run/resume-payload'
 import { defaultGroupChatWorkspace } from '../services/group-chat/workspace-files'
+import { GroupStreamSnapshots } from '../services/group-chat/stream-snapshots'
 
 export { defaultGroupChatWorkspace } from '../services/group-chat/workspace-files'
 
@@ -3146,6 +3147,7 @@ export class GroupChatServer {
     private nsp: Namespace
     private storage: ChatStorage
     private rooms = new Map<string, ChatRoom>()
+    private streamSnapshots = new GroupStreamSnapshots<ChatMessage>()
     /** Map: socket.id → persistent userId */
     private socketUserMap = new Map<string, string>()
     /** Map: userId → { name, description } (from auth) */
@@ -4172,6 +4174,7 @@ export class GroupChatServer {
     }
 
     private clearRoomAgentActivities(roomId: string, agentId?: string): void {
+        this.streamSnapshots?.clear(roomId, agentId)
         const roomActivities = this.roomAgentActivityState?.get(roomId)
         if (!roomActivities) return
         for (const [key, activity] of roomActivities) {
@@ -4468,6 +4471,11 @@ export class GroupChatServer {
         const historyLimit = Math.min(150, Math.max(1, Number.isFinite(data.historyLimit) ? Math.floor(Number(data.historyLimit)) : 150))
         const messages = this.storage.getRecentMessagesForUI(roomId, historyLimit, 0)
         const total = this.storage.getMessageCount?.(roomId) ?? messages.length
+        const storedIds = new Set(messages.map(message => message.id))
+        const streamingMessages = this.streamSnapshots.snapshot(roomId, (message, sessionId) =>
+            this.agentClients.agentSessionIsCurrent(roomId, message.senderId, sessionId)
+            && !this.isRoomAgentSessionFenced(roomId, sessionId),
+        ).filter(message => !storedIds.has(message.id))
         const historyTruncated = total > GROUP_CHAT_MESSAGE_WINDOW
         const agents = this.getRoomAgentViews(
             roomId,
@@ -4479,7 +4487,7 @@ export class GroupChatServer {
             roomId,
             roomName: room.name,
             members: this.getRoomMemberViews(roomId, room),
-            messages,
+            messages: [...messages, ...streamingMessages],
             agents,
             rooms: typeof socket.data?.inviteGuestRoomId === 'string' ? [roomId] : this.getRoomIds(),
             total,
@@ -4775,6 +4783,8 @@ export class GroupChatServer {
         const savedMsg = saved.message
         const totalTokens = saved.totalTokens
 
+        this.streamSnapshots?.persisted(savedMsg)
+
         this.nsp.to(roomId).emit('message', buildOutboundGroupMessage(savedMsg))
         this.notifyGroupReply(roomId, savedMsg)
         this.nsp.to(roomId).emit('room_updated', { roomId, totalTokens })
@@ -4882,7 +4892,7 @@ export class GroupChatServer {
         if (!id) return
         const agent = this.storage.getRoomAgentByAgentId(roomId, member.userId)
 
-        this.nsp.to(roomId).emit('message_stream_start', {
+        const message: ChatMessage = {
             id,
             roomId,
             senderId: member.userId,
@@ -4893,14 +4903,18 @@ export class GroupChatServer {
             run_id: typeof data.run_id === 'string' && data.run_id.trim() ? data.run_id.trim() : null,
             role: 'assistant',
             finish_reason: 'streaming',
-        })
+        }
+        this.streamSnapshots.start(message, String(data.agentSessionId).trim())
+        this.nsp.to(roomId).emit('message_stream_start', message)
     }
 
     private handleMessageStreamDelta(socket: Socket, data: { roomId?: string; id?: string; delta?: string; agentSessionId?: string }): void {
         const roomId = data.roomId || 'general'
-        if (!this.getCurrentAgentEventMember(socket, roomId, '', data.agentSessionId)) return
+        const member = this.getCurrentAgentEventMember(socket, roomId, '', data.agentSessionId)
+        if (!member) return
         const id = this.normalizeClientMessageId(data.id)
         if (!id || !data.delta) return
+        this.streamSnapshots.append(roomId, id, member.userId, String(data.agentSessionId).trim(), 'content', String(data.delta))
         this.nsp.to(roomId).emit('message_stream_delta', {
             roomId,
             id,
@@ -4910,9 +4924,11 @@ export class GroupChatServer {
 
     private handleMessageReasoningDelta(socket: Socket, data: { roomId?: string; id?: string; delta?: string; agentSessionId?: string }): void {
         const roomId = data.roomId || 'general'
-        if (!this.getCurrentAgentEventMember(socket, roomId, '', data.agentSessionId)) return
+        const member = this.getCurrentAgentEventMember(socket, roomId, '', data.agentSessionId)
+        if (!member) return
         const id = this.normalizeClientMessageId(data.id)
         if (!id || !data.delta) return
+        this.streamSnapshots.append(roomId, id, member.userId, String(data.agentSessionId).trim(), 'reasoning', String(data.delta))
         this.nsp.to(roomId).emit('message_reasoning_delta', {
             roomId,
             id,
@@ -4922,9 +4938,11 @@ export class GroupChatServer {
 
     private handleMessageStreamEnd(socket: Socket, data: { roomId?: string; id?: string; agentSessionId?: string }): void {
         const roomId = data.roomId || 'general'
-        if (!this.getCurrentAgentEventMember(socket, roomId, '', data.agentSessionId)) return
+        const member = this.getCurrentAgentEventMember(socket, roomId, '', data.agentSessionId)
+        if (!member) return
         const id = this.normalizeClientMessageId(data.id)
         if (!id) return
+        this.streamSnapshots.finish(roomId, id, member.userId)
         this.nsp.to(roomId).emit('message_stream_end', { roomId, id })
     }
 
@@ -4998,6 +5016,7 @@ export class GroupChatServer {
             // emitting ready. Match the status that started the run instead of
             // consulting the already-disposed runtime session.
             if (!activeStatus.agentSessionId || activeStatus.agentSessionId !== agentSessionId) return
+            this.streamSnapshots?.clearSender(roomId, joined.member.userId, agentSessionId)
             roomStatuses.delete(agentName)
             if (roomStatuses.size === 0) this.contextStatusState.delete(roomId)
         } else {

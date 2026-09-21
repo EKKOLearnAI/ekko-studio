@@ -259,7 +259,7 @@ describe('chat run webhooks', () => {
     enqueue.mockRestore()
   })
 
-  it('fans session notifications out from the unified webhook observer', async () => {
+  it('keeps HTTP webhook delivery active without forwarding session notifications to social media', async () => {
     const notifySessionPush = vi.fn(async () => 1)
     vi.doMock('../../packages/server/src/modules/studio/services/social-messages/session-push', () => ({
       notifySessionPush,
@@ -294,28 +294,13 @@ describe('chat run webhooks', () => {
       payload: { tool_call_id: 'tool-1' },
     })
 
-    await vi.waitFor(() => expect(notifySessionPush).toHaveBeenCalledTimes(3))
-    expect(notifySessionPush).toHaveBeenNthCalledWith(
-      1,
-      'session-push',
-      'run.completed',
-      { run_id: 'run-1', output: 'done' },
-      'bridge',
-    )
-    expect(notifySessionPush).toHaveBeenNthCalledWith(
-      2,
-      'session-push',
-      'approval.requested',
-      { approval_id: 'approval-1', command: 'npm test' },
-      'bridge',
-    )
-    expect(notifySessionPush).toHaveBeenNthCalledWith(
-      3,
-      'session-push',
-      'clarify.requested',
-      { clarify_id: 'clarify-1', question: 'Continue?' },
-      'bridge',
-    )
+    expect(enqueue.mock.calls.map(([event]) => event.type)).toEqual([
+      'chat.run.completed',
+      'chat.approval.requested',
+      'chat.clarification.requested',
+      'chat.tool.started',
+    ])
+    expect(notifySessionPush).not.toHaveBeenCalled()
     enqueue.mockRestore()
   })
 

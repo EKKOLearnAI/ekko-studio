@@ -36,7 +36,7 @@ test('sends a Telegram message from Device Connections message push', async ({ p
   await page.goto('/#/social-messages')
 
   await expect(page).toHaveURL(/#\/hermes\/connections\?view=messages$/)
-  await expect(page.getByRole('button', { name: 'Message Push' })).toHaveClass(/view-switch-button--active/)
+  await expect(page.getByRole('button', { name: 'Message Push' })).toHaveCount(0)
   await expect(page.getByText('Push target found. You can now send messages to this Telegram chat.')).toBeVisible()
   await expect(page.getByPlaceholder('Chat ID or @channel_username')).toHaveCount(0)
   await page.getByPlaceholder('Write the message to send…').fill('hello telegram')

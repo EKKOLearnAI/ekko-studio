@@ -19,6 +19,7 @@ describe('user device APNs delivery', () => {
     db = new DatabaseSync(':memory:'); home = mkdtempSync(join(tmpdir(), 'user-push-'))
     connections = []; users = new Map(); workflow = null
     appRelayRoute = undefined
+    vi.stubEnv('STUDIO_PUSH_CONTENT_PREVIEW', '0')
     session = { title: 'Saved task', profile: 'default', user_id: 7 }
     vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({ getDb: () => db }))
     vi.doMock('../../packages/server/src/modules/studio/public/config', () => ({ config: { appHome: home, appRelay: { url: 'https://push.test' } } }))
@@ -27,7 +28,8 @@ describe('user device APNs delivery', () => {
     vi.doMock('../../packages/server/src/modules/studio/public/system-info', () => ({ getAppRelayDeviceIdentity: async () => ({ device_id: 'studio-a' }) }))
     vi.doMock('../../packages/server/src/modules/studio/repositories/app-connections-store', () => ({ listAppConnections: () => connections, hashAppCredential: hash }))
     vi.doMock('../../packages/server/src/modules/studio/repositories/users-store', () => ({ findUserById: (id: number) => users.get(id), listUserProfiles: () => [{ profile_name: 'default' }] }))
-    vi.doMock('../../packages/server/src/modules/studio/repositories/session-store', () => ({ getSession: () => session, getSessionNotificationPreview: () => session }))
+    vi.doMock('../../packages/server/src/modules/studio/repositories/session-store', () => ({ getSession: () => session, getSessionNotificationPreview: () => session,
+      getSessionContextMessage: (_sessionId: string, messageId: number) => messageId === 42 ? { id: 42, role: 'assistant', content: 'Persisted current reply', display_content: null } : null }))
     vi.doMock('../../packages/server/src/modules/studio/repositories/workflow-run-store', () => ({ getWorkflowRun: () => workflow, getWorkflowRunForSession: () => workflow }))
     vi.doMock('../../packages/server/src/modules/studio/services/webhooks/app-event-state', () => ({ appEventState: () => [] }))
     inspect.mockReset().mockImplementation(async (token: string) => {
@@ -37,6 +39,7 @@ describe('user device APNs delivery', () => {
     fetchMock.mockReset().mockResolvedValue({ status: 200, body: { cancel: vi.fn() } })
   })
   afterEach(() => {
+    vi.unstubAllEnvs()
     db.close(); rmSync(home, { recursive: true, force: true })
     paths.forEach(path => vi.doUnmock(`../../packages/server/src/modules/studio/${path}`)); vi.resetModules()
   })
@@ -85,6 +88,12 @@ describe('user device APNs delivery', () => {
       ekko_run: { cloud_user_id: 107, run_kind: 'chat', session_id: 'session-a', run_id: 'runtime-a' } })
     expect(JSON.stringify(bodies)).not.toContain('push_')
   })
+
+  it('honors the session push opt-out for ordinary APNs too', async () => {
+    await register(); session.push_enabled = 0
+    await (await consumer())(event())
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
   it('never includes long private titles or generated output in push requests', async () => {
     await register()
     session.title = 'PRIVATE TITLE'.repeat(1000)
@@ -95,6 +104,53 @@ describe('user device APNs delivery', () => {
     expect(JSON.parse(body).notification).toEqual({ title: '', body: '' })
     expect(body).not.toContain('PRIVATE')
     expect(Buffer.byteLength(body, 'utf8')).toBeLessThan(4096)
+  })
+  it('defaults to current title and reply when the preview setting is absent', async () => {
+    vi.stubEnv('STUDIO_PUSH_CONTENT_PREVIEW', undefined)
+    await register()
+    const consume = await consumer()
+    await consume(event({ payload: { run_id: 'runtime-a', output: '**Current reply**' } }))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).notification).toEqual({ title: 'Saved task', body: 'Current reply' })
+  })
+  it('opt-in sends current final reply without historical preview fallback', async () => {
+    vi.stubEnv('STUDIO_PUSH_CONTENT_PREVIEW', '1')
+    await register()
+    session.preview = 'OLD PRIVATE REPLY'
+    const consume = await consumer()
+    await consume(event({ payload: { run_id: 'runtime-a', output: '' } }))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).notification).toEqual({ title: 'Saved task', body: '' })
+    await consume(event({ id: 'next', payload: { run_id: 'runtime-b', output: '**Done** ```hidden' } }))
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).notification).toEqual({ title: 'Saved task', body: 'Done' })
+  })
+  it('uses the exact persisted terminal message when the completion payload output is empty', async () => {
+    vi.stubEnv('STUDIO_PUSH_CONTENT_PREVIEW', '1')
+    await register()
+    const consume = await consumer()
+    await consume(event({ subject: { session_id: 'session-a', run_id: 'runtime-a', message_id: '42' }, payload: { run_id: 'runtime-a', output: '' } }))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).notification).toEqual({ title: 'Saved task', body: 'Persisted current reply' })
+  })
+  it('uses the terminal assistant message ahead of accumulated output on both Android and iOS', async () => {
+    vi.stubEnv('STUDIO_PUSH_CONTENT_PREVIEW', '1')
+    await register()
+    session.preview = 'Unrelated historical reply'
+    const completion = event({
+      subject: { session_id: 'session-a', run_id: 'runtime-a', message_id: '42' },
+      payload: { run_id: 'runtime-a', output: 'First progress reply. '.repeat(30) + 'Persisted current reply' },
+    })
+    const { appEventEnvelope } = await import('../../packages/server/src/modules/studio/services/webhooks/app-events')
+    expect(appEventEnvelope(completion)).toMatchObject({ display: { content: 'Persisted current reply' } })
+    await (await consumer())(completion)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).notification).toEqual({ title: 'Saved task', body: 'Persisted current reply' })
+  })
+  it('never falls back to session history on Android or iOS when the current reply is unavailable', async () => {
+    vi.stubEnv('STUDIO_PUSH_CONTENT_PREVIEW', '1')
+    await register()
+    session.preview = 'Unrelated historical reply'
+    const completion = event({ payload: { run_id: 'runtime-a', output: '' } })
+    const { appEventEnvelope } = await import('../../packages/server/src/modules/studio/services/webhooks/app-events')
+    expect(appEventEnvelope(completion)).toMatchObject({ display: { content: '' } })
+    await (await consumer())(completion)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).notification.body).toBe('')
   })
   it('mutes APNs without deleting registration and token refresh does not re-enable the connection', async () => {
     const a = await register(); await register(7, 'phone-b', 'bc')

@@ -61,7 +61,10 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
           models: [{ id: 'studio-test', input: ['text'], contextWindow: 128000, maxTokens: 8192, reasoningEfforts: { high: 'high' } }] } } },
       }) : '{}\n')
       const prepared = await prepareDshRuntime({ sourceHome: join(root, 'empty-home'), sharedSkills: join(root, 'shared-skills'),
-        installationCommand: process.env.DSH_WEB_COMMAND!, rootDir: home, systemPrompt: 'Answer briefly.', managedMcp: {}, model: mode === 'scoped' ? 'studio-test' : undefined, reasoningEffort: 'high', baseUrl: `http://127.0.0.1:${port}/v1` })
+        installationCommand: process.env.DSH_WEB_COMMAND!, rootDir: home, systemPrompt: 'Answer briefly.', managedMcp: {}, model: mode === 'scoped' ? 'studio-test' : undefined, reasoningEffort: 'high', baseUrl: `http://127.0.0.1:${port}/v1`,
+        ...(mode === 'scoped' ? { contextWindow: 128000, outputLimit: 8192,
+          contextPolicy: { contextWindow: 128000, outputLimit: 8192, threshold: 0.35, triggerTokens: 44800 } } : {}),
+      })
       let nativeSessionId = ''
       for (let round = 0; round < 2; round++) {
         const child = spawn(process.env.DSH_WEB_COMMAND!, prepared.args, {

@@ -1,4 +1,5 @@
 import { openCodeSessionHeaders } from '../../studio/public/opencode-session'
+import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
 import { openRouterAttributionHeaders } from '../../studio/public/openrouter-attribution'
 import { readFile } from 'fs/promises'
 import { existsSync, readFileSync } from 'fs'
@@ -1165,6 +1166,8 @@ export async function updateModelContext(ctx: any) {
       ctx.body = { error: 'Database not available' }
       return
     }
+
+    invalidateProviderRuntime(profile, provider)
 
     ctx.body = {
       success: true,

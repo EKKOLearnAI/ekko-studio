@@ -75,6 +75,17 @@ export class TaskPlanRuns {
     return structuredClone(snapshot)
   }
 
+  activeSnapshots(): Array<{ profile: string; snapshot: TaskPlanSnapshot }> {
+    const result: Array<{ profile: string; snapshot: TaskPlanSnapshot }> = []
+    for (const binding of this.bindings.values()) {
+      const state = binding.resolve(), snapshot = binding.snapshot
+      if (binding.publish || !snapshot || snapshot.execution_state !== 'running' || !state?.isWorking || state.isAborting) continue
+      if ((state.activeRunMarker || state.responseRun?.runMarker) !== snapshot.run_id) continue
+      result.push({ profile: binding.profile, snapshot: structuredClone(snapshot) })
+    }
+    return result.sort((a, b) => b.snapshot.updated_at - a.snapshot.updated_at)
+  }
+
   finish(contextId: string, executionState: TerminalState): void {
     const binding = this.bindings.get(contextId)
     if (!binding) return

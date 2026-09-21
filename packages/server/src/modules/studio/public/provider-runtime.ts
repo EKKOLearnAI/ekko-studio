@@ -1,7 +1,7 @@
 export interface ProviderRuntimeDependencies {
   getModelContextLength: (...args: any[]) => number
   getModelRuntimeCapabilities: (...args: any[]) => any
-  invalidateProviderRuntime: (profile: string, provider: string) => {
+  invalidateProviderRuntime: (profile: string, provider?: string) => {
     invalidatedRuns: number
     deferredRuns: number
   }
@@ -26,7 +26,7 @@ export function getModelRuntimeCapabilities(...args: any[]): any {
   return configured().getModelRuntimeCapabilities(...args)
 }
 
-export function invalidateProviderRuntime(profile: string, provider: string): {
+export function invalidateProviderRuntime(profile: string, provider?: string): {
   invalidatedRuns: number
   deferredRuns: number
 } {

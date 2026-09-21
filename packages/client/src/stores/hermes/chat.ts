@@ -3747,7 +3747,7 @@ export const useChatStore = defineStore('chat', () => {
         reasoning_effort: isCodingAgentExecution && codingAgentMode === 'global'
           ? undefined
           : activeSession.value?.reasoningEffort || undefined,
-        push_enabled: Boolean(activeSession.value?.pushEnabled),
+        push_enabled: activeSession.value?.pushEnabled !== false,
       }
       if (shouldSendInitialSessionConfig && activeSession.value) {
         activeSession.value.messageCount = Math.max(activeSession.value.messageCount || 0, 1)

@@ -86,6 +86,36 @@ describe('group chat streaming baseline', () => {
     await expect(unexpectedEnd).rejects.toThrow('timeout waiting for message_stream_end')
   })
 
+  it('restores in-progress content and reasoning when switching back to a room', async () => {
+    const { worker, bob, agentSessionId } = await joinPair()
+    groupServer.getStorage().saveRoom('room-2', 'Room 2', 'ROOM2')
+    const start = once<any>(bob, 'message_stream_start')
+    worker.emit('message_stream_start', { roomId: 'room-1', id: 'live-1', run_id: 'run-1', agentSessionId })
+    await start
+    const content = once<any>(bob, 'message_stream_delta')
+    worker.emit('message_stream_delta', { roomId: 'room-1', id: 'live-1', delta: 'Partial reply', agentSessionId })
+    await content
+    const reasoning = once<any>(bob, 'message_reasoning_delta')
+    worker.emit('message_reasoning_delta', { roomId: 'room-1', id: 'live-1', delta: 'Still thinking', agentSessionId })
+    await reasoning
+    await emitAck(bob, 'join', { roomId: 'room-2', inviteCode: 'ROOM2' })
+    const restored = await emitAck(bob, 'join', { roomId: 'room-1' })
+    expect(restored.messages).toContainEqual(expect.objectContaining({
+      id: 'live-1', senderId: 'agent-worker', senderName: 'Worker', run_id: 'run-1',
+      content: 'Partial reply', reasoning: 'Still thinking', isStreaming: true,
+    }))
+    expect(groupServer.getStorage().getRecentMessagesForUI('room-1', 100, 0)).toEqual([])
+    const delta = once<any>(bob, 'message_stream_delta')
+    worker.emit('message_stream_delta', { roomId: 'room-1', id: 'live-1', delta: ' continues', agentSessionId })
+    await delta
+    const next = await emitAck(bob, 'join', { roomId: 'room-1' })
+    expect(next.messages.find((message: any) => message.id === 'live-1').content).toBe('Partial reply continues')
+    const ended = once<any>(bob, 'message_stream_end')
+    worker.emit('message_stream_end', { roomId: 'room-1', id: 'live-1', agentSessionId })
+    await ended
+    expect((await emitAck(bob, 'join', { roomId: 'room-1' })).messages).toEqual([])
+  })
+
   it('ignores a representative invalid stream id', async () => {
     const { alice, bob } = await joinPair()
     const unexpected = once<any>(bob, 'message_stream_start', 100)

@@ -24,7 +24,7 @@ export function foregroundNotificationPreview(
     ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, limit) : ''
   return {
     title: plain(session?.title, 120),
-    content: kind === 'completion' ? plain(payload.output || session?.preview, 240) : '',
+    content: kind === 'completion' ? plain(payload.output, 240) : '',
   }
 }
 

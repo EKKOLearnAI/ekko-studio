@@ -1,3 +1,6 @@
+import { getSession } from "../../repositories/session-store"
+import { notificationPreview } from './notification-preview'
+import { chatCompletionText } from './chat-completion-text'
 import { listAppConnections } from '../../repositories/app-connections-store'
 import { findUserById } from '../../repositories/users-store'
 import { listUserPushDevices, removeUserPushDevice } from '../../repositories/user-push-store'
@@ -29,6 +32,7 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
       const runKind = event.source === 'group_chat' ? 'group' : event.source === 'workflow' ? 'workflow' : 'chat'
       const subjectId = runKind === 'group' ? event.subject.room_id : runKind === 'workflow' ? event.subject.workflow_id : event.subject.session_id
       if (!subjectId) return
+      if (runKind === 'chat' && getSession(subjectId)?.push_enabled === 0) return
       const pushUrl = new URL('/push/v1/send', appRelayUrlForRoute(await getAppRelayRoute()))
       const connections = listAppConnections()
       await Promise.allSettled(listUserPushDevices().map(async device => {
@@ -49,15 +53,20 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
         if (attempted.has(key)) return
         attempted.add(key)
         if (attempted.size > 5000) attempted.delete(attempted.values().next().value!)
+        const currentOutput = chatCompletionText(event)
         const response = await send(pushUrl, {
           method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registration.push_token}` },
           body: JSON.stringify({ schema_version: 1, event_id: event.id, event_type: kind,
             recipient: { platform: 'ios', app_id: registration.app_id,
               apns_environment: registration.apns_environment, apns_token: registration.apns_token },
-            // The gateway selects fixed Android-equivalent text by event/domain.
-            // Keep conversation titles and generated output out of push requests.
-            notification: { title: '', body: '' },
+            // Preview is enabled by default; set 0 to keep notification content private.
+            // Custom content requires a gateway that honors notification title/body.
+            notification: process.env.STUDIO_PUSH_CONTENT_PREVIEW !== '0'
+              ? notificationPreview(event.type === 'chat.run.completed'
+                ? { ...('display' in envelope ? envelope.display as Record<string, unknown> : {}), content: currentOutput, preview: '' }
+                : 'display' in envelope ? envelope.display : undefined, kind === 'completion')
+              : { title: '', body: '' },
             ekko_run: { schema_version: 1, studio_device_id: registration.studio_device_id, cloud_user_id: registration.cloud_user_id,
               run_kind: runKind, run_id: event.subject.run_id || event.subject.message_id || event.id, profile: event.profile,
               [runKind === 'chat' ? 'session_id' : runKind === 'group' ? 'room_id' : 'workflow_id']: subjectId } }),

@@ -18,6 +18,7 @@ const deleteHermesSessionForProfileMock = vi.fn()
 const localListSessionsMock = vi.fn()
 const localCountSessionsMock = vi.fn()
 const localGetSessionDetailMock = vi.fn()
+const localGetSessionDetailPaginatedMock = vi.fn()
 const localSearchSessionsMock = vi.fn()
 const localDeleteSessionMock = vi.fn()
 const localRenameSessionMock = vi.fn()
@@ -101,6 +102,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
   countSessions: localCountSessionsMock,
   searchSessions: localSearchSessionsMock,
   getSessionDetail: localGetSessionDetailMock,
+  getSessionDetailPaginated: localGetSessionDetailPaginatedMock,
   deleteSession: localDeleteSessionMock,
   renameSession: localRenameSessionMock,
   setSessionArchived: localSetSessionArchivedMock,
@@ -322,6 +324,19 @@ describe('session conversations controller', () => {
     bridgeGetRuntimeStateMock.mockReturnValue({ ready: false, running: false, endpoint: 'ipc:///tmp/hermes-agent-bridge.sock' })
     codingAgentRunManagerMock.stop.mockReset()
     invalidateCodingAgentSessionRuntimeMock.mockReset()
+  })
+
+  it('returns shared session agent and workspace metadata without account secrets', async () => {
+    localGetSessionDetailPaginatedMock.mockReturnValue({
+      session: { id: 'shared', profile: 'default', source: 'coding_agent', agent: 'codex', agent_mode: 'scoped', coding_agent_id: 'codex', workspace: '/project', api_key: 'private', parent_title: 'private parent' },
+      messages: [], total: 0, offset: 0, limit: 1, hasMore: false,
+    })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'shared' }, query: { limit: '1' }, state: { sessionShare: {} } }
+    await mod.getConversationMessagesPaginated(ctx)
+    expect(ctx.body.session).toMatchObject({ agent: 'codex', coding_agent_id: 'codex', agent_mode: 'scoped', workspace: '/project' })
+    expect(ctx.body.session).not.toHaveProperty('api_key')
+    expect(ctx.body.session.parent_title).toBeUndefined()
   })
 
   it('lists conversations from the local session store', async () => {

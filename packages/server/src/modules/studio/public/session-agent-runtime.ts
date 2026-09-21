@@ -1,4 +1,5 @@
 export interface SessionAgentRuntimeDependencies {
+  getAvailableModelGroups?: (profile: string) => Promise<any[]>
   deleteHermesSessionForProfile: (...args: any[]) => Promise<boolean>
   getHermesCliSession: (...args: any[]) => Promise<any>
   getHermesModelContextLength: (...args: any[]) => number
@@ -38,3 +39,5 @@ export const listHermesSessionSummaryGroups = (...args: any[]): Promise<any> => 
 export const notifyHermesSessionModelChanged = (...args: any[]): Promise<void> => configured().notifyHermesSessionModelChanged(...args)
 export const stopCodingAgentSessionRun = (...args: any[]) => configured().stopCodingAgentSessionRun(...args)
 export const invalidateCodingAgentSessionRuntime = (...args: any[]) => configured().invalidateCodingAgentSessionRuntime(...args)
+
+export const getSessionAvailableModelGroups = (profile: string): Promise<any[]> => configured().getAvailableModelGroups?.(profile) ?? Promise.resolve([])

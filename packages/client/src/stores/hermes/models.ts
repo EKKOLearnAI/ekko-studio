@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as systemApi from '@/api/hermes/system'
 import type { AvailableModelGroup, CustomProvider, ProviderEditorPatch, ProviderEditorDetail } from '@/api/hermes/system'
-import { hasApiKey } from '@/api/client'
+import { getModelsPageProfile, hasApiKey } from '@/api/client'
 import { useAppStore } from './app'
 import { useProfilesStore } from './profiles'
 
@@ -38,9 +38,9 @@ export const useModelsStore = defineStore('models', () => {
     if (!hasApiKey()) return
     if (!options.background) loading.value = true
     try {
-      const profile = useProfilesStore().activeProfileName || 'default'
+      const profile = getModelsPageProfile() || useProfilesStore().activeProfileName || 'default'
       const res = await systemApi.fetchAvailableModelsForProfile(profile)
-      if (profile !== (useProfilesStore().activeProfileName || 'default')) return
+      if (profile !== (getModelsPageProfile() || useProfilesStore().activeProfileName || 'default')) return
       // MoA is a virtual Hermes runtime provider used by chat model pickers,
       // not a credential-backed provider that belongs in model settings or
       // auxiliary-model configuration.

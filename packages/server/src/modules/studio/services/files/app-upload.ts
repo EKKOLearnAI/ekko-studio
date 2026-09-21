@@ -46,6 +46,8 @@ export async function openAppUpload(input: {
   profile: string
   name: unknown
   size: unknown
+  /** Server-selected directory; never read from request body. */
+  uploadDir?: string
 }): Promise<{ id: string; nextOffset: number; maxChunkBytes: number }> {
   const id = String(input.id || '').trim()
   if (!UPLOAD_ID_PATTERN.test(id)) throw new AppUploadError('invalid_upload_id', 'Invalid upload id')
@@ -57,7 +59,7 @@ export async function openAppUpload(input: {
     throw new AppUploadError('upload_too_large', 'File is too large (max 50MB)', 413)
   }
 
-  const uploadDir = getProfileUploadDir(input.profile)
+  const uploadDir = input.uploadDir || getProfileUploadDir(input.profile)
   await mkdir(uploadDir, { recursive: true })
   const extension = safeExtension(name)
   const storageId = randomBytes(12).toString('hex')

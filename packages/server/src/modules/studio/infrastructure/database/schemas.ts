@@ -50,6 +50,36 @@ export const TASK_PLANS_SCHEMA: Record<string, string> = {
 
 export const SESSIONS_TABLE = 'sessions'
 
+export const SESSION_SHARES_TABLE = 'session_shares'
+export const SESSION_SHARES_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  session_id: 'TEXT NOT NULL',
+  profile: 'TEXT NOT NULL',
+  created_by_user_id: 'INTEGER NOT NULL',
+  sharer_app_user_id: 'INTEGER NOT NULL',
+  sharer_name_snapshot: 'TEXT NOT NULL',
+  recipient_app_user_id: 'INTEGER',
+  recipient_name_snapshot: 'TEXT',
+  token_hash: 'TEXT NOT NULL',
+  permissions: 'TEXT NOT NULL',
+  workspace_root: 'TEXT NOT NULL',
+  // Allow existing tables to migrate. Legacy grants without a pinned real path
+  // remain unable to access workspace files until a new share is created.
+  workspace_real_root: "TEXT NOT NULL DEFAULT ''",
+  extra_paths: "TEXT NOT NULL DEFAULT '[]'",
+  policy_version: 'INTEGER NOT NULL DEFAULT 1',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+  expires_at: 'INTEGER NOT NULL',
+  claimed_at: 'INTEGER',
+  revoked_at: 'INTEGER',
+}
+export const SESSION_SHARES_INDEXES = {
+  uniq_session_shares_token: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_shares_token ON session_shares(token_hash)',
+  idx_session_shares_sender: 'CREATE INDEX IF NOT EXISTS idx_session_shares_sender ON session_shares(session_id, sharer_app_user_id, created_at)',
+  idx_session_shares_recipient: 'CREATE INDEX IF NOT EXISTS idx_session_shares_recipient ON session_shares(recipient_app_user_id)',
+}
+
 export const SESSION_CATEGORIES_TABLE = 'session_categories'
 
 export const SESSION_CATEGORIES_SCHEMA: Record<string, string> = {
@@ -98,7 +128,7 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   last_active: 'INTEGER NOT NULL',
   is_archived: 'INTEGER NOT NULL DEFAULT 0',
   is_pinned: 'INTEGER NOT NULL DEFAULT 0',
-  push_enabled: 'INTEGER NOT NULL DEFAULT 0',
+  push_enabled: 'INTEGER NOT NULL DEFAULT 1',
   workspace: 'TEXT',
   category_id: 'INTEGER',
   history_revision: 'INTEGER NOT NULL DEFAULT 0',
@@ -1611,6 +1641,8 @@ export function initAllHermesTables(): void {
     })
 
     // App authorization codes and connected mobile devices
+    syncTable(SESSION_SHARES_TABLE, SESSION_SHARES_SCHEMA, { indexes: SESSION_SHARES_INDEXES })
+    createIndexes(db, SESSION_SHARES_INDEXES)
     syncTable(APP_CONNECTIONS_TABLE, APP_CONNECTIONS_SCHEMA, {
       indexes: APP_CONNECTIONS_INDEXES,
     })

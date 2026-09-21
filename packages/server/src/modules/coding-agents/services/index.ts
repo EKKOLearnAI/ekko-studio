@@ -47,6 +47,7 @@ import type { CodingAgentRuntime } from '../../studio/contracts/agents/runtime'
 import { defaultCodingAgentWorkspace } from '../../studio/public/workspace-manager'
 import { isolateUnhealthyRuntimeMcpServers } from './mcp-runtime-isolation'
 import { getCodingAgentGlobalHome } from '../../studio/public/coding-agent-global-home'
+import { codingAgentContextPolicy, compactionPercent, claudeCompactionPercent, piCompactionSettings, type CodingAgentContextPolicy } from './context-policy'
 
 const execFileAsync = promisify(execFile)
 const LAUNCH_API_MODES = new Set<ApiMode>(['chat_completions', 'codex_responses', 'anthropic_messages'])
@@ -64,10 +65,6 @@ const CLAUDE_CODE_ROOT_PERMISSION_ARGS = [
   '--allowedTools',
   CLAUDE_CODE_TASK_PLAN_TOOL,
 ]
-// Claude Code auto-compact is on by default, but Studio never tells it the
-// model context window, so it can compact too late for the 20MB proxy body
-// limit. Mirror Hermes' 50% compression budget and pass Studio's window.
-const CLAUDE_CODE_AUTO_COMPACT_PERCENT = 50
 const PI_MCP_ADAPTER_PACKAGE = 'pi-mcp-adapter'
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org'
 const PI_PROVIDER_ID = 'hermes-studio'
@@ -1459,6 +1456,10 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
     'model',
     'model_provider',
     'model_catalog_json',
+    'model_context_window',
+    'model_auto_compact_token_limit',
+    'model_auto_compact_token_limit_scope',
+    'model_auto_compact_enabled',
     'model_reasoning_summary',
     'model_reasoning_effort',
     'developer_instructions',
@@ -1468,7 +1469,7 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
     'preferred_auth_method',
     'chatgpt_base_url',
   ])
-  const runtimeFeatures = new Set(['tool_search', 'tool_search_always_defer_mcp_tools'])
+  const runtimeFeatures = new Set(['tool_search', 'tool_search_always_defer_mcp_tools', 'auto_compaction'])
 
   let arraySectionIndex = 0
   for (const content of contents) {
@@ -1730,11 +1731,12 @@ function piMcpConfig(profile: string, ...externalContents: Array<string | null |
     .map((item) => {
     const server = managedHermesMcpServerConfig('pi', profile, item.name, item.toolset)
     const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
+    const interaction = item.toolset === 'plan'
     return [item.name, {
       ...server,
-      lifecycle: 'lazy',
-      directTools: false,
-      toolPrefix: 'none',
+      lifecycle: interaction ? 'eager' : 'lazy',
+      directTools: interaction,
+      toolPrefix: interaction ? 'server' : 'none',
       requestTimeoutMs,
     }]
   }))
@@ -1834,6 +1836,7 @@ function opencodeRuntimeConfig(
     model?: string
     baseUrl?: string
     systemPrompt?: string
+    contextPolicy?: CodingAgentContextPolicy
   },
   ...existingContents: Array<string | null | undefined>
 ): string {
@@ -1876,11 +1879,21 @@ function opencodeRuntimeConfig(
               // Always forward images; let the upstream model handle support.
               attachment: true,
               modalities: { input: ['text', 'image'], output: ['text'] },
+              ...(runtime.contextPolicy ? { limit: {
+                context: runtime.contextPolicy.contextWindow,
+                input: runtime.contextPolicy.contextWindow,
+                output: runtime.contextPolicy.outputLimit,
+              } } : {}),
             },
           },
         },
       },
     } : {}),
+    ...(runtime.contextPolicy ? { compaction: {
+      ...(config.compaction && typeof config.compaction === 'object' ? config.compaction : {}),
+      auto: true,
+      reserved: runtime.contextPolicy.contextWindow - runtime.contextPolicy.triggerTokens,
+    } } : {}),
     ...((inheritedInstructions.length || runtime.systemPrompt) ? {
       instructions: [...new Set([
         ...inheritedInstructions,
@@ -1931,9 +1944,9 @@ export function getCodingAgentManagedMcpServerConfigs(
       const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
       return [item.name, {
         ...server,
-        lifecycle: 'lazy',
-        directTools: false,
-        toolPrefix: 'none',
+        lifecycle: item.toolset === 'plan' ? 'eager' : 'lazy',
+        directTools: item.toolset === 'plan',
+        toolPrefix: item.toolset === 'plan' ? 'server' : 'none',
         requestTimeoutMs,
         ...(disabledManaged.has(item.name) ? { enabled: false } : {}),
       }]
@@ -3486,6 +3499,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const preset = PROVIDER_PRESETS.find(item => item.value === provider)
   const apiMode = freeRuntime?.apiMode || normalizeLaunchApiMode(input.apiMode, preset?.api_mode || 'chat_completions')
   const reasoningEffort = String(input.reasoningEffort || '').trim()
+  const contextPolicy = await codingAgentContextPolicy({ profile: scope.profile, provider, model })
   const groupSystemPrompt = String(input.groupSystemPrompt || '').trim()
   const scopedSystemPrompt = tool.id === 'pi' && groupSystemPrompt
     ? getSystemPrompt(undefined, { mcpCapabilities })
@@ -3523,7 +3537,6 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   let env: Record<string, string> = {}
 
   if (tool.id === 'claude-code') {
-    const contextWindow = getModelContextLength({ profile: scope.profile, provider, model })
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerClaudeCodeProxyTarget({
           provider,
@@ -3561,8 +3574,12 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: modelName,
         ANTHROPIC_DEFAULT_OPUS_MODEL: model,
         ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: modelName,
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(contextWindow),
-        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CLAUDE_CODE_AUTO_COMPACT_PERCENT),
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(contextPolicy.contextWindow),
+        // Claude clamps its rolling window to >=100K. Adjust the percentage
+        // against that window so a smaller Studio model still compacts early.
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(claudeCompactionPercent(contextPolicy)),
+        DISABLE_AUTO_COMPACT: '0',
+        DISABLE_COMPACT: '0',
         ENABLE_TOOL_SEARCH: 'true',
       },
     }
@@ -3637,6 +3654,9 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       `model_catalog_json = ${JSON.stringify(catalogPath)}`,
       `model_provider = ${JSON.stringify(providerId)}`,
       `model = ${JSON.stringify(model)}`,
+      `model_context_window = ${contextPolicy.contextWindow}`,
+      `model_auto_compact_token_limit = ${contextPolicy.triggerTokens}`,
+      'model_auto_compact_token_limit_scope = "total"',
       'model_reasoning_summary = "auto"',
       ...(reasoningEffort ? [`model_reasoning_effort = ${JSON.stringify(reasoningEffort)}`] : []),
       `developer_instructions = ${tomlMultilineString(effectiveCodexInstructions)}`,
@@ -3708,7 +3728,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     await mkdir(sessionsDir, { recursive: true })
     await writeRuntimeFile('studio_extension', PI_STUDIO_EXTENSION_FILE, piStudioRuntimeExtension())
     await writeRuntimeFile('dynamic_prompt', PI_DYNAMIC_PROMPT_FILE, '')
-    await writeRuntimeFile('settings', 'settings.json', piSettingsConfig(settings, studioExtensionPath))
+    await writeRuntimeFile('settings', 'settings.json', piSettingsConfig(piCompactionSettings(settings, contextPolicy, model), studioExtensionPath))
     await writeRuntimeFile('models', 'models.json', piModelsConfig({
       baseUrl: piBaseUrl,
       apiKey: piApiKey,
@@ -3775,12 +3795,6 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
           chatSessionId: isolatedInput.sessionId,
         })
       : null
-    const capabilities = getModelRuntimeCapabilities({
-      profile: scope.profile,
-      provider,
-      model,
-      ...(provider === 'custom' || provider.startsWith('custom:') ? { fallbackContextLength: 128_000 } : {}),
-    })
     const baseConfigRoot = getScopedConfigRoot(tool.id, scope)
     const globalGrokHome = process.env.GROK_HOME?.trim() || join(getGlobalConfigHome(), '.grok')
     const globalInstructions = await safeReadFile(join(globalGrokHome, 'AGENTS.md')) || ''
@@ -3794,8 +3808,9 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       model,
       displayName: displayNameForModel(model),
       proxyBaseUrl: proxyTarget?.baseUrl || baseUrl,
-      contextWindow: capabilities.contextWindow,
-      outputLimit: capabilities.outputLimit,
+      contextWindow: contextPolicy.contextWindow,
+      outputLimit: contextPolicy.outputLimit,
+      contextPolicy,
       reasoningEffort,
       systemPrompt: scopedSystemPrompt,
       userInstructions: [globalInstructions.trim(), scopedInstructions.trim()]
@@ -3812,6 +3827,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     files.push(...prepared.files)
     env = {
       GROK_HOME: rootDir,
+      GROK_AUTO_COMPACT_THRESHOLD_PERCENT: String(compactionPercent(contextPolicy.threshold)),
       [GROK_API_KEY_ENV]: proxyTarget?.token || apiKey,
     }
     args = [
@@ -3830,7 +3846,8 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       ...await dshHost.runtimeInput(),
       sharedSkills: join(getGlobalConfigHome(), '.agents', 'skills'),
       rootDir, systemPrompt: scopedSystemPrompt, model, baseUrl: proxyTarget.baseUrl,
-      contextWindow: capabilities.contextWindow, outputLimit: capabilities.outputLimit,
+      contextWindow: contextPolicy.contextWindow, outputLimit: contextPolicy.outputLimit,
+      contextPolicy,
       imageInput: capabilities.input.includes('image'),
       reasoningEffort,
       managedMcp: getCodingAgentManagedMcpServerConfigs('dsh', scope.profile),
@@ -3867,6 +3884,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       model,
       baseUrl: proxyTarget?.baseUrl || baseUrl,
       systemPrompt: promptPath,
+      contextPolicy,
     })
     await writeFile(configPath, runtimeConfig, 'utf-8')
     files.push(
@@ -4109,14 +4127,14 @@ export function stopCodingAgentRun(sessionId: string): { stopped: boolean } {
   return { stopped: codingAgentRunManager.stop(sessionId) }
 }
 
-export function invalidateCodingAgentProviderRuntime(profileInput: string, providerInput: string): {
+export function invalidateCodingAgentProviderRuntime(profileInput: string, providerInput?: string): {
   invalidatedRuns: number
   deferredRuns: number
 } {
   const profile = normalizeScopeSegment(profileInput, 'default', 'profile')
-  const providerIdentity = normalizeProviderIdentity(providerInput)
+  const providerIdentity = providerInput ? normalizeProviderIdentity(providerInput) : undefined
   const result = codingAgentRunManager.invalidateMatching(launch => (
-    launch.profile === profile && launch.provider === providerIdentity
+    launch.profile === profile && (providerIdentity ? launch.provider === providerIdentity : launch.mode === 'scoped')
   ))
   return { invalidatedRuns: result.invalidated, deferredRuns: result.deferred }
 }

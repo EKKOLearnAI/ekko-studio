@@ -410,7 +410,8 @@ const summaryApiModeOptions = computed(() => [
 ])
 const liveRoomSummaryState = computed(() => {
     const roomId = store.currentRoomId
-    return (roomId && store.roomSummaryStates.get(roomId)) || roomSummaryState.value
+    return (roomId && store.roomSummaryStates.get(roomId))
+        || (roomSummaryState.value?.roomId === roomId ? roomSummaryState.value : null)
 })
 
 function clearInlineSummaryStatusTimer() {
@@ -442,6 +443,8 @@ watch(
                 status: 'summarizing',
                 error: '',
             }
+        } else if (state.status === 'idle') {
+            hideInlineSummaryStatus()
         } else if (
             (state.status === 'success' || state.status === 'failed')
             && inlineSummaryStatus.value?.roomId === state.roomId
@@ -454,18 +457,21 @@ watch(
             }
             clearInlineSummaryStatusTimer()
             const completedRoomId = state.roomId
-            inlineSummaryStatusTimer = setTimeout(() => {
+            const timer = setTimeout(() => {
+                if (inlineSummaryStatusTimer !== timer) return
                 if (inlineSummaryStatus.value?.roomId === completedRoomId) {
                     inlineSummaryStatus.value = null
                 }
                 inlineSummaryStatusTimer = null
             }, state.status === 'failed' ? 6000 : 3000)
+            inlineSummaryStatusTimer = timer
         }
         if (!showRoomSettingsModal.value) return
         roomSummaryState.value = state
         if (state.status === 'success') roomSummaryDraft.value = state.summary
         try {
-            roomSummaryAnchor.value = (await getRoomSummary(state.roomId)).anchor
+            const result = await getRoomSummary(state.roomId)
+            if (store.currentRoomId === state.roomId) roomSummaryAnchor.value = result.anchor
         } catch { /* the next settings open refreshes it */ }
     },
     { flush: 'sync' },
@@ -1630,10 +1636,7 @@ onUnmounted(() => {
 async function loadRoomSummaryState(roomId: string) {
     try {
         const result = await getRoomSummary(roomId)
-        const existing = store.roomSummaryStates.get(roomId)
-        if (!existing || result.summary.version >= existing.version) {
-            store.roomSummaryStates.set(roomId, result.summary)
-        }
+        store.applyRoomSummaryState(result.summary)
         if (store.currentRoomId !== roomId) return
         roomSummaryState.value = store.roomSummaryStates.get(roomId) || result.summary
         roomSummaryAnchor.value = result.anchor
@@ -1645,14 +1648,14 @@ async function loadRoomSummaryState(roomId: string) {
 
 watch(() => store.currentRoomId, (roomId, previousRoomId) => {
     if (roomId === previousRoomId) return
-    hideInlineSummaryStatus()
+    if (inlineSummaryStatus.value?.roomId !== roomId) hideInlineSummaryStatus()
     roomSummaryState.value = null
     roomSummaryAnchor.value = null
     roomSummaryDraft.value = ''
     if (filesStore.previewFile || toolPanelStore.workspaceDiff || showWorkspacePanel.value) closeWorkspacePanel()
     if (roomId && !props.standalone) void loadRoomSummaryState(roomId)
     if (!props.standalone) void refreshPendingAgentPairings()
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 
 watch(() => store.agentPairingRevision, () => {
     if (!props.standalone) void refreshPendingAgentPairings()
@@ -1854,14 +1857,16 @@ async function handleOpenRoomSettings() {
         store.handoffChains = new Map()
     }
     if (!store.currentRoomId) return
+    const summaryRoomId = store.currentRoomId
     void refreshPendingAgentPairings()
     isLoadingRoomSummary.value = true
     try {
-        const result = await getRoomSummary(store.currentRoomId)
-        roomSummaryState.value = result.summary
+        const result = await getRoomSummary(summaryRoomId)
+        store.applyRoomSummaryState(result.summary)
+        if (store.currentRoomId !== summaryRoomId) return
+        roomSummaryState.value = store.roomSummaryStates.get(summaryRoomId) || result.summary
         roomSummaryAnchor.value = result.anchor
-        roomSummaryDraft.value = result.summary.summary
-        store.roomSummaryStates.set(store.currentRoomId, result.summary)
+        roomSummaryDraft.value = roomSummaryState.value.summary
     } catch (err: any) {
         message.error(err?.message || t('groupChat.summaryLoadFailed'))
     } finally {

@@ -10,6 +10,7 @@ import { groupReplyNotification } from '../group-chat/foreground-notification'
 import { foregroundNotification, foregroundNotificationAgent, foregroundNotificationPreview } from '../chat-run/foreground-notification'
 import { appEventState, type AppStateProvider } from './app-event-state'
 import { taskPlanWebhookContent } from './task-plan'
+import { chatCompletionText } from '../notifications/chat-completion-text'
 
 interface Subscription { profile: string; types: string[]; sessionIds: string[]; roomIds: string[]; workflowIds: string[]; snapshot: boolean }
 interface GroupAccess { canReceive(user: AuthenticatedUser, roomId: string, event?: BusinessEvent): boolean }
@@ -56,7 +57,8 @@ export function appEventEnvelope(event: BusinessEvent) {
   if (event.type.startsWith('chat.')) {
     if (event.source === 'group_chat' || event.source === 'workflow') return null
     const name = event.type.replace('chat.clarification.', 'clarify.').replace(/^chat\./, '')
-    const payload = { ...event.payload, session_id: event.subject.session_id }
+    const payload = { ...event.payload, session_id: event.subject.session_id,
+      ...(event.type === 'chat.run.completed' ? { output: chatCompletionText(event) } : {}) }
     const notice = foregroundNotification(name, payload)
     if (!notice) return null
     const session = getSession(notice.sessionId)
