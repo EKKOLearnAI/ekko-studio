@@ -418,7 +418,7 @@ for (const phrase of [
 
 for (const phrase of [
   'https://download.ekkolearnai.com/latest',
-  'https://github.com/EKKOLearnAI/hermes-studio/releases/latest/download',
+  'https://github.com/EKKOLearnAI/ekko-studio/releases/latest/download',
   'checkForUpdatesWithFallback()',
 ]) {
   if (!desktopUpdater.includes(phrase)) {

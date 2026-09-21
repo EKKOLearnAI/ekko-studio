@@ -6,7 +6,7 @@
   "description": "Standalone Ekko Agent runtime embedded in Ekko Studio.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/EKKOLearnAI/hermes-studio.git",
+    "url": "https://github.com/EKKOLearnAI/ekko-studio.git",
     "directory": "packages/ekko-agent"
   },
   "engines": {

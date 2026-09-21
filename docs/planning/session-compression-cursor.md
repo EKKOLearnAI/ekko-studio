@@ -2,7 +2,7 @@
 
 Date: 2026-07-19
 Updated: 2026-07-20
-Issue: https://github.com/EKKOLearnAI/hermes-studio/issues/2138
+Issue: https://github.com/EKKOLearnAI/ekko-studio/issues/2138
 
 Status: Implemented on 2026-07-20. The legacy index fields remain available
 for compatibility and are upgraded only by a successful compression cycle.

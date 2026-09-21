@@ -6,7 +6,7 @@
 
 后续进展：同日完成独立 M0 后端实验并补充证据链接；生产运行时未切换。
 
-状态：Web 后端插件及预设用于 ACP 的部分接入已实现，当前边界见[实现记录](dsh-plugin-management-implementation.md)。完整目标尚未完成。T01/T02 的首轮固定 rc.1、macOS 后端实验已通过，见[兼容性证据](dsh-compatibility-evidence.md)。本文提交到 [PR #3011](https://github.com/EKKOLearnAI/hermes-studio/pull/3011)，不代表该 PR 已实现下面的完整插件能力。
+状态：Web 后端插件及预设用于 ACP 的部分接入已实现，当前边界见[实现记录](dsh-plugin-management-implementation.md)。完整目标尚未完成。T01/T02 的首轮固定 rc.1、macOS 后端实验已通过，见[兼容性证据](dsh-compatibility-evidence.md)。本文提交到 [PR #3011](https://github.com/EKKOLearnAI/ekko-studio/pull/3011)，不代表该 PR 已实现下面的完整插件能力。
 
 实现基线：Studio `32027ae4`；真实 CLI 验证版本为 DSH `0.1.5-rc.1`。
 

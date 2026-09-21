@@ -150,7 +150,7 @@ describe('local STT model manager', () => {
       `https://download.ekkolearnai.com/${manager.LOCAL_STT_MODEL_RELEASE_TAG}/${manager.LOCAL_STT_MODEL_ASSET_NAME}`,
     )
     expect(manager.localSttModelAssetUrl('github')).toBe(
-      `https://github.com/EKKOLearnAI/hermes-studio/releases/download/${manager.LOCAL_STT_MODEL_RELEASE_TAG}/${manager.LOCAL_STT_MODEL_ASSET_NAME}`,
+      `https://github.com/EKKOLearnAI/ekko-studio/releases/download/${manager.LOCAL_STT_MODEL_RELEASE_TAG}/${manager.LOCAL_STT_MODEL_ASSET_NAME}`,
     )
   })
 
