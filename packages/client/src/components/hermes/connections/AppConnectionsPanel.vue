@@ -617,15 +617,6 @@ onUnmounted(() => {
           >
             {{ t('connections.app.viewDownload') }}
           </button>
-          <button
-            type="button"
-            class="view-switch-button"
-            :class="{ 'view-switch-button--active': panelView === 'messages' }"
-            :aria-selected="panelView === 'messages'"
-            @click="updatePanelView('messages')"
-          >
-            {{ t('connections.app.viewMessages') }}
-          </button>
         </div>
         <NButton size="small" type="primary" @click="openScanModal">
           {{ t('connections.app.scanToAdd') }}
