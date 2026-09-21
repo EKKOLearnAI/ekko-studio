@@ -876,6 +876,11 @@ function normalizeLaunchApiMode(value: unknown, fallback: ApiMode): ApiMode {
   throw err
 }
 
+function resolvedCodingAgentLaunchMode(id: string, mode?: string | null): 'global' | 'scoped' {
+  if (id === 'cursor') return 'global'
+  return mode === 'global' ? 'global' : 'scoped'
+}
+
 function storedCodingAgentMode(session: HermesSessionRow | null): 'scoped' | 'global' {
   if (session?.agent_mode === 'global' || session?.agent_mode === 'scoped') return session.agent_mode
   return session?.provider === 'global' ? 'global' : 'scoped'
@@ -3303,7 +3308,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   }
 
   const mcpCapabilities = studioMcpCapabilities(getCodingAgentManagedMcpServerConfigs(tool.id, input.profile || 'default'))
-  const mode = input.mode === 'global' ? 'global' : 'scoped'
+  const mode = resolvedCodingAgentLaunchMode(tool.id, input.mode)
   if (mode === 'global') {
     const scope = normalizeConfigScope({ profile: input.profile, provider: 'global' })
     const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
@@ -3974,7 +3979,7 @@ async function startCodingAgentRunInternal(
       : 'coding_agent'
   const existingAgentSessionId = existingSession?.agent_session_id || ''
   const resolvedInput = await resolveStoredProviderLaunchInput(input, existingSession)
-  const requestedMode = resolvedInput.mode === 'global' ? 'global' : 'scoped'
+  const requestedMode = resolvedCodingAgentLaunchMode(id, resolvedInput.mode)
   const requestedProvider = String(resolvedInput.provider || '').trim().toLowerCase()
   assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider)
   if (id !== 'cursor' && requestedMode !== 'global' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
@@ -3984,7 +3989,7 @@ async function startCodingAgentRunInternal(
   }
   const agentSessionId = resolvedInput.agentSessionId || existingAgentSessionId || makeAgentSessionId()
   const canResumeNativeSession = existingSession
-    ? storedCodingAgentMode(existingSession) === requestedMode &&
+    ? resolvedCodingAgentLaunchMode(id, storedCodingAgentMode(existingSession)) === requestedMode &&
       (existingSession.agent === persistedAgentId(id) || !existingSession.agent) &&
       (requestedMode === 'global' || (
         String(existingSession.provider || '').trim() === String(resolvedInput.provider || '').trim() &&
@@ -3996,6 +4001,7 @@ async function startCodingAgentRunInternal(
   const agentNativeSessionId = resolvedInput.agentNativeSessionId || existingNativeSessionId || (id === 'claude-code' || id === 'pi' || id === 'grok' ? randomUUID() : '')
   const launch = await prepareCodingAgentLaunch(id, {
     ...resolvedInput,
+    mode: requestedMode,
     sessionId,
     agentSessionId,
     agentNativeSessionId,
@@ -4024,7 +4030,9 @@ async function startCodingAgentRunInternal(
     ? await resolveCommandForExecution(launch.command, commandExecutionEnv)
     : launch.command
   const runtimeEnv = launch.agentId === 'pi' ? launch.env : commandExecutionEnv
-  const persistedProvider = String(resolvedInput.provider || launch.provider || '').trim() || launch.provider
+  const persistedProvider = id === 'cursor'
+    ? String(launch.provider || 'global').trim() || 'global'
+    : String(resolvedInput.provider || launch.provider || '').trim() || launch.provider
   const started = codingAgentRunManager.start({
     agentSessionId,
     agentId: launch.agentId,

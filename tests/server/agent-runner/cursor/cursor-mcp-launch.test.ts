@@ -60,4 +60,22 @@ describe('Cursor MCP launch wiring', () => {
       env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: '1' }),
     })
   })
+
+  it('forces global mode when the caller requests scoped', async () => {
+    const home = makeHome()
+    const launch = await prepareCodingAgentLaunch('cursor', {
+      mode: 'scoped',
+      profile: 'default',
+    })
+
+    expect(launch.agentId).toBe('cursor')
+    expect(launch.mode).toBe('global')
+    expect(launch.command).toBe('agent')
+    expect(launch.args).toEqual(['--approve-mcps'])
+    expect(launch.args).not.toContain('--mcp-config')
+    expect(launch.args).not.toContain('streaming-json')
+    expect(launch.args).not.toContain('--prompt-file')
+    const mcpFile = launch.files.find(file => file.key === 'mcp')
+    expect(mcpFile?.absolutePath).toBe(join(home, '.cursor', 'mcp.json'))
+  })
 })
