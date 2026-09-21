@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import Koa from 'koa'
@@ -337,7 +337,7 @@ describe('existing APIs with session share credentials', () => {
   })
 
   it('binds upload chunks and downloads to the session without granting workspace access', async () => {
-    const first = await issue({ upload: true, download: true })
+    const first = await issue({ upload: true, download: true, workspaceRead: true })
     const second = await issue({ upload: true, download: true }, 's2')
     expect((await request(first.token, '/api/studio/app-uploads', 'POST', { id: 'upload-1111', name: 'note.txt', size: 5 })).status).toBe(200)
     expect((await request(second.token, '/api/studio/app-uploads/upload-1111/chunks?offset=0', 'PUT', 'hello')).status).toBe(403)
@@ -346,6 +346,8 @@ describe('existing APIs with session share credentials', () => {
     expect(result.status).toBe(200)
     const path = '/api/studio/files/download?path=' + encodeURIComponent(result.body.files[0].path)
     expect((await request(first.token, path)).body).toBe('hello')
+    const contentPath = '/api/studio/sessions/s1/workspace-file/content?download=1&path=' + encodeURIComponent(result.body.files[0].path)
+    expect((await request(first.token, contentPath)).body).toBe('hello')
     expect((await request(second.token, path)).status).toBe(403)
     const otherAccess = await accessModule.authenticateSessionShare(second.token, 'cloud-bob')
     const otherRoot = await accessModule.authorizeShareUpload(otherAccess)
@@ -356,6 +358,78 @@ describe('existing APIs with session share credentials', () => {
     expect((await request(first.token, path)).status).toBe(403)
     await service.change(7, 's1', first.record.id, { revoke: true })
     expect((await request(first.token, path)).status).toBe(410)
+  })
+
+  it('includes only this session’s structured historical uploads in preview and download scope', async () => {
+    const { addMessage } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    await mkdir(join(root, 'uploads'))
+    const own = join(root, 'uploads', 'a'.repeat(16) + '.md')
+    const other = join(root, 'uploads', 'b'.repeat(24) + '.md')
+    const mentioned = join(root, 'uploads', 'c'.repeat(16) + '.md')
+    for (const path of [own, other, mentioned]) await writeFile(path, 'attachment')
+    const historical = Math.floor(Date.now() / 1000) - 60
+    addMessage({ session_id: 's1', role: 'user', content: JSON.stringify([{ type: 'file', path: own, name: '旧附件.md' }]), timestamp: historical })
+    addMessage({ session_id: 's2', role: 'user', content: JSON.stringify([{ type: 'image', path: other }]), timestamp: historical })
+    addMessage({ session_id: 's1', role: 'user', content: `[file](${mentioned})`, timestamp: historical })
+    const share = await issue({ download: true, workspaceRead: true, workspaceWrite: true })
+    const url = (path: string) => '/api/studio/files/download?path=' + encodeURIComponent(path)
+    expect(await request(share.token, url(own))).toMatchObject({ status: 200, body: 'attachment' })
+    expect(await request(share.token, '/api/studio/sessions/s1/workspace-file/content?text=1&path=' + encodeURIComponent(own)))
+      .toMatchObject({ status: 200, body: 'attachment' })
+    expect(await request(share.token, '/api/studio/sessions/s1/workspace-file/content?download=1&path=' + encodeURIComponent(own)))
+      .toMatchObject({ status: 200, body: 'attachment' })
+    for (const path of [other, mentioned, join(root, 'uploads')]) expect((await request(share.token, url(path))).status).toBe(403)
+    // A recipient cannot turn a later stored message into a new file grant.
+    addMessage({ session_id: 's1', role: 'user', content: JSON.stringify([{ type: 'file', path: other }]), timestamp: historical + 3600 })
+    expect((await request(share.token, url(other))).status).toBe(403)
+    expect((await request(share.token, '/api/studio/sessions/s1/workspace-file/write', 'PUT', { path: own, content: 'changed' })).status).toBe(403)
+    expect(await readFile(own, 'utf8')).toBe('attachment')
+    await service.change(7, 's1', share.record.id, { permissions: { download: false } })
+    expect((await request(share.token, url(own))).status).toBe(403)
+    expect((await request(share.token, '/api/studio/sessions/s1/workspace-file/content?text=1&path=' + encodeURIComponent(own))).status).toBe(200)
+    await service.change(7, 's1', share.record.id, { revoke: true })
+    expect((await request(share.token, url(own))).status).toBe(410)
+  })
+
+  it('records host attachments after sharing without exposing other uploads or symlink targets', async () => {
+    const { recordSessionUploadAttachments } = await import('../../packages/server/src/modules/studio/services/files/session-uploads')
+    const share = await issue({ download: true })
+    await mkdir(join(root, 'uploads'))
+    const own = join(root, 'uploads', 'd'.repeat(24) + '.txt')
+    const other = join(root, 'uploads', 'e'.repeat(24) + '.txt')
+    await writeFile(own, 'new attachment'); await writeFile(other, 'private')
+    const url = '/api/studio/files/download?path=' + encodeURIComponent(own)
+    expect((await request(share.token, url)).status).toBe(403)
+    await recordSessionUploadAttachments('s2', 'default', [{ type: 'file', path: own }])
+    expect((await request(share.token, url)).status).toBe(403)
+    await recordSessionUploadAttachments('s1', 'another-profile', [{ type: 'file', path: own }])
+    expect((await request(share.token, url)).status).toBe(403)
+    await recordSessionUploadAttachments('s1', 'default', [{ type: 'file', path: own }])
+    expect(await request(share.token, url)).toMatchObject({ status: 200, body: 'new attachment' })
+    // Authorization survives process-level service instances because the grant is persisted.
+    const store = (await import('../../packages/server/src/modules/studio/repositories/session-uploads-store')).sessionUploadsStore
+    expect(store.find('s1', 'default', own)).toBe(await realpath(own))
+    await rm(own); await symlink(other, own)
+    expect((await request(share.token, url)).status).toBe(403)
+    await recordSessionUploadAttachments('s1', 'default', [{ type: 'file', path: own }])
+    expect((await request(share.token, url)).status).toBe(403)
+  })
+
+  it('serves session attachments without a workspace, but does not grant download by enabling upload', async () => {
+    const { updateSession, addMessage } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    updateSession('s1', { workspace: null })
+    await mkdir(join(root, 'uploads'))
+    const path = join(root, 'uploads', 'f'.repeat(16) + '.md')
+    await writeFile(path, 'without workspace')
+    addMessage({ session_id: 's1', role: 'user', content: JSON.stringify([{ type: 'file', path }]), timestamp: Math.floor(Date.now() / 1000) - 60 })
+    const share = await issue({ download: true })
+    const url = '/api/studio/sessions/s1/workspace-file/content?download=1&path=' + encodeURIComponent(path)
+    expect(await request(share.token, url)).toMatchObject({ status: 200, body: 'without workspace' })
+    const uploadOnly = await issue({ upload: true })
+    expect((await request(uploadOnly.token, url)).status).toBe(403)
+    const reader = await issue({ workspaceRead: true })
+    expect((await request(reader.token, url)).status).toBe(403)
+    expect((await request(reader.token, url.replace('download=1', 'text=1'))).status).toBe(200)
   })
 
   it('checks every Socket packet, strips execution overrides and closes on policy change', async () => {

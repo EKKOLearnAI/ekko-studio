@@ -1,3 +1,4 @@
+import { isSessionUploadAttachment } from '../files/session-uploads'
 import { createHash } from 'node:crypto'
 import { lstat, mkdir } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
@@ -96,18 +97,28 @@ export async function authorizeShareUpload(access: SessionShareAccess): Promise<
   return directory
 }
 
-export async function authorizeShareDownload(access: SessionShareAccess, path: string): Promise<string> {
-  authorizeSessionShare(access, 'download')
+export async function authorizeShareFile(access: SessionShareAccess, action: 'workspaceRead' | 'workspaceWrite' | 'download', path: string): Promise<string> {
+  authorizeSessionShare(access, action)
+  if (action === 'workspaceWrite') return (await sessionShareService.authorizePath(access.token, access.actor, action, path)).fullPath
   const fullPath = resolve(access.share.workspace_root || '.', path)
   const root = sessionShareUploadDir(access)
   if (dirname(fullPath) === root && isPathWithin(fullPath, root) && await shareUploadRootIsSafe(access)
     && await isNearestExistingRealPathWithin(fullPath, root)
     && await isNearestExistingRealPathWithin(root, getProfileUploadDir(access.share.profile))
-    && !fullPath.split(/[\\/]/).pop()?.startsWith('.')) {
-    authorizeSessionShare(access, 'download')
+    && !fullPath.split(/[\\/]/).pop()?.startsWith('.')
+    && await lstat(fullPath).then(info => info.isFile() && !info.isSymbolicLink()).catch(() => false)) {
+    authorizeSessionShare(access, action)
     return fullPath
   }
-  return (await sessionShareService.authorizePath(access.token, access.actor, 'download', path)).fullPath
+  if (await isSessionUploadAttachment(access.share.session_id, access.share.profile, fullPath)) {
+    authorizeSessionShare(access, action)
+    return fullPath
+  }
+  return (await sessionShareService.authorizePath(access.token, access.actor, action, path)).fullPath
+}
+
+export async function authorizeShareDownload(access: SessionShareAccess, path: string): Promise<string> {
+  return authorizeShareFile(access, 'download', path)
 }
 
 /** Retain the existing run API, but derive execution configuration from the bound session. */

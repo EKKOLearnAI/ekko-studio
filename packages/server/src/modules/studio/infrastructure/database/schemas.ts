@@ -80,6 +80,18 @@ export const SESSION_SHARES_INDEXES = {
   idx_session_shares_recipient: 'CREATE INDEX IF NOT EXISTS idx_session_shares_recipient ON session_shares(recipient_app_user_id)',
 }
 
+export const SESSION_UPLOADS_TABLE = 'session_uploads'
+export const SESSION_UPLOADS_SCHEMA: Record<string, string> = {
+  id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+  session_id: 'TEXT NOT NULL',
+  profile: 'TEXT NOT NULL',
+  path: 'TEXT NOT NULL',
+  real_path: 'TEXT NOT NULL',
+}
+export const SESSION_UPLOADS_INDEXES = {
+  uniq_session_uploads_path: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_uploads_path ON session_uploads(session_id, profile, path)',
+}
+
 export const SESSION_CATEGORIES_TABLE = 'session_categories'
 
 export const SESSION_CATEGORIES_SCHEMA: Record<string, string> = {
@@ -1643,6 +1655,8 @@ export function initAllHermesTables(): void {
     // App authorization codes and connected mobile devices
     syncTable(SESSION_SHARES_TABLE, SESSION_SHARES_SCHEMA, { indexes: SESSION_SHARES_INDEXES })
     createIndexes(db, SESSION_SHARES_INDEXES)
+    syncTable(SESSION_UPLOADS_TABLE, SESSION_UPLOADS_SCHEMA, { indexes: SESSION_UPLOADS_INDEXES })
+    createIndexes(db, SESSION_UPLOADS_INDEXES)
     syncTable(APP_CONNECTIONS_TABLE, APP_CONNECTIONS_SCHEMA, {
       indexes: APP_CONNECTIONS_INDEXES,
     })

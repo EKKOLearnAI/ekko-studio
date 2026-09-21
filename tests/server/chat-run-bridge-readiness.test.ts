@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const recordSessionUploadAttachmentsMock = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('../../packages/server/src/modules/studio/services/files/session-uploads', () => ({
+  recordSessionUploadAttachments: recordSessionUploadAttachmentsMock,
+}))
+vi.mock('../../packages/server/src/modules/studio/services/session-shares/socket-access', () => ({
+  bindSessionShareSocket: vi.fn(),
+}))
+
 const saveTaskPlanMock = vi.hoisted(() => vi.fn())
 vi.mock('../../packages/server/src/modules/studio/repositories/task-plan-store', () => ({
   saveTaskPlan: saveTaskPlanMock, listTaskPlansForPage: vi.fn(() => []),
@@ -1143,4 +1151,21 @@ describe('MCP-aware run guidance', () => {
     expect((handleCodingAgentRunMock.mock.calls as any)[0][2].instructions || '').not.toContain('ekko_studio_use_mobile_')
   })
 
+})
+
+describe('session upload provenance at the socket boundary', () => {
+  it.each([false, true])('registers host attachments but never recipient-provided paths (shared=%s)', async shared => {
+    recordSessionUploadAttachmentsMock.mockClear()
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    if (shared) socket.data = { sessionShare: { share: { session_id: 'session-1', profile: 'default' } } }
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).onConnection(socket)
+    ;(server as any).sessionMap.set('session-1', { isWorking: true, queue: [], events: [] })
+    const input = [{ type: 'file', path: '/uploads/attachment.txt', name: 'attachment.txt' }]
+    await handlers.get('run')!({ session_id: 'session-1', input })
+    if (shared) expect(recordSessionUploadAttachmentsMock).not.toHaveBeenCalled()
+    else expect(recordSessionUploadAttachmentsMock).toHaveBeenCalledWith('session-1', 'default', input)
+    expect((server as any).sessionMap.get('session-1').queue).toHaveLength(1)
+  })
 })
