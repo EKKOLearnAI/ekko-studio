@@ -1,4 +1,4 @@
-import { request as defaultRequest } from '../client'
+import { request } from '../client'
 
 export interface NousStartResult {
   session_id: string
@@ -16,21 +16,14 @@ export interface NousStatusResult {
   authenticated: boolean
 }
 
-
-export function createApi(request: typeof defaultRequest = (...args) => defaultRequest(...args)) {
-  async function startNousLogin(): Promise<NousStartResult> {
-    return request<NousStartResult>('/api/hermes/auth/nous/start', { method: 'POST' })
-  }
-
-  async function pollNousLogin(sessionId: string): Promise<NousPollResult> {
-    return request<NousPollResult>(`/api/hermes/auth/nous/poll/${sessionId}`)
-  }
-
-  async function getNousAuthStatus(): Promise<NousStatusResult> {
-    return request<NousStatusResult>('/api/hermes/auth/nous/status')
-  }
-
-  return { startNousLogin, pollNousLogin, getNousAuthStatus }
+export async function startNousLogin(): Promise<NousStartResult> {
+  return request<NousStartResult>('/api/hermes/auth/nous/start', { method: 'POST' })
 }
 
-export const { startNousLogin, pollNousLogin, getNousAuthStatus } = createApi()
+export async function pollNousLogin(sessionId: string): Promise<NousPollResult> {
+  return request<NousPollResult>(`/api/hermes/auth/nous/poll/${sessionId}`)
+}
+
+export async function getNousAuthStatus(): Promise<NousStatusResult> {
+  return request<NousStatusResult>('/api/hermes/auth/nous/status')
+}

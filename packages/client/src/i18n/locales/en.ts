@@ -2050,8 +2050,6 @@ export default {
     visibilitySaveFailed: 'Failed to save visible models',
     showAllModels: 'Show all models',
     clearVisibleModels: 'Clear selection',
-    profileLabel: 'Profile',
-    profileSwitchFailed: 'Failed to switch the model settings Profile.',
     generalTitle: 'General Models',
     auxiliaryTitle: 'Auxiliary Models (Hermes)',
     modelRoutingTitle: 'Model Routing',

@@ -2096,8 +2096,6 @@ export default {
     visibilitySaveFailed: '保存可见模型失败',
     showAllModels: '显示全部模型',
     clearVisibleModels: '取消全选',
-    profileLabel: '配置 Profile',
-    profileSwitchFailed: '切换模型配置 Profile 失败。',
     generalTitle: '通用模型',
     auxiliaryTitle: '辅助模型（Hermes）',
     modelRoutingTitle: '模型分工',

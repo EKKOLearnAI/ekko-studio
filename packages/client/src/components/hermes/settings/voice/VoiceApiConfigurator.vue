@@ -8,7 +8,6 @@ import { DOUBAO_TTS_2_RESOURCE_ID, DOUBAO_TTS_VOICE_OPTIONS, doubaoTtsResourceFo
 import { EDGE_TTS_VOICE_OPTIONS } from '@/constants/edgeTtsVoices'
 import { speedToEdgeRate, hzToEdgePitch } from '@/utils/ttsHelpers'
 import { useVoiceSettings } from '@/composables/useVoiceSettings'
-import { useSettingsProfileScope } from '@/composables/useSettingsProfile'
 
 const props = defineProps<{
   connection: VoiceApiConnection | null
@@ -22,7 +21,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const voiceSettings = useVoiceSettings()
-const settingsScope = useSettingsProfileScope()
 
 const loading = ref(false)
 const formData = ref<Record<string, string | number | undefined>>({})
@@ -72,9 +70,9 @@ watch(() => props.connection, (conn) => {
     }
     apiKeyInput.value = ''
     if (conn.provider === 'mimo') {
-      mimoCloneDataUri.value = settingsScope ? settingsScope.voiceClone.dataUri : voiceSettings.mimoVoiceCloneDataUri.value
-      mimoCloneFileName.value = settingsScope ? settingsScope.voiceClone.fileName : voiceSettings.mimoVoiceCloneFileName.value
-      mimoCloneFormat.value = settingsScope ? settingsScope.voiceClone.format : voiceSettings.mimoVoiceCloneFormat.value
+      mimoCloneDataUri.value = voiceSettings.mimoVoiceCloneDataUri.value
+      mimoCloneFileName.value = voiceSettings.mimoVoiceCloneFileName.value
+      mimoCloneFormat.value = voiceSettings.mimoVoiceCloneFormat.value
     }
   }
 }, { immediate: true })

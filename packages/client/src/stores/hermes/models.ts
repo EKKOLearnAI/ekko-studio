@@ -6,13 +6,7 @@ import { hasApiKey } from '@/api/client'
 import { useAppStore } from './app'
 import { useProfilesStore } from './profiles'
 
-export function createModelsState(dependencies: {
-  api: ReturnType<typeof systemApi.createApi>
-  profile: () => string
-  onChanged: (options?: { preserveSelection?: boolean }) => Promise<void>
-  onLoaded?: (response: systemApi.AvailableModelsResponse) => void
-}) {
-  const systemApi = dependencies.api
+export const useModelsStore = defineStore('models', () => {
   const providers = ref<AvailableModelGroup[]>([])
   const allProviders = ref<AvailableModelGroup[]>([])
   const defaultModel = ref('')
@@ -40,13 +34,13 @@ export function createModelsState(dependencies: {
     ),
   )
 
-  async function fetchProviders(fetchOptions: { background?: boolean } = {}) {
+  async function fetchProviders(options: { background?: boolean } = {}) {
     if (!hasApiKey()) return
-    if (!fetchOptions.background) loading.value = true
+    if (!options.background) loading.value = true
     try {
-      const profile = dependencies.profile()
+      const profile = useProfilesStore().activeProfileName || 'default'
       const res = await systemApi.fetchAvailableModelsForProfile(profile)
-      if (profile !== (dependencies.profile())) return
+      if (profile !== (useProfilesStore().activeProfileName || 'default')) return
       // MoA is a virtual Hermes runtime provider used by chat model pickers,
       // not a credential-backed provider that belongs in model settings or
       // auxiliary-model configuration.
@@ -54,11 +48,10 @@ export function createModelsState(dependencies: {
       allProviders.value = res.allProviders
       defaultModel.value = res.default
       defaultProvider.value = res.default_provider || ''
-      dependencies.onLoaded?.(res)
     } catch (err) {
       console.error('Failed to fetch providers:', err)
     } finally {
-      if (!fetchOptions.background) loading.value = false
+      if (!options.background) loading.value = false
     }
   }
 
@@ -68,7 +61,7 @@ export function createModelsState(dependencies: {
     try {
       await systemApi.refreshProviderModelCache()
       await fetchProviders()
-      await dependencies.onChanged()
+      await useAppStore().reloadModels()
     } finally {
       refreshingModelCache.value = false
     }
@@ -78,7 +71,8 @@ export function createModelsState(dependencies: {
     await systemApi.updateDefaultModel({ default: modelId, provider })
     defaultModel.value = modelId
     defaultProvider.value = provider
-    await dependencies.onChanged()
+    const appStore = useAppStore()
+    await appStore.reloadModels()
   }
 
   async function setDefaultProvider(providerId: string) {
@@ -97,13 +91,13 @@ export function createModelsState(dependencies: {
   async function addProvider(data: CustomProvider) {
     await systemApi.addCustomProvider(data)
     await fetchProviders()
-    await dependencies.onChanged({ preserveSelection: true })
+    await useAppStore().reloadModels({ preserveSelection: true })
   }
 
   async function removeProvider(name: string, options: { source?: 'custom_providers' | 'providers'; providerKey?: string } = {}) {
     await systemApi.removeCustomProvider(name, options)
     await fetchProviders()
-    await dependencies.onChanged()
+    await useAppStore().reloadModels()
   }
 
   async function fetchProviderEditor(providerId: string): Promise<ProviderEditorDetail> {
@@ -123,7 +117,7 @@ export function createModelsState(dependencies: {
       detail = contextUpdate.provider
     }
     await fetchProviders()
-    await dependencies.onChanged()
+    await useAppStore().reloadModels()
     return detail
   }
 
@@ -131,7 +125,7 @@ export function createModelsState(dependencies: {
     const result = await systemApi.refreshProviderModels(providerId, options)
     if (result.applied) {
       await fetchProviders()
-      await dependencies.onChanged()
+      await useAppStore().reloadModels()
     }
     return result
   }
@@ -140,7 +134,7 @@ export function createModelsState(dependencies: {
     const result = await systemApi.restoreProviderModels(providerId)
     if (result.applied) {
       await fetchProviders()
-      await dependencies.onChanged()
+      await useAppStore().reloadModels()
     }
     return result
   }
@@ -166,10 +160,4 @@ export function createModelsState(dependencies: {
     refreshProviderModels,
     restoreProviderModels,
   }
-}
-
-export const useModelsStore = defineStore('models', () => createModelsState({
-  api: systemApi,
-  profile: () => useProfilesStore().activeProfileName || 'default',
-  onChanged: options => useAppStore().reloadModels(options),
-}))
+})

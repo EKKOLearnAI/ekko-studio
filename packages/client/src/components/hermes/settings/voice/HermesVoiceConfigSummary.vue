@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import { useSettingsApi } from '@/composables/useSettingsProfile'
-const { fetchConfig, updateConfigSection } = useSettingsApi(settingsApi0)
 import { computed, onMounted, ref } from 'vue'
 import { NButton, NSelect, NTag, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import * as settingsApi0 from '@/api/hermes/config'
-
+import { fetchConfig, updateConfigSection } from '@/api/hermes/config'
 import type { VoiceApiKind } from '@/types/voice-api'
 
 const props = defineProps<{

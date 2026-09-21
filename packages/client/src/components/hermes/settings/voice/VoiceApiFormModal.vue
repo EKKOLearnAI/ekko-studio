@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import { useSettingsApi } from '@/composables/useSettingsProfile'
-const { probeVoiceProvider } = useSettingsApi(settingsApi0)
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NModal, NForm, NFormItem, NInput, NButton, NSelect, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import * as settingsApi0 from '@/api/studio/voice-provider-probe'
-import type { VoiceProviderProbeModel } from '@/api/studio/voice-provider-probe'
-
+import { probeVoiceProvider, type VoiceProviderProbeModel } from '@/api/studio/voice-provider-probe'
 import { VOICE_API_PRESETS } from '@/constants/voiceApiPresets'
 import { DOUBAO_TTS_2_RESOURCE_ID, DOUBAO_TTS_DEFAULT_VOICE, DOUBAO_TTS_VOICE_OPTIONS, doubaoTtsResourceForVoice } from '@/constants/doubaoTtsVoices'
 import type { VoiceApiKind, VoiceApiProviderCompatibility } from '@/types/voice-api'

@@ -1861,8 +1861,6 @@ export default {
     visibilitySaveFailed: 'Не удалось сохранить видимые модели',
     showAllModels: 'Показать все модели',
     clearVisibleModels: 'Снять все',
-    profileLabel: 'Профиль',
-    profileSwitchFailed: 'Не удалось переключить профиль настроек моделей.',
     generalTitle: 'Основные модели',
     combinationTitle: 'Ансамбли моделей (Hermes)',
     fallbackTitle: 'Резервные модели',

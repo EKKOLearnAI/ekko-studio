@@ -2089,8 +2089,6 @@ export default {
     visibilitySaveFailed: 'تعذّر حفظ النماذج الظاهرة',
     showAllModels: 'إظهار جميع النماذج',
     clearVisibleModels: 'مسح التحديد',
-    profileLabel: 'الملف الشخصي',
-    profileSwitchFailed: 'تعذر تبديل الملف الشخصي لإعدادات النماذج.',
     generalTitle: 'النماذج العامة',
     auxiliaryTitle: 'النماذج المساعدة (Hermes)',
     modelRoutingTitle: 'توزيع النماذج',

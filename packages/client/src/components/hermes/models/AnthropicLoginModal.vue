@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { useSettingsApi } from '@/composables/useSettingsProfile'
 import { ref } from 'vue'
 import { NModal, NButton, NInput, NSpin, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import * as anthropicAuthApi from '@/api/hermes/anthropic-auth'
-const { startAnthropicLogin, submitAnthropicLogin } = useSettingsApi(anthropicAuthApi)
+import { startAnthropicLogin, submitAnthropicLogin } from '@/api/hermes/anthropic-auth'
 import { copyToClipboard } from '@/utils/clipboard'
 
 const { t } = useI18n()

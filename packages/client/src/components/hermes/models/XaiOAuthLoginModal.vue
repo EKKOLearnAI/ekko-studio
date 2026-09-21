@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { useSettingsApi } from '@/composables/useSettingsProfile'
 import { ref, onUnmounted } from 'vue'
 import { NModal, NButton, NSpin, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import * as xaiAuthApi from '@/api/hermes/xai-auth'
-const { startXaiLogin, pollXaiLogin } = useSettingsApi(xaiAuthApi)
+import { startXaiLogin, pollXaiLogin } from '@/api/hermes/xai-auth'
 import { copyToClipboard } from '@/utils/clipboard'
 
 const { t } = useI18n()

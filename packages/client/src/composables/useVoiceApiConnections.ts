@@ -1,12 +1,24 @@
-import { useSettingsApi, useSettingsProfileScope } from '@/composables/useSettingsProfile'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import * as settingsApi0 from '@/api/studio/tts-settings'
-import type { StoredTtsProvider, TtsStoredSecretsInput, TtsStoredSettings } from '@/api/studio/tts-settings'
-
-import * as settingsApi1 from '@/api/studio/stt-settings'
-import type { StoredSttProvider, SttProvider, SttStoredSecretsInput, SttStoredSettings } from '@/api/studio/stt-settings'
-
+import {
+  deleteTtsProvider,
+  fetchTtsSettings,
+  saveActiveTtsProvider,
+  saveTtsSettings,
+  type StoredTtsProvider,
+  type TtsStoredSecretsInput,
+  type TtsStoredSettings,
+} from '@/api/studio/tts-settings'
+import {
+  deleteSttProvider,
+  fetchSttSettings,
+  saveActiveSttProvider,
+  saveSttSettings,
+  type StoredSttProvider,
+  type SttProvider,
+  type SttStoredSecretsInput,
+  type SttStoredSettings,
+} from '@/api/studio/stt-settings'
 import { useVoiceSettings } from '@/composables/useVoiceSettings'
 import { useSttSettings } from '@/composables/useSttSettings'
 import { useLocalSttModel } from '@/composables/useLocalSttModel'
@@ -53,17 +65,14 @@ function stringSetting(settings: object, key: string): string {
 }
 
 export function useVoiceApiConnections() {
-  const settingsScope = useSettingsProfileScope()
-  const ttsSettingsApi = useSettingsApi(settingsApi0)
-  const sttSettingsApi = useSettingsApi(settingsApi1)
   const { t } = useI18n()
   const connections = ref<VoiceApiConnection[]>([])
   const loading = ref(false)
   const vs = useVoiceSettings()
   const stt = useSttSettings()
   const localStt = useLocalSttModel()
-  const activeTtsProvider = ref<StoredTtsProvider>(settingsScope ? 'edge' : vs.provider.value === 'webspeech' ? 'edge' : vs.provider.value)
-  const activeSttProvider = ref<SttProvider>(settingsScope ? 'browser' : stt.provider.value)
+  const activeTtsProvider = ref<StoredTtsProvider>(vs.provider.value === 'webspeech' ? 'edge' : vs.provider.value)
+  const activeSttProvider = ref<SttProvider>(stt.provider.value)
 
   const activeTtsId = computed(() => `tts-${activeTtsProvider.value}`)
   const activeSttId = computed(() => `stt-${activeSttProvider.value}`)
@@ -82,7 +91,6 @@ export function useVoiceApiConnections() {
   const configurableSttConnections = computed(() => sttConnections.value.filter(c => c.provider !== 'local'))
 
   function applyTtsConnectionToLegacyState(connection: VoiceApiConnection) {
-    if (settingsScope) return
     if (!isTtsProvider(connection.provider)) return
     vs.setProvider(connection.provider)
     const settings = connection.settings
@@ -129,7 +137,6 @@ export function useVoiceApiConnections() {
   }
 
   function applySttConnectionToLegacyState(connection: VoiceApiConnection) {
-    if (settingsScope) return
     if (!isSttProvider(connection.provider)) return
     stt.setProvider(connection.provider)
     const settings = connection.settings
@@ -187,19 +194,19 @@ export function useVoiceApiConnections() {
   async function refresh() {
     loading.value = true
     try {
-      if (!settingsScope) await stt.loadServerSttSettings(true)
+      await stt.loadServerSttSettings(true)
       const [ttsData, sttData, localStatus] = await Promise.all([
-        ttsSettingsApi.fetchTtsSettings(),
-        sttSettingsApi.fetchSttSettings(),
+        fetchTtsSettings(),
+        fetchSttSettings(),
         localStt.refresh().catch(() => null),
       ])
       if (ttsData.activeProvider && isTtsProvider(ttsData.activeProvider)) {
         activeTtsProvider.value = ttsData.activeProvider
-        if (!settingsScope) vs.setProvider(ttsData.activeProvider)
+        vs.setProvider(ttsData.activeProvider)
       }
       if (sttData.activeProvider && isSttProvider(sttData.activeProvider)) {
         activeSttProvider.value = sttData.activeProvider
-        if (!settingsScope) stt.setProvider(sttData.activeProvider)
+        stt.setProvider(sttData.activeProvider)
       }
 
       const newConnections: VoiceApiConnection[] = [
@@ -212,11 +219,11 @@ export function useVoiceApiConnections() {
           hasSecret: false,
           active: activeTtsId.value === 'tts-edge',
           settings: {
-            voice: settingsScope ? 'zh-CN-XiaoxiaoNeural' : vs.edgeVoice.value,
-            rate: settingsScope ? 1 : vs.edgeRate.value,
-            pitch: settingsScope ? 0 : vs.edgePitchHz.value,
+            voice: vs.edgeVoice.value,
+            rate: vs.edgeRate.value,
+            pitch: vs.edgePitchHz.value,
           },
-          voice: settingsScope ? 'zh-CN-XiaoxiaoNeural' : vs.edgeVoice.value,
+          voice: vs.edgeVoice.value,
         },
         {
           id: 'stt-local',
@@ -285,13 +292,13 @@ export function useVoiceApiConnections() {
 
     if (kind === 'tts') {
       if (isTtsProvider(connection.provider)) {
-        const provider = await ttsSettingsApi.saveActiveTtsProvider(connection.provider)
+        const provider = await saveActiveTtsProvider(connection.provider)
         activeTtsProvider.value = provider
         applyTtsConnectionToLegacyState(connection)
       }
     } else {
       if (isSttProvider(connection.provider)) {
-        const provider = await sttSettingsApi.saveActiveSttProvider(connection.provider)
+        const provider = await saveActiveSttProvider(connection.provider)
         activeSttProvider.value = provider
         applySttConnectionToLegacyState(connection)
       }
@@ -313,7 +320,7 @@ export function useVoiceApiConnections() {
       const cloneFileName = settings.voiceCloneFileName
       delete settings.voiceCloneDataUri
       delete settings.voiceCloneFileName
-      const res = await ttsSettingsApi.saveTtsSettings(provider, {
+      const res = await saveTtsSettings(provider, {
         settings: settings as TtsStoredSettings,
         secrets: payload.secrets as TtsStoredSecretsInput | undefined,
         activeProvider: provider,
@@ -321,31 +328,22 @@ export function useVoiceApiConnections() {
       await refresh()
       await setActiveConnection('tts', `tts-${provider}`)
       if (provider === 'mimo') {
-        if (settingsScope && (settings.voiceCloneFormat === 'mp3' || settings.voiceCloneFormat === 'wav')) {
-          settingsScope.voiceClone.format = settings.voiceCloneFormat
-        }
-        if (hasCloneDataUri && typeof cloneDataUri === 'string') {
-          if (settingsScope) settingsScope.voiceClone.dataUri = cloneDataUri
-          else vs.setMimoVoiceCloneDataUri(cloneDataUri)
-        }
-        if (hasCloneFileName && typeof cloneFileName === 'string') {
-          if (settingsScope) settingsScope.voiceClone.fileName = cloneFileName
-          else vs.setMimoVoiceCloneFileName(cloneFileName)
-        }
+        if (hasCloneDataUri && typeof cloneDataUri === 'string') vs.setMimoVoiceCloneDataUri(cloneDataUri)
+        if (hasCloneFileName && typeof cloneFileName === 'string') vs.setMimoVoiceCloneFileName(cloneFileName)
       }
       return res
     }
 
     if (provider === 'browser') {
-      const activeProvider = await sttSettingsApi.saveActiveSttProvider('browser')
+      const activeProvider = await saveActiveSttProvider('browser')
       activeSttProvider.value = activeProvider
-      if (!settingsScope) stt.setProvider('browser')
+      stt.setProvider('browser')
       await refresh()
       return null
     }
 
     if (!isStoredSttProvider(provider)) throw new Error(`Unsupported STT provider: ${String(provider)}`)
-    const res = await sttSettingsApi.saveSttSettings(provider, {
+    const res = await saveSttSettings(provider, {
       settings: payload.settings as SttStoredSettings | undefined,
       secrets: payload.secrets as SttStoredSecretsInput | undefined,
       activeProvider: provider,
@@ -358,10 +356,10 @@ export function useVoiceApiConnections() {
   async function deleteSecret(kind: VoiceApiKind, provider: VoiceApiProvider) {
     if (kind === 'tts') {
       if (!isStoredTtsProvider(provider) || provider === 'edge') return
-      await ttsSettingsApi.deleteTtsProvider(provider)
+      await deleteTtsProvider(provider)
     } else {
       if (!isStoredSttProvider(provider)) return
-      await sttSettingsApi.deleteSttProvider(provider)
+      await deleteSttProvider(provider)
     }
     await refresh()
   }

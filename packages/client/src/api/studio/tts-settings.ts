@@ -1,4 +1,4 @@
-import { request as defaultRequest } from '../client'
+import { request } from '../client'
 import type { TtsProviderId } from './tts'
 
 export type StoredTtsProvider = TtsProviderId
@@ -75,87 +75,80 @@ function normalizeProviders(body: unknown): FetchTtsSettingsResponse {
   return { providers: [], activeProvider: null }
 }
 
-
-export function createApi(request: typeof defaultRequest = (...args) => defaultRequest(...args)) {
-  async function fetchTtsSettings(): Promise<FetchTtsSettingsResponse> {
-    const body = await request<{ providers?: TtsProviderSettingsResponse[]; settings?: TtsProviderSettingsResponse[]; activeProvider?: StoredTtsProvider | null }>(
-      '/api/studio/tts/settings',
-    )
-    return normalizeProviders(body)
-  }
-
-  async function saveTtsSettings(
-    provider: StoredTtsProvider,
-    payload: { settings?: TtsStoredSettings; secrets?: TtsStoredSecretsInput; activeProvider?: StoredTtsProvider },
-  ): Promise<TtsProviderSettingsResponse> {
-    const body = await request<TtsProviderSettingsResponse | { setting: TtsProviderSettingsResponse }>(
-      `/api/studio/tts/settings/${provider}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      },
-    )
-    return typeof body === 'object' && body !== null && 'setting' in body ? body.setting : body
-  }
-
-  async function saveActiveTtsProvider(provider: StoredTtsProvider): Promise<StoredTtsProvider> {
-    const body = await request<{ activeProvider: StoredTtsProvider }>(
-      '/api/studio/tts/settings/active',
-      {
-        method: 'PUT',
-        body: JSON.stringify({ provider }),
-      },
-    )
-    return body.activeProvider
-  }
-
-  async function clearTtsSecret(
-    provider: StoredTtsProvider,
-    secretName: keyof TtsStoredSecretsInput,
-  ): Promise<TtsProviderSettingsResponse | null> {
-    const body = await request<
-      TtsProviderSettingsResponse |
-      { setting: TtsProviderSettingsResponse | null } |
-      { success?: boolean; setting: TtsProviderSettingsResponse | null }
-    >(
-      `/api/studio/tts/settings/${provider}/secret/${secretName}`,
-      { method: 'DELETE' },
-    )
-
-    if (body && typeof body === 'object' && 'setting' in body) {
-      return body.setting ?? null
-    }
-    return body as TtsProviderSettingsResponse
-  }
-
-  async function deleteTtsProvider(
-    provider: Exclude<StoredTtsProvider, 'edge'>,
-  ): Promise<{ success?: boolean; deleted?: boolean; activeProvider?: StoredTtsProvider | null }> {
-    return request<{ success?: boolean; deleted?: boolean; activeProvider?: StoredTtsProvider | null }>(
-      `/api/studio/tts/settings/${provider}`,
-      { method: 'DELETE' },
-    )
-  }
-
-  async function deleteTtsBaseUrlPreset(
-    provider: StoredTtsProvider,
-    url: string,
-  ): Promise<TtsProviderSettingsResponse | null> {
-    const body = await request<
-      { success?: boolean; setting: TtsProviderSettingsResponse | null } |
-      TtsProviderSettingsResponse
-    >(
-      `/api/studio/tts/settings/${provider}/base-url-preset?url=${encodeURIComponent(url)}`,
-      { method: 'DELETE' },
-    )
-
-    if (body && typeof body === 'object' && 'setting' in body) {
-      return body.setting ?? null
-    }
-    return body as TtsProviderSettingsResponse
-  }
-
-  return { fetchTtsSettings, saveTtsSettings, saveActiveTtsProvider, clearTtsSecret, deleteTtsProvider, deleteTtsBaseUrlPreset }
+export async function fetchTtsSettings(): Promise<FetchTtsSettingsResponse> {
+  const body = await request<{ providers?: TtsProviderSettingsResponse[]; settings?: TtsProviderSettingsResponse[]; activeProvider?: StoredTtsProvider | null }>(
+    '/api/studio/tts/settings',
+  )
+  return normalizeProviders(body)
 }
 
-export const { fetchTtsSettings, saveTtsSettings, saveActiveTtsProvider, clearTtsSecret, deleteTtsProvider, deleteTtsBaseUrlPreset } = createApi()
+export async function saveTtsSettings(
+  provider: StoredTtsProvider,
+  payload: { settings?: TtsStoredSettings; secrets?: TtsStoredSecretsInput; activeProvider?: StoredTtsProvider },
+): Promise<TtsProviderSettingsResponse> {
+  const body = await request<TtsProviderSettingsResponse | { setting: TtsProviderSettingsResponse }>(
+    `/api/studio/tts/settings/${provider}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    },
+  )
+  return typeof body === 'object' && body !== null && 'setting' in body ? body.setting : body
+}
+
+export async function saveActiveTtsProvider(provider: StoredTtsProvider): Promise<StoredTtsProvider> {
+  const body = await request<{ activeProvider: StoredTtsProvider }>(
+    '/api/studio/tts/settings/active',
+    {
+      method: 'PUT',
+      body: JSON.stringify({ provider }),
+    },
+  )
+  return body.activeProvider
+}
+
+export async function clearTtsSecret(
+  provider: StoredTtsProvider,
+  secretName: keyof TtsStoredSecretsInput,
+): Promise<TtsProviderSettingsResponse | null> {
+  const body = await request<
+    TtsProviderSettingsResponse |
+    { setting: TtsProviderSettingsResponse | null } |
+    { success?: boolean; setting: TtsProviderSettingsResponse | null }
+  >(
+    `/api/studio/tts/settings/${provider}/secret/${secretName}`,
+    { method: 'DELETE' },
+  )
+
+  if (body && typeof body === 'object' && 'setting' in body) {
+    return body.setting ?? null
+  }
+  return body as TtsProviderSettingsResponse
+}
+
+export async function deleteTtsProvider(
+  provider: Exclude<StoredTtsProvider, 'edge'>,
+): Promise<{ success?: boolean; deleted?: boolean; activeProvider?: StoredTtsProvider | null }> {
+  return request<{ success?: boolean; deleted?: boolean; activeProvider?: StoredTtsProvider | null }>(
+    `/api/studio/tts/settings/${provider}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function deleteTtsBaseUrlPreset(
+  provider: StoredTtsProvider,
+  url: string,
+): Promise<TtsProviderSettingsResponse | null> {
+  const body = await request<
+    { success?: boolean; setting: TtsProviderSettingsResponse | null } |
+    TtsProviderSettingsResponse
+  >(
+    `/api/studio/tts/settings/${provider}/base-url-preset?url=${encodeURIComponent(url)}`,
+    { method: 'DELETE' },
+  )
+
+  if (body && typeof body === 'object' && 'setting' in body) {
+    return body.setting ?? null
+  }
+  return body as TtsProviderSettingsResponse
+}

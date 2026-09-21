@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { useSettingsApi } from '@/composables/useSettingsProfile'
-import { useSettingsProfileScope } from '@/composables/useSettingsProfile'
-import { useModelSettingsModels, useModelSettingsApp } from '@/composables/useModelSettings'
 import { ref, computed } from 'vue'
 import { NButton, NCheckbox, NCheckboxGroup, NModal, NInput, NSelect, useMessage, useDialog } from 'naive-ui'
 import type { AvailableModelGroup } from '@/api/hermes/system'
+import { useModelsStore } from '@/stores/hermes/models'
+import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore } from '@/stores/hermes/chat'
-import * as copilotAuthApi from '@/api/hermes/copilot-auth'
-const { checkCopilotToken, disableCopilot } = useSettingsApi(copilotAuthApi)
+import { checkCopilotToken, disableCopilot } from '@/api/hermes/copilot-auth'
 import { getStoredUserRole } from '@/api/client'
 import ProviderEditorModal from './ProviderEditorModal.vue'
 import { useI18n } from 'vue-i18n'
@@ -15,10 +13,9 @@ import { useI18n } from 'vue-i18n'
 const props = defineProps<{ provider: AvailableModelGroup }>()
 
 const { t } = useI18n()
-const modelsStore = useModelSettingsModels()
-const appStore = useModelSettingsApp()
+const modelsStore = useModelsStore()
+const appStore = useAppStore()
 const chatStore = useChatStore()
-const settingsScope = useSettingsProfileScope()
 const message = useMessage()
 const dialog = useDialog()
 
@@ -214,7 +211,7 @@ async function handleDelete() {
           await disableCopilot()
           // 服务端会在默认模型属于 copilot 时清掉 model.default，这里再清理本地
           // 会话级 model/provider，避免 Chat 页继续显示已下架的 copilot 模型。
-          if (!settingsScope) chatStore.clearProviderFromSessions('copilot')
+          chatStore.clearProviderFromSessions('copilot')
           await modelsStore.fetchProviders()
         } else {
           await modelsStore.removeProvider(props.provider.provider, {

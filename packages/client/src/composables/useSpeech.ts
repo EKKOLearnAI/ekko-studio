@@ -695,7 +695,6 @@ export function useSpeech() {
     messageId: string,
     content: string,
     opts: OpenaiTtsOptions,
-    profile?: string,
   ) {
     const text = extractReadableText(content)
     if (!text) return
@@ -711,7 +710,6 @@ export function useSpeech() {
       providerOptions as unknown as Record<string, unknown>,
       token,
       '[useSpeech] Custom TTS audio playback error',
-      profile,
     )
   }
 
@@ -770,7 +768,6 @@ export function useSpeech() {
     messageId: string,
     content: string,
     opts: MimoTtsOptions,
-    profile?: string,
   ) {
     const text = extractReadableText(content)
     if (!text) return
@@ -784,7 +781,6 @@ export function useSpeech() {
       opts as unknown as Record<string, unknown>,
       token,
       '[useSpeech] MiMo TTS audio playback error',
-      profile,
     )
   }
 

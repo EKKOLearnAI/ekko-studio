@@ -1,18 +1,25 @@
 <script setup lang="ts">
-import { useSettingsApi } from '@/composables/useSettingsProfile'
-import { useModelSettingsModels, useModelSettingsProfile } from '@/composables/useModelSettings'
 import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NInput, NInputNumber, NModal, NSelect, NSpin, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import * as configApi from '@/api/hermes/config'
-import type { AuxiliaryModelSettings, AuxiliaryModelTask, AuxiliaryModelsConfig, DelegationModelConfig } from '@/api/hermes/config'
-const { fetchAuxiliaryModels, fetchDelegationModel, saveAuxiliaryModels, saveDelegationModel } = useSettingsApi(configApi)
+import {
+  fetchAuxiliaryModels,
+  fetchDelegationModel,
+  saveAuxiliaryModels,
+  saveDelegationModel,
+  type AuxiliaryModelSettings,
+  type AuxiliaryModelTask,
+  type AuxiliaryModelsConfig,
+  type DelegationModelConfig,
+} from '@/api/hermes/config'
+import { useModelsStore } from '@/stores/hermes/models'
+import { useProfilesStore } from '@/stores/hermes/profiles'
 import FallbackProvidersPanel from './FallbackProvidersPanel.vue'
 
 const { t } = useI18n()
 const message = useMessage()
-const modelsStore = useModelSettingsModels()
-const profilesStore = useModelSettingsProfile()
+const modelsStore = useModelsStore()
+const profilesStore = useProfilesStore()
 
 const loading = ref(false)
 const saving = ref(false)

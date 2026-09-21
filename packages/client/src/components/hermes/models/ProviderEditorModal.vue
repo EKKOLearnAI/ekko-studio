@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { useSettingsApi } from '@/composables/useSettingsProfile'
-import { useModelSettingsModels } from '@/composables/useModelSettings'
 import { computed, ref, watch } from 'vue'
 import {
   NButton,
@@ -22,8 +20,8 @@ import type {
   ProviderEditorPatch,
 } from '@/api/hermes/system'
 import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
-import * as systemApiModule from '@/api/hermes/system'
-const systemApi = useSettingsApi(systemApiModule)
+import * as systemApi from '@/api/hermes/system'
+import { useModelsStore } from '@/stores/hermes/models'
 
 const props = defineProps<{
   show: boolean
@@ -38,7 +36,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const message = useMessage()
 const dialog = useDialog()
-const modelsStore = useModelSettingsModels()
+const modelsStore = useModelsStore()
 
 const detail = ref<ProviderEditorDetail | null>(null)
 const loading = ref(false)

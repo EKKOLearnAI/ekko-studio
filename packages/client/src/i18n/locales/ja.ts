@@ -1556,8 +1556,6 @@ export default {
     customModelHint: 'プロバイダーは対応しているが API が返さないモデル用です。表示名の変更ではありません。Enter で読み込み。',
     noProviders: 'プロバイダーがありません。カスタムプロバイダーを追加して始めましょう。',
     clearVisibleModels: '選択をクリア',
-    profileLabel: 'プロファイル',
-    profileSwitchFailed: 'モデル設定のプロファイルを切り替えられませんでした。',
     generalTitle: '一般モデル',
     combinationTitle: 'モデルアンサンブル（Hermes）',
     fallbackTitle: 'フォールバック',

@@ -207,9 +207,8 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 
   // Inject active profile header for request-scoped endpoints. Explicit profile
   // selectors in the URL/body and profile-name routes are validated directly.
-  const explicitProfile = new Headers(options.headers).get('X-Hermes-Profile')
   const profileName = getActiveProfileName()
-  if (!explicitProfile && profileName && shouldAttachProfileHeader(path, options)) {
+  if (profileName && shouldAttachProfileHeader(path, options)) {
     headers['X-Hermes-Profile'] = profileName
   }
 

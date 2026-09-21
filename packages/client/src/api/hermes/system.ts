@@ -1,4 +1,4 @@
-import { request as defaultRequest } from '../client'
+import { request } from '../client'
 import type { ProviderApiMode } from '../studio/provider-api-mode'
 
 // Config-based model types
@@ -135,6 +135,139 @@ export interface ProviderEditorResponse {
   changed?: string[]
 }
 
+export async function fetchConfigModels(): Promise<ConfigModelsResponse> {
+  return request<ConfigModelsResponse>('/api/hermes/config/models')
+}
+
+export async function fetchAvailableModels(): Promise<AvailableModelsResponse> {
+  return request<AvailableModelsResponse>('/api/hermes/available-models')
+}
+
+export async function fetchAvailableModelsForProfile(profile: string): Promise<AvailableModelsResponse> {
+  const params = new URLSearchParams()
+  params.set('profile', profile || 'default')
+  return request<AvailableModelsResponse>(`/api/hermes/available-models?${params.toString()}`)
+}
+
+export async function fetchProviderModels(data: {
+  base_url: string
+  api_key?: string
+  freeOnly?: boolean
+  provider?: string
+  label?: string
+  update_cache?: boolean
+}): Promise<{ models: string[] }> {
+  return request<{ models: string[] }>('/api/hermes/provider-models', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function refreshProviderModelCache(): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>('/api/hermes/provider-models/cache/refresh', {
+    method: 'POST',
+  })
+}
+
+export async function updateDefaultModel(data: {
+  default: string
+  provider?: string
+  base_url?: string
+  api_key?: string
+}): Promise<void> {
+  await request('/api/hermes/config/model', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateModelAlias(data: {
+  provider: string
+  model: string
+  alias: string
+}): Promise<void> {
+  await request('/api/hermes/model-alias', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function addCustomProvider(data: CustomProvider): Promise<void> {
+  await request('/api/hermes/config/providers', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function removeCustomProvider(name: string, options: { source?: 'custom_providers' | 'providers'; providerKey?: string } = {}): Promise<void> {
+  const query = new URLSearchParams()
+  if (options.source) query.set('source', options.source)
+  if (options.providerKey) query.set('providerKey', options.providerKey)
+  await request(`/api/hermes/config/providers/${encodeURIComponent(name)}${query.size ? `?${query}` : ''}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function updateProvider(poolKey: string, data: {
+  name?: string
+  base_url?: string
+  api_key?: string
+  model?: string
+  api_mode?: ProviderApiMode
+}): Promise<void> {
+  await request(`/api/hermes/config/providers/${encodeURIComponent(poolKey)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function fetchProviderEditor(poolKey: string): Promise<ProviderEditorDetail> {
+  const response = await request<ProviderEditorResponse>(
+    `/api/hermes/config/providers/${encodeURIComponent(poolKey)}/editor`,
+  )
+  return response.provider
+}
+
+export async function patchProviderEditor(
+  poolKey: string,
+  revision: string,
+  data: ProviderEditorPatch,
+): Promise<ProviderEditorResponse> {
+  return request<ProviderEditorResponse>(
+    `/api/hermes/config/providers/${encodeURIComponent(poolKey)}/editor`,
+    {
+      method: 'PATCH',
+      headers: { 'If-Match': `"${revision}"` },
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export async function testProviderEditor(
+  poolKey: string,
+  data: ProviderEditorPatch,
+): Promise<{ success: boolean; models?: string[]; model_count?: number; catalog_unavailable?: boolean; error?: string; code?: string }> {
+  return request(`/api/hermes/config/providers/${encodeURIComponent(poolKey)}/editor/test`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function patchProviderEditorContexts(
+  poolKey: string,
+  revision: string,
+  contextLengths: Record<string, number | null>,
+): Promise<ProviderEditorResponse> {
+  return request<ProviderEditorResponse>(
+    `/api/hermes/config/providers/${encodeURIComponent(poolKey)}/editor/contexts`,
+    {
+      method: 'PATCH',
+      headers: { 'If-Match': `"${revision}"` },
+      body: JSON.stringify({ context_lengths: contextLengths }),
+    },
+  )
+}
+
 export interface ProviderModelRefreshResult {
   success: boolean
   applied: boolean
@@ -150,195 +283,55 @@ export interface ProviderModelRefreshResult {
   code?: string
 }
 
-
-export function createApi(request: typeof defaultRequest = (...args) => defaultRequest(...args)) {
-  async function fetchConfigModels(): Promise<ConfigModelsResponse> {
-    return request<ConfigModelsResponse>('/api/hermes/config/models')
-  }
-
-  async function fetchAvailableModels(): Promise<AvailableModelsResponse> {
-    return request<AvailableModelsResponse>('/api/hermes/available-models')
-  }
-
-  async function fetchAvailableModelsForProfile(profile: string): Promise<AvailableModelsResponse> {
-    const params = new URLSearchParams()
-    params.set('profile', profile || 'default')
-    return request<AvailableModelsResponse>(`/api/hermes/available-models?${params.toString()}`)
-  }
-
-  async function fetchProviderModels(data: {
-    base_url: string
-    api_key?: string
-    freeOnly?: boolean
-    provider?: string
-    label?: string
-    update_cache?: boolean
-  }): Promise<{ models: string[] }> {
-    return request<{ models: string[] }>('/api/hermes/provider-models', {
+export async function refreshProviderModels(
+  poolKey: string,
+  options: { confirm?: boolean } = {},
+): Promise<ProviderModelRefreshResult> {
+  return request<ProviderModelRefreshResult>(
+    `/api/hermes/config/providers/${encodeURIComponent(poolKey)}/models/refresh`,
+    {
       method: 'POST',
-      body: JSON.stringify(data),
-    })
-  }
-
-  async function refreshProviderModelCache(): Promise<{ success: boolean }> {
-    return request<{ success: boolean }>('/api/hermes/provider-models/cache/refresh', {
-      method: 'POST',
-    })
-  }
-
-  async function updateDefaultModel(data: {
-    default: string
-    provider?: string
-    base_url?: string
-    api_key?: string
-  }): Promise<void> {
-    await request('/api/hermes/config/model', {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    })
-  }
-
-  async function updateModelAlias(data: {
-    provider: string
-    model: string
-    alias: string
-  }): Promise<void> {
-    await request('/api/hermes/model-alias', {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    })
-  }
-
-  async function addCustomProvider(data: CustomProvider): Promise<void> {
-    await request('/api/hermes/config/providers', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  }
-
-  async function removeCustomProvider(name: string, options: { source?: 'custom_providers' | 'providers'; providerKey?: string } = {}): Promise<void> {
-    const query = new URLSearchParams()
-    if (options.source) query.set('source', options.source)
-    if (options.providerKey) query.set('providerKey', options.providerKey)
-    await request(`/api/hermes/config/providers/${encodeURIComponent(name)}${query.size ? `?${query}` : ''}`, {
-      method: 'DELETE',
-    })
-  }
-
-  async function updateProvider(poolKey: string, data: {
-    name?: string
-    base_url?: string
-    api_key?: string
-    model?: string
-    api_mode?: ProviderApiMode
-  }): Promise<void> {
-    await request(`/api/hermes/config/providers/${encodeURIComponent(poolKey)}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    })
-  }
-
-  async function fetchProviderEditor(poolKey: string): Promise<ProviderEditorDetail> {
-    const response = await request<ProviderEditorResponse>(
-      `/api/hermes/config/providers/${encodeURIComponent(poolKey)}/editor`,
-    )
-    return response.provider
-  }
-
-  async function patchProviderEditor(
-    poolKey: string,
-    revision: string,
-    data: ProviderEditorPatch,
-  ): Promise<ProviderEditorResponse> {
-    return request<ProviderEditorResponse>(
-      `/api/hermes/config/providers/${encodeURIComponent(poolKey)}/editor`,
-      {
-        method: 'PATCH',
-        headers: { 'If-Match': `"${revision}"` },
-        body: JSON.stringify(data),
-      },
-    )
-  }
-
-  async function testProviderEditor(
-    poolKey: string,
-    data: ProviderEditorPatch,
-  ): Promise<{ success: boolean; models?: string[]; model_count?: number; catalog_unavailable?: boolean; error?: string; code?: string }> {
-    return request(`/api/hermes/config/providers/${encodeURIComponent(poolKey)}/editor/test`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  }
-
-  async function patchProviderEditorContexts(
-    poolKey: string,
-    revision: string,
-    contextLengths: Record<string, number | null>,
-  ): Promise<ProviderEditorResponse> {
-    return request<ProviderEditorResponse>(
-      `/api/hermes/config/providers/${encodeURIComponent(poolKey)}/editor/contexts`,
-      {
-        method: 'PATCH',
-        headers: { 'If-Match': `"${revision}"` },
-        body: JSON.stringify({ context_lengths: contextLengths }),
-      },
-    )
-  }
-
-  async function refreshProviderModels(
-    poolKey: string,
-    options: { confirm?: boolean } = {},
-  ): Promise<ProviderModelRefreshResult> {
-    return request<ProviderModelRefreshResult>(
-      `/api/hermes/config/providers/${encodeURIComponent(poolKey)}/models/refresh`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ confirm: options.confirm === true }),
-      },
-    )
-  }
-
-  async function restoreProviderModels(poolKey: string): Promise<ProviderModelRefreshResult> {
-    return request<ProviderModelRefreshResult>(
-      `/api/hermes/config/providers/${encodeURIComponent(poolKey)}/models/restore`,
-      { method: 'POST', body: JSON.stringify({}) },
-    )
-  }
-
-  async function updateModelVisibility(data: {
-    provider: string
-    mode: 'all' | 'include'
-    models: string[]
-  }): Promise<{ success: boolean; model_visibility: ModelVisibility }> {
-    return request<{ success: boolean; model_visibility: ModelVisibility }>('/api/hermes/model-visibility', {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    })
-  }
-
-  async function addCustomModel(data: {
-    provider: string
-    model: string
-  }): Promise<{ success: boolean; custom_models: CustomModels }> {
-    return request<{ success: boolean; custom_models: CustomModels }>('/api/hermes/custom-model', {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    })
-  }
-
-  async function removeCustomModel(data: {
-    provider: string
-    model: string
-  }): Promise<{ success: boolean; custom_models: CustomModels }> {
-    const params = new URLSearchParams()
-    params.set('provider', data.provider)
-    params.set('model', data.model)
-    return request<{ success: boolean; custom_models: CustomModels }>(`/api/hermes/custom-model?${params.toString()}`, {
-      method: 'DELETE',
-    })
-  }
-
-  return { fetchConfigModels, fetchAvailableModels, fetchAvailableModelsForProfile, fetchProviderModels, refreshProviderModelCache, updateDefaultModel, updateModelAlias, addCustomProvider, removeCustomProvider, updateProvider, fetchProviderEditor, patchProviderEditor, testProviderEditor, patchProviderEditorContexts, refreshProviderModels, restoreProviderModels, updateModelVisibility, addCustomModel, removeCustomModel }
+      body: JSON.stringify({ confirm: options.confirm === true }),
+    },
+  )
 }
 
-export const { fetchConfigModels, fetchAvailableModels, fetchAvailableModelsForProfile, fetchProviderModels, refreshProviderModelCache, updateDefaultModel, updateModelAlias, addCustomProvider, removeCustomProvider, updateProvider, fetchProviderEditor, patchProviderEditor, testProviderEditor, patchProviderEditorContexts, refreshProviderModels, restoreProviderModels, updateModelVisibility, addCustomModel, removeCustomModel } = createApi()
+export async function restoreProviderModels(poolKey: string): Promise<ProviderModelRefreshResult> {
+  return request<ProviderModelRefreshResult>(
+    `/api/hermes/config/providers/${encodeURIComponent(poolKey)}/models/restore`,
+    { method: 'POST', body: JSON.stringify({}) },
+  )
+}
+
+export async function updateModelVisibility(data: {
+  provider: string
+  mode: 'all' | 'include'
+  models: string[]
+}): Promise<{ success: boolean; model_visibility: ModelVisibility }> {
+  return request<{ success: boolean; model_visibility: ModelVisibility }>('/api/hermes/model-visibility', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function addCustomModel(data: {
+  provider: string
+  model: string
+}): Promise<{ success: boolean; custom_models: CustomModels }> {
+  return request<{ success: boolean; custom_models: CustomModels }>('/api/hermes/custom-model', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function removeCustomModel(data: {
+  provider: string
+  model: string
+}): Promise<{ success: boolean; custom_models: CustomModels }> {
+  const params = new URLSearchParams()
+  params.set('provider', data.provider)
+  params.set('model', data.model)
+  return request<{ success: boolean; custom_models: CustomModels }>(`/api/hermes/custom-model?${params.toString()}`, {
+    method: 'DELETE',
+  })
+}

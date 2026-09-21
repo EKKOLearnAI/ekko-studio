@@ -1,4 +1,4 @@
-import { request as defaultRequest } from '../client'
+import { request } from '../client'
 
 export interface AnthropicStartResult {
   session_id: string
@@ -16,24 +16,17 @@ export interface AnthropicStatusResult {
   last_refresh?: string
 }
 
-
-export function createApi(request: typeof defaultRequest = (...args) => defaultRequest(...args)) {
-  async function startAnthropicLogin(): Promise<AnthropicStartResult> {
-    return request<AnthropicStartResult>('/api/hermes/auth/anthropic/start', { method: 'POST' })
-  }
-
-  async function submitAnthropicLogin(sessionId: string, code: string): Promise<AnthropicSubmitResult> {
-    return request<AnthropicSubmitResult>(`/api/hermes/auth/anthropic/submit/${sessionId}`, {
-      method: 'POST',
-      body: JSON.stringify({ code }),
-    })
-  }
-
-  async function getAnthropicAuthStatus(): Promise<AnthropicStatusResult> {
-    return request<AnthropicStatusResult>('/api/hermes/auth/anthropic/status')
-  }
-
-  return { startAnthropicLogin, submitAnthropicLogin, getAnthropicAuthStatus }
+export async function startAnthropicLogin(): Promise<AnthropicStartResult> {
+  return request<AnthropicStartResult>('/api/hermes/auth/anthropic/start', { method: 'POST' })
 }
 
-export const { startAnthropicLogin, submitAnthropicLogin, getAnthropicAuthStatus } = createApi()
+export async function submitAnthropicLogin(sessionId: string, code: string): Promise<AnthropicSubmitResult> {
+  return request<AnthropicSubmitResult>(`/api/hermes/auth/anthropic/submit/${sessionId}`, {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  })
+}
+
+export async function getAnthropicAuthStatus(): Promise<AnthropicStatusResult> {
+  return request<AnthropicStatusResult>('/api/hermes/auth/anthropic/status')
+}
