@@ -262,5 +262,6 @@ export async function notifySessionPush(
   payload: unknown,
   agent?: SessionPushAgent,
 ): Promise<number> {
-  return singleton.notify(sessionId, event, payload, agent)
+  // Product-level suspension: keep configuration, do not send social task notifications.
+  return 0
 }

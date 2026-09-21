@@ -22,12 +22,12 @@ import {
   type AppRelayRoute,
 } from '@/api/studio/app-relay'
 import { fetchStudioVersionManifest, type AppAccessMode, type StudioMobileRelease } from '@/api/studio/versions'
-import SocialMessagesView from '@/views/social-messages/SocialMessagesView.vue'
 
-type AppPanelView = 'list' | 'download' | 'messages'
+type AppPanelView = 'list' | 'download'
 
 function normalizePanelView(value: unknown): AppPanelView {
-  if (value === 'list' || value === 'messages') return value
+  if (value === 'list') return value
+  if (value === 'messages') return 'list'
   return 'download'
 }
 
@@ -617,6 +617,7 @@ onUnmounted(() => {
           >
             {{ t('connections.app.viewDownload') }}
           </button>
+
         </div>
         <NButton size="small" type="primary" @click="openScanModal">
           {{ t('connections.app.scanToAdd') }}
@@ -884,7 +885,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <SocialMessagesView v-else embedded class="app-message-push" />
+    <!-- Social push settings intentionally hidden; stored credentials remain intact. -->
   </section>
 
   <NModal

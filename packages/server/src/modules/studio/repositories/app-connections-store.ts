@@ -1,3 +1,4 @@
+import { deviceSystemNotificationsEnabled } from './device-notification-preferences'
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto'
 import { getDb, jsonGetAll, jsonSet } from '../infrastructure/database'
 import { APP_AUTHORIZATION_CODES_TABLE, APP_CONNECTIONS_TABLE } from '../infrastructure/database/schemas'
@@ -288,9 +289,10 @@ export function updateAppConnectionPushEnabled(id: number, enabled: boolean, now
 export function isAppConnectionPushEnabled(token: string): boolean {
   if (!token) return true
   const hash = hashAppCredential(token), db = getDb()
-  const row = db ? db.prepare(`SELECT push_enabled FROM ${APP_CONNECTIONS_TABLE} WHERE token_hash=?`).get(hash)
+  const row = db ? db.prepare(`SELECT push_enabled,user_id,device_code FROM ${APP_CONNECTIONS_TABLE} WHERE token_hash=?`).get(hash)
     : Object.values(jsonGetAll(APP_CONNECTIONS_TABLE)).find(connection => connection.token_hash === hash)
   return row?.push_enabled !== 0 && row?.push_enabled !== false
+    && (!row || deviceSystemNotificationsEnabled(Number(row.user_id), String(row.device_code)))
 }
 
 export function assignLegacyCloudAppConnectionUser(deviceCode: string, cloudUserId: number): boolean {

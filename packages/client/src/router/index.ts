@@ -170,7 +170,7 @@ const router = createRouter({
       path: '/social-messages',
       redirect: {
         name: 'hermes.connections',
-        query: { view: 'messages' },
+        query: { view: 'list' },
       },
     },
     {

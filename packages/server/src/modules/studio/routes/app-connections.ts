@@ -4,6 +4,7 @@ import * as pushCtrl from '../controllers/push-registration'
 
 export const appConnectionRoutes = new Router()
 
+appConnectionRoutes.put('/api/studio/push/preference', pushCtrl.deviceNotificationPreferenceController)
 appConnectionRoutes.put('/api/studio/push/registration', pushCtrl.pushRegistrationController)
 appConnectionRoutes.delete('/api/studio/push/registration', pushCtrl.pushRegistrationController)
 appConnectionRoutes.put('/api/studio/live-activities/registration', pushCtrl.liveActivityRegistrationController)

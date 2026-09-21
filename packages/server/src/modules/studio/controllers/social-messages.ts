@@ -132,39 +132,10 @@ export async function updatePlatformLocale(ctx: Context) {
 }
 
 export async function sendMessage(ctx: Context) {
-  try {
-    const userId = authenticatedUserId(ctx)
-    if (!userId) return
-    const body = ctx.request.body as {
-      platform: string
-      recipient: string
-      recipientType?: string
-      content: string
-      contextToken?: string
-    } | undefined
-    const result = await getSocialMessageService().send(userId, {
-      platform: body?.platform,
-      recipient: body?.recipient,
-      recipientType: body?.recipientType,
-      content: body?.content,
-      contextToken: body?.contextToken,
-    })
-    await saveSocialMessageTarget(userId, {
-      platform: result.platform,
-      recipient: result.recipient,
-      recipientType: (body?.recipientType || (result.platform === 'weixin' ? 'user_id' : 'chat_id')) as any,
-    })
-    ctx.status = 201
-    ctx.body = { result }
-  } catch (error) {
-    if (error instanceof SocialMessageError) {
-      ctx.status = error.status
-      ctx.body = { error: error.message, code: error.code }
-      return
-    }
-    ctx.status = 500
-    ctx.body = { error: error instanceof Error ? error.message : String(error) }
-  }
+  if (!authenticatedUserId(ctx)) return
+  // Temporarily suspend social delivery without deleting saved credentials.
+  ctx.status = 503
+  ctx.body = { error: 'Social message delivery is temporarily disabled', code: 'social_push_disabled' }
 }
 
 export async function savePlatformCredentials(ctx: Context) {

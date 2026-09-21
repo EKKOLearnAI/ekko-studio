@@ -1,4 +1,4 @@
-import { getSession } from "../../repositories/session-store"
+import { deviceSystemNotificationsEnabled } from '../../repositories/device-notification-preferences'
 import { notificationPreview } from './notification-preview'
 import { chatCompletionText } from './chat-completion-text'
 import { listAppConnections } from '../../repositories/app-connections-store'
@@ -32,7 +32,6 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
       const runKind = event.source === 'group_chat' ? 'group' : event.source === 'workflow' ? 'workflow' : 'chat'
       const subjectId = runKind === 'group' ? event.subject.room_id : runKind === 'workflow' ? event.subject.workflow_id : event.subject.session_id
       if (!subjectId) return
-      if (runKind === 'chat' && getSession(subjectId)?.push_enabled === 0) return
       const pushUrl = new URL('/push/v1/send', appRelayUrlForRoute(await getAppRelayRoute()))
       const connections = listAppConnections()
       await Promise.allSettled(listUserPushDevices().map(async device => {
@@ -40,7 +39,7 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
           && row.device_code === device.device_id && row.token_hash === device.connection_token_hash
           && row.revoked_at == null && row.token_expires_at > Date.now() / 1000)
         if (!connection) { removeUserPushDevice(device.id); return }
-        if (connection.push_enabled === 0) return
+        if (connection.push_enabled === 0 || !deviceSystemNotificationsEnabled(connection.user_id,connection.device_code)) return
         const user = findUserById(device.user_id)
         if (!user || user.status !== 'active' || !canReceiveAppEvent(user, event)) return
         let registration: Record<string, any>

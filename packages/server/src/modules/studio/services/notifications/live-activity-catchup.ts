@@ -42,3 +42,9 @@ export async function catchUpLiveActivities(connectionId: number): Promise<void>
     }
   } finally { pending.delete(connectionId) }
 }
+
+export async function endDeviceLiveActivities(connectionId: number): Promise<void> {
+  if (!deliver) return
+  await deliver({schema_version:1,id:randomUUID(),type:'device.push.disabled',source:'chat',profile:'default',
+    occurred_at:new Date().toISOString(),subject:{},payload:{}},connectionId)
+}

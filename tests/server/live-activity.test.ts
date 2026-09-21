@@ -65,11 +65,12 @@ describe('Studio Live Activity orchestration', () => {
   for(const [,request] of fetchMock.mock.calls) expect(JSON.parse(request.body)).not.toHaveProperty('relevance_score')
  })
 
- it('does not start a muted session and closes an existing card with a redacted terminal snapshot',async()=>{
+ it('device opt-out closes an existing card with a redacted terminal snapshot',async()=>{
   let muted=false
   vi.doMock('../../packages/server/src/modules/studio/repositories/session-store',()=>({getSession:()=>({title:'Private title',profile:'default',user_id:7,agent:'pi',push_enabled:muted?0:1}),getSessionNotificationPreview:()=>({})}))
   const consume=await setup();await consume(event('chat.plan.updated'))
   muted=true
+  connections[0].push_enabled=0
   await consume(event('chat.push.disabled',2))
   const end=JSON.parse(fetchMock.mock.calls[1][1].body)
   expect(end.event).toBe('end');expect(end.dismissal_at).toBe(end.occurred_at)

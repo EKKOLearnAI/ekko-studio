@@ -11,15 +11,15 @@ const controllerSource = readFileSync(
 )
 
 describe('App connections scan modal', () => {
-  it('shows connection and download entries while keeping message push hidden', () => {
-    expect(source).toContain("type AppPanelView = 'list' | 'download' | 'messages'")
+  it('switches between the connection list, mobile download hub, and message push', () => {
+    expect(source).toContain("type AppPanelView = 'list' | 'download'")
     expect(source).toContain('normalizePanelView(route.query.view)')
     expect(source).toContain("t('connections.app.viewList')")
     expect(source).toContain("t('connections.app.viewDownload')")
     expect(source).not.toContain("t('connections.app.viewMessages')")
     expect(source).toContain("panelView === 'list'")
     expect(source).not.toContain("updatePanelView('messages')")
-    expect(source).toContain('<SocialMessagesView v-else embedded')
+    expect(source).not.toContain('<SocialMessagesView v-else embedded')
     expect(source).toContain('Ekko Studio Mobile')
     expect(source).toContain("const downloadSource = ref<'github' | 'cloudflare'>('cloudflare')")
     expect(source).toContain('fetchStudioVersionManifest()')
