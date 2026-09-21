@@ -1603,3 +1603,131 @@ test('restores named resumed tool traces from assistant tool calls after session
   await expect(page.locator('.message.tool .tool-details')).toContainText('/tmp/history.txt')
   expect(api.unexpectedRequests).toEqual([])
 })
+
+// Browser-side contract for the approval outcome. The mocked chat socket feeds
+// the card directly, so these hold with or without the bridge forwarder fix and
+// are controls for it: they pin what the Web UI must do with each outcome the
+// forwarder can send, while tests/client/bridge-approval-outcome-contract.test.ts
+// pins that the forwarder actually sends it.
+test('keeps the approval card in the browser when the runtime reports a failed resolution (control)', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  const api = await mockHermesApi(page)
+  await mockChatSocket(page)
+
+  await page.goto('/#/hermes/chat')
+
+  await sendChatMessage(page, 'Use write_file behind a gateway approval')
+  const { run } = await waitForRun(page)
+
+  await page.evaluate((sid) => {
+    const socket = (window as any).__PW_CHAT_SOCKET__.latest
+    socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'run-gateway' })
+    socket.__trigger('approval.requested', {
+      event: 'approval.requested',
+      session_id: sid,
+      run_id: 'run-gateway',
+      approval_id: 'approval-gateway',
+      command: 'write_file /tmp/gateway.txt',
+      description: 'Allow write_file to create /tmp/gateway.txt',
+      choices: ['once', 'deny'],
+      timeout_ms: 300_000,
+      remaining_timeout_ms: 300_000,
+    })
+  }, run.session_id)
+
+  const prompt = page.locator('.approval-float-panel')
+  await expect(prompt).toContainText('Allow write_file to create /tmp/gateway.txt')
+  await page.getByRole('button', { name: 'Allow once' }).click()
+  await expect(prompt).toHaveCount(0)
+
+  // The runtime failed to resolve the gateway request, so the decision never
+  // took effect and the card has to come back rather than stay dismissed.
+  await page.evaluate((sid) => {
+    const socket = (window as any).__PW_CHAT_SOCKET__.latest
+    socket.__trigger('approval.requested', {
+      event: 'approval.requested',
+      session_id: sid,
+      run_id: 'run-gateway',
+      approval_id: 'approval-gateway',
+      command: 'write_file /tmp/gateway.txt',
+      description: 'Allow write_file to create /tmp/gateway.txt',
+      choices: ['once', 'deny'],
+      timeout_ms: 300_000,
+      remaining_timeout_ms: 300_000,
+    })
+    socket.__trigger('approval.resolved', {
+      event: 'approval.resolved',
+      session_id: sid,
+      run_id: 'run-gateway',
+      approval_id: 'approval-gateway',
+      choice: 'once',
+      resolved: false,
+    })
+  }, run.session_id)
+
+  await expect(prompt).toContainText('Allow write_file to create /tmp/gateway.txt')
+  await expect(page.getByRole('button', { name: 'Allow once' })).toBeVisible()
+
+  // A stale failure is the expiry case: the card closes and the user is told.
+  await page.evaluate((sid) => {
+    const socket = (window as any).__PW_CHAT_SOCKET__.latest
+    socket.__trigger('approval.resolved', {
+      event: 'approval.resolved',
+      session_id: sid,
+      run_id: 'run-gateway',
+      approval_id: 'approval-gateway',
+      choice: 'once',
+      resolved: false,
+      stale: true,
+      error: 'Approval is no longer pending.',
+    })
+  }, run.session_id)
+  await expect(prompt).toHaveCount(0)
+
+  expect(api.unexpectedRequests).toEqual([])
+})
+
+test('dismisses the approval card in the browser when the runtime reports a successful resolution (control)', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  const api = await mockHermesApi(page)
+  await mockChatSocket(page)
+
+  await page.goto('/#/hermes/chat')
+
+  await sendChatMessage(page, 'Use write_file behind a resolved approval')
+  const { run } = await waitForRun(page)
+
+  await page.evaluate((sid) => {
+    const socket = (window as any).__PW_CHAT_SOCKET__.latest
+    socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'run-gateway-ok' })
+    socket.__trigger('approval.requested', {
+      event: 'approval.requested',
+      session_id: sid,
+      run_id: 'run-gateway-ok',
+      approval_id: 'approval-gateway-ok',
+      command: 'write_file /tmp/gateway-ok.txt',
+      description: 'Allow write_file to create /tmp/gateway-ok.txt',
+      choices: ['once', 'deny'],
+      timeout_ms: 300_000,
+      remaining_timeout_ms: 300_000,
+    })
+  }, run.session_id)
+
+  const prompt = page.locator('.approval-float-panel')
+  await expect(prompt).toContainText('Allow write_file to create /tmp/gateway-ok.txt')
+
+  await page.evaluate((sid) => {
+    const socket = (window as any).__PW_CHAT_SOCKET__.latest
+    socket.__trigger('approval.resolved', {
+      event: 'approval.resolved',
+      session_id: sid,
+      run_id: 'run-gateway-ok',
+      approval_id: 'approval-gateway-ok',
+      choice: 'once',
+      resolved: true,
+    })
+  }, run.session_id)
+
+  await expect(prompt).toHaveCount(0)
+  expect(api.unexpectedRequests).toEqual([])
+})
