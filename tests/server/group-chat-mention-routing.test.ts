@@ -39,6 +39,13 @@ describe('group chat mention routing', () => {
     expect(isAgentMentioned('mailto@Alice.example', 'Alice')).toBe(false)
   })
 
+  it('treats CJK enumeration顿号 as a safe after-boundary', () => {
+    expect(isAgentMentioned('与其他智能体（@Hermes、@Claude、@Codex、@OpenCode 等）协作', 'Hermes')).toBe(true)
+    expect(isAgentMentioned('与其他智能体（@Hermes、@Claude、@Codex、@OpenCode 等）协作', 'Claude')).toBe(true)
+    expect(isAgentMentioned('与其他智能体（@Hermes、@Claude、@Codex、@OpenCode 等）协作', 'Codex')).toBe(true)
+    expect(isAgentMentioned('与其他智能体（@Hermes、@Claude、@Codex、@OpenCode 等）协作', 'OpenCode')).toBe(true)
+  })
+
   it('routes mentions after CJK speaker prefixes, emoji, and punctuation', () => {
     expect(isAgentMentioned('hermes：@Bob 老板喊你，出来露个脸。', 'Bob')).toBe(true)
     expect(isAgentMentioned('老板喊你@Bob 出来露个脸。', 'Bob')).toBe(true)

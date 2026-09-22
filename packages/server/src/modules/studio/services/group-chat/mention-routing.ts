@@ -16,7 +16,7 @@ type MentionRange = {
     end: number
 }
 
-const AFTER_BOUNDARY = new Set(['.', ',', '!', '?', ';', ':', '，', '。', '！', '？', '；', '：', ')', ']', '}', '>'])
+const AFTER_BOUNDARY = new Set(['.', ',', '!', '?', ';', ':', '，', '、', '。', '！', '？', '；', '：', ')', ']', '}', '>'])
 const QUOTED_MESSAGE_BLOCK_RE = /<quoted_message(?:\s[^>]*)?>[\s\S]*?<\/quoted_message>/gi
 
 function maskQuotedMessageBlocks(content: string): string {

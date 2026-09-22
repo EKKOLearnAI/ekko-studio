@@ -584,9 +584,13 @@ export class AgentClient implements GroupAgentExecutor {
             matches.push({ agentId: participantId, name: displayName })
             byName.set(displayName, matches)
         }
-        return [...byName.values()]
+        const mentions = [...byName.values()]
             .filter(matches => matches.length === 1 && isAgentMentioned(content, matches[0].name))
             .map(matches => ({ type: 'agent' as const, participantId: matches[0].agentId, displayName: matches[0].name }))
+        // Self-intros often list peers as "@A、@B、@C". That is informational, not a handoff.
+        // Only a single peer @mention is treated as Agent-to-Agent routing intent.
+        if (mentions.length > 1) return []
+        return mentions
     }
 
     startTyping(roomId: string): void {
