@@ -24,6 +24,7 @@ function displayFields(event: BusinessEvent, registration: Record<string, any>, 
   let result: Record<string, string | number> = {}
   try { result = JSON.parse(state.display_json || '{}') } catch { /* old row */ }
   if (['light', 'dark'].includes(registration.appearance)) result.appearance = registration.appearance
+  if (/^(?:zh|zh-TW|en|ja|ko|fr|es|de|pt|ru|ar)$/.test(String(registration.locale || ''))) result.locale = registration.locale
   const started = getChatRunServer()?.getLiveActivityStartedAt?.(event.subject.session_id, event.profile, event.subject.run_id)
   if (result.startedAtEpoch === undefined && typeof started === 'number' && Number.isFinite(started) && started >= 0) result.startedAtEpoch = started
   const through = terminal(event) ? Date.parse(event.occurred_at) : Date.now()
