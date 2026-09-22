@@ -52,6 +52,8 @@ export const PROVIDER_ENV_MAP: Record<string, { api_key_env: string; base_url_en
   copilot: { api_key_env: 'GITHUB_TOKEN', base_url_env: '' },
   longcat: { api_key_env: '', base_url_env: '' },
   'tencent-tokenhub': { api_key_env: 'TENCENT_TOKENHUB_API_KEY', base_url_env: 'TOKENHUB_BASE_URL' },
+  orcarouter: { api_key_env: 'ORCAROUTER_API_KEY', base_url_env: 'ORCAROUTER_BASE_URL' },
+  'orcarouter-oauth': { api_key_env: '', base_url_env: '' },
 }
 
 // --- Types ---

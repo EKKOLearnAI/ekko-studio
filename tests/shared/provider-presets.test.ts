@@ -379,3 +379,47 @@ describe('provider presets', () => {
     }
   })
 })
+
+describe('OrcaRouter provider presets', () => {
+  const ORCAROUTER = 'orcarouter'
+  const ORCAROUTER_OAUTH = 'orcarouter-oauth'
+
+  it('registers both first-class entries with the OpenAI-compatible inference base', () => {
+    for (const provider of [ORCAROUTER, ORCAROUTER_OAUTH]) {
+      const preset = SERVER_PROVIDER_PRESETS.find(candidate => candidate.value === provider)
+      expect(preset).toBeDefined()
+      expect(preset?.builtin).toBe(true)
+      expect(preset?.base_url).toBe('https://api.orcarouter.ai/v1')
+      expect(preset?.api_mode).toBe('chat_completions')
+      // A gateway is not a custom base URL: the provider must stay a named,
+      // first-class entry with its own label.
+      expect(preset?.label).toMatch(/^OrcaRouter/)
+    }
+  })
+
+  it('maps the API-key entry to the profile env and leaves the Auth entry keyless', () => {
+    expect(PROVIDER_ENV_MAP[ORCAROUTER]).toEqual({
+      api_key_env: 'ORCAROUTER_API_KEY',
+      base_url_env: 'ORCAROUTER_BASE_URL',
+    })
+    expect(PROVIDER_ENV_MAP[ORCAROUTER_OAUTH]).toEqual({ api_key_env: '', base_url_env: '' })
+  })
+
+  it('seeds only the verified cold-start catalog, never the live gateway list', () => {
+    const models = modelsForProvider(SERVER_PROVIDER_PRESETS, ORCAROUTER)
+    expect(models).toEqual([
+      'openai/gpt-5.5',
+      'anthropic/claude-opus-4.8',
+      'google/gemini-3.5-flash',
+      'deepseek/deepseek-v4-pro',
+      'orcarouter/auto',
+    ])
+    expect(modelsForProvider(SERVER_PROVIDER_PRESETS, ORCAROUTER_OAUTH)).toEqual(models)
+  })
+
+  it('keeps vendor/model namespaces verbatim in the seed', () => {
+    for (const model of modelsForProvider(SERVER_PROVIDER_PRESETS, ORCAROUTER)) {
+      expect(model).toMatch(/^[a-z0-9.-]+\/[a-z0-9.-]+$/)
+    }
+  })
+})

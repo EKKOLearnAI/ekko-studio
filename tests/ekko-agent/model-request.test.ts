@@ -1836,3 +1836,58 @@ describe('ekko-agent model requests', () => {
   })
 
 })
+
+describe('OrcaRouter reasoning replay', () => {
+  const orcaConfig: ModelProviderConfig = {
+    id: 'orcarouter',
+    type: 'openai-compatible',
+    apiKey: 'test-key',
+    baseUrl: 'https://api.orcarouter.ai/v1',
+    defaultModel: 'deepseek/deepseek-v4-pro',
+  }
+
+  it('replays OrcaRouter reasoning through reasoning_content', () => {
+    const payload = toOpenAIChatPayload(orcaConfig, {
+      messages: [
+        { role: 'assistant', content: 'answer', reasoning: 'because' },
+        { role: 'user', content: 'next' },
+      ],
+    })
+    const assistant = (payload.messages as Array<Record<string, any>>)[0]
+    expect(assistant.reasoning_content).toBe('because')
+    expect(assistant).not.toHaveProperty('reasoning')
+    expect(assistant).not.toHaveProperty('reasoning_details')
+  })
+
+  it('recognises the Auth entry point and the gateway hostname, not the model name', () => {
+    const viaOauthEntry = toOpenAIChatPayload({
+      id: 'orcarouter-oauth',
+      type: 'openai-compatible',
+      requestStyle: 'openai-chat',
+      defaultModel: 'openai/gpt-5.5',
+    }, { messages: [{ role: 'assistant', content: 'a', reasoning: 'r' }] })
+    expect((viaOauthEntry.messages as Array<Record<string, any>>)[0].reasoning_content).toBe('r')
+
+    const viaHostname = toOpenAIChatPayload({
+      id: 'custom:my-gateway',
+      type: 'openai-compatible',
+      requestStyle: 'openai-chat',
+      baseUrl: 'https://api.orcarouter.ai/v1',
+      defaultModel: 'openai/gpt-5.5',
+    }, { messages: [{ role: 'assistant', content: 'a', reasoning: 'r' }] })
+    expect((viaHostname.messages as Array<Record<string, any>>)[0].reasoning_content).toBe('r')
+  })
+
+  it('leaves an unrelated OpenAI-compatible provider on the common reasoning field', () => {
+    const payload = toOpenAIChatPayload({
+      id: 'custom:other-relay',
+      type: 'openai-compatible',
+      requestStyle: 'openai-chat',
+      baseUrl: 'https://relay.example/v1',
+      defaultModel: 'some/model',
+    }, { messages: [{ role: 'assistant', content: 'a', reasoning: 'r' }] })
+    const assistant = (payload.messages as Array<Record<string, any>>)[0]
+    expect(assistant.reasoning).toBe('r')
+    expect(assistant).not.toHaveProperty('reasoning_content')
+  })
+})

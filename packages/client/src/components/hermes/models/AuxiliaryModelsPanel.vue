@@ -13,6 +13,7 @@ import {
   type DelegationModelConfig,
 } from '@/api/hermes/config'
 import { useModelsStore } from '@/stores/hermes/models'
+import { isOrcaRouterProvider, modelsForCapability } from '@/utils/modelCapabilities'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import FallbackProvidersPanel from './FallbackProvidersPanel.vue'
 
@@ -48,8 +49,37 @@ const delegationForm = ref({
 const modelOptions = computed(() => {
   const provider = form.value.provider.trim()
   if (!provider || provider === 'auto' || provider === 'main') return []
-  return modelsForProvider(provider).map(model => ({ label: model, value: model }))
+  return modelsForAuxiliaryTask(provider).map(model => ({ label: model, value: model }))
 })
+
+/**
+ * Each auxiliary task has its own requirement. The Vision task uploads an
+ * image, so it may only offer chat models that explicitly declare image input;
+ * a model that does not declare the modality fails closed.
+ */
+function modelsForAuxiliaryTask(provider: string): string[] {
+  const group = modelsStore.providers.find(entry => entry.provider === provider)
+  const capability = isOrcaRouterProvider(provider) && isEditingVision.value ? 'chat-image' : 'chat'
+  return modelsForCapability(group, capability)
+}
+
+/**
+ * A stored model that is no longer compatible with the task must be cleared and
+ * surfaced, not silently kept and sent.
+ */
+watch(
+  [() => form.value.provider, () => editingTask.value?.key, modelOptions],
+  () => {
+    if (hydratingForm.value) return
+    const provider = form.value.provider.trim()
+    if (!provider || provider === 'auto' || provider === 'main') return
+    const options = modelOptions.value.map(option => option.value)
+    if (form.value.model && !options.includes(form.value.model)) {
+      form.value.model = options[0] || ''
+      message.warning(t('models.orcaRouterModelIncompatible'))
+    }
+  },
+)
 
 const delegationProviderOptions = computed(() => {
   const options = modelsStore.providers

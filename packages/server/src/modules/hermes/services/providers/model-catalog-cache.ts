@@ -7,6 +7,19 @@ import { readAppConfig } from '../../../studio/public/app-config'
 import { config } from '../../../studio/public/config'
 import { logger } from '../../../studio/public/logging'
 import { fetchProviderModels, fetchOpenCodeFreeModels } from '../../../studio/public/provider-catalog'
+import {
+  ORCAROUTER_PROVIDER,
+  ORCAROUTER_OAUTH_PROVIDER,
+  filterOrcaRouterModels,
+  normalizeOrcaRouterCatalogModels,
+  normalizeOrcaRouterApiBase,
+  orcaRouterModelsUrl,
+  type OrcaRouterCatalogModel,
+} from '../../../studio/public/orcarouter-catalog'
+import {
+  ORCAROUTER_CATALOG_MAX_BYTES,
+  ORCAROUTER_CATALOG_TIMEOUT_MS,
+} from '../../../studio/public/orcarouter-catalog'
 import { OPENCODE_FREE_PROVIDER, OPENCODE_FREE_BASE_URL } from '../../../studio/contracts/opencode-free'
 import { PROVIDER_ENV_MAP, readConfigYamlForProfile } from '../../../studio/public/profile-config'
 import { safeFileStore } from '../../../studio/public/safe-file-store'
@@ -51,6 +64,12 @@ export interface ProviderCatalogRefreshTarget {
   api_mode?: string
   credential_kind: 'api_key' | 'oauth' | 'copilot' | 'none'
   skip_live_fetch?: boolean
+  /**
+   * Catalog reader to use. `capability` reads `GET /v1/models?capability=<name>`
+   * and intersects the result with the endpoint types and input modalities this
+   * client can speak, so a selector can never be offered a route we cannot call.
+   */
+  catalog_kind?: 'generic' | 'capability'
 }
 
 type RefreshCandidate = ProviderCatalogRefreshTarget
@@ -73,6 +92,7 @@ const AUTH_CATALOG_PROVIDERS = new Set([
   'claude-oauth',
   'qwen-oauth',
   'minimax-oauth',
+  ORCAROUTER_OAUTH_PROVIDER,
 ])
 let backgroundRefresh: Promise<void> | null = null
 
@@ -422,7 +442,69 @@ export async function fetchProviderCatalogRefreshTargetModels(
   if (target.provider === 'claude-oauth') {
     return fetchClaudeOAuthModels(target.base_url, target.api_key)
   }
+  if (target.catalog_kind === 'capability') {
+    return fetchOrcaRouterChatModels(target.base_url, target.api_key)
+  }
   return fetchProviderModels(target.base_url, target.api_key, target.free_only === true)
+}
+
+export function usesOrcaRouterCapabilityCatalog(provider: string): boolean {
+  return provider === ORCAROUTER_PROVIDER || provider === ORCAROUTER_OAUTH_PROVIDER
+}
+
+/** Full capability-filtered catalog with metadata, for the provider editor. */
+export async function fetchOrcaRouterCapabilityCatalog(
+  baseUrl: string,
+  apiKey: string,
+  capability: 'chat' | 'embedding' | 'image' | 'video' | 'rerank',
+): Promise<OrcaRouterCatalogModel[]> {
+  return fetchOrcaRouterCatalog(baseUrl, apiKey, capability)
+}
+
+/**
+ * OrcaRouter's chat catalog needs its own read: the generic `/v1/models` fetch
+ * would return image, video, embedding and rerank models too, and the model
+ * selectors must only ever be offered routes this client can speak. The request
+ * is bounded and fails closed — an undeclared capability is not a capability.
+ */
+export async function fetchOrcaRouterChatModels(baseUrl: string, apiKey: string): Promise<string[]> {
+  const models = await fetchOrcaRouterCatalog(baseUrl, apiKey, 'chat')
+  return models.map(model => model.id)
+}
+
+export async function fetchOrcaRouterCatalog(
+  baseUrl: string,
+  apiKey: string,
+  capability: 'chat' | 'embedding' | 'image' | 'video' | 'rerank',
+): Promise<OrcaRouterCatalogModel[]> {
+  if (!apiKey) return []
+  const modelsUrl = orcaRouterModelsUrl(normalizeOrcaRouterApiBase(baseUrl), capability)
+  try {
+    const response = await fetch(modelsUrl, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(ORCAROUTER_CATALOG_TIMEOUT_MS),
+    })
+    if (!response.ok) {
+      logger.warn('[model-catalog-cache] OrcaRouter catalog %s returned %d', capability, response.status)
+      return []
+    }
+    const declaredLength = Number(response.headers.get('content-length') || 0)
+    if (declaredLength > ORCAROUTER_CATALOG_MAX_BYTES) {
+      logger.warn('[model-catalog-cache] OrcaRouter catalog %s exceeded the byte cap', capability)
+      return []
+    }
+    const text = await response.text()
+    if (text.length > ORCAROUTER_CATALOG_MAX_BYTES) {
+      logger.warn('[model-catalog-cache] OrcaRouter catalog %s exceeded the byte cap', capability)
+      return []
+    }
+    const parsed = text ? JSON.parse(text) : {}
+    return filterOrcaRouterModels(normalizeOrcaRouterCatalogModels(parsed), capability)
+  } catch (err) {
+    logger.warn(err, '[model-catalog-cache] OrcaRouter catalog %s fetch failed', capability)
+    return []
+  }
 }
 
 function hasOAuthCredential(value: any): boolean {
@@ -538,6 +620,7 @@ async function collectRefreshCandidates(profiles = listProfileNamesFromDisk()): 
               profile,
               api_mode: preset.api_mode,
               credential_kind: 'oauth',
+              ...(usesOrcaRouterCapabilityCatalog(provider) ? { catalog_kind: 'capability' as const } : {}),
             })
             continue
           }
@@ -557,6 +640,7 @@ async function collectRefreshCandidates(profiles = listProfileNamesFromDisk()): 
         api_mode: preset.api_mode,
         credential_kind: apiKey ? 'api_key' : 'none',
         skip_live_fetch: skipLiveFetch,
+        ...(usesOrcaRouterCapabilityCatalog(provider) ? { catalog_kind: 'capability' as const } : {}),
       })
     }
 

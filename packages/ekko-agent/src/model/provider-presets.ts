@@ -31,8 +31,49 @@ export interface EkkoModelProviderPreset {
  * instead of copying Studio's entire marketplace-sized catalog. Every entry
  * carries an explicit API mode so installing a preset never depends on URL
  * inference.
+ *
+ * The OrcaRouter `models` lists are the verified cold-start seed read from the
+ * live catalog at https://api.orcarouter.ai/v1/models. Live discovery is
+ * authoritative; the seed only keeps a fresh installation usable while that
+ * endpoint is slow or unavailable, and the UI labels the list as degraded.
  */
 export const BUILTIN_MODEL_PROVIDER_PRESETS: Record<string, EkkoModelProviderPreset> = presetMap([
+  {
+    id: 'orcarouter',
+    label: 'OrcaRouter',
+    type: 'openai',
+    apiMode: 'chat_completions',
+    requestStyle: 'openai-chat',
+    baseUrl: 'https://api.orcarouter.ai/v1',
+    defaultModel: 'orcarouter/auto',
+    models: [
+      'openai/gpt-5.5',
+      'anthropic/claude-opus-4.8',
+      'google/gemini-3.5-flash',
+      'deepseek/deepseek-v4-pro',
+      'orcarouter/auto',
+    ],
+    authType: 'api-key',
+    builtin: true,
+  },
+  {
+    id: 'orcarouter-oauth',
+    label: 'OrcaRouter - Auth',
+    type: 'openai',
+    apiMode: 'chat_completions',
+    requestStyle: 'openai-chat',
+    baseUrl: 'https://api.orcarouter.ai/v1',
+    defaultModel: 'orcarouter/auto',
+    models: [
+      'openai/gpt-5.5',
+      'anthropic/claude-opus-4.8',
+      'google/gemini-3.5-flash',
+      'deepseek/deepseek-v4-pro',
+      'orcarouter/auto',
+    ],
+    authType: 'oauth',
+    builtin: true,
+  },
   {
     id: 'openai-api',
     label: 'OpenAI API',

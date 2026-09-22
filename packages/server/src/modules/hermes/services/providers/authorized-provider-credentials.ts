@@ -1,8 +1,10 @@
 import { randomUUID } from 'crypto'
-import { chmod, mkdir, open, readFile, rename, rm } from 'fs/promises'
+import { readFile } from 'fs/promises'
 import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { getHermesBaseDir, getProfileDir } from '../profiles/profile'
+import { atomicWritePrivateJson } from './private-json-store'
+import { ORCAROUTER_DEFAULT_API_BASE } from '../../../studio/public/orcarouter-catalog'
 
 const DEFAULT_TIMEOUT_MS = 20_000
 const DEFAULT_REFRESH_SKEW_MS = 120_000
@@ -45,6 +47,7 @@ type AuthorizedProvider =
   | 'qwen-oauth'
   | 'claude-oauth'
   | 'minimax-oauth'
+  | 'orcarouter-oauth'
 
 type JsonRecord = Record<string, any>
 
@@ -55,7 +58,20 @@ export const AUTHORIZED_RUNTIME_PROVIDERS = new Set<AuthorizedProvider>([
   'qwen-oauth',
   'claude-oauth',
   'minimax-oauth',
+  'orcarouter-oauth',
 ])
+
+/**
+ * Providers whose authorization mints a durable API key rather than an
+ * access/refresh token pair. There is no refresh endpoint for these: the key is
+ * reused until the provider revokes it, and a 401 is a terminal
+ * reauthentication requirement, never a retry loop.
+ */
+const DURABLE_KEY_PROVIDERS = new Set<AuthorizedProvider>(['orcarouter-oauth'])
+
+export function isDurableKeyProvider(provider: unknown): boolean {
+  return DURABLE_KEY_PROVIDERS.has(clean(provider).toLowerCase() as AuthorizedProvider)
+}
 
 export interface AuthorizedProviderRuntimeCredentials {
   provider: string
@@ -153,6 +169,7 @@ function hasCredential(value: unknown): boolean {
     record.access_token,
     record.refresh_token,
     record.agent_key,
+    record.api_key,
   )
 }
 
@@ -176,22 +193,6 @@ async function readJsonFile(path: string): Promise<JsonRecord> {
   }
 }
 
-async function atomicWritePrivateJson(path: string, value: JsonRecord): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  const temporaryPath = `${path}.tmp.${process.pid}.${randomUUID()}`
-  const handle = await open(temporaryPath, 'wx', 0o600)
-  try {
-    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf-8')
-    await handle.sync()
-    await handle.close()
-    await rename(temporaryPath, path)
-    await chmod(path, 0o600)
-  } catch (err) {
-    await handle.close().catch(() => undefined)
-    await rm(temporaryPath, { force: true }).catch(() => undefined)
-    throw err
-  }
-}
 
 function decodeJwtClaims(token: string): JsonRecord {
   const parts = token.split('.')
@@ -298,6 +299,8 @@ function runtimeDefaults(provider: AuthorizedProvider): {
       return { baseUrl: MINIMAX_DEFAULT_BASE_URL, apiMode: 'anthropic_messages', source: 'hermes-auth-store' }
     case 'nous':
       return { baseUrl: NOUS_DEFAULT_INFERENCE_URL, apiMode: 'chat_completions', source: 'invoke_jwt' }
+    case 'orcarouter-oauth':
+      return { baseUrl: ORCAROUTER_DEFAULT_API_BASE, apiMode: 'chat_completions', source: 'loopback_pkce' }
   }
 }
 
@@ -311,8 +314,10 @@ function snapshotFromAuth(
   const { key: stateKey, state } = providerStateFor(auth, keys)
   const { key: poolKey, entry: poolEntry } = poolEntryFor(auth, keys)
   const tokens = objectValue(state.tokens)
-  const accessToken = firstText(tokens.access_token, state.access_token, poolEntry.access_token)
-  const refreshToken = firstText(tokens.refresh_token, state.refresh_token, poolEntry.refresh_token)
+  const accessToken = firstText(tokens.access_token, state.access_token, poolEntry.access_token, state.api_key, poolEntry.api_key)
+  const refreshToken = DURABLE_KEY_PROVIDERS.has(provider)
+    ? ''
+    : firstText(tokens.refresh_token, state.refresh_token, poolEntry.refresh_token)
   const defaults = runtimeDefaults(provider)
   let baseUrl = firstText(
     poolEntry.base_url,
@@ -402,6 +407,11 @@ function selectedCredential(snapshot: CredentialSnapshot, now: number): {
   }
 
   if (!snapshot.accessToken) return { token: '', refreshNeeded: true }
+  if (DURABLE_KEY_PROVIDERS.has(snapshot.provider)) {
+    // A PKCE-issued key is a durable API key, not a short-lived access token.
+    // Reuse it until OrcaRouter revokes it; never schedule a proactive refresh.
+    return { token: snapshot.accessToken, refreshNeeded: false }
+  }
   if (snapshot.expiresAtMs === undefined) {
     return { token: snapshot.accessToken, refreshNeeded: false }
   }
@@ -916,6 +926,16 @@ async function resolveHermesStoredProvider(
   const now = (dependencies.now || Date.now)()
   const selected = selectedCredential(initial, now)
   if (!forceRefresh && !selected.refreshNeeded && selected.token) return runtimeCredentials(initial, selected)
+  if (DURABLE_KEY_PROVIDERS.has(provider)) {
+    // No refresh grant exists. A rejected durable key is a terminal
+    // reauthentication requirement for this exact account.
+    throw refreshFailure(
+      provider,
+      `${provider} API key was rejected by OrcaRouter; run the connect flow again to issue a new key`,
+      'ORCAROUTER_KEY_REJECTED',
+      true,
+    )
+  }
   if (!initial.refreshToken) throw missingCredentials(provider, `${provider} OAuth session expired; sign in again`)
 
   const lockKey = `${resolve(initial.authPath)}:${provider}`

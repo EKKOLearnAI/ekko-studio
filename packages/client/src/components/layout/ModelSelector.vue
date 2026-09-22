@@ -4,6 +4,7 @@ import { NModal, NInput, NSelect } from 'naive-ui'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useCollapsedProviderGroups } from '@/composables/useCollapsedProviderGroups'
+import { capabilityCatalogStatus, modelsForCapability, type CapabilityCatalogGroup } from '@/utils/modelCapabilities'
 import { useI18n } from 'vue-i18n'
 
 const emit = defineEmits<{
@@ -35,11 +36,32 @@ const providerOptions = computed(() => {
 const modelGroupsWithCustom = computed(() =>
   activeModelGroups.value.map(g => ({
     ...g,
-    models: [
-      ...g.models,
-      ...(appStore.customModels[g.provider] || []).filter(m => !g.models.includes(m)),
-    ],
+    // OrcaRouter groups are replaced by the server's capability-filtered chat
+    // list: a gateway catalog cannot be extended with a locally typed model id,
+    // because the gateway is not known to route it.
+    models: isOrcaRouterGroup(g)
+      ? modelsForCapability(g as CapabilityCatalogGroup, 'chat')
+      : [
+        ...g.models,
+        ...(appStore.customModels[g.provider] || []).filter(m => !g.models.includes(m)),
+      ],
   }))
+)
+
+function isOrcaRouterGroup(group: { provider: string }): boolean {
+  const id = String(group?.provider || '').trim().toLowerCase()
+  return id === 'orcarouter' || id === 'orcarouter-oauth'
+}
+
+/**
+ * Only surfaced when the backend had to fall back to the verified cold-start
+ * seed: the user must know the list is degraded rather than believe it is the
+ * whole live catalog.
+ */
+const orcaRouterDegradedGroups = computed(() =>
+  activeModelGroups.value.filter(
+    group => isOrcaRouterGroup(group) && capabilityCatalogStatus(group as CapabilityCatalogGroup).degraded,
+  ),
 )
 
 const selectedModelInActiveProfile = computed(() =>
@@ -186,6 +208,13 @@ async function handleRefresh() {
         size="small"
         class="model-search"
       />
+      <div
+        v-if="orcaRouterDegradedGroups.length > 0"
+        class="model-degraded"
+        data-testid="orca-router-catalog-degraded"
+      >
+        {{ t('models.orcaRouterCatalogDegraded') }}
+      </div>
       <div class="model-list">
         <div v-for="group in filteredGroups" :key="group.provider" class="model-group">
           <div class="model-group-header" @click="toggleGroup(group.provider)">
@@ -355,6 +384,17 @@ async function handleRefresh() {
 
 .model-search {
   margin-bottom: 12px;
+}
+
+.model-degraded {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid $border-color;
+  border-radius: $radius-sm;
+  background: $bg-secondary;
+  color: $text-muted;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .model-list {

@@ -525,6 +525,10 @@ function openAIReasoningReplayField(
   // OpenAI-compatible Chat adapters receive the common `reasoning` field.
   if (identifier.includes('openrouter')) return 'reasoning_details'
   if (usesReasoningContentProtocol(identifier)) return 'reasoning_content'
+  // OrcaRouter replays reasoning in `reasoning_content`, verified against the
+  // live gateway. The hostname check keeps this inert for a provider that
+  // merely shares a base URL string.
+  if (usesOrcaRouterReasoningContentProtocol(config.id, config.baseUrl)) return 'reasoning_content'
   return 'reasoning'
 }
 
@@ -533,6 +537,22 @@ function requiresNonNullAssistantContent(
   model: string,
 ): boolean {
   return openAIReasoningReplayField(config, model) === 'reasoning_content'
+}
+
+/**
+ * OrcaRouter returns `reasoning_content` on Chat Completions (verified live
+ * against `https://api.orcarouter.ai/v1`). Match on the provider id and the
+ * gateway hostname rather than on a model name.
+ */
+export function usesOrcaRouterReasoningContentProtocol(id: string, baseUrl?: string): boolean {
+  const providerId = String(id || '').trim().toLowerCase()
+  if (providerId === 'orcarouter' || providerId === 'orcarouter-oauth') return true
+  try {
+    const host = new URL(String(baseUrl || '')).hostname.toLowerCase()
+    return host === 'api.orcarouter.ai' || host.endsWith('.orcarouter.ai')
+  } catch {
+    return false
+  }
 }
 
 function usesReasoningContentProtocol(identifier: string): boolean {

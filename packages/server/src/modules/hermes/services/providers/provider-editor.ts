@@ -7,6 +7,17 @@ import YAML from 'js-yaml'
 import { normalizeCustomProviderEntry } from '../../../studio/contracts/provider-compat'
 import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
 import {
+  ORCAROUTER_OAUTH_PROVIDER,
+  ORCAROUTER_PROVIDER,
+  filterOrcaRouterModels,
+  normalizeOrcaRouterApiBase,
+  normalizeOrcaRouterCatalogModels,
+  orcaRouterModelsUrl,
+  ORCAROUTER_BASE_URL_ENV,
+  ORCAROUTER_CATALOG_MAX_BYTES,
+  type OrcaRouterCapability,
+} from '../../../studio/public/orcarouter-catalog'
+import {
   appConfigFilePath,
   invalidateAppConfigCache,
   type AppConfig,
@@ -81,6 +92,7 @@ export class ProviderEditorError extends Error {
 
 interface ProviderSource {
   id: string
+  providerId: string
   builtin: boolean
   source: ProviderEditorDetail['source']
   sourceKey?: string
@@ -149,19 +161,30 @@ function updateEnv(raw: string | undefined, key: string, value: string | undefin
   return `${next.join('\n').replace(/^\n+/, '')}${next.length ? '\n' : ''}`
 }
 
+/**
+ * Environment key that holds a built-in provider's base URL override. Both
+ * OrcaRouter entries share one override, and the Auth entry point has no
+ * `base_url_env` of its own, so the mapping cannot be read straight off
+ * `PROVIDER_ENV_MAP`.
+ */
+function builtinBaseUrlEnvKey(source: ProviderSource): string {
+  if (isOrcaRouterProvider(source.providerId)) return ORCAROUTER_BASE_URL_ENV
+  return source.envMapping?.base_url_env || ''
+}
+
 function findSource(config: Record<string, any>, providerId: string): ProviderSource | null {
   if (providerId.startsWith('custom:')) {
     if (Array.isArray(config.custom_providers)) {
       const entry = (config.custom_providers as any[]).find(item => providerKeyForCustomName(item?.name) === providerId)
       if (entry && typeof entry === 'object') {
-        return { id: providerId, builtin: false, source: 'custom_providers', configEntry: entry }
+        return { id: providerId, providerId, builtin: false, source: 'custom_providers', configEntry: entry }
       }
     }
     if (config.providers && typeof config.providers === 'object' && !Array.isArray(config.providers)) {
       for (const [key, value] of Object.entries(config.providers)) {
         const normalized = normalizeCustomProviderEntry(value, key, 'providers')
         if (normalized && providerKeyForCustomName(normalized.name) === providerId) {
-          return { id: providerId, builtin: false, source: 'providers', sourceKey: key, configEntry: value as Record<string, any> }
+          return { id: providerId, providerId, builtin: false, source: 'providers', sourceKey: key, configEntry: value as Record<string, any> }
         }
       }
     }
@@ -170,8 +193,11 @@ function findSource(config: Record<string, any>, providerId: string): ProviderSo
 
   const envMapping = PROVIDER_ENV_MAP[providerId]
   const preset = PROVIDER_PRESETS.find(item => item.value === providerId)
-  if (!envMapping || !preset || !envMapping.api_key_env) return null
-  return { id: providerId, builtin: true, source: 'builtin_env', preset, envMapping }
+  if (!envMapping || !preset) return null
+  // Built-in providers are editable when they own an env credential, and the
+  // OrcaRouter Auth entry point is editable through its auth.json key store.
+  if (!envMapping.api_key_env && !isOrcaRouterProvider(providerId)) return null
+  return { id: providerId, providerId, builtin: true, source: 'builtin_env', preset, envMapping }
 }
 
 function existingAlias(entry: Record<string, any>, aliases: string[], fallback: unknown = ''): any {
@@ -227,12 +253,28 @@ function secretFingerprint(value: string): string {
   return `sha256:${createHash('sha256').update(value).digest('hex').slice(0, 16)}`
 }
 
+function storedDurableKey(auth: Record<string, any>, providerId: string): string {
+  const provider = auth?.providers?.[providerId]
+  const pool = auth?.credential_pool?.[providerId]
+  const poolEntry = Array.isArray(pool)
+    ? pool.find((entry: any) => entry && typeof entry === 'object' && (entry.api_key || entry.access_token))
+    : undefined
+  return String(provider?.api_key || provider?.access_token || poolEntry?.api_key || poolEntry?.access_token || '').trim()
+}
+
 function credentialInfo(
   source: ProviderSource,
   env: Map<string, string>,
+  auth: Record<string, any> = {},
 ): { configured: boolean; value: string; envKey?: string } {
   if (source.source === 'builtin_env') {
     const envKey = source.envMapping!.api_key_env
+    // OrcaRouter's Auth entry point keeps its PKCE-issued key in auth.json.
+    // That key still belongs on this seam: replaceable and clearable here.
+    if (isOrcaRouterProvider(source.providerId)) {
+      const value = storedDurableKey(auth, source.providerId)
+      return { configured: !!value, value, ...(envKey ? { envKey } : {}) }
+    }
     const value = env.get(envKey) || ''
     return { configured: !!value.trim(), value, envKey }
   }
@@ -258,6 +300,11 @@ const CUSTOM_PROVIDER_EDITABLE_FIELDS: ProviderEditableField[] = [
 
 function editableFields(source: ProviderSource): ProviderEditableField[] {
   if (!source.builtin) return [...CUSTOM_PROVIDER_EDITABLE_FIELDS]
+  // OrcaRouter's Auth entry point stores its key in auth.json rather than the
+  // profile .env, but it is still user-replaceable and user-clearable.
+  if (isOrcaRouterProvider(source.providerId)) {
+    return ['label', 'base_url', 'api_key', 'preferred_model', 'context_lengths']
+  }
   const fields: ProviderEditableField[] = ['label', 'api_key', 'preferred_model', 'context_lengths']
   if (source.envMapping?.base_url_env) fields.splice(1, 0, 'base_url')
   return fields
@@ -271,6 +318,9 @@ export function providerEditorCapabilities(providerId: string): {
     return { editable: true, editable_fields: [...CUSTOM_PROVIDER_EDITABLE_FIELDS] }
   }
   const envMapping = PROVIDER_ENV_MAP[providerId]
+  if (isOrcaRouterProvider(providerId)) {
+    return { editable: true, editable_fields: ['label', 'base_url', 'api_key', 'preferred_model', 'context_lengths'] }
+  }
   if (!envMapping?.api_key_env) return { editable: false, editable_fields: [] }
   const fields: ProviderEditableField[] = ['label', 'api_key', 'preferred_model', 'context_lengths']
   if (envMapping.base_url_env) fields.splice(1, 0, 'base_url')
@@ -311,20 +361,22 @@ function buildDetailFromRaw(
   rawConfig: string | undefined,
   rawEnv: string | undefined,
   rawAppConfig: string | undefined,
+  rawAuthConfig?: string,
 ): ProviderEditorDetail {
   const config = parseYaml(rawConfig)
   const appConfig = parseJson(rawAppConfig) as AppConfig
   const source = findSource(config, providerId)
   if (!source) throw new ProviderEditorError(`Provider "${providerId}" is not editable`, 404, 'PROVIDER_NOT_EDITABLE')
   const env = parseEnv(rawEnv)
-  const credential = credentialInfo(source, env)
+  const auth = parseJson(rawAuthConfig)
+  const credential = credentialInfo(source, env, auth)
   const normalized = source.builtin
     ? null
     : normalizeCustomProviderEntry(source.configEntry, source.sourceKey || '', source.source === 'providers' ? 'providers' : 'custom_providers')
   const fallbackLabel = source.builtin ? source.preset!.label : normalized!.name
   const label = appProfileValue(appConfig, 'providerLabels', profile, providerId) || fallbackLabel
   const baseUrl = source.builtin
-    ? (source.envMapping!.base_url_env ? env.get(source.envMapping!.base_url_env) : '') || source.preset!.base_url
+    ? (builtinBaseUrlEnvKey(source) ? env.get(builtinBaseUrlEnvKey(source)) : '') || source.preset!.base_url
     : normalized!.base_url
   const apiMode = source.builtin ? source.preset!.api_mode : normalized!.api_mode
   const preferredModel = appProfileValue(appConfig, 'providerPreferredModels', profile, providerId) ||
@@ -347,7 +399,7 @@ function buildDetailFromRaw(
     sourceKey: source.sourceKey || '',
     entry: source.configEntry || null,
     envCredential: credential.value,
-    envBaseUrl: source.envMapping?.base_url_env ? env.get(source.envMapping.base_url_env) || '' : '',
+    envBaseUrl: builtinBaseUrlEnvKey(source) ? env.get(builtinBaseUrlEnvKey(source)) || '' : '',
     label,
     preferredModel,
     contexts,
@@ -388,12 +440,13 @@ function profilePaths(profile: string) {
 
 export async function getProviderEditorDetail(profile: string, providerId: string): Promise<ProviderEditorDetail> {
   const paths = profilePaths(profile)
-  const [rawConfig, rawEnv, rawApp] = await Promise.all([
+  const [rawConfig, rawEnv, rawApp, rawAuth] = await Promise.all([
     safeFileStore.readText(paths.config).catch(() => ''),
     safeFileStore.readText(paths.env).catch(() => ''),
     safeFileStore.readText(paths.app).catch(() => ''),
+    safeFileStore.readText(paths.auth).catch(() => ''),
   ])
-  return buildDetailFromRaw(profile, providerId, rawConfig, rawEnv, rawApp)
+  return buildDetailFromRaw(profile, providerId, rawConfig, rawEnv, rawApp, rawAuth)
 }
 
 const PROVIDER_TEST_TIMEOUT_MS = 8_000
@@ -430,6 +483,41 @@ async function readLimitedResponse(response: Response): Promise<string> {
   } finally {
     reader.releaseLock()
   }
+}
+
+/**
+ * OrcaRouter's catalog must be read per capability. The generic `/v1/models`
+ * probe would happily return image, video, embedding and rerank models, and a
+ * text selector must never be offered a route this client cannot speak.
+ */
+async function fetchOrcaRouterCapabilityCatalogForTest(
+  baseUrl: string,
+  apiKey: string,
+  capability: OrcaRouterCapability,
+): Promise<string[]> {
+  const url = orcaRouterModelsUrl(normalizeOrcaRouterApiBase(baseUrl), capability)
+  const response = await fetch(url, {
+    headers: { Accept: 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+    signal: AbortSignal.timeout(PROVIDER_TEST_TIMEOUT_MS),
+  })
+  if (!response.ok) {
+    const code = response.status === 404 || response.status === 405 ? 'PROVIDER_CATALOG_UNAVAILABLE' : 'PROVIDER_TEST_FAILED'
+    throw new ProviderEditorError(`Provider models endpoint returned HTTP ${response.status}`, 422, code)
+  }
+  const text = await response.text()
+  if (text.length > ORCAROUTER_CATALOG_MAX_BYTES) {
+    throw new ProviderEditorError('Provider returned more than 2 MiB of model metadata', 422, 'PROVIDER_MODEL_LIMIT_EXCEEDED')
+  }
+  let body: unknown
+  try { body = JSON.parse(text) } catch { throw new ProviderEditorError('Provider returned invalid JSON', 422, 'PROVIDER_TEST_FAILED') }
+  const models = filterOrcaRouterModels(normalizeOrcaRouterCatalogModels(body), capability)
+  if (models.length === 0) throw new ProviderEditorError('Provider returned an empty model catalog', 422, 'PROVIDER_EMPTY_CATALOG')
+  return models.map(model => model.id)
+}
+
+export function isOrcaRouterProvider(providerId: unknown): boolean {
+  const id = String(providerId || '').trim().toLowerCase()
+  return id === ORCAROUTER_PROVIDER || id === ORCAROUTER_OAUTH_PROVIDER
 }
 
 export async function fetchProviderCatalogForTest(baseUrl: string, apiKey: string, apiMode?: ProviderApiMode): Promise<string[]> {
@@ -498,16 +586,17 @@ export async function testProviderEditorDraft(
   patch: ProviderEditorPatch,
 ): Promise<{ models: string[]; model_count: number; catalog_unavailable?: boolean }> {
   const paths = profilePaths(profile)
-  const [rawConfig, rawEnv, rawApp] = await Promise.all([
+  const [rawConfig, rawEnv, rawApp, rawAuth] = await Promise.all([
     safeFileStore.readText(paths.config).catch(() => ''),
     safeFileStore.readText(paths.env).catch(() => ''),
     safeFileStore.readText(paths.app).catch(() => ''),
+    safeFileStore.readText(paths.auth).catch(() => ''),
   ])
-  const detail = buildDetailFromRaw(profile, providerId, rawConfig, rawEnv, rawApp)
+  const detail = buildDetailFromRaw(profile, providerId, rawConfig, rawEnv, rawApp, rawAuth)
   validatePatch(detail, patch)
   const config = parseYaml(rawConfig)
   const source = findSource(config, providerId)!
-  const existingCredential = credentialInfo(source, parseEnv(rawEnv)).value
+  const existingCredential = credentialInfo(source, parseEnv(rawEnv), parseJson(rawAuth)).value
   const apiKey = patch.credential_action === 'replace' ? String(patch.api_key || '') : existingCredential
   if (patch.credential_action === 'clear') throw new ProviderEditorError('Cannot test a cleared credential', 422, 'PROVIDER_TEST_NO_CREDENTIAL')
   const baseUrl = patch.base_url !== undefined ? normalizeUrl(patch.base_url) : detail.base_url
@@ -517,7 +606,9 @@ export async function testProviderEditorDraft(
     throw new ProviderEditorError(capability.reason || 'Provider connection testing is not supported', 422, 'PROVIDER_TEST_UNSUPPORTED')
   }
   try {
-    const models = await fetchProviderCatalogForTest(baseUrl, apiKey, apiMode)
+    const models = isOrcaRouterProvider(providerId)
+      ? await fetchOrcaRouterCapabilityCatalogForTest(baseUrl, apiKey, 'chat')
+      : await fetchProviderCatalogForTest(baseUrl, apiKey, apiMode)
     return { models: models.slice(0, 100), model_count: models.length }
   } catch (error) {
     // No catalog is not a failed connection. Report it as its own outcome so
@@ -649,7 +740,7 @@ export async function updateProviderEditorDetail(
   let nextDetail!: ProviderEditorDetail
   let changed: string[] = []
   await safeFileStore.updateTexts([paths.config, paths.env, paths.auth, paths.app], (current) => {
-    before = buildDetailFromRaw(profile, providerId, current[paths.config], current[paths.env], current[paths.app])
+    before = buildDetailFromRaw(profile, providerId, current[paths.config], current[paths.env], current[paths.app], current[paths.auth])
     if (!expectedRevision || expectedRevision.replace(/^W\//, '').replace(/^"|"$/g, '') !== before.revision) {
       throw new ProviderEditorError('Provider configuration changed; reload before saving', 412, 'REVISION_CONFLICT', before)
     }
@@ -675,7 +766,7 @@ export async function updateProviderEditorDetail(
     if (patch.base_url !== undefined) {
       baseUrl = normalizeUrl(patch.base_url)
       if (source.source === 'builtin_env') {
-        const key = source.envMapping!.base_url_env
+        const key = builtinBaseUrlEnvKey(source)
         const presetUrl = source.preset!.base_url.replace(/\/+$/, '')
         env = updateEnv(env, key, baseUrl === presetUrl ? undefined : baseUrl)
       } else {
@@ -704,7 +795,20 @@ export async function updateProviderEditorDetail(
     }
 
     if (credentialAction !== 'keep') {
-      if (source.source === 'builtin_env') {
+      if (source.source === 'builtin_env' && isOrcaRouterProvider(source.providerId)) {
+        // The Auth entry point's key is a durable API key, not a token pair.
+        if (credentialAction === 'replace') {
+          auth.providers = auth.providers && typeof auth.providers === 'object' ? auth.providers : {}
+          auth.providers[providerId] = {
+            ...(auth.providers[providerId] || {}),
+            api_key: apiKey,
+            auth_mode: 'oauth_pkce',
+            last_refresh: new Date().toISOString(),
+          }
+        } else {
+          delete auth.providers?.[providerId]
+        }
+      } else if (source.source === 'builtin_env') {
         env = updateEnv(env, source.envMapping!.api_key_env, credentialAction === 'replace' ? apiKey : undefined)
       } else {
         const normalized = normalizeCustomProviderEntry(source.configEntry, source.sourceKey || '', source.source === 'providers' ? 'providers' : 'custom_providers')
@@ -717,7 +821,9 @@ export async function updateProviderEditorDetail(
         }
       }
     }
-    syncAuthMetadata(auth, source, providerId, baseUrl, credentialAction, apiKey)
+    if (!isOrcaRouterProvider(source.providerId)) {
+      syncAuthMetadata(auth, source, providerId, baseUrl, credentialAction, apiKey)
+    }
 
     const files: MultiTextUpdate = {
       [paths.config]: dumpYaml(config),
@@ -725,7 +831,7 @@ export async function updateProviderEditorDetail(
       [paths.auth]: JSON.stringify(auth, null, 2) + '\n',
       [paths.app]: JSON.stringify(appConfig, null, 2) + '\n',
     }
-    nextDetail = buildDetailFromRaw(profile, providerId, files[paths.config], files[paths.env], files[paths.app])
+    nextDetail = buildDetailFromRaw(profile, providerId, files[paths.config], files[paths.env], files[paths.app], files[paths.auth])
     return { files, result: undefined }
   }, { backup: true })
 
@@ -748,7 +854,7 @@ export async function updateProviderContextLengths(
   const result = await safeFileStore.updateTexts(
     [paths.config, paths.env, paths.auth, paths.app],
     (current) => {
-      const before = buildDetailFromRaw(profile, providerId, current[paths.config], current[paths.env], current[paths.app])
+      const before = buildDetailFromRaw(profile, providerId, current[paths.config], current[paths.env], current[paths.app], current[paths.auth])
       const normalizedExpected = String(expectedRevision || '').replace(/^W\//, '').replace(/^"|"$/g, '')
       if (!normalizedExpected || normalizedExpected !== before.revision) {
         throw new ProviderEditorError('Provider configuration changed; reload before saving', 412, 'REVISION_CONFLICT', before)
@@ -772,7 +878,7 @@ export async function updateProviderContextLengths(
         updates.map(([model, value]) => [model.trim(), value]),
       )
       if (!written) throw new ProviderEditorError('Database is not available', 500, 'DATABASE_UNAVAILABLE')
-      const detail = buildDetailFromRaw(profile, providerId, current[paths.config], current[paths.env], current[paths.app])
+      const detail = buildDetailFromRaw(profile, providerId, current[paths.config], current[paths.env], current[paths.app], current[paths.auth])
       return {
         files: {},
         result: { before, detail, changed: updates.map(([model]) => `context_lengths.${model}`) },

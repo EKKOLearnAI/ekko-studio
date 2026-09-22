@@ -60,6 +60,7 @@ const tagMappings = {
   'modules/hermes/routes/xai-auth.ts': { name: 'xAI Auth', description: 'xAI OAuth' },
   'modules/hermes/routes/anthropic-auth.ts': { name: 'Anthropic Auth', description: 'Anthropic OAuth' },
   'modules/hermes/routes/minimax-auth.ts': { name: 'MiniMax Auth', description: 'MiniMax OAuth' },
+  'modules/hermes/routes/orcarouter-auth.ts': { name: 'OrcaRouter Auth', description: 'OrcaRouter OAuth 2.0 + PKCE' },
   'modules/hermes/routes/config.ts': { name: 'Config', description: 'Configuration management' },
   'modules/studio/routes/files.ts': { name: 'Studio Files', description: 'Studio profile file browser and editor' },
   'modules/studio/routes/app-upload.ts': { name: 'Studio Files', description: 'Studio App chunked uploads' },

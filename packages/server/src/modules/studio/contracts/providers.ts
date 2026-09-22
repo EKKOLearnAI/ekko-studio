@@ -4,6 +4,10 @@
  */
 
 import { OPENCODE_FREE_PROVIDER, OPENCODE_FREE_BASE_URL } from './opencode-free'
+import { ORCAROUTER_SEED_MODELS } from '../public/orcarouter-catalog'
+
+/** Verified cold-start seed IDs shared by both OrcaRouter authentication entries. */
+const ORCAROUTER_SEED_MODEL_IDS: string[] = ORCAROUTER_SEED_MODELS.map(model => model.id)
 
 export interface ProviderPreset {
   label: string
@@ -627,6 +631,25 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://openrouter.ai/api/v1',
     models: [],
+  },
+  {
+    label: 'OrcaRouter',
+    value: 'orcarouter',
+    builtin: true,
+    base_url: 'https://api.orcarouter.ai/v1',
+    api_mode: 'chat_completions',
+    // Verified cold-start seed only. Live discovery from
+    // https://api.orcarouter.ai/v1/models is authoritative; these entries keep a
+    // fresh installation usable while that endpoint is slow or unavailable.
+    models: ORCAROUTER_SEED_MODEL_IDS,
+  },
+  {
+    label: 'OrcaRouter - Auth',
+    value: 'orcarouter-oauth',
+    builtin: true,
+    base_url: 'https://api.orcarouter.ai/v1',
+    api_mode: 'chat_completions',
+    models: ORCAROUTER_SEED_MODEL_IDS,
   },
   {
     label: 'GitHub Copilot',

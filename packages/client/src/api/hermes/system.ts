@@ -47,6 +47,17 @@ export interface AvailableModelGroup {
   model_restore_available?: boolean
   /** 可选：模型 ID -> 元数据（preview/disabled/alias）。alias 仅用于 Web UI 展示。 */
   model_meta?: Record<string, { preview?: boolean; disabled?: boolean; alias?: string }>
+  /**
+   * Capability-filtered model lists. OrcaRouter publishes image, video,
+   * embedding and rerank models alongside chat models, so each AI entry point
+   * gets its own list instead of one shared catalog.
+   */
+  capability_models?: Record<string, string[]>
+  capability_catalog?: {
+    source: 'live' | 'seed'
+    degraded: boolean
+    reason?: string
+  }
 }
 
 export interface ProfileAvailableModels {

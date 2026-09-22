@@ -3,7 +3,7 @@
   "info": {
     "title": "Ekko Studio API",
     "description": "Ekko Studio API — chat sessions, scheduled jobs, platform channels, model management, skills, memory, logs, file browser, group chat, and terminal.",
-    "version": "0.7.23"
+    "version": "0.7.24"
   },
   "servers": [
     {
@@ -75,6 +75,10 @@
     {
       "name": "MiniMax Auth",
       "description": "MiniMax OAuth"
+    },
+    {
+      "name": "OrcaRouter Auth",
+      "description": "OrcaRouter OAuth 2.0 + PKCE"
     },
     {
       "name": "Config",
@@ -6397,6 +6401,199 @@
         }
       }
     },
+    "/api/hermes/auth/orcarouter/cancel/{sessionId}": {
+      "post": {
+        "tags": [
+          "OrcaRouter Auth"
+        ],
+        "summary": "Create :sessionId",
+        "description": "POST /api/hermes/auth/orcarouter/cancel/:sessionId",
+        "operationId": "cancel",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/hermes/auth/orcarouter/poll/{sessionId}": {
+      "get": {
+        "tags": [
+          "OrcaRouter Auth"
+        ],
+        "summary": "Get :sessionId",
+        "description": "GET /api/hermes/auth/orcarouter/poll/:sessionId",
+        "operationId": "poll",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/hermes/auth/orcarouter/start": {
+      "post": {
+        "tags": [
+          "OrcaRouter Auth"
+        ],
+        "summary": "Create start",
+        "description": "POST /api/hermes/auth/orcarouter/start",
+        "operationId": "start",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "callback_mode": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hermes/auth/orcarouter/status": {
+      "get": {
+        "tags": [
+          "OrcaRouter Auth"
+        ],
+        "summary": "Get status",
+        "description": "GET /api/hermes/auth/orcarouter/status",
+        "operationId": "status",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/hermes/auth/orcarouter/submit/{sessionId}": {
+      "post": {
+        "tags": [
+          "OrcaRouter Auth"
+        ],
+        "summary": "Create :sessionId",
+        "description": "POST /api/hermes/auth/orcarouter/submit/:sessionId",
+        "operationId": "submit",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/hermes/auth/xai/poll/{sessionId}": {
       "get": {
         "tags": [
@@ -7141,46 +7338,6 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "api_key": {
-                    "type": "string"
-                  },
-                  "api_mode": {
-                    "type": "string"
-                  },
-                  "base_url": {
-                    "type": "string"
-                  },
-                  "context_length": {
-                    "type": "number"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "providerKey": {
-                    "nullable": true,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "api_key",
-                  "base_url",
-                  "model",
-                  "name"
-                ]
-              }
-            }
           }
         }
       }

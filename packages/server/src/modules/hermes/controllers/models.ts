@@ -24,13 +24,18 @@ import { readProviderModelCatalogCache,
 import { providerEditorCapabilities, type ProviderEditableField } from '../services/providers/provider-editor'
 import { providerModelRefreshCapabilities } from '../services/providers/provider-model-refresh'
 import { getOpenCodeFreeStatus, type OpenCodeFreeStatus } from '../services/providers/opencode-free'
+import {
+  ORCAROUTER_OAUTH_PROVIDER,
+  isOrcaRouterCapabilityProvider,
+  resolveOrcaRouterCapabilityCatalog,
+} from '../services/providers/orcarouter-capabilities'
 import { OPENCODE_FREE_PROVIDER, OPENCODE_FREE_BASE_URL, isOpenCodeFreeModel } from '../../studio/contracts/opencode-free'
 
 const PROVIDER_MODEL_CATALOG = buildProviderModelMap()
 
 type ModelMeta = { preview?: boolean; disabled?: boolean; alias?: string }
 type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
-type AvailableGroup = { catalog_status?: OpenCodeFreeStatus; provider: string; label: string; base_url: string; models: string[]; api_key: string; api_mode?: ProviderApiMode; builtin?: boolean; model_meta?: Record<string, ModelMeta>; available_models?: string[]; base_url_env?: string; provider_source?: 'custom_providers' | 'providers'; provider_key?: string; provider_editable?: boolean; editable_fields?: ProviderEditableField[]; model_refreshable?: boolean; model_refresh_reason?: string; model_restore_available?: boolean }
+type AvailableGroup = { catalog_status?: OpenCodeFreeStatus; provider: string; label: string; base_url: string; models: string[]; api_key: string; api_mode?: ProviderApiMode; builtin?: boolean; model_meta?: Record<string, ModelMeta>; available_models?: string[]; base_url_env?: string; provider_source?: 'custom_providers' | 'providers'; provider_key?: string; provider_editable?: boolean; editable_fields?: ProviderEditableField[]; model_refreshable?: boolean; model_refresh_reason?: string; model_restore_available?: boolean; capability_models?: Record<string, string[]>; capability_catalog?: { source: 'live' | 'seed'; degraded: boolean; reason?: string } }
 type ModelVisibility = Record<string, ModelVisibilityRule>
 type CustomModels = Record<string, string[]>
 
@@ -260,7 +265,9 @@ function providerShouldFetchLiveModels(providerKey: string): boolean {
 }
 
 function providerSupportsStoredOAuth(providerKey: string): boolean {
-  return providerKey === 'claude-oauth' || providerKey === 'minimax-oauth'
+  return providerKey === 'claude-oauth' ||
+    providerKey === 'minimax-oauth' ||
+    providerKey === ORCAROUTER_OAUTH_PROVIDER
 }
 
 interface StoredOAuthCredential {
@@ -276,14 +283,16 @@ function storedOAuthCredential(auth: any, providerKey: string): StoredOAuthCrede
     const provider = auth?.providers?.[key]
     const pool = auth?.credential_pool?.[key]
     const poolEntry = Array.isArray(pool)
-      ? pool.find((entry: any) => entry?.access_token || entry?.agent_key)
+      ? pool.find((entry: any) => entry?.access_token || entry?.agent_key || entry?.api_key)
       : undefined
     const authorized = !!(
       provider?.tokens?.access_token ||
       provider?.access_token ||
       provider?.agent_key ||
+      provider?.api_key ||
       poolEntry?.access_token ||
-      poolEntry?.agent_key
+      poolEntry?.agent_key ||
+      poolEntry?.api_key
     )
     if (!authorized) continue
     const baseUrl = String(
@@ -424,10 +433,12 @@ async function buildAvailableForProfile(
 
   const groups: AvailableGroup[] = []
   const seenProviders = new Set<string>()
-  const addGroup = (provider: string, label: string, base_url: string, models: string[], api_key: string, builtin?: boolean, model_meta?: Record<string, ModelMeta>, extra?: Pick<AvailableGroup, 'provider_source' | 'provider_key' | 'api_mode'>) => {
+  const addGroup = (provider: string, label: string, base_url: string, models: string[], api_key: string, builtin?: boolean, model_meta?: Record<string, ModelMeta>, extra?: Pick<AvailableGroup, 'provider_source' | 'provider_key' | 'api_mode'>, capability?: { models: Record<string, string[]>; catalog: { source: 'live' | 'seed'; degraded: boolean; reason?: string } }) => {
     if (seenProviders.has(provider)) return
     seenProviders.add(provider)
-    const availableModels = [...new Set(models)]
+    const availableModels = capability
+      ? [...(capability.models.chat || [])]
+      : [...new Set(models)]
     const apiMode = providerApiMode(provider, extra?.api_mode)
     const displayLabel = providerDisplayLabel(appConfig, profile, provider, label)
     const editor = providerEditorCapabilities(provider)
@@ -457,6 +468,7 @@ async function buildAvailableForProfile(
       model_refreshable: refresh.refreshable,
       ...(refresh.refresh_reason ? { model_refresh_reason: refresh.refresh_reason } : {}),
       model_restore_available: !!(catalogEntry?.previous_models?.length),
+      ...(capability ? { capability_models: capability.models, capability_catalog: capability.catalog } : {}),
     })
   }
 
@@ -507,9 +519,33 @@ async function buildAvailableForProfile(
       },
     )
     modelsList = includeConfiguredDefaultModel(providerKey, modelsList, currentDefault, currentDefaultProvider)
-    if (modelsList.length > 0) {
+    // OrcaRouter entry points get a capability-filtered option list computed
+    // from the live catalog, with the verified seed as an explicit fallback.
+    const capability = isOrcaRouterCapabilityProvider(providerKey)
+      ? await resolveOrcaRouterCapabilityCatalog(profile, providerKey)
+      : null
+    if (capability || modelsList.length > 0) {
       const apiKey = envMapping.api_key_env ? envGetValue(envMapping.api_key_env) : ''
-      addGroup(providerKey, label, baseUrl, modelsList, apiKey, true)
+      addGroup(
+        providerKey,
+        label,
+        baseUrl,
+        modelsList,
+        apiKey,
+        true,
+        undefined,
+        undefined,
+        capability
+          ? {
+              models: capability.models as Record<string, string[]>,
+              catalog: {
+                source: capability.source,
+                degraded: capability.degraded,
+                ...(capability.reason ? { reason: capability.reason } : {}),
+              },
+            }
+          : undefined,
+      )
     }
   }
 
@@ -709,12 +745,14 @@ export async function getAvailable(ctx: any) {
       const match = envContent.match(new RegExp(`^${key}\\s*=[ \\t]*(.+)`, 'm'))
       return match?.[1]?.trim() || ''
     }
-    const addGroup = (provider: string, label: string, base_url: string, models: string[], api_key: string, builtin?: boolean, model_meta?: Record<string, ModelMeta>, extra?: Pick<AvailableGroup, 'provider_source' | 'provider_key'>) => {
+    const addGroup = (provider: string, label: string, base_url: string, models: string[], api_key: string, builtin?: boolean, model_meta?: Record<string, ModelMeta>, extra?: Pick<AvailableGroup, 'provider_source' | 'provider_key'>, capability?: { models: Record<string, string[]>; catalog: { source: 'live' | 'seed'; degraded: boolean; reason?: string } }) => {
       if (seenProviders.has(provider)) return
       seenProviders.add(provider)
-      const availableModels = [...models]
+      // For OrcaRouter the capability-filtered lists are authoritative: the
+      // model selectors must be offered only routes this client can speak.
+      const availableModels = capability ? [...(capability.models.chat || [])] : [...models]
       const apiMode = providerApiMode(provider)
-      groups.push({ provider, label, base_url, models: availableModels, available_models: availableModels, api_key, ...(apiMode ? { api_mode: apiMode } : {}), ...(builtin ? { builtin: true } : {}), ...(model_meta ? { model_meta } : {}), ...(extra?.provider_source ? { provider_source: extra.provider_source } : {}), ...(extra?.provider_key ? { provider_key: extra.provider_key } : {}) })
+      groups.push({ provider, label, base_url, models: availableModels, available_models: availableModels, api_key, ...(apiMode ? { api_mode: apiMode } : {}), ...(builtin ? { builtin: true } : {}), ...(model_meta ? { model_meta } : {}), ...(extra?.provider_source ? { provider_source: extra.provider_source } : {}), ...(extra?.provider_key ? { provider_key: extra.provider_key } : {}), ...(capability ? { capability_models: capability.models, capability_catalog: capability.catalog } : {}) })
     }
 
     let storedAuth: any = {}

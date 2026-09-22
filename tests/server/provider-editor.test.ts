@@ -477,3 +477,66 @@ describe('provider editor service', () => {
       })
   })
 })
+
+describe('provider editor: OrcaRouter entries', () => {
+  it('exposes both OrcaRouter entries as editable with a base URL override', async () => {
+    writeProfile('default', 'model:\n  provider: orcarouter\n  default: openai/gpt-5.5\n')
+    const { getProviderEditorDetail } = await loadEditor()
+
+    const apiKeyEntry = await getProviderEditorDetail('default', 'orcarouter')
+    expect(apiKeyEntry.editable_fields).toEqual(['label', 'base_url', 'api_key', 'preferred_model', 'context_lengths'])
+    expect(apiKeyEntry.base_url).toBe('https://api.orcarouter.ai/v1')
+
+    // The Auth entry point has no `.env` credential slot but must still be
+    // user-replaceable and clearable through the same seam.
+    const authEntry = await getProviderEditorDetail('default', 'orcarouter-oauth')
+    expect(authEntry.editable_fields).toContain('api_key')
+    expect(authEntry.base_url).toBe('https://api.orcarouter.ai/v1')
+  })
+
+  it('writes the shared ORCAROUTER_BASE_URL override for the Auth entry point', async () => {
+    writeProfile('default', 'model:\n  provider: orcarouter-oauth\n  default: openai/gpt-5.5\n')
+    const { getProviderEditorDetail, updateProviderEditorDetail } = await loadEditor()
+    const before = await getProviderEditorDetail('default', 'orcarouter-oauth')
+
+    await updateProviderEditorDetail('default', 'orcarouter-oauth', {
+      base_url: 'https://gateway.example.com/v1',
+    }, before.revision)
+
+    const env = readFileSync(join(profileDir('default'), '.env'), 'utf8')
+    expect(env).toContain('ORCAROUTER_BASE_URL=https://gateway.example.com/v1')
+    // The Auth entry point must never gain an env credential slot.
+    expect(env).not.toContain('ORCAROUTER_API_KEY=')
+
+    const after = await getProviderEditorDetail('default', 'orcarouter-oauth')
+    expect(after.base_url).toBe('https://gateway.example.com/v1')
+  })
+
+  it('stores an Auth entry point key in the auth store rather than the profile .env', async () => {
+    writeProfile('default', 'model:\n  provider: orcarouter-oauth\n  default: openai/gpt-5.5\n')
+    const fakeKey = ['sk-orca', 'editor', 'fixture', '00000000'].join('-')
+    const { getProviderEditorDetail, updateProviderEditorDetail } = await loadEditor()
+    const before = await getProviderEditorDetail('default', 'orcarouter-oauth')
+
+    await updateProviderEditorDetail('default', 'orcarouter-oauth', {
+      credential_action: 'replace',
+      api_key: fakeKey,
+    }, before.revision)
+
+    const env = readFileSync(join(profileDir('default'), '.env'), 'utf8')
+    expect(env).not.toContain(fakeKey)
+    const auth = JSON.parse(readFileSync(join(profileDir('default'), 'auth.json'), 'utf8'))
+    expect(auth.providers['orcarouter-oauth']).toMatchObject({ api_key: fakeKey, auth_mode: 'oauth_pkce' })
+
+    const detail = await getProviderEditorDetail('default', 'orcarouter-oauth')
+    expect(detail.credential_configured).toBe(true)
+    expect(JSON.stringify(detail)).not.toContain(fakeKey)
+
+    // Clearing removes it again.
+    await updateProviderEditorDetail('default', 'orcarouter-oauth', {
+      credential_action: 'clear',
+    }, detail.revision)
+    const cleared = JSON.parse(readFileSync(join(profileDir('default'), 'auth.json'), 'utf8'))
+    expect(cleared.providers?.['orcarouter-oauth']).toBeUndefined()
+  })
+})

@@ -18,9 +18,14 @@ import { refreshProviderModels, restoreProviderModels } from '../services/provid
 import { appendProviderAuditEvent } from '../../studio/public/provider-audit'
 import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
 import { OPENCODE_FREE_PROVIDER, OPENCODE_FREE_BASE_URL, isOpenCodeFreeModel } from '../../studio/contracts/opencode-free'
+import {
+  ORCAROUTER_BASE_URL_ENV,
+  ORCAROUTER_OAUTH_PROVIDER,
+  ORCAROUTER_PROVIDER,
+} from '../../studio/public/orcarouter-catalog'
 
-const OPTIONAL_API_KEY_PROVIDERS = new Set(['cliproxyapi', 'xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth', OPENCODE_FREE_PROVIDER])
-const DIRECT_CONFIG_PROVIDERS = new Set(['xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth', OPENCODE_FREE_PROVIDER])
+const OPTIONAL_API_KEY_PROVIDERS = new Set(['cliproxyapi', 'xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth', 'orcarouter-oauth', OPENCODE_FREE_PROVIDER])
+const DIRECT_CONFIG_PROVIDERS = new Set(['xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth', 'orcarouter-oauth', OPENCODE_FREE_PROVIDER])
 type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
 
 function requestedProfile(ctx: any): string {
@@ -121,6 +126,12 @@ function normalizeBaseUrl(url: string): string {
 
 function builtinBaseUrl(poolKey: string, requestedBaseUrl: string): string {
   return requestedBaseUrl || PROVIDER_PRESETS.find(p => p.value === poolKey)?.base_url || ''
+}
+
+/** Both OrcaRouter entries share one `.env` override for the inference base. */
+function builtinBaseUrlEnv(poolKey: string): string {
+  if (poolKey === ORCAROUTER_PROVIDER || poolKey === ORCAROUTER_OAUTH_PROVIDER) return ORCAROUTER_BASE_URL_ENV
+  return PROVIDER_ENV_MAP[poolKey]?.base_url_env || ''
 }
 
 function shouldPersistBuiltinBaseUrl(poolKey: string, requestedBaseUrl: string): boolean {
@@ -338,11 +349,14 @@ export async function create(ctx: any) {
       } else {
         if (PROVIDER_ENV_MAP[poolKey].api_key_env) {
           await saveEnvValueForProfile(profile, PROVIDER_ENV_MAP[poolKey].api_key_env, api_key)
-          if (PROVIDER_ENV_MAP[poolKey].base_url_env && shouldPersistBuiltinBaseUrl(poolKey, base_url)) { await saveEnvValueForProfile(profile, PROVIDER_ENV_MAP[poolKey].base_url_env, effectiveBaseUrl) }
+          if (builtinBaseUrlEnv(poolKey) && shouldPersistBuiltinBaseUrl(poolKey, base_url)) { await saveEnvValueForProfile(profile, builtinBaseUrlEnv(poolKey), effectiveBaseUrl) }
           config.model.default = model
           config.model.provider = poolKey
         } else if (DIRECT_CONFIG_PROVIDERS.has(poolKey)) {
-          if (PROVIDER_ENV_MAP[poolKey].base_url_env && shouldPersistBuiltinBaseUrl(poolKey, base_url)) { await saveEnvValueForProfile(profile, PROVIDER_ENV_MAP[poolKey].base_url_env, effectiveBaseUrl) }
+          if (builtinBaseUrlEnv(poolKey) && shouldPersistBuiltinBaseUrl(poolKey, base_url)) { await saveEnvValueForProfile(profile, builtinBaseUrlEnv(poolKey), effectiveBaseUrl) }
+          // OrcaRouter - Auth has no `.env` credential slot: the key is issued
+          // by the PKCE connect flow and lives in the profile's auth store, so
+          // only the default model is recorded here.
           config.model.default = model
           config.model.provider = poolKey
         } else {
