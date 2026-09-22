@@ -4,6 +4,16 @@ This page describes the current integration. The proposed next stages for reusin
 
 Open **Agent Manager → DeepSeek Harness** to install `@deepseek-ai/dsh`, detect an existing `dsh` CLI, check for updates, or uninstall the CLI. Installation uses the official npm registry and the same global package management path as other Coding Agents. Update checks include prerelease ordering, such as `rc.1` to `rc.2`.
 
+DSH installs and updates use npm's `--prefer-dedupe` option. Duplicate copies of
+its native dependencies can register the same FFI types twice and stop plugin
+startup even when `dsh --version` succeeds. If opening modes or plugin settings
+fails after an update, check whether `dsh web --no-open` also exits with a plugin
+load error. A `Duplicate type name 'DSH_STARTUPINFOW'` failure can be repaired with
+`npm install -g @deepseek-ai/dsh --prefer-dedupe --registry=https://registry.npmjs.org`.
+This repairs the CLI dependency tree without removing the native DSH home.
+Studio reports connection failures separately from HTTP authentication rejection;
+older builds can show this startup failure as `native authentication failed`.
+
 The Settings button opens the shared Coding Agent configuration pages:
 
 | Page | Native files |

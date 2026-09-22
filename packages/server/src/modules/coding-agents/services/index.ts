@@ -2787,8 +2787,11 @@ export function getCodingAgentDefinition(id: string): CodingAgentDefinition | nu
 }
 
 export function withCodingAgentRegistry(id: CodingAgentId, args: string[]): string[] {
+  // DSH's native dependencies share a process-wide FFI type registry; duplicate
+  // copies can crash plugin startup after an otherwise successful npm update.
+  const installOptions = id === 'dsh' && args[0] === 'install' ? ['--prefer-dedupe'] : []
   return id === 'codex' || id === 'grok' || id === 'opencode' || id === 'dsh'
-    ? [...args, `--registry=${OFFICIAL_NPM_REGISTRY}`]
+    ? [...args, ...installOptions, `--registry=${OFFICIAL_NPM_REGISTRY}`]
     : [...args]
 }
 
