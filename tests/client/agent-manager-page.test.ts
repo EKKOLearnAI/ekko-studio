@@ -272,7 +272,7 @@ describe('Agent Manager page', () => {
     expect(hermesCard.text()).not.toContain('/Users/test/.local/bin/hermes')
     expect(hermesCard.get('[data-testid="hermes-source-type"]').text()).toBe('Runtime')
     expect(hermesCard.findAll('button').map(button => button.text()))
-      .toEqual(['sidebar.settings', 'agentManager.manageRuntime'])
+      .toEqual(['agentManager.hermesSettings', 'agentManager.manageRuntime'])
     expect(wrapper.findComponent({ name: 'VersionManagementModal' }).exists()).toBe(true)
     expect(api.fetchAgentStatusSnapshot).toHaveBeenCalledOnce()
     expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
@@ -322,7 +322,7 @@ describe('Agent Manager page', () => {
     expect(hermesCard.text()).not.toContain('/Users/test/.local/bin/hermes')
     expect(hermesCard.get('[data-testid="hermes-source-type"]').text()).toBe('CLI')
     expect(hermesCard.findAll('button').map(button => button.text()))
-      .toEqual(['sidebar.settings', 'runtimeVersions.viewCliDetails'])
+      .toEqual(['agentManager.hermesSettings', 'runtimeVersions.viewCliDetails'])
     expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
     expect(wrapper.getComponent({ name: 'VersionManagementModal' }).props('show')).toBe(false)
 

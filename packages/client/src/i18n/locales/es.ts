@@ -442,6 +442,7 @@ export default {
     subtitle: 'Detecta y gestiona los agentes disponibles en este dispositivo.',
     refresh: 'Actualizar',
     hermesDescription: 'Hermes puede usar un Runtime gestionado por Studio o una CLI local instalada por el usuario.',
+    hermesSettings: 'Configurar Hermes',
     managedRuntime: 'Hermes Runtime',
     managedRuntimeHint: 'Studio solo instala y gestiona paquetes Runtime completos; nunca instala la CLI de Hermes por separado.',
     studioManaged: 'Gestionado por Studio',

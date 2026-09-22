@@ -442,6 +442,7 @@ export default {
     subtitle: '이 기기에서 사용할 수 있는 에이전트를 검색하고 관리합니다.',
     refresh: '새로고침',
     hermesDescription: 'Hermes는 Studio가 관리하는 Runtime 또는 사용자가 설치한 로컬 CLI를 사용할 수 있습니다.',
+    hermesSettings: 'Hermes 설정',
     managedRuntime: 'Hermes Runtime',
     managedRuntimeHint: 'Studio는 전체 Runtime 패키지만 설치하고 관리하며 Hermes CLI를 별도로 설치하지 않습니다.',
     studioManaged: 'Studio 관리',

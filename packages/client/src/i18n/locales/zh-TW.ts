@@ -430,6 +430,7 @@ export default {
     subtitle: '統一探索及管理此裝置上的 Agent。',
     refresh: '重新整理',
     hermesDescription: 'Hermes 支援 Studio 託管的 Runtime，以及使用者自行安裝的本機 CLI。',
+    hermesSettings: '設定 Hermes',
     managedRuntime: 'Hermes Runtime',
     managedRuntimeHint: 'Studio 僅安裝及管理完整 Runtime 套件，不會單獨安裝 Hermes CLI。',
     studioManaged: 'Studio 管理',
