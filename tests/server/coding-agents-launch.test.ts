@@ -1723,6 +1723,87 @@ describe('coding agent launch preparation', () => {
     expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-use\][\s\S]*?tool_timeout_sec = 360/)
   })
 
+  it('keeps user-owned Codex tables when rewriting config.toml', async () => {
+    // Studio rewrites config.toml on every launch. It owns the top-level keys,
+    // [model_providers.*] and its own [mcp_servers.hermes-studio-*] — everything
+    // else is the user's and must survive, including the [features] apps = false
+    // that silences Codex's host-owned codex_apps server (#2379).
+    const home = makeHome()
+    const codexConfigPath = join(home, 'coding-agent', 'model', 'default', 'openrouter', 'codex', 'config.toml')
+    mkdirSync(dirname(codexConfigPath), { recursive: true })
+    writeFileSync(codexConfigPath, [
+      'model = "stale-model"',
+      '',
+      '[features]',
+      'apps = false',
+      '',
+      '[shell_environment_policy]',
+      'inherit = "all"',
+      '',
+      '[model_providers.unrelated]',
+      'name = "unrelated"',
+      '',
+      '[mcp_servers.custom]',
+      'command = "custom-mcp"',
+      '',
+    ].join('\n'))
+
+    const codex = await prepareCodingAgentLaunch('codex', {
+      profile: 'default',
+      provider: 'openrouter',
+      model: 'openai/gpt-oss-20b:free',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'sk-test',
+    })
+    const config = readFileSync(join(codex.rootDir, 'config.toml'), 'utf-8')
+
+    expect(config).toContain('[features]')
+    expect(config).toContain('apps = false')
+    expect(config).toContain('[shell_environment_policy]')
+    expect(config).toContain('inherit = "all"')
+    expect(config).toContain('[mcp_servers.custom]')
+    // Studio-owned parts are still rewritten, not inherited.
+    expect(config).not.toContain('[model_providers.unrelated]')
+    expect(config).not.toContain('stale-model')
+    expect(config).toContain('[mcp_servers.hermes-studio-api]')
+
+    // Studio writes its own [features] flags, and TOML rejects a table
+    // declared twice: the user's flags are merged into that one table.
+    expect(config.split('[features]').length - 1).toBe(1)
+    expect(config).toContain('tool_search = true')
+    const featuresTable = config.slice(config.indexOf('[features]')).split(/\n\[/)[0]
+    expect(featuresTable).toContain('tool_search = true')
+    expect(featuresTable).toContain('apps = false')
+  })
+
+  it('lets Studio own the Codex feature flags it sets, and keeps the rest', async () => {
+    const home = makeHome()
+    const codexConfigPath = join(home, 'coding-agent', 'model', 'default', 'openrouter', 'codex', 'config.toml')
+    mkdirSync(dirname(codexConfigPath), { recursive: true })
+    writeFileSync(codexConfigPath, [
+      '[features]',
+      'tool_search = false',
+      'apps = false',
+      '',
+    ].join('\n'))
+
+    const codex = await prepareCodingAgentLaunch('codex', {
+      profile: 'default',
+      provider: 'openrouter',
+      model: 'openai/gpt-oss-20b:free',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'sk-test',
+    })
+    const featuresTable = readFileSync(join(codex.rootDir, 'config.toml'), 'utf-8')
+    const table = featuresTable.slice(featuresTable.indexOf('[features]')).split(/\n\[/)[0]
+
+    // Studio decides tool_search, so its value wins and is not duplicated.
+    expect(table).toContain('tool_search = true')
+    expect(table).not.toContain('tool_search = false')
+    expect(table.split('tool_search =').length - 1).toBe(1)
+    expect(table).toContain('apps = false')
+  })
+
   it('inherits external MCP configs for scoped Claude and Codex launches', async () => {
     const home = makeHome()
     const claudeGlobalMcpPath = join(home, 'global-home', '.claude', 'mcp.json')
