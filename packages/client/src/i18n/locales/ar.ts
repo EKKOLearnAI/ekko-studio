@@ -2175,6 +2175,8 @@ export default {
     auxiliaryTaskFlushMemories: 'تفريغ الذاكرة',
     auxiliaryTaskImageGeneration: 'توليد الصور في Studio',
     auxiliaryTaskImageEdit: 'تحويل صورة إلى صورة في Studio',
+    auxiliaryTaskImageGenerationHint: 'نموذج الصور نفسه، مثل gpt-image-2.',
+    auxiliaryTaskImageEditHint: 'نموذج محادثة يستضيف أداة توليد الصور، مثل gpt-5.4-mini — لا نموذج صور. ويجب أن يكون متاحًا على المزوّد المختار أعلاه، لأن الاثنين يُرسَلان في طلب واحد.',
     currentDefault: 'الافتراضي الحالي',
     defaultShort: 'افتراضي',
     setDefaultProvider: 'تعيين المزوّد الافتراضي',

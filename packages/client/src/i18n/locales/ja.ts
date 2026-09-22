@@ -1642,6 +1642,8 @@ export default {
     auxiliaryTaskFlushMemories: 'メモリ書き込み',
     auxiliaryTaskImageGeneration: 'Studio画像生成',
     auxiliaryTaskImageEdit: 'Studio画像から画像',
+    auxiliaryTaskImageGenerationHint: '画像モデルそのもの（例: gpt-image-2）。',
+    auxiliaryTaskImageEditHint: '画像生成ツールをホストするチャットモデル（例: gpt-5.4-mini）。画像モデルではありません。両方が 1 つのリクエストで送られるため、上で選んだプロバイダーで利用できる必要があります。',
     currentDefault: '現在のデフォルト',
     defaultShort: 'デフォルト',
     setDefaultProvider: 'デフォルトプロバイダーに設定',

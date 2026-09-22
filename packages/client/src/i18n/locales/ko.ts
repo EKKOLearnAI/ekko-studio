@@ -1642,6 +1642,8 @@ export default {
     auxiliaryTaskFlushMemories: '메모리 쓰기',
     auxiliaryTaskImageGeneration: 'Studio 이미지 생성',
     auxiliaryTaskImageEdit: 'Studio 이미지 투 이미지',
+    auxiliaryTaskImageGenerationHint: '이미지 모델 자체입니다. 예: gpt-image-2.',
+    auxiliaryTaskImageEditHint: '이미지 생성 도구를 호스팅하는 채팅 모델입니다. 예: gpt-5.4-mini — 이미지 모델이 아닙니다. 둘이 한 요청으로 전송되므로 위에서 고른 공급자에 있어야 합니다.',
     currentDefault: '현재 기본값',
     defaultShort: '기본값',
     setDefaultProvider: '기본 Provider로 설정',

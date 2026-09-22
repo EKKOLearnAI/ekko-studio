@@ -149,6 +149,20 @@ function modelsForProvider(provider: string): string[] {
   return group?.models || []
 }
 
+/**
+ * The two Studio image tasks take different kinds of model, and nothing in the
+ * dialog said so: generation takes the image model itself, while image-to-image
+ * takes a chat model that hosts the image_generation tool on the same provider.
+ * Choosing an image model for the second one fails without saying why.
+ */
+function taskHint(task: AuxiliaryModelTask): string {
+  switch (task.key) {
+    case 'image_generation': return t('models.auxiliaryTaskImageGenerationHint')
+    case 'image_edit': return t('models.auxiliaryTaskImageEditHint')
+    default: return ''
+  }
+}
+
 function taskLabel(task: AuxiliaryModelTask): string {
   switch (task.key) {
     case 'compression': return t('models.auxiliaryTaskCompression')
@@ -533,6 +547,9 @@ watch(() => delegationForm.value.provider, (provider) => {
       :mask-closable="!saving"
     >
       <div class="auxiliary-form">
+        <p v-if="editingTask && taskHint(editingTask)" class="auxiliary-task-hint">
+          {{ taskHint(editingTask) }}
+        </p>
         <label>
           <span>{{ t('models.provider') }}</span>
           <NSelect
@@ -774,6 +791,15 @@ watch(() => delegationForm.value.provider, (provider) => {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.auxiliary-task-hint {
+  // The form is a two-column grid; the hint explains both fields, so it spans.
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: $text-secondary;
 }
 
 .auxiliary-form,

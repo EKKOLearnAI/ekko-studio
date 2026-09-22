@@ -2136,6 +2136,8 @@ export default {
     auxiliaryTaskFlushMemories: 'Flush memories',
     auxiliaryTaskImageGeneration: 'Studio image generation',
     auxiliaryTaskImageEdit: 'Studio image-to-image',
+    auxiliaryTaskImageGenerationHint: 'The image model itself, such as gpt-image-2.',
+    auxiliaryTaskImageEditHint: 'A chat model that hosts the image generation tool, such as gpt-5.4-mini — not an image model. It must be available on the provider chosen above, since both are sent in one request.',
     currentDefault: 'Current default',
     defaultShort: 'Default',
     setDefaultProvider: 'Set default provider',

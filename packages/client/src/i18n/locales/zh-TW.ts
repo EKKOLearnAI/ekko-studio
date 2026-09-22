@@ -2113,6 +2113,8 @@ export default {
     auxiliaryTaskFlushMemories: '寫入記憶',
     auxiliaryTaskImageGeneration: 'Studio 圖片生成',
     auxiliaryTaskImageEdit: 'Studio 圖生圖',
+    auxiliaryTaskImageGenerationHint: '圖像模型本身，例如 gpt-image-2。',
+    auxiliaryTaskImageEditHint: '承載圖像生成工具的對話模型，例如 gpt-5.4-mini——不是圖像模型。它必須在上方選擇的供應商上可用，因為兩者在同一個請求中送出。',
     currentDefault: '目前預設',
     defaultShort: '預設',
     setDefaultProvider: '設為預設 Provider',

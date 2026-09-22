@@ -1947,6 +1947,8 @@ export default {
     auxiliaryTaskFlushMemories: 'Запись воспоминаний',
     auxiliaryTaskImageGeneration: 'Генерация изображений Studio',
     auxiliaryTaskImageEdit: 'Studio: изображение в изображение',
+    auxiliaryTaskImageGenerationHint: 'Сама модель изображений, например gpt-image-2.',
+    auxiliaryTaskImageEditHint: 'Чат-модель, которая размещает инструмент генерации изображений, например gpt-5.4-mini, а не модель изображений. Она должна быть у выбранного выше провайдера, так как обе отправляются в одном запросе.',
     currentDefault: 'Текущая по умолчанию',
     defaultShort: 'По умолч.',
     setDefaultProvider: 'Сделать провайдером по умолчанию',
