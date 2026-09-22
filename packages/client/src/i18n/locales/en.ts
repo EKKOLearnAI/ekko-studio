@@ -3539,6 +3539,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_24_1: 'Added iOS Live Activities orchestration with locale-aware updates and per-user notification routing (#3102, #3111, #3152)',
+    new_0_7_24_2: 'Improved notification defaults and previews, ignored legacy session opt-outs, and hid unsupported social push entries (#3131, #3133, #3146, #3151)',
+    new_0_7_24_3: 'Fixed shared session uploads and attachment access across session sharing flows (#3144)',
+    new_0_7_24_4: 'Scoped Coding Agents now use Studio profile context and compaction settings consistently, including native compact recovery (#3112, #3134)',
+    new_0_7_24_5: 'Improved group chat recovery, avatars, generated titles, and notification previews for attachment messages (#3107, #3135, #3132)',
+    new_0_7_24_6: 'Added session-scoped shared voice and model context permissions, with stronger App-bound session sharing authorization (#3121, #3128, #3129)',
+    new_0_7_24_7: 'Restored Android task notification progress and improved shared-session metadata and invitation handling (#3122, #3123, #3127)',
+    new_0_7_24_8: 'Fixed DSH manifests and Coding Agent integrations, including package identity, MCP namespaces, and Studio guidance gating (#3103, #3109, #3116)',
     new_0_7_23_1: 'Added persistent mobile terminal sessions over App relay, with improved output delivery and input flow control (#3076, #3079)',
     new_0_7_23_2: 'Added Coding Agent clarification prompts and persistent group chat task cards; task plans now stay at the end of each turn (#3080, #3085)',
     new_0_7_23_3: 'Session pins now sync across devices and appear above recent sessions, with corrected pin filtering for App pagination (#3091)',
