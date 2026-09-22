@@ -14,6 +14,7 @@ import { readAppConfig, writeAppConfig, providerDisplayLabel, type ModelVisibili
 import { listUserProfiles } from '../../studio/public/users'
 import { readModelContextRecord, upsertModelContextRecord } from '../../studio/public/provider-context'
 import { getModelContextLength } from '../services/models/context'
+import { isPlainModelSection } from '../services/models/model-section'
 import { readProviderModelCatalogCache,
   refreshConfiguredProviderModelCatalogs,
   resolveProviderCatalogModels,
@@ -1103,9 +1104,14 @@ export async function setConfigModel(ctx: any) {
   try {
     const profile = requestScopedProfileName(ctx)
     await updateConfigYamlForProfile(profile, (config) => {
-      config.model = {}
-      config.model.default = defaultModel
-      if (reqProvider) { config.model.provider = reqProvider }
+      const current = isPlainModelSection(config.model) ? { ...config.model } : {}
+      if (reqProvider && current.provider !== undefined && current.provider !== reqProvider) {
+        delete current.base_url
+        delete current.api_key
+      }
+      current.default = defaultModel
+      if (reqProvider) { current.provider = reqProvider }
+      config.model = current
       return config
     })
     ctx.body = { success: true }
