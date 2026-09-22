@@ -135,6 +135,17 @@ describe('desktop browser security primitives', () => {
     expect(restarted.active().tabs).toEqual([])
   })
 
+  it('uses the system proxy for a newly initialized default profile', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hermes-browser-system-proxy-'))
+    roots.push(root)
+    const store = new BrowserProfileStore(join(root, 'state'))
+
+    await store.initialize()
+
+    expect(store.active().proxyMode).toBe('system')
+    expect(store.active().proxyRules).toBe('')
+  })
+
   it('switches to a new empty root without migrating old browser data', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-browser-profile-switch-'))
     roots.push(root)
