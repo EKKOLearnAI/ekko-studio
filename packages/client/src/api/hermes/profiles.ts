@@ -113,28 +113,35 @@ export async function restartProfileRuntime(name: string): Promise<ProfileRuntim
 
 export interface CreateProfileResult {
   success: boolean
-  /** clone=true 时被清理的独占平台凭据 KEY 名 */
+  /** 实际克隆来源的 profile 名（未克隆时为空） */
+  clonedFrom?: string
+  /** 克隆时被清理的独占平台凭据 KEY 名 */
   strippedCredentials?: string[]
-  /** clone=true 时被禁用的独占平台名 */
+  /** 克隆时被禁用的独占平台名 */
   disabledPlatforms?: string[]
-  /** clone=true 时在 config.yaml 中被清理的内嵌凭据字段路径 */
+  /** 克隆时在 config.yaml 中被清理的内嵌凭据字段路径 */
   strippedConfigCredentials?: string[]
 }
 
-export async function createProfile(name: string, clone?: boolean): Promise<CreateProfileResult & { error?: string }> {
+/**
+ * @param cloneFrom 克隆来源 profile 名；留空表示不克隆
+ */
+export async function createProfile(name: string, cloneFrom?: string | null): Promise<CreateProfileResult & { error?: string }> {
   try {
     const res = await request<{
       success: boolean
+      clonedFrom?: string
       strippedCredentials?: string[]
       disabledPlatforms?: string[]
       strippedConfigCredentials?: string[]
       error?: string
     }>('/api/hermes/profiles', {
       method: 'POST',
-      body: JSON.stringify({ name, clone }),
+      body: JSON.stringify({ name, clone: !!cloneFrom, cloneFrom: cloneFrom || undefined }),
     })
     return {
       success: !!res.success,
+      clonedFrom: res.clonedFrom,
       strippedCredentials: res.strippedCredentials,
       disabledPlatforms: res.disabledPlatforms,
       strippedConfigCredentials: res.strippedConfigCredentials,

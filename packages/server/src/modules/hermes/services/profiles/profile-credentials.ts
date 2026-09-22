@@ -12,7 +12,7 @@
  * 操作前会备份原文件为 `.bak.<timestamp>`。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import yaml from 'js-yaml'
 import { detectHermesRootHome } from '../runtime/path'
@@ -237,14 +237,19 @@ const MODEL_AUTH_PROVIDERS = new Set([
  * access without copying unrelated provider or platform credentials across
  * profiles. Claude OAuth also copies its `anthropic` runtime alias because chat
  * execution rewrites `claude-oauth` to `anthropic`.
+ *
+ * @param sourceProfileName 克隆来源 profile，缺省为当前激活 profile
  */
-export function copyModelProviderAuthForClone(profileName: string): string[] {
+export function copyModelProviderAuthForClone(
+  profileName: string,
+  sourceProfileName?: string,
+): string[] {
   if (!profileName || profileName === 'default') return []
   const targetDir = profileDir(profileName)
   const provider = configuredModelProvider(join(targetDir, 'config.yaml'))
   if (!MODEL_AUTH_PROVIDERS.has(provider)) return []
 
-  const sourceDir = profileDir(activeProfileName())
+  const sourceDir = profileDir(sourceProfileName || activeProfileName())
   const sourceAuth = readAuthJson(join(sourceDir, 'auth.json'))
   const targetAuthPath = join(targetDir, 'auth.json')
   const targetAuth = readAuthJson(targetAuthPath)
@@ -268,6 +273,46 @@ export function copyModelProviderAuthForClone(profileName: string): string[] {
   }
   writeFileSync(targetAuthPath, JSON.stringify(targetAuth, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 })
   return [...copied]
+}
+
+/**
+ * `hermes profile create --clone` 复制的条目
+ *
+ * CLI 的 `--clone` 只能从**当前激活的** profile 克隆（源取自 `~/.hermes/active_profile`），
+ * 没有指定源的参数。要从任意 profile 克隆，只能先创建空 profile，再由这里补齐同一批文件。
+ * 列表与 CLI 行为对齐：config / .env / SOUL / skills，不含 `auth.json`
+ * （auth 仍由 copyModelProviderAuthForClone 按 model provider 精确复制）。
+ */
+const CLONED_PROFILE_ENTRIES = ['config.yaml', '.env', 'SOUL.md', 'skills'] as const
+
+/**
+ * 从任意源 profile 复制 `--clone` 那批文件到新建的空 profile
+ *
+ * 只覆盖上面列出的条目，源里不存在的条目跳过；目标已存在的同名条目会被源覆盖
+ * （调用方保证目标是刚创建的空 profile）。
+ *
+ * @returns 实际复制的条目名
+ */
+export function copyProfileContentsForClone(
+  sourceProfileName: string,
+  targetProfileName: string,
+): string[] {
+  if (!targetProfileName || targetProfileName === sourceProfileName) return []
+  const sourceDir = profileDir(sourceProfileName)
+  const targetDir = profileDir(targetProfileName)
+  if (!existsSync(sourceDir)) {
+    throw new Error(`Source profile '${sourceProfileName}' not found`)
+  }
+
+  mkdirSync(targetDir, { recursive: true })
+  const copied: string[] = []
+  for (const entry of CLONED_PROFILE_ENTRIES) {
+    const from = join(sourceDir, entry)
+    if (!existsSync(from)) continue
+    cpSync(from, join(targetDir, entry), { recursive: true, force: true })
+    copied.push(entry)
+  }
+  return copied
 }
 
 /**

@@ -113,8 +113,8 @@ export const useProfilesStore = defineStore('profiles', () => {
     }
   }
 
-  async function createProfile(name: string, clone?: boolean) {
-    const res = await profilesApi.createProfile(name, clone)
+  async function createProfile(name: string, cloneFrom?: string | null) {
+    const res = await profilesApi.createProfile(name, cloneFrom)
     if (res.success) await fetchProfiles()
     return res
   }

@@ -173,6 +173,153 @@ describe('Profile Routes', () => {
       expect(clonedAuth.credential_pool.anthropic).toBeUndefined()
     })
 
+    it('clones from a profile that is not the active one', async () => {
+      const hermesHome = await mkdtemp(join(tmpdir(), 'hermes-profile-clone-source-'))
+      tempHomes.push(hermesHome)
+      process.env.HERMES_HOME = hermesHome
+      // active profile is `default`; the clone source is a different profile
+      await writeFile(join(hermesHome, 'active_profile'), 'default\n', 'utf-8')
+      await writeFile(join(hermesHome, 'auth.json'), JSON.stringify({
+        providers: { 'openai-codex': { access_token: 'default-token' } },
+      }, null, 2), 'utf-8')
+      const sourceDir = join(hermesHome, 'profiles', 'work')
+      await mkdir(join(sourceDir, 'skills', 'demo'), { recursive: true })
+      await writeFile(join(sourceDir, 'config.yaml'), [
+        'model:',
+        '  provider: openai-codex',
+        '  default: gpt-5.5',
+        'custom_providers:',
+        '  - name: my-router',
+        '    base_url: https://router.example.com/v1',
+        '    api_key: router-key',
+        '',
+      ].join('\n'), 'utf-8')
+      await writeFile(join(sourceDir, '.env'), 'OPENAI_API_KEY=from-work\nTELEGRAM_BOT_TOKEN=work-bot\n', 'utf-8')
+      await writeFile(join(sourceDir, 'SOUL.md'), '# work soul\n', 'utf-8')
+      await writeFile(join(sourceDir, 'skills', 'demo', 'SKILL.md'), '# demo skill\n', 'utf-8')
+      await writeFile(join(sourceDir, 'auth.json'), JSON.stringify({
+        providers: { 'openai-codex': { access_token: 'work-token' } },
+      }, null, 2), 'utf-8')
+      vi.mocked(hermesCli.createProfile).mockImplementation(async (name: string) => {
+        await mkdir(join(hermesHome, 'profiles', name), { recursive: true })
+        return 'Profile created'
+      })
+      const { create } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const ctx: any = {
+        request: { body: { name: 'cloned', cloneFrom: 'work' } },
+        status: 200,
+        body: undefined,
+      }
+
+      await create(ctx)
+
+      expect(ctx.status).toBe(200)
+      expect(ctx.body.clonedFrom).toBe('work')
+      // the CLI's --clone can only read the active profile, so it must not be used here
+      expect(hermesCli.createProfile).toHaveBeenCalledWith('cloned', false)
+      const clonedDir = join(hermesHome, 'profiles', 'cloned')
+      const clonedConfig = readFileSync(join(clonedDir, 'config.yaml'), 'utf-8')
+      expect(clonedConfig).toContain('gpt-5.5')
+      // model providers configured on the source profile come across with it
+      expect(clonedConfig).toContain('my-router')
+      expect(clonedConfig).toContain('router-key')
+      expect(readFileSync(join(clonedDir, 'SOUL.md'), 'utf-8')).toContain('work soul')
+      expect(readFileSync(join(clonedDir, 'skills', 'demo', 'SKILL.md'), 'utf-8')).toContain('demo skill')
+      // auth comes from the chosen source, not from the active profile
+      const clonedAuth = JSON.parse(readFileSync(join(clonedDir, 'auth.json'), 'utf-8'))
+      expect(clonedAuth.providers['openai-codex']).toEqual({ access_token: 'work-token' })
+      // smart cleanup still runs on the copied .env
+      const clonedEnv = readFileSync(join(clonedDir, '.env'), 'utf-8')
+      expect(clonedEnv).toContain('OPENAI_API_KEY=from-work')
+      expect(clonedEnv).not.toContain('TELEGRAM_BOT_TOKEN')
+      expect(ctx.body.strippedCredentials).toContain('TELEGRAM_BOT_TOKEN')
+    })
+
+    it('delegates to the CLI --clone when the source is the active profile', async () => {
+      const hermesHome = await mkdtemp(join(tmpdir(), 'hermes-profile-clone-active-'))
+      tempHomes.push(hermesHome)
+      process.env.HERMES_HOME = hermesHome
+      await writeFile(join(hermesHome, 'active_profile'), 'work\n', 'utf-8')
+      await mkdir(join(hermesHome, 'profiles', 'work'), { recursive: true })
+      vi.mocked(hermesCli.createProfile).mockImplementation(async (name: string) => {
+        await mkdir(join(hermesHome, 'profiles', name), { recursive: true })
+        return 'Profile created'
+      })
+      const { create } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const ctx: any = {
+        request: { body: { name: 'cloned', cloneFrom: 'work' } },
+        status: 200,
+        body: undefined,
+      }
+
+      await create(ctx)
+
+      expect(ctx.status).toBe(200)
+      expect(hermesCli.createProfile).toHaveBeenCalledWith('cloned', true)
+      expect(ctx.body.clonedFrom).toBe('work')
+    })
+
+    it('keeps clone=true without a source meaning "the active profile"', async () => {
+      const hermesHome = await mkdtemp(join(tmpdir(), 'hermes-profile-clone-legacy-'))
+      tempHomes.push(hermesHome)
+      process.env.HERMES_HOME = hermesHome
+      await writeFile(join(hermesHome, 'active_profile'), 'default\n', 'utf-8')
+      vi.mocked(hermesCli.createProfile).mockImplementation(async (name: string) => {
+        await mkdir(join(hermesHome, 'profiles', name), { recursive: true })
+        return 'Profile created'
+      })
+      const { create } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const ctx: any = {
+        request: { body: { name: 'cloned', clone: true } },
+        status: 200,
+        body: undefined,
+      }
+
+      await create(ctx)
+
+      expect(hermesCli.createProfile).toHaveBeenCalledWith('cloned', true)
+      expect(ctx.body.clonedFrom).toBe('default')
+    })
+
+    it('rejects a clone source that does not exist', async () => {
+      const hermesHome = await mkdtemp(join(tmpdir(), 'hermes-profile-clone-missing-'))
+      tempHomes.push(hermesHome)
+      process.env.HERMES_HOME = hermesHome
+      await writeFile(join(hermesHome, 'active_profile'), 'default\n', 'utf-8')
+      vi.mocked(hermesCli.createProfile).mockResolvedValue('Profile created')
+      const { create } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const ctx: any = {
+        request: { body: { name: 'cloned', cloneFrom: 'ghost' } },
+        status: 200,
+        body: undefined,
+      }
+
+      await create(ctx)
+
+      expect(ctx.status).toBe(400)
+      expect(ctx.body.error).toContain('ghost')
+      expect(hermesCli.createProfile).not.toHaveBeenCalled()
+    })
+
+    it('rejects a clone source containing path separators', async () => {
+      const hermesHome = await mkdtemp(join(tmpdir(), 'hermes-profile-clone-traversal-'))
+      tempHomes.push(hermesHome)
+      process.env.HERMES_HOME = hermesHome
+      await writeFile(join(hermesHome, 'active_profile'), 'default\n', 'utf-8')
+      vi.mocked(hermesCli.createProfile).mockResolvedValue('Profile created')
+      const { create } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const ctx: any = {
+        request: { body: { name: 'cloned', cloneFrom: '../../etc' } },
+        status: 200,
+        body: undefined,
+      }
+
+      await create(ctx)
+
+      expect(ctx.status).toBe(400)
+      expect(hermesCli.createProfile).not.toHaveBeenCalled()
+    })
+
     it('deleteProfile calls CLI with name', async () => {
       vi.mocked(hermesCli.deleteProfile).mockResolvedValue(true)
 

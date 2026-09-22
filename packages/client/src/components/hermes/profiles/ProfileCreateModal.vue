@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { NModal, NForm, NFormItem, NInput, NButton, NSwitch, NText, useMessage } from 'naive-ui'
+import { computed, ref } from 'vue'
+import { NModal, NForm, NFormItem, NInput, NButton, NSelect, NSwitch, NText, useMessage } from 'naive-ui'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useI18n } from 'vue-i18n'
 
@@ -18,6 +18,15 @@ const loading = ref(false)
 const name = ref('')
 const clone = ref(false)
 const nameValidationMessage = ref('')
+
+// 克隆来源默认当前 profile —— 与开关打开前的旧行为一致
+const cloneFrom = ref<string | null>(profilesStore.activeProfileName || 'default')
+const cloneOptions = computed(() => profilesStore.profiles.map(profile => ({
+  label: profile.name === profilesStore.activeProfileName
+    ? t('profiles.cloneSourceCurrent', { name: profile.name })
+    : profile.name,
+  value: profile.name,
+})))
 
 function handleNameInput(value: string) {
   // 过滤掉不符合规则的字符，只保留小写字母、数字、下划线和连字符
@@ -41,9 +50,14 @@ async function handleSave() {
     return
   }
 
+  if (clone.value && !cloneFrom.value) {
+    message.warning(t('profiles.cloneSourcePlaceholder'))
+    return
+  }
+
   loading.value = true
   try {
-    const res = await profilesStore.createProfile(name.value.trim(), clone.value)
+    const res = await profilesStore.createProfile(name.value.trim(), clone.value ? cloneFrom.value : null)
     if (res.success) {
       const stripped = res.strippedCredentials ?? []
       const disabled = res.disabledPlatforms ?? []
@@ -94,8 +108,16 @@ function handleClose() {
         {{ nameValidationMessage }}
       </NText>
 
-      <NFormItem :label="t('profiles.cloneFromCurrent')">
+      <NFormItem :label="t('profiles.cloneFromProfile')">
         <NSwitch v-model:value="clone" />
+      </NFormItem>
+      <NFormItem v-if="clone" :label="t('profiles.cloneSource')">
+        <NSelect
+          v-model:value="cloneFrom"
+          :options="cloneOptions"
+          :placeholder="t('profiles.cloneSourcePlaceholder')"
+          filterable
+        />
       </NFormItem>
       <NText v-if="clone" depth="3" style="font-size: 12px;">
         {{ t('profiles.cloneCleanupNotice') }}

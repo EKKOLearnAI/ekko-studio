@@ -12,7 +12,7 @@ import {
   restartGatewayForProfile as restartGatewayRuntimeForProfile,
 } from '../services/gateway/autostart'
 import { logger } from '../../studio/public/logging'
-import { smartCloneCleanup, copyModelProviderAuthForClone } from '../services/profiles/profile-credentials'
+import { smartCloneCleanup, copyModelProviderAuthForClone, copyProfileContentsForClone } from '../services/profiles/profile-credentials'
 import { detectHermesRootHome } from '../services/runtime/path'
 import { getActiveProfileName } from '../services/profiles/profile'
 import {
@@ -436,15 +436,44 @@ export async function listForApp(ctx: any) {
 }
 
 export async function create(ctx: any) {
-  const { name: requestedName, clone } = ctx.request.body as { name?: string; clone?: boolean }
+  const { name: requestedName, clone, cloneFrom } = ctx.request.body as {
+    name?: string
+    clone?: boolean
+    cloneFrom?: string
+  }
   try {
     const name = validateProfileName(requestedName)
+
+    // An explicit source wins; otherwise preserve the existing active-profile clone behaviour.
+    const activeName = normalizeProfileName(getActiveProfileName()) || 'default'
+    let cloneSource = ''
+    if (clone || cloneFrom) {
+      cloneSource = validateProfileName(cloneFrom || activeName, { allowDefault: true })
+      if (!profileDirectoryExists(cloneSource)) {
+        ctx.status = 400
+        ctx.body = { error: `Clone source profile '${cloneSource}' not found` }
+        return
+      }
+      if (!canAccessProfile(ctx, cloneSource)) {
+        ctx.status = 403
+        ctx.body = { error: `No access to profile '${cloneSource}'` }
+        return
+      }
+    }
+
+    // Both native paths clone only the active profile. For another source, create
+    // an empty profile first and copy the same user-owned files explicitly.
+    const cloneViaActiveProfile = !!cloneSource && cloneSource === activeName
     const useHermes = isHermesAgentAvailable()
     const output = useHermes
-      ? await hermesCli.createProfile(name, clone)
-      : `Profile '${(await createProfileWithoutHermes(name, Boolean(clone))).name}' created by Studio`
+      ? await hermesCli.createProfile(name, cloneViaActiveProfile)
+      : `Profile '${(await createProfileWithoutHermes(name, cloneViaActiveProfile)).name}' created by Studio`
+    if (cloneSource && !cloneViaActiveProfile) {
+      const copied = copyProfileContentsForClone(cloneSource, name)
+      logger.info('Cloned profile "%s" from "%s": copied %s', name, cloneSource, copied.join(',') || 'nothing')
+    }
 
-    // clone=true 时执行智能清理：
+    // 克隆时执行智能清理：
     //   - 删除 .env 中的独占平台凭据（Weixin / Telegram / Slack / ...）
     //   - 禁用 config.yaml 中对应的平台节点
     // 避免新 profile 与源 profile 共享同一个 bot token 导致互斥冲突。
@@ -452,9 +481,9 @@ export async function create(ctx: any) {
     let disabledPlatforms: string[] = []
     let strippedConfigCredentials: string[] = []
     let copiedAuthProviders: string[] = []
-    if (clone) {
+    if (cloneSource) {
       try {
-        copiedAuthProviders = copyModelProviderAuthForClone(name)
+        copiedAuthProviders = copyModelProviderAuthForClone(name, cloneSource)
         const cleanup = smartCloneCleanup(name)
         strippedCredentials = cleanup.strippedCredentials
         disabledPlatforms = cleanup.disabledPlatforms
@@ -490,6 +519,7 @@ export async function create(ctx: any) {
     ctx.body = {
       success: true,
       message: output.trim(),
+      clonedFrom: cloneSource || undefined,
       strippedCredentials,
       disabledPlatforms,
       strippedConfigCredentials,
