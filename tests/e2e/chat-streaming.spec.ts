@@ -1604,12 +1604,7 @@ test('restores named resumed tool traces from assistant tool calls after session
   expect(api.unexpectedRequests).toEqual([])
 })
 
-// Browser-side contract for the approval outcome. The mocked chat socket feeds
-// the card directly, so these hold with or without the bridge forwarder fix and
-// are controls for it: they pin what the Web UI must do with each outcome the
-// forwarder can send, while tests/client/bridge-approval-outcome-contract.test.ts
-// pins that the forwarder actually sends it.
-test('keeps the approval card in the browser when the runtime reports a failed resolution (control)', async ({ page }) => {
+test('keeps the approval card when the runtime reports a failed resolution', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const api = await mockHermesApi(page)
   await mockChatSocket(page)
@@ -1640,8 +1635,8 @@ test('keeps the approval card in the browser when the runtime reports a failed r
   await page.getByRole('button', { name: 'Allow once' }).click()
   await expect(prompt).toHaveCount(0)
 
-  // The runtime failed to resolve the gateway request, so the decision never
-  // took effect and the card has to come back rather than stay dismissed.
+  // The runtime could not apply the decision, so it asks again before reporting
+  // the failed outcome for the first request.
   await page.evaluate((sid) => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
     socket.__trigger('approval.requested', {
@@ -1668,7 +1663,6 @@ test('keeps the approval card in the browser when the runtime reports a failed r
   await expect(prompt).toContainText('Allow write_file to create /tmp/gateway.txt')
   await expect(page.getByRole('button', { name: 'Allow once' })).toBeVisible()
 
-  // A stale failure is the expiry case: the card closes and the user is told.
   await page.evaluate((sid) => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
     socket.__trigger('approval.resolved', {
@@ -1687,7 +1681,7 @@ test('keeps the approval card in the browser when the runtime reports a failed r
   expect(api.unexpectedRequests).toEqual([])
 })
 
-test('dismisses the approval card in the browser when the runtime reports a successful resolution (control)', async ({ page }) => {
+test('dismisses the approval card when the runtime reports a successful resolution', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const api = await mockHermesApi(page)
   await mockChatSocket(page)

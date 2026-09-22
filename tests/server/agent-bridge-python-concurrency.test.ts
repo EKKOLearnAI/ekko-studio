@@ -1387,7 +1387,6 @@ assert [(msg["role"], msg["content"]) for msg in messages] == [
 ${harness}
 ${gatewayApprovalPrelude}
 
-# A runtime that queued the request resolves, and the event says so.
 record, approval_id = notify_gateway_approval("session-ok", "run-ok", "request-ok", True)
 result = pool.respond_approval(approval_id, "once")
 assert result["resolved"] is True, result
@@ -1403,7 +1402,6 @@ assert resolved_events[0]["choice"] == "once", resolved_events[0]
 ${harness}
 ${gatewayApprovalPrelude}
 
-# A runtime that never registered the request does not resolve, and the event says so.
 record, approval_id = notify_gateway_approval("session-stale", "run-stale", "request-stale", False)
 result = pool.respond_approval(approval_id, "once")
 assert result["resolved"] is False, result
@@ -1419,8 +1417,7 @@ assert resolved_events[0]["choice"] == "once", resolved_events[0]
 ${harness}
 ${gatewayApprovalPrelude}
 
-# A runtime older than v0.20.5 emits no request_id at all: same honest outcome.
-# The empty request_id short-circuits before resolve_gateway_approval is called.
+# An empty request_id short-circuits before resolve_gateway_approval is reached.
 record, approval_id = notify_gateway_approval("session-legacy", "run-legacy", "", False)
 before = len(approval._resolved_gateway_requests)
 result = pool.respond_approval(approval_id, "deny")
@@ -1438,7 +1435,6 @@ assert resolved_events[0]["choice"] == "deny", resolved_events[0]
 ${harness}
 ${gatewayApprovalPrelude}
 
-# The except Exception branch: a gateway that raises must not be reported as resolved.
 def raising_resolve_gateway_approval(session_key, choice, request_id=None):
     raise RuntimeError("gateway unavailable")
 
@@ -1453,14 +1449,13 @@ assert resolved_events[0]["resolved"] is False, resolved_events[0]
 `)
   })
 
-  it('keeps reporting the interrupt-path approval.resolved event without an outcome (control)', () => {
+  it('omits the outcome on the session-interrupt approval.resolved event', () => {
     runPython(String.raw`
 ${harness}
 ${gatewayApprovalPrelude}
 
-# Control for the respond_approval branch only: the session-interrupt path
-# resolves gateway approvals of its own and is untouched by the fix, so its
-# event carries a reason and still no resolved key on either arm.
+# The interrupt path resolves gateway approvals of its own and reports a reason
+# instead of an outcome.
 record, approval_id = notify_gateway_approval("session-interrupt", "run-interrupt", "request-interrupt", True)
 pool._cancel_pending_approvals_for_generation("session-interrupt", "run-interrupt")
 resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]

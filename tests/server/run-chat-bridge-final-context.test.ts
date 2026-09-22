@@ -2251,8 +2251,6 @@ describe('bridge run final context usage', () => {
       vi.fn(),
     )
 
-    // handleBridgeRun is the live-run call surface of applyBridgeChunkAsync;
-    // resumeBridgeRun covers the reconnect one.
     const approvalResolved = emit.mock.calls.filter(call => call[0] === 'approval.resolved')
     expect(approvalResolved).toHaveLength(1)
     expect(approvalResolved[0][1]).toMatchObject({

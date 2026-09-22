@@ -461,7 +461,7 @@ describe('resumeBridgeRun', () => {
     { name: 'the number 0', resolved: 0 },
     { name: 'an empty string', resolved: '' },
     { name: 'the string "true"', resolved: 'true' },
-  ])('drops a non-boolean resolved value of $name rather than forwarding it (control)', async ({ resolved }) => {
+  ])('drops a non-boolean resolved value of $name rather than forwarding it', async ({ resolved }) => {
     const { resumeBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
     const { nsp, emitted } = createNamespace()
     const socket = { id: 'socket-1', connected: true, emit: vi.fn() }
@@ -521,8 +521,6 @@ describe('resumeBridgeRun', () => {
       vi.fn(),
     )
 
-    // A non-boolean carries no outcome the client can trust: forwarding it would
-    // make `resolved === false` in the client store depend on the loose value.
     const approvalResolved = emitted.filter(item => item.event === 'approval.resolved')
     expect(approvalResolved).toHaveLength(1)
     expect('resolved' in approvalResolved[0].payload).toBe(false)

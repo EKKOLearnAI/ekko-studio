@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
-// The bridge forwarder decides whether the Web UI can tell a failed approval
-// resolution from an older runtime that reports no outcome at all. These cases
-// drive the real forwarder and feed whatever it emits to the real chat store,
-// so the server payload and the client card are checked against each other
-// rather than against a hand-written fixture.
+// These cases drive the real bridge forwarder and feed whatever it broadcasts
+// into the real chat store, so the run-stream payload and the approval card are
+// checked against each other rather than against a hand-written fixture.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -111,6 +109,7 @@ import { useChatStore, type Session } from '@/stores/hermes/chat'
 
 const SESSION_ID = 'session-bridge'
 const APPROVAL_ID = 'approval-bridge'
+const STALE = { stale: true, error: 'Approval is no longer pending.' }
 
 function makeSession(): Session {
   return {
@@ -222,7 +221,11 @@ describe('bridge approval outcome reaches the approval card', () => {
     return store
   }
 
-  it('keeps the approval card when a gateway resolution failed', async () => {
+  it.each([
+    { name: 'a failed gateway resolution', outcome: { resolved: false }, resolved: false, card: APPROVAL_ID },
+    { name: 'a successful gateway resolution', outcome: { resolved: true }, resolved: true, card: undefined },
+    { name: 'an older runtime that reports no outcome', outcome: {}, resolved: undefined, card: undefined },
+  ])('forwards $name to the approval card', async ({ outcome, resolved, card }) => {
     const store = storeWithPendingApproval()
 
     const payload = await forwardRuntimeApproval({
@@ -230,14 +233,13 @@ describe('bridge approval outcome reaches the approval card', () => {
       run_id: 'run-bridge',
       approval_id: APPROVAL_ID,
       choice: 'once',
-      resolved: false,
+      ...outcome,
     })
     chatApi.globalPendingHandler?.({ ...payload, event: 'approval.resolved', session_id: SESSION_ID })
 
-    // The card staying up is the user-visible outcome, so it is asserted first:
-    // on the unfixed forwarder the card is gone by this point.
-    expect(store.pendingApprovals.get(SESSION_ID)).toMatchObject({ approvalId: APPROVAL_ID })
-    expect(payload.resolved).toBe(false)
+    expect(store.pendingApprovals.get(SESSION_ID)?.approvalId).toBe(card)
+    expect(payload.resolved).toBe(resolved)
+    expect('resolved' in payload).toBe(resolved !== undefined)
   })
 
   it('reports the expiry when a failed gateway resolution is also stale', async () => {
@@ -253,61 +255,22 @@ describe('bridge approval outcome reaches the approval card', () => {
       choice: 'once',
       resolved: false,
     })
-    chatApi.globalPendingHandler?.({
-      ...payload,
-      event: 'approval.resolved',
-      session_id: SESSION_ID,
-      stale: true,
-      error: 'Approval is no longer pending.',
-    })
+    chatApi.globalPendingHandler?.({ ...payload, event: 'approval.resolved', session_id: SESSION_ID, ...STALE })
 
-    // Without the outcome the card is dropped silently: it disappears either
-    // way, but only the fixed forwarder reaches the expiry notice.
     expect(expired).toHaveBeenCalledTimes(1)
     expect(store.pendingApprovals.has(SESSION_ID)).toBe(false)
     expect(payload.resolved).toBe(false)
     window.removeEventListener('hermes:pending-interaction-expired', expired)
-  })
-
-  it('publishes a successful gateway resolution and dismisses the approval card', async () => {
-    const store = storeWithPendingApproval()
-
-    const payload = await forwardRuntimeApproval({
-      event: 'approval.resolved',
-      run_id: 'run-bridge',
-      approval_id: APPROVAL_ID,
-      choice: 'once',
-      resolved: true,
-    })
-    chatApi.globalPendingHandler?.({ ...payload, event: 'approval.resolved', session_id: SESSION_ID })
-
-    // The card is dismissed with or without the fix here; the forwarded true is
-    // what discriminates, so it is asserted first.
-    expect(payload.resolved).toBe(true)
-    expect(store.pendingApprovals.has(SESSION_ID)).toBe(false)
-  })
-
-  it('dismisses the approval card for an older runtime that reports no outcome (control)', async () => {
-    const store = storeWithPendingApproval()
-
-    const payload = await forwardRuntimeApproval({
-      event: 'approval.resolved',
-      run_id: 'run-bridge',
-      approval_id: APPROVAL_ID,
-      choice: 'once',
-    })
-    chatApi.globalPendingHandler?.({ ...payload, event: 'approval.resolved', session_id: SESSION_ID })
-
-    expect('resolved' in payload).toBe(false)
-    expect(store.pendingApprovals.has(SESSION_ID)).toBe(false)
   })
 
   // The chat view answers an approval through respondApproval(), which dismisses
-  // the card locally as soon as the choice is sent. The failed resolution then
+  // the card locally as soon as the choice is sent. A stale resolution then
   // arrives with nothing pending for the session, so clearPendingApproval takes
-  // its `!current` early return — a branch that only notifies when the event
-  // says resolved === false, which is precisely what the forwarder now sends.
-  it('reports the expiry after the view already dismissed the card on submit', async () => {
+  // its `!current` early return, which notifies only on resolved === false.
+  it.each([
+    { name: 'a failed gateway resolution', resolved: false, expiries: 1 },
+    { name: 'a successful gateway resolution', resolved: true, expiries: 0 },
+  ])('reports $name to a card the view already dismissed on submit', async ({ resolved, expiries }) => {
     const store = storeWithPendingApproval()
     const expired = vi.fn()
     window.addEventListener('hermes:pending-interaction-expired', expired)
@@ -320,49 +283,12 @@ describe('bridge approval outcome reaches the approval card', () => {
       run_id: 'run-bridge',
       approval_id: APPROVAL_ID,
       choice: 'once',
-      resolved: false,
+      resolved,
     })
-    chatApi.globalPendingHandler?.({
-      ...payload,
-      event: 'approval.resolved',
-      session_id: SESSION_ID,
-      stale: true,
-      error: 'Approval is no longer pending.',
-    })
+    chatApi.globalPendingHandler?.({ ...payload, event: 'approval.resolved', session_id: SESSION_ID, ...STALE })
 
-    // On the unfixed forwarder the payload carries no outcome, the early return
-    // notifies nobody, and the user is left believing the command was allowed.
-    expect(expired).toHaveBeenCalledTimes(1)
-    expect(payload.resolved).toBe(false)
-    window.removeEventListener('hermes:pending-interaction-expired', expired)
-  })
-
-  // Same early-return branch, successful resolution: there is nothing pending
-  // and nothing to tell the user, with or without the fix.
-  it('stays silent after a submit-dismissed card resolves successfully (control)', async () => {
-    const store = storeWithPendingApproval()
-    const expired = vi.fn()
-    window.addEventListener('hermes:pending-interaction-expired', expired)
-
-    expect(store.respondApproval('once')).toBe('submitted')
-
-    const payload = await forwardRuntimeApproval({
-      event: 'approval.resolved',
-      run_id: 'run-bridge',
-      approval_id: APPROVAL_ID,
-      choice: 'once',
-      resolved: true,
-    })
-    chatApi.globalPendingHandler?.({
-      ...payload,
-      event: 'approval.resolved',
-      session_id: SESSION_ID,
-      stale: true,
-      error: 'Approval is no longer pending.',
-    })
-
-    expect(expired).not.toHaveBeenCalled()
-    expect(store.pendingApprovals.has(SESSION_ID)).toBe(false)
+    expect(expired).toHaveBeenCalledTimes(expiries)
+    expect(payload.resolved).toBe(resolved)
     window.removeEventListener('hermes:pending-interaction-expired', expired)
   })
 })
