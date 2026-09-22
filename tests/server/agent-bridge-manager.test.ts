@@ -207,6 +207,21 @@ describe('agent bridge manager command resolution', () => {
     expect(env.HERMES_OPENROUTER_APP_CATEGORIES).toBe('custom-category')
   })
 
+  it('binds managed MCP launches to this server even when inherited routing is stale', async () => {
+    process.env.PORT = '18748'
+    process.env.HERMES_WEB_UI_HOME = join(tempDir, 'owner-state')
+    process.env.HERMES_WEB_UI_URL = 'http://127.0.0.1:18647'
+    process.env.HERMES_AGENT_BRIDGE_STUDIO_MCP_ENV = JSON.stringify({ HERMES_WEB_UI_URL: 'http://127.0.0.1:18647' })
+    const { buildAgentBridgeProcessEnv } = await import('../../packages/server/src/modules/hermes/services/bridge/manager')
+    const env = buildAgentBridgeProcessEnv('ipc:///tmp/test.sock', '/tmp/hermes-home', undefined)
+    expect(JSON.parse(env.HERMES_AGENT_BRIDGE_STUDIO_MCP_ENV!)).toEqual({
+      HERMES_WEB_UI_URL: 'http://127.0.0.1:18748',
+      HERMES_WEB_UI_HOME: join(tempDir, 'owner-state'),
+      HERMES_WEBUI_STATE_DIR: join(tempDir, 'owner-state'),
+      ELECTRON_RUN_AS_NODE: '1',
+    })
+  })
+
   it('removes inherited Anthropic auth token from the bridge process env', async () => {
     process.env.ANTHROPIC_AUTH_TOKEN = 'stale-bearer-token'
 
