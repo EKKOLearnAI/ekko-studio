@@ -230,7 +230,10 @@ let bundlesLoadRequestKey = ''
 const isBridgeSession = computed(() => {
   const session = chatStore.activeSession
   if (!session) return chatStore.runtimeMode !== 'global_agent'
-  return session.source === 'cli'
+  // Studio-created Hermes sessions are persisted with source 'api_server' but
+  // are backed by the same bridge runtime as CLI sessions, so they support the
+  // full slash command set as well. Fixes #2611.
+  return session.source === 'cli' || session.source === 'api_server'
 })
 const isCodingAgentSession = computed(() => {
   const session = chatStore.activeSession
