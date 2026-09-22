@@ -302,6 +302,27 @@ const canInsertQueuedMessages = computed(() => {
   if (agent === "codex" || agent === "pi" || agent === "grok" || (agent === "opencode" || agent === "dsh") || agent === "claude" || agent === "claude-code") return true;
   return !session.source || session.source === "cli" || session.source === "global_agent";
 });
+/**
+ * Steering reaches the agent mid-turn over the bridge, so it only makes sense
+ * for a Hermes bridge run that is actually going. Coding agents run their own
+ * CLI and have no such channel.
+ */
+const canSteerQueuedMessages = computed(() => {
+  const session = chatStore.activeSession;
+  if (!session) return false;
+  const agent = session.codingAgentId || session.agent;
+  if (agent && agent !== "hermes") return false;
+  // A queue only exists while a run is going, and isSessionLive is what the
+  // store uses elsewhere to mean exactly that.
+  return canInsertQueuedMessages.value && chatStore.isSessionLive(session.id);
+});
+
+function steerQueuedMessage(messageId: string) {
+  const sid = chatStore.activeSessionId;
+  if (!sid) return;
+  chatStore.steerQueuedMessage(sid, messageId);
+}
+
 const visibleApproval = computed(() => chatStore.activePendingApproval);
 const visibleClarify = computed(() => chatStore.activePendingClarify);
 const clarifyResponse = ref("");
@@ -1030,9 +1051,11 @@ defineExpose({
         <MessageQueueFloatPanel
           :items="queuedFloatItems"
           :can-insert="canInsertQueuedMessages"
+          :can-steer="canSteerQueuedMessages"
           :active-insert-id="activeQueueInsertion?.queueId"
           :insert-title="item => queueInsertionTitle(item.id)"
           @insert="insertQueuedMessage"
+          @steer="steerQueuedMessage"
           @remove="removeQueuedMessage"
         />
       </Transition>

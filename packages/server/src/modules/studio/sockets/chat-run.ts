@@ -1081,6 +1081,68 @@ export class ChatRunSocket {
       void this.requestQueuedRunInsertion(data.session_id, data.queue_id)
     })
 
+    /**
+     * Send a queued message into the run that is already going, instead of
+     * waiting for it to end or stopping it. Steering is what the agent is
+     * given, so the message leaves the queue only once the bridge takes it.
+     */
+    socket.on('steer_queued_run', async (data: { session_id?: string; queue_id?: string }) => {
+      if (!data.session_id || !data.queue_id) return
+      try {
+        requireSocketSessionAccess(data.session_id)
+      } catch {
+        return
+      }
+      const state = this.sessionMap.get(data.session_id)
+      const item = state?.queue.find(entry => entry.queue_id === data.queue_id)
+      if (!state || !item) return
+
+      const text = contentBlocksToString(item.displayInput ?? item.input).trim()
+      const ack = (message: string, ok = true) => {
+        this.nsp.to(`session:${data.session_id}`).emit('session.command', {
+          event: 'session.command',
+          command: 'steer',
+          action: 'steer',
+          ok,
+          terminal: false,
+          session_id: data.session_id,
+          message,
+        })
+      }
+      if (!text) {
+        ack('Nothing to steer with.', false)
+        return
+      }
+
+      try {
+        await this.bridge.steer(data.session_id, text, state.profile)
+      } catch (err) {
+        logger.warn(err, '[chat-run-socket] failed to steer queued run %s for session %s', data.queue_id, data.session_id)
+        ack(err instanceof Error ? err.message : 'Steering failed.', false)
+        return
+      }
+
+      state.queue = state.queue.filter(entry => entry.queue_id !== data.queue_id)
+      if (state.queueInsertion?.queueId === data.queue_id) {
+        const nextVisible = state.queue.find(entry => this.isQueueInsertionCandidate(entry))
+        if (nextVisible) {
+          state.queueInsertion.queueId = nextVisible.queue_id
+          this.emitQueueInsertionUpdate(data.session_id, state.queueInsertion)
+        } else {
+          this.clearQueueInsertion(data.session_id, state, 'queued_message_removed')
+        }
+      }
+      this.nsp.to(`session:${data.session_id}`).emit('run.queued', {
+        event: 'run.queued',
+        session_id: data.session_id,
+        queue_length: state.queue.length,
+        queued_messages: this.serializeQueuedMessages(state.queue),
+      })
+      ack('Steer instruction sent.')
+      logger.info('[chat-run-socket] steered queued run %s into the active run for session %s (queue: %d)',
+        data.queue_id, data.session_id, state.queue.length)
+    })
+
     socket.on('cancel_queued_run', (data: { session_id?: string; queue_id?: string }) => {
       if (!data.session_id || !data.queue_id) return
       try {

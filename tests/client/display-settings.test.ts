@@ -208,7 +208,7 @@ describe('DisplaySettings', () => {
     expect(mockSettingsStore.saveSection).not.toHaveBeenCalledWith('display', { notify_on_approval: true })
   })
 
-  it('does not expose the unwired busy input mode toggle', () => {
+  it('exposes the busy input mode now that sending honours it', () => {
     const wrapper = mount(DisplaySettings, {
       global: {
         stubs: {
@@ -222,8 +222,29 @@ describe('DisplaySettings', () => {
       },
     })
 
-    expect(wrapper.text()).not.toContain('settings.display.busyInputMode')
-    expect(wrapper.text()).not.toContain('settings.display.busyInputModeHint')
+    // This row was deliberately kept out while display.busy_input_mode was
+    // carried in the config type but never read; sending now honours it.
+    expect(wrapper.text()).toContain('settings.display.busyInputMode')
+    expect(wrapper.text()).toContain('settings.display.busyInputModeHint')
+  })
+
+  it('saves the chosen busy input mode', async () => {
+    const wrapper = mount(DisplaySettings, {
+      global: {
+        stubs: {
+          SettingRow: {
+            props: ['label', 'hint'],
+            template: '<div class="setting-row"><div class="setting-row-label">{{ label }}</div><div class="setting-row-hint">{{ hint }}</div><slot /></div>',
+          },
+          NSwitch: true,
+        },
+      },
+    })
+
+    await wrapper.findAll('select')[0].setValue('steer')
+    await flushPromises()
+
+    expect(mockSettingsStore.saveSection).toHaveBeenCalledWith('display', { busy_input_mode: 'steer' })
   })
 
   it('shows and persists the desktop link-opening target', async () => {
