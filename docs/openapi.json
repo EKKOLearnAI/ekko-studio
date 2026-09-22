@@ -10209,6 +10209,32 @@
         }
       }
     },
+    "/api/hermes/plugins/import": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Create import",
+        "description": "POST /api/hermes/plugins/import",
+        "operationId": "importPlugin",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/api/hermes/plugins/{key}/disable": {
       "post": {
         "tags": [

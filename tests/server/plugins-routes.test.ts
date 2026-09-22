@@ -9,11 +9,15 @@ const enableMock = vi.fn(async (ctx: any) => {
 const disableMock = vi.fn(async (ctx: any) => {
   ctx.body = { key: ctx.params.key, enabled: false }
 })
+const importMock = vi.fn(async (ctx: any) => {
+  ctx.body = { success: true }
+})
 
 vi.mock('../../packages/server/src/modules/hermes/controllers/plugins', () => ({
   list: listMock,
   enable: enableMock,
   disable: disableMock,
+  importPlugin: importMock,
 }))
 
 describe('plugin routes', () => {
@@ -32,7 +36,18 @@ describe('plugin routes', () => {
       '/api/hermes/plugins',
       '/api/hermes/plugins/:key/enable',
       '/api/hermes/plugins/:key/disable',
+      '/api/hermes/plugins/import',
     ]))
+  })
+
+  it('keeps plugin import behind the super-admin guard', async () => {
+    const { pluginRoutes } = await import('../../packages/server/src/modules/hermes/routes/plugins')
+    const layer = pluginRoutes.stack.find((entry: any) => entry.path === '/api/hermes/plugins/import')
+
+    expect(layer.methods).toContain('POST')
+    // Guard first, controller second: importing writes executable code.
+    expect(layer.stack).toHaveLength(2)
+    expect(layer.stack[1]).toBe(importMock)
   })
 
   it('delegates plugin listing to the controller', async () => {
