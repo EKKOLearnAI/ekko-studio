@@ -900,7 +900,15 @@ export class ChatRunSocket {
       try {
         runProfile = resolveRunProfile(data.session_id, data.profile)
         if (!shared && data.session_id && Array.isArray(data.input)) {
-          requireSocketSessionAccess(data.session_id)
+          // requireSocketSessionAccess hard-fails when the session row is not in the
+          // DB. A brand-new session is client-generated (isLocalOnly) and its row is
+          // only written during execution, so the first message carrying an
+          // image/attachment (input is a ContentBlock[] array) must not fail here —
+          // that is exactly the "Session not found" regression. For a persisted
+          // session it still enforces cross-profile access; for a not-yet-persisted
+          // session resolveRunProfile already validated the profile and
+          // recordSessionUploadAttachments safely no-ops when the row is absent.
+          if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id)
           await recordSessionUploadAttachments(data.session_id, runProfile, data.input)
         }
       } catch (err) {

@@ -1169,3 +1169,54 @@ describe('session upload provenance at the socket boundary', () => {
     expect((server as any).sessionMap.get('session-1').queue).toHaveLength(1)
   })
 })
+
+describe('first image message on a brand-new (not-yet-persisted) session', () => {
+  it('does not fail with "Session not found" when the DB row does not exist yet', async () => {
+    recordSessionUploadAttachmentsMock.mockClear()
+    getSessionMock.mockReset()
+    // Brand-new session row does not exist in the DB yet — getSession returns null.
+    ;(getSessionMock as ReturnType<typeof vi.fn>).mockImplementation(
+      (id?: string) => (id === 'new-local-session' ? null : undefined),
+    )
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).onConnection(socket)
+    ;(server as any).sessionMap.set('new-local-session', { isWorking: false, queue: [], events: [] })
+    // Stub the real run so the assertion isolates the access gate, not bridge readiness.
+    const handleRunMock = vi.fn(async () => {})
+    ;(server as any).handleRun = handleRunMock
+    // ContentBlock[] input is exactly what an image attachment produces — the branch
+    // that used to call requireSocketSessionAccess unconditionally and 404.
+    const input = [{ type: 'image', path: '/uploads/img.png', name: 'img.png', media_type: 'image/png' }]
+    await handlers.get('run')!({ session_id: 'new-local-session', input })
+    // Under the buggy code this throws "Session not found" and returns before any of
+    // these run. Asserting they were reached proves the access gate let a not-yet-persisted
+    // session through.
+    expect(recordSessionUploadAttachmentsMock).toHaveBeenCalledWith('new-local-session', 'default', input)
+    expect(handleRunMock).toHaveBeenCalled()
+    // No failure may be attributed to the access gate.
+    expect(socket.emit).not.toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'Session not found' }))
+  })
+
+  it('still rejects a persisted session owned by a different profile', async () => {
+    getSessionMock.mockReset()
+    ;(getSessionMock as ReturnType<typeof vi.fn>).mockImplementation(
+      (id?: string) => (id === 'other-profile-session'
+        ? { id, profile: 'research', source: 'cli', model: 'gpt-test', provider: 'openai' }
+        : undefined),
+    )
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).onConnection(socket)
+    ;(server as any).sessionMap.set('other-profile-session', { isWorking: false, queue: [], events: [] })
+    const input = [{ type: 'image', path: '/uploads/img.png', name: 'img.png', media_type: 'image/png' }]
+    await handlers.get('run')!({ session_id: 'other-profile-session', input })
+    // Socket is on the 'default' profile but the persisted row belongs to 'research' → cross-profile guard still fires.
+    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({
+      session_id: 'other-profile-session',
+      error: 'Profile "research" is not available on this connection',
+    }))
+  })
+})
