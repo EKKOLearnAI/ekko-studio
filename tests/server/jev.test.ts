@@ -31,32 +31,32 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('JEV settings', () => {
   it('round-trips all memory options, preserves them while disabled, and resets only the selected Profile', async () => {
-    const options = { ekkoMemoryEnabled: true, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRerankEnabled: true,
-      ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 7, ekkoMemoryRecallMinConfidence: 0.65, ekkoMemoryMinConfidence: 0.95, ekkoMemoryTimeoutMs: 1200 }
+    const options = { ekkoMemoryEnabled: true, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true,
+      ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 7, ekkoMemoryRecallMinConfidence: 0.65, ekkoMemoryFilterMinConfidence: 0.9, ekkoMemoryMinConfidence: 0.95, ekkoMemoryTimeoutMs: 1200 }
     await saveJevSettings('research', { ...options, apiKey: 'research-key' })
     await saveJevSettings('research', { ekkoMemoryEnabled: false })
     expect(await getJevSettings('research')).toMatchObject({ ...options, ekkoMemoryEnabled: false })
     expect(await getJevRuntimeConfig('research')).toMatchObject({ enabled: true, memoryEnabled: false,
-      memoryKindRoutingEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true,
-      memoryCandidateLimit: 7, memoryRecallMinConfidence: 0.65, memoryMinConfidence: 0.95, memoryTimeoutMs: 1200 })
+      memoryKindRoutingEnabled: true, memoryRelevanceFilterEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true,
+      memoryCandidateLimit: 7, memoryRecallMinConfidence: 0.65, memoryFilterMinConfidence: 0.9, memoryMinConfidence: 0.95, memoryTimeoutMs: 1200 })
     expect(await getJevRuntimeConfig('default')).toMatchObject({ enabled: false, memoryKindRoutingEnabled: true, memoryWriteReviewEnabled: true })
     await saveJevSettings('other', options)
     expect(await deleteJevSettings('research')).toMatchObject({ ekkoMemoryKindRoutingEnabled: true,
-      ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 20,
-      ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 })
+      ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 20,
+      ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 })
     expect(await getJevSettings('other')).toMatchObject(options)
   })
   it('exports complete server-only runtime values and explicitly disables an unconfigured Profile', async () => {
     await saveJevSettings('research', { apiKey: 'research-key', model: 'jev-research' })
     expect(await getJevRuntimeConfig('research')).toMatchObject({ enabled: true, apiKey: 'research-key', model: 'jev-research' })
     expect(await getJevRuntimeConfig('other')).toEqual({
-      enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.8, memoryTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000,
+      enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: true, memoryRelevanceFilterEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryFilterMinConfidence: 0.8, memoryMinConfidence: 0.8, memoryTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000,
     })
     expect(JSON.stringify(await getJevSettings('research'))).not.toContain('research-key')
   })
   it('isolates profiles and returns only credential presence', async () => {
     const saved = await saveJevSettings('research', { apiKey: 'private-key', model: 'jev-research' })
-    expect(saved).toEqual({ baseUrl: 'https://api.typesafe.ai', model: 'jev-research', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 })
+    expect(saved).toEqual({ baseUrl: 'https://api.typesafe.ai', model: 'jev-research', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 })
     expect(JSON.stringify(await getJevSettings('research'))).not.toContain('private-key')
     expect(await getJevSettings('default')).toMatchObject({ model: 'jev-latest', hasApiKey: false })
     const [file] = await readdir(directory)
@@ -69,7 +69,7 @@ describe('JEV settings', () => {
     await saveJevSettings('research', { model: 'updated' })
     expect(await getJevSettings('research')).toMatchObject({ ekkoMemoryEnabled: true })
     expect(await getJevRuntimeConfig('research')).toMatchObject({ enabled: true, memoryEnabled: true,
-      memoryKindRoutingEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true })
+      memoryKindRoutingEnabled: true, memoryRelevanceFilterEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true })
     expect(await getJevRuntimeConfig('default')).toMatchObject({ enabled: false, memoryEnabled: false })
     await saveJevSettings('research', { ekkoMemoryEnabled: false })
     expect(await getJevRuntimeConfig('research')).toMatchObject({ enabled: true, memoryEnabled: false, apiKey: 'research-key' })
@@ -84,7 +84,7 @@ describe('JEV settings', () => {
     const [file] = await readdir(directory)
     await writeFile(join(directory, file), JSON.stringify({ apiKey: 'legacy-key', model: 'legacy-model', ekkoMemoryMinConfidence: 0.9 }))
     expect(await getJevRuntimeConfig('research')).toMatchObject({ enabled: true, memoryEnabled: false,
-      memoryKindRoutingEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true,
+      memoryKindRoutingEnabled: true, memoryRelevanceFilterEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true,
       apiKey: 'legacy-key', model: 'legacy-model', memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.9 })
   })
 
@@ -92,13 +92,13 @@ describe('JEV settings', () => {
     await saveJevSettings('research', { apiKey: 'key' })
     const [file] = await readdir(directory)
     const disabled = { ekkoMemoryEnabled: true, ekkoMemoryKindRoutingEnabled: false,
-      ekkoMemoryRerankEnabled: false, ekkoMemoryWriteReviewEnabled: false }
+      ekkoMemoryRelevanceFilterEnabled: false, ekkoMemoryRerankEnabled: false, ekkoMemoryWriteReviewEnabled: false }
     await writeFile(join(directory, file), JSON.stringify({ apiKey: 'key', ...disabled }))
     expect(await getJevSettings('research')).toMatchObject(disabled)
     await saveJevSettings('research', { model: 'edited' })
     expect(await getJevSettings('research')).toMatchObject(disabled)
     expect(await getJevRuntimeConfig('research')).toMatchObject({ enabled: true, memoryEnabled: true,
-      memoryKindRoutingEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false })
+      memoryKindRoutingEnabled: false, memoryRelevanceFilterEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false })
   })
 
   it('preserves blank/omitted keys, replaces explicit keys and clears only the selected profile', async () => {
@@ -133,6 +133,7 @@ describe('JEV settings', () => {
     { ekkoMemoryKindRoutingEnabled: 'true' }, { ekkoMemoryRerankEnabled: 1 }, { ekkoMemoryWriteReviewEnabled: null },
     { ekkoMemoryCandidateLimit: 0 }, { ekkoMemoryCandidateLimit: 51 }, { ekkoMemoryMinConfidence: 0.2 },
     { ekkoMemoryRecallMinConfidence: 0.2 }, { ekkoMemoryRecallMinConfidence: 1.1 }, { ekkoMemoryRecallMinConfidence: '0.5' },
+    { ekkoMemoryRelevanceFilterEnabled: 'true' }, { ekkoMemoryFilterMinConfidence: 0.4 }, { ekkoMemoryFilterMinConfidence: 1.1 }, { ekkoMemoryFilterMinConfidence: '0.8' },
     { ekkoMemoryMinConfidence: '0.9' }, { ekkoMemoryTimeoutMs: 99 }, { ekkoMemoryTimeoutMs: 30001 },
     { ekkoMemoryEnabled: 'false' }, { ekkoMemoryEnabled: 1 }, { ekkoMemoryEnabled: null },
   ])('rejects invalid settings without changing saved data: %j', async input => {

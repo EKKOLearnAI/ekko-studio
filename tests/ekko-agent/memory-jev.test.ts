@@ -12,6 +12,8 @@ let routedKinds: string[]
 let reviewDecision: string
 let confidence: number
 let routingProbability: number
+let filterConfidence: number
+let filterDecision: (card: { content: string }, query: string) => 'relevant' | 'irrelevant'
 
 function evaluator(overrides: EkkoJevOverrides = {}) {
   return new EkkoJevClient({ enabled: true, apiKey: 'test-key', memoryEnabled: true,
@@ -26,7 +28,9 @@ function reply(request: any) {
       question.type === 'noul' ? { type: 'noul', noul: routedKinds.includes(key) ? routingProbability : 0.01 }
         : question.type === 'score' ? { type: 'score', score: state.cards[Number(key.slice(5))].content.includes('second') ? 2 : 0,
           confidence, legend: { 0: 'Unrelated', 1: 'Helpful', 2: 'Essential' }, probabilities: { 0: 0.5, 1: 0, 2: 0.5 } }
-          : { type: 'choice', choice: reviewDecision, confidence, probabilities: { accept: 0.01, unsupported: 0.97, transient: 0.01, wrong_kind: 0.01 } },
+          : key.startsWith('filter_') ? { type: 'choice', choice: filterDecision(state.cards[Number(key.slice(7))], state.request),
+            confidence: filterConfidence, probabilities: { relevant: 0.01, irrelevant: 0.99 } }
+            : { type: 'choice', choice: reviewDecision, confidence, probabilities: { accept: 0.01, unsupported: 0.97, transient: 0.01, wrong_kind: 0.01 } },
     ]),
   ) }
 }
@@ -38,6 +42,8 @@ beforeEach(() => {
   reviewDecision = 'accept'
   confidence = 0.99
   routingProbability = 0.99
+  filterConfidence = 0.99
+  filterDecision = () => 'relevant'
   upstream.mockReset().mockImplementation(async (_url, init) => Response.json(reply(JSON.parse(init!.body as string))))
   vi.stubGlobal('fetch', upstream)
 })
@@ -55,6 +61,196 @@ async function draft(itemKey = 'new'): Promise<MemoryWriteInput> {
 }
 
 describe('optional memory JEV', () => {
+  it('filters the dessert false positive from weak exact kind matches in one shared routing request', async () => {
+    const lodging = await card('lodging', '挑选旅馆时最在意隔音，其次是床垫舒适度；对窗外景色没有要求。')
+    const query = '我之前说过自己最喜欢哪种甜点？只依据已有个人信息回答，没有记录就说不知道，不调用记忆工具，也不新增记忆。'
+    const baseline = await service.retrieve(identity, query)
+    expect(baseline.usedMemoryIds).toEqual([lodging.id])
+    filterDecision = () => 'irrelevant'
+    const diagnostics = vi.fn()
+    const result = await evaluator({ memoryRelevanceFilterEnabled: true }).runScoped(undefined, () => service.retrieve(identity, query), diagnostics)
+    expect(result.usedMemoryIds).toEqual([])
+    expect(result.preferences).toEqual([])
+    expect(service.contextPrompt(result)).not.toContain('隔音')
+    expect(Object.keys(result).sort()).toEqual(Object.keys(baseline).sort())
+    expect(await service.get(lodging.id, identity)).toEqual(lodging)
+    expect(upstream).toHaveBeenCalledTimes(1)
+    const questions = JSON.parse(upstream.mock.calls[0][1]!.body as string).questions
+    expect(questions.general_preference.type).toBe('noul')
+    expect(questions.filter_0.type).toBe('choice')
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ stage: 'filter', removedIds: [lodging.id], selectedCount: 0 }))
+    expect(JSON.stringify(diagnostics.mock.calls)).not.toMatch(/旅馆|甜点|test-key/)
+  })
+
+  it('filters individual cards in a selected kind and leaves related cards unchanged', async () => {
+    const lodging = await card('lodging', 'Choose quiet hotels')
+    const dessert = await card('dessert', 'The user enjoys strawberry cake')
+    routedKinds = ['general_preference']
+    filterDecision = node => node.content.includes('hotels') ? 'irrelevant' : 'relevant'
+    const result = await evaluator({ memoryRelevanceFilterEnabled: true }).runScoped(undefined, () => service.retrieve(identity, '我喜欢哪种甜点？'))
+    expect(result.relevantNodes).toEqual([dessert])
+    expect(result.usedMemoryIds).not.toContain(lodging.id)
+  })
+
+  it('does not abandon relevant recall because filtering an unselected category was uncertain', async () => {
+    const lodging = await card('lodging', 'Choose quiet hotels')
+    await service.write({ operation: 'create', kind: 'profile_name', identity, reason: 'test',
+      node: { title: 'Name', content: 'The user is Ekko', valueJson: 'Ekko' } })
+    routedKinds = ['general_preference']
+    upstream.mockImplementation(async (_url, init) => {
+      const request = JSON.parse(init!.body as string)
+      const cards = JSON.parse(request.state).cards
+      const result = reply(request)
+      for (const [index, node] of cards.entries()) {
+        if (node.kind === 'profile_name') result.answers[`filter_${index}`].confidence = 0.6
+      }
+      return Response.json(result)
+    })
+    const result = await evaluator({ memoryRelevanceFilterEnabled: true }).runScoped(undefined, () => service.retrieve(identity, '这次出差怎么选住处？'))
+    expect(result.usedMemoryIds).toEqual([lodging.id])
+  })
+
+  it('filters ordinary keyword matches independently when routing and reranking are off', async () => {
+    await card('lodging', 'Quiet hotels with no view requirement')
+    const query = 'What dessert has no dairy?'
+    expect((await service.retrieve(identity, query)).usedMemoryIds).toHaveLength(1)
+    filterDecision = () => 'irrelevant'
+    const result = await evaluator({ memoryRelevanceFilterEnabled: true, memoryKindRoutingEnabled: false, memoryRerankEnabled: false })
+      .runScoped(undefined, () => service.retrieve(identity, query))
+    expect(result.usedMemoryIds).toEqual([])
+    expect(Object.keys(JSON.parse(upstream.mock.calls[0][1]!.body as string).questions)).toEqual(['filter_0'])
+  })
+
+  it('can disable filtering without affecting other selected features or baseline matches', async () => {
+    const lodging = await card('lodging', 'Quiet hotels')
+    filterDecision = () => 'irrelevant'
+    const result = await evaluator({ memoryRelevanceFilterEnabled: false }).runScoped(undefined, () => service.retrieve(identity, '我喜欢哪种甜点？'))
+    expect(result.usedMemoryIds).toEqual([lodging.id])
+    expect(JSON.stringify(upstream.mock.calls)).not.toContain('filter_0')
+  })
+
+  it('preserves standing instructions, constraints and corrections while filtering ordinary exact matches', async () => {
+    const language = (await service.write({ operation: 'create', kind: 'language_preference', identity, reason: 'test',
+      node: { title: 'Language', content: 'Respond in Chinese', valueJson: 'Chinese' } })).node!
+    const constraint = (await service.write({ operation: 'create', kind: 'hard_constraint', itemKey: 'privacy', identity, reason: 'test',
+      node: { title: 'Privacy', content: 'Never disclose my address', valueJson: 'private' } })).node!
+    const correction = await card('correction', 'Corrected information')
+    await store.applyMutations([{ type: 'upsert', node: { ...correction, type: 'correction' } }])
+    const ordinary = await card('lodging', 'Quiet hotels')
+    filterDecision = () => 'irrelevant'
+    const result = await evaluator({ memoryRelevanceFilterEnabled: true, memoryKindRoutingEnabled: false })
+      .runScoped(undefined, () => service.retrieve(identity, '我喜欢哪种甜点？'))
+    expect(new Set(result.usedMemoryIds)).toEqual(new Set([language.id, constraint.id, correction.id]))
+    expect(result.usedMemoryIds).not.toContain(ordinary.id)
+    const request = JSON.parse(upstream.mock.calls[0][1]!.body as string)
+    expect(JSON.parse(request.state).cards.map((node: any) => node.content)).toEqual(['Quiet hotels'])
+  })
+
+  it('bypasses relevance filtering for caller-specified exact queries and empty candidates', async () => {
+    filterDecision = () => 'irrelevant'
+    const client = evaluator({ memoryRelevanceFilterEnabled: true })
+    await client.runScoped(undefined, () => service.retrieve(identity, 'question'))
+    const node = await card('lodging', 'Quiet hotels')
+    for (const query of [{ key: node.key }, { kinds: ['general_preference'] as const }, { valueJson: 'Quiet hotels' }]) {
+      const result = await client.runScoped(undefined, () => service.retrieve(identity, 'dessert', query as any))
+      expect(result.usedMemoryIds).toEqual([node.id])
+    }
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
+  it('keeps unjudged baseline cards when the filter candidate cap is reached', async () => {
+    for (let index = 0; index < 4; index++) await card(`card${index}`, `item ${index}`)
+    filterDecision = () => 'irrelevant'
+    const result = await evaluator({ memoryRelevanceFilterEnabled: true, memoryKindRoutingEnabled: false, memoryRerankEnabled: false, memoryCandidateLimit: 2 })
+      .runScoped(undefined, () => service.retrieve(identity, 'What are my preferences?'))
+    const request = JSON.parse(upstream.mock.calls[0][1]!.body as string)
+    expect(Object.keys(request.questions)).toHaveLength(2)
+    expect(result.usedMemoryIds).toHaveLength(2)
+    const checked = JSON.parse(request.state).cards.map((node: any) => node.content)
+    expect(result.relevantNodes.every(node => !checked.includes(node.content))).toBe(true)
+  })
+
+  it.each(['relevant', 'irrelevant'] as const)('keeps useful semantic recall when the filter is uncertain about %s', async decision => {
+    const lodging = await card('lodging', 'Choose quiet hotels')
+    const query = '这次出差怎么选住处？'
+    expect((await service.retrieve(identity, query)).usedMemoryIds).toEqual([])
+    routedKinds = ['general_preference']
+    filterDecision = () => decision
+    filterConfidence = 0.6
+    const result = await evaluator({ memoryRelevanceFilterEnabled: true }).runScoped(undefined, () => service.retrieve(identity, query))
+    expect(result.usedMemoryIds).toEqual([lodging.id])
+  })
+
+  it('drops only confident negatives and retains uncertain baseline matches', async () => {
+    await card('lodging', 'Quiet hotels')
+    const dessert = await card('dessert', 'Chocolate cake')
+    filterDecision = () => 'irrelevant'
+    upstream.mockImplementation(async (_url, init) => {
+      const request = JSON.parse(init!.body as string)
+      const result = reply(request)
+      for (const [index, node] of JSON.parse(request.state).cards.entries()) {
+        result.answers[`filter_${index}`].confidence = node.content === 'Quiet hotels' ? 0.8 : 0.79
+      }
+      return Response.json(result)
+    })
+    const result = await evaluator({ memoryRelevanceFilterEnabled: true, memoryKindRoutingEnabled: false })
+      .runScoped(undefined, () => service.retrieve(identity, 'What are my preferences?'))
+    expect(result.usedMemoryIds).toEqual([dessert.id])
+  })
+
+  it.each(['network', 'malformed', 'timeout'])('restores the entire original recall when filtering is %s', async failure => {
+    await card('lodging', 'Quiet hotels')
+    await card('dessert', 'Chocolate cake')
+    const query = 'What are my preferences?'
+    const baseline = await service.retrieve(identity, query)
+    filterDecision = () => 'irrelevant'
+    if (failure === 'network') upstream.mockRejectedValue(new Error('private provider error'))
+    if (failure === 'timeout') upstream.mockImplementation(() => new Promise<Response>(() => {}))
+    if (failure === 'malformed') upstream.mockImplementation(async (_url, init) => {
+      const result = reply(JSON.parse(init!.body as string))
+      delete result.answers.filter_1
+      return Response.json(result)
+    })
+    expect(await evaluator({ memoryRelevanceFilterEnabled: true, memoryTimeoutMs: 100 })
+      .runScoped(undefined, () => service.retrieve(identity, query))).toEqual(baseline)
+  })
+
+  it('restores even filtered baseline nodes when the subsequent rerank fails', async () => {
+    await card('one', 'trip first')
+    await card('two', 'trip second')
+    await card('unrelated', 'trip generic')
+    const baseline = await service.retrieve(identity, 'trip')
+    filterDecision = node => node.content.includes('generic') ? 'irrelevant' : 'relevant'
+    upstream.mockImplementation(async (_url, init) => {
+      const request = JSON.parse(init!.body as string)
+      if (request.questions.card_0) throw new Error('ranking failed')
+      return Response.json(reply(request))
+    })
+    expect(await evaluator({ memoryRelevanceFilterEnabled: true }).runScoped(undefined, () => service.retrieve(identity, 'trip'))).toEqual(baseline)
+    expect(upstream).toHaveBeenCalledTimes(2)
+  })
+
+  it('propagates cancellation during filtering and still runs the model after ordinary provider failure', async () => {
+    const lodging = await card('lodging', 'Quiet hotels')
+    upstream.mockImplementation(() => new Promise<Response>(() => {}))
+    const controller = new AbortController()
+    const pending = evaluator({ memoryRelevanceFilterEnabled: true }).runScoped(controller.signal,
+      () => service.retrieve(identity, 'What are my preferences?'))
+    const rejected = expect(pending).rejects.toThrow('caller stopped')
+    await vi.waitFor(() => expect(upstream).toHaveBeenCalled())
+    controller.abort(new Error('caller stopped'))
+    await rejected
+    upstream.mockRejectedValue(new Error('JEV unavailable'))
+    const model: ModelClient = { provider: 'test', requestStyle: 'custom-runtime',
+      capabilities: { streaming: false, tools: false, vision: false, jsonMode: false, systemPrompt: true },
+      create: vi.fn(async () => ({ content: 'Normal answer', finishReason: 'stop' })), stream: vi.fn() }
+    const runtime = new AgentRuntime({ modelClient: model, memory: service,
+      jev: { enabled: true, apiKey: 'key', memoryEnabled: true, memoryRelevanceFilterEnabled: true } })
+    const result = await runtime.run({ messages: ['What are my preferences?'], contextKey: identity.sessionId, toolContext: identity })
+    expect(result.output.content).toBe('Normal answer')
+    expect(result.memoryContext!.usedMemoryIds).toEqual([lodging.id])
+  })
+
   it('recalls the lodging preference from a paraphrase using actual card evidence and an independent recall threshold', async () => {
     const node = await card('lodging_preferences', '挑选旅馆时的长期偏好：最在意隔音，其次是床垫舒适度；对窗外景色没有要求。')
     const query = '这次出差怎么选住处？只根据已有上下文回答，不调用记忆工具，也不新增记忆。'
@@ -127,13 +323,13 @@ describe('optional memory JEV', () => {
 
   it.each([
     { enabled: false }, { apiKey: '' }, { memoryEnabled: false },
-    { memoryKindRoutingEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false },
+    { memoryKindRoutingEnabled: false, memoryRelevanceFilterEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false },
   ])('preserves original recall and write behavior with no provider requests: %j', async overrides => {
     await card('first', 'trip first')
     await card('second', 'trip second')
     const baseline = await service.retrieve(identity, 'trip')
     const input = await draft()
-    const client = evaluator(overrides)
+    const client = evaluator({ memoryRelevanceFilterEnabled: true, ...overrides })
     expect(await client.runScoped(undefined, () => service.retrieve(identity, 'trip'))).toEqual({ ...baseline,
       recentMessages: await store.listRecentMessages({ sessionId: identity.sessionId, limit: 20 }) })
     expect(await client.runScoped(undefined, () => service.write(input))).toMatchObject({ accepted: true, action: 'created' })

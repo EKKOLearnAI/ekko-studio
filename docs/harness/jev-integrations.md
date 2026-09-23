@@ -42,19 +42,21 @@ must still be enabled before its configured child features can use JEV.
 | --- | --- | --- | --- | --- |
 | `ekko-memory` | Active: run context and fallback, `memory/jev-policy.ts` | `ekkoMemoryEnabled` | `jev.memoryEnabled` | Models → JEV → Use JEV for Ekko memory |
 | `ekko-memory-kind-routing` | Active: `memory/jev-routing.ts` | `ekkoMemoryKindRoutingEnabled` | `jev.memoryKindRoutingEnabled` | Memory options → Semantic category routing |
+| `ekko-memory-relevance-filter` | Active: `memory/jev-filter.ts` | `ekkoMemoryRelevanceFilterEnabled` | `jev.memoryRelevanceFilterEnabled` | Memory options → Irrelevant memory filtering |
 | `ekko-memory-rerank` | Active: `memory/jev-rerank.ts` | `ekkoMemoryRerankEnabled` | `jev.memoryRerankEnabled` | Memory options → Candidate reranking |
 | `ekko-memory-write-review` | Active: `memory/jev-write-review.ts` | `ekkoMemoryWriteReviewEnabled` | `jev.memoryWriteReviewEnabled` | Memory options → Review memory writes |
 
 Agent source paths above are relative to `packages/ekko-agent/src`. Studio's memory
-master defaults to false; its three child switches default to true. Existing saved
+master defaults to false; its four child switches default to true. Existing saved
 values, including explicit false, take precedence. Standalone Ekko retains false
 defaults for every switch. Studio reads the selected Profile before each normal/isolated run;
 the runtime snapshots the values for all subsequent memory operations. Shared memory
 services never store a mutable JEV client or Profile configuration. No runtime
 setting is written back to Ekko's local file.
 
-The parent integration owns the decision threshold and per-operation time budget.
-Reranking owns the candidate limit. All three options have editable advanced controls.
+The parent integration owns the candidate limit, recall threshold and per-operation
+time budget. Relevance filtering owns its exclusion confidence threshold and write
+review owns its review threshold. All five options have editable advanced controls.
 See [memory JEV behavior](../../packages/ekko-agent/docs/memory-jev.md) for the
 behavioral contract. Keep `MemoryContext`, `MemoryQueryResult`, `MemoryNode` and
 write result shapes compatible. Evaluation scores must not overwrite stored fields.
@@ -114,7 +116,10 @@ against a small isolated repository. The full repository scan runs in the separa
 size and avoiding a duplicate full scan under their per-test timeout.
 
 Memory routing and reranking share the registered candidate limit and recall
-threshold (default 0.5). Write review retains its independent confidence threshold
+threshold (default 0.5). Relevance filtering shares the candidate limit and the
+category request, but owns its exclusion confidence threshold (default 0.8): valid
+uncertain decisions keep that card, while malformed answers or provider failures
+restore the complete original recall. Write review retains its independent confidence threshold
 (default 0.8). Missing legacy recall settings inherit the new default; saved write
-thresholds are preserved. Both numeric thresholds require frontend controls and
+thresholds are preserved. All numeric thresholds require frontend controls and
 round-trip tests.

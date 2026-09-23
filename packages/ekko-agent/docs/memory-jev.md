@@ -3,8 +3,8 @@
 Ekko creates its own JEV client. Hosts pass configuration values, never an SDK
 implementation. Persisted `config.jev` is overridden field by field by constructor
 and runtime options; explicit false values and empty credentials win. Configuration
-schema 12 supplies the independent recall threshold to older configs and preserves
-their saved switches and write-review confidence.
+schema 13 supplies relevance filtering options to older configs while preserving
+their saved switches and thresholds.
 
 ```ts
 const ekko = new EkkoAgent({
@@ -13,24 +13,26 @@ const ekko = new EkkoAgent({
     apiKey: 'host-provided-key',
     memoryEnabled: true,
     memoryKindRoutingEnabled: true,
+    memoryRelevanceFilterEnabled: true,
     memoryRerankEnabled: true,
     memoryWriteReviewEnabled: true,
     memoryCandidateLimit: 20,
     memoryRecallMinConfidence: 0.5,
+    memoryFilterMinConfidence: 0.8,
     memoryMinConfidence: 0.8,
     memoryTimeoutMs: 3000,
   },
 })
 ```
 
-Standalone Ekko's master and all three feature switches default to false. Numeric defaults are
-20 candidate cards (range 1–50), a 0.5 recall threshold and a 0.8 write-review
-confidence threshold (both range 0.5–1), and a
+Standalone Ekko's master and all four feature switches default to false. Numeric defaults are
+20 candidate cards (range 1–50), a 0.5 recall threshold, a 0.8 relevance-filter
+confidence threshold and a 0.8 write-review threshold (all range 0.5–1), and a
 3000 ms total deadline (range 100–30000 ms). These are configurable defaults,
 not a claim that provider confidence is calibrated for every application.
 Studio exposes every option in Models → JEV for the selected Profile, with numeric
 fields in Advanced parameters. Studio's memory master defaults to false and its
-three child switches default to true; saved explicit values take precedence.
+four child switches default to true; saved explicit values take precedence.
 Switching the master off preserves child settings. Missing credentials still
 disable provider calls even when the master is enabled.
 
@@ -49,28 +51,42 @@ cannot substitute. This does not write back to the standalone configuration file
 
 ## Recall
 
-1. Compute the original, authorized recall result first.
-2. If category routing is enabled, read up to 500 cards within the original Profile
-   and scopes, then apply the existing expiry, confidence and conflict resolution.
-   Select at most `memoryCandidateLimit` eligible cards using the existing ordering.
-   Batch yes/no questions only for kinds present in those cards, supplying their
-   actual title, content and value as evidence. Empty sets make no provider request.
-   Only judged candidates in kinds whose relevance probability reaches
-   `memoryRecallMinConfidence` supplement the original result. Categories remain
-   the existing controlled kinds; no new kind is invented.
-3. If reranking is enabled, score at most `memoryCandidateLimit` ordinary candidates
-   in one request. Require valid scores in the rubric range and confidence at least
-   `memoryRecallMinConfidence`.
-   Preserve exact matches, always-recalled constraints and corrections at the front.
-4. Recheck added candidates after evaluation; discard any that were deleted,
+1. Compute the original, authorized recall result first. Explicit `key`, `kinds`
+   and `valueJson` queries bypass enhancement, as do empty query text and disabled
+   features. Exact queries, `memory_search`, `memory_get` and list-all keep their
+   original behavior.
+2. Prioritize ordinary baseline matches for individual filtering. If category
+   routing is enabled, supplement the evaluation pool with up to 500 authorized
+   cards after the existing expiry, confidence and conflict resolution. Judge at
+   most `memoryCandidateLimit` candidates in the existing order. Baseline cards
+   outside this window remain intact.
+3. In one provider request, ask category questions and, when filtering is enabled,
+   individual relevance questions using actual title, content and value evidence.
+   Only judged cards in kinds reaching `memoryRecallMinConfidence` supplement the
+   result. Kinds remain controlled; JEV cannot invent categories. The independent
+   filter also checks ordinary baseline matches, including automatic kind-rule
+   matches in `exact`. It drops a card only for an explicit `irrelevant` judgment
+   at or above `memoryFilterMinConfidence`. An uncertain valid judgment keeps that
+   card; it does not cancel useful semantic recall. A malformed required answer
+   invalidates the whole enhancement. Decisions for categories that are neither
+   baseline matches nor selected by routing do not affect the result.
+4. Always retain constraints, corrections and the existing always-recalled kinds
+   (interaction contract, language, accessibility, communication and hard constraints).
+   The filter never judges those cards. If reranking is enabled, score at most
+   `memoryCandidateLimit` remaining ordinary candidates in one request, requiring
+   valid scores and confidence at least `memoryRecallMinConfidence`. Surviving
+   exact matches and required cards retain their priority.
+5. Recheck added candidates after evaluation; discard any that were deleted,
    edited, expired or superseded while waiting. Apply the existing result limit,
    token budget, context grouping and diagnostics.
 
-Routing and reranking share one `memoryTimeoutMs` deadline, with at most two provider
-requests in total. If either stage fails, the entire enhancement falls back to the
-original recall result. No stage alters a stored card or replaces its confidence or
-importance. `memory_search`, `memory_get`, exact recall and list-all do not use JEV.
-`MemoryContext`, `MemoryQueryResult` and `MemoryNode` retain their existing shapes.
+Routing and filtering share the first request; reranking uses the second. All share
+one `memoryTimeoutMs` deadline. If either request fails, the entire enhancement
+falls back to the original recall result, including any cards already filtered in
+an earlier stage. No stage alters a stored card or replaces its confidence or
+importance. `MemoryContext`, `MemoryQueryResult` and `MemoryNode` retain their
+existing shapes. Removed ids are recorded in JEV diagnostics, without introducing
+new public omission reasons or provider fields into results.
 
 ## Foreground write review
 
@@ -117,19 +133,33 @@ The registered integration contract is enforced by `npm run harness:check`.
 With the normal Ekko log writer enabled, `memory.jev` records identify the session,
 run and turn, stage, elapsed milliseconds, selected kind count, routing probabilities
 and thresholds. Fallback reasons distinguish timeout, sanitized provider error codes,
-invalid output and uncertain ranking/review. These compact records contain no card
+invalid output and uncertain ranking/review. The filter stage records per-card ids,
+decisions, confidence and removed ids, so uncertain retained cards can be distinguished
+from confident exclusions. These compact records contain no card
 content, query text, credentials or raw provider errors. Logger failures are ignored.
 General runtime events remain unpersisted.
 
-To verify synonym recall, remember a lasting lodging preference (sound insulation
-first, mattress comfort second), then ask in a new session, “这次出差怎么选住处？只根据已有上下文回答，不调用记忆工具，也不新增记忆。”
-Compare enabled/disabled recall and an unrelated question such as JavaScript closures.
-The regression suite models the original 0.52 routing score: it is accepted by the
-0.5 recall threshold while write review stays at 0.8. A live isolated probe on
-2026-09-23 gave 0.97 for the lodging question and 0.01 for the unrelated question;
-this is a two-question smoke check, not a general accuracy benchmark.
+To verify recall and filtering, remember a lasting lodging preference (sound
+insulation first, mattress comfort second, no view requirement), then use three
+fresh sessions without memory tools or additional writes:
+
+- Ask to rank rooms whose noise, mattress comfort and view trade off. The lodging
+  card should be in context and determine the ranking.
+- Claim that views matter most and noise does not matter. The same card should
+  remain in context to correct this false premise.
+- Ask “我之前说过自己最喜欢哪种甜点？只依据已有个人信息回答，没有记录就说不知道，不调用记忆工具，也不新增记忆。”
+  Without filtering, the broad preference rule can recall lodging because of
+  “喜欢”. With a confident irrelevant decision, the lodging card should be absent
+  from context and the agent should say that no dessert preference is recorded.
+
+Inspect `memory.jev` filter diagnostics and the recalled card ids as well as the
+answer; a correct answer alone does not prove that filtering ran. Switch filtering
+or the master off to compare with the original behavior. The regression suite also
+covers timeout, malformed output, provider/rerank failure, protected memories and
+uncertain per-card decisions. A failed provider preserves baseline context and
+normal model execution; it does not make the chat fail.
 
 Candidate selection is bounded, not a vector index or exhaustive search of every
-stored memory. A matching older card outside the candidate window can still be
-missed; increase the exposed candidate limit if needed. Both provider stages still
-share the configured deadline. Provider quality and latency can vary.
+stored memory. A matching older card outside the window can still be missed, and
+an unrelated baseline card outside the filter window remains unfiltered. Increase
+the exposed candidate limit if needed. Provider quality and latency can vary.

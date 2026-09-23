@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { ALWAYS_RECALLED_MEMORY_KINDS } from './recall-policy'
 import {
   buildMemoryContextPrompt,
   selectMemoryNodesByTokenBudget,
@@ -44,14 +45,6 @@ import type {
 
 const MEMORY_CANDIDATE_LIMIT = 500
 const MAX_MEMORY_SEARCH_RESULTS = 50
-const ALWAYS_RECALLED_MEMORY_KINDS: NonNullable<MemoryQuery['kinds']> = [
-  'interaction_contract',
-  'language_preference',
-  'accessibility_need',
-  'communication_preference',
-  'hard_constraint',
-]
-
 export interface MemoryServiceOptions {
   store?: MemoryStore
   enabled?: boolean

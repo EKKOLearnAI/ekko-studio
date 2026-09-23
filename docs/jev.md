@@ -95,17 +95,19 @@ disable other callers of the shared JEV evaluator.
 Standalone Ekko users can persist `config.jev.memoryEnabled` or override it via
 `new EkkoAgent({ jev: { memoryEnabled: true } })` and runtime creation options.
 Standalone Ekko defaults every switch to false. Studio defaults the master to false
-and the three child switches to true, so enabling the master activates all three
+and the four child switches to true, so enabling the master activates all four
 policies unless a child was explicitly disabled. Missing fields in older Studio
 settings receive these defaults; saved values always take precedence, including false.
 
 | Studio field | Ekko `jev` field | Studio default / range |
 | --- | --- | --- |
 | `ekkoMemoryKindRoutingEnabled` | `memoryKindRoutingEnabled` | true |
+| `ekkoMemoryRelevanceFilterEnabled` | `memoryRelevanceFilterEnabled` | true |
 | `ekkoMemoryRerankEnabled` | `memoryRerankEnabled` | true |
 | `ekkoMemoryWriteReviewEnabled` | `memoryWriteReviewEnabled` | true |
 | `ekkoMemoryCandidateLimit` | `memoryCandidateLimit` | 20 / integer 1–50 |
 | `ekkoMemoryRecallMinConfidence` | `memoryRecallMinConfidence` | 0.5 / 0.5–1 (routing relevance and ranking confidence) |
+| `ekkoMemoryFilterMinConfidence` | `memoryFilterMinConfidence` | 0.8 / 0.5–1 (minimum confidence to discard an irrelevant card) |
 | `ekkoMemoryMinConfidence` | `memoryMinConfidence` | 0.8 / 0.5–1 (write review only) |
 | `ekkoMemoryTimeoutMs` | `memoryTimeoutMs` | 3000 / integer 100–30000 ms |
 
@@ -115,9 +117,13 @@ Turning the master switch off retains the child settings. Save applies the compl
 Profile configuration on the next run. Delete resets all fields in that Profile.
 
 Category routing uses actual eligible memory content to select controlled kinds,
-with both routing and ranking bounded by the candidate limit. The recall threshold
+with routing, individual relevance filtering and ranking bounded by the candidate limit. The recall threshold
 is independent of write review. Older saved settings inherit recall 0.5 while
-retaining their write threshold. Reranking
+retaining their write threshold. Relevance filtering removes confident unrelated
+cards from both ordinary baseline matches and semantic additions. Uncertain cards,
+standing instructions, constraints and corrections remain. Explicit queries bypass
+filtering. Its independent switch and confidence control appear in the same panel.
+Reranking
 changes candidate order before the existing token selection; exact matches and
 always-recalled constraints retain their priority. Write review checks user evidence,
 durability and kind after deterministic validation and before an atomic commit.
@@ -125,7 +131,7 @@ A reliable negative decision rejects the entire batch with corrective feedback.
 Deletion, expiry, noops, exact search, get and list-all keep their existing behavior.
 
 Each run snapshots its effective configuration, isolated even when memory services
-are shared. A recall has at most one category request and one batch scoring request;
+are shared. A recall has at most one combined category/filter request and one batch scoring request;
 a write batch has at most one review request. The memory timeout covers each complete
 recall or write batch, while the shared provider timeout also limits each request.
 Disabled/missing JEV makes no requests. Timeout, provider failures, invalid/unreliable
@@ -136,5 +142,6 @@ See [Ekko memory JEV behavior](../packages/ekko-agent/docs/memory-jev.md) for de
 
 Memory JEV diagnostics appear as `memory.jev` in the existing Ekko logs, correlated
 by session/run/turn. They include timings, routing probabilities, thresholds and
-sanitized failure codes, never card text or credentials. See the
+sanitized failure codes; filter diagnostics also report per-card decisions, confidence
+and removed ids, never card text or credentials. See the
 [recall verification guide](../packages/ekko-agent/docs/memory-jev.md#diagnostics-and-manual-verification).

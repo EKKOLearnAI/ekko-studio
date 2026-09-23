@@ -103,12 +103,12 @@ describe('GlobalEkkoAgent', () => {
     // The cached runtime picks up edits before the next run.
     getJevRuntimeConfigMock.mockResolvedValue({ ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, memoryEnabled: true, apiKey: 'edited-key', model: 'jev-edited',
       memoryKindRoutingEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true,
-      memoryCandidateLimit: 7, memoryMinConfidence: 0.95, memoryTimeoutMs: 1200 })
+      memoryRelevanceFilterEnabled: true, memoryFilterMinConfidence: 0.9, memoryCandidateLimit: 7, memoryMinConfidence: 0.95, memoryTimeoutMs: 1200 })
     await work.run({ messages: ['again'], modelClient: modelClient('updated') })
     expect(createRuntime).toHaveBeenCalledTimes(2)
     expect(workRuntime.jev.settings.model).toBe('jev-edited')
     expect(workRuntime.jev.settings).toMatchObject({ memoryKindRoutingEnabled: true, memoryRerankEnabled: true,
-      memoryWriteReviewEnabled: true, memoryCandidateLimit: 7, memoryMinConfidence: 0.95, memoryTimeoutMs: 1200 })
+      memoryWriteReviewEnabled: true, memoryRelevanceFilterEnabled: true, memoryFilterMinConfidence: 0.9, memoryCandidateLimit: 7, memoryMinConfidence: 0.95, memoryTimeoutMs: 1200 })
     expect(workRuntime.jev.settings.memoryEnabled).toBe(true)
     expect(personalRuntime.jev.settings.model).toBe('jev-personal')
     getJevRuntimeConfigMock.mockResolvedValue({ ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, apiKey: 'edited-key', model: 'jev-edited', memoryEnabled: false })

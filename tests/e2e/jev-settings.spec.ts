@@ -3,8 +3,8 @@ import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 import en from '../../packages/client/src/i18n/locales/en'
 import zh from '../../packages/client/src/i18n/locales/zh'
 
-const memoryDefaults = { ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true,
-  ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 }
+const memoryDefaults = { ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true,
+  ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 }
 
 for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
   test(`localizes JEV fields, failures and connection feedback in ${locale}`, async ({ page }, testInfo) => {
@@ -95,7 +95,7 @@ test(`configures JEV memory per Profile at ${viewport.width}px`, async ({ page }
   await expect(memorySwitch).not.toBeChecked()
   await memorySwitch.click()
   await expect(page.locator('.jev-settings')).toContainText(en.common.notConfigured)
-  for (const label of [en.jev.memoryKindRouting, en.jev.memoryRerank, en.jev.memoryWriteReview]) {
+  for (const label of [en.jev.memoryKindRouting, en.jev.memoryRelevanceFilter, en.jev.memoryRerank, en.jev.memoryWriteReview]) {
     const control = page.getByRole('switch', { name: label, exact: true })
     await expect(control).toBeChecked()
   }
@@ -103,13 +103,15 @@ test(`configures JEV memory per Profile at ${viewport.width}px`, async ({ page }
   await page.getByLabel(en.jev.memoryCandidateLimit, { exact: true }).fill('7')
   await expect(page.getByLabel(en.jev.memoryRecallMinConfidence, { exact: true })).toHaveValue('0.5')
   await page.getByLabel(en.jev.memoryRecallMinConfidence, { exact: true }).fill('0.65')
+  await expect(page.getByLabel(en.jev.memoryFilterMinConfidence, { exact: true })).toHaveValue('0.8')
+  await page.getByLabel(en.jev.memoryFilterMinConfidence, { exact: true }).fill('0.85')
   await page.getByLabel(en.jev.memoryMinConfidence, { exact: true }).fill('0.9')
   await page.getByLabel(en.jev.memoryTimeout, { exact: true }).fill('1200')
   await page.getByLabel('JEV API Key', { exact: true }).fill('new-research-key')
   await page.getByLabel('JEV Model', { exact: true }).fill('jev-research')
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByLabel('JEV API Key', { exact: true })).toHaveValue('')
-  expect(requests.find(r => r.method === 'PUT')).toMatchObject({ profile: 'research', body: { apiKey: 'new-research-key', model: 'jev-research', ekkoMemoryEnabled: true, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 7, ekkoMemoryRecallMinConfidence: 0.65, ekkoMemoryMinConfidence: 0.9, ekkoMemoryTimeoutMs: 1200 } })
+  expect(requests.find(r => r.method === 'PUT')).toMatchObject({ profile: 'research', body: { apiKey: 'new-research-key', model: 'jev-research', ekkoMemoryEnabled: true, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 7, ekkoMemoryRecallMinConfidence: 0.65, ekkoMemoryFilterMinConfidence: 0.85, ekkoMemoryMinConfidence: 0.9, ekkoMemoryTimeoutMs: 1200 } })
   await expect(memorySwitch).toBeChecked()
   await expect(page.locator('.jev-settings')).toContainText(en.jev.memoryReady)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
@@ -130,19 +132,22 @@ test(`configures JEV memory per Profile at ${viewport.width}px`, async ({ page }
   await page.locator('.n-base-select-option').filter({ hasText: /^research$/ }).click()
   await expect(page.getByLabel('JEV Model', { exact: true })).toHaveValue('jev-research')
   await expect(memorySwitch).toBeChecked()
-  for (const label of [en.jev.memoryKindRouting, en.jev.memoryRerank, en.jev.memoryWriteReview]) {
+  for (const label of [en.jev.memoryKindRouting, en.jev.memoryRelevanceFilter, en.jev.memoryRerank, en.jev.memoryWriteReview]) {
     await expect(page.getByRole('switch', { name: label, exact: true })).toBeChecked()
   }
   await page.locator('summary').filter({ hasText: en.jev.memoryAdvanced }).click()
   await expect(page.getByLabel(en.jev.memoryCandidateLimit, { exact: true })).toHaveValue('7')
   await expect(page.getByLabel(en.jev.memoryRecallMinConfidence, { exact: true })).toHaveValue('0.65')
+  await expect(page.getByLabel(en.jev.memoryFilterMinConfidence, { exact: true })).toHaveValue('0.85')
   await expect(page.getByLabel(en.jev.memoryMinConfidence, { exact: true })).toHaveValue('0.9')
   await expect(page.getByLabel(en.jev.memoryTimeout, { exact: true })).toHaveValue('1200')
+  await page.getByRole('switch', { name: en.jev.memoryRelevanceFilter, exact: true }).click()
   await memorySwitch.click()
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => settings.research.ekkoMemoryEnabled).toBe(false)
   await page.reload()
   await expect(memorySwitch).not.toBeChecked()
+  expect(settings.research.ekkoMemoryRelevanceFilterEnabled).toBe(false)
   expect(settings.research.ekkoMemoryWriteReviewEnabled).toBe(true)
   expect(settings.research.ekkoMemoryCandidateLimit).toBe(7)
   await page.getByRole('button', { name: 'Delete', exact: true }).click()

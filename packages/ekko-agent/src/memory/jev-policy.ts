@@ -15,7 +15,7 @@ export function memoryJevDiagnostic(diagnostic: EkkoJevDiagnostic): void {
   try { currentEkkoJevRun()?.onDiagnostic?.(diagnostic) } catch { /* Logging cannot affect memory. */ }
 }
 
-export function memoryJevEnabled(feature: 'memoryKindRoutingEnabled' | 'memoryRerankEnabled' | 'memoryWriteReviewEnabled'): boolean {
+export function memoryJevEnabled(feature: 'memoryKindRoutingEnabled' | 'memoryRerankEnabled' | 'memoryWriteReviewEnabled' | 'memoryRelevanceFilterEnabled'): boolean {
   const run = currentEkkoJevRun()
   return Boolean(run?.client.available && run.client.settings.memoryEnabled && run.client.settings[feature])
 }

@@ -14,7 +14,7 @@ import {
   type EkkoModelProviderPreset,
 } from './model/provider-presets'
 
-export const EKKO_CONFIG_SCHEMA_VERSION = 12
+export const EKKO_CONFIG_SCHEMA_VERSION = 13
 export const EKKO_CONFIG_DIRECTORY_NAME = 'config'
 export const EKKO_CONFIG_FILE_NAME = 'config.json'
 

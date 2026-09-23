@@ -15,7 +15,7 @@ Persist defaults in `config.jev`, or pass a `jev` object to the constructor/runt
 to override fields in memory without rewriting the local configuration. The host
 passes settings, and Ekko creates the SDK client itself. See the
 [JEV module API](docs/API.md#jev-模块) for precedence and fallback behavior.
-`jev.memoryEnabled` gates optional category routing, candidate reranking and foreground
+`jev.memoryEnabled` gates optional category routing, per-card relevance filtering, candidate reranking and foreground
 write review. Each feature has its own default-off switch and retains the original
 flow when JEV is unavailable. See [memory JEV behavior](docs/memory-jev.md).
 

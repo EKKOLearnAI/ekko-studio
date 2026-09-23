@@ -66,6 +66,16 @@
         "control": "NInputNumber",
         "binding": "settings.ekkoMemoryRecallMinConfidence",
         "label": "jev.memoryRecallMinConfidence"
+      },
+      "ekkoMemoryRelevanceFilterEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoMemoryRelevanceFilterEnabled",
+        "label": "jev.memoryRelevanceFilter"
+      },
+      "ekkoMemoryFilterMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoMemoryFilterMinConfidence",
+        "label": "jev.memoryFilterMinConfidence"
       }
     }
   },
@@ -76,7 +86,8 @@
       "status": "active",
       "sources": [
         "packages/server/src/modules/ekko/services/manager.ts",
-        "packages/ekko-agent/src/memory/jev-policy.ts"
+        "packages/ekko-agent/src/memory/jev-policy.ts",
+        "packages/ekko-agent/src/memory/jev-candidates.ts"
       ],
       "enabledKey": "ekkoMemoryEnabled",
       "studioDefaultEnabled": false,
@@ -163,6 +174,31 @@
         "interface": "EkkoJevConfig",
         "defaults": "DEFAULT_EKKO_JEV_CONFIG",
         "enabledKey": "memoryWriteReviewEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/ekko-agent/memory-jev.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "ekko-memory-relevance-filter",
+      "purpose": "Remove reliably unrelated ordinary recall candidates while preserving standing instructions and the complete baseline on failure.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/memory/jev-filter.ts"
+      ],
+      "enabledKey": "ekkoMemoryRelevanceFilterEnabled",
+      "studioDefaultEnabled": true,
+      "options": [
+        "ekkoMemoryFilterMinConfidence"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryRelevanceFilterEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
       "tests": [

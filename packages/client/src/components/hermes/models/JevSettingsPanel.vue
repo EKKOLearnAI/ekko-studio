@@ -16,7 +16,7 @@ const error = ref('')
 const testResult = ref<{ model: string; durationMs: number } | null>(null)
 const memoryStatus = computed(() => !settings.value?.ekkoMemoryEnabled ? 'jev.memoryDisabled'
   : !settings.value.hasApiKey ? 'common.notConfigured'
-    : !settings.value.ekkoMemoryKindRoutingEnabled && !settings.value.ekkoMemoryRerankEnabled && !settings.value.ekkoMemoryWriteReviewEnabled
+    : !settings.value.ekkoMemoryKindRoutingEnabled && !settings.value.ekkoMemoryRelevanceFilterEnabled && !settings.value.ekkoMemoryRerankEnabled && !settings.value.ekkoMemoryWriteReviewEnabled
       ? 'jev.memoryNoFeatures' : 'jev.memoryReady')
 let disposed = false
 onUnmounted(() => { disposed = true })
@@ -51,11 +51,11 @@ async function perform(action: 'save' | 'delete' | 'test') {
       const result = await testJevConnection(profile)
       if (!disposed) testResult.value = { model: result.model, durationMs: result.durationMs }
     } else {
-      const { baseUrl, model, timeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRerankEnabled,
-        ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs } = settings.value
+      const { baseUrl, model, timeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+        ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs } = settings.value
       const result = action === 'delete' ? await deleteJevSettings(profile)
-        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRerankEnabled,
-          ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs,
+        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+          ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs,
           ...(apiKey.value.trim() ? { apiKey: apiKey.value.trim() } : {}) })
       if (!disposed) { settings.value = result; apiKey.value = ''; message.success(t(action === 'delete' ? 'jev.deleted' : 'common.saved')) }
     }
@@ -102,6 +102,9 @@ async function perform(action: 'save' | 'delete' | 'test') {
             <SettingRow :label="t('jev.memoryKindRouting')" :hint="t('jev.memoryKindRoutingHint')">
               <NSwitch v-model:value="settings.ekkoMemoryKindRoutingEnabled" :aria-label="t('jev.memoryKindRouting')" />
             </SettingRow>
+            <SettingRow :label="t('jev.memoryRelevanceFilter')" :hint="t('jev.memoryRelevanceFilterHint')">
+              <NSwitch v-model:value="settings.ekkoMemoryRelevanceFilterEnabled" :aria-label="t('jev.memoryRelevanceFilter')" />
+            </SettingRow>
             <SettingRow :label="t('jev.memoryRerank')" :hint="t('jev.memoryRerankHint')">
               <NSwitch v-model:value="settings.ekkoMemoryRerankEnabled" :aria-label="t('jev.memoryRerank')" />
             </SettingRow>
@@ -117,6 +120,9 @@ async function perform(action: 'save' | 'delete' | 'test') {
               </SettingRow>
               <SettingRow :label="t('jev.memoryRecallMinConfidence')" :hint="t('jev.memoryRecallMinConfidenceHint')">
                 <NInputNumber :value="settings.ekkoMemoryRecallMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoMemoryRecallMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.memoryRecallMinConfidence') }" />
+              </SettingRow>
+              <SettingRow :label="t('jev.memoryFilterMinConfidence')" :hint="t('jev.memoryFilterMinConfidenceHint')">
+                <NInputNumber :value="settings.ekkoMemoryFilterMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoMemoryFilterMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.memoryFilterMinConfidence') }" />
               </SettingRow>
               <SettingRow :label="t('jev.memoryMinConfidence')" :hint="t('jev.memoryMinConfidenceHint')">
                 <NInputNumber :value="settings.ekkoMemoryMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoMemoryMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.memoryMinConfidence') }" />

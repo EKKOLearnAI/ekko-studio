@@ -4,6 +4,7 @@ export interface EkkoJevConfig {
   /** Allow memory to use JEV independently of other JEV consumers. */
   memoryEnabled: boolean
   memoryKindRoutingEnabled: boolean
+  memoryRelevanceFilterEnabled: boolean
   memoryRerankEnabled: boolean
   memoryWriteReviewEnabled: boolean
   memoryCandidateLimit: number
@@ -11,6 +12,8 @@ export interface EkkoJevConfig {
   memoryRecallMinConfidence: number
   /** Minimum confidence for write-review decisions only. */
   memoryMinConfidence: number
+  /** Discard irrelevant cards only at this confidence; uncertain cards remain. */
+  memoryFilterMinConfidence: number
   /** Total budget per automatic recall or write batch, including all JEV stages. */
   memoryTimeoutMs: number
   apiKey: string
@@ -26,11 +29,13 @@ export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({
   enabled: false,
   memoryEnabled: false,
   memoryKindRoutingEnabled: false,
+  memoryRelevanceFilterEnabled: false,
   memoryRerankEnabled: false,
   memoryWriteReviewEnabled: false,
   memoryCandidateLimit: 20,
   memoryRecallMinConfidence: 0.5,
   memoryMinConfidence: 0.8,
+  memoryFilterMinConfidence: 0.8,
   memoryTimeoutMs: 3000,
   apiKey: '',
   baseUrl: 'https://api.typesafe.ai',
@@ -55,7 +60,7 @@ export function resolveEkkoJevConfig(
   }
   if (typeof next.enabled !== 'boolean') throw new TypeError('JEV enabled must be a boolean.')
   if (typeof next.memoryEnabled !== 'boolean') throw new TypeError('JEV memoryEnabled must be a boolean.')
-  for (const key of ['memoryKindRoutingEnabled', 'memoryRerankEnabled', 'memoryWriteReviewEnabled'] as const) {
+  for (const key of ['memoryKindRoutingEnabled', 'memoryRelevanceFilterEnabled', 'memoryRerankEnabled', 'memoryWriteReviewEnabled'] as const) {
     if (typeof next[key] !== 'boolean') throw new TypeError(`JEV ${key} must be a boolean.`)
   }
   if (!Number.isInteger(next.memoryCandidateLimit) || next.memoryCandidateLimit < 1 || next.memoryCandidateLimit > 50) {
@@ -66,6 +71,9 @@ export function resolveEkkoJevConfig(
   }
   if (!Number.isFinite(next.memoryRecallMinConfidence) || next.memoryRecallMinConfidence < 0.5 || next.memoryRecallMinConfidence > 1) {
     throw new TypeError('JEV memory recall confidence must be between 0.5 and 1.')
+  }
+  if (!Number.isFinite(next.memoryFilterMinConfidence) || next.memoryFilterMinConfidence < 0.5 || next.memoryFilterMinConfidence > 1) {
+    throw new TypeError('JEV memory filter confidence must be between 0.5 and 1.')
   }
   if (!Number.isInteger(next.memoryTimeoutMs) || next.memoryTimeoutMs < 100 || next.memoryTimeoutMs > 30_000) {
     throw new TypeError('JEV memory timeout must be between 100 and 30000 ms.')

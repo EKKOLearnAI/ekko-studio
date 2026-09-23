@@ -377,7 +377,7 @@ Studio 在每次普通或隔离运行开始前读取当前 Profile 的 Studio JE
 `jev.memoryEnabled` 是独立的记忆使用开关，默认 false，可持久化，也可通过构造参数或 runtime
 参数覆盖。Studio 的“Ekko 记忆使用 JEV”开关按 Profile 保存为 `ekkoMemoryEnabled`，每次运行前
 映射到此字段；显式 false 会覆盖本地 true，且不关闭其他模块的 JEV 调用。
-本次仅提供开关及配置传递；即使开启，记忆分类、召回和写入策略仍尚未自动调用 JEV。
+开启总开关后，按子开关执行分类路由、逐条相关性过滤、候选重排和写入审查；具体默认值与回退语义见 [memory-jev.md](memory-jev.md)。
 
 ## `authorization` 模块
 
@@ -404,7 +404,7 @@ Studio 在每次普通或隔离运行开始前读取当前 Profile 的 Studio JE
 
 | 路径 | 类型 | 说明 |
 | --- | --- | --- |
-| `schemaVersion` | `number` | 当前为 12；读取旧配置时补齐新字段。 |
+| `schemaVersion` | `number` | 当前为 13；读取旧配置时补齐新字段。 |
 | `runtime.maxSteps` | `number` | 单次主循环最大步数。 |
 | `runtime.maxModelRetries` | `number` | 单次模型步骤最大重试。 |
 | `runtime.toolFailureRecoveryThreshold` | `number` | 同一工具连续失败后要求模型纠错或换方案的阈值；默认 3，不终止运行。 |
@@ -419,6 +419,15 @@ Studio 在每次普通或隔离运行开始前读取当前 Profile 的 Studio JE
 | `model.authorizationRefreshLeewayMs` | `number` | 到期前主动刷新窗口。 |
 | `jev.enabled` | `boolean` | JEV 开关，默认 false。 |
 | `jev.memoryEnabled` | `boolean` | 记忆使用 JEV 的总开关，默认 false；还需启用具体增强项。 |
+| `jev.memoryKindRoutingEnabled` | `boolean` | 语义分类补召回，独立运行默认 false。 |
+| `jev.memoryRelevanceFilterEnabled` | `boolean` | 逐条剔除高置信度无关记忆，独立运行默认 false。 |
+| `jev.memoryRerankEnabled` | `boolean` | 候选重排，独立运行默认 false。 |
+| `jev.memoryWriteReviewEnabled` | `boolean` | 写入审查，独立运行默认 false。 |
+| `jev.memoryCandidateLimit` | `number` | 每个召回阶段候选上限，默认 20，范围 1–50。 |
+| `jev.memoryRecallMinConfidence` | `number` | 分类路由及重排阈值，默认 0.5，范围 0.5–1。 |
+| `jev.memoryFilterMinConfidence` | `number` | 排除无关记忆的最低置信度，默认 0.8，范围 0.5–1；不确定时保留该条。 |
+| `jev.memoryMinConfidence` | `number` | 写入审查阈值，默认 0.8，范围 0.5–1。 |
+| `jev.memoryTimeoutMs` | `number` | 单次召回或写入的总预算，默认 3000，范围 100–30000 毫秒。 |
 | `jev.apiKey` | `string` | 独立运行时可保存的本地密钥，默认空；运行参数可临时覆盖。 |
 | `jev.baseUrl` | `string` | API 根地址，默认 `https://api.typesafe.ai`，不带 `/v1`。 |
 | `jev.model` | `string` | 默认 `jev-latest`。 |
@@ -773,7 +782,7 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig
 ### `src/config.ts`
 
 ```ts
-export const EKKO_CONFIG_SCHEMA_VERSION = 12
+export const EKKO_CONFIG_SCHEMA_VERSION = 13
 
 export const EKKO_CONFIG_DIRECTORY_NAME = 'config'
 
@@ -1471,7 +1480,7 @@ export interface EkkoJevSettings extends Omit<EkkoJevConfig, 'apiKey'> {
 }
 
 export interface EkkoJevDiagnostic {
-  stage: 'recall' | 'routing' | 'rerank' | 'write_review'
+  stage: 'recall' | 'routing' | 'filter' | 'rerank' | 'write_review'
   status: 'completed' | 'fallback' | 'skipped' | 'cancelled'
   durationMs: number
   reason?: string
@@ -1479,6 +1488,8 @@ export interface EkkoJevDiagnostic {
   candidateCount?: number
   selectedCount?: number
   kindProbabilities?: Record<string, number>
+  removedIds?: string[]
+  cardDecisions?: Array<{ nodeId: string; decision: string; confidence: number }>
 }
 
 export function currentEkkoJevRun(): EkkoJevRunContext | undefined
@@ -1501,11 +1512,13 @@ export interface EkkoJevConfig {
   enabled: boolean
   memoryEnabled: boolean
   memoryKindRoutingEnabled: boolean
+  memoryRelevanceFilterEnabled: boolean
   memoryRerankEnabled: boolean
   memoryWriteReviewEnabled: boolean
   memoryCandidateLimit: number
   memoryRecallMinConfidence: number
   memoryMinConfidence: number
+  memoryFilterMinConfidence: number
   memoryTimeoutMs: number
   apiKey: string
   baseUrl: string
@@ -1515,7 +1528,7 @@ export interface EkkoJevConfig {
 
 export type EkkoJevOverrides = Partial<EkkoJevConfig> | false
 
-export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.8, memoryTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
+export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRelevanceFilterEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.8, memoryFilterMinConfidence: 0.8, memoryTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
 
 export function resolveEkkoJevConfig( ...layers: Array<EkkoJevOverrides | undefined> ): EkkoJevConfig
 ```
@@ -1657,6 +1670,18 @@ export function buildMemoryContextPrompt(context: MemoryContext): string
 
 export function formatMemoryCard(node: MemoryNode): string
 ```
+### `src/memory/jev-candidates.ts`
+
+```ts
+export async function judgeMemoryCandidates(policy: MemoryJevPolicy, query: string, candidates: MemoryNode[], baselineIds: ReadonlySet<string>)
+```
+### `src/memory/jev-filter.ts`
+
+```ts
+export function memoryFilterQuestions(policy: MemoryJevPolicy, candidates: MemoryNode[]): Questions
+
+export function readMemoryFilter( policy: MemoryJevPolicy, candidates: MemoryNode[], result: SystemOneResult<Questions>, durationMs: number, admittedIds: ReadonlySet<string>, ): Set<string>
+```
 ### `src/memory/jev-policy.ts`
 
 ```ts
@@ -1672,7 +1697,7 @@ export class MemoryJevFallback extends Error {
 
 export function memoryJevDiagnostic(diagnostic: EkkoJevDiagnostic): void
 
-export function memoryJevEnabled(feature: 'memoryKindRoutingEnabled' | 'memoryRerankEnabled' | 'memoryWriteReviewEnabled'): boolean
+export function memoryJevEnabled(feature: 'memoryKindRoutingEnabled' | 'memoryRerankEnabled' | 'memoryWriteReviewEnabled' | 'memoryRelevanceFilterEnabled'): boolean
 
 export function throwIfMemoryRunAborted(): void
 
@@ -1695,7 +1720,9 @@ export async function rerankMemoryNodes(policy: MemoryJevPolicy, query: string, 
 ### `src/memory/jev-routing.ts`
 
 ```ts
-export async function routeMemoryKinds(policy: MemoryJevPolicy, query: string, candidates: MemoryNode[]): Promise<MemoryKind[]>
+export function memoryKindQuestions(policy: MemoryJevPolicy, candidates: MemoryNode[]): Questions
+
+export function readMemoryKinds(policy: MemoryJevPolicy, candidates: MemoryNode[], result: SystemOneResult<Questions>, durationMs: number): MemoryKind[]
 ```
 ### `src/memory/jev-write-review.ts`
 
@@ -1717,6 +1744,13 @@ export function resolveEkkoDataDirectory(options: EkkoDataPathOptions = {}): str
 export function resolveEkkoDatabasePath(options: EkkoDataPathOptions = {}): string
 
 export function isEkkoDevelopmentEnvironment(env: Record<string, string | undefined> = process.env): boolean
+```
+### `src/memory/recall-policy.ts`
+
+```ts
+export const ALWAYS_RECALLED_MEMORY_KINDS: MemoryKind[] = [ 'interaction_contract', 'language_preference', 'accessibility_need', 'communication_preference', 'hard_constraint', ]
+
+export function isProtectedMemoryNode(node: MemoryNode): boolean
 ```
 ### `src/memory/retrieval.ts`
 

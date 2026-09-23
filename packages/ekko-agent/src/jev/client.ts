@@ -22,7 +22,7 @@ export interface EkkoJevSettings extends Omit<EkkoJevConfig, 'apiKey'> {
 
 /** Compact diagnostics only; never include request text, evidence or provider errors. */
 export interface EkkoJevDiagnostic {
-  stage: 'recall' | 'routing' | 'rerank' | 'write_review'
+  stage: 'recall' | 'routing' | 'filter' | 'rerank' | 'write_review'
   status: 'completed' | 'fallback' | 'skipped' | 'cancelled'
   durationMs: number
   reason?: string
@@ -30,6 +30,8 @@ export interface EkkoJevDiagnostic {
   candidateCount?: number
   selectedCount?: number
   kindProbabilities?: Record<string, number>
+  removedIds?: string[]
+  cardDecisions?: Array<{ nodeId: string; decision: string; confidence: number }>
 }
 
 interface EkkoJevRunContext {
