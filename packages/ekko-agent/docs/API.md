@@ -322,6 +322,8 @@ API mode 固定映射：`chat_completions` → `openai-chat`，`codex_responses`
 
 ## `jev` 模块
 
+记忆增强的具体行为、开关及降级规则见 [memory-jev.md](memory-jev.md)。每次 `runtime.run` 固定 JEV 配置快照；本轮工具和召回沿用此快照，下一轮才使用更新后的值。
+
 JEV 实现由 Ekko 自己提供，可以脱离 Studio 独立使用。配置按字段合并，优先级从低到高为：
 
 1. `DEFAULT_EKKO_JEV_CONFIG`：默认关闭，空密钥、`https://api.typesafe.ai`、`jev-latest`、10 秒超时。
@@ -416,7 +418,7 @@ Studio 在每次普通或隔离运行开始前读取当前 Profile 的 Studio JE
 | `model.reasoningSummary` | `auto/concise/detailed` | 默认推理摘要。 |
 | `model.authorizationRefreshLeewayMs` | `number` | 到期前主动刷新窗口。 |
 | `jev.enabled` | `boolean` | JEV 开关，默认 false。 |
-| `jev.memoryEnabled` | `boolean` | 记忆使用 JEV 的独立开关，默认 false；当前提供配置传递，记忆策略尚未接入。 |
+| `jev.memoryEnabled` | `boolean` | 记忆使用 JEV 的总开关，默认 false；还需启用具体增强项。 |
 | `jev.apiKey` | `string` | 独立运行时可保存的本地密钥，默认空；运行参数可临时覆盖。 |
 | `jev.baseUrl` | `string` | API 根地址，默认 `https://api.typesafe.ai`，不带 `/v1`。 |
 | `jev.model` | `string` | 默认 `jev-latest`。 |
@@ -771,7 +773,7 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig
 ### `src/config.ts`
 
 ```ts
-export const EKKO_CONFIG_SCHEMA_VERSION = 10
+export const EKKO_CONFIG_SCHEMA_VERSION = 11
 
 export const EKKO_CONFIG_DIRECTORY_NAME = 'config'
 
@@ -1468,10 +1470,13 @@ export interface EkkoJevSettings extends Omit<EkkoJevConfig, 'apiKey'> {
   hasApiKey: boolean
 }
 
+export function currentEkkoJevRun(): { client: EkkoJevClient; signal?: AbortSignal } | undefined
+
 export class EkkoJevClient {
   #config: EkkoJevConfig
   constructor(config?: EkkoJevOverrides)
   configure(config?: EkkoJevOverrides): void
+  runScoped<T>(signal: AbortSignal | undefined, operation: () => T): T
   get available(): boolean
   get settings(): EkkoJevSettings
   async evaluate<Q extends Questions>(request: SystemOneRequest<Q>, options: { signal?: AbortSignal } = {}): Promise<SystemOneResult<Q> | undefined>
@@ -1484,6 +1489,12 @@ export class EkkoJevClient {
 export interface EkkoJevConfig {
   enabled: boolean
   memoryEnabled: boolean
+  memoryKindRoutingEnabled: boolean
+  memoryRerankEnabled: boolean
+  memoryWriteReviewEnabled: boolean
+  memoryCandidateLimit: number
+  memoryMinConfidence: number
+  memoryTimeoutMs: number
   apiKey: string
   baseUrl: string
   model: string
@@ -1492,7 +1503,7 @@ export interface EkkoJevConfig {
 
 export type EkkoJevOverrides = Partial<EkkoJevConfig> | false
 
-export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
+export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryMinConfidence: 0.8, memoryTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
 
 export function resolveEkkoJevConfig( ...layers: Array<EkkoJevOverrides | undefined> ): EkkoJevConfig
 ```
@@ -1632,6 +1643,45 @@ export function selectMemoryNodesByTokenBudget( nodes: MemoryNode[], tokenBudget
 export function buildMemoryContextPrompt(context: MemoryContext): string
 
 export function formatMemoryCard(node: MemoryNode): string
+```
+### `src/memory/jev-policy.ts`
+
+```ts
+export interface MemoryJevPolicy {
+  client: EkkoJevClient
+  settings: EkkoJevSettings
+  signal: AbortSignal
+}
+
+export function memoryJevEnabled(feature: 'memoryKindRoutingEnabled' | 'memoryRerankEnabled' | 'memoryWriteReviewEnabled'): boolean
+
+export function throwIfMemoryRunAborted(): void
+
+export async function optionalMemoryJev<T>(fallback: T, work: (policy: MemoryJevPolicy) => Promise<T>): Promise<T>
+
+export async function evaluateMemory<Q extends Questions>(policy: MemoryJevPolicy, request: SystemOneRequest<Q>): Promise<SystemOneResult<Q>>
+
+export function probability(value: unknown): value is number
+```
+### `src/memory/jev-recall.ts`
+
+```ts
+export async function enhanceMemoryRecall( store: MemoryStore, query: MemoryQuery, text: string | undefined, baseline: MemoryQueryResult, ): Promise<MemoryQueryResult>
+```
+### `src/memory/jev-rerank.ts`
+
+```ts
+export async function rerankMemoryNodes(policy: MemoryJevPolicy, query: string, nodes: MemoryNode[]): Promise<MemoryNode[]>
+```
+### `src/memory/jev-routing.ts`
+
+```ts
+export async function routeMemoryKinds(policy: MemoryJevPolicy, query: string): Promise<MemoryKind[]>
+```
+### `src/memory/jev-write-review.ts`
+
+```ts
+export async function reviewMemoryWrites( store: MemoryStore, mutations: Array<MemoryStoreMutation | undefined>, identity?: Partial<MemoryRuntimeIdentity>, ): Promise<{ index: number; reason: string } | undefined>
 ```
 ### `src/memory/paths.ts`
 

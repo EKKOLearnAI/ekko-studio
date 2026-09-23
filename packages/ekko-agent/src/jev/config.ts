@@ -3,6 +3,13 @@ export interface EkkoJevConfig {
   enabled: boolean
   /** Allow memory to use JEV independently of other JEV consumers. */
   memoryEnabled: boolean
+  memoryKindRoutingEnabled: boolean
+  memoryRerankEnabled: boolean
+  memoryWriteReviewEnabled: boolean
+  memoryCandidateLimit: number
+  memoryMinConfidence: number
+  /** Total budget per automatic recall or write batch, including all JEV stages. */
+  memoryTimeoutMs: number
   apiKey: string
   baseUrl: string
   model: string
@@ -15,6 +22,12 @@ export type EkkoJevOverrides = Partial<EkkoJevConfig> | false
 export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({
   enabled: false,
   memoryEnabled: false,
+  memoryKindRoutingEnabled: false,
+  memoryRerankEnabled: false,
+  memoryWriteReviewEnabled: false,
+  memoryCandidateLimit: 20,
+  memoryMinConfidence: 0.8,
+  memoryTimeoutMs: 3000,
   apiKey: '',
   baseUrl: 'https://api.typesafe.ai',
   model: 'jev-latest',
@@ -38,6 +51,18 @@ export function resolveEkkoJevConfig(
   }
   if (typeof next.enabled !== 'boolean') throw new TypeError('JEV enabled must be a boolean.')
   if (typeof next.memoryEnabled !== 'boolean') throw new TypeError('JEV memoryEnabled must be a boolean.')
+  for (const key of ['memoryKindRoutingEnabled', 'memoryRerankEnabled', 'memoryWriteReviewEnabled'] as const) {
+    if (typeof next[key] !== 'boolean') throw new TypeError(`JEV ${key} must be a boolean.`)
+  }
+  if (!Number.isInteger(next.memoryCandidateLimit) || next.memoryCandidateLimit < 1 || next.memoryCandidateLimit > 50) {
+    throw new TypeError('JEV memory candidate limit must be between 1 and 50.')
+  }
+  if (!Number.isFinite(next.memoryMinConfidence) || next.memoryMinConfidence < 0.5 || next.memoryMinConfidence > 1) {
+    throw new TypeError('JEV memory confidence must be between 0.5 and 1.')
+  }
+  if (!Number.isInteger(next.memoryTimeoutMs) || next.memoryTimeoutMs < 100 || next.memoryTimeoutMs > 30_000) {
+    throw new TypeError('JEV memory timeout must be between 100 and 30000 ms.')
+  }
   for (const key of ['apiKey', 'baseUrl', 'model'] as const) {
     if (typeof next[key] !== 'string' || next[key].length > 4096 || /[\r\n]/.test(next[key])) {
       throw new TypeError(`Invalid JEV ${key}.`)

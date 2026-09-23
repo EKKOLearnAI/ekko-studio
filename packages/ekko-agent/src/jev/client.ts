@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import {
   APIError, APITimeoutError, APIUserAbortError, TypeSafeClient,
   type Questions, type SystemOneRequest, type SystemOneResult,
@@ -19,6 +20,13 @@ export interface EkkoJevSettings extends Omit<EkkoJevConfig, 'apiKey'> {
   hasApiKey: boolean
 }
 
+const runContext = new AsyncLocalStorage<{ client: EkkoJevClient; signal?: AbortSignal }>()
+
+/** Internal run-local access; memory services can be shared across profiles. */
+export function currentEkkoJevRun(): { client: EkkoJevClient; signal?: AbortSignal } | undefined {
+  return runContext.getStore()
+}
+
 /** Ekko-owned evaluator. Receives configuration values only; never reads or writes files. */
 export class EkkoJevClient {
   #config: EkkoJevConfig
@@ -30,6 +38,11 @@ export class EkkoJevClient {
   /** Replace the effective in-memory settings. Already-started requests retain their snapshot. */
   configure(config?: EkkoJevOverrides): void {
     this.#config = resolveEkkoJevConfig(config)
+  }
+
+  /** Freeze this run's effective settings without changing the shared memory service. */
+  runScoped<T>(signal: AbortSignal | undefined, operation: () => T): T {
+    return runContext.run({ client: new EkkoJevClient(this.#config), signal }, operation)
   }
 
   get available(): boolean {

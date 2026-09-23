@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { NAlert, NButton, NForm, NInput, NInputNumber, NPopconfirm, NSpace, NSpin, NSwitch, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { deleteJevSettings, getJevSettings, saveJevSettings, testJevConnection, type JevSettings } from '@/api/studio/jev'
@@ -14,6 +14,10 @@ const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const testResult = ref<{ model: string; durationMs: number } | null>(null)
+const memoryStatus = computed(() => !settings.value?.ekkoMemoryEnabled ? 'jev.memoryDisabled'
+  : !settings.value.hasApiKey ? 'common.notConfigured'
+    : !settings.value.ekkoMemoryKindRoutingEnabled && !settings.value.ekkoMemoryRerankEnabled && !settings.value.ekkoMemoryWriteReviewEnabled
+      ? 'jev.memoryNoFeatures' : 'jev.memoryReady')
 let disposed = false
 onUnmounted(() => { disposed = true })
 
@@ -47,9 +51,12 @@ async function perform(action: 'save' | 'delete' | 'test') {
       const result = await testJevConnection(profile)
       if (!disposed) testResult.value = { model: result.model, durationMs: result.durationMs }
     } else {
-      const { baseUrl, model, timeoutMs, ekkoMemoryEnabled } = settings.value
+      const { baseUrl, model, timeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRerankEnabled,
+        ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs } = settings.value
       const result = action === 'delete' ? await deleteJevSettings(profile)
-        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, ekkoMemoryEnabled, ...(apiKey.value.trim() ? { apiKey: apiKey.value.trim() } : {}) })
+        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRerankEnabled,
+          ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs,
+          ...(apiKey.value.trim() ? { apiKey: apiKey.value.trim() } : {}) })
       if (!disposed) { settings.value = result; apiKey.value = ''; message.success(t(action === 'delete' ? 'jev.deleted' : 'common.saved')) }
     }
   } catch (err) { if (!disposed) error.value = errorKey(err) }
@@ -67,6 +74,7 @@ async function perform(action: 'save' | 'delete' | 'test') {
         <NButton v-if="!settings" @click="load">{{ t('common.retry') }}</NButton>
       </NSpace>
       <NForm v-if="settings" :disabled="busy" @submit.prevent="perform('save')">
+        <h4 class="group-title">{{ t('jev.connectionSettings') }}</h4>
         <div class="settings-rows">
           <SettingRow :label="t('jev.baseUrl')" class="text-setting">
             <NInput v-model:value="settings.baseUrl" size="small" :input-props="{ 'aria-label': `JEV ${t('jev.baseUrl')}` }" placeholder="https://api.typesafe.ai" />
@@ -80,10 +88,42 @@ async function perform(action: 'save' | 'delete' | 'test') {
           <SettingRow :label="t('jev.timeout')">
             <NInputNumber :value="settings.timeoutMs" size="small" class="input-md" :min="1000" :max="120000" :step="1000" :placeholder="t('jev.timeout')" :input-props="{ 'aria-label': `JEV ${t('jev.timeout')}` }" @update:value="value => { if (value !== null) settings!.timeoutMs = value }" />
           </SettingRow>
-          <SettingRow :label="t('jev.ekkoMemoryEnabled')">
+        </div>
+        <h4 class="group-title">{{ t('jev.useCases') }}</h4>
+        <div class="settings-rows">
+          <SettingRow :label="t('jev.ekkoMemoryEnabled')" :hint="t(memoryStatus)">
             <NSwitch v-model:value="settings.ekkoMemoryEnabled" :aria-label="t('jev.ekkoMemoryEnabled')" />
           </SettingRow>
         </div>
+        <details class="memory-options" :open="settings.ekkoMemoryEnabled">
+          <summary>{{ t('jev.memoryOptions') }}</summary>
+          <p class="section-hint">{{ t('jev.memoryOptionsHint') }}</p>
+          <div class="settings-rows">
+            <SettingRow :label="t('jev.memoryKindRouting')" :hint="t('jev.memoryKindRoutingHint')">
+              <NSwitch v-model:value="settings.ekkoMemoryKindRoutingEnabled" :aria-label="t('jev.memoryKindRouting')" />
+            </SettingRow>
+            <SettingRow :label="t('jev.memoryRerank')" :hint="t('jev.memoryRerankHint')">
+              <NSwitch v-model:value="settings.ekkoMemoryRerankEnabled" :aria-label="t('jev.memoryRerank')" />
+            </SettingRow>
+            <SettingRow :label="t('jev.memoryWriteReview')" :hint="t('jev.memoryWriteReviewHint')">
+              <NSwitch v-model:value="settings.ekkoMemoryWriteReviewEnabled" :aria-label="t('jev.memoryWriteReview')" />
+            </SettingRow>
+          </div>
+          <details class="memory-advanced">
+            <summary>{{ t('jev.memoryAdvanced') }}</summary>
+            <div class="settings-rows">
+              <SettingRow :label="t('jev.memoryCandidateLimit')" :hint="t('jev.memoryCandidateLimitHint')">
+                <NInputNumber :value="settings.ekkoMemoryCandidateLimit" @update:value="value => { if (value !== null) settings!.ekkoMemoryCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': t('jev.memoryCandidateLimit') }" />
+              </SettingRow>
+              <SettingRow :label="t('jev.memoryMinConfidence')" :hint="t('jev.memoryMinConfidenceHint')">
+                <NInputNumber :value="settings.ekkoMemoryMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoMemoryMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.memoryMinConfidence') }" />
+              </SettingRow>
+              <SettingRow :label="t('jev.memoryTimeout')" :hint="t('jev.memoryTimeoutHint')">
+                <NInputNumber :value="settings.ekkoMemoryTimeoutMs" @update:value="value => { if (value !== null) settings!.ekkoMemoryTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.memoryTimeout') }" />
+              </SettingRow>
+            </div>
+          </details>
+        </details>
         <div class="settings-actions">
           <NButton type="primary" :loading="busy" :disabled="busy" @click="perform('save')">{{ t('common.save') }}</NButton>
           <NButton :disabled="busy || !settings.hasApiKey" @click="perform('test')">{{ t('jev.testSaved') }}</NButton>
@@ -136,5 +176,10 @@ async function perform(action: 'save' | 'delete' | 'test') {
 }
 
 .feedback { margin-bottom: 16px; }
+.group-title { margin: 20px 0 8px; color: $text-primary; font-size: 14px; }
+.memory-options, .memory-advanced {
+  margin-top: 12px;
+  summary { cursor: pointer; padding: 8px 0; color: $text-primary; font-size: 13px; }
+}
 .test-result { overflow-wrap: anywhere; margin-top: 16px; }
 </style>

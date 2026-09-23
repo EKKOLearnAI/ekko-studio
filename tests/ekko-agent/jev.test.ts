@@ -47,11 +47,27 @@ function requestKey(index = 0): string | null {
 }
 
 describe('Ekko JEV configuration', () => {
+  it('migrates existing JEV settings without automatically activating memory enhancements', () => {
+    const config = normalizeEkkoConfig({ schemaVersion: 10, jev: { enabled: true, memoryEnabled: true, apiKey: 'legacy' } })
+    expect(config.jev).toEqual({ ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, memoryEnabled: true, apiKey: 'legacy' })
+    expect(config.schemaVersion).toBe(11)
+    expect(resolveEkkoJevConfig(config.jev, { memoryWriteReviewEnabled: true }, { memoryWriteReviewEnabled: false }))
+      .toMatchObject({ memoryWriteReviewEnabled: false, apiKey: 'legacy' })
+  })
+
+  it.each([
+    { memoryKindRoutingEnabled: 'false' }, { memoryRerankEnabled: 1 }, { memoryWriteReviewEnabled: null },
+    { memoryCandidateLimit: 0 }, { memoryCandidateLimit: 51 }, { memoryCandidateLimit: 1.5 },
+    { memoryMinConfidence: 0.1 }, { memoryMinConfidence: Number.NaN }, { memoryMinConfidence: 2 },
+    { memoryTimeoutMs: 99 }, { memoryTimeoutMs: 30_001 },
+  ])('rejects invalid memory settings: %j', input => {
+    expect(() => normalizeEkkoConfig({ jev: input } as any)).toThrow(EkkoConfigError)
+  })
   it('adds disabled defaults to older configs while retaining their settings', () => {
     const config = normalizeEkkoConfig({ schemaVersion: 9, runtime: { maxSteps: 17 } })
     expect(config.jev).toEqual(DEFAULT_EKKO_JEV_CONFIG)
     expect(config.runtime.maxSteps).toBe(17)
-    expect(config.schemaVersion).toBe(10)
+    expect(config.schemaVersion).toBe(11)
   })
 
   it('uses local settings when no override is supplied, including after restarting', async () => {

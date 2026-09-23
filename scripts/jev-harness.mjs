@@ -83,7 +83,7 @@ export function jevUsage(file, source) {
   let used = false
   let evaluates = false
   let directSdk = false
-  const evaluators = new Set(['evaluateJev'])
+  const evaluators = new Set(['evaluateJev', 'evaluateMemory'])
   walk(ast, node => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       if (!node.moduleSpecifier || !ts.isStringLiteralLike(node.moduleSpecifier)) return
@@ -96,7 +96,7 @@ export function jevUsage(file, source) {
       for (const item of elements) {
         if (item.isTypeOnly) continue
         const imported = name(item.propertyName ?? item.name)
-        if (imported === 'evaluateJev') evaluators.add(name(item.name))
+        if (['evaluateJev', 'evaluateMemory'].includes(imported)) evaluators.add(name(item.name))
         if (/^(EkkoJevClient|evaluateJev|getJevRuntimeConfig)$/.test(imported)) used = true
       }
       if (/(?:^|\/)jev(?:\/|$|\.)/.test(specifier)) used = true

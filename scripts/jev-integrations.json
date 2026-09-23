@@ -7,21 +7,77 @@
     "component": "JevSettingsPanel",
     "page": "/#/hermes/models?tab=jev",
     "fields": {
-      "baseUrl": { "control": "NInput", "binding": "settings.baseUrl", "label": "jev.baseUrl" },
-      "model": { "control": "NInput", "binding": "settings.model", "label": "profiles.model" },
-      "apiKey": { "control": "NInput", "binding": "apiKey", "label": "jev.apiKey" },
-      "timeoutMs": { "control": "NInputNumber", "binding": "settings.timeoutMs", "label": "jev.timeout" },
-      "ekkoMemoryEnabled": { "control": "NSwitch", "binding": "settings.ekkoMemoryEnabled", "label": "jev.ekkoMemoryEnabled" }
+      "baseUrl": {
+        "control": "NInput",
+        "binding": "settings.baseUrl",
+        "label": "jev.baseUrl"
+      },
+      "model": {
+        "control": "NInput",
+        "binding": "settings.model",
+        "label": "profiles.model"
+      },
+      "apiKey": {
+        "control": "NInput",
+        "binding": "apiKey",
+        "label": "jev.apiKey"
+      },
+      "timeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.timeoutMs",
+        "label": "jev.timeout"
+      },
+      "ekkoMemoryEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoMemoryEnabled",
+        "label": "jev.ekkoMemoryEnabled"
+      },
+      "ekkoMemoryKindRoutingEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoMemoryKindRoutingEnabled",
+        "label": "jev.memoryKindRouting"
+      },
+      "ekkoMemoryRerankEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoMemoryRerankEnabled",
+        "label": "jev.memoryRerank"
+      },
+      "ekkoMemoryWriteReviewEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoMemoryWriteReviewEnabled",
+        "label": "jev.memoryWriteReview"
+      },
+      "ekkoMemoryCandidateLimit": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoMemoryCandidateLimit",
+        "label": "jev.memoryCandidateLimit"
+      },
+      "ekkoMemoryMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoMemoryMinConfidence",
+        "label": "jev.memoryMinConfidence"
+      },
+      "ekkoMemoryTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoMemoryTimeoutMs",
+        "label": "jev.memoryTimeout"
+      }
     }
   },
   "integrations": [
     {
       "id": "ekko-memory",
-      "purpose": "Allow Ekko memory to use JEV; currently configuration transport only.",
-      "status": "configuration-only",
-      "sources": ["packages/server/src/modules/ekko/services/manager.ts"],
+      "purpose": "Control optional Ekko memory JEV with a run snapshot, total deadline and conservative fallback.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/modules/ekko/services/manager.ts",
+        "packages/ekko-agent/src/memory/jev-policy.ts"
+      ],
       "enabledKey": "ekkoMemoryEnabled",
-      "options": [],
+      "options": [
+        "ekkoMemoryMinConfidence",
+        "ekkoMemoryTimeoutMs"
+      ],
       "runtimeConfig": {
         "file": "packages/ekko-agent/src/jev/config.ts",
         "interface": "EkkoJevConfig",
@@ -33,6 +89,75 @@
         "tests/server/jev.test.ts",
         "tests/server/ekko-agent-manager.test.ts",
         "tests/ekko-agent/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts",
+        "tests/ekko-agent/memory-jev.test.ts"
+      ]
+    },
+    {
+      "id": "ekko-memory-kind-routing",
+      "purpose": "Select relevant controlled memory kinds for automatic recall.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/memory/jev-routing.ts"
+      ],
+      "enabledKey": "ekkoMemoryKindRoutingEnabled",
+      "options": [],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryKindRoutingEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/ekko-agent/memory-jev.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "ekko-memory-rerank",
+      "purpose": "Rerank recall candidates without changing cards or exact results.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/memory/jev-rerank.ts"
+      ],
+      "enabledKey": "ekkoMemoryRerankEnabled",
+      "options": [
+        "ekkoMemoryCandidateLimit"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryRerankEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/ekko-agent/memory-jev.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "ekko-memory-write-review",
+      "purpose": "Review evidenced memory writes before committing an atomic batch.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/memory/jev-write-review.ts"
+      ],
+      "enabledKey": "ekkoMemoryWriteReviewEnabled",
+      "options": [],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryWriteReviewEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/ekko-agent/memory-jev.test.ts",
+        "tests/server/jev.test.ts",
         "tests/e2e/jev-settings.spec.ts"
       ]
     }

@@ -37,14 +37,22 @@ features into JEV.
 
 | Integration | Implementation | Studio setting | Standalone setting | Frontend entry |
 | --- | --- | --- | --- | --- |
-| `ekko-memory` | Configuration transport only, in `packages/server/src/modules/ekko/services/manager.ts` | `ekkoMemoryEnabled` | `jev.memoryEnabled` | Models → JEV → Use JEV for Ekko memory |
+| `ekko-memory` | Active: run context and fallback, `memory/jev-policy.ts` | `ekkoMemoryEnabled` | `jev.memoryEnabled` | Models → JEV → Use JEV for Ekko memory |
+| `ekko-memory-kind-routing` | Active: `memory/jev-routing.ts` | `ekkoMemoryKindRoutingEnabled` | `jev.memoryKindRoutingEnabled` | Memory options → Semantic category routing |
+| `ekko-memory-rerank` | Active: `memory/jev-rerank.ts` | `ekkoMemoryRerankEnabled` | `jev.memoryRerankEnabled` | Memory options → Candidate reranking |
+| `ekko-memory-write-review` | Active: `memory/jev-write-review.ts` | `ekkoMemoryWriteReviewEnabled` | `jev.memoryWriteReviewEnabled` | Memory options → Review memory writes |
 
-Both switches default to `false`. Studio reads its Profile settings before each
-normal or isolated run and maps the value to Ekko's runtime configuration without
-writing it to Ekko's local file. **Memory policies do not evaluate JEV yet.**
-When adding the first memory evaluation, change the registry status from
-`configuration-only` to `active`, register the actual evaluation source, and add
-tests proving the disabled and fallback behavior.
+Agent source paths above are relative to `packages/ekko-agent/src`. Every switch
+defaults to false. Studio reads the selected Profile before each normal/isolated run;
+the runtime snapshots the values for all subsequent memory operations. Shared memory
+services never store a mutable JEV client or Profile configuration. No runtime
+setting is written back to Ekko's local file.
+
+The parent integration owns the decision threshold and per-operation time budget.
+Reranking owns the candidate limit. All three options have editable advanced controls.
+See [memory JEV behavior](../../packages/ekko-agent/docs/memory-jev.md) for the
+behavioral contract. Keep `MemoryContext`, `MemoryQueryResult`, `MemoryNode` and
+write result shapes compatible. Evaluation scores must not overwrite stored fields.
 
 The settings screen's connection test and the authenticated manual evaluation
 API are explicit caller actions, rather than automatically enabled business

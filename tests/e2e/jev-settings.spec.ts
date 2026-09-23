@@ -3,6 +3,9 @@ import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 import en from '../../packages/client/src/i18n/locales/en'
 import zh from '../../packages/client/src/i18n/locales/zh'
 
+const memoryDefaults = { ekkoMemoryKindRoutingEnabled: false, ekkoMemoryRerankEnabled: false, ekkoMemoryWriteReviewEnabled: false,
+  ekkoMemoryCandidateLimit: 20, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 }
+
 for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
   test(`localizes JEV fields, failures and connection feedback in ${locale}`, async ({ page }, testInfo) => {
     await authenticate(page, TEST_ACCESS_KEY, 'default')
@@ -16,7 +19,7 @@ for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
       } else if (route.request().method() === 'PUT') {
         await route.fulfill({ status: 400, json: { error: 'Invalid JEV model', code: 'jev_invalid_request' } })
       } else {
-        await route.fulfill({ json: { baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false } })
+        await route.fulfill({ json: { ...memoryDefaults, baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false } })
       }
     })
     await page.route('**/api/studio/jev/test', async route => {
@@ -57,10 +60,12 @@ for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
   })
 }
 
-test('configures and tests JEV per page Profile without switching the global Profile', async ({ page }) => {
+for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+test(`configures JEV memory per Profile at ${viewport.width}px`, async ({ page }, testInfo) => {
+  await page.setViewportSize(viewport)
   await authenticate(page, TEST_ACCESS_KEY, 'default')
   const api = await mockHermesApi(page, { initialProfileName: 'default' })
-  const defaults = { baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000, hasApiKey: false, ekkoMemoryEnabled: false }
+  const defaults = { ...memoryDefaults, baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000, hasApiKey: false, ekkoMemoryEnabled: false }
   const settings: Record<string, typeof defaults> = {
     default: { ...defaults, model: 'jev-default', hasApiKey: true }, research: { ...defaults },
   }
@@ -76,7 +81,8 @@ test('configures and tests JEV per page Profile without switching the global Pro
       return
     }
     if (method === 'PUT') {
-      settings[profile] = { baseUrl: body.baseUrl, model: body.model, timeoutMs: body.timeoutMs, ekkoMemoryEnabled: body.ekkoMemoryEnabled, hasApiKey: !!body.apiKey || settings[profile].hasApiKey }
+      const { apiKey, ...values } = body
+      settings[profile] = { ...values, hasApiKey: !!apiKey || settings[profile].hasApiKey }
     }
     if (method === 'DELETE') settings[profile] = { ...defaults }
     await route.fulfill({ json: settings[profile] })
@@ -88,12 +94,24 @@ test('configures and tests JEV per page Profile without switching the global Pro
   const memorySwitch = page.getByRole('switch', { name: en.jev.ekkoMemoryEnabled, exact: true })
   await expect(memorySwitch).not.toBeChecked()
   await memorySwitch.click()
+  for (const label of [en.jev.memoryKindRouting, en.jev.memoryRerank, en.jev.memoryWriteReview]) {
+    const control = page.getByRole('switch', { name: label, exact: true })
+    await expect(control).not.toBeChecked()
+    await control.click()
+  }
+  await page.locator('summary').filter({ hasText: en.jev.memoryAdvanced }).click()
+  await page.getByLabel(en.jev.memoryCandidateLimit, { exact: true }).fill('7')
+  await page.getByLabel(en.jev.memoryMinConfidence, { exact: true }).fill('0.9')
+  await page.getByLabel(en.jev.memoryTimeout, { exact: true }).fill('1200')
   await page.getByLabel('JEV API Key', { exact: true }).fill('new-research-key')
   await page.getByLabel('JEV Model', { exact: true }).fill('jev-research')
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByLabel('JEV API Key', { exact: true })).toHaveValue('')
-  expect(requests.find(r => r.method === 'PUT')).toMatchObject({ profile: 'research', body: { apiKey: 'new-research-key', model: 'jev-research', ekkoMemoryEnabled: true } })
+  expect(requests.find(r => r.method === 'PUT')).toMatchObject({ profile: 'research', body: { apiKey: 'new-research-key', model: 'jev-research', ekkoMemoryEnabled: true, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 7, ekkoMemoryMinConfidence: 0.9, ekkoMemoryTimeoutMs: 1200 } })
   await expect(memorySwitch).toBeChecked()
+  await expect(page.locator('.jev-settings')).toContainText(en.jev.memoryReady)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('jev-memory-settings.png'), fullPage: true })
 
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => requests.filter(r => r.method === 'PUT').length).toBe(2)
@@ -110,11 +128,20 @@ test('configures and tests JEV per page Profile without switching the global Pro
   await page.locator('.n-base-select-option').filter({ hasText: /^research$/ }).click()
   await expect(page.getByLabel('JEV Model', { exact: true })).toHaveValue('jev-research')
   await expect(memorySwitch).toBeChecked()
+  for (const label of [en.jev.memoryKindRouting, en.jev.memoryRerank, en.jev.memoryWriteReview]) {
+    await expect(page.getByRole('switch', { name: label, exact: true })).toBeChecked()
+  }
+  await page.locator('summary').filter({ hasText: en.jev.memoryAdvanced }).click()
+  await expect(page.getByLabel(en.jev.memoryCandidateLimit, { exact: true })).toHaveValue('7')
+  await expect(page.getByLabel(en.jev.memoryMinConfidence, { exact: true })).toHaveValue('0.9')
+  await expect(page.getByLabel(en.jev.memoryTimeout, { exact: true })).toHaveValue('1200')
   await memorySwitch.click()
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => settings.research.ekkoMemoryEnabled).toBe(false)
   await page.reload()
   await expect(memorySwitch).not.toBeChecked()
+  expect(settings.research.ekkoMemoryWriteReviewEnabled).toBe(true)
+  expect(settings.research.ekkoMemoryCandidateLimit).toBe(7)
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await page.getByRole('button', { name: 'Confirm', exact: true }).click()
   await expect(page.getByLabel('JEV Model', { exact: true })).toHaveValue('jev-latest')
@@ -125,3 +152,4 @@ test('configures and tests JEV per page Profile without switching the global Pro
   expect(api.requests.filter(r => r.pathname.includes('/profiles/') && r.method !== 'GET')).toEqual([])
   expect(api.unexpectedRequests).toEqual([])
 })
+}

@@ -5,6 +5,12 @@ export type { Questions, SystemOneRequest, SystemOneResult } from '@typesafe-ai/
 
 export interface JevSettings {
   ekkoMemoryEnabled: boolean
+  ekkoMemoryKindRoutingEnabled: boolean
+  ekkoMemoryRerankEnabled: boolean
+  ekkoMemoryWriteReviewEnabled: boolean
+  ekkoMemoryCandidateLimit: number
+  ekkoMemoryMinConfidence: number
+  ekkoMemoryTimeoutMs: number
   baseUrl: string
   model: string
   timeoutMs: number

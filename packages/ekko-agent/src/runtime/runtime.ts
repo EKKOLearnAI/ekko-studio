@@ -356,6 +356,10 @@ export class AgentRuntime {
   }
 
   async run(input: AgentRuntimeRunInput): Promise<AgentRuntimeRunResult> {
+    return this.jev.runScoped(input.signal, () => this.runWithSnapshot(input))
+  }
+
+  private async runWithSnapshot(input: AgentRuntimeRunInput): Promise<AgentRuntimeRunResult> {
     await this.refreshTools(this.runToolContext(input))
 
     const runId = randomUUID()

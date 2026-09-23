@@ -58,7 +58,7 @@ Use `evaluateJev(profile, input, signal?)` from `@/api/studio/jev`. It has the s
 typed request/response shape and routes through the authenticated Studio server.
 
 - `GET /api/studio/jev/settings`: read non-secret settings.
-- `PUT /api/studio/jev/settings`: save `baseUrl`, `model`, `timeoutMs`, optional `apiKey` and `ekkoMemoryEnabled`.
+- `PUT /api/studio/jev/settings`: save `baseUrl`, `model`, `timeoutMs`, optional `apiKey` and the memory options listed below.
 - `DELETE /api/studio/jev/settings`: reset settings and remove the key.
 - `POST /api/studio/jev/test`: test saved settings with a fixed sample.
 - `POST /api/studio/jev/evaluate`: accept `{ state, questions, model? }`.
@@ -66,7 +66,7 @@ typed request/response shape and routes through the authenticated Studio server.
 All endpoints require Studio authentication and an authorized Profile header.
 Persistence uses private files in `config.appHome/models/jev`, named by the profile hash.
 It does not write Hermes Agent configuration. No existing runtime or business
-module is automatically routed through JEV by this change.
+module is routed through JEV without its feature switch being enabled.
 
 Protocol reference: [TypeSafe quickstart](https://docs.typesafe.ai/introduction/quickstart)
 and [JavaScript SDK](https://docs.typesafe.ai/sdk/javascript).
@@ -94,5 +94,36 @@ disable other callers of the shared JEV evaluator.
 
 Standalone Ekko users can persist `config.jev.memoryEnabled` or override it via
 `new EkkoAgent({ jev: { memoryEnabled: true } })` and runtime creation options.
-This adds the switch and configuration transport only; Ekko memory policies do
-not yet call JEV automatically, even when the switch is enabled.
+Enable the master switch and the desired feature switches below to activate memory
+policies. All feature switches default to false, including when loading old settings.
+
+| Studio field | Ekko `jev` field | Default / range |
+| --- | --- | --- |
+| `ekkoMemoryKindRoutingEnabled` | `memoryKindRoutingEnabled` | false |
+| `ekkoMemoryRerankEnabled` | `memoryRerankEnabled` | false |
+| `ekkoMemoryWriteReviewEnabled` | `memoryWriteReviewEnabled` | false |
+| `ekkoMemoryCandidateLimit` | `memoryCandidateLimit` | 20 / integer 1–50 |
+| `ekkoMemoryMinConfidence` | `memoryMinConfidence` | 0.8 / 0.5–1 |
+| `ekkoMemoryTimeoutMs` | `memoryTimeoutMs` | 3000 / integer 100–30000 ms |
+
+The page groups provider connection settings and memory use cases. Feature switches
+are in the expandable memory section; numeric controls are under Advanced parameters.
+Turning the master switch off retains the child settings. Save applies the complete
+Profile configuration on the next run. Delete resets all fields in that Profile.
+
+Category routing supplements the original candidates with controlled kinds. Reranking
+changes candidate order before the existing token selection; exact matches and
+always-recalled constraints retain their priority. Write review checks user evidence,
+durability and kind after deterministic validation and before an atomic commit.
+A reliable negative decision rejects the entire batch with corrective feedback.
+Deletion, expiry, noops, exact search, get and list-all keep their existing behavior.
+
+Each run snapshots its effective configuration, isolated even when memory services
+are shared. A recall has at most one category request and one batch scoring request;
+a write batch has at most one review request. The memory timeout covers each complete
+recall or write batch, while the shared provider timeout also limits each request.
+Disabled/missing JEV makes no requests. Timeout, provider failures, invalid/unreliable
+results, unavailable evidence, or oversized input preserve the original flow.
+Cancellation propagates and cannot authorize a write. Result structures and stored
+card confidence/importance remain unchanged; provider scores stay internal.
+See [Ekko memory JEV behavior](../packages/ekko-agent/docs/memory-jev.md) for details.

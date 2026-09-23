@@ -14,12 +14,13 @@ function fixture() {
   const manifest = structuredClone(registered)
   const { server, client, form } = manifest.settings
   const integration = manifest.integrations[0]
-  const files = [server, client, form, manifest.settings.host, integration.runtimeConfig.file, ...integration.sources, ...integration.tests]
+  const files = [server, client, form, manifest.settings.host, ...manifest.integrations.flatMap((item: typeof integration) => [item.runtimeConfig.file, ...item.sources, ...item.tests])]
   const sources = new Map<string, string>(files.map(file => [file, readFileSync(resolve(root, file), 'utf8')]))
-  sources.set('packages/client/src/i18n/locales/en.ts', `export default {
-    jev: { baseUrl: 'Base URL', apiKey: 'API key', timeout: 'Timeout', ekkoMemoryEnabled: 'Memory' },
+  const labels = Object.values(manifest.settings.fields).map((field: any) => field.label as string)
+  sources.set('packages/client/src/i18n/locales/en.ts', `export default ${JSON.stringify({
+    jev: Object.fromEntries(labels.filter(label => label.startsWith('jev.')).map(label => [label.slice(4), label])),
     profiles: { model: 'Model' },
-  }`)
+  })}`)
   const change = (file: string, before: string, after: string) => {
     expect(sources.get(file)).toContain(before)
     sources.set(file, sources.get(file)!.replace(before, after))
@@ -28,7 +29,7 @@ function fixture() {
 }
 
 describe('JEV integration harness', () => {
-  it('accepts the current configuration-only integration', () => {
+  it('accepts the registered memory integrations', () => {
     const { sources, manifest } = fixture()
     expect(jevHarnessViolations(sources, manifest)).toEqual([])
   })
@@ -130,7 +131,7 @@ describe('JEV integration harness', () => {
 
   it('rejects a switch that is displayed but never saved', () => {
     const f = fixture()
-    f.change(f.form, '{ baseUrl, model, timeoutMs, ekkoMemoryEnabled, ...', '{ baseUrl, model, timeoutMs, ...')
+    f.change(f.form, 'saveJevSettings(profile, { baseUrl, model, timeoutMs, ekkoMemoryEnabled,', 'saveJevSettings(profile, { baseUrl, model, timeoutMs,')
     expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('ekkoMemoryEnabled is not submitted')
   })
 
@@ -184,6 +185,7 @@ describe('JEV integration harness', () => {
 
   it('does not allow a configuration-only registration to hide an evaluation call', () => {
     const f = fixture()
+    f.integration.status = 'configuration-only'
     f.sources.set(f.integration.sources[0], f.sources.get(f.integration.sources[0]) + '\nruntime.jev.tryEvaluate(request)')
     expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('configuration-only registration cannot evaluate JEV')
     f.integration.status = 'active'
@@ -198,6 +200,7 @@ describe('JEV integration harness', () => {
     f.sources.set(runtime, f.sources.get(runtime) + '\nruntime.jev.tryEvaluate(request)')
     expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain(`${runtime} is an unregistered JEV integration`)
     f.integration.sources.push(runtime)
+    f.integration.status = 'configuration-only'
     expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('configuration-only registration cannot evaluate JEV')
     f.integration.status = 'active'
     expect(jevHarnessViolations(f.sources, f.manifest)).toEqual([])

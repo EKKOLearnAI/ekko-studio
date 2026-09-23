@@ -15,9 +15,9 @@ Persist defaults in `config.jev`, or pass a `jev` object to the constructor/runt
 to override fields in memory without rewriting the local configuration. The host
 passes settings, and Ekko creates the SDK client itself. See the
 [JEV module API](docs/API.md#jev-模块) for precedence and fallback behavior.
-`jev.memoryEnabled` separately records whether memory may use JEV (default
-`false`). It supports the same persisted/override precedence; automatic memory
-evaluation is not yet connected.
+`jev.memoryEnabled` gates optional category routing, candidate reranking and foreground
+write review. Each feature has its own default-off switch and retains the original
+flow when JEV is unavailable. See [memory JEV behavior](docs/memory-jev.md).
 
 `default` is always created, even when `profiles` is omitted or does not list
 it. Existing first-level Profile directories under `.ekko/skills`,
