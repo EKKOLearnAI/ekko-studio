@@ -55,7 +55,7 @@ typed request/response shape and routes through the authenticated Studio server.
 - `POST /api/studio/jev/evaluate`: accept `{ state, questions, model? }`.
 
 All endpoints require Studio authentication and an authorized Profile header.
-Persistence uses private files in `config.appHome/jev`, named by the profile hash.
+Persistence uses private files in `config.appHome/models/jev`, named by the profile hash.
 It does not write Hermes Agent configuration. No existing runtime or business
 module is automatically routed through JEV by this change.
 

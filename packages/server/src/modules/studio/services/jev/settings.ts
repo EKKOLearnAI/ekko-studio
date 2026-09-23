@@ -25,7 +25,7 @@ function settingsPath(profile: string): string {
   if (typeof profile !== 'string' || !profile.trim() || profile.length > 128) {
     throw new JevError('Profile is required')
   }
-  return join(config.appHome, 'jev', `${createHash('sha256').update(profile.trim()).digest('hex')}.json`)
+  return join(config.appHome, 'models', 'jev', `${createHash('sha256').update(profile.trim()).digest('hex')}.json`)
 }
 
 function normalize(input: unknown, current = defaults): StoredSettings {
@@ -75,7 +75,7 @@ export async function getJevSettings(profile: string): Promise<JevSettings> {
 
 export async function saveJevSettings(profile: string, input: unknown): Promise<JevSettings> {
   const path = settingsPath(profile)
-  const directory = join(config.appHome, 'jev')
+  const directory = join(config.appHome, 'models', 'jev')
   await mkdir(directory, { recursive: true, mode: 0o700 })
   await chmod(directory, 0o700)
   const result = await safeFileStore.updateText(path, text => {
@@ -89,7 +89,7 @@ export async function saveJevSettings(profile: string, input: unknown): Promise<
 export async function deleteJevSettings(profile: string): Promise<JevSettings> {
   // Use the same write lock as saving; clearing cannot race a credential update.
   const path = settingsPath(profile)
-  await mkdir(join(config.appHome, 'jev'), { recursive: true, mode: 0o700 })
+  await mkdir(join(config.appHome, 'models', 'jev'), { recursive: true, mode: 0o700 })
   await safeFileStore.updateText(path, () => JSON.stringify(defaults))
   await chmod(path, 0o600)
   return publicSettings(defaults)

@@ -6,7 +6,7 @@ import { evaluateJev, choice, score, noul } from '../../packages/server/src/modu
 import { getJevSettings, saveJevSettings, deleteJevSettings, readJevCredentials } from '../../packages/server/src/modules/studio/services/jev/settings'
 import { getSettings, saveSettings, evaluate } from '../../packages/server/src/modules/studio/controllers/jev'
 
-const directory = join(config.appHome, 'jev')
+const directory = join(config.appHome, 'models', 'jev')
 const upstream = vi.fn<typeof fetch>()
 const questions = {
   route: choice('Route?', { billing: null, technical: 'Software' }),
