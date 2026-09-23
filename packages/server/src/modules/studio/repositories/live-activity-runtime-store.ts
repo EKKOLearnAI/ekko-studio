@@ -40,6 +40,13 @@ export function saveLiveActivityRun(value: LiveActivityRunRecord): void {
     .run(value.run_key,value.destination_id,value.activity_ref,value.revision,value.started,value.terminal,
       value.title,value.completed,value.total,value.updated_at,value.display_json || '{}')
 }
+export function saveLiveActivityRunIfActive(value: LiveActivityRunRecord, expectedRevision: number): boolean {
+  const result = database().prepare(`UPDATE live_activity_runs SET
+    activity_ref=?,revision=?,started=?,terminal=?,title=?,completed=?,total=?,updated_at=?,display_json=?
+    WHERE run_key=? AND revision=? AND terminal=0`).run(value.activity_ref,value.revision,value.started,value.terminal,
+      value.title,value.completed,value.total,value.updated_at,value.display_json || '{}',value.run_key,expectedRevision)
+  return Number(result.changes) === 1
+}
 export function getLiveActivityLastStart(destinationId: string): number {
   if (!getDb()) return 0
   const row=database().prepare('SELECT last_start_at FROM live_activity_start_budget WHERE destination_id=?').get(destinationId) as {last_start_at:number}|undefined
