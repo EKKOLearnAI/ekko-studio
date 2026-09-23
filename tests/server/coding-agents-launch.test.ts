@@ -300,6 +300,50 @@ describe('coding agent launch preparation', () => {
     expect(config.slice(0, config.indexOf('\n['))).toContain('model = "codex-model"')
   })
 
+  it('deduplicates inherited Codex table keys when scoped config overrides global config', async () => {
+    const home = makeHome()
+    const globalConfigPath = join(home, 'global-home', '.codex', 'config.toml')
+    const scopedConfigPath = join(home, 'coding-agent', 'model', 'default', 'openrouter', 'codex', 'config.toml')
+    mkdirSync(dirname(globalConfigPath), { recursive: true })
+    mkdirSync(dirname(scopedConfigPath), { recursive: true })
+    writeFileSync(globalConfigPath, [
+      '[projects."/workspace"]',
+      'trust_level = "trusted"',
+      'notify = [',
+      '  "global",',
+      ']',
+      '',
+    ].join('\n'))
+    writeFileSync(scopedConfigPath, [
+      '[projects."/workspace"]',
+      'trust_level = "untrusted"',
+      'notify = [',
+      '  "scoped",',
+      ']',
+      '',
+    ].join('\n'))
+
+    const launch = await prepareCodingAgentLaunch('codex', {
+      profile: 'default',
+      provider: 'openrouter',
+      model: 'codex-model',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      apiMode: 'codex_responses',
+      sessionId: 'codex-deduplicated-table-session',
+      agentSessionId: 'codex-deduplicated-table-agent-session',
+    })
+    const config = readFileSync(join(launch.rootDir, 'config.toml'), 'utf-8')
+    const parsed = parseToml(config)
+
+    expect(config.match(/trust_level\s*=/g)).toHaveLength(1)
+    expect(config.match(/notify\s*=/g)).toHaveLength(1)
+    expect(parsed.projects['/workspace']).toEqual({
+      trust_level: 'untrusted',
+      notify: ['scoped'],
+    })
+  })
+
   it('preserves complete multiline top-level arrays when strings and comments contain brackets', async () => {
     const home = makeHome()
     const globalConfigPath = join(home, 'global-home', '.codex', 'config.toml')

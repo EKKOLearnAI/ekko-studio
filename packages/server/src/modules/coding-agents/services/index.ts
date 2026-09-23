@@ -1404,7 +1404,11 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
   featureLines: string[]
 } {
   const topLevel = new Map<string, string>()
-  const sections = new Map<string, { header: string; lines: string[] }>()
+  const sections = new Map<string, {
+    header: string
+    entries: string[][]
+    assignmentIndexes: Map<string, number>
+  }>()
   const featureLines = new Map<string, string>()
   const runtimeKeys = new Set([
     'model',
@@ -1426,30 +1430,23 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
     if (!content?.trim()) continue
     let section = ''
     let sectionKey = ''
-    const sectionScanState: TomlArrayScanState = { quote: null, multiline: false }
     const lines = content.split(/\r?\n/)
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
       const line = lines[lineIndex]
-      if (sectionScanState.multiline) {
-        const sectionBlock = sections.get(sectionKey)
-        if (sectionBlock && section !== 'features' && !isManagedCodexSection(section)) {
-          sectionBlock.lines.push(line)
-        }
-        scanTomlArrayBrackets(line, sectionScanState)
-        continue
-      }
       const arrayHeader = line.match(/^\s*\[\[([^\]]+)\]\]\s*$/)
       if (arrayHeader) {
         section = arrayHeader[1].trim()
         sectionKey = `array:${arraySectionIndex++}`
-        sections.set(sectionKey, { header: line.trim(), lines: [] })
+        sections.set(sectionKey, { header: line.trim(), entries: [], assignmentIndexes: new Map() })
         continue
       }
       const tableHeader = line.match(/^\s*\[([^\]]+)\]\s*$/)
       if (tableHeader) {
         section = tableHeader[1].trim()
         sectionKey = `table:${section}`
-        if (!sections.has(sectionKey)) sections.set(sectionKey, { header: line.trim(), lines: [] })
+        if (!sections.has(sectionKey)) {
+          sections.set(sectionKey, { header: line.trim(), entries: [], assignmentIndexes: new Map() })
+        }
         continue
       }
       const assignment = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=/)
@@ -1470,21 +1467,41 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
       }
       if (section === 'features') {
         if (assignment && !runtimeFeatures.has(assignment[1])) featureLines.set(assignment[1], line)
-        scanTomlArrayBrackets(line, sectionScanState)
         continue
       }
       if (isManagedCodexSection(section)) {
-        scanTomlArrayBrackets(line, sectionScanState)
         continue
       }
       const sectionBlock = sections.get(sectionKey)
-      if (sectionBlock && line.trim()) sectionBlock.lines.push(line)
-      scanTomlArrayBrackets(line, sectionScanState)
+      if (!sectionBlock || !line.trim()) continue
+      if (!assignment) {
+        sectionBlock.entries.push([line])
+        continue
+      }
+
+      const entryLines = [line]
+      const scanState: TomlArrayScanState = { quote: null, multiline: false }
+      let bracketDepth = scanTomlArrayBrackets(line.slice(line.indexOf('=') + 1), scanState)
+      while ((bracketDepth > 0 || scanState.multiline) && lineIndex + 1 < lines.length) {
+        lineIndex += 1
+        const nextLine = lines[lineIndex]
+        entryLines.push(nextLine)
+        bracketDepth += scanTomlArrayBrackets(nextLine, scanState)
+      }
+
+      const previousIndex = sectionBlock.assignmentIndexes.get(assignment[1])
+      if (previousIndex === undefined) {
+        sectionBlock.assignmentIndexes.set(assignment[1], sectionBlock.entries.length)
+        sectionBlock.entries.push(entryLines)
+      } else {
+        sectionBlock.entries[previousIndex] = entryLines
+      }
     }
   }
 
   const sectionBlocks: string[] = []
-  for (const [key, { header, lines }] of sections) {
+  for (const [key, { header, entries }] of sections) {
+    const lines = entries.flat()
     if (lines.length || key.startsWith('array:')) {
       sectionBlocks.push(lines.length ? `${header}\n${lines.join('\n')}` : header)
     }

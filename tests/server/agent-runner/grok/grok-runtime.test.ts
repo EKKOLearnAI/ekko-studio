@@ -4,6 +4,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  grokRuntimeSettingsConfig,
   grokSettingsConfig,
   grokUserMcpConfig,
   mergeGrokSettingsConfig,
@@ -146,6 +147,18 @@ describe('Grok runtime isolation', () => {
     expect(config).toContain('allowed_tools = [\n  "bash",\n  "read",\n]')
     expect(config).toContain('[[profiles]]\nname = "fast"')
     expect(config).toContain('[tools]\npreamble = """\nkeep this line\n[not a section]\n"""')
+  })
+
+  it('deduplicates inherited Grok table keys when scoped settings override global settings', () => {
+    const config = grokRuntimeSettingsConfig(
+      '[projects."/workspace"]\ntrust_level = "trusted"\nnotify = [\n  "global",\n]\n',
+      '[projects."/workspace"]\ntrust_level = "untrusted"\nnotify = [\n  "scoped",\n]\n',
+    )
+
+    expect(config.match(/trust_level\s*=/g)).toHaveLength(1)
+    expect(config.match(/notify\s*=/g)).toHaveLength(1)
+    expect(config).toContain('trust_level = "untrusted"')
+    expect(config).toContain('notify = [\n  "scoped",\n]')
   })
 
   it('copies global Grok skills into scoped runtimes', async () => {
