@@ -1,7 +1,31 @@
 import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
-  jev: {"description":"모듈에서 Choice, Score, Noul 판단을 호출합니다. 설정은 선택한 Profile에 적용됩니다.","timeout":"시간 제한(밀리초)","keyHint":"비워 두면 저장된 키 유지","testSaved":"저장된 설정 테스트","deleteConfirm":"이 Profile의 JEV 설정과 API 키를 삭제할까요?"},
+  jev: {
+    "description": "모듈에서 Choice, Score, Noul 판단을 호출합니다. 설정은 선택한 Profile에 적용됩니다.",
+    "timeout": "시간 제한(밀리초)",
+    "keyHint": "비워 두면 저장된 키 유지",
+    "testSaved": "저장된 설정 테스트",
+    "deleteConfirm": "이 Profile의 JEV 설정과 API 키를 삭제할까요?",
+    "baseUrl": "API 주소",
+    "apiKey": "API 키",
+    "keyPlaceholder": "TypeSafe API 키 입력",
+    "deleted": "JEV 설정이 삭제되었습니다",
+    "testSuccess": "연결 성공 · 모델: {model} · 소요 시간: {duration}밀리초",
+    "errors": {
+      "invalid_request": "입력이 올바르지 않습니다. 설정 또는 요청 매개변수를 확인하세요.",
+      "not_configured": "먼저 이 프로필의 API 키를 설정하고 저장하세요.",
+      "timeout": "JEV 요청 시간이 초과되었습니다. 다시 시도하거나 제한 시간을 늘리세요.",
+      "cancelled": "JEV 요청이 취소되었습니다.",
+      "auth_failed": "TypeSafe 인증에 실패했습니다. API 키와 권한을 확인하세요.",
+      "rate_limited": "TypeSafe 요청 한도에 도달했습니다. 나중에 다시 시도하세요.",
+      "provider_error": "TypeSafe가 요청을 처리하지 못했습니다. 모델을 확인한 후 다시 시도하세요.",
+      "request_failed": "JEV에 연결할 수 없습니다. API 주소와 네트워크를 확인하세요.",
+      "settings_failed": "JEV 설정을 읽거나 저장할 수 없습니다. Studio 데이터 디렉터리를 확인하세요.",
+      "forbidden": "이 프로필에 접근할 권한이 없습니다.",
+      "unavailable": "작업을 완료하지 못했습니다. Studio 연결을 확인한 후 다시 시도하세요."
+    }
+  },
   dshPresets: {"sessionMode": "DSH 모드", "selectMode": "Agent 프리셋 선택", "sessionHint": "이 새 세션에만 적용됩니다. 선택한 프리셋에 따라 도구와 세션 플러그인을 불러옵니다.", "title": "Agent 프리셋", "unavailable": "DSH Agent 프리셋을 불러올 수 없습니다. DSH 설치를 확인하고 새로 고침하세요.", "hint": "기본 프리셋은 새 DSH 세션에 적용됩니다. 기존 세션은 원래 프리셋을 유지합니다.", "copy": "복제", "view": "보기", "setDefault": "기본값으로 설정", "default": "기본값", "delete": "삭제", "deleteConfirm": "프리셋 “{name}” 및 디렉터리를 삭제할까요?", "identifier": "식별자", "name": "이름", "idHint": "소문자, 숫자, 하이픈으로 고유한 식별자를 입력하세요.", "empty": "Agent 프리셋 없음", "copyTitle": "프리셋 복제: {name}", "create": "만들기", "location": "폴더 열기"},
   dshPlugins: {
     "configurationTab": "플러그인 설정",

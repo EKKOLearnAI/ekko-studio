@@ -1,7 +1,31 @@
 import { socialMessagesEs } from '../social-messages-locales'
 
 export default {
-  jev: {"description":"Evaluaciones Choice, Score y Noul compartidas entre módulos. La configuración se aplica al Profile seleccionado.","timeout":"Tiempo de espera (ms)","keyHint":"Dejar vacío para conservar la clave guardada","testSaved":"Probar la configuración guardada","deleteConfirm":"¿Eliminar la configuración JEV y la clave API de este Profile?"},
+  jev: {
+    "description": "Evaluaciones Choice, Score y Noul compartidas entre módulos. La configuración se aplica al Profile seleccionado.",
+    "timeout": "Tiempo de espera (ms)",
+    "keyHint": "Dejar vacío para conservar la clave guardada",
+    "testSaved": "Probar la configuración guardada",
+    "deleteConfirm": "¿Eliminar la configuración JEV y la clave API de este Profile?",
+    "baseUrl": "Dirección de la API",
+    "apiKey": "Clave API",
+    "keyPlaceholder": "Introduce tu clave API de TypeSafe",
+    "deleted": "Configuración JEV eliminada",
+    "testSuccess": "Conexión correcta · Modelo: {model} · {duration} ms",
+    "errors": {
+      "invalid_request": "Entrada no válida. Revisa la configuración o los parámetros de la solicitud.",
+      "not_configured": "Primero configura y guarda una clave API para este perfil.",
+      "timeout": "La solicitud JEV agotó el tiempo de espera. Reintenta o aumenta el límite.",
+      "cancelled": "La solicitud JEV se canceló.",
+      "auth_failed": "Error de autenticación de TypeSafe. Revisa la clave API y sus permisos.",
+      "rate_limited": "Se alcanzó el límite de solicitudes de TypeSafe. Reintenta más tarde.",
+      "provider_error": "TypeSafe no pudo procesar la solicitud. Revisa el modelo y reintenta.",
+      "request_failed": "No se pudo conectar con JEV. Revisa la dirección de la API y la red.",
+      "settings_failed": "No se pudo leer o guardar la configuración JEV. Revisa el directorio de datos de Studio.",
+      "forbidden": "No tienes acceso a este perfil.",
+      "unavailable": "No se pudo completar la operación. Revisa la conexión con Studio y reintenta."
+    }
+  },
   dshPresets: {"sessionMode": "Modo DSH", "selectMode": "Seleccionar un ajuste de Agent", "sessionHint": "Solo se aplica a esta nueva sesión. Las herramientas y los plugins de sesión siguen el ajuste seleccionado.", "title": "Preajustes de Agent", "unavailable": "No se pudieron cargar los preajustes de DSH Agent. Comprueba la instalación de DSH y actualiza.", "hint": "El valor predeterminado se aplica a nuevas sesiones DSH. Las sesiones existentes conservan su preajuste.", "copy": "Duplicar", "view": "Ver", "setDefault": "Establecer por defecto", "default": "Predeterminado", "delete": "Eliminar", "deleteConfirm": "¿Eliminar el preajuste «{name}» y su directorio?", "identifier": "Identificador", "name": "Nombre", "idHint": "Usa un identificador único con minúsculas, números y guiones.", "empty": "No hay preajustes de Agent", "copyTitle": "Duplicar preajuste: {name}", "create": "Crear", "location": "Abrir carpeta"},
   dshPlugins: {
     "configurationTab": "Configuración de plugins",

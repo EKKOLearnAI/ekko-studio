@@ -1,7 +1,31 @@
 import { socialMessagesZhTw } from '../social-messages'
 
 export default {
-  jev: {"description":"供各模組呼叫 Choice、Score、Noul 判斷，設定僅套用至目前選取的 Profile。","timeout":"請求逾時（毫秒）","keyHint":"留空以保留已儲存的金鑰","testSaved":"測試已儲存設定","deleteConfirm":"刪除此 Profile 的 JEV 設定與 API Key？"},
+  jev: {
+    "description": "供各模組呼叫選擇（Choice）、評分（Score）和真假判斷（Noul），設定僅套用至目前選取的設定檔。",
+    "timeout": "請求逾時（毫秒）",
+    "keyHint": "留空以保留已儲存的金鑰",
+    "testSaved": "測試已儲存設定",
+    "deleteConfirm": "刪除此設定檔的 JEV 設定與 API 金鑰？",
+    "baseUrl": "API 位址",
+    "apiKey": "API 金鑰",
+    "keyPlaceholder": "輸入 TypeSafe API 金鑰",
+    "deleted": "已刪除 JEV 設定",
+    "testSuccess": "連線成功 · 模型：{model} · 耗時：{duration} 毫秒",
+    "errors": {
+      "invalid_request": "輸入無效，請檢查設定或請求參數。",
+      "not_configured": "請先為此設定檔設定並儲存 API 金鑰。",
+      "timeout": "JEV 請求逾時，請重試或增加逾時時間。",
+      "cancelled": "已取消 JEV 請求。",
+      "auth_failed": "TypeSafe 驗證失敗，請檢查 API 金鑰及其權限。",
+      "rate_limited": "已達到 TypeSafe 請求頻率限制，請稍後再試。",
+      "provider_error": "TypeSafe 無法處理請求，請檢查模型後重試。",
+      "request_failed": "無法連線至 JEV，請檢查 API 位址與網路連線。",
+      "settings_failed": "無法讀取或儲存 JEV 設定，請檢查 Studio 資料目錄。",
+      "forbidden": "你沒有存取此設定檔的權限。",
+      "unavailable": "操作未完成，請檢查與 Studio 的連線後重試。"
+    }
+  },
   dshPresets: {"sessionMode": "DSH 模式", "selectMode": "選擇 Agent 預設", "sessionHint": "僅用於本次新工作階段，依所選預設載入工具與工作階段層級外掛。", "title": "Agent 預設", "unavailable": "無法載入 DSH Agent 預設，請檢查 DSH 安裝後重新整理。", "hint": "預設套用於新的 DSH 對話，既有對話保留原來的預設。", "copy": "複製", "view": "檢視", "setDefault": "設為預設", "default": "預設", "delete": "刪除", "deleteConfirm": "刪除預設「{name}」及其目錄？", "identifier": "識別碼", "name": "名稱", "idHint": "使用不重複的小寫字母、數字和連字號作為識別碼。", "empty": "尚無 Agent 預設", "copyTitle": "複製預設：{name}", "create": "建立", "location": "開啟目錄"},
   dshPlugins: {
     "configurationTab": "外掛設定",

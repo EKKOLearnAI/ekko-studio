@@ -44,7 +44,7 @@ export async function evaluateJev<Q extends Questions>(
 ): Promise<SystemOneResult<Q>> {
   const payload = parseJevRequest(request)
   const settings = await readJevCredentials(profile)
-  if (!settings.apiKey) throw new JevError('JEV API key is not configured for this Profile', 409)
+  if (!settings.apiKey) throw new JevError('JEV API key is not configured for this Profile', 409, 'jev_not_configured')
   const client = new TypeSafeClient({
     apiKey: settings.apiKey, baseURL: settings.baseUrl, defaultModel: settings.model,
     timeout: settings.timeoutMs, retry: { maxRetries: 0 }, logLevel: 'off',
@@ -54,11 +54,14 @@ export async function evaluateJev<Q extends Questions>(
     options.signal?.throwIfAborted()
     return await client.systemOne(payload as SystemOneRequest<Q>, { signal: options.signal })
   } catch (error) {
-    if (error instanceof APITimeoutError) throw new JevError('JEV request timed out', 504)
-    if (error instanceof APIUserAbortError || options.signal?.aborted) throw new JevError('JEV request cancelled', 499)
+    if (error instanceof APITimeoutError) throw new JevError('JEV request timed out', 504, 'jev_timeout')
+    if (error instanceof APIUserAbortError || options.signal?.aborted) throw new JevError('JEV request cancelled', 499, 'jev_cancelled')
     // Do not forward provider response bodies, credentials or request state to clients/logs.
-    if (error instanceof APIError) throw new JevError(`JEV provider returned HTTP ${error.status}`, 502)
-    throw new JevError('JEV request failed', 502)
+    if (error instanceof APIError) {
+      const code = [401, 403].includes(error.status) ? 'jev_auth_failed' : error.status === 429 ? 'jev_rate_limited' : 'jev_provider_error'
+      throw new JevError(`JEV provider returned HTTP ${error.status}`, 502, code)
+    }
+    throw new JevError('JEV request failed', 502, 'jev_request_failed')
   }
 }
 

@@ -1,7 +1,31 @@
 import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
-  jev: {"description":"تقييمات Choice وScore وNoul مشتركة بين الوحدات. تنطبق الإعدادات على Profile المحدد.","timeout":"المهلة (مللي ثانية)","keyHint":"اتركه فارغًا للاحتفاظ بالمفتاح المحفوظ","testSaved":"اختبار الإعدادات المحفوظة","deleteConfirm":"هل تريد حذف إعدادات JEV ومفتاح API لهذا Profile؟"},
+  jev: {
+    "description": "تقييمات Choice وScore وNoul مشتركة بين الوحدات. تنطبق الإعدادات على Profile المحدد.",
+    "timeout": "المهلة (مللي ثانية)",
+    "keyHint": "اتركه فارغًا للاحتفاظ بالمفتاح المحفوظ",
+    "testSaved": "اختبار الإعدادات المحفوظة",
+    "deleteConfirm": "هل تريد حذف إعدادات JEV ومفتاح API لهذا Profile؟",
+    "baseUrl": "عنوان واجهة API",
+    "apiKey": "مفتاح API",
+    "keyPlaceholder": "أدخل مفتاح TypeSafe API",
+    "deleted": "تم حذف إعدادات JEV",
+    "testSuccess": "تم الاتصال · النموذج: {model} · المدة: {duration} مللي ثانية",
+    "errors": {
+      "invalid_request": "إدخال غير صالح. تحقق من الإعدادات أو معلمات الطلب.",
+      "not_configured": "اضبط مفتاح API لهذا الملف الشخصي واحفظه أولًا.",
+      "timeout": "انتهت مهلة طلب JEV. حاول مجددًا أو زد المهلة.",
+      "cancelled": "تم إلغاء طلب JEV.",
+      "auth_failed": "فشلت مصادقة TypeSafe. تحقق من مفتاح API وصلاحياته.",
+      "rate_limited": "تم بلوغ حد طلبات TypeSafe. حاول لاحقًا.",
+      "provider_error": "تعذر على TypeSafe معالجة الطلب. تحقق من النموذج وحاول مجددًا.",
+      "request_failed": "تعذر الاتصال بـ JEV. تحقق من عنوان API واتصال الشبكة.",
+      "settings_failed": "تعذرت قراءة إعدادات JEV أو حفظها. تحقق من مجلد بيانات Studio.",
+      "forbidden": "ليس لديك إذن للوصول إلى هذا الملف الشخصي.",
+      "unavailable": "تعذر إكمال العملية. تحقق من الاتصال بـ Studio وحاول مجددًا."
+    }
+  },
   dshPresets: {"sessionMode": "وضع DSH", "selectMode": "اختر إعداد Agent مسبقًا", "sessionHint": "ينطبق على هذه الجلسة الجديدة فقط. تُحمّل الأدوات وإضافات الجلسة وفق الإعداد المحدد.", "title": "إعدادات Agent المسبقة", "unavailable": "تعذر تحميل إعدادات DSH Agent المسبقة. تحقق من تثبيت DSH ثم حدّث الصفحة.", "hint": "تُطبق الإعدادات الافتراضية على جلسات DSH الجديدة. تحتفظ الجلسات الحالية بإعداداتها الأصلية.", "copy": "نسخ", "view": "عرض", "setDefault": "تعيين كافتراضي", "default": "افتراضي", "delete": "حذف", "deleteConfirm": "حذف الإعداد «{name}» ومجلده؟", "identifier": "المعرّف", "name": "الاسم", "idHint": "استخدم معرّفًا فريدًا من أحرف لاتينية صغيرة وأرقام وشرطات.", "empty": "لا توجد إعدادات Agent مسبقة", "copyTitle": "نسخ الإعداد: {name}", "create": "إنشاء", "location": "فتح المجلد"},
   dshPlugins: {
     "configurationTab": "إعدادات الإضافات",

@@ -14,7 +14,7 @@ export interface JevSettings {
 interface StoredSettings extends Omit<JevSettings, 'hasApiKey'> { apiKey: string }
 
 export class JevError extends Error {
-  constructor(message: string, public readonly status = 400) { super(message) }
+  constructor(message: string, public readonly status = 400, public readonly code = 'jev_invalid_request') { super(message) }
 }
 
 const defaults: StoredSettings = {

@@ -4,12 +4,15 @@ import { deleteJevSettings, getJevSettings, JevError, saveJevSettings } from '..
 
 async function respond(ctx: Context, action: (profile: string) => Promise<unknown>) {
   const profile = ctx.state.profile?.name
-  if (!profile) { ctx.status = 400; ctx.body = { error: 'Profile is required' }; return }
+  if (!profile) { ctx.status = 400; ctx.body = { error: 'Profile is required', code: 'jev_invalid_request' }; return }
   try {
     ctx.body = await action(profile)
   } catch (error) {
     ctx.status = error instanceof JevError ? error.status : 500
-    ctx.body = { error: error instanceof JevError ? error.message : 'JEV settings operation failed' }
+    ctx.body = {
+      error: error instanceof JevError ? error.message : 'JEV settings operation failed',
+      code: error instanceof JevError ? error.code : 'jev_settings_failed',
+    }
   }
 }
 

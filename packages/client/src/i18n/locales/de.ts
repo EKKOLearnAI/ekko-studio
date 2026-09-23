@@ -1,7 +1,31 @@
 import { socialMessagesDe } from '../social-messages-locales'
 
 export default {
-  jev: {"description":"Gemeinsame Choice-, Score- und Noul-Auswertungen. Die Einstellungen gelten für das ausgewählte Profile.","timeout":"Zeitlimit (ms)","keyHint":"Leer lassen, um den gespeicherten Schlüssel zu behalten","testSaved":"Gespeicherte Konfiguration testen","deleteConfirm":"JEV-Konfiguration und API-Schlüssel dieses Profile löschen?"},
+  jev: {
+    "description": "Gemeinsame Choice-, Score- und Noul-Auswertungen. Die Einstellungen gelten für das ausgewählte Profile.",
+    "timeout": "Zeitlimit (ms)",
+    "keyHint": "Leer lassen, um den gespeicherten Schlüssel zu behalten",
+    "testSaved": "Gespeicherte Konfiguration testen",
+    "deleteConfirm": "JEV-Konfiguration und API-Schlüssel dieses Profile löschen?",
+    "baseUrl": "API-Adresse",
+    "apiKey": "API-Schlüssel",
+    "keyPlaceholder": "TypeSafe-API-Schlüssel eingeben",
+    "deleted": "JEV-Konfiguration gelöscht",
+    "testSuccess": "Verbindung erfolgreich · Modell: {model} · {duration} ms",
+    "errors": {
+      "invalid_request": "Ungültige Eingabe. Prüfen Sie die Konfiguration oder Anfrageparameter.",
+      "not_configured": "Konfigurieren und speichern Sie zuerst einen API-Schlüssel für dieses Profil.",
+      "timeout": "Die JEV-Anfrage hat das Zeitlimit überschritten. Versuchen Sie es erneut oder erhöhen Sie das Zeitlimit.",
+      "cancelled": "Die JEV-Anfrage wurde abgebrochen.",
+      "auth_failed": "TypeSafe-Authentifizierung fehlgeschlagen. Prüfen Sie den API-Schlüssel und seine Berechtigungen.",
+      "rate_limited": "TypeSafe-Anfragelimit erreicht. Versuchen Sie es später erneut.",
+      "provider_error": "TypeSafe konnte die Anfrage nicht verarbeiten. Prüfen Sie das Modell und versuchen Sie es erneut.",
+      "request_failed": "Verbindung zu JEV fehlgeschlagen. Prüfen Sie API-Adresse und Netzwerk.",
+      "settings_failed": "JEV-Einstellungen konnten nicht gelesen oder gespeichert werden. Prüfen Sie das Studio-Datenverzeichnis.",
+      "forbidden": "Sie haben keinen Zugriff auf dieses Profil.",
+      "unavailable": "Der Vorgang konnte nicht abgeschlossen werden. Prüfen Sie die Studio-Verbindung und versuchen Sie es erneut."
+    }
+  },
   dshPresets: {"sessionMode": "DSH-Modus", "selectMode": "Agent-Voreinstellung wählen", "sessionHint": "Gilt nur für diese neue Sitzung. Werkzeuge und Sitzungsplugins folgen der gewählten Voreinstellung.", "title": "Agent-Vorlagen", "unavailable": "DSH-Agent-Vorlagen konnten nicht geladen werden. Prüfen Sie die DSH-Installation und aktualisieren Sie die Seite.", "hint": "Die Vorgabe gilt für neue DSH-Sitzungen. Bestehende Sitzungen behalten ihre Vorlage.", "copy": "Duplizieren", "view": "Anzeigen", "setDefault": "Als Standard setzen", "default": "Standard", "delete": "Löschen", "deleteConfirm": "Vorlage „{name}“ und ihr Verzeichnis löschen?", "identifier": "Kennung", "name": "Name", "idHint": "Verwenden Sie eine eindeutige Kennung aus Kleinbuchstaben, Ziffern und Bindestrichen.", "empty": "Keine Agent-Vorlagen", "copyTitle": "Vorlage duplizieren: {name}", "create": "Erstellen", "location": "Ordner öffnen"},
   dshPlugins: {
     "configurationTab": "Plugin-Konfiguration",

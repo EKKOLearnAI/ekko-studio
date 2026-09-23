@@ -1,7 +1,31 @@
 import { socialMessagesEn } from '../social-messages'
 
 export default {
-  jev: {"description":"Shared Choice, Score and Noul evaluations. Settings apply to the selected Profile.","timeout":"Timeout (ms)","keyHint":"Leave blank to keep the saved key","testSaved":"Test saved configuration","deleteConfirm":"Delete the JEV configuration and API key for this Profile?"},
+  jev: {
+    "description": "Shared Choice, Score and Noul evaluations. Settings apply to the selected Profile.",
+    "timeout": "Timeout (ms)",
+    "keyHint": "Leave blank to keep the saved key",
+    "testSaved": "Test saved configuration",
+    "deleteConfirm": "Delete the JEV configuration and API key for this Profile?",
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
+    "keyPlaceholder": "Enter your TypeSafe API key",
+    "deleted": "JEV configuration deleted",
+    "testSuccess": "Connection succeeded · Model: {model} · {duration} ms",
+    "errors": {
+      "invalid_request": "Invalid input. Check the configuration or request parameters.",
+      "not_configured": "Configure and save an API key for this Profile first.",
+      "timeout": "The JEV request timed out. Try again or increase the timeout.",
+      "cancelled": "The JEV request was cancelled.",
+      "auth_failed": "TypeSafe authentication failed. Check the API key and its permissions.",
+      "rate_limited": "TypeSafe rate limit reached. Try again later.",
+      "provider_error": "TypeSafe could not process the request. Check the model and try again.",
+      "request_failed": "Unable to connect to JEV. Check the API URL and network connection.",
+      "settings_failed": "Unable to read or save JEV settings. Check the Studio data directory.",
+      "forbidden": "You do not have access to this Profile.",
+      "unavailable": "Unable to complete the operation. Check the Studio connection and try again."
+    }
+  },
   dshPresets: {"sessionMode": "DSH mode", "selectMode": "Select an Agent preset", "sessionHint": "Applies only to this new session. Tools and session plugins follow the selected preset.", "title": "Agent presets", "unavailable": "Unable to load DSH Agent presets. Check the DSH installation and refresh.", "hint": "Defaults apply to new DSH sessions. Existing sessions keep their original preset.", "copy": "Duplicate", "view": "View", "setDefault": "Set as default", "default": "Default", "delete": "Delete", "deleteConfirm": "Delete preset “{name}” and its directory?", "identifier": "Identifier", "name": "Name", "idHint": "Use a unique identifier with lowercase letters, numbers and hyphens.", "empty": "No Agent presets", "copyTitle": "Duplicate preset: {name}", "create": "Create", "location": "Open folder"},
   dshPlugins: {
     "configurationTab": "Plugin configuration",

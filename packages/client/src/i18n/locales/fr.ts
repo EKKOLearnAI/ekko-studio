@@ -1,7 +1,31 @@
 import { socialMessagesFr } from '../social-messages-locales'
 
 export default {
-  jev: {"description":"Évaluations Choice, Score et Noul partagées entre modules. Les paramètres concernent le Profile sélectionné.","timeout":"Délai (ms)","keyHint":"Laisser vide pour conserver la clé enregistrée","testSaved":"Tester la configuration enregistrée","deleteConfirm":"Supprimer la configuration JEV et la clé API de ce Profile ?"},
+  jev: {
+    "description": "Évaluations Choice, Score et Noul partagées entre modules. Les paramètres concernent le Profile sélectionné.",
+    "timeout": "Délai (ms)",
+    "keyHint": "Laisser vide pour conserver la clé enregistrée",
+    "testSaved": "Tester la configuration enregistrée",
+    "deleteConfirm": "Supprimer la configuration JEV et la clé API de ce Profile ?",
+    "baseUrl": "Adresse de l’API",
+    "apiKey": "Clé API",
+    "keyPlaceholder": "Saisir votre clé API TypeSafe",
+    "deleted": "Configuration JEV supprimée",
+    "testSuccess": "Connexion réussie · Modèle : {model} · {duration} ms",
+    "errors": {
+      "invalid_request": "Entrée invalide. Vérifiez la configuration ou les paramètres de la requête.",
+      "not_configured": "Configurez et enregistrez d’abord une clé API pour ce profil.",
+      "timeout": "La requête JEV a expiré. Réessayez ou augmentez le délai.",
+      "cancelled": "La requête JEV a été annulée.",
+      "auth_failed": "Échec de l’authentification TypeSafe. Vérifiez la clé API et ses autorisations.",
+      "rate_limited": "Limite de requêtes TypeSafe atteinte. Réessayez plus tard.",
+      "provider_error": "TypeSafe n’a pas pu traiter la requête. Vérifiez le modèle et réessayez.",
+      "request_failed": "Impossible de joindre JEV. Vérifiez l’adresse de l’API et le réseau.",
+      "settings_failed": "Impossible de lire ou d’enregistrer les paramètres JEV. Vérifiez le dossier de données Studio.",
+      "forbidden": "Vous n’avez pas accès à ce profil.",
+      "unavailable": "Impossible de terminer l’opération. Vérifiez la connexion à Studio et réessayez."
+    }
+  },
   dshPresets: {"sessionMode": "Mode DSH", "selectMode": "Choisir un préréglage Agent", "sessionHint": "S’applique uniquement à cette nouvelle session. Les outils et plugins de session suivent le préréglage choisi.", "title": "Préréglages Agent", "unavailable": "Impossible de charger les préréglages DSH Agent. Vérifiez l’installation de DSH et actualisez.", "hint": "Le préréglage par défaut s’applique aux nouvelles sessions DSH. Les sessions existantes conservent leur préréglage.", "copy": "Dupliquer", "view": "Afficher", "setDefault": "Définir par défaut", "default": "Par défaut", "delete": "Supprimer", "deleteConfirm": "Supprimer le préréglage « {name} » et son dossier ?", "identifier": "Identifiant", "name": "Nom", "idHint": "Utilisez un identifiant unique avec des lettres minuscules, des chiffres et des tirets.", "empty": "Aucun préréglage Agent", "copyTitle": "Dupliquer le préréglage : {name}", "create": "Créer", "location": "Ouvrir le dossier"},
   dshPlugins: {
     "configurationTab": "Configuration des plugins",

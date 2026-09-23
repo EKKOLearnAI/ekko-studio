@@ -1,7 +1,31 @@
 import { socialMessagesPt } from '../social-messages-locales'
 
 export default {
-  jev: {"description":"Avaliações Choice, Score e Noul partilhadas entre módulos. As definições aplicam-se ao Profile selecionado.","timeout":"Tempo limite (ms)","keyHint":"Deixe vazio para manter a chave guardada","testSaved":"Testar a configuração guardada","deleteConfirm":"Eliminar a configuração JEV e a chave API deste Profile?"},
+  jev: {
+    "description": "Avaliações Choice, Score e Noul partilhadas entre módulos. As definições aplicam-se ao Profile selecionado.",
+    "timeout": "Tempo limite (ms)",
+    "keyHint": "Deixe vazio para manter a chave guardada",
+    "testSaved": "Testar a configuração guardada",
+    "deleteConfirm": "Eliminar a configuração JEV e a chave API deste Profile?",
+    "baseUrl": "Endereço da API",
+    "apiKey": "Chave API",
+    "keyPlaceholder": "Introduza a sua chave API TypeSafe",
+    "deleted": "Configuração JEV eliminada",
+    "testSuccess": "Ligação estabelecida · Modelo: {model} · {duration} ms",
+    "errors": {
+      "invalid_request": "Entrada inválida. Verifique a configuração ou os parâmetros do pedido.",
+      "not_configured": "Configure e guarde primeiro uma chave API para este perfil.",
+      "timeout": "O pedido JEV excedeu o tempo limite. Tente novamente ou aumente o limite.",
+      "cancelled": "O pedido JEV foi cancelado.",
+      "auth_failed": "Falha na autenticação TypeSafe. Verifique a chave API e as permissões.",
+      "rate_limited": "Limite de pedidos TypeSafe atingido. Tente novamente mais tarde.",
+      "provider_error": "A TypeSafe não conseguiu processar o pedido. Verifique o modelo e tente novamente.",
+      "request_failed": "Não foi possível ligar ao JEV. Verifique o endereço da API e a rede.",
+      "settings_failed": "Não foi possível ler ou guardar as definições JEV. Verifique a pasta de dados do Studio.",
+      "forbidden": "Não tem acesso a este perfil.",
+      "unavailable": "Não foi possível concluir a operação. Verifique a ligação ao Studio e tente novamente."
+    }
+  },
   dshPresets: {"sessionMode": "Modo DSH", "selectMode": "Selecionar uma predefinição de Agent", "sessionHint": "Aplica-se apenas a esta nova sessão. As ferramentas e os plugins de sessão seguem a predefinição selecionada.", "title": "Predefinições do Agent", "unavailable": "Não foi possível carregar as predefinições do DSH Agent. Verifique a instalação do DSH e atualize.", "hint": "O padrão aplica-se a novas sessões DSH. As sessões existentes mantêm a predefinição original.", "copy": "Duplicar", "view": "Ver", "setDefault": "Definir como padrão", "default": "Padrão", "delete": "Excluir", "deleteConfirm": "Excluir a predefinição “{name}” e seu diretório?", "identifier": "Identificador", "name": "Nome", "idHint": "Use um identificador único com letras minúsculas, números e hífens.", "empty": "Nenhuma predefinição do Agent", "copyTitle": "Duplicar predefinição: {name}", "create": "Criar", "location": "Abrir pasta"},
   dshPlugins: {
     "configurationTab": "Configuração de plugins",

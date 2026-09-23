@@ -93,7 +93,7 @@ describe('shared JEV client', () => {
   it('does not fall back to another profile or the process environment', async () => {
     await saveJevSettings('default', { apiKey: 'default-key' })
     vi.stubEnv('TYPESAFE_API_KEY', 'environment-key')
-    try { await expect(evaluateJev('research', { state: null, questions })).rejects.toMatchObject({ status: 409 }) }
+    try { await expect(evaluateJev('research', { state: null, questions })).rejects.toMatchObject({ status: 409, code: 'jev_not_configured' }) }
     finally { vi.unstubAllEnvs() }
     expect(upstream).not.toHaveBeenCalled()
   })
@@ -108,10 +108,11 @@ describe('shared JEV client', () => {
     expect(JSON.parse(init!.body as string).model).toBe('jev-override')
   })
 
-  it.each([401, 429, 500])('sanitizes provider HTTP %i errors without retries', async status => {
+  it.each([401, 403, 429, 500])('sanitizes provider HTTP %i errors without retries', async status => {
     await saveJevSettings('research', { apiKey: 'private-key' })
     upstream.mockResolvedValue(Response.json({ error: 'private-key and private-state' }, { status }))
-    await expect(evaluateJev('research', { state: 'private-state', questions })).rejects.toMatchObject({ status: 502, message: `JEV provider returned HTTP ${status}` })
+    const code = [401, 403].includes(status) ? 'jev_auth_failed' : status === 429 ? 'jev_rate_limited' : 'jev_provider_error'
+    await expect(evaluateJev('research', { state: 'private-state', questions })).rejects.toMatchObject({ status: 502, code, message: `JEV provider returned HTTP ${status}` })
     expect(upstream).toHaveBeenCalledTimes(1)
   })
 
@@ -119,7 +120,7 @@ describe('shared JEV client', () => {
     await saveJevSettings('research', { apiKey: 'key' })
     const controller = new AbortController()
     controller.abort()
-    await expect(evaluateJev('research', { state: null, questions }, { signal: controller.signal })).rejects.toMatchObject({ status: 499 })
+    await expect(evaluateJev('research', { state: null, questions }, { signal: controller.signal })).rejects.toMatchObject({ status: 499, code: 'jev_cancelled' })
     expect(upstream).not.toHaveBeenCalled()
   })
 
@@ -128,7 +129,7 @@ describe('shared JEV client', () => {
     upstream.mockImplementation((_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
     }))
-    await expect(evaluateJev('research', { state: null, questions })).rejects.toMatchObject({ status: 504 })
+    await expect(evaluateJev('research', { state: null, questions })).rejects.toMatchObject({ status: 504, code: 'jev_timeout' })
   })
 
   it.each([{}, { state: '', questions: {} }, { state: true, questions },
@@ -157,6 +158,22 @@ describe('JEV controllers', () => {
     const ctx = { state: {}, request: { body: {} } } as any
     await getSettings(ctx)
     expect(ctx.status).toBe(400)
+    expect(ctx.body.code).toBe('jev_invalid_request')
     expect(upstream).not.toHaveBeenCalled()
+  })
+
+  it('returns stable error codes for client-side translation', async () => {
+    const ctx = { state: { profile: { name: 'research' } }, request: { body: { state: null, questions } } } as any
+    await evaluate(ctx)
+    expect(ctx.body.code).toBe('jev_not_configured')
+    await saveJevSettings('research', { apiKey: 'key' })
+    upstream.mockResolvedValue(Response.json({ error: 'private provider detail' }, { status: 401 }))
+    await evaluate(ctx)
+    expect(ctx.status).toBe(502)
+    expect(ctx.body).toEqual({ code: 'jev_auth_failed', error: 'JEV provider returned HTTP 401' })
+    ctx.request.body = { timeoutMs: 0 }
+    await saveSettings(ctx)
+    expect(ctx.status).toBe(400)
+    expect(ctx.body.code).toBe('jev_invalid_request')
   })
 })

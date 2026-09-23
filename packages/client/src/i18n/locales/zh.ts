@@ -1,7 +1,31 @@
 import { socialMessagesZh } from '../social-messages'
 
 export default {
-  jev: {"description":"供各模块调用 Choice、Score、Noul 判断，配置仅作用于当前选中的 Profile。","timeout":"请求超时（毫秒）","keyHint":"留空保留已保存的密钥","testSaved":"测试已保存配置","deleteConfirm":"删除此 Profile 的 JEV 配置和 API Key？"},
+  jev: {
+    "description": "供各模块调用选择（Choice）、评分（Score）和真假判断（Noul），配置仅作用于当前选中的配置档案。",
+    "timeout": "请求超时（毫秒）",
+    "keyHint": "留空保留已保存的密钥",
+    "testSaved": "测试已保存配置",
+    "deleteConfirm": "删除此配置档案的 JEV 配置和 API 密钥？",
+    "baseUrl": "接口地址",
+    "apiKey": "API 密钥",
+    "keyPlaceholder": "输入 TypeSafe API 密钥",
+    "deleted": "JEV 配置已删除",
+    "testSuccess": "连接成功 · 模型：{model} · 耗时：{duration} 毫秒",
+    "errors": {
+      "invalid_request": "输入无效，请检查配置或请求参数。",
+      "not_configured": "请先为此配置档案设置并保存 API 密钥。",
+      "timeout": "JEV 请求超时，请重试或增加超时时间。",
+      "cancelled": "JEV 请求已取消。",
+      "auth_failed": "TypeSafe 身份验证失败，请检查 API 密钥及其权限。",
+      "rate_limited": "已达到 TypeSafe 请求频率限制，请稍后重试。",
+      "provider_error": "TypeSafe 无法处理请求，请检查模型后重试。",
+      "request_failed": "无法连接 JEV，请检查接口地址和网络连接。",
+      "settings_failed": "无法读取或保存 JEV 配置，请检查 Studio 数据目录。",
+      "forbidden": "你没有访问此配置档案的权限。",
+      "unavailable": "操作未完成，请检查与 Studio 的连接后重试。"
+    }
+  },
   dshPresets: {"sessionMode": "DSH 模式", "selectMode": "选择 Agent 预设", "sessionHint": "仅用于本次新会话，按所选预设加载工具和会话级插件。", "title": "Agent 预设", "unavailable": "无法加载 DSH Agent 预设，请检查 DSH 安装后刷新。", "hint": "默认预设用于新的 DSH 会话，已有会话保留原来的预设。", "copy": "复制", "view": "查看", "setDefault": "设为默认", "default": "默认", "delete": "删除", "deleteConfirm": "删除预设“{name}”及其目录？", "identifier": "标识符", "name": "名称", "idHint": "使用不重复的小写字母、数字和连字符作为标识符。", "empty": "暂无 Agent 预设", "copyTitle": "复制预设：{name}", "create": "创建", "location": "打开目录"},
   dshPlugins: {
     "configurationTab": "插件配置",

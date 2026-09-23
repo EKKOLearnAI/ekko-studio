@@ -1,5 +1,60 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
+import en from '../../packages/client/src/i18n/locales/en'
+import zh from '../../packages/client/src/i18n/locales/zh'
+
+for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
+  test(`localizes JEV fields, failures and connection feedback in ${locale}`, async ({ page }, testInfo) => {
+    await authenticate(page, TEST_ACCESS_KEY, 'default')
+    await page.addInitScript(value => localStorage.setItem('hermes_locale', value), locale)
+    await mockHermesApi(page, { initialProfileName: 'default' })
+    let loadFailed = true
+    let testFailure: 'auth_failed' | 'timeout' | 'network' | null = 'auth_failed'
+    await page.route('**/api/studio/jev/settings', async route => {
+      if (loadFailed) {
+        await route.fulfill({ status: 500, json: { error: 'Internal storage failure', code: 'jev_settings_failed' } })
+      } else if (route.request().method() === 'PUT') {
+        await route.fulfill({ status: 400, json: { error: 'Invalid JEV model', code: 'jev_invalid_request' } })
+      } else {
+        await route.fulfill({ json: { baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000, hasApiKey: true } })
+      }
+    })
+    await page.route('**/api/studio/jev/test', async route => {
+      if (testFailure === 'network') { await route.abort(); return }
+      if (testFailure) {
+        await route.fulfill({ status: testFailure === 'timeout' ? 504 : 502, json: { error: 'Upstream English diagnostic', code: `jev_${testFailure}` } })
+      } else {
+        await route.fulfill({ json: { model: 'jev-test', durationMs: 2500, answers: {}, usage: { input_tokens: 1, output_tokens: 1 } } })
+      }
+    })
+    await page.goto('/#/hermes/models?tab=jev&modelProfile=default')
+    const panel = page.locator('.jev-settings')
+    await expect(panel).toContainText(messages.jev.errors.settings_failed)
+    await expect(panel).not.toContainText('Internal storage failure')
+    loadFailed = false
+    await panel.getByRole('button', { name: messages.common.retry, exact: true }).click()
+    await expect(panel.getByLabel(`JEV ${messages.jev.baseUrl}`, { exact: true })).toHaveValue('https://api.typesafe.ai')
+    await expect(panel.getByLabel(`JEV ${messages.jev.apiKey}`, { exact: true })).toHaveAttribute('placeholder', messages.jev.keyHint)
+    await expect(panel.getByLabel(`JEV ${messages.jev.timeout}`, { exact: true })).toHaveValue('10000')
+    await panel.getByRole('button', { name: messages.common.save, exact: true }).click()
+    await expect(panel).toContainText(messages.jev.errors.invalid_request)
+    const testButton = panel.getByRole('button', { name: messages.jev.testSaved, exact: true })
+    await testButton.click()
+    await expect(panel).toContainText(messages.jev.errors.auth_failed)
+    await expect(panel).not.toContainText('Upstream English diagnostic')
+    testFailure = 'timeout'
+    await testButton.click()
+    await expect(panel).toContainText(messages.jev.errors.timeout)
+    testFailure = 'network'
+    await testButton.click()
+    await expect(panel).toContainText(messages.jev.errors.unavailable)
+    testFailure = null
+    await testButton.click()
+    await expect(page.getByTestId('jev-test-result')).toHaveText(messages.jev.testSuccess.replace('{model}', 'jev-test').replace('{duration}', '2,500'))
+    await expect(panel.locator('pre')).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath('jev-i18n.png') })
+  })
+}
 
 test('configures and tests JEV per page Profile without switching the global Profile', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'default')

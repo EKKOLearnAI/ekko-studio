@@ -1396,6 +1396,12 @@ const jevSettingsProperties = {
   timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000, default: 10000 },
 }
 const jevSettingsSchema = { type: 'object', properties: { ...jevSettingsProperties, hasApiKey: { type: 'boolean' } }, required: ['baseUrl', 'model', 'timeoutMs', 'hasApiKey'] }
+openapi.components.schemas.JevError = {
+  type: 'object', required: ['error'], properties: {
+    error: { type: 'string', description: 'Sanitized diagnostic message.' },
+    code: { type: 'string', pattern: '^jev_', description: 'Stable JEV error code used for client-side translation; middleware errors may omit it.' },
+  },
+}
 for (const [path, methods] of Object.entries(openapi.paths)) {
   if (!path.startsWith('/api/studio/jev/')) continue
   for (const [method, operation] of Object.entries(methods)) {
@@ -1418,8 +1424,8 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
         } }, model: { type: 'string' },
       },
     } } } }
-    for (const [status, description] of Object.entries({ 400: 'Invalid input or missing Profile', 403: 'Profile access denied', 409: 'API key not configured', 502: 'Provider request failed', 504: 'Provider request timed out' })) {
-      operation.responses[status] = { description }
+    for (const [status, description] of Object.entries({ 400: 'Invalid input or missing Profile', 403: 'Profile access denied', 409: 'API key not configured', 499: 'Request cancelled', 500: 'Settings operation failed', 502: 'Provider request failed', 504: 'Provider request timed out' })) {
+      operation.responses[status] = { description, content: { 'application/json': { schema: { $ref: '#/components/schemas/JevError' } } } }
     }
   }
 }

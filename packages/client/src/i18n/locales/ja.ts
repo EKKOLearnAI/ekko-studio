@@ -1,7 +1,31 @@
 import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
-  jev: {"description":"各モジュールで Choice・Score・Noul を利用できます。設定は選択中の Profile に適用されます。","timeout":"タイムアウト（ミリ秒）","keyHint":"空欄にすると保存済みのキーを維持","testSaved":"保存済み設定をテスト","deleteConfirm":"この Profile の JEV 設定と API キーを削除しますか？"},
+  jev: {
+    "description": "各モジュールで Choice・Score・Noul を利用できます。設定は選択中の Profile に適用されます。",
+    "timeout": "タイムアウト（ミリ秒）",
+    "keyHint": "空欄にすると保存済みのキーを維持",
+    "testSaved": "保存済み設定をテスト",
+    "deleteConfirm": "この Profile の JEV 設定と API キーを削除しますか？",
+    "baseUrl": "API URL",
+    "apiKey": "API キー",
+    "keyPlaceholder": "TypeSafe API キーを入力",
+    "deleted": "JEV 設定を削除しました",
+    "testSuccess": "接続成功 · モデル：{model} · 所要時間：{duration} ミリ秒",
+    "errors": {
+      "invalid_request": "入力が無効です。設定またはリクエストのパラメーターを確認してください。",
+      "not_configured": "先にこのプロファイルの API キーを設定して保存してください。",
+      "timeout": "JEV リクエストがタイムアウトしました。再試行するか、制限時間を延ばしてください。",
+      "cancelled": "JEV リクエストはキャンセルされました。",
+      "auth_failed": "TypeSafe の認証に失敗しました。API キーと権限を確認してください。",
+      "rate_limited": "TypeSafe のリクエスト制限に達しました。しばらくしてから再試行してください。",
+      "provider_error": "TypeSafe がリクエストを処理できませんでした。モデルを確認して再試行してください。",
+      "request_failed": "JEV に接続できません。API URL とネットワークを確認してください。",
+      "settings_failed": "JEV 設定を読み込みまたは保存できません。Studio のデータディレクトリを確認してください。",
+      "forbidden": "このプロファイルへのアクセス権がありません。",
+      "unavailable": "操作を完了できませんでした。Studio への接続を確認して再試行してください。"
+    }
+  },
   dshPresets: {"sessionMode": "DSH モード", "selectMode": "Agent プリセットを選択", "sessionHint": "この新規セッションにのみ適用します。ツールとセッション用プラグインは選択したプリセットに従います。", "title": "Agent プリセット", "unavailable": "DSH Agent プリセットを読み込めません。DSH のインストールを確認して再読み込みしてください。", "hint": "既定のプリセットは新しい DSH セッションに適用されます。既存のセッションは元のプリセットを維持します。", "copy": "複製", "view": "表示", "setDefault": "既定に設定", "default": "既定", "delete": "削除", "deleteConfirm": "プリセット「{name}」とそのディレクトリを削除しますか？", "identifier": "識別子", "name": "名前", "idHint": "小文字、数字、ハイフンで一意の識別子を指定してください。", "empty": "Agent プリセットはありません", "copyTitle": "プリセットを複製: {name}", "create": "作成", "location": "フォルダーを開く"},
   dshPlugins: {
     "configurationTab": "プラグイン設定",

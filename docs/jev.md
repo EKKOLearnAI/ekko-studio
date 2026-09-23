@@ -42,6 +42,8 @@ the configured timeout, support cancellation, and do not automatically retry.
 `JevError.status` identifies missing configuration (409), provider errors (502),
 timeout (504), cancellation (499) and invalid input (400). Provider errors are
 sanitized so credentials and request state are not exposed in API errors.
+Errors also expose a stable `JevError.code` (`jev_*`), returned as `code` by HTTP
+endpoints, so the UI can translate them without parsing English diagnostic text.
 
 ## Client modules and HTTP
 
