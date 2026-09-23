@@ -1,5 +1,10 @@
 # Shared JEV evaluations
 
+Business integrations must follow the [JEV harness contract](harness/jev-integrations.md):
+register the exact integration point, provide an independent default-off feature
+switch, and expose adjustable options in the frontend. `npm run harness:check`
+enforces the registration and configuration wiring.
+
 The Models page has a **JEV** tab for the selected `modelProfile`. Save a TypeSafe
 API key, API root (default `https://api.typesafe.ai`, without `/v1`), model
 (`jev-latest`) and timeout. **Test saved configuration** submits one fixed sample
@@ -14,7 +19,9 @@ settings and removes its saved key.
 
 ## Server modules
 
-Import the Studio public facade. Pass the Profile authorized for the operation:
+Import the Studio public facade. Pass the Profile authorized for the operation.
+The following is a low-level evaluation example; business callers must first gate
+it on their registered feature switch and retain their fallback behavior:
 
 ```ts
 import { evaluateJev, choice, score, noul } from '../modules/studio/public/jev'

@@ -1,0 +1,40 @@
+{
+  "settings": {
+    "server": "packages/server/src/modules/studio/services/jev/settings.ts",
+    "client": "packages/client/src/api/studio/jev.ts",
+    "form": "packages/client/src/components/hermes/models/JevSettingsPanel.vue",
+    "host": "packages/client/src/views/hermes/ModelsView.vue",
+    "component": "JevSettingsPanel",
+    "page": "/#/hermes/models?tab=jev",
+    "fields": {
+      "baseUrl": { "control": "NInput", "binding": "settings.baseUrl", "label": "jev.baseUrl" },
+      "model": { "control": "NInput", "binding": "settings.model", "label": "profiles.model" },
+      "apiKey": { "control": "NInput", "binding": "apiKey", "label": "jev.apiKey" },
+      "timeoutMs": { "control": "NInputNumber", "binding": "settings.timeoutMs", "label": "jev.timeout" },
+      "ekkoMemoryEnabled": { "control": "NSwitch", "binding": "settings.ekkoMemoryEnabled", "label": "jev.ekkoMemoryEnabled" }
+    }
+  },
+  "integrations": [
+    {
+      "id": "ekko-memory",
+      "purpose": "Allow Ekko memory to use JEV; currently configuration transport only.",
+      "status": "configuration-only",
+      "sources": ["packages/server/src/modules/ekko/services/manager.ts"],
+      "enabledKey": "ekkoMemoryEnabled",
+      "options": [],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/server/jev.test.ts",
+        "tests/server/ekko-agent-manager.test.ts",
+        "tests/ekko-agent/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    }
+  ]
+}

@@ -5,10 +5,12 @@ import path from 'node:path'
 import { checkServerModuleBoundaries } from './server-module-boundaries.mjs'
 import { hasManagedMcpNodeMode } from './managed-mcp-harness.mjs'
 import { checkDshModuleBoundaries } from './dsh-module-harness.mjs'
+import { checkJevIntegrations } from './jev-harness.mjs'
 
 const root = process.cwd()
 const failures = []
 failures.push(...await checkDshModuleBoundaries(root))
+failures.push(...await checkJevIntegrations(root))
 
 function fail(message) {
   failures.push(message)
@@ -39,6 +41,8 @@ for (const file of [
   'docs/harness/worktree-runbook.md',
   'docs/harness/pr-review.md',
   'docs/harness/server-module-boundaries.md',
+  'docs/harness/jev-integrations.md',
+  'scripts/jev-integrations.json',
 ]) {
   requireFile(file)
 }
