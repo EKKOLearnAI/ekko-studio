@@ -2,6 +2,7 @@ import { socialMessagesZhTw } from '../social-messages'
 
 export default {
   jev: {
+    "ekkoMemoryEnabled": "Ekko 記憶使用 JEV",
     "description": "供各模組呼叫選擇（Choice）、評分（Score）和真假判斷（Noul），設定僅套用至目前選取的設定檔。",
     "timeout": "請求逾時（毫秒）",
     "keyHint": "留空以保留已儲存的金鑰",

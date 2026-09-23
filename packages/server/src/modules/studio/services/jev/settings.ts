@@ -5,6 +5,7 @@ import { config } from '../../public/config'
 import { safeFileStore } from '../../public/safe-file-store'
 
 export interface JevSettings {
+  ekkoMemoryEnabled: boolean
   baseUrl: string
   model: string
   timeoutMs: number
@@ -18,6 +19,7 @@ export class JevError extends Error {
 }
 
 const defaults: StoredSettings = {
+  ekkoMemoryEnabled: false,
   baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, apiKey: '',
 }
 
@@ -31,10 +33,14 @@ function settingsPath(profile: string): string {
 function normalize(input: unknown, current = defaults): StoredSettings {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new JevError('Invalid JEV settings')
   const value = input as Record<string, unknown>
-  if (Object.keys(value).some(key => !['baseUrl', 'model', 'timeoutMs', 'apiKey'].includes(key))) {
+  if (Object.keys(value).some(key => !['baseUrl', 'model', 'timeoutMs', 'apiKey', 'ekkoMemoryEnabled'].includes(key))) {
     throw new JevError('Unknown JEV setting')
   }
   const next = { ...current }
+  if (value.ekkoMemoryEnabled !== undefined) {
+    if (typeof value.ekkoMemoryEnabled !== 'boolean') throw new JevError('JEV ekkoMemoryEnabled must be a boolean')
+    next.ekkoMemoryEnabled = value.ekkoMemoryEnabled
+  }
   for (const key of ['baseUrl', 'model', 'apiKey'] as const) {
     if (value[key] === undefined) continue
     if (typeof value[key] !== 'string' || value[key].length > 4096) throw new JevError(`Invalid JEV ${key}`)
@@ -57,7 +63,7 @@ function normalize(input: unknown, current = defaults): StoredSettings {
 }
 
 function publicSettings(value: StoredSettings): JevSettings {
-  return { baseUrl: value.baseUrl, model: value.model, timeoutMs: value.timeoutMs, hasApiKey: !!value.apiKey }
+  return { baseUrl: value.baseUrl, model: value.model, timeoutMs: value.timeoutMs, ekkoMemoryEnabled: value.ekkoMemoryEnabled, hasApiKey: !!value.apiKey }
 }
 
 export async function readJevCredentials(profile: string): Promise<StoredSettings> {
@@ -71,6 +77,12 @@ export async function readJevCredentials(profile: string): Promise<StoredSetting
 
 export async function getJevSettings(profile: string): Promise<JevSettings> {
   return publicSettings(await readJevCredentials(profile))
+}
+
+/** Server-only host configuration for agent runtimes; never return this from an HTTP endpoint. */
+export async function getJevRuntimeConfig(profile: string): Promise<Omit<StoredSettings, 'ekkoMemoryEnabled'> & { enabled: boolean; memoryEnabled: boolean }> {
+  const { ekkoMemoryEnabled, ...settings } = await readJevCredentials(profile)
+  return { ...settings, enabled: Boolean(settings.apiKey), memoryEnabled: ekkoMemoryEnabled }
 }
 
 export async function saveJevSettings(profile: string, input: unknown): Promise<JevSettings> {

@@ -65,6 +65,7 @@ JavaScript 运行时也会为不与根字段冲突的 Profile 安装直接属性
 | `baseDirectory` | `string?` | 数据根目录；实际数据位于 `<base>/.ekko`。默认使用用户主目录。 |
 | `profiles` | `string[]?` | 额外创建的命名 Profile；`default` 总会创建。省略时仍会从已有 Profile 目录自动发现。 |
 | `config` | `EkkoConfigPatch?` | 在创建 Profile Agent 和 runtime 服务前合并并持久化的安装级配置；支持下表全部配置段的局部字段。 |
+| `jev` | `EkkoJevOverrides?` | 仅在内存中覆盖本地 `config.jev`，不写回配置文件；`false` 显式禁用。 |
 | `hermesRootDirectory` | `string?` | 仅用于一次性识别并删除 `.ekko` 中旧版同步留下的 Hermes Skill 副本；Hermes 源目录只读且永不修改。 |
 | `onSkillError` | `(error: unknown) => void?` | 可选启动诊断回调；Ekko Setup 会记录故障并以无 Skills 的降级模式继续。 |
 | `env` | `Record<string, string \| undefined>?` | 路径和开发/生产数据库策略使用的环境变量。 |
@@ -93,6 +94,7 @@ JavaScript 运行时也会为不与根字段冲突的 Profile 安装直接属性
 | `conversations`, `conversation` | `EkkoConversationStore` | 兼容入口；不自动隔离 Profile。新代码用 Profile 模块。 |
 | `authorizations`, `authorization` | `EkkoModelAuthorizationManager` | 共享 OAuth 管理器。 |
 | `model` | `EkkoModelManager` | 共享 Provider、Preset、授权及 client 管理器。 |
+| `jev` | `EkkoJevClient` | Ekko 内部创建的 JEV 评估模块，使用本地配置与构造参数合并后的值。 |
 | `tool` | `EkkoToolManager` | 兼容入口，方法需要 Profile 参数。新代码用 Profile 模块。 |
 | `skill` | `EkkoSkillManager` | 兼容入口，方法需要 Profile 参数。新代码用 Profile 模块。 |
 | `runtime` | `EkkoRuntimeManager` | 兼容入口，创建时需要 `profile`。 |
@@ -206,6 +208,7 @@ JavaScript 运行时也会为不与根字段冲突的 Profile 安装直接属性
 | `profileId?` | `AgentRuntime` 的固定工具/memory 身份；Profile 模块会强制设为当前 Profile，单次 run 不能覆盖。 |
 | `provider?`, `model?`, `apiKey?` | 本 runtime 的 Provider、模型和进程内密钥覆盖。 |
 | `clientOptions?` | 模型 client 的 `fetch?`。 |
+| `jev?` | 本 runtime 的 JEV 配置覆盖，优先于根容器传参与本地配置；`false` 禁用。Runtime 自行创建独立的 `runtime.jev` 客户端。 |
 | `modelClient?` | 完全自定义 ModelClient；提供后不再按配置创建。 |
 | `toolsEnabled?`, `tools?`, `toolAuthorizer?`, `toolContext?` | 工具总开关、自定义 registry、审批器与默认上下文。 |
 | `skillsEnabled?`, `skills?`, `skillDirectory?`, `skillReviewEveryToolCalls?` | Skill 总开关、进程内 skills、目录覆盖和复盘频率。 |
@@ -317,6 +320,63 @@ Session 创建时强制写入本 Profile。读取、更新、删除 Session/Mess
 
 API mode 固定映射：`chat_completions` → `openai-chat`，`codex_responses` → `openai-responses`，`anthropic_messages` → `anthropic-messages`，`gemini_contents` → `gemini-contents`，`prompt_completion` → `prompt-completion`，`custom_runtime` → `custom-runtime`。配置同时提供两者时必须匹配。
 
+## `jev` 模块
+
+JEV 实现由 Ekko 自己提供，可以脱离 Studio 独立使用。配置按字段合并，优先级从低到高为：
+
+1. `DEFAULT_EKKO_JEV_CONFIG`：默认关闭，空密钥、`https://api.typesafe.ai`、`jev-latest`、10 秒超时。
+2. 本地持久化 `config.jev`。
+3. `new EkkoAgent({ jev: ... })` 的内存覆盖。
+4. `ekko.default.runtime.create({ jev: ... })` 的 runtime 覆盖。
+
+省略或 `undefined` 的字段继承前层；显式 `enabled: false`、`memoryEnabled: false`、空 `apiKey` 会覆盖前层。
+`config: { jev: ... }` 和 `ekko.config.update({ jev: ... })` 是主动持久化入口；顶层 `jev` 和
+runtime 的 `jev` 参数不落盘。配置更新事件会刷新根 `ekko.jev` 并保留构造覆盖，新建 runtime
+会重新读取本地文件。已有 runtime 保持自己的配置快照，可用 `runtime.jev.configure(values)`
+替换其内存配置；已经开始的请求继续使用发起时的值。
+
+```ts
+import { EkkoAgent, noul, score } from 'ekko-agent'
+
+const ekko = new EkkoAgent({
+  baseDirectory: '/srv/ekko',
+  // 可省略：省略时使用本地持久化 config.jev。
+  jev: { enabled: true, apiKey: 'host-provided-key' },
+})
+try {
+  const result = await ekko.jev.tryEvaluate({
+    state: { question: '用户的工作是什么？', memory: '用户是一名程序员。' },
+    questions: {
+      relevant: noul('这条记忆是否有助于回答当前问题？'),
+      usefulness: score('相关程度？', ['不相关', '有帮助', '直接回答']),
+    },
+  })
+  if (result) console.log(result.answers.relevant.noul)
+  // result 为 undefined 时，调用方继续自己的原有流程。
+} finally {
+  ekko.close()
+}
+```
+
+| API | 行为 |
+| --- | --- |
+| `available` | 配置启用且存在密钥时为 true。 |
+| `settings` | 有效配置的脱敏快照，以 `hasApiKey` 代替密钥。 |
+| `configure(config?)` | 替换有效内存配置，不修改任何文件。 |
+| `evaluate(request, { signal }?)` | 返回 SDK 类型化结果；未启用/无密钥时不发请求，返回 undefined；服务错误抛出脱敏的 `EkkoJevError`。 |
+| `tryEvaluate(request, { signal }?)` | 额外将超时、网络或提供商错误转为 undefined，便于可选功能回退；参数错误和主动取消仍抛出。 |
+
+`choice`、`score`、`noul` 及请求/结果类型从包入口导出。也可直接 `new EkkoJevClient(config)`。
+客户端没有环境变量密钥兜底，不自动重试；传入配置值后由 Ekko 内部创建 SDK client，无需注入外部 evaluator。
+
+Studio 在每次普通或隔离运行开始前读取当前 Profile 的 Studio JEV 设置，并传入完整配置；
+缓存 runtime 会更新内存设置，删除 Studio 密钥则显式关闭，防止回落到 Ekko 的本地密钥。
+读取 Studio 设置失败时仅禁用该次使用，不阻塞普通聊天。Studio 的密钥不写入 Ekko 的配置文件。
+`jev.memoryEnabled` 是独立的记忆使用开关，默认 false，可持久化，也可通过构造参数或 runtime
+参数覆盖。Studio 的“Ekko 记忆使用 JEV”开关按 Profile 保存为 `ekkoMemoryEnabled`，每次运行前
+映射到此字段；显式 false 会覆盖本地 true，且不关闭其他模块的 JEV 调用。
+本次仅提供开关及配置传递；即使开启，记忆分类、召回和写入策略仍尚未自动调用 JEV。
+
 ## `authorization` 模块
 
 | 方法/字段 | 参数 | 返回/说明 |
@@ -342,7 +402,7 @@ API mode 固定映射：`chat_completions` → `openai-chat`，`codex_responses`
 
 | 路径 | 类型 | 说明 |
 | --- | --- | --- |
-| `schemaVersion` | `number` | 当前为 7；读取旧配置时补齐新字段。 |
+| `schemaVersion` | `number` | 当前为 10；读取旧配置时补齐新字段。 |
 | `runtime.maxSteps` | `number` | 单次主循环最大步数。 |
 | `runtime.maxModelRetries` | `number` | 单次模型步骤最大重试。 |
 | `runtime.toolFailureRecoveryThreshold` | `number` | 同一工具连续失败后要求模型纠错或换方案的阈值；默认 3，不终止运行。 |
@@ -355,6 +415,12 @@ API mode 固定映射：`chat_completions` → `openai-chat`，`codex_responses`
 | `model.reasoningEffort` | `none/minimal/low/medium/high/xhigh/max` | 默认推理强度。 |
 | `model.reasoningSummary` | `auto/concise/detailed` | 默认推理摘要。 |
 | `model.authorizationRefreshLeewayMs` | `number` | 到期前主动刷新窗口。 |
+| `jev.enabled` | `boolean` | JEV 开关，默认 false。 |
+| `jev.memoryEnabled` | `boolean` | 记忆使用 JEV 的独立开关，默认 false；当前提供配置传递，记忆策略尚未接入。 |
+| `jev.apiKey` | `string` | 独立运行时可保存的本地密钥，默认空；运行参数可临时覆盖。 |
+| `jev.baseUrl` | `string` | API 根地址，默认 `https://api.typesafe.ai`，不带 `/v1`。 |
+| `jev.model` | `string` | 默认 `jev-latest`。 |
+| `jev.timeoutMs` | `number` | 默认 10000，范围 1000–120000 毫秒。 |
 | `model.providerCatalog` | `Record<string, EkkoModelProviderPreset>` | 可安装目录。 |
 | `model.disabledProviderPresets` | `string[]` | 被显式删除、不得由默认目录恢复的 ID。 |
 | `model.providers` | `Record<string, EkkoModelProviderSettings>` | 已配置 Provider。 |
@@ -705,7 +771,7 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig
 ### `src/config.ts`
 
 ```ts
-export const EKKO_CONFIG_SCHEMA_VERSION = 9
+export const EKKO_CONFIG_SCHEMA_VERSION = 10
 
 export const EKKO_CONFIG_DIRECTORY_NAME = 'config'
 
@@ -904,14 +970,15 @@ export interface EkkoConfig {
   delegation: EkkoDelegationConfig
   compression: EkkoCompressionConfig
   memory: EkkoMemoryConfig
+  jev: EkkoJevConfig
   skills: EkkoSkillsConfig
   logging: EkkoLoggingConfig
   prompt: EkkoPromptConfig
 }
 
-export type EkkoConfigPatch = { schemaVersion?: number runtime?: Partial<EkkoRuntimeConfig> model?: Partial<Omit<EkkoModelConfig, 'providerCatalog' | 'disabledProviderPresets' | 'providers' | 'authorizations'>> & { providerCatalog?: Record<string, EkkoModelProviderPreset> disabledProviderPresets?: string[] providers?: Record<string, EkkoModelProviderSettings> authorizations?: Record<string, EkkoModelAuthorizationSettings> } tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec'>> & { approvals?: Partial<EkkoToolApprovalConfig> codeExec?: Partial<EkkoCodeExecConfig> } mcp?: Partial<Omit<EkkoMcpConfig, 'profiles'>> & { profiles?: Record<string, EkkoMcpProfileConfig> } delegation?: Partial<EkkoDelegationConfig> compression?: Partial<EkkoCompressionConfig> memory?: Partial<EkkoMemoryConfig> skills?: Partial<Omit<EkkoSkillsConfig, 'profiles'>> & { profiles?: Record<string, Partial<EkkoSkillsProfileConfig>> } logging?: Partial<EkkoLoggingConfig> prompt?: Partial<EkkoPromptConfig> }
+export type EkkoConfigPatch = { schemaVersion?: number runtime?: Partial<EkkoRuntimeConfig> model?: Partial<Omit<EkkoModelConfig, 'providerCatalog' | 'disabledProviderPresets' | 'providers' | 'authorizations'>> & { providerCatalog?: Record<string, EkkoModelProviderPreset> disabledProviderPresets?: string[] providers?: Record<string, EkkoModelProviderSettings> authorizations?: Record<string, EkkoModelAuthorizationSettings> } tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec'>> & { approvals?: Partial<EkkoToolApprovalConfig> codeExec?: Partial<EkkoCodeExecConfig> } mcp?: Partial<Omit<EkkoMcpConfig, 'profiles'>> & { profiles?: Record<string, EkkoMcpProfileConfig> } delegation?: Partial<EkkoDelegationConfig> compression?: Partial<EkkoCompressionConfig> memory?: Partial<EkkoMemoryConfig> jev?: Partial<EkkoJevConfig> skills?: Partial<Omit<EkkoSkillsConfig, 'profiles'>> & { profiles?: Record<string, Partial<EkkoSkillsProfileConfig>> } logging?: Partial<EkkoLoggingConfig> prompt?: Partial<EkkoPromptConfig> }
 
-export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHEMA_VERSION, runtime: { maxSteps: DEFAULT_AGENT_MAX_STEPS, maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES, toolFailureRecoveryThreshold: DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD, maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES, }, model: { defaultProvider: '', defaultModel: '', requestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS, reasoningEffort: 'medium', reasoningSummary: 'auto', authorizationRefreshLeewayMs: DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS, providerCatalog: structuredClone(BUILTIN_MODEL_PROVIDER_PRESETS), disabledProviderPresets: [], providers: {}, authorizations: {}, }, tools: { enabled: true, executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, approvals: { enabled: true, timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS, permanentAllow: [], }, codeExec: { enabled: true, languages: [...DEFAULT_CODE_EXEC_LANGUAGES], timeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, maxToolCalls: DEFAULT_CODE_EXEC_MAX_TOOL_CALLS, maxOutputBytes: DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES, maxStderrBytes: DEFAULT_CODE_EXEC_MAX_STDERR_BYTES, maxSourceBytes: DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES, }, }, mcp: { enabled: true, profiles: {}, }, delegation: { backgroundEnabled: true, subtaskMaxSteps: DEFAULT_AGENT_SUBTASK_MAX_STEPS, }, compression: { enabled: true, threshold: DEFAULT_COMPRESSION_THRESHOLD, targetRatio: DEFAULT_COMPRESSION_TARGET_RATIO, protectLastN: DEFAULT_COMPRESSION_PROTECT_LAST_N, protectFirstN: DEFAULT_COMPRESSION_PROTECT_FIRST_N, }, memory: { enabled: true, recentMessageLimit: DEFAULT_MEMORY_RECENT_MESSAGE_LIMIT, automaticRecallTokenBudget: DEFAULT_AUTOMATIC_MEMORY_TOKEN_BUDGET, searchResultLimit: DEFAULT_MEMORY_SEARCH_RESULT_LIMIT, }, skills: { enabled: true, reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL, profiles: {}, }, logging: { maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES, }, prompt: { instructions: [], }, }
+export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHEMA_VERSION, runtime: { maxSteps: DEFAULT_AGENT_MAX_STEPS, maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES, toolFailureRecoveryThreshold: DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD, maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES, }, model: { defaultProvider: '', defaultModel: '', requestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS, reasoningEffort: 'medium', reasoningSummary: 'auto', authorizationRefreshLeewayMs: DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS, providerCatalog: structuredClone(BUILTIN_MODEL_PROVIDER_PRESETS), disabledProviderPresets: [], providers: {}, authorizations: {}, }, tools: { enabled: true, executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, approvals: { enabled: true, timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS, permanentAllow: [], }, codeExec: { enabled: true, languages: [...DEFAULT_CODE_EXEC_LANGUAGES], timeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, maxToolCalls: DEFAULT_CODE_EXEC_MAX_TOOL_CALLS, maxOutputBytes: DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES, maxStderrBytes: DEFAULT_CODE_EXEC_MAX_STDERR_BYTES, maxSourceBytes: DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES, }, }, mcp: { enabled: true, profiles: {}, }, delegation: { backgroundEnabled: true, subtaskMaxSteps: DEFAULT_AGENT_SUBTASK_MAX_STEPS, }, compression: { enabled: true, threshold: DEFAULT_COMPRESSION_THRESHOLD, targetRatio: DEFAULT_COMPRESSION_TARGET_RATIO, protectLastN: DEFAULT_COMPRESSION_PROTECT_LAST_N, protectFirstN: DEFAULT_COMPRESSION_PROTECT_FIRST_N, }, memory: { enabled: true, recentMessageLimit: DEFAULT_MEMORY_RECENT_MESSAGE_LIMIT, automaticRecallTokenBudget: DEFAULT_AUTOMATIC_MEMORY_TOKEN_BUDGET, searchResultLimit: DEFAULT_MEMORY_SEARCH_RESULT_LIMIT, }, skills: { enabled: true, reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL, profiles: {}, }, jev: { ...DEFAULT_EKKO_JEV_CONFIG }, logging: { maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES, }, prompt: { instructions: [], }, }
 
 export function serializeDefaultEkkoConfig(): string
 ```
@@ -1288,6 +1355,8 @@ export * from './config'
 
 export * from './config-store'
 
+export * from './jev'
+
 export * from './directories'
 
 export * from './diagnostics'
@@ -1385,6 +1454,58 @@ export { PromptCompletionModelClient, normalizePromptCompletionResponse, toPromp
 export { UpdatePlanTool } from './tools/plan'
 
 export type { AgentPlanStep, AgentPlanUpdate, AgentTaskPlan } from './tools/plan'
+```
+### `src/jev/client.ts`
+
+```ts
+export type EkkoJevErrorCode = | 'jev_invalid_request' | 'jev_timeout' | 'jev_cancelled' | 'jev_auth_failed' | 'jev_rate_limited' | 'jev_provider_error' | 'jev_request_failed'
+
+export class EkkoJevError extends Error {
+  constructor(message: string, readonly code: EkkoJevErrorCode)
+}
+
+export interface EkkoJevSettings extends Omit<EkkoJevConfig, 'apiKey'> {
+  hasApiKey: boolean
+}
+
+export class EkkoJevClient {
+  #config: EkkoJevConfig
+  constructor(config?: EkkoJevOverrides)
+  configure(config?: EkkoJevOverrides): void
+  get available(): boolean
+  get settings(): EkkoJevSettings
+  async evaluate<Q extends Questions>(request: SystemOneRequest<Q>, options: { signal?: AbortSignal } = {}): Promise<SystemOneResult<Q> | undefined>
+  async tryEvaluate<Q extends Questions>(request: SystemOneRequest<Q>, options: { signal?: AbortSignal } = {}): Promise<SystemOneResult<Q> | undefined>
+}
+```
+### `src/jev/config.ts`
+
+```ts
+export interface EkkoJevConfig {
+  enabled: boolean
+  memoryEnabled: boolean
+  apiKey: string
+  baseUrl: string
+  model: string
+  timeoutMs: number
+}
+
+export type EkkoJevOverrides = Partial<EkkoJevConfig> | false
+
+export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
+
+export function resolveEkkoJevConfig( ...layers: Array<EkkoJevOverrides | undefined> ): EkkoJevConfig
+```
+### `src/jev/index.ts`
+
+```ts
+export * from './config'
+
+export * from './client'
+
+export { choice, score, noul } from '@typesafe-ai/sdk'
+
+export type { Questions, SystemOneRequest, SystemOneResult } from '@typesafe-ai/sdk'
 ```
 ### `src/logging/file-logger.ts`
 
@@ -2558,6 +2679,7 @@ export class EkkoRuntimeManager {
 
 ```ts
 export class AgentRuntime {
+  readonly jev: EkkoJevClient
   constructor(options: AgentRuntimeOptions)
   registerSkill(skill: AgentSkill): void
   registerSkills(skills: AgentSkill[]): void
@@ -2630,6 +2752,7 @@ export interface AgentRuntimeRecoveryDirective {
 }
 
 export interface AgentRuntimeOptions {
+  jev?: EkkoJevOverrides
   profileId?: string
   modelClient?: ModelClient
   toolsEnabled?: boolean
@@ -2720,6 +2843,7 @@ export interface SetupEkkoAgentOptions extends EkkoDirectoryInitializationOption
   baseDirectory?: string
   profiles?: string[]
   config?: EkkoConfigPatch
+  jev?: EkkoJevOverrides
   env?: Record<string, string | undefined>
   packageRoot?: string
   authorizationRefresher?: EkkoModelAuthorizationRefresher
@@ -2749,6 +2873,7 @@ export class EkkoAgentSetup {
   readonly diagnostics: EkkoDiagnosticsRegistry
   readonly recovery: EkkoRecoveryService
   readonly config: EkkoConfigStore
+  readonly jev: EkkoJevClient
   readonly database: EkkoDatabaseManager
   readonly memoryStore: SqliteMemoryStore
   readonly memory: MemoryService

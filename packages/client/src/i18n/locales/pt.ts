@@ -2,6 +2,7 @@ import { socialMessagesPt } from '../social-messages-locales'
 
 export default {
   jev: {
+    "ekkoMemoryEnabled": "Usar JEV para a memória do Ekko",
     "description": "Avaliações Choice, Score e Noul partilhadas entre módulos. As definições aplicam-se ao Profile selecionado.",
     "timeout": "Tempo limite (ms)",
     "keyHint": "Deixe vazio para manter a chave guardada",

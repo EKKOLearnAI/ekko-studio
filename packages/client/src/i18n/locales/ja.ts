@@ -2,6 +2,7 @@ import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
   jev: {
+    "ekkoMemoryEnabled": "Ekko のメモリに JEV を使用",
     "description": "各モジュールで Choice・Score・Noul を利用できます。設定は選択中の Profile に適用されます。",
     "timeout": "タイムアウト（ミリ秒）",
     "keyHint": "空欄にすると保存済みのキーを維持",

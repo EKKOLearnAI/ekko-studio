@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -10,10 +10,15 @@ import {
   GlobalEkkoAgent,
   setupGlobalEkkoAgent,
 } from '../../packages/server/src/modules/ekko/services/manager'
-import { EkkoFileLogReader, setupEkkoAgent } from '../../packages/ekko-agent/src'
+import { DEFAULT_EKKO_JEV_CONFIG, EkkoFileLogReader, noul, setupEkkoAgent } from '../../packages/ekko-agent/src'
 import type { EkkoAgentSetup, ModelClient, ModelRequest } from '../../packages/ekko-agent/src'
 
 const getHermesBaseDirMock = vi.hoisted(() => vi.fn())
+const getJevRuntimeConfigMock = vi.hoisted(() => vi.fn())
+
+vi.mock('../../packages/server/src/modules/studio/public/jev', () => ({
+  getJevRuntimeConfig: getJevRuntimeConfigMock,
+}))
 
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
   getProfilesBaseDir: getHermesBaseDirMock,
@@ -27,10 +32,12 @@ beforeEach(async () => {
   baseDirectory = await mkdtemp(join(tmpdir(), 'global-ekko-agent-'))
   setups = []
   getHermesBaseDirMock.mockReturnValue(join(baseDirectory, 'hermes'))
+  getJevRuntimeConfigMock.mockReset().mockResolvedValue({ ...DEFAULT_EKKO_JEV_CONFIG })
 })
 
 afterEach(async () => {
   vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
   closeGlobalEkkoAgent()
   for (const setup of setups) setup.close()
   await rm(baseDirectory, { recursive: true, force: true })
@@ -72,6 +79,64 @@ function modelClient(content: string): ModelClient {
 }
 
 describe('GlobalEkkoAgent', () => {
+  it('passes current Profile JEV settings to Ekko without overwriting its persisted defaults', async () => {
+    const setup = createTestSetup(['work', 'personal'])
+    setup.config.update({ jev: { enabled: true, memoryEnabled: true, apiKey: 'ekko-local-key' } })
+    const before = await readFile(setup.layout.configPath, 'utf8')
+    const createRuntime = vi.spyOn(setup, 'createRuntime')
+    getJevRuntimeConfigMock.mockImplementation(async profile => ({
+      ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, memoryEnabled: profile === 'personal', apiKey: `studio-${profile}`, model: `jev-${profile}`,
+    }))
+    const work = createGlobalEkkoAgent({ setup, profile: 'work', memory: false })
+    const personal = createGlobalEkkoAgent({ setup, profile: 'personal', memory: false })
+    await work.run({ messages: ['first'], modelClient: modelClient('work') })
+    await personal.run({ messages: ['second'], modelClient: modelClient('personal') })
+    expect(createRuntime.mock.calls[0][0]?.jev).toMatchObject({ apiKey: 'studio-work' })
+    expect(createRuntime.mock.calls[1][0]?.jev).toMatchObject({ apiKey: 'studio-personal' })
+    const workRuntime = createRuntime.mock.results[0].value
+    const personalRuntime = createRuntime.mock.results[1].value
+    expect(workRuntime.jev).not.toBe(personalRuntime.jev)
+    expect(workRuntime.jev.settings.model).toBe('jev-work')
+    expect(personalRuntime.jev.settings.model).toBe('jev-personal')
+    expect(workRuntime.jev.settings.memoryEnabled).toBe(false)
+    expect(personalRuntime.jev.settings.memoryEnabled).toBe(true)
+    // The cached runtime picks up edits before the next run.
+    getJevRuntimeConfigMock.mockResolvedValue({ ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, memoryEnabled: true, apiKey: 'edited-key', model: 'jev-edited' })
+    await work.run({ messages: ['again'], modelClient: modelClient('updated') })
+    expect(createRuntime).toHaveBeenCalledTimes(2)
+    expect(workRuntime.jev.settings.model).toBe('jev-edited')
+    expect(workRuntime.jev.settings.memoryEnabled).toBe(true)
+    expect(personalRuntime.jev.settings.model).toBe('jev-personal')
+    getJevRuntimeConfigMock.mockResolvedValue({ ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, apiKey: 'edited-key', model: 'jev-edited', memoryEnabled: false })
+    await work.run({ messages: ['memory JEV off'], modelClient: modelClient('continued') })
+    expect(workRuntime.jev.settings.memoryEnabled).toBe(false)
+    expect(workRuntime.jev.available).toBe(true)
+    expect(personalRuntime.jev.settings.memoryEnabled).toBe(true)
+    // Removing Studio's key explicitly disables JEV instead of falling back to Ekko's local key.
+    getJevRuntimeConfigMock.mockResolvedValue({ ...DEFAULT_EKKO_JEV_CONFIG })
+    await work.run({ messages: ['no JEV'], modelClient: modelClient('normal response') })
+    expect(workRuntime.jev.available).toBe(false)
+    expect(workRuntime.jev.settings.memoryEnabled).toBe(false)
+    expect(await readFile(setup.layout.configPath, 'utf8')).toBe(before)
+  })
+
+  it('passes Profile JEV settings into isolated runs and degrades config read failures', async () => {
+    const setup = createTestSetup(['work'])
+    const createRuntime = vi.spyOn(setup, 'createRuntime')
+    const agent = createGlobalEkkoAgent({ setup, profile: 'work', memory: false })
+    getJevRuntimeConfigMock.mockResolvedValue({ ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, memoryEnabled: true, apiKey: 'isolated-key' })
+    await agent.runIsolated({ modelClient: modelClient('isolated') }, { messages: ['isolated'] })
+    expect(createRuntime.mock.calls[0][0]?.jev).toMatchObject({ enabled: true, memoryEnabled: true, apiKey: 'isolated-key' })
+    getJevRuntimeConfigMock.mockRejectedValue(new Error('private configuration details'))
+    await expect(agent.run({ messages: ['continue'], modelClient: modelClient('continued') }))
+      .resolves.toMatchObject({ output: { content: 'continued' } })
+    const runtime = createRuntime.mock.results[1].value
+    const upstream = vi.fn()
+    vi.stubGlobal('fetch', upstream)
+    expect(await runtime.jev.evaluate({ state: null, questions: { ok: noul('OK?') } })).toBeUndefined()
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
   it('sets up global directories and the memory database before any agent run', () => {
     const setup = setupGlobalEkkoAgent({
       baseDirectory,

@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { resolveEkkoJevConfig } from './jev/config'
 import {
   DEFAULT_CODE_EXEC_LANGUAGES,
   DEFAULT_EKKO_CONFIG,
@@ -546,6 +547,12 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig {
   const delegation = record(source.delegation, 'delegation', true)
   const compression = record(source.compression, 'compression', true)
   const memory = record(source.memory, 'memory', true)
+  let jev: EkkoConfig['jev']
+  try {
+    jev = resolveEkkoJevConfig(record(source.jev, 'jev', true))
+  } catch (error) {
+    throw new EkkoConfigError(error instanceof Error ? error.message : 'Invalid JEV configuration.', 'jev')
+  }
   const skills = record(source.skills, 'skills', true)
   const logging = record(source.logging, 'logging', true)
   const prompt = record(source.prompt, 'prompt', true)
@@ -563,6 +570,7 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig {
 
   const normalized: EkkoConfig = {
     ...source,
+    jev,
     schemaVersion: EKKO_CONFIG_SCHEMA_VERSION,
     runtime: {
       ...runtime,
@@ -799,6 +807,7 @@ function mergeConfigPatch(current: EkkoConfig, patch: EkkoConfigPatch): JsonReco
     delegation: { ...current.delegation, ...patch.delegation },
     compression: { ...current.compression, ...patch.compression },
     memory: { ...current.memory, ...patch.memory },
+    jev: { ...current.jev, ...patch.jev },
     skills: {
       ...current.skills,
       ...patch.skills,

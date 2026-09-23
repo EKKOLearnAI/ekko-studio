@@ -51,7 +51,7 @@ Use `evaluateJev(profile, input, signal?)` from `@/api/studio/jev`. It has the s
 typed request/response shape and routes through the authenticated Studio server.
 
 - `GET /api/studio/jev/settings`: read non-secret settings.
-- `PUT /api/studio/jev/settings`: save `baseUrl`, `model`, `timeoutMs`, optional `apiKey`.
+- `PUT /api/studio/jev/settings`: save `baseUrl`, `model`, `timeoutMs`, optional `apiKey` and `ekkoMemoryEnabled`.
 - `DELETE /api/studio/jev/settings`: reset settings and remove the key.
 - `POST /api/studio/jev/test`: test saved settings with a fixed sample.
 - `POST /api/studio/jev/evaluate`: accept `{ state, questions, model? }`.
@@ -63,3 +63,29 @@ module is automatically routed through JEV by this change.
 
 Protocol reference: [TypeSafe quickstart](https://docs.typesafe.ai/introduction/quickstart)
 and [JavaScript SDK](https://docs.typesafe.ai/sdk/javascript).
+
+## Ekko runtime configuration
+
+Ekko Agent also owns an independent JEV module (`ekko.jev` and `runtime.jev`).
+Standalone users can persist `config.jev`, pass `new EkkoAgent({ jev: ... })`,
+or override it when creating a runtime. Runtime values override persisted fields
+without writing them back. See the [Ekko API](../packages/ekko-agent/docs/API.md#jev-模块).
+
+Studio keeps using the Profile-scoped settings above. Before each Ekko run it
+reads the current Profile's complete values through the server-only
+`getJevRuntimeConfig(profile)` facade and passes configuration values to Ekko's
+own client. Cached runtimes pick up edits on the next run. Missing credentials or
+settings read failures disable JEV for the run, rather than using an Ekko-local
+or another Profile's key. No client/evaluator implementation is injected.
+
+The JEV settings panel includes **Use JEV for Ekko memory**, stored per Profile as
+`ekkoMemoryEnabled` (default `false`). The runtime facade maps it to Ekko's
+`jev.memoryEnabled`; Studio's explicit `false` overrides a locally saved `true`.
+Edits take effect on the next run without changing Ekko's persisted settings.
+Deleting Studio JEV settings resets the switch to `false`. This switch does not
+disable other callers of the shared JEV evaluator.
+
+Standalone Ekko users can persist `config.jev.memoryEnabled` or override it via
+`new EkkoAgent({ jev: { memoryEnabled: true } })` and runtime creation options.
+This adds the switch and configuration transport only; Ekko memory policies do
+not yet call JEV automatically, even when the switch is enabled.

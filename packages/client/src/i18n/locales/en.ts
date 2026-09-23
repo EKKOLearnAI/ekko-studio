@@ -2,6 +2,7 @@ import { socialMessagesEn } from '../social-messages'
 
 export default {
   jev: {
+    "ekkoMemoryEnabled": "Use JEV for Ekko memory",
     "description": "Shared Choice, Score and Noul evaluations. Settings apply to the selected Profile.",
     "timeout": "Timeout (ms)",
     "keyHint": "Leave blank to keep the saved key",

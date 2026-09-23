@@ -2,6 +2,7 @@ import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
   jev: {
+    "ekkoMemoryEnabled": "Ekko 메모리에 JEV 사용",
     "description": "모듈에서 Choice, Score, Noul 판단을 호출합니다. 설정은 선택한 Profile에 적용됩니다.",
     "timeout": "시간 제한(밀리초)",
     "keyHint": "비워 두면 저장된 키 유지",

@@ -16,7 +16,7 @@ for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
       } else if (route.request().method() === 'PUT') {
         await route.fulfill({ status: 400, json: { error: 'Invalid JEV model', code: 'jev_invalid_request' } })
       } else {
-        await route.fulfill({ json: { baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000, hasApiKey: true } })
+        await route.fulfill({ json: { baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false } })
       }
     })
     await page.route('**/api/studio/jev/test', async route => {
@@ -36,6 +36,7 @@ for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
     await expect(panel.getByLabel(`JEV ${messages.jev.baseUrl}`, { exact: true })).toHaveValue('https://api.typesafe.ai')
     await expect(panel.getByLabel(`JEV ${messages.jev.apiKey}`, { exact: true })).toHaveAttribute('placeholder', messages.jev.keyHint)
     await expect(panel.getByLabel(`JEV ${messages.jev.timeout}`, { exact: true })).toHaveValue('10000')
+    await expect(panel.getByRole('switch', { name: messages.jev.ekkoMemoryEnabled, exact: true })).not.toBeChecked()
     await panel.getByRole('button', { name: messages.common.save, exact: true }).click()
     await expect(panel).toContainText(messages.jev.errors.invalid_request)
     const testButton = panel.getByRole('button', { name: messages.jev.testSaved, exact: true })
@@ -59,7 +60,7 @@ for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
 test('configures and tests JEV per page Profile without switching the global Profile', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'default')
   const api = await mockHermesApi(page, { initialProfileName: 'default' })
-  const defaults = { baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000, hasApiKey: false }
+  const defaults = { baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000, hasApiKey: false, ekkoMemoryEnabled: false }
   const settings: Record<string, typeof defaults> = {
     default: { ...defaults, model: 'jev-default', hasApiKey: true }, research: { ...defaults },
   }
@@ -75,7 +76,7 @@ test('configures and tests JEV per page Profile without switching the global Pro
       return
     }
     if (method === 'PUT') {
-      settings[profile] = { baseUrl: body.baseUrl, model: body.model, timeoutMs: body.timeoutMs, hasApiKey: !!body.apiKey || settings[profile].hasApiKey }
+      settings[profile] = { baseUrl: body.baseUrl, model: body.model, timeoutMs: body.timeoutMs, ekkoMemoryEnabled: body.ekkoMemoryEnabled, hasApiKey: !!body.apiKey || settings[profile].hasApiKey }
     }
     if (method === 'DELETE') settings[profile] = { ...defaults }
     await route.fulfill({ json: settings[profile] })
@@ -84,11 +85,15 @@ test('configures and tests JEV per page Profile without switching the global Pro
   await page.goto('/#/hermes/models?tab=jev&modelProfile=research')
   await expect(page.locator('.n-tabs-tab--active')).toHaveText('JEV')
   await expect(page.getByLabel('JEV Model', { exact: true })).toHaveValue('jev-latest')
+  const memorySwitch = page.getByRole('switch', { name: en.jev.ekkoMemoryEnabled, exact: true })
+  await expect(memorySwitch).not.toBeChecked()
+  await memorySwitch.click()
   await page.getByLabel('JEV API Key', { exact: true }).fill('new-research-key')
   await page.getByLabel('JEV Model', { exact: true }).fill('jev-research')
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByLabel('JEV API Key', { exact: true })).toHaveValue('')
-  expect(requests.find(r => r.method === 'PUT')).toMatchObject({ profile: 'research', body: { apiKey: 'new-research-key', model: 'jev-research' } })
+  expect(requests.find(r => r.method === 'PUT')).toMatchObject({ profile: 'research', body: { apiKey: 'new-research-key', model: 'jev-research', ekkoMemoryEnabled: true } })
+  await expect(memorySwitch).toBeChecked()
 
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => requests.filter(r => r.method === 'PUT').length).toBe(2)
@@ -99,13 +104,21 @@ test('configures and tests JEV per page Profile without switching the global Pro
   await page.getByTestId('models-profile-select').click()
   await page.locator('.n-base-select-option').filter({ hasText: /^default$/ }).click()
   await expect(page.getByLabel('JEV Model', { exact: true })).toHaveValue('jev-default')
+  await expect(memorySwitch).not.toBeChecked()
   await expect(page.getByTestId('jev-test-result')).toHaveCount(0)
   await page.getByTestId('models-profile-select').click()
   await page.locator('.n-base-select-option').filter({ hasText: /^research$/ }).click()
   await expect(page.getByLabel('JEV Model', { exact: true })).toHaveValue('jev-research')
+  await expect(memorySwitch).toBeChecked()
+  await memorySwitch.click()
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect.poll(() => settings.research.ekkoMemoryEnabled).toBe(false)
+  await page.reload()
+  await expect(memorySwitch).not.toBeChecked()
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await page.getByRole('button', { name: 'Confirm', exact: true }).click()
   await expect(page.getByLabel('JEV Model', { exact: true })).toHaveValue('jev-latest')
+  await expect(memorySwitch).not.toBeChecked()
   await expect(page.getByRole('button', { name: 'Test saved configuration', exact: true })).toBeDisabled()
   expect(settings.default.model).toBe('jev-default')
   expect(await page.evaluate(() => localStorage.getItem('hermes_active_profile_name'))).toBe('default')

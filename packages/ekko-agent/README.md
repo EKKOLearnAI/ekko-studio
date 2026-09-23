@@ -10,6 +10,15 @@ creates one `EkkoProfileAgent` per configured Profile, so modules are used as
 `ekko.agent.get('work').tool`. See the complete field, method, parameter, and
 configuration reference in [docs/API.md](docs/API.md).
 
+Ekko includes its own optional JEV evaluator through `ekko.jev` and `runtime.jev`.
+Persist defaults in `config.jev`, or pass a `jev` object to the constructor/runtime
+to override fields in memory without rewriting the local configuration. The host
+passes settings, and Ekko creates the SDK client itself. See the
+[JEV module API](docs/API.md#jev-模块) for precedence and fallback behavior.
+`jev.memoryEnabled` separately records whether memory may use JEV (default
+`false`). It supports the same persisted/override precedence; automatic memory
+evaluation is not yet connected.
+
 `default` is always created, even when `profiles` is omitted or does not list
 it. Existing first-level Profile directories under `.ekko/skills`,
 `.ekko/logs`, and `.ekko/workspace` are discovered automatically; explicit
