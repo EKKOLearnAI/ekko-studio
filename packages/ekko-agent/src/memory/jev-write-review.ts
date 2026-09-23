@@ -1,7 +1,7 @@
 import { choice } from '../jev'
 import { memoryKindForCanonicalKey } from './schema'
 import type { MemoryRuntimeIdentity, MemoryStore, MemoryStoreMutation } from './types'
-import { evaluateMemory, memoryJevEnabled, optionalMemoryJev, probability } from './jev-policy'
+import { evaluateMemory, MemoryJevFallback, memoryJevEnabled, optionalMemoryJev, probability } from './jev-policy'
 
 export async function reviewMemoryWrites(
   store: MemoryStore,
@@ -15,11 +15,11 @@ export async function reviewMemoryWrites(
   })
   // Forget/expire/noop operations do not require provider approval.
   if (!candidates.length) return undefined
-  return optionalMemoryJev<{ index: number; reason: string } | undefined>(undefined, async policy => {
+  return optionalMemoryJev<{ index: number; reason: string } | undefined>('write_review', undefined, async policy => {
     const messages = await store.listRecentMessages({ sessionId: identity.sessionId!, limit: 500 })
     const cards = candidates.map(({ node }) => {
       const evidence = messages.filter(message => message.role === 'user' && node.sourceMessageIds.includes(message.id))
-      if (!evidence.length) throw new Error('No complete user evidence available for JEV review.')
+      if (!evidence.length) throw new MemoryJevFallback('missing_evidence')
       return { kind: memoryKindForCanonicalKey(node.key)?.kind, title: node.title, content: node.content,
         value: node.valueJson, evidence: evidence.map(message => ({ content: message.content, createdAt: message.createdAt })) }
     })
@@ -37,9 +37,10 @@ export async function reviewMemoryWrites(
     const decisions = candidates.map((candidate, index) => {
       const answer = result.answers[`write_${index}`]
       if (answer?.type !== 'choice' || !Object.hasOwn(criteria, answer.choice)
-        || !probability(answer.confidence) || answer.confidence < policy.settings.memoryMinConfidence) {
+        || !probability(answer.confidence)) {
         throw new Error('Unreliable memory write review.')
       }
+      if (answer.confidence < policy.settings.memoryMinConfidence) throw new MemoryJevFallback('review_below_threshold')
       return { index: candidate.index, decision: answer.choice }
     })
     const rejected = decisions.find(item => item.decision !== 'accept')

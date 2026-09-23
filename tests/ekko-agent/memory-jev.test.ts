@@ -11,6 +11,7 @@ let store: SqliteMemoryStore
 let routedKinds: string[]
 let reviewDecision: string
 let confidence: number
+let routingProbability: number
 
 function evaluator(overrides: EkkoJevOverrides = {}) {
   return new EkkoJevClient({ enabled: true, apiKey: 'test-key', memoryEnabled: true,
@@ -22,7 +23,7 @@ function reply(request: any) {
   const state = typeof request.state === 'string' ? JSON.parse(request.state) : request.state
   return { model: 'test', usage: { input_tokens: 1, output_tokens: 1 }, answers: Object.fromEntries(
     Object.entries(request.questions).map(([key, question]: [string, any]) => [key,
-      question.type === 'noul' ? { type: 'noul', noul: routedKinds.includes(key) ? 0.99 : 0.01 }
+      question.type === 'noul' ? { type: 'noul', noul: routedKinds.includes(key) ? routingProbability : 0.01 }
         : question.type === 'score' ? { type: 'score', score: state.cards[Number(key.slice(5))].content.includes('second') ? 2 : 0,
           confidence, legend: { 0: 'Unrelated', 1: 'Helpful', 2: 'Essential' }, probabilities: { 0: 0.5, 1: 0, 2: 0.5 } }
           : { type: 'choice', choice: reviewDecision, confidence, probabilities: { accept: 0.01, unsupported: 0.97, transient: 0.01, wrong_kind: 0.01 } },
@@ -36,6 +37,7 @@ beforeEach(() => {
   routedKinds = []
   reviewDecision = 'accept'
   confidence = 0.99
+  routingProbability = 0.99
   upstream.mockReset().mockImplementation(async (_url, init) => Response.json(reply(JSON.parse(init!.body as string))))
   vi.stubGlobal('fetch', upstream)
 })
@@ -53,6 +55,76 @@ async function draft(itemKey = 'new'): Promise<MemoryWriteInput> {
 }
 
 describe('optional memory JEV', () => {
+  it('recalls the lodging preference from a paraphrase using actual card evidence and an independent recall threshold', async () => {
+    const node = await card('lodging_preferences', '挑选旅馆时的长期偏好：最在意隔音，其次是床垫舒适度；对窗外景色没有要求。')
+    const query = '这次出差怎么选住处？只根据已有上下文回答，不调用记忆工具，也不新增记忆。'
+    const baseline = await service.retrieve(identity, query)
+    expect(baseline.usedMemoryIds).toEqual([])
+    routedKinds = ['general_preference']
+    routingProbability = 0.52
+    const diagnostics = vi.fn()
+    const result = await evaluator().runScoped(undefined, () => service.retrieve(identity, query), diagnostics)
+    expect(result.usedMemoryIds).toEqual([node.id])
+    expect(result.relevantNodes).toEqual([node])
+    expect(Object.keys(result).sort()).toEqual(Object.keys(baseline).sort())
+    const request = JSON.parse(upstream.mock.calls[0][1]!.body as string)
+    expect(JSON.parse(request.state)).toMatchObject({ request: query, cards: [{ kind: 'general_preference', content: node.content }] })
+    expect(Object.keys(request.questions)).toEqual(['general_preference'])
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ stage: 'routing', reason: 'matched',
+      threshold: 0.5, selectedCount: 1, kindProbabilities: { general_preference: 0.52 } }))
+    expect(JSON.stringify(diagnostics.mock.calls)).not.toMatch(/挑选旅馆|test-key/)
+    expect(await evaluator({ memoryRecallMinConfidence: 0.8 }).runScoped(undefined, () => service.retrieve(identity, query))).toEqual(baseline)
+    routedKinds = []
+    expect((await evaluator().runScoped(undefined, () => service.retrieve(identity, 'JavaScript closures'))).usedMemoryIds).toEqual([])
+  })
+
+  it('keeps write review conservative independently of recall and records uncertain reviews', async () => {
+    const input = await draft()
+    reviewDecision = 'unsupported'
+    confidence = 0.6
+    const diagnostics = vi.fn()
+    expect(await evaluator({ memoryRecallMinConfidence: 0.5 }).runScoped(undefined, () => service.write(input), diagnostics))
+      .toMatchObject({ accepted: true })
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ stage: 'write_review', status: 'fallback', reason: 'review_below_threshold' }))
+    expect(await evaluator({ memoryRecallMinConfidence: 0.9, memoryMinConfidence: 0.55 })
+      .runScoped(undefined, () => service.write({ ...input, itemKey: 'other' }))).toMatchObject({ accepted: false })
+  })
+
+  it('skips empty or ineligible candidate sets without contacting JEV', async () => {
+    const diagnostics = vi.fn()
+    await evaluator().runScoped(undefined, () => service.retrieve(identity, 'where should I stay'), diagnostics)
+    const deleted = await card('deleted', 'deleted private evidence')
+    await service.delete(deleted.id, { identity, expectedRevision: deleted.revision, reason: 'forget' })
+    await service.write({ operation: 'create', kind: 'general_preference', itemKey: 'expired', identity, reason: 'test',
+      node: { title: 'Expired', content: 'expired evidence', valueJson: 'expired', expiresAt: '2000-01-01T00:00:00Z' } })
+    await evaluator().runScoped(undefined, () => service.retrieve(identity, 'where should I stay'), diagnostics)
+    expect(upstream).not.toHaveBeenCalled()
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ stage: 'routing', status: 'skipped', reason: 'no_candidates' }))
+  })
+
+  it.each(['deleted', 'edited'])('does not add a candidate %s while JEV is evaluating it', async change => {
+    const node = await card('lodging', 'Prefer quiet hotels')
+    routedKinds = ['general_preference']
+    upstream.mockImplementation(async (_url, init) => {
+      if (change === 'deleted') await service.delete(node.id, { identity, expectedRevision: node.revision, reason: 'forget' })
+      else await store.applyMutations([{ type: 'upsert', node: { ...node, revision: node.revision + 1, content: 'Changed preference' } }])
+      return Response.json(reply(JSON.parse(init!.body as string)))
+    })
+    const result = await evaluator().runScoped(undefined, () => service.retrieve(identity, '这次出差怎么选住处？'))
+    expect(result.usedMemoryIds).toEqual([])
+  })
+
+  it('reports provider failures without logging provider bodies and ignores diagnostic failures', async () => {
+    await card('preference', 'Prefer quiet lodging')
+    const baseline = await service.retrieve(identity, 'where should I stay')
+    const diagnostics = vi.fn()
+    upstream.mockImplementation(async () => Response.json({ private: 'secret provider payload' }, { status: 503 }))
+    expect(await evaluator().runScoped(undefined, () => service.retrieve(identity, 'where should I stay'), diagnostics)).toEqual(baseline)
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ stage: 'recall', status: 'fallback', reason: 'jev_provider_error' }))
+    expect(JSON.stringify(diagnostics.mock.calls)).not.toMatch(/secret provider|Prefer quiet|test-key/)
+    expect(await evaluator().runScoped(undefined, () => service.retrieve(identity, 'where should I stay'), () => { throw new Error('log failed') })).toEqual(baseline)
+  })
+
   it.each([
     { enabled: false }, { apiKey: '' }, { memoryEnabled: false },
     { memoryKindRoutingEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false },
@@ -98,6 +170,19 @@ describe('optional memory JEV', () => {
     expect(upstream).toHaveBeenCalledTimes(1)
   })
 
+  it('uses recall confidence for ranking and restores baseline when that threshold is not met', async () => {
+    const second = await card('second', 'trip second')
+    await card('first', 'trip first')
+    confidence = 0.6
+    const baseline = await service.retrieve(identity, 'trip')
+    const result = await evaluator({ memoryKindRoutingEnabled: false }).runScoped(undefined, () => service.retrieve(identity, 'trip'))
+    expect(result.usedMemoryIds[0]).toBe(second.id)
+    const diagnostics = vi.fn()
+    expect(await evaluator({ memoryKindRoutingEnabled: false, memoryRecallMinConfidence: 0.8 })
+      .runScoped(undefined, () => service.retrieve(identity, 'trip'), diagnostics)).toEqual(baseline)
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ stage: 'recall', status: 'fallback', reason: 'ranking_below_threshold' }))
+  })
+
   it('never sends exact search, get or list-all operations to JEV', async () => {
     const node = await card('first', 'trip first')
     await evaluator().runScoped(undefined, async () => {
@@ -118,6 +203,8 @@ describe('optional memory JEV', () => {
     const ranking = upstream.mock.calls.map(([, init]) => JSON.parse(init!.body as string)).find(request => request.questions.card_0)
     expect(Object.keys(ranking.questions)).toHaveLength(2)
     expect(JSON.parse(ranking.state).cards).toHaveLength(2)
+    const routing = upstream.mock.calls.map(([, init]) => JSON.parse(init!.body as string)).find(request => request.questions.general_preference)
+    expect(JSON.parse(routing.state).cards).toHaveLength(2)
   })
 
   it.each(['wrong_kind', 'transient'])('returns corrective feedback for a reliable %s review', async decision => {
@@ -185,14 +272,17 @@ describe('optional memory JEV', () => {
     const baseline = await service.retrieve(identity, 'trip')
     vi.useFakeTimers()
     upstream.mockImplementation(async () => new Promise<Response>(() => {}))
-    const pending = evaluator({ memoryTimeoutMs: 100 }).runScoped(undefined, () => service.retrieve(identity, 'trip'))
+    const diagnostics = vi.fn()
+    const pending = evaluator({ memoryTimeoutMs: 100 }).runScoped(undefined, () => service.retrieve(identity, 'trip'), diagnostics)
     await vi.advanceTimersByTimeAsync(101)
     expect(await pending).toEqual(baseline)
     expect(upstream).toHaveBeenCalledTimes(1)
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ stage: 'recall', status: 'fallback', reason: 'timeout', durationMs: 100 }))
   })
 
   it('propagates caller cancellation instead of turning it into empty recall or a write', async () => {
     const input = await draft()
+    const existing = await card('existing', 'Earlier preference')
     upstream.mockImplementation(async () => new Promise<Response>(() => {}))
     for (const operation of [() => service.retrieve(identity, 'question'), () => service.write(input)]) {
       const controller = new AbortController()
@@ -203,7 +293,7 @@ describe('optional memory JEV', () => {
       await rejected
       upstream.mockClear()
     }
-    expect(await service.list()).toEqual([])
+    expect((await service.list()).map(node => node.id)).toEqual([existing.id])
   })
 
   it('reviews a whole batch before committing and returns the original failure shape', async () => {
@@ -280,6 +370,7 @@ describe('optional memory JEV', () => {
   })
 
   it('activates the policy inside a standalone runtime and its foreground memory tools', async () => {
+    await card('existing', 'Earlier preference')
     routedKinds = ['general_preference']
     let calls = 0
     const model: ModelClient = { provider: 'test', requestStyle: 'custom-runtime',
@@ -291,11 +382,15 @@ describe('optional memory JEV', () => {
         } }] }
         : { content: 'done', finishReason: 'stop' }),
     }
-    const runtime = new AgentRuntime({ modelClient: model, memory: service,
+    const writeLog = vi.fn(() => true)
+    const runtime = new AgentRuntime({ modelClient: model, memory: service, logWriter: { write: writeLog },
       jev: { enabled: true, apiKey: 'standalone', memoryEnabled: true, memoryKindRoutingEnabled: true, memoryWriteReviewEnabled: true } })
     const result = await runtime.run({ messages: ['Remember I prefer short answers.'], contextKey: identity.sessionId, toolContext: identity })
     expect(result.output.content).toBe('done')
-    expect(await service.list()).toHaveLength(1)
+    expect(JSON.stringify(vi.mocked(model.create).mock.calls[0][0].messages)).toContain('Earlier preference')
+    expect(await service.list()).toHaveLength(2)
+    expect(writeLog).toHaveBeenCalledWith(expect.objectContaining({ category: 'memory', event: 'memory.jev',
+      sessionId: identity.sessionId, runId: expect.any(String), data: expect.objectContaining({ stage: 'routing', reason: 'matched' }) }))
     expect(upstream.mock.calls.some(([, init]) => JSON.parse(init!.body as string).questions.write_0)).toBe(true)
     expect(upstream.mock.calls.some(([, init]) => JSON.parse(init!.body as string).questions.general_preference)).toBe(true)
     await service.drain()

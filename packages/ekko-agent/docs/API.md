@@ -404,7 +404,7 @@ Studio 在每次普通或隔离运行开始前读取当前 Profile 的 Studio JE
 
 | 路径 | 类型 | 说明 |
 | --- | --- | --- |
-| `schemaVersion` | `number` | 当前为 10；读取旧配置时补齐新字段。 |
+| `schemaVersion` | `number` | 当前为 12；读取旧配置时补齐新字段。 |
 | `runtime.maxSteps` | `number` | 单次主循环最大步数。 |
 | `runtime.maxModelRetries` | `number` | 单次模型步骤最大重试。 |
 | `runtime.toolFailureRecoveryThreshold` | `number` | 同一工具连续失败后要求模型纠错或换方案的阈值；默认 3，不终止运行。 |
@@ -773,7 +773,7 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig
 ### `src/config.ts`
 
 ```ts
-export const EKKO_CONFIG_SCHEMA_VERSION = 11
+export const EKKO_CONFIG_SCHEMA_VERSION = 12
 
 export const EKKO_CONFIG_DIRECTORY_NAME = 'config'
 
@@ -1470,13 +1470,24 @@ export interface EkkoJevSettings extends Omit<EkkoJevConfig, 'apiKey'> {
   hasApiKey: boolean
 }
 
-export function currentEkkoJevRun(): { client: EkkoJevClient; signal?: AbortSignal } | undefined
+export interface EkkoJevDiagnostic {
+  stage: 'recall' | 'routing' | 'rerank' | 'write_review'
+  status: 'completed' | 'fallback' | 'skipped' | 'cancelled'
+  durationMs: number
+  reason?: string
+  threshold?: number
+  candidateCount?: number
+  selectedCount?: number
+  kindProbabilities?: Record<string, number>
+}
+
+export function currentEkkoJevRun(): EkkoJevRunContext | undefined
 
 export class EkkoJevClient {
   #config: EkkoJevConfig
   constructor(config?: EkkoJevOverrides)
   configure(config?: EkkoJevOverrides): void
-  runScoped<T>(signal: AbortSignal | undefined, operation: () => T): T
+  runScoped<T>(signal: AbortSignal | undefined, operation: () => T, onDiagnostic?: EkkoJevRunContext['onDiagnostic']): T
   get available(): boolean
   get settings(): EkkoJevSettings
   async evaluate<Q extends Questions>(request: SystemOneRequest<Q>, options: { signal?: AbortSignal } = {}): Promise<SystemOneResult<Q> | undefined>
@@ -1493,6 +1504,7 @@ export interface EkkoJevConfig {
   memoryRerankEnabled: boolean
   memoryWriteReviewEnabled: boolean
   memoryCandidateLimit: number
+  memoryRecallMinConfidence: number
   memoryMinConfidence: number
   memoryTimeoutMs: number
   apiKey: string
@@ -1503,7 +1515,7 @@ export interface EkkoJevConfig {
 
 export type EkkoJevOverrides = Partial<EkkoJevConfig> | false
 
-export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryMinConfidence: 0.8, memoryTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
+export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.8, memoryTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
 
 export function resolveEkkoJevConfig( ...layers: Array<EkkoJevOverrides | undefined> ): EkkoJevConfig
 ```
@@ -1626,6 +1638,7 @@ export interface EkkoModelRequestSpan {
 
 export class EkkoRuntimeLogger {
   constructor(private readonly writer: EkkoLogWriter, private readonly defaultContext: EkkoRuntimeLogContext = {})
+  memoryJev(runId: string, diagnostic: EkkoJevDiagnostic, inputContext?: EkkoRuntimeLogContext): void
   startModelRequest(input: EkkoModelRequestLogInput): EkkoModelRequestSpan
 }
 ```
@@ -1653,11 +1666,17 @@ export interface MemoryJevPolicy {
   signal: AbortSignal
 }
 
+export class MemoryJevFallback extends Error {
+  constructor(readonly reason: string)
+}
+
+export function memoryJevDiagnostic(diagnostic: EkkoJevDiagnostic): void
+
 export function memoryJevEnabled(feature: 'memoryKindRoutingEnabled' | 'memoryRerankEnabled' | 'memoryWriteReviewEnabled'): boolean
 
 export function throwIfMemoryRunAborted(): void
 
-export async function optionalMemoryJev<T>(fallback: T, work: (policy: MemoryJevPolicy) => Promise<T>): Promise<T>
+export async function optionalMemoryJev<T>(stage: 'recall' | 'write_review', fallback: T, work: (policy: MemoryJevPolicy) => Promise<T>): Promise<T>
 
 export async function evaluateMemory<Q extends Questions>(policy: MemoryJevPolicy, request: SystemOneRequest<Q>): Promise<SystemOneResult<Q>>
 
@@ -1676,7 +1695,7 @@ export async function rerankMemoryNodes(policy: MemoryJevPolicy, query: string, 
 ### `src/memory/jev-routing.ts`
 
 ```ts
-export async function routeMemoryKinds(policy: MemoryJevPolicy, query: string): Promise<MemoryKind[]>
+export async function routeMemoryKinds(policy: MemoryJevPolicy, query: string, candidates: MemoryNode[]): Promise<MemoryKind[]>
 ```
 ### `src/memory/jev-write-review.ts`
 

@@ -20,10 +20,28 @@ export interface EkkoJevSettings extends Omit<EkkoJevConfig, 'apiKey'> {
   hasApiKey: boolean
 }
 
-const runContext = new AsyncLocalStorage<{ client: EkkoJevClient; signal?: AbortSignal }>()
+/** Compact diagnostics only; never include request text, evidence or provider errors. */
+export interface EkkoJevDiagnostic {
+  stage: 'recall' | 'routing' | 'rerank' | 'write_review'
+  status: 'completed' | 'fallback' | 'skipped' | 'cancelled'
+  durationMs: number
+  reason?: string
+  threshold?: number
+  candidateCount?: number
+  selectedCount?: number
+  kindProbabilities?: Record<string, number>
+}
+
+interface EkkoJevRunContext {
+  client: EkkoJevClient
+  signal?: AbortSignal
+  onDiagnostic?: (diagnostic: EkkoJevDiagnostic) => void
+}
+
+const runContext = new AsyncLocalStorage<EkkoJevRunContext>()
 
 /** Internal run-local access; memory services can be shared across profiles. */
-export function currentEkkoJevRun(): { client: EkkoJevClient; signal?: AbortSignal } | undefined {
+export function currentEkkoJevRun(): EkkoJevRunContext | undefined {
   return runContext.getStore()
 }
 
@@ -41,8 +59,8 @@ export class EkkoJevClient {
   }
 
   /** Freeze this run's effective settings without changing the shared memory service. */
-  runScoped<T>(signal: AbortSignal | undefined, operation: () => T): T {
-    return runContext.run({ client: new EkkoJevClient(this.#config), signal }, operation)
+  runScoped<T>(signal: AbortSignal | undefined, operation: () => T, onDiagnostic?: EkkoJevRunContext['onDiagnostic']): T {
+    return runContext.run({ client: new EkkoJevClient(this.#config), signal, onDiagnostic }, operation)
   }
 
   get available(): boolean {

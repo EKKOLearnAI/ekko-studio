@@ -9,6 +9,7 @@ export interface JevSettings {
   ekkoMemoryRerankEnabled: boolean
   ekkoMemoryWriteReviewEnabled: boolean
   ekkoMemoryCandidateLimit: number
+  ekkoMemoryRecallMinConfidence: number
   ekkoMemoryMinConfidence: number
   ekkoMemoryTimeoutMs: number
   baseUrl: string

@@ -112,3 +112,9 @@ to verify that these regressions fail the check. Filesystem discovery is tested
 against a small isolated repository. The full repository scan runs in the separate
 `npm run harness:check` CI step, keeping coverage tests independent of repository
 size and avoiding a duplicate full scan under their per-test timeout.
+
+Memory routing and reranking share the registered candidate limit and recall
+threshold (default 0.5). Write review retains its independent confidence threshold
+(default 0.8). Missing legacy recall settings inherit the new default; saved write
+thresholds are preserved. Both numeric thresholds require frontend controls and
+round-trip tests.

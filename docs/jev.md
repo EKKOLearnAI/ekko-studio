@@ -105,7 +105,8 @@ settings receive these defaults; saved values always take precedence, including 
 | `ekkoMemoryRerankEnabled` | `memoryRerankEnabled` | true |
 | `ekkoMemoryWriteReviewEnabled` | `memoryWriteReviewEnabled` | true |
 | `ekkoMemoryCandidateLimit` | `memoryCandidateLimit` | 20 / integer 1–50 |
-| `ekkoMemoryMinConfidence` | `memoryMinConfidence` | 0.8 / 0.5–1 |
+| `ekkoMemoryRecallMinConfidence` | `memoryRecallMinConfidence` | 0.5 / 0.5–1 (routing relevance and ranking confidence) |
+| `ekkoMemoryMinConfidence` | `memoryMinConfidence` | 0.8 / 0.5–1 (write review only) |
 | `ekkoMemoryTimeoutMs` | `memoryTimeoutMs` | 3000 / integer 100–30000 ms |
 
 The page groups provider connection settings and memory use cases. Feature switches
@@ -113,7 +114,10 @@ are in the expandable memory section; numeric controls are under Advanced parame
 Turning the master switch off retains the child settings. Save applies the complete
 Profile configuration on the next run. Delete resets all fields in that Profile.
 
-Category routing supplements the original candidates with controlled kinds. Reranking
+Category routing uses actual eligible memory content to select controlled kinds,
+with both routing and ranking bounded by the candidate limit. The recall threshold
+is independent of write review. Older saved settings inherit recall 0.5 while
+retaining their write threshold. Reranking
 changes candidate order before the existing token selection; exact matches and
 always-recalled constraints retain their priority. Write review checks user evidence,
 durability and kind after deterministic validation and before an atomic commit.
@@ -129,3 +133,8 @@ results, unavailable evidence, or oversized input preserve the original flow.
 Cancellation propagates and cannot authorize a write. Result structures and stored
 card confidence/importance remain unchanged; provider scores stay internal.
 See [Ekko memory JEV behavior](../packages/ekko-agent/docs/memory-jev.md) for details.
+
+Memory JEV diagnostics appear as `memory.jev` in the existing Ekko logs, correlated
+by session/run/turn. They include timings, routing probabilities, thresholds and
+sanitized failure codes, never card text or credentials. See the
+[recall verification guide](../packages/ekko-agent/docs/memory-jev.md#diagnostics-and-manual-verification).

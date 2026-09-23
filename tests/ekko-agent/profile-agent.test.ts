@@ -34,7 +34,7 @@ describe('profile agent facade', () => {
       expect(work.memory).not.toBe(personal.memory)
       expect(work.validation).toMatchObject({
         profile: 'work',
-        configSchemaVersion: 11,
+        configSchemaVersion: 12,
         directories: {
           skill: join(baseDirectory, '.ekko', 'skills', 'work'),
           log: join(baseDirectory, '.ekko', 'logs', 'work'),

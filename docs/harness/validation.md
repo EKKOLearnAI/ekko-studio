@@ -37,8 +37,9 @@ npm run build
 ## JEV integration controls
 
 Follow [the JEV integration contract](jev-integrations.md) for every new consumer
-or setting. Each feature needs a registered integration point, its own default-off
-switch and frontend controls for user-adjustable options. `harness:check` detects
+or setting. Each feature needs a registered integration point, its own switch with
+an explicitly registered Studio default, and frontend controls for user-adjustable
+options. `harness:check` detects
 unregistered consumers and missing configuration wiring; feature tests must prove
 that disabling the switch prevents upstream requests and preserves the old flow.
 

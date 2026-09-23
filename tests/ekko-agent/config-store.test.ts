@@ -233,7 +233,7 @@ describe('EkkoConfigStore', () => {
 
     const config = new EkkoConfigStore({ configPath }).ensureDefaults()
 
-    expect(config.schemaVersion).toBe(11)
+    expect(config.schemaVersion).toBe(12)
     expect(config.memory).not.toHaveProperty('reviewEveryUserMessages')
     expect(config.memory).not.toHaveProperty('summaryEveryUserMessages')
   })

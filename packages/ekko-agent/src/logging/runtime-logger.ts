@@ -1,6 +1,7 @@
 import type { ModelClient, ModelRequest, ModelResponse } from '../model/types'
 import { agentReasoningText } from '../model/messages'
 import type { EkkoLogWriter } from './file-logger'
+import type { EkkoJevDiagnostic } from '../jev/client'
 
 export interface EkkoRuntimeLogContext {
   profile?: string
@@ -30,7 +31,8 @@ export interface EkkoModelRequestSpan {
 /**
  * Writes one compact record for each model-client request attempt.
  *
- * Runtime events are intentionally not persisted. A request writes exactly one
+ * General runtime events are not persisted; optional memory JEV writes compact stage summaries.
+ * A model request writes exactly one
  * terminal record (completed or failed), so streaming and tool events cannot
  * multiply file volume.
  */
@@ -39,6 +41,15 @@ export class EkkoRuntimeLogger {
     private readonly writer: EkkoLogWriter,
     private readonly defaultContext: EkkoRuntimeLogContext = {},
   ) {}
+
+  memoryJev(runId: string, diagnostic: EkkoJevDiagnostic, inputContext?: EkkoRuntimeLogContext): void {
+    const context = { ...this.defaultContext, ...inputContext }
+    try {
+      this.writer.write({ category: 'memory', event: 'memory.jev', level: 'info', runId,
+        profile: context.profile, sessionId: context.sessionId, turnId: context.turnId,
+        data: { ...diagnostic } })
+    } catch { /* Diagnostics must never change memory execution. */ }
+  }
 
   startModelRequest(input: EkkoModelRequestLogInput): EkkoModelRequestSpan {
     const startedAt = Date.now()

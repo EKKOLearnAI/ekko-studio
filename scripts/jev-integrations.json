@@ -61,6 +61,11 @@
         "control": "NInputNumber",
         "binding": "settings.ekkoMemoryTimeoutMs",
         "label": "jev.memoryTimeout"
+      },
+      "ekkoMemoryRecallMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoMemoryRecallMinConfidence",
+        "label": "jev.memoryRecallMinConfidence"
       }
     }
   },
@@ -76,7 +81,8 @@
       "enabledKey": "ekkoMemoryEnabled",
       "studioDefaultEnabled": false,
       "options": [
-        "ekkoMemoryMinConfidence",
+        "ekkoMemoryCandidateLimit",
+        "ekkoMemoryRecallMinConfidence",
         "ekkoMemoryTimeoutMs"
       ],
       "runtimeConfig": {
@@ -126,9 +132,7 @@
       ],
       "enabledKey": "ekkoMemoryRerankEnabled",
       "studioDefaultEnabled": true,
-      "options": [
-        "ekkoMemoryCandidateLimit"
-      ],
+      "options": [],
       "runtimeConfig": {
         "file": "packages/ekko-agent/src/jev/config.ts",
         "interface": "EkkoJevConfig",
@@ -151,7 +155,9 @@
       ],
       "enabledKey": "ekkoMemoryWriteReviewEnabled",
       "studioDefaultEnabled": true,
-      "options": [],
+      "options": [
+        "ekkoMemoryMinConfidence"
+      ],
       "runtimeConfig": {
         "file": "packages/ekko-agent/src/jev/config.ts",
         "interface": "EkkoJevConfig",

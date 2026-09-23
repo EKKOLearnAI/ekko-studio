@@ -575,12 +575,14 @@ next event would exceed that cap, the existing content is discarded and
 logging continues in the same file; no rotated or per-session files are
 created.
 
-The persistent log is intentionally request-only. Every model-client request
-attempt writes one terminal `model.request` record after it completes or fails.
+Every model-client request attempt writes one terminal `model.request` record after it completes or fails.
 That single record combines safe request metadata, status, duration, usage, and
 response sizes. Runtime events, streaming deltas, tool events, prompts, and
 response bodies are not written, so log volume tracks model calls instead of
-the much larger runtime event stream.
+the much larger runtime event stream. Optional memory JEV also writes compact
+`memory.jev` stage summaries with timings, routing probabilities, thresholds and
+sanitized fallback reasons, correlated by session/run/turn. It never logs card
+content, query text or credentials.
 
 Endpoints and common credential shapes are redacted, large strings are
 truncated, and base64 payloads are omitted. `EkkoFileLogReader.query()` can

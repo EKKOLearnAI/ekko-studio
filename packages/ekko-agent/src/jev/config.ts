@@ -7,6 +7,9 @@ export interface EkkoJevConfig {
   memoryRerankEnabled: boolean
   memoryWriteReviewEnabled: boolean
   memoryCandidateLimit: number
+  /** Relevance probability for routing; minimum ranking confidence for recall. */
+  memoryRecallMinConfidence: number
+  /** Minimum confidence for write-review decisions only. */
   memoryMinConfidence: number
   /** Total budget per automatic recall or write batch, including all JEV stages. */
   memoryTimeoutMs: number
@@ -26,6 +29,7 @@ export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({
   memoryRerankEnabled: false,
   memoryWriteReviewEnabled: false,
   memoryCandidateLimit: 20,
+  memoryRecallMinConfidence: 0.5,
   memoryMinConfidence: 0.8,
   memoryTimeoutMs: 3000,
   apiKey: '',
@@ -59,6 +63,9 @@ export function resolveEkkoJevConfig(
   }
   if (!Number.isFinite(next.memoryMinConfidence) || next.memoryMinConfidence < 0.5 || next.memoryMinConfidence > 1) {
     throw new TypeError('JEV memory confidence must be between 0.5 and 1.')
+  }
+  if (!Number.isFinite(next.memoryRecallMinConfidence) || next.memoryRecallMinConfidence < 0.5 || next.memoryRecallMinConfidence > 1) {
+    throw new TypeError('JEV memory recall confidence must be between 0.5 and 1.')
   }
   if (!Number.isInteger(next.memoryTimeoutMs) || next.memoryTimeoutMs < 100 || next.memoryTimeoutMs > 30_000) {
     throw new TypeError('JEV memory timeout must be between 100 and 30000 ms.')
