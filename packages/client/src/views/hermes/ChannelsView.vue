@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import PlatformSettings from '@/components/hermes/settings/PlatformSettings.vue'
+import IncomingWebhookSettings from '@/components/hermes/settings/IncomingWebhookSettings.vue'
 
 const settingsStore = useSettingsStore()
 const profilesStore = useProfilesStore()
@@ -31,6 +32,7 @@ onMounted(() => {
     <div class="channels-content">
       <NSpin :show="settingsStore.loading || settingsStore.saving" size="large" :description="t('common.loading')">
         <PlatformSettings v-if="!settingsStore.loading" />
+        <IncomingWebhookSettings v-if="!settingsStore.loading" />
       </NSpin>
     </div>
   </div>

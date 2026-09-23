@@ -1,4 +1,5 @@
 import { socialMessagesZh } from '../social-messages'
+import { incomingWebhooksEn } from '../incoming-webhooks'
 
 export default {
   jev: {
@@ -190,6 +191,7 @@ export default {
     "missingCommand": "必须包含非空的 command"
   },
   socialMessages: socialMessagesZh,
+  incomingWebhooks: incomingWebhooksEn,
   browser: {
     title: '浏览器', settings: '浏览器设置', desktopOnly: '内置浏览器仅在 Ekko Studio 桌面端可用。', newTab: '新标签页',
     back: '后退', forward: '前进', reload: '刷新', stop: '停止', addressPlaceholder: '搜索或输入网址',

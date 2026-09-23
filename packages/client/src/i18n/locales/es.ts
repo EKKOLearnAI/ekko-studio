@@ -1,4 +1,5 @@
 import { socialMessagesEs } from '../social-messages-locales'
+import { incomingWebhooksEn } from '../incoming-webhooks'
 
 export default {
   jev: {
@@ -190,6 +191,7 @@ export default {
     "missingCommand": "Debe incluir un command no vacío"
   },
   socialMessages: socialMessagesEs,
+  incomingWebhooks: incomingWebhooksEn,
   browser: {
     title: 'Navegador', settings: 'Ajustes del navegador', desktopOnly: 'El navegador integrado solo está disponible en Ekko Studio Desktop.', newTab: 'Nueva pestaña',
     back: 'Atrás', forward: 'Adelante', reload: 'Recargar', stop: 'Detener', addressPlaceholder: 'Buscar o escribir una dirección',

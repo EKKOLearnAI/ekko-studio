@@ -796,6 +796,18 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       return
     }
 
+    if (pathname === '/api/hermes/incoming-webhooks' && request.method() === 'GET') {
+      await route.fulfill(jsonResponse({
+        profile: activeProfileName,
+        enabled: false,
+        gateway_running: true,
+        unified: false,
+        base_url: 'http://localhost:8644',
+        subscriptions: [],
+      }))
+      return
+    }
+
     if (pathname === '/api/hermes/config') {
       await route.fulfill(jsonResponse({
         display: { streaming: true, show_reasoning: true, show_cost: true },
