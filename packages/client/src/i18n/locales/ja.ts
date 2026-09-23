@@ -1,6 +1,7 @@
 import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
+  jev: {"description":"各モジュールで Choice・Score・Noul を利用できます。設定は選択中の Profile に適用されます。","timeout":"タイムアウト（ミリ秒）","keyHint":"空欄にすると保存済みのキーを維持","testSaved":"保存済み設定をテスト","deleteConfirm":"この Profile の JEV 設定と API キーを削除しますか？"},
   dshPresets: {"sessionMode": "DSH モード", "selectMode": "Agent プリセットを選択", "sessionHint": "この新規セッションにのみ適用します。ツールとセッション用プラグインは選択したプリセットに従います。", "title": "Agent プリセット", "unavailable": "DSH Agent プリセットを読み込めません。DSH のインストールを確認して再読み込みしてください。", "hint": "既定のプリセットは新しい DSH セッションに適用されます。既存のセッションは元のプリセットを維持します。", "copy": "複製", "view": "表示", "setDefault": "既定に設定", "default": "既定", "delete": "削除", "deleteConfirm": "プリセット「{name}」とそのディレクトリを削除しますか？", "identifier": "識別子", "name": "名前", "idHint": "小文字、数字、ハイフンで一意の識別子を指定してください。", "empty": "Agent プリセットはありません", "copyTitle": "プリセットを複製: {name}", "create": "作成", "location": "フォルダーを開く"},
   dshPlugins: {
     "configurationTab": "プラグイン設定",

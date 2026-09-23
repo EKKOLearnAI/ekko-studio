@@ -84,6 +84,7 @@ vi.mock('@/api/client', () => ({ isStoredSuperAdmin: () => false }))
 
 vi.mock('@/components/hermes/models/AuxiliaryModelsPanel.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/models/CombinationModelsPanel.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/hermes/models/JevSettingsPanel.vue', () => ({ default: { props: ['profile'], template: '<div class="jev-settings-stub" :data-profile="profile" />' } }))
 vi.mock('@/components/hermes/models/ProvidersPanel.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/models/ProviderFormModal.vue', () => ({
   default: {

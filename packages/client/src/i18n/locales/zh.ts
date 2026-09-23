@@ -1,6 +1,7 @@
 import { socialMessagesZh } from '../social-messages'
 
 export default {
+  jev: {"description":"供各模块调用 Choice、Score、Noul 判断，配置仅作用于当前选中的 Profile。","timeout":"请求超时（毫秒）","keyHint":"留空保留已保存的密钥","testSaved":"测试已保存配置","deleteConfirm":"删除此 Profile 的 JEV 配置和 API Key？"},
   dshPresets: {"sessionMode": "DSH 模式", "selectMode": "选择 Agent 预设", "sessionHint": "仅用于本次新会话，按所选预设加载工具和会话级插件。", "title": "Agent 预设", "unavailable": "无法加载 DSH Agent 预设，请检查 DSH 安装后刷新。", "hint": "默认预设用于新的 DSH 会话，已有会话保留原来的预设。", "copy": "复制", "view": "查看", "setDefault": "设为默认", "default": "默认", "delete": "删除", "deleteConfirm": "删除预设“{name}”及其目录？", "identifier": "标识符", "name": "名称", "idHint": "使用不重复的小写字母、数字和连字符作为标识符。", "empty": "暂无 Agent 预设", "copyTitle": "复制预设：{name}", "create": "创建", "location": "打开目录"},
   dshPlugins: {
     "configurationTab": "插件配置",

@@ -1,6 +1,7 @@
 import { socialMessagesPt } from '../social-messages-locales'
 
 export default {
+  jev: {"description":"Avaliações Choice, Score e Noul partilhadas entre módulos. As definições aplicam-se ao Profile selecionado.","timeout":"Tempo limite (ms)","keyHint":"Deixe vazio para manter a chave guardada","testSaved":"Testar a configuração guardada","deleteConfirm":"Eliminar a configuração JEV e a chave API deste Profile?"},
   dshPresets: {"sessionMode": "Modo DSH", "selectMode": "Selecionar uma predefinição de Agent", "sessionHint": "Aplica-se apenas a esta nova sessão. As ferramentas e os plugins de sessão seguem a predefinição selecionada.", "title": "Predefinições do Agent", "unavailable": "Não foi possível carregar as predefinições do DSH Agent. Verifique a instalação do DSH e atualize.", "hint": "O padrão aplica-se a novas sessões DSH. As sessões existentes mantêm a predefinição original.", "copy": "Duplicar", "view": "Ver", "setDefault": "Definir como padrão", "default": "Padrão", "delete": "Excluir", "deleteConfirm": "Excluir a predefinição “{name}” e seu diretório?", "identifier": "Identificador", "name": "Nome", "idHint": "Use um identificador único com letras minúsculas, números e hífens.", "empty": "Nenhuma predefinição do Agent", "copyTitle": "Duplicar predefinição: {name}", "create": "Criar", "location": "Abrir pasta"},
   dshPlugins: {
     "configurationTab": "Configuração de plugins",

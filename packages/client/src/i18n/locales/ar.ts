@@ -1,6 +1,7 @@
 import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
+  jev: {"description":"تقييمات Choice وScore وNoul مشتركة بين الوحدات. تنطبق الإعدادات على Profile المحدد.","timeout":"المهلة (مللي ثانية)","keyHint":"اتركه فارغًا للاحتفاظ بالمفتاح المحفوظ","testSaved":"اختبار الإعدادات المحفوظة","deleteConfirm":"هل تريد حذف إعدادات JEV ومفتاح API لهذا Profile؟"},
   dshPresets: {"sessionMode": "وضع DSH", "selectMode": "اختر إعداد Agent مسبقًا", "sessionHint": "ينطبق على هذه الجلسة الجديدة فقط. تُحمّل الأدوات وإضافات الجلسة وفق الإعداد المحدد.", "title": "إعدادات Agent المسبقة", "unavailable": "تعذر تحميل إعدادات DSH Agent المسبقة. تحقق من تثبيت DSH ثم حدّث الصفحة.", "hint": "تُطبق الإعدادات الافتراضية على جلسات DSH الجديدة. تحتفظ الجلسات الحالية بإعداداتها الأصلية.", "copy": "نسخ", "view": "عرض", "setDefault": "تعيين كافتراضي", "default": "افتراضي", "delete": "حذف", "deleteConfirm": "حذف الإعداد «{name}» ومجلده؟", "identifier": "المعرّف", "name": "الاسم", "idHint": "استخدم معرّفًا فريدًا من أحرف لاتينية صغيرة وأرقام وشرطات.", "empty": "لا توجد إعدادات Agent مسبقة", "copyTitle": "نسخ الإعداد: {name}", "create": "إنشاء", "location": "فتح المجلد"},
   dshPlugins: {
     "configurationTab": "إعدادات الإضافات",

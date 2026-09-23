@@ -1,6 +1,7 @@
 import { socialMessagesFr } from '../social-messages-locales'
 
 export default {
+  jev: {"description":"Évaluations Choice, Score et Noul partagées entre modules. Les paramètres concernent le Profile sélectionné.","timeout":"Délai (ms)","keyHint":"Laisser vide pour conserver la clé enregistrée","testSaved":"Tester la configuration enregistrée","deleteConfirm":"Supprimer la configuration JEV et la clé API de ce Profile ?"},
   dshPresets: {"sessionMode": "Mode DSH", "selectMode": "Choisir un préréglage Agent", "sessionHint": "S’applique uniquement à cette nouvelle session. Les outils et plugins de session suivent le préréglage choisi.", "title": "Préréglages Agent", "unavailable": "Impossible de charger les préréglages DSH Agent. Vérifiez l’installation de DSH et actualisez.", "hint": "Le préréglage par défaut s’applique aux nouvelles sessions DSH. Les sessions existantes conservent leur préréglage.", "copy": "Dupliquer", "view": "Afficher", "setDefault": "Définir par défaut", "default": "Par défaut", "delete": "Supprimer", "deleteConfirm": "Supprimer le préréglage « {name} » et son dossier ?", "identifier": "Identifiant", "name": "Nom", "idHint": "Utilisez un identifiant unique avec des lettres minuscules, des chiffres et des tirets.", "empty": "Aucun préréglage Agent", "copyTitle": "Dupliquer le préréglage : {name}", "create": "Créer", "location": "Ouvrir le dossier"},
   dshPlugins: {
     "configurationTab": "Configuration des plugins",

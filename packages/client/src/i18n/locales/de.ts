@@ -1,6 +1,7 @@
 import { socialMessagesDe } from '../social-messages-locales'
 
 export default {
+  jev: {"description":"Gemeinsame Choice-, Score- und Noul-Auswertungen. Die Einstellungen gelten für das ausgewählte Profile.","timeout":"Zeitlimit (ms)","keyHint":"Leer lassen, um den gespeicherten Schlüssel zu behalten","testSaved":"Gespeicherte Konfiguration testen","deleteConfirm":"JEV-Konfiguration und API-Schlüssel dieses Profile löschen?"},
   dshPresets: {"sessionMode": "DSH-Modus", "selectMode": "Agent-Voreinstellung wählen", "sessionHint": "Gilt nur für diese neue Sitzung. Werkzeuge und Sitzungsplugins folgen der gewählten Voreinstellung.", "title": "Agent-Vorlagen", "unavailable": "DSH-Agent-Vorlagen konnten nicht geladen werden. Prüfen Sie die DSH-Installation und aktualisieren Sie die Seite.", "hint": "Die Vorgabe gilt für neue DSH-Sitzungen. Bestehende Sitzungen behalten ihre Vorlage.", "copy": "Duplizieren", "view": "Anzeigen", "setDefault": "Als Standard setzen", "default": "Standard", "delete": "Löschen", "deleteConfirm": "Vorlage „{name}“ und ihr Verzeichnis löschen?", "identifier": "Kennung", "name": "Name", "idHint": "Verwenden Sie eine eindeutige Kennung aus Kleinbuchstaben, Ziffern und Bindestrichen.", "empty": "Keine Agent-Vorlagen", "copyTitle": "Vorlage duplizieren: {name}", "create": "Erstellen", "location": "Ordner öffnen"},
   dshPlugins: {
     "configurationTab": "Plugin-Konfiguration",
