@@ -95,4 +95,7 @@ positive/negative fixtures together instead of exempting the business module.
 
 The harness test suite deliberately removes switches, save fields, controls,
 locale labels and runtime mappings, and introduces unregistered/aliased callers,
-to verify that these regressions fail the check.
+to verify that these regressions fail the check. Filesystem discovery is tested
+against a small isolated repository. The full repository scan runs in the separate
+`npm run harness:check` CI step, keeping coverage tests independent of repository
+size and avoiding a duplicate full scan under their per-test timeout.

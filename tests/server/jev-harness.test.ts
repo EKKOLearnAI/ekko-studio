@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error Harness scripts are plain Node modules.
 import { checkJevIntegrations, jevHarnessViolations, jevUsage } from '../../scripts/jev-harness.mjs'
@@ -26,10 +28,39 @@ function fixture() {
 }
 
 describe('JEV integration harness', () => {
-  it('accepts the current configuration-only integration and actual repository', async () => {
+  it('accepts the current configuration-only integration', () => {
     const { sources, manifest } = fixture()
     expect(jevHarnessViolations(sources, manifest)).toEqual([])
-    expect(await checkJevIntegrations(root)).toEqual([])
+  })
+
+  it('discovers nested consumers and missing regression tests in an isolated repository', async () => {
+    const { sources, manifest, integration } = fixture()
+    const directory = await mkdtemp(join(tmpdir(), 'jev-harness-'))
+    const write = async (file: string, source: string) => {
+      const target = join(directory, file)
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, source)
+    }
+    try {
+      await write('scripts/jev-integrations.json', JSON.stringify(manifest))
+      await Promise.all([...sources].map(([file, source]) => write(file, source)))
+      expect(await checkJevIntegrations(directory)).toEqual([])
+
+      const consumers = [
+        'packages/server/src/nested/consumer.ts',
+        'packages/client/src/nested/Consumer.vue',
+        'packages/ekko-agent/src/nested/consumer.ts',
+      ]
+      await Promise.all(consumers.map(file => write(file, file.endsWith('.vue')
+        ? '<script setup lang="ts">runtime.jev.tryEvaluate(request)</script>'
+        : 'runtime.jev.tryEvaluate(request)')))
+      await rm(join(directory, integration.tests[0]))
+      const failures = (await checkJevIntegrations(directory)).join('\n')
+      for (const file of consumers) expect(failures).toContain(`${file} is an unregistered JEV integration`)
+      expect(failures).toContain(`missing required file ${integration.tests[0]}`)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   it.each([
