@@ -3,7 +3,7 @@ import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 import en from '../../packages/client/src/i18n/locales/en'
 import zh from '../../packages/client/src/i18n/locales/zh'
 
-const memoryDefaults = { ekkoMemoryKindRoutingEnabled: false, ekkoMemoryRerankEnabled: false, ekkoMemoryWriteReviewEnabled: false,
+const memoryDefaults = { ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true,
   ekkoMemoryCandidateLimit: 20, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 }
 
 for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
@@ -94,10 +94,10 @@ test(`configures JEV memory per Profile at ${viewport.width}px`, async ({ page }
   const memorySwitch = page.getByRole('switch', { name: en.jev.ekkoMemoryEnabled, exact: true })
   await expect(memorySwitch).not.toBeChecked()
   await memorySwitch.click()
+  await expect(page.locator('.jev-settings')).toContainText(en.common.notConfigured)
   for (const label of [en.jev.memoryKindRouting, en.jev.memoryRerank, en.jev.memoryWriteReview]) {
     const control = page.getByRole('switch', { name: label, exact: true })
-    await expect(control).not.toBeChecked()
-    await control.click()
+    await expect(control).toBeChecked()
   }
   await page.locator('summary').filter({ hasText: en.jev.memoryAdvanced }).click()
   await page.getByLabel(en.jev.memoryCandidateLimit, { exact: true }).fill('7')

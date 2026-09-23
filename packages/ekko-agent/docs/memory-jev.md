@@ -21,12 +21,15 @@ const ekko = new EkkoAgent({
 })
 ```
 
-The master and all three feature switches default to false. Numeric defaults are
+Standalone Ekko's master and all three feature switches default to false. Numeric defaults are
 20 candidate cards (range 1–50), a 0.8 decision threshold (range 0.5–1), and a
 3000 ms total deadline (range 100–30000 ms). These are configurable defaults,
 not a claim that provider confidence is calibrated for every application.
 Studio exposes every option in Models → JEV for the selected Profile, with numeric
-fields in Advanced parameters. Switching the master off preserves child settings.
+fields in Advanced parameters. Studio's memory master defaults to false and its
+three child switches default to true; saved explicit values take precedence.
+Switching the master off preserves child settings. Missing credentials still
+disable provider calls even when the master is enabled.
 
 ## Runtime boundary
 

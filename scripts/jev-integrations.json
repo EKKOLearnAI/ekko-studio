@@ -74,6 +74,7 @@
         "packages/ekko-agent/src/memory/jev-policy.ts"
       ],
       "enabledKey": "ekkoMemoryEnabled",
+      "studioDefaultEnabled": false,
       "options": [
         "ekkoMemoryMinConfidence",
         "ekkoMemoryTimeoutMs"
@@ -101,6 +102,7 @@
         "packages/ekko-agent/src/memory/jev-routing.ts"
       ],
       "enabledKey": "ekkoMemoryKindRoutingEnabled",
+      "studioDefaultEnabled": true,
       "options": [],
       "runtimeConfig": {
         "file": "packages/ekko-agent/src/jev/config.ts",
@@ -123,6 +125,7 @@
         "packages/ekko-agent/src/memory/jev-rerank.ts"
       ],
       "enabledKey": "ekkoMemoryRerankEnabled",
+      "studioDefaultEnabled": true,
       "options": [
         "ekkoMemoryCandidateLimit"
       ],
@@ -147,6 +150,7 @@
         "packages/ekko-agent/src/memory/jev-write-review.ts"
       ],
       "enabledKey": "ekkoMemoryWriteReviewEnabled",
+      "studioDefaultEnabled": true,
       "options": [],
       "runtimeConfig": {
         "file": "packages/ekko-agent/src/jev/config.ts",

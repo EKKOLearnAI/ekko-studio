@@ -47,7 +47,7 @@ Use the smallest relevant check while iterating. Before a broad PR, run
 - Register local API routes before proxy catch-all routes.
 - Use structured APIs and argument arrays instead of shell string construction.
 - Add user-facing strings to every locale file.
-- Register every JEV business integration with its own default-off switch and frontend configuration entry; run `npm run harness:check`.
+- Register every JEV business integration with its own switch and frontend configuration entry; explicitly register any enabled Studio default, keep standalone defaults off, and run `npm run harness:check`.
 - Do not mix unrelated refactors into a bug fix.
 
 ## When The Agent Gets Stuck

@@ -1,18 +1,21 @@
 # JEV integration and configuration contract
 
 Every Studio business feature that uses JEV must identify its integration point,
-provide its own persisted opt-in switch, and expose user-adjustable settings in
-the frontend. An API key only makes the provider available; it never opts all
-features into JEV.
+provide its own persisted switch, and expose user-adjustable settings in the
+frontend. An API key only makes the provider available; the memory master switch
+must still be enabled before its configured child features can use JEV.
 
 ## Required behavior
 
 - Register the feature in `scripts/jev-integrations.json`: a stable id, purpose,
   concrete source files, independent boolean `enabledKey`, additional `options`,
   implementation status, and regression test files.
-- Each feature switch defaults to `false`, is scoped to the selected Profile,
-  and has a labeled frontend `NSwitch`. Reusing another feature's switch or the
-  provider credential as its activation condition is not allowed.
+- Each feature switch is scoped to the selected Profile and has a labeled
+  frontend `NSwitch`. Studio defaults to `false` unless its registration explicitly
+  declares `studioDefaultEnabled: true`. The checker requires the persisted default
+  to match this declaration; standalone switches still default to `false`.
+  Reusing another feature's switch or the provider credential as its activation
+  condition is not allowed.
 - Expose every user-adjustable JEV option through the settings API and an editable
   frontend control. This includes feature-specific thresholds, candidate limits,
   per-feature models or timeouts if introduced. Do not add backend-only knobs or
@@ -42,8 +45,10 @@ features into JEV.
 | `ekko-memory-rerank` | Active: `memory/jev-rerank.ts` | `ekkoMemoryRerankEnabled` | `jev.memoryRerankEnabled` | Memory options → Candidate reranking |
 | `ekko-memory-write-review` | Active: `memory/jev-write-review.ts` | `ekkoMemoryWriteReviewEnabled` | `jev.memoryWriteReviewEnabled` | Memory options → Review memory writes |
 
-Agent source paths above are relative to `packages/ekko-agent/src`. Every switch
-defaults to false. Studio reads the selected Profile before each normal/isolated run;
+Agent source paths above are relative to `packages/ekko-agent/src`. Studio's memory
+master defaults to false; its three child switches default to true. Existing saved
+values, including explicit false, take precedence. Standalone Ekko retains false
+defaults for every switch. Studio reads the selected Profile before each normal/isolated run;
 the runtime snapshots the values for all subsequent memory operations. Shared memory
 services never store a mutable JEV client or Profile configuration. No runtime
 setting is written back to Ekko's local file.
@@ -68,8 +73,8 @@ It reads TypeScript and Vue syntax, including real template bindings, and checks
 
 1. JEV imports/calls, runtime evaluator access and known HTTP entry points in
    server, client and standalone agent source have a registered owner.
-2. Each integration declares its own default-off boolean switch and concrete
-   source/test paths; a configuration-only integration cannot directly evaluate.
+2. Each integration declares its own boolean switch, matching Studio default and
+   concrete source/test paths; a configuration-only integration cannot directly evaluate.
 3. Settings declared by defaults and server/client interfaces are registered,
    accepted by the save API, returned by the read API, bound to editable controls,
    included in the frontend save request, and labeled in every locale. The form

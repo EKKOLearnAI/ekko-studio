@@ -26,9 +26,9 @@ export class JevError extends Error {
 
 const defaults: StoredSettings = {
   ekkoMemoryEnabled: false,
-  ekkoMemoryKindRoutingEnabled: false,
-  ekkoMemoryRerankEnabled: false,
-  ekkoMemoryWriteReviewEnabled: false,
+  ekkoMemoryKindRoutingEnabled: true,
+  ekkoMemoryRerankEnabled: true,
+  ekkoMemoryWriteReviewEnabled: true,
   ekkoMemoryCandidateLimit: 20,
   ekkoMemoryMinConfidence: 0.8,
   ekkoMemoryTimeoutMs: 3000,

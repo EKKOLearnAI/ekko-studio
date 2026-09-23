@@ -99,10 +99,25 @@ describe('JEV integration harness', () => {
     expect(jevHarnessViolations(sources, manifest).join('\n')).toContain('business integrations must use the public JEV facade')
   })
 
-  it('requires a default-off boolean switch', () => {
+  it('requires the registered Studio default', () => {
     const f = fixture()
+    f.change(f.server, 'ekkoMemoryRerankEnabled: true', 'ekkoMemoryRerankEnabled: false')
+    expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('requires its own boolean switch with a true Studio default')
+  })
+
+  it('requires default-off unless Studio explicitly registers default-on', () => {
+    const f = fixture()
+    delete f.integration.studioDefaultEnabled
     f.change(f.server, 'ekkoMemoryEnabled: false', 'ekkoMemoryEnabled: true')
-    expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('requires its own boolean switch with a false default')
+    expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('requires its own boolean switch with a false Studio default')
+    f.integration.studioDefaultEnabled = true
+    expect(jevHarnessViolations(f.sources, f.manifest)).toEqual([])
+  })
+
+  it('rejects a non-boolean Studio default declaration', () => {
+    const f = fixture()
+    f.integration.studioDefaultEnabled = 'true'
+    expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('studioDefaultEnabled must be a boolean')
   })
 
   it('requires independent switches rather than reusing another feature switch', () => {

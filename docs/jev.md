@@ -1,8 +1,8 @@
 # Shared JEV evaluations
 
 Business integrations must follow the [JEV harness contract](harness/jev-integrations.md):
-register the exact integration point, provide an independent default-off feature
-switch, and expose adjustable options in the frontend. `npm run harness:check`
+register the exact integration point, provide an independent feature switch with a
+declared Studio default, and expose adjustable options in the frontend. `npm run harness:check`
 enforces the registration and configuration wiring.
 
 The Models page has a **JEV** tab for the selected `modelProfile`. Save a TypeSafe
@@ -94,14 +94,16 @@ disable other callers of the shared JEV evaluator.
 
 Standalone Ekko users can persist `config.jev.memoryEnabled` or override it via
 `new EkkoAgent({ jev: { memoryEnabled: true } })` and runtime creation options.
-Enable the master switch and the desired feature switches below to activate memory
-policies. All feature switches default to false, including when loading old settings.
+Standalone Ekko defaults every switch to false. Studio defaults the master to false
+and the three child switches to true, so enabling the master activates all three
+policies unless a child was explicitly disabled. Missing fields in older Studio
+settings receive these defaults; saved values always take precedence, including false.
 
-| Studio field | Ekko `jev` field | Default / range |
+| Studio field | Ekko `jev` field | Studio default / range |
 | --- | --- | --- |
-| `ekkoMemoryKindRoutingEnabled` | `memoryKindRoutingEnabled` | false |
-| `ekkoMemoryRerankEnabled` | `memoryRerankEnabled` | false |
-| `ekkoMemoryWriteReviewEnabled` | `memoryWriteReviewEnabled` | false |
+| `ekkoMemoryKindRoutingEnabled` | `memoryKindRoutingEnabled` | true |
+| `ekkoMemoryRerankEnabled` | `memoryRerankEnabled` | true |
+| `ekkoMemoryWriteReviewEnabled` | `memoryWriteReviewEnabled` | true |
 | `ekkoMemoryCandidateLimit` | `memoryCandidateLimit` | 20 / integer 1–50 |
 | `ekkoMemoryMinConfidence` | `memoryMinConfidence` | 0.8 / 0.5–1 |
 | `ekkoMemoryTimeoutMs` | `memoryTimeoutMs` | 3000 / integer 100–30000 ms |
