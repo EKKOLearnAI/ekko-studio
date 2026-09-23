@@ -57,6 +57,7 @@ import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./se
 import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } from "./session-category-menu";
 import { buildActiveSessionMenuOptions, buildSessionContextMenuOptions } from "./session-menu-options";
 import PageSidebarNav from "@/components/layout/PageSidebarNav.vue";
+import LanguageSwitch from "@/components/layout/LanguageSwitch.vue";
 import { isStoredSuperAdmin } from "@/api/client";
 import { useDefaultWorkspace } from "@/composables/useDefaultWorkspace";
 import { useCollapsedProviderGroups } from "@/composables/useCollapsedProviderGroups";
@@ -2675,6 +2676,7 @@ async function handleSessionModelCustomSubmit() {
           </svg>
           <span>{{ t("sidebar.settings") }}</span>
         </button>
+        <LanguageSwitch />
       </div>
     </aside>
 
@@ -4113,6 +4115,11 @@ async function handleSessionModelCustomSubmit() {
   display: flex;
   align-items: center;
   gap: 8px;
+
+  .language-switch {
+    flex: 0 0 auto;
+    width: 96px;
+  }
 }
 
 .page-sidebar-menu-btn {

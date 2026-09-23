@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import LanguageSwitch from '@/components/layout/LanguageSwitch.vue'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -19,6 +20,7 @@ function openSettingsPage() {
       </svg>
       <span>{{ t('sidebar.settings') }}</span>
     </button>
+    <LanguageSwitch />
   </div>
 </template>
 
@@ -31,6 +33,11 @@ function openSettingsPage() {
   display: flex;
   align-items: center;
   gap: 8px;
+
+  .language-switch {
+    flex: 0 0 auto;
+    width: 96px;
+  }
 }
 
 .page-sidebar-menu-btn {

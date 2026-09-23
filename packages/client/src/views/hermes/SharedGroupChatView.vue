@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NModal, useMessage } from 'naive-ui'
 import GroupChatPanel from '@/components/hermes/group-chat/GroupChatPanel.vue'
+import LanguageSwitch from '@/components/layout/LanguageSwitch.vue'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import { getStoredUserId, type RoomAgent } from '@/api/studio/group-chat'
 import type { ProfileAvatar as ProfileAvatarData } from '@/api/hermes/profiles'
@@ -555,7 +556,10 @@ onUnmounted(() => {
 
         <main v-else class="invite-gate">
             <section class="invite-card" aria-labelledby="shared-group-chat-title">
-                <img class="invite-logo" src="/logo.png" alt="" />
+                <div class="invite-card-top">
+                    <img class="invite-logo" src="/logo.png" alt="" />
+                    <LanguageSwitch class="invite-language-switch" />
+                </div>
                 <div class="invite-heading">
                     <p class="invite-kicker">{{ t('groupChat.title') }}</p>
                     <h1 id="shared-group-chat-title">{{ t('groupChat.shareTitle') }}</h1>
@@ -781,6 +785,23 @@ onUnmounted(() => {
     border-radius: 24px;
     background: $bg-main-surface;
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.14);
+}
+
+.invite-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 24px;
+
+    .invite-logo {
+        margin-bottom: 0;
+    }
+
+    .invite-language-switch {
+        flex: 0 0 auto;
+        width: 96px;
+    }
 }
 
 .invite-logo {
