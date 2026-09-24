@@ -1171,7 +1171,7 @@ describe('session upload provenance at the socket boundary', () => {
     const input = [{ type, path: '/uploads/attachment.txt', name: 'attachment.txt', text: 'hello' }]
     await handlers.get('run')!({ session_id: 'new-local-session', profile: 'default', input })
     expect(socket.emit).not.toHaveBeenCalledWith('run.failed', expect.anything())
-    expect(run).toHaveBeenCalledWith(socket, expect.objectContaining({ session_id: 'new-local-session', input }), 'default', false, undefined, undefined)
+    expect(run).toHaveBeenCalledWith(socket, expect.objectContaining({ session_id: 'new-local-session', input }), 'default', false, undefined, undefined, expect.any(String))
     expect(recordSessionUploadAttachmentsMock).toHaveBeenCalledWith('new-local-session', 'default', input, { allowPendingSession: true })
   })
 
