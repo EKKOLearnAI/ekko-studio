@@ -6,7 +6,7 @@ Electron desktop distribution for Ekko Studio.
 
 Download the latest macOS, Windows, or Linux installer for your CPU
 architecture from the project
-[GitHub Releases](https://github.com/EKKOLearnAI/hermes-studio/releases/latest).
+[GitHub Releases](https://github.com/EKKOLearnAI/ekko-studio/releases/latest).
 
 The desktop app bundles the Web UI runtime and launches it locally from the
 native shell app.

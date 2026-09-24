@@ -1,3 +1,6 @@
+import { hermesStudioMcpCapabilities } from '../chat-run/studio-mcp'
+import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
+import { findPushRunLink, linkPushRun, type PushRunRef } from '../../repositories/run-push-store'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 import type { TaskPlanSnapshot } from '../../contracts/task-plan'
 import { groupTaskPlanMessage } from './task-plan'
@@ -315,6 +318,7 @@ export interface GroupChatRunService {
             memory_default_write_scope?: Record<string, string>
         },
         options?: {
+            pushRoot?: PushRunRef
             profile?: string
             timeoutMs?: number
             onEvent?: (event: string, payload: any) => void
@@ -1148,6 +1152,8 @@ export class AgentClient implements GroupAgentExecutor {
     ): Promise<void> {
         if (!this.chatRunService) throw new Error('Chat run service is not ready')
         const responseRunId = groupMessageId(roomId, this.profile, this.name)
+        const pushRoot = findPushRunLink('group_root', roomId, msg.handoffChainId || msg.messageId || '')
+        if (pushRoot) linkPushRun('group_runtime', roomId, responseRunId, pushRoot)
         const runMessageId = groupMessagePartId(responseRunId, 0)
         const sessionId = groupRuntimeSessionId(roomId, this.profile, this.name)
         this.activeSessions.set(roomId, sessionId)
@@ -1254,6 +1260,7 @@ export class AgentClient implements GroupAgentExecutor {
                     : {}),
             }, {
                 profile: this.profile,
+                ...(pushRoot ? { pushRoot: { kind: pushRoot.kind, profile: pushRoot.profile, runId: pushRoot.run_id } } : {}),
                 onEvent: (event, payload = {}) => {
                     // Keep the terminal card after a user interrupt, while still rejecting an old room session.
                     if (event === 'plan.updated' && payload.execution_state !== 'running' && this.roomSessionIsCurrent(roomId, sessionId)) {
@@ -1376,6 +1383,8 @@ export class AgentClient implements GroupAgentExecutor {
             return
         }
         const runMessageId = groupMessageId(roomId, this.profile, this.name)
+        const pushRoot = findPushRunLink('group_root', roomId, msg.handoffChainId || msg.messageId || '')
+        if (pushRoot) linkPushRun('group_runtime', roomId, runMessageId, pushRoot)
         let partIndex = 0
         let streamMessageId = groupMessagePartId(runMessageId, partIndex)
         let currentContent = ''
@@ -1396,7 +1405,8 @@ export class AgentClient implements GroupAgentExecutor {
             this.startTyping(roomId)
 
             const conversationHistory = this.groupConversationHistory(runtimeContext)
-            let instructions = this.groupSystemPrompt(roomId, msg)
+            const mcpCapabilities = await hermesStudioMcpCapabilities(this.profile)
+            let instructions = [this.groupSystemPrompt(roomId, msg), studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
             const bridge = createGroupPrimaryAgentBridge()
             const sessionId = groupRuntimeSessionId(roomId, this.profile, this.name)
             this.activeSessions.set(roomId, sessionId)
@@ -1464,9 +1474,9 @@ export class AgentClient implements GroupAgentExecutor {
                 : `${routedPrefix}\n\nOriginal message: ${stripMentionRoutingTokens(msg.content, this.name) || msg.content}`
             const runPrompt = 'When calling Hermes Web UI endpoints from tools or skills, include the current Hermes profile as the X-Hermes-Profile header if the endpoint supports profile-scoped behavior.'
             instructions = `${instructions}\n\n${runPrompt}`
-            groupPlan = this.chatRunService?.beginGroupTaskPlanRun?.(sessionId, this.profile, runMessageId,
+            groupPlan = mcpCapabilities.interaction ? this.chatRunService?.beginGroupTaskPlanRun?.(sessionId, this.profile, runMessageId,
                 () => this.replySessionIsCurrent(roomId, sessionId, replyInterruptVersion),
-                snapshot => { planWrites = planWrites.then(() => this.recordTaskPlan(roomId, sessionId, runMessageId, snapshot)).catch(error => { logger.warn(error, '[GroupChat] task plan delivery failed') }) })
+                snapshot => { planWrites = planWrites.then(() => this.recordTaskPlan(roomId, sessionId, runMessageId, snapshot)).catch(error => { logger.warn(error, '[GroupChat] task plan delivery failed') }) }) : undefined
             const planInput = withTaskPlanTurnContext(input, groupPlan?.contextId)
             const bridgeInput: GroupPrimaryAgentBridgeMessage = isContentBlockArray(planInput)
                 ? await convertContentBlocksForAgent(planInput)
@@ -1737,6 +1747,8 @@ export class AgentClient implements GroupAgentExecutor {
                 this.emitClarifyRequested(roomId, {
                     event: 'clarify.requested',
                     agentSessionId: sessionId,
+                    runId: responseRunId,
+                    runtimeRunId: String((ev as any).run_id || ''),
                     clarify_id: (ev as any).clarify_id,
                     question: (ev as any).question,
                     choices: Array.isArray((ev as any).choices) ? (ev as any).choices : null,

@@ -34,6 +34,26 @@ describe('App connection authorization', () => {
     return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf-8'))
   }
 
+  it('allows only the connection owner or super-admin to change a boolean push preference', async () => {
+    const store = await import('../../packages/server/src/modules/studio/repositories/app-connections-store')
+    const ctrl = await import('../../packages/server/src/modules/studio/controllers/app-connections')
+    const connection = store.upsertAppConnection({ deviceCode: 'phone', deviceName: '', deviceBrand: '', deviceModel: '',
+      connectionType: 'lan', userId: 7, token: 'token', tokenExpiresAt: 9999999999 })
+    const call = async (user: any, enabled: unknown, id: unknown = connection.id) => {
+      const ctx = { state: { user }, params: { id: String(id) }, request: { body: { push_enabled: enabled } }, status: 200, body: null } as any
+      await ctrl.updateAppConnectionPushController(ctx); return ctx
+    }
+    expect((await call(undefined, false)).status).toBe(401)
+    expect((await call({ id: 8, role: 'admin' }, false)).status).toBe(403)
+    expect((await call({ id: 7, role: 'admin' }, 'false')).status).toBe(400)
+    expect((await call({ id: 7, role: 'admin' }, true, 'bad')).status).toBe(400)
+    expect(store.listAppConnections()[0].push_enabled).toBe(1)
+    expect((await call({ id: 7, role: 'admin' }, false)).body).toEqual({ success: true, push_enabled: false })
+    expect(store.listAppConnections()[0].push_enabled).toBe(0)
+    expect((await call({ id: 8, role: 'super_admin' }, true)).body.push_enabled).toBe(true)
+    expect((await call({ id: 7, role: 'admin' }, false, 999)).status).toBe(404)
+  })
+
   it('records the authorizing user and exchanges once for that user\'s 30-day device token', async () => {
     const users = await import('../../packages/server/src/modules/studio/repositories/users-store')
     const admin = users.bootstrapDefaultSuperAdmin('admin', '123456')!

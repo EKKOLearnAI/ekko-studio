@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { type Session } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
-import { useSessionBrowserPrefsStore } from '@/stores/hermes/session-browser-prefs'
 import { NButton, NDropdown, NPopconfirm, NTooltip, useMessage, type DropdownOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getSourceLabel } from '@/shared/session-display'
@@ -15,11 +14,10 @@ import SessionListItem from '@/components/hermes/chat/SessionListItem.vue'
 import OutlinePanel from '@/components/hermes/chat/OutlinePanel.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
 import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
-import { batchDeleteSessions, deleteSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchHermesSession, fetchSessionMessagesPage, importHermesSession, unarchiveSession, type HermesMessage, type SessionSummary } from '@/api/studio/sessions'
+import { setSessionPinned, batchDeleteSessions, deleteSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchHermesSession, fetchSessionMessagesPage, importHermesSession, unarchiveSession, type HermesMessage, type SessionSummary } from '@/api/studio/sessions'
 
 const appStore = useAppStore()
 const profilesStore = useProfilesStore()
-const sessionBrowserPrefsStore = useSessionBrowserPrefsStore()
 const message = useMessage()
 const { t } = useI18n()
 const route = useRoute()
@@ -75,7 +73,7 @@ async function loadHermesSessions() {
   const requestId = ++hermesSessionsRequestId
   hermesSessionsLoading.value = true
   try {
-    const includedIds = [...sessionBrowserPrefsStore.pinnedIds]
+    const includedIds: string[] = []
     if (routeSessionId.value && !includedIds.includes(routeSessionId.value)) includedIds.push(routeSessionId.value)
     const result = await fetchHermesSessionGroups(HISTORY_GROUP_PAGE_SIZE, effectiveHistoryProfile.value, includedIds)
     if (requestId !== hermesSessionsRequestId) return
@@ -121,7 +119,7 @@ const contextSessionSummary = computed(() =>
 )
 
 const contextSessionPinned = computed(() =>
-  contextSessionId.value ? sessionBrowserPrefsStore.isPinned(contextSessionId.value) : false,
+  contextSessionId.value ? Boolean(contextSessionSummary.value?.is_pinned) : false,
 )
 
 const contextMenuOptions = computed<DropdownOption[]>(() => {
@@ -131,7 +129,7 @@ const contextMenuOptions = computed<DropdownOption[]>(() => {
       key: 'import-webui',
       disabled: Boolean(contextSessionSummary.value?.webui_imported),
     },
-    { label: t(contextSessionPinned.value ? 'chat.unpin' : 'chat.pin'), key: 'pin' },
+    { label: t(contextSessionPinned.value ? 'chat.unpin' : 'chat.pin'), key: 'pin', disabled: contextSessionSummary.value?.webui_imported === false },
     ...(contextSessionSummary.value?.is_archived ? [{ label: t('chat.unarchiveSession'), key: 'unarchive' }] : []),
     { label: t('chat.copySessionLink'), key: 'copy-link' },
     { label: t('chat.copySessionId'), key: 'copy-id' },
@@ -232,6 +230,7 @@ function sessionFromSummary(summary: SessionSummary, messages: Session['messages
     outputTokens: summary.output_tokens,
     endedAt: summary.ended_at ? summary.ended_at * 1000 : undefined,
     lastActiveAt: summary.last_active ? summary.last_active * 1000 : undefined,
+    isPinned: Boolean(summary.is_pinned),
     isArchived: Boolean(summary.is_archived),
     pushEnabled: Boolean(summary.push_enabled),
     workspace: summary.workspace || undefined,
@@ -446,6 +445,7 @@ function sessionSummaryToSession(summary: SessionSummary): Session {
     outputTokens: summary.output_tokens,
     endedAt: summary.ended_at ? summary.ended_at * 1000 : undefined,
     lastActiveAt: summary.last_active ? summary.last_active * 1000 : undefined,
+    isPinned: Boolean(summary.is_pinned),
     isArchived: Boolean(summary.is_archived),
     pushEnabled: Boolean(summary.push_enabled),
     workspace: summary.workspace || undefined,
@@ -533,13 +533,13 @@ interface SessionGroup {
 }
 
 const pinnedSessions = computed(() =>
-  sortSessionsWithActiveFirst(historySessions.value.filter(session => sessionBrowserPrefsStore.isPinned(session.id))),
+  sortSessionsWithActiveFirst(historySessions.value.filter(session => session.isPinned)),
 )
 
 const groupedSessions = computed<SessionGroup[]>(() => {
   const map = new Map<string, Session[]>()
   for (const s of historySessions.value) {
-    if (sessionBrowserPrefsStore.isPinned(s.id)) continue
+    if (s.isPinned) continue
     const key = s.source || ''
     if (!map.has(key)) map.set(key, [])
     map.get(key)!.push(s)
@@ -718,7 +718,14 @@ async function handleContextMenuSelect(key: string) {
   showContextMenu.value = false
   if (!contextSessionId.value) return
   if (key === 'pin') {
-    sessionBrowserPrefsStore.togglePinned(contextSessionId.value)
+    const summary = contextSessionSummary.value
+    if (!summary) return
+    try {
+      const result = await setSessionPinned(summary.id, !summary.is_pinned)
+      summary.is_pinned = result.is_pinned
+    } catch (error: any) {
+      message.error(error?.message || t('common.saveFailed'))
+    }
   } else if (key === 'copy-link') {
     await copySessionLink(contextSessionId.value)
   } else if (key === 'copy-id') {
@@ -753,7 +760,6 @@ async function handleDeleteSession(id: string, profile?: string | null) {
     return
   }
 
-  sessionBrowserPrefsStore.removePinned(id)
   hermesSessions.value = hermesSessions.value.filter(s => s.id !== id)
   if (summary?.source && sourceOffsets.value[summary.source]) {
     sourceOffsets.value = {
@@ -791,10 +797,6 @@ async function handleBatchDelete() {
   try {
     const result = await batchDeleteSessions(targets)
     if (result.deleted > 0) {
-      for (const target of targets) {
-        sessionBrowserPrefsStore.removePinned(target.id)
-      }
-
       await loadHermesSessions()
 
       if (activeWasSelected || (historySessionId.value && !findHistorySession(historySessionId.value))) {

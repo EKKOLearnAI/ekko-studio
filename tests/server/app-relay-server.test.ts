@@ -508,7 +508,7 @@ describe('LocalAppRelayServer', () => {
       id: 'http-1',
       method: 'GET',
       path: '/api/studio/sessions?profile=default',
-      headers: { 'if-match': '"revision-1"' },
+      headers: { 'if-match': '"revision-1"', 'x-app-access-token': 'cloud-account-token', 'x-session-share-token': 'session-invitation-token' },
     }, ack)
 
     await vi.waitFor(() => expect(ack).toHaveBeenCalledWith(expect.objectContaining({
@@ -523,6 +523,8 @@ describe('LocalAppRelayServer', () => {
     const headers = fetchImpl.mock.calls[0][1]?.headers as Headers
     expect(headers.get('authorization')).toBe('Bearer local-user-token')
     expect(headers.get('if-match')).toBe('"revision-1"')
+    expect(headers.get('x-app-access-token')).toBe('cloud-account-token')
+    expect(headers.get('x-session-share-token')).toBe('session-invitation-token')
     expect(clientSocketMocks.io).not.toHaveBeenCalled()
 
     fetchImpl.mockResolvedValueOnce(new Response(Uint8Array.from([7, 8, 9]), {
@@ -899,7 +901,7 @@ describe('LocalAppRelayServer', () => {
     })))
   })
 
-  it('bridges unified App subscriptions over local and manually addressed relay', async () => {
+  it.each([['/chat-run', 'app.events.subscribe'], ['/group-chat', 'load_room_agent_activities']])('bridges %s %s over local and manually addressed relay', async (ns, event) => {
     const namespace = createMockNamespace()
     const io = { of: vi.fn(() => namespace) }
     const { LocalAppRelayServer } = await import('../../packages/server/src/modules/studio/services/app-relay/server')
@@ -918,30 +920,30 @@ describe('LocalAppRelayServer', () => {
     const openAck = vi.fn()
     app.__handlers.get('socket.open')({
       id: 'workflow-1',
-      namespace: '/chat-run',
+      namespace: ns,
       auth: { token: 'untrusted-token', appEventVersion: 1 }, query: { profile: 'default' },
     }, openAck)
 
     await vi.waitFor(() => expect(openAck).toHaveBeenCalledWith(expect.objectContaining({
       id: 'workflow-1',
       ok: true,
-      namespace: '/chat-run',
+      namespace: ns,
     })))
     expect(clientSocketMocks.io).toHaveBeenCalledWith(
-      'http://127.0.0.1:8748/chat-run',
+      `http://127.0.0.1:8748${ns}`,
       expect.objectContaining({ auth: { token: 'local-user-token', appEventVersion: 1 } }),
     )
 
     const local = clientSocketMocks.sockets[0]
-    local.emit.mockImplementation((event: string, payload: unknown, ack?: (response: unknown) => void) => {
-      if (event === 'app.events.subscribe') {
+    local.emit.mockImplementation((name: string, payload: unknown, ack?: (response: unknown) => void) => {
+      if (name === event) {
         ack?.({ ok: true, data: { statuses: [{ workflowId: 'workflow-a', status: 'idle' }] } })
       }
     })
     const eventAck = vi.fn()
     app.__handlers.get('socket.event')({
       id: 'workflow-1',
-      event: 'app.events.subscribe',
+      event,
       payload: { schema_version: 1, profile: 'default', types: ['workflow.run.completed'] },
       ack: true,
     }, eventAck)
@@ -949,8 +951,8 @@ describe('LocalAppRelayServer', () => {
     await vi.waitFor(() => expect(eventAck).toHaveBeenCalledWith(expect.objectContaining({
       id: 'workflow-1',
       ok: true,
-      namespace: '/chat-run',
-      event: 'app.events.subscribe',
+      namespace: ns,
+      event,
       payload: { ok: true, data: { statuses: [{ workflowId: 'workflow-a', status: 'idle' }] } },
     })))
   })

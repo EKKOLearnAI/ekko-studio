@@ -73,13 +73,34 @@ it('reports a bounded readiness timeout', async () => {
   expect(await result).toMatchObject({ message: 'Unable to start the DSH configuration runtime (readiness timed out after 30 seconds)' })
 })
 
-it.each(['authentication', 'frontend probe'])('reports native %s failure without token or cookie values', async stage => {
+it.each(['connection', 'frontend probe'])('reports native %s failure without token or cookie values', async stage => {
   const fetch = vi.fn().mockRejectedValue(new Error('private-token private-cookie'))
   if (stage === 'frontend probe') fetch.mockResolvedValueOnce(new Response(null, { status: 303, headers: { 'set-cookie': 'auth=private-cookie' } }))
   vi.stubGlobal('fetch', fetch)
   const { result } = await start()
   child.stdout.write('STUDIO_DSH_UI_READY:http://127.0.0.1:12345/?token=private-token\n')
   expect(await result).toMatchObject({ message: `Unable to start the DSH configuration runtime (native ${stage} failed)` })
+})
+
+it('identifies a native runtime that stopped listening instead of reporting an authentication rejection', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('private-token', {
+    cause: Object.assign(new Error('private command path'), { code: 'ECONNREFUSED' }),
+  })))
+  const { result } = await start()
+  child.stdout.write('STUDIO_DSH_UI_READY:http://127.0.0.1:12345/?token=private-token\n')
+  expect(await result).toMatchObject({ status: 503, code: 'DSH_UI_UNAVAILABLE',
+    message: 'Unable to start the DSH configuration runtime (native connection failed: ECONNREFUSED)' })
+})
+
+it.each([401, 403, 303])('reports rejected authentication or a missing cookie with HTTP %s', async status => {
+  const fetch = vi.fn().mockResolvedValue(new Response(null, { status }))
+  vi.stubGlobal('fetch', fetch)
+  const { result } = await start()
+  child.stdout.write('STUDIO_DSH_UI_READY:http://127.0.0.1:12345/?token=private-token\n')
+  expect(await result).toMatchObject({
+    message: `Unable to start the DSH configuration runtime (native authentication failed (HTTP ${status}))`,
+  })
+  expect(fetch).toHaveBeenCalledTimes(1)
 })
 
 it('returns the authenticated target and reuses the running host', async () => {

@@ -46,6 +46,8 @@ export function normalizeGatewayAutoStartConfig(value: unknown): GatewayAutoStar
 }
 
 export interface AppConfig {
+  // Defaults on for supported gateways. Explicit false opts out for old gateways; persisted in appHome/config.json.
+  liveActivityRelevanceEnabled?: boolean
   // Network entry used by Studio's cloud App Relay connection.
   appRelayRoute?: 'official' | 'cloudflare'
 

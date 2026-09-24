@@ -75,6 +75,7 @@ const tagMappings = {
   'modules/ekko/routes/config.ts': { name: 'Ekko Config', description: 'Ekko runtime configuration management' },
   'modules/studio/routes/workflows.ts': { name: 'Workflows', description: 'Cross-agent workflow orchestration' },
   'modules/studio/routes/sessions.ts': { name: 'Sessions', description: 'Cross-agent chat session management' },
+  'modules/studio/routes/session-shares.ts': { name: 'Session Shares', description: 'App-bound single-session share tokens, first claim, permissions and revocation' },
   'modules/studio/routes/logs.ts': { name: 'Logs', description: 'Cross-agent log file access' },
   'modules/studio/routes/social-messages.ts': { name: 'Social Messages', description: 'Unified outbound messaging for configured social platforms' },
   'modules/studio/routes/group-chat.ts': { name: 'Group Chat', description: 'Cross-agent group chat management' },
@@ -82,6 +83,7 @@ const tagMappings = {
   'modules/studio/routes/chat-webhooks.ts': { name: 'Chat Webhooks', description: 'Cross-agent Chat Run webhook endpoint management' },
   'modules/studio/routes/tts.ts': { name: 'TTS', description: 'Text-to-speech generation and settings' },
   'modules/studio/routes/stt.ts': { name: 'STT', description: 'Speech-to-text transcription and settings' },
+  'modules/studio/routes/jev.ts': { name: 'JEV', description: 'Profile-scoped TypeSafe JEV configuration and shared Choice, Score, Noul evaluations' },
   'modules/studio/routes/media.ts': { name: 'Media', description: 'Media generation endpoints' },
   'modules/studio/routes/performance-monitor.ts': { name: 'Performance', description: 'Runtime performance monitoring' },
   'modules/studio/routes/petdex.ts': { name: 'Petdex', description: 'Desktop pet catalog and assets' },
@@ -339,8 +341,11 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
     }
     for (const parameter of parameters) {
       if (parameter.name === 'category') {
-        parameter.schema = { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'string', enum: ['none'] }] }
-        parameter.description = 'Filter by category ID; none selects uncategorized sessions.'
+        parameter.schema = { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'string', enum: ['none', 'pinned'] }] }
+        parameter.description = 'Filter by category ID; none selects uncategorized sessions, pinned selects database-pinned sessions.'
+      } else if (parameter.name === 'pinned') {
+        parameter.schema = { type: 'boolean' }
+        parameter.description = 'Filter by database pin state before pagination and counting. The pinned category takes precedence.'
       } else if (parameter.name === 'include' || parameter.name === 'exclude') {
         parameter.schema = { type: 'array', items: { type: 'string' } }
         parameter.style = 'form'
@@ -909,6 +914,13 @@ Object.keys(openapi.paths).sort().forEach(key => {
 openapi.paths = sortedPaths
 
 // Add special endpoints after sorting
+openapi.paths['/api/studio/sessions/{id}/pin'].post.requestBody = {
+  required: true,
+  content: { 'application/json': { schema: {
+    type: 'object', required: ['is_pinned'], properties: { is_pinned: { type: 'boolean' } },
+  } } },
+}
+
 // Shared task planning is bound to an authenticated, active turn capability.
 openapi.paths['/api/studio/task-plans/update'] = {
   post: {
@@ -1244,6 +1256,179 @@ openapi.paths['/api/coding-agents/dsh/agent-presets/{presetId}'] = {
 }
 openapi.paths['/api/coding-agents/dsh/agent-presets/{presetId}/default'] = { put: { ...pluginAuth, operationId: 'defaultDshAgentPreset', summary: 'Set the native preset default for new sessions', parameters: presetParameters, responses: { '200': pluginResponse(presetRosterSchema), ...presetErrors } } }
 openapi.paths['/api/coding-agents/dsh/agent-presets/{presetId}/location'] = { post: { ...pluginAuth, operationId: 'locateDshAgentPreset', summary: 'Open a custom preset directory on the DSH host or return its path', parameters: presetParameters, responses: { '200': pluginResponse({ oneOf: [{ type: 'object', required: ['opened'], properties: { opened: { type: 'boolean', enum: [true] } } }, { type: 'object', required: ['opened', 'path'], properties: { opened: { type: 'boolean', enum: [false] }, path: { type: 'string' } } }] }), ...presetErrors } } }
+
+// Share identities use separate headers so App relays cannot replace the cloud
+// account credential with a local Studio JWT.
+openapi.components.securitySchemes.AppAccessToken = { type: 'apiKey', in: 'header', name: 'X-App-Access-Token', description: 'Cloud App access token, verified against /api/app/auth/me.' }
+openapi.components.securitySchemes.SessionShareToken = { type: 'apiKey', in: 'header', name: 'X-Session-Share-Token', description: 'sst1_ invitation secret; never accepted as a Studio login JWT.' }
+// These existing routes accept a second, session-scoped authentication mechanism.
+const shareReadPaths = ['/api/studio/sessions/{id}', '/api/studio/sessions/{id}/context', '/api/studio/sessions/{id}/usage',
+  '/api/studio/sessions/conversations/{id}/messages', '/api/studio/sessions/conversations/{id}/messages/paginated']
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  for (const [method, operation] of Object.entries(methods)) {
+    let permission = ''
+    if (method === 'get' && shareReadPaths.includes(path)) permission = 'read'
+    if (method === 'post' && path === '/api/studio/chat-run/runs') permission = 'input'
+    if (method === 'get' && ['/api/studio/files/download', '/api/studio/sessions/{id}/export'].includes(path)) permission = 'download'
+    if (method === 'get' && /^\/api\/studio\/sessions\/\{id\}\/(workspace-files\/list|workspace-file\/(read|diff|content)|workspace-run-changes(?:\/\{changeId\}\/files\/\{fileId\})?)$/.test(path)) permission = 'workspaceRead'
+    if (['put workspace-file/write', 'post workspace-file/mkdir', 'delete workspace-file/delete', 'post workspace-file/rename', 'post workspace-file/copy'].includes(`${method} ${path.replace('/api/studio/sessions/{id}/', '')}`)) permission = 'workspaceWrite'
+    if ((method === 'post' && path === '/api/studio/uploads') || /^\/api\/studio\/app-uploads(?:\/\{id\}(?:\/chunks|\/complete)?)?$/.test(path)) permission = 'upload'
+    if (method === 'get' && path === '/api/studio/sessions/{id}/share-models') permission = 'switchModel'
+    if (method === 'get' && path === '/api/studio/sessions/{id}/share-workspaces') permission = 'switchWorkspace'
+    if (method === 'post' && path === '/api/studio/sessions/{id}/model') permission = 'switchModel'
+    if (method === 'post' && path === '/api/studio/sessions/{id}/reasoning-effort') permission = 'reasoningEffort'
+    if (method === 'post' && path === '/api/studio/sessions/{id}/workspace') permission = 'switchWorkspace'
+    if (!permission) continue
+    operation.security = [...(operation.security || [{ BearerAuth: [] }]), { AppAccessToken: [], SessionShareToken: [] }]
+    operation['x-session-share-permission'] = permission
+    operation.description = `${operation.description || ''}\nApp session sharing: requires the claimed recipient identity and ${permission} permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.`.trim()
+  }
+}
+const sharePermissionSchema = { type: 'object', additionalProperties: false, properties: Object.fromEntries(
+  ['input', 'voice', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal', 'switchModel', 'reasoningEffort', 'switchWorkspace'].map(key => [key, { type: 'boolean', default: false }]),
+) }
+sharePermissionSchema.properties.voice.description = 'Use session-scoped speech transcription and synthesis with the sharer Profile voice settings. Sending transcribed messages still requires input. Defaults to false for existing shares.'
+sharePermissionSchema.properties.switchModel.description = 'Change the shared session model using the scoped share-models catalog, and edit the current Hermes/Ekko model context limit. Does not grant reasoning-effort changes.'
+sharePermissionSchema.properties.reasoningEffort.description = 'Change the shared session reasoning effort independently of model selection.'
+sharePermissionSchema.properties.switchWorkspace.description = 'Select an existing directory within the original workspace, or an explicit extraPaths grant when outsideWorkspace is enabled. Does not grant filesystem read/write or expand the share scope.'
+for (const [suffix, description] of [
+  ['share-models', 'Selectable models for this session. Returns provider/model labels and IDs without provider secrets or endpoints.'],
+  ['share-workspaces', 'Browse only directories that this share may select as workspace. Empty path returns authorized roots; an absolute path returns child directories.'],
+]) {
+  const operation = openapi.paths[`/api/studio/sessions/{id}/${suffix}`]?.get
+  if (!operation) continue
+  operation.security = [{ AppAccessToken: [], SessionShareToken: [] }]
+  operation.description = `${description} ${operation.description || ''}`
+  if (suffix === 'share-workspaces') operation.parameters = [
+    ...(operation.parameters || []).filter(parameter => parameter.name !== 'path'),
+    { name: 'path', in: 'query', required: false, schema: { type: 'string' }, description: 'Existing absolute directory in the share scope. Omit to list authorized roots.' },
+  ]
+}
+const shareChangeSchema = { type: 'object', additionalProperties: false, properties: {
+  permissions: sharePermissionSchema,
+  extraPaths: { type: 'array', maxItems: 16, items: { type: 'object', additionalProperties: false, required: ['path', 'writable'], properties: {
+    path: { type: 'string', description: 'Existing absolute directory explicitly allowed outside the session workspace. Super administrator only.' }, writable: { type: 'boolean' },
+  } } },
+} }
+const shareBody = schema => ({ required: true, content: { 'application/json': { schema } } })
+for (const kind of ['synthesize', 'transcribe']) {
+  const operation = openapi.paths[`/api/studio/sessions/{id}/share-voice/${kind}`].post
+  operation.operationId = kind === 'synthesize' ? 'synthesizeSessionShareSpeech' : 'transcribeSessionShareSpeech'
+  operation.security = [{ AppAccessToken: [], SessionShareToken: [] }]
+  operation['x-session-share-permission'] = 'voice'
+  operation.description = 'Requires voice permission on the claimed shared session. Uses the share-bound Profile active speech provider and stored settings; provider, credential and option overrides are rejected. No upload permission is required. Sending recognized text additionally requires input.'
+  operation.requestBody = kind === 'synthesize'
+    ? shareBody({ type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1, maxLength: 5000 } } })
+    : { required: true, content: { 'multipart/form-data': { schema: { type: 'object', additionalProperties: false, required: ['audio'], properties: { audio: { type: 'string', format: 'binary' } } } } } }
+  operation.responses['200'] = kind === 'synthesize'
+    ? { description: 'MP3 speech audio', content: { 'audio/mpeg': { schema: { type: 'string', format: 'binary' } } } }
+    : { description: 'Recognized speech; text is empty when no speech is detected', content: { 'application/json': { schema: { type: 'object', properties: { text: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, durationMs: { type: 'number' } } } } } }
+  operation.responses['400'] = { description: 'Invalid text/audio, unsupported provider or missing host configuration' }
+  operation.responses['403'] = { description: 'Voice permission denied or session/profile mismatch' }
+  operation.responses['410'] = { description: 'Share expired or revoked' }
+}
+const shareContextPath = openapi.paths['/api/studio/sessions/{id}/share-context-length']
+for (const method of ['get', 'put']) {
+  const operation = shareContextPath[method]
+  operation.operationId = method === 'get' ? 'getSessionShareContextLength' : 'setSessionShareContextLength'
+  operation.security = [{ AppAccessToken: [], SessionShareToken: [] }]
+  operation['x-session-share-permission'] = method === 'get' ? 'read' : 'switchModel'
+  operation.description = 'Read or edit the current shared Hermes/Ekko model context limit. Profile and session are server-bound. Writes require switchModel and matching current provider/model; the value is model-level within the shared Profile. Coding Agents do not support this operation.'
+  operation.responses['200'] = { description: 'Current context limit', content: { 'application/json': { schema: {
+    type: 'object', required: ['context_length'], properties: { context_length: { type: 'integer', minimum: 1 } },
+  } } } }
+  operation.responses['403'] = { description: 'Permission denied or session/profile mismatch' }
+  operation.responses['410'] = { description: 'Share expired or revoked' }
+}
+shareContextPath.put.requestBody = shareBody({ type: 'object', additionalProperties: false,
+  required: ['provider', 'model', 'context_limit'], properties: {
+    provider: { type: 'string', minLength: 1 }, model: { type: 'string', minLength: 1 },
+    context_limit: { type: 'integer', minimum: 1000, maximum: 10000000 },
+  },
+})
+openapi.components.schemas.SessionShare = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    id: { type: 'string' }, session_id: { type: 'string' },
+    sharer_app_user_id: { type: 'integer' }, sharer_name_snapshot: { type: 'string' },
+    recipient_app_user_id: { type: 'integer', nullable: true }, recipient_name_snapshot: { type: 'string', nullable: true },
+    permissions: sharePermissionSchema, policy_version: { type: 'integer' },
+    ...Object.fromEntries(['created_at', 'updated_at', 'expires_at', 'claimed_at', 'revoked_at'].map(key => [key, {
+      type: 'integer', format: 'int64', description: 'Unix epoch milliseconds', ...(['claimed_at', 'revoked_at'].includes(key) ? { nullable: true } : {}),
+    }])),
+  },
+}
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  const management = /^\/api\/studio\/sessions\/\{sessionId\}\/shares/.test(path)
+  if (!management && !path.startsWith('/api/studio/session-shares/')) continue
+  for (const [method, operation] of Object.entries(methods)) {
+    operation.operationId = management
+      ? ({ post: 'createSessionShare', get: 'listSessionShares', patch: 'updateSessionShare', delete: 'revokeSessionShare' })[method]
+      : ({ claim: 'claimSessionShare', access: 'getSessionShareAccess', check: 'checkSessionSharePermission' })[path.split('/').pop()]
+    operation.parameters = [...path.matchAll(/\{([^}]+)\}/g)].map(match => ({ name: match[1], in: 'path', required: true, schema: { type: 'string' } }))
+    operation.security = management ? [{ BearerAuth: [] }] : [{ AppAccessToken: [], SessionShareToken: [] }]
+    if (management && ['post', 'patch'].includes(method)) operation.requestBody = shareBody(method === 'post'
+      ? { ...shareChangeSchema, required: ['sharer'], properties: { ...shareChangeSchema.properties,
+        sharer: { type: 'object', additionalProperties: false, required: ['id', 'name'], description: 'App-provided attribution only. Management authority comes from the authenticated local Studio owner, not this metadata.',
+          properties: { id: { type: 'integer', minimum: 1 }, name: { type: 'string', maxLength: 200 } } },
+      } } : shareChangeSchema)
+    if (path.endsWith('/claim')) operation.requestBody = shareBody({ type: 'object', additionalProperties: false, required: ['confirm'], properties: { confirm: { type: 'boolean', enum: [true] } } })
+    if (path.endsWith('/check')) operation.requestBody = shareBody({ type: 'object', additionalProperties: false, required: ['action', 'sessionId'], properties: {
+      action: { type: 'string', enum: ['read', ...Object.keys(sharePermissionSchema.properties)] }, sessionId: { type: 'string' },
+    } })
+    operation.responses = { ...operation.responses, '401': { description: 'Missing or invalid App identity / Studio App device credential' },
+      '403': { description: 'Recipient, session, resource, owner or permission mismatch' }, '404': { description: 'Share not found' },
+      '409': { description: 'Already claimed by another App user, or concurrent policy change' }, '410': { description: 'Share expired or revoked' },
+      '503': { description: 'Identity verification or transactional storage unavailable' } }
+    if (management && method === 'post') {
+      delete operation.responses['200']
+      operation.responses['201'] = { description: 'New independent invitation; secret is returned only at creation', content: { 'application/json': { schema: {
+        type: 'object', required: ['share', 'token'], properties: { share: { $ref: '#/components/schemas/SessionShare' }, token: { type: 'string', pattern: '^sst1_[A-Za-z0-9_-]{43}$' } },
+      } } } }
+    }
+  }
+}
+
+// JEV accepts named heterogeneous questions and never returns its stored API key.
+const jevSettingsProperties = {
+  baseUrl: { type: 'string', format: 'uri', default: 'https://api.typesafe.ai' },
+  model: { type: 'string', default: 'jev-latest', maxLength: 200 },
+  timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000, default: 10000 },
+}
+const jevSettingsSchema = { type: 'object', properties: { ...jevSettingsProperties, hasApiKey: { type: 'boolean' } }, required: ['baseUrl', 'model', 'timeoutMs', 'hasApiKey'] }
+openapi.components.schemas.JevError = {
+  type: 'object', required: ['error'], properties: {
+    error: { type: 'string', description: 'Sanitized diagnostic message.' },
+    code: { type: 'string', pattern: '^jev_', description: 'Stable JEV error code used for client-side translation; middleware errors may omit it.' },
+  },
+}
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  if (!path.startsWith('/api/studio/jev/')) continue
+  for (const [method, operation] of Object.entries(methods)) {
+    operation.parameters = [{ name: 'X-Hermes-Profile', in: 'header', required: true, schema: { type: 'string' }, description: 'Authorized Profile; never changes the global active Profile.' }]
+    if (path.endsWith('/settings')) {
+      operation.responses['200'] = { description: 'Non-secret JEV settings', content: { 'application/json': { schema: jevSettingsSchema } } }
+      if (method === 'put') operation.requestBody = { required: true, content: { 'application/json': { schema: {
+        type: 'object', additionalProperties: false, properties: { ...jevSettingsProperties,
+          apiKey: { type: 'string', writeOnly: true, description: 'Omit or leave blank to preserve the saved key. DELETE clears it.' },
+        },
+      } } } }
+    }
+    if (path.endsWith('/evaluate')) operation.requestBody = { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['state', 'questions'], properties: {
+        state: { nullable: true, oneOf: [{ type: 'string' }, { type: 'object', additionalProperties: true }, { type: 'array', items: {} }] },
+        questions: { type: 'object', minProperties: 1, additionalProperties: {
+          type: 'object', required: ['type'], properties: {
+            type: { type: 'string', enum: ['choice', 'score', 'noul'] }, instructions: {}, criteria: {},
+          }, description: 'Choice: at least two named criteria. Score: at least two ordered criteria. Noul: optional true/false criteria.',
+        } }, model: { type: 'string' },
+      },
+    } } } }
+    for (const [status, description] of Object.entries({ 400: 'Invalid input or missing Profile', 403: 'Profile access denied', 409: 'API key not configured', 499: 'Request cancelled', 500: 'Settings operation failed', 502: 'Provider request failed', 504: 'Provider request timed out' })) {
+      operation.responses[status] = { description, content: { 'application/json': { schema: { $ref: '#/components/schemas/JevError' } } } }
+    }
+  }
+}
 
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')

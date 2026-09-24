@@ -1982,4 +1982,24 @@ describe('ekko-agent context usage events', () => {
     ])
     expect(runInput.messages.some((message: any) => message.content === 'orphan result')).toBe(false)
   })
+
+  it('uses the same resolved MCP snapshot for Ekko tools and guidance on consecutive turns', async () => {
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap } = makeHarness()
+    for (const enabled of [true, false]) {
+      const servers = { 'ekko-studio-api': { command: 'studio', enabled } }
+      await handleEkkoAgentRun(nsp as any, socket as any, {
+        session_id: 'session-1', input: 'Hello', coding_agent_id: 'ekko-agent',
+        instructions: 'Custom instructions', resolved_mcp_servers: servers,
+      }, 'default', sessionMap, vi.fn(() => false))
+      const run = agentRunMock.mock.calls.at(-1)![0]
+      expect(run.toolContext.mcpServers).toBe(servers)
+      const instructions = run.messages.filter((m: any) => m.role === 'system').map((m: any) => m.content).join('\n')
+      expect(instructions).toContain('Custom instructions')
+      expect(instructions.includes('ekko_studio_api_openapi_get')).toBe(enabled)
+      expect(instructions).not.toContain('ekko_studio_update_plan')
+      expect(run.onPlanUpdate).toBeTypeOf('function')
+    }
+  })
+
 })

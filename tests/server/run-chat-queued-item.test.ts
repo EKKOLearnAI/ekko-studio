@@ -66,6 +66,8 @@ vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-ma
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', () => ({
+  getChatCodingAgentMcpServers: vi.fn(() => ({ 'ekko-studio-interaction': { command: 'studio' }, 'ekko-studio-use': { command: 'studio' } })),
+  resolveChatEkkoMcpServers: vi.fn(() => ({ 'ekko-studio-use': { command: 'studio' } })),
   createPrimaryAgentBridge: vi.fn(() => bridgeMock),
   getPrimaryAgentBridgeManager: vi.fn(() => ({ start: vi.fn(async () => {}), ensureReady: ensureReadyMock })),
   redactPrimaryAgentBridgeError: (error?: string) => error,
@@ -106,6 +108,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/workspace-run-cha
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
+  readConfigYamlForProfile: vi.fn(async () => ({ mcp_servers: { 'ekko-studio-interaction': { command: 'studio' }, 'ekko-studio-use': { command: 'studio' } } })),
   getActiveProfileName: vi.fn(() => 'default'),
   getProfileDir: vi.fn(() => '/tmp/hermes-default'),
   listProfileNamesFromDisk: vi.fn(() => ['default']),
@@ -184,6 +187,18 @@ describe('ChatRunSocket queued bridge runs', () => {
       events: [],
       queue: [],
     })
+  })
+
+  it('drops a queued shared message when its execution-time authorization fails', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, socket, roomEmit } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const authorize = vi.fn(async () => { throw new Error('share_revoked') })
+    ;(server as any).sessionMap.set('session-1', { isWorking: true, events: [], queue: [] })
+    ;(server as any).runQueuedItem(socket, 'session-1', { queue_id: 'revoked-queue', input: 'blocked', profile: 'default', authorize })
+    await vi.waitFor(() => expect(roomEmit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ queue_id: 'revoked-queue', error: 'share_access_denied' })))
+    expect(handleBridgeRunMock).not.toHaveBeenCalled()
+    expect((server as any).sessionMap.get('session-1').isWorking).toBe(false)
   })
 
   it('promotes a selected queued Hermes message and arms one strict boundary request', async () => {
@@ -825,14 +840,15 @@ describe('ChatRunSocket queued bridge runs', () => {
     expect(abortSpy).toHaveBeenCalled()
     expect(bridgeMock.interrupt).toHaveBeenCalledWith('session-1', 'Session cleared', 'default')
     expect((server as any).sessionMap.has('session-1')).toBe(false)
-    expect(namespace.emit).toHaveBeenCalledWith('session.command', expect.objectContaining({
+    expect(namespace.to).toHaveBeenCalledWith(['studio-account', 'session:session-1'])
+    expect(namespace.to('session:session-1').emit).toHaveBeenCalledWith('session.command', expect.objectContaining({
       event: 'session.command',
       session_id: 'session-1',
       action: 'clear',
       clearHistory: true,
       deleted: 2,
     }))
-    expect(namespace.emit).toHaveBeenCalledWith('resumed', expect.objectContaining({
+    expect(namespace.to('session:session-1').emit).toHaveBeenCalledWith('resumed', expect.objectContaining({
       session_id: 'session-1',
       messages: [],
       messageTotal: 0,

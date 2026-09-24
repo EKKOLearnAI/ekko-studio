@@ -1,15 +1,19 @@
 import type { Socket } from 'socket.io'
 import { randomUUID } from 'crypto'
 import { businessEvents, APP_BUSINESS_TYPES, type BusinessEvent } from './business-events'
-import { stableChatWebhookEventId } from './envelope'
 import { authenticateUserToken, type AuthenticatedUser } from '../../public/auth'
 import { listUserProfiles } from '../../repositories/users-store'
+import { isAppConnectionPushEnabled } from '../../repositories/app-connections-store'
 import { getSession, getSessionNotificationPreview } from '../../repositories/session-store'
+import { getWorkflowRun, getWorkflowRunForSession } from '../../repositories/workflow-run-store'
 import { groupReplyNotification } from '../group-chat/foreground-notification'
 import { foregroundNotification, foregroundNotificationAgent, foregroundNotificationPreview } from '../chat-run/foreground-notification'
+import { appEventState, type AppStateProvider } from './app-event-state'
+import { taskPlanWebhookContent } from './task-plan'
+import { chatCompletionText } from '../notifications/chat-completion-text'
 
-interface Subscription { profile: string; types: string[]; sessionIds: string[]; roomIds: string[]; workflowIds: string[] }
-interface GroupAccess { canReceive(user: AuthenticatedUser, roomId: string): boolean }
+interface Subscription { profile: string; types: string[]; sessionIds: string[]; roomIds: string[]; workflowIds: string[]; snapshot: boolean }
+interface GroupAccess { canReceive(user: AuthenticatedUser, roomId: string, event?: BusinessEvent): boolean }
 let groupAccess: GroupAccess | null = null
 export function registerGroupEventAccess(access: GroupAccess): () => void {
   groupAccess = access
@@ -29,19 +33,39 @@ export function parseAppSubscription(value: unknown): Subscription {
   const profile = typeof p.profile === 'string' ? p.profile.trim() || 'default' : 'default'
   const types = p.types === undefined ? [...APP_BUSINESS_TYPES] : ids(p.types)
   if (types.some(t => !(APP_BUSINESS_TYPES as readonly string[]).includes(t))) throw new Error('unsupported event type')
-  return { profile, types, sessionIds: ids(p.session_ids), roomIds: ids(p.room_ids), workflowIds: ids(p.workflow_ids) }
+  return { profile, types, sessionIds: ids(p.session_ids), roomIds: ids(p.room_ids), workflowIds: ids(p.workflow_ids), snapshot: p.include_snapshot === true }
 }
 export function appEventEnvelope(event: BusinessEvent) {
+  const base = { timestamp: Date.parse(event.occurred_at), schema_version: 1, id: event.id, type: event.type, occurred_at: event.occurred_at,
+    profile: event.profile, source: event.source, subject: event.subject }
+  if (event.type.endsWith('.run.updated')) return { ...base, notify: false, state: event.payload.state }
+  if (event.type.endsWith('.plan.updated')) {
+    const plan = event.chat?.task_plan
+    return plan ? { ...base, notify: false, task_plan: taskPlanWebhookContent(plan, true) } : null
+  }
+  const interaction = event.subject.approval_id || event.subject.clarification_id
+  const interactionState = interaction ? { interaction: {
+    ...(typeof event.payload.resolved === 'boolean' ? { resolved: event.payload.resolved } : {}),
+    ...(event.payload.stale === true ? { stale: true } : {}),
+    ...(typeof event.payload.reason === 'string' ? { reason: event.payload.reason.slice(0, 100) } : {}),
+    ...Object.fromEntries(['timeout_ms', 'requested_at', 'remaining_timeout_ms'].flatMap(key =>
+      typeof event.payload[key] === 'number' ? [[key, event.payload[key]]] : [])),
+  } } : {}
+  if (event.source === 'workflow' && event.type.startsWith('chat.') && interaction) {
+    return { ...base, ...interactionState, notify: false, display: { title: '', preview: '' } }
+  }
   if (event.type.startsWith('chat.')) {
     if (event.source === 'group_chat' || event.source === 'workflow') return null
     const name = event.type.replace('chat.clarification.', 'clarify.').replace(/^chat\./, '')
-    const payload = { ...event.payload, session_id: event.subject.session_id }
+    const payload = { ...event.payload, session_id: event.subject.session_id,
+      ...(event.type === 'chat.run.completed' ? { output: chatCompletionText(event) } : {}) }
     const notice = foregroundNotification(name, payload)
     if (!notice) return null
     const session = getSession(notice.sessionId)
     if (!session || (session.profile || 'default') !== event.profile || session.source === 'group_chat' || session.source === 'workflow') return null
     return { schema_version: 1, id: event.id, type: event.type, occurred_at: event.occurred_at,
       profile: event.profile, source: event.source, subject: event.subject,
+      ...interactionState,
       display: { ...foregroundNotificationPreview(notice.kind, getSessionNotificationPreview(notice.sessionId) || session, payload), agent: foregroundNotificationAgent(session.agent) } }
   }
   if (event.type === 'group.message.created') {
@@ -58,10 +82,34 @@ export function appEventEnvelope(event: BusinessEvent) {
   }
   if (!(APP_BUSINESS_TYPES as readonly string[]).includes(event.type)) return null
   return { schema_version: 1, id: event.id, type: event.type, occurred_at: event.occurred_at,
-    profile: event.profile, source: event.source, subject: event.subject, display: event.payload.display }
+    profile: event.profile, source: event.source, subject: event.subject, ...interactionState, display: event.payload.display }
+}
+function matches(request: Subscription, event: BusinessEvent): boolean {
+  if (!request.types.includes(event.type) || event.source !== 'group_chat' && request.profile !== event.profile) return false
+  const selected = event.subject.room_id ? request.roomIds : event.subject.workflow_id ? request.workflowIds : request.sessionIds
+  return !selected.length || selected.includes(event.subject.room_id || event.subject.workflow_id || event.subject.session_id || '')
+}
+/** Notification ownership is stricter than permission to view a shared Profile. */
+export function canReceiveAppEvent(user: AuthenticatedUser | undefined, event: BusinessEvent): boolean {
+  if (!user || !Number.isSafeInteger(user.id) || user.id <= 0) return false
+  if (event.source === 'group_chat') {
+    return Boolean(event.subject.room_id && groupAccess?.canReceive(user, event.subject.room_id, event))
+  }
+  if (!allowed(user, event.profile)) return false
+  if (event.source === 'workflow') {
+    // Node events carry their own runtime ID; resolve the persisted root by session.
+    const run = event.subject.session_id
+      ? getWorkflowRunForSession(event.subject.session_id, event.profile)
+      : event.subject.run_id ? getWorkflowRun(event.subject.run_id) : null
+    return Boolean(run && run.workflow_id === event.subject.workflow_id && run.user_id === user.id
+      && (event.subject.session_id || run.profile === event.profile))
+  }
+  const session = event.subject.session_id ? getSession(event.subject.session_id) : null
+  return Boolean(session && (session.profile || 'default') === event.profile
+    && session.user_id != null && String(session.user_id) === String(user.id))
 }
 /** One subscription per authenticated socket; local/manual/cloud use the same command. */
-export function bindAppEventSubscription(socket: Socket): void {
+export function bindAppEventSubscription(socket: Socket, localState?: AppStateProvider): void {
   let subscription: Subscription | null = null
   let revision = 0
   let closed = false
@@ -79,27 +127,25 @@ export function bindAppEventSubscription(socket: Socket): void {
       if (closed || ticket !== revision) return
       subscription = request
       socket.data.appEventVersion = 1
-      ack?.({ ok: true, schema_version: 1 })
-    } catch { if (!closed && ticket === revision) ack?.({ ok: false, error: 'event_subscription_denied' }) }
+      const snapshot = request.snapshot ? (isAppConnectionPushEnabled(token) ? [...appEventState(user, request.profile), ...(localState?.(user, request.profile) || [])] : [])
+        .filter(event => matches(request, event) && canReceiveAppEvent(user, event)).map(appEventEnvelope).filter(Boolean) : undefined
+      ack?.({ ok: true, schema_version: 1, ...(snapshot ? { snapshot, timestamp: Date.now() } : {}) })
+    } catch { if (!closed && ticket === revision) { subscription = null; ack?.({ ok: false, error: 'event_subscription_denied' }) } }
   })
   socket.on('app.events.unsubscribe', (_input: unknown, ack?: (result: unknown) => void) => {
     revision++; subscription = null; ack?.({ ok: true })
   })
   const stop = businessEvents.subscribe(`app:${socket.id}:${randomUUID()}`, event => {
     const request = subscription, ticket = revision
-    if (closed || !request || !request.types.includes(event.type) || pending >= 100) return
-    if (event.source !== 'group_chat' && request.profile !== event.profile) return
-    const selected = event.subject.room_id ? request.roomIds : event.subject.workflow_id ? request.workflowIds : request.sessionIds
-    const subjectId = event.subject.room_id || event.subject.workflow_id || event.subject.session_id || ''
-    if (selected.length && !selected.includes(subjectId)) return
+    if (closed || !request || !matches(request, event) || pending >= 100) return
     pending++
     chain = chain.then(async () => {
       if (closed || revision !== ticket || subscription !== request || seen.has(event.id)) return
       // Revalidate JWT/account and current profile/membership on every delivery.
       const user = await authenticateUserToken(token)
       if (!user || !allowed(user, request.profile)) return
-      if (event.source === 'group_chat' && (!event.subject.room_id || !groupAccess?.canReceive(user, event.subject.room_id))) return
-      if (event.source !== 'group_chat' && !allowed(user, event.profile)) return
+      if (!isAppConnectionPushEnabled(token)) return
+      if (!canReceiveAppEvent(user, event)) return
       const envelope = appEventEnvelope(event)
       if (!envelope || closed || revision !== ticket) return
       seen.add(event.id); if (seen.size > 2000) seen.delete(seen.values().next().value!)
@@ -107,14 +153,4 @@ export function bindAppEventSubscription(socket: Socket): void {
     }).catch(() => {}).finally(() => { pending-- })
   })
   socket.on('disconnect', () => { closed = true; revision++; subscription = null; stop(); seen.clear() })
-}
-export function publishDomainEvent(type: 'group.message.created' | 'workflow.run.completed' | 'workflow.run.failed', profile: string,
-  subject: BusinessEvent['subject'], display: Record<string, unknown>): void {
-  const identity = type === 'group.message.created' ? `${subject.room_id}:${subject.message_id}` : `${subject.workflow_id}:${subject.run_id}`
-  businessEvents.publish({ schema_version: 1, id: stableChatWebhookEventId(`${type}:${identity}`), type,
-    occurred_at: new Date().toISOString(), profile: profile?.trim() || 'default', source: type.startsWith('group.') ? 'group_chat' : 'workflow', subject, payload: { display } })
-}
-
-export function publishGroupMessage(room: {id:string;name:string;summaryProfile:string}, message: Record<string, unknown>, agents: unknown[]): void {
-  businessEvents.publish({schema_version:1,id:stableChatWebhookEventId(`group.message.created:${room.id}:${message.id}`),type:'group.message.created',occurred_at:new Date().toISOString(),profile:room.summaryProfile?.trim() || 'default',source:'group_chat',subject:{room_id:room.id,message_id:String(message.id)},payload:{room:{id:room.id,name:room.name},message,agents}})
 }

@@ -50,7 +50,7 @@ const trackerMock = vi.hoisted(() => ({
 vi.mock('socket.io-client', () => ({ io: vi.fn(() => mockSocket) }))
 vi.mock('../../packages/server/src/modules/studio/services/auth/token-auth', () => ({ getToken: vi.fn(async () => 'test-token') }))
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
-  readConfigYamlForProfile: vi.fn(async () => ({ model: { default: 'model-a', provider: 'provider-a' } })),
+  readConfigYamlForProfile: vi.fn(async () => ({ model: { default: 'model-a', provider: 'provider-a' }, mcp_servers: { 'ekko-studio-interaction': { command: 'studio' } } })),
 }))
 vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () => ({ updateUsage: vi.fn() }))
 vi.mock('../../packages/server/src/modules/studio/public/group-chat-agent-runtime', () => ({
@@ -1507,6 +1507,20 @@ describe('group chat agent workspace bridge runs', () => {
     expect(JSON.parse(cards[1].content)).toMatchObject({ revision: 2, execution_state: terminal, plan: [{ status: 'pending' }] })
     expect(fallbackPublish).not.toHaveBeenCalled()
     expect(() => plans.update(contextId, 'default', { plan: [] })).toThrow('expired')
+  })
+
+  it('does not attach MCP plans or usage guidance to a group bridge run with MCPs disabled', async () => {
+    const { readConfigYamlForProfile } = await import('../../packages/server/src/modules/studio/public/profile-config')
+    vi.mocked(readConfigYamlForProfile).mockResolvedValueOnce({ mcp_servers: {} })
+    const client = await createClient('')
+    const beginGroupTaskPlanRun = vi.fn()
+    client.setChatRunService({ runAndWait: vi.fn(), abortSession: vi.fn(), beginGroupTaskPlanRun })
+    await client.replyToMention('room-1', { content: '@Worker inspect', senderName: 'Alice', senderId: 'user-1', timestamp: 1 })
+    expect(beginGroupTaskPlanRun).not.toHaveBeenCalled()
+    const call = bridgeMock.chat.mock.calls[0] as any
+    expect(String(call[1])).not.toContain('studio_task_plan_context')
+    expect(call[3]).not.toContain('ekko_studio_')
+    expect(call[3]).toContain('# Output format guidelines')
   })
 
   it('omits workspace when the room has no workspace', async () => {

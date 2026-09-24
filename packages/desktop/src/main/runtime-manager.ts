@@ -45,7 +45,7 @@ import {
 import { t } from './desktop-i18n'
 
 const DEFAULT_RUNTIME_BASE_URL = 'https://download.ekkolearnai.com'
-const DEFAULT_RUNTIME_GITHUB_REPO = 'EKKOLearnAI/hermes-studio'
+const DEFAULT_RUNTIME_GITHUB_REPO = 'EKKOLearnAI/ekko-studio'
 const RUNTIME_MANIFEST_NAME = 'runtime-manifest.json'
 const PACKAGED_RUNTIME_RELEASE_NAME = 'runtime-release.json'
 const ACTIVE_RUNTIME_VERSION_NAME = 'active-version.json'

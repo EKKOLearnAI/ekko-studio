@@ -7,6 +7,7 @@ import { saveEnvValueForProfile } from '../../studio/public/profile-config'
 import { logger } from '../../studio/public/logging'
 import { safeFileStore } from '../../studio/public/safe-file-store'
 import { EXCLUSIVE_PLATFORM_CREDENTIAL_KEYS } from '../services/profiles/profile-credentials'
+import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
 
 const PLATFORM_SECTIONS = new Set([
   'telegram', 'discord', 'slack', 'whatsapp', 'matrix',
@@ -530,6 +531,7 @@ export async function updateConfig(ctx: any) {
         forceQuotes: true,
       },
     })
+    if ((section === 'compression' && 'threshold' in values) || section === 'model') invalidateProviderRuntime(profile)
 
     // Platform adapters run through Hermes gateway; restart it so channel
     // config changes (Feishu/Weixin/etc.) are applied.

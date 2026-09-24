@@ -273,8 +273,9 @@ describe('workflow manager', () => {
     })
     expect(workflow.nodes[0]?.data).not.toHaveProperty('executionPolicy')
     try {
-      const result = await manager.runNow(workflow.id)
+      const result = await manager.runNow(workflow.id, { user: { id: 42, username: 'owner', role: 'super_admin' } })
       expect(result.run.status).toBe('completed')
+      expect(result.run.user_id).toBe(42)
       expect(result.run.snapshot_nodes[0]).toMatchObject({ data: {
         provider: 'custom:test', model: 'model-a', apiMode: 'chat_completions', reasoningEffort: 'high',
       } })
@@ -1656,10 +1657,11 @@ describe('workflow manager', () => {
         { id: 'retry', source: 'latch', target: 'header', data: { orchestration: { route: 'success', feedback: { maxIterations: 3 } } } },
       ],
     })
+    // Exercise the mocked chat-run timeout, not a wall-clock deadline during setup.
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
     try {
       const result = await manager.runNow(workflow.id, { timeoutMs: 25 })
-      expect(actualTimeoutMs).toBeGreaterThan(0)
-      expect(actualTimeoutMs).toBeLessThanOrEqual(25)
+      expect(actualTimeoutMs).toBe(25)
       const timeoutError = `chat-run timed out after ${actualTimeoutMs}ms`
       expect({ status: result.run.status, error: result.run.error }).toEqual({ status: 'failed', error: timeoutError })
       expect(result.nodeSessions.map(session => [session.execution_id, session.status, session.error])).toEqual([
@@ -1668,7 +1670,10 @@ describe('workflow manager', () => {
       expect(listWorkflowRunLoopEpochs(result.run.id).map(epoch => ({ status: epoch.status, exitReason: epoch.exit_reason }))).toEqual([
         { status: 'timed_out', exitReason: timeoutError },
       ])
-    } finally { await manager.delete(workflow.id) }
+    } finally {
+      nowSpy.mockRestore()
+      await manager.delete(workflow.id)
+    }
   })
 
   it('fails closed when timed_out loop epoch evidence cannot be persisted', async () => {
@@ -1693,12 +1698,15 @@ describe('workflow manager', () => {
         { id: 'retry', source: 'latch', target: 'header', data: { orchestration: { route: 'success', feedback: { maxIterations: 3 } } } },
       ],
     })
+    // Keep setup time from expiring the run before runAndWait returns its timeout.
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
     try {
       const result = await manager.runNow(workflow.id, { timeoutMs: 25 })
       expect(result.run.status).toBe('failed')
       expect(result.run.error).toContain('timed out loop epoch write failed')
       expect(chatRunMock.runAndWait).toHaveBeenCalledTimes(1)
     } finally {
+      nowSpy.mockRestore()
       db.exec('DROP TRIGGER IF EXISTS fail_timed_out_loop_epoch')
       await manager.delete(workflow.id)
     }

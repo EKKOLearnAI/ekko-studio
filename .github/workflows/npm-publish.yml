@@ -104,11 +104,12 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          PACKAGE_TARBALL: npm-packages/${{ matrix.package }}-${{ needs.build.outputs.version }}.tgz
+          PACKAGE_TARBALL: ./npm-packages/${{ matrix.package }}-${{ needs.build.outputs.version }}.tgz
           NPM_DIST_TAG: ${{ needs.build.outputs.dist_tag }}
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
             echo "NPM_TOKEN repository secret is not configured" >&2
             exit 1
           fi
+          test -f "$PACKAGE_TARBALL"
           npm publish "$PACKAGE_TARBALL" --access public --tag "$NPM_DIST_TAG" --ignore-scripts --registry https://registry.npmjs.org

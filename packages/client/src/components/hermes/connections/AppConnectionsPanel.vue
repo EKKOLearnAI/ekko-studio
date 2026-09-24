@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NAlert, NButton, NDataTable, NEmpty, NModal, NPopconfirm, NSpin, NTabPane, NTabs, NTag, useMessage } from 'naive-ui'
+import { NAlert, NButton, NDataTable, NEmpty, NModal, NPopconfirm, NSpin, NSwitch, NTabPane, NTabs, NTag, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -10,6 +10,7 @@ import {
   createCloudAppAuthorization,
   deleteAppConnection,
   fetchAppConnections,
+  updateAppConnectionPush,
   type AppConnection,
   type AppConnectionAccessFailure,
   type CloudAppAuthorizationResponse,
@@ -42,7 +43,7 @@ const DEFAULT_MOBILE_RELEASE: StudioMobileRelease = {
   channels: {
     androidApk: {
       version: '1.0.0',
-      githubUrl: 'https://github.com/EKKOLearnAI/hermes-studio/releases/download/v1.0.0/Ekko Studio.apk',
+      githubUrl: 'https://github.com/EKKOLearnAI/ekko-studio/releases/download/v1.0.0/Ekko Studio.apk',
       cloudflareUrl: 'https://download.ekkolearnai.com/v1.0.0/Ekko Studio.apk',
       online: true,
     },
@@ -70,6 +71,8 @@ const appAccessMode = ref<AppAccessMode | null>(null)
 const cloudRelayRouteLoading = ref(false)
 const authorizationLoading = ref<Record<'lan' | 'cloud', boolean>>({ lan: false, cloud: false })
 const deletingConnectionId = ref<number | null>(null)
+const updatingPushIds = ref(new Set<number>())
+let pushPreferenceRevision = 0
 const lanAuthorization = ref<LanAppAuthorizationResponse | null>(null)
 const cloudAuthorization = ref<CloudAppAuthorizationResponse | null>(null)
 const qrCodeDataUrls = ref<Record<'lan' | 'cloud', string>>({ lan: '', cloud: '' })
@@ -265,6 +268,22 @@ const columns = computed<DataTableColumns<AppConnection>>(() => [
     },
   },
   {
+    title: t('connections.app.pushNotifications'),
+    key: 'push_enabled',
+    width: 120,
+    fixed: 'right',
+    render(row) {
+      return h(NSwitch, {
+        value: row.push_enabled !== false,
+        loading: updatingPushIds.value.has(row.id),
+        disabled: row.can_manage_push === false || updatingPushIds.value.has(row.id),
+        'aria-disabled': row.can_manage_push === false || updatingPushIds.value.has(row.id),
+        'aria-label': t('connections.app.pushForDevice', { name: row.device_name || row.device_code }),
+        onUpdateValue: (value: boolean) => updatePushPreference(row, value),
+      })
+    },
+  },
+  {
     title: t('connections.app.actions'),
     key: 'actions',
     width: 100,
@@ -295,9 +314,15 @@ async function loadConnections(options: { silent?: boolean; detectScanConnection
   if (connectionsRequestInFlight) return
   connectionsRequestInFlight = true
   if (!options.silent) loading.value = true
+  const preferenceRevision = pushPreferenceRevision
   try {
     const response = await fetchAppConnections()
-    connections.value = response.connections
+    connections.value = response.connections.map(row => {
+      // A polling response begun before a toggle must not undo its saved value.
+      const current = connections.value.find(item => item.id === row.id)
+      return current && (preferenceRevision !== pushPreferenceRevision || updatingPushIds.value.has(row.id))
+        ? { ...row, push_enabled: current.push_enabled } : row
+    })
     const nextFailure = response.access_failure || null
     const previousFailureAt = Number(accessFailure.value?.occurredAt || 0)
     const visibleFailure = nextFailure && nextFailure.occurredAt > dismissedAccessFailureAt.value
@@ -481,6 +506,21 @@ function generateDownloadQrCodes(): void {
   for (const channel of channels) void generateDownloadQrCode(channel, downloadUrlFor(channel))
 }
 
+async function updatePushPreference(connection: AppConnection, enabled: boolean) {
+  if (updatingPushIds.value.has(connection.id)) return
+  updatingPushIds.value.add(connection.id)
+  pushPreferenceRevision++
+  try {
+    const response = await updateAppConnectionPush(connection.id, enabled)
+    connections.value = connections.value.map(row => row.id === connection.id ? { ...row, push_enabled: response.push_enabled } : row)
+  } catch (error: any) {
+    message.error(error?.message || t('connections.app.pushUpdateFailed'))
+  } finally {
+    pushPreferenceRevision++
+    updatingPushIds.value.delete(connection.id)
+  }
+}
+
 async function deleteConnection(connection: AppConnection) {
   if (deletingConnectionId.value != null) return
   deletingConnectionId.value = connection.id
@@ -577,15 +617,6 @@ onUnmounted(() => {
           >
             {{ t('connections.app.viewDownload') }}
           </button>
-          <button
-            type="button"
-            class="view-switch-button"
-            :class="{ 'view-switch-button--active': panelView === 'messages' }"
-            :aria-selected="panelView === 'messages'"
-            @click="updatePanelView('messages')"
-          >
-            {{ t('connections.app.viewMessages') }}
-          </button>
         </div>
         <NButton size="small" type="primary" @click="openScanModal">
           {{ t('connections.app.scanToAdd') }}
@@ -656,7 +687,7 @@ onUnmounted(() => {
           bordered
           :single-line="false"
           :row-key="(row: AppConnection) => row.id"
-          :scroll-x="1370"
+          :scroll-x="1490"
           flex-height
         >
           <template #empty>

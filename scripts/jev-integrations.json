@@ -1,0 +1,262 @@
+{
+  "settings": {
+    "server": "packages/server/src/modules/studio/services/jev/settings.ts",
+    "client": "packages/client/src/api/studio/jev.ts",
+    "form": "packages/client/src/components/hermes/models/JevSettingsPanel.vue",
+    "host": "packages/client/src/views/hermes/ModelsView.vue",
+    "component": "JevSettingsPanel",
+    "page": "/#/hermes/models?tab=jev",
+    "fields": {
+      "baseUrl": {
+        "control": "NInput",
+        "binding": "settings.baseUrl",
+        "label": "jev.baseUrl"
+      },
+      "model": {
+        "control": "NInput",
+        "binding": "settings.model",
+        "label": "profiles.model"
+      },
+      "apiKey": {
+        "control": "NInput",
+        "binding": "apiKey",
+        "label": "jev.apiKey"
+      },
+      "timeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.timeoutMs",
+        "label": "jev.timeout"
+      },
+      "ekkoMemoryEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoMemoryEnabled",
+        "label": "jev.ekkoMemoryEnabled"
+      },
+      "ekkoMemoryKindRoutingEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoMemoryKindRoutingEnabled",
+        "label": "jev.memoryKindRouting"
+      },
+      "ekkoMemoryRerankEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoMemoryRerankEnabled",
+        "label": "jev.memoryRerank"
+      },
+      "ekkoMemoryWriteReviewEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoMemoryWriteReviewEnabled",
+        "label": "jev.memoryWriteReview"
+      },
+      "ekkoMemoryCandidateLimit": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoMemoryCandidateLimit",
+        "label": "jev.memoryCandidateLimit"
+      },
+      "ekkoMemoryMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoMemoryMinConfidence",
+        "label": "jev.memoryMinConfidence"
+      },
+      "ekkoMemoryTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoMemoryTimeoutMs",
+        "label": "jev.memoryTimeout"
+      },
+      "ekkoMemoryRecallMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoMemoryRecallMinConfidence",
+        "label": "jev.memoryRecallMinConfidence"
+      },
+      "ekkoMemoryRelevanceFilterEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoMemoryRelevanceFilterEnabled",
+        "label": "jev.memoryRelevanceFilter"
+      },
+      "ekkoMemoryFilterMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoMemoryFilterMinConfidence",
+        "label": "jev.memoryFilterMinConfidence"
+      },
+      "ekkoSkillsEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoSkillsEnabled",
+        "label": "jev.ekkoSkillsEnabled"
+      },
+      "ekkoSkillsCandidateLimit": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoSkillsCandidateLimit",
+        "label": "jev.skillsCandidateLimit"
+      },
+      "ekkoSkillsMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoSkillsMinConfidence",
+        "label": "jev.skillsMinConfidence"
+      },
+      "ekkoSkillsTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoSkillsTimeoutMs",
+        "label": "jev.skillsTimeout"
+      }
+    }
+  },
+  "integrations": [
+    {
+      "id": "ekko-memory",
+      "purpose": "Control optional Ekko memory JEV with a run snapshot, total deadline and conservative fallback.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/modules/ekko/services/manager.ts",
+        "packages/ekko-agent/src/memory/jev-policy.ts",
+        "packages/ekko-agent/src/memory/jev-candidates.ts"
+      ],
+      "enabledKey": "ekkoMemoryEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "ekkoMemoryCandidateLimit",
+        "ekkoMemoryRecallMinConfidence",
+        "ekkoMemoryTimeoutMs"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/server/jev.test.ts",
+        "tests/server/ekko-agent-manager.test.ts",
+        "tests/ekko-agent/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts",
+        "tests/ekko-agent/memory-jev.test.ts"
+      ]
+    },
+    {
+      "id": "ekko-memory-kind-routing",
+      "purpose": "Select relevant controlled memory kinds for automatic recall.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/memory/jev-routing.ts"
+      ],
+      "enabledKey": "ekkoMemoryKindRoutingEnabled",
+      "studioDefaultEnabled": true,
+      "options": [],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryKindRoutingEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/ekko-agent/memory-jev.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "ekko-memory-rerank",
+      "purpose": "Rerank recall candidates without changing cards or exact results.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/memory/jev-rerank.ts"
+      ],
+      "enabledKey": "ekkoMemoryRerankEnabled",
+      "studioDefaultEnabled": true,
+      "options": [],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryRerankEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/ekko-agent/memory-jev.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "ekko-memory-write-review",
+      "purpose": "Review evidenced memory writes before committing an atomic batch.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/memory/jev-write-review.ts"
+      ],
+      "enabledKey": "ekkoMemoryWriteReviewEnabled",
+      "studioDefaultEnabled": true,
+      "options": [
+        "ekkoMemoryMinConfidence"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryWriteReviewEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/ekko-agent/memory-jev.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "ekko-memory-relevance-filter",
+      "purpose": "Remove reliably unrelated ordinary recall candidates while preserving standing instructions and the complete baseline on failure.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/memory/jev-filter.ts"
+      ],
+      "enabledKey": "ekkoMemoryRelevanceFilterEnabled",
+      "studioDefaultEnabled": true,
+      "options": [
+        "ekkoMemoryFilterMinConfidence"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryRelevanceFilterEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/ekko-agent/memory-jev.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "ekko-skills",
+      "purpose": "One opt-in enhancement for semantic skill matching and background learning preflight, with run snapshots and conservative fallback.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/skills/jev.ts",
+        "packages/ekko-agent/src/skills/review.ts",
+        "packages/ekko-agent/src/tools/skills.ts"
+      ],
+      "enabledKey": "ekkoSkillsEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "ekkoSkillsCandidateLimit",
+        "ekkoSkillsMinConfidence",
+        "ekkoSkillsTimeoutMs"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "skillsEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/ekko-agent/skills-jev.test.ts",
+        "tests/ekko-agent/jev.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/server/ekko-agent-manager.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    }
+  ]
+}

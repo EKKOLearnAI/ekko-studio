@@ -1,3 +1,7 @@
+import { businessEvents } from '../services/webhooks/business-events'
+import { ensureBusinessConsumers } from '../services/webhooks/business-consumers'
+import { authorizeSessionShare, authorizeShareFile } from '../services/session-shares/access'
+import { sessionShareService } from '../services/session-shares/service'
 import { getSessionTaskPlans } from '../services/task-plans'
 import {
   deleteHermesSessionForProfile,
@@ -24,6 +28,7 @@ import {
   renameSession as localRenameSession,
   setSessionArchived as localSetSessionArchived,
   setSessionPushEnabled as localSetSessionPushEnabled,
+  setSessionPinned as localSetSessionPinned,
   createSession as localCreateSession,
   addMessages as localAddMessages,
   updateSession as localUpdateSession,
@@ -200,6 +205,7 @@ function mergeHermesHistorySessions(
   for (const [id, session] of historySessionsById) {
     const localSession = localSessionsById.get(id)
     if (localSession?.is_archived != null) session.is_archived = localSession.is_archived
+    session.is_pinned = Number(localSession?.is_pinned || 0)
     session.push_enabled = Number(localSession?.push_enabled || 0) !== 0 ? 1 : 0
   }
 
@@ -481,10 +487,10 @@ export async function list(ctx: any) {
   const requestedOffset = Number(ctx.query.offset)
   const offset = Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0
   const category = ctx.query.category
-  const categoryId = category === 'none' ? null : category === undefined ? undefined : Number(category)
+  const categoryId = category === 'none' ? null : category === undefined || category === 'pinned' ? undefined : Number(category)
   if (categoryId !== undefined && categoryId !== null && (!Number.isSafeInteger(categoryId) || categoryId <= 0)) {
     ctx.status = 400
-    ctx.body = { error: 'category must be a positive integer or none' }
+    ctx.body = { error: 'category must be a positive integer, none, or pinned' }
     return
   }
   const readIds = (raw: unknown): string[] => (Array.isArray(raw) ? raw : raw ? [raw] : [])
@@ -498,6 +504,7 @@ export async function list(ctx: any) {
     ? [...knownProfiles].filter(name => !allowedProfiles || allowedProfiles.has(name))
     : undefined
   const listOptions = {
+    ...(category === 'pinned' || ctx.query.pinned === 'true' ? { pinned: true } : ctx.query.pinned === 'false' ? { pinned: false } : {}),
     ...(categoryId !== undefined ? { categoryId } : {}),
     ...(includedIds !== undefined ? { includeSessionIds: includedIds } : {}),
     sources: source ? undefined : requestedSessionSources(),
@@ -688,7 +695,7 @@ export async function listHermesSessionGroups(ctx: any) {
     })
   }
 
-  const localIncluded = localSessions.filter(session => includedIds.includes(session.id))
+  const localIncluded = localSessions.filter(session => session.is_pinned || includedIds.includes(session.id))
   const included = mergeHermesHistorySessions(ctx, profile, hermesResult.included, localIncluded)
   ctx.body = { groups, included }
 }
@@ -730,6 +737,9 @@ export async function get(ctx: any) {
     return
   }
   if (denySessionAccess(ctx, session)) return
+  if (ctx.state?.sessionShare) {
+    delete session.parent_title; delete session.parent_last_message; delete session.parent_last_message_role
+  }
   ctx.body = { session }
 }
 
@@ -763,6 +773,13 @@ export async function getWorkspaceRunChangeFile(ctx: any) {
     ctx.status = 404
     ctx.body = { error: 'Workspace change file not found' }
     return
+  }
+  if (ctx.state?.sessionShare) {
+    const access = ctx.state.sessionShare
+    const change = listWorkspaceRunChangesForSession(ctx.params.id).find(item => item.change_id === ctx.params.changeId)
+    if (!change || pathResolve(change.workspace) !== access.share.workspace_root) { ctx.status = 403; ctx.body = { error: 'share_workspace_changed' }; return }
+    await sessionShareService.authorizePath(access.token, access.actor, 'workspaceRead', file.path)
+    if (file.old_path) await sessionShareService.authorizePath(access.token, access.actor, 'workspaceRead', file.old_path)
   }
   ctx.body = { file }
 }
@@ -801,6 +818,11 @@ async function resolveSessionWorkspacePath(
   if (!session) throw Object.assign(new Error('Session not found'), { code: 'not_found', status: 404 })
   if (denySessionAccess(ctx, session)) throw Object.assign(new Error('Forbidden'), { code: 'forbidden', status: 403, handled: true })
   const workspace = String(session.workspace || '').trim()
+  const shareAccess = ctx.state?.sessionShare
+  if (shareAccess && typeof relativePathValue === 'string' && isAbsoluteWorkspacePath(relativePathValue)) {
+    const fullPath = await authorizeShareFile(shareAccess, ctx.state.sessionShareFileAction || 'workspaceRead', relativePathValue)
+    return { session, workspace, relativePath: relativePathValue, fullPath }
+  }
   if (!workspace) throw Object.assign(new Error('Session workspace not found'), { code: 'workspace_not_found', status: 404 })
   const path = normalizeSessionWorkspaceRelativePath(workspace, session.profile, relativePathValue, options)
   const resolved = await resolveWorkspacePath(workspace, path, {
@@ -809,6 +831,7 @@ async function resolveSessionWorkspacePath(
     allowEmpty: options.allowEmpty,
     missingWorkspaceMessage: 'Session workspace not found',
   })
+  if (shareAccess) await authorizeShareFile(shareAccess, ctx.state.sessionShareFileAction || 'workspaceRead', resolved.fullPath)
   return { session, ...resolved }
 }
 
@@ -837,7 +860,14 @@ export async function listWorkspaceFiles(ctx: any) {
       return
     }
     const entries = await readdir(fullPath, { withFileTypes: true })
-    const mapped = await Promise.all(entries.map(async entry => {
+    const visibleEntries = ctx.state?.sessionShare ? (await Promise.all(entries.map(async entry => {
+      const access = ctx.state.sessionShare
+      try {
+        await sessionShareService.authorizePath(access.token, access.actor, 'workspaceRead', pathResolve(fullPath, entry.name))
+        return entry
+      } catch { return null }
+    }))).filter((entry): entry is typeof entries[number] => entry !== null) : entries
+    const mapped = await Promise.all(visibleEntries.map(async entry => {
       const entryFullPath = pathResolve(fullPath, entry.name)
       const stat = await fsStat(entryFullPath)
       return {
@@ -1438,6 +1468,28 @@ export async function unarchive(ctx: any) {
   ctx.body = { ok: true }
 }
 
+export async function setPinned(ctx: any) {
+  const existing = localGetSession(ctx.params.id)
+  if (!existing) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+  if (denySessionAccess(ctx, existing)) return
+  const { is_pinned } = ctx.request.body || {}
+  if (typeof is_pinned !== 'boolean') {
+    ctx.status = 400
+    ctx.body = { error: 'is_pinned must be a boolean' }
+    return
+  }
+  if (!localSetSessionPinned(ctx.params.id, is_pinned)) {
+    ctx.status = 500
+    ctx.body = { error: 'Failed to update session pin' }
+    return
+  }
+  ctx.body = { ok: true, is_pinned }
+}
+
 export async function setPushEnabled(ctx: any) {
   const existing = localGetSession(ctx.params.id)
   if (!existing) {
@@ -1459,6 +1511,12 @@ export async function setPushEnabled(ctx: any) {
     ctx.body = { error: 'Failed to update session push setting' }
     return
   }
+  if (!rawEnabled) {
+    ensureBusinessConsumers()
+    businessEvents.publish({ schema_version: 1, id: `push-disabled:${ctx.params.id}:${Date.now()}`,
+      type: 'chat.push.disabled', source: 'chat', profile: existing.profile || 'default',
+      occurred_at: new Date().toISOString(), subject: { session_id: ctx.params.id }, payload: {} })
+  }
   getChatRunServer()?.emitSessionSettingsUpdated(ctx.params.id, {
     push_enabled: rawEnabled,
   })
@@ -1476,6 +1534,7 @@ export async function setWorkspace(ctx: any) {
   const id = ctx.params.id
   const existing = getSession(id)
   if (denySessionAccess(ctx, existing)) return
+  if (ctx.state?.sessionShare) sessionShareService.authorizeWorkspaceSwitch(ctx.state.sessionShare.token, ctx.state.sessionShare.actor, workspace)
   if (!existing) {
     createSession({ id, profile: requestedProfile(ctx) || 'default', title: '' })
   }
@@ -1554,7 +1613,9 @@ export async function setModel(ctx: any) {
   if (!existing) {
     createSession({ id, profile, title: '', model: cleanModel, provider: cleanProvider, api_mode: cleanApiMode || '', reasoning_effort: '', workspace })
   }
-  const updates: Record<string, string> = { model: cleanModel, provider: cleanProvider, reasoning_effort: '' }
+  const updates: Record<string, string> = { model: cleanModel, provider: cleanProvider }
+  // A model-only share grant must never overwrite a concurrent reasoning update.
+  if (!ctx.state?.sessionShare) updates.reasoning_effort = ''
   if (cleanApiMode) updates.api_mode = cleanApiMode
   else if (codingAgentSession && existing && existing.provider !== cleanProvider) updates.api_mode = ''
   if (!codingAgentSession && existing && !existing.workspace && workspace) updates.workspace = workspace
@@ -1565,12 +1626,13 @@ export async function setModel(ctx: any) {
   ) {
     updates.agent_native_session_id = ''
   }
+  if (ctx.state?.sessionShare) authorizeSessionShare(ctx.state.sessionShare, 'switchModel', id)
   updateSession(id, updates as any)
   getChatRunServer()?.emitSessionSettingsUpdated(id, {
     model: cleanModel,
     provider: cleanProvider,
     api_mode: updates.api_mode ?? existing?.api_mode ?? '',
-    reasoning_effort: '',
+    reasoning_effort: updates.reasoning_effort ?? getSession(id)?.reasoning_effort ?? '',
   })
   if (!codingAgentSession) {
     await notifyBridgeSessionModelChanged(id, cleanModel, cleanProvider, profile)
@@ -2016,6 +2078,14 @@ export async function exportSession(ctx: any) {
   }
   if (denySessionAccess(ctx, session)) return
 
+  if (ctx.state?.sessionShare) {
+    delete session.parent_title; delete session.parent_last_message; delete session.parent_last_message_role
+    if (mode === 'compressed') {
+      const access = ctx.state.sessionShare
+      sessionShareService.authorize(access.token, access.actor, 'input', session.id)
+    }
+  }
+
   const ext = (ctx.query.ext as string) || (mode === 'compressed' ? 'txt' : 'json')
   const title = session.title || 'session'
   const safeName = title.replace(/[^a-zA-Z0-9一-鿿_-]/g, '_').slice(0, 50)
@@ -2101,12 +2171,16 @@ export async function getConversationMessagesPaginated(ctx: any) {
       profile: session.profile,
       source: session.source,
       model: session.model,
+      agent: (session as any).agent,
+      agent_mode: (session as any).agent_mode,
+      coding_agent_id: (session as any).coding_agent_id,
+      workspace: (session as any).workspace || null,
       title: session.title,
       parent_session_id: (session as any).parent_session_id,
       fork_point_message_id: (session as any).fork_point_message_id,
-      parent_title: (session as any).parent_title,
-      parent_last_message: (session as any).parent_last_message,
-      parent_last_message_role: (session as any).parent_last_message_role,
+      parent_title: ctx.state?.sessionShare ? undefined : (session as any).parent_title,
+      parent_last_message: ctx.state?.sessionShare ? undefined : (session as any).parent_last_message,
+      parent_last_message_role: ctx.state?.sessionShare ? undefined : (session as any).parent_last_message_role,
       started_at: session.started_at,
       ended_at: session.ended_at,
       last_active: session.last_active,

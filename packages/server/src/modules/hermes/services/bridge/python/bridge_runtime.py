@@ -499,6 +499,9 @@ def _ensure_agent_imports() -> None:
     os.environ.setdefault("HERMES_HOME", str(_hermes_home()))
     os.environ.setdefault("HERMES_AGENT_BRIDGE_BASE_HOME", str(_hermes_home()))
     _apply_openrouter_attribution_override()
+    from bridge_mcp import install_studio_mcp_env
+
+    install_studio_mcp_env()
 
 
 def _apply_openrouter_attribution_override() -> None:

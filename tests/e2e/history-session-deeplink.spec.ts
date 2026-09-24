@@ -354,3 +354,14 @@ test.describe('history source pagination', () => {
     await expect(loadMore).toHaveCount(0)
   })
 })
+
+
+test('groups database-pinned history separately from its source', async ({ page }) => {
+  await authenticate(page)
+  await mockHistoryApi(page, historySessions.map(session => ({ ...session, is_pinned: session.id === 'hist-alpha' ? 1 : 0 })))
+  await page.goto('/#/hermes/history')
+  const pinned = page.locator('.session-group-header').filter({ hasText: 'Pinned' })
+  await expect(pinned).toBeVisible()
+  await expect(page.locator('.session-item').filter({ hasText: 'Alpha History Session' })).toHaveCount(1)
+  await expect(page.locator('.session-item').filter({ hasText: 'Alpha History Session' }).locator('.session-item-pin')).toBeVisible()
+})

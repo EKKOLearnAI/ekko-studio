@@ -36,6 +36,8 @@ const ALLOWED_REQUEST_HEADERS = new Set([
   'range',
   'x-hermes-profile',
   'x-request-id',
+  'x-app-access-token',
+  'x-session-share-token',
   'x-group-agent-request-secret',
   'x-expected-sha256',
 ])
@@ -63,6 +65,7 @@ const ALLOWED_CHAT_RUN_CLIENT_EVENTS = new Set([
 const ALLOWED_GROUP_CHAT_CLIENT_EVENTS = new Set([
   'join',
   'load_pending_approvals',
+  'load_room_agent_activities',
   'load_messages',
   'update_member_profile',
   'message',

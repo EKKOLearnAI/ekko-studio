@@ -25,6 +25,7 @@ export interface SessionSummary {
   started_at: number
   ended_at: number | null
   last_active?: number
+  is_pinned?: number | boolean
   is_archived?: number | boolean
   push_enabled?: number | boolean
   message_count: number
@@ -537,6 +538,13 @@ export async function unarchiveSession(id: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+export function setSessionPinned(id: string, is_pinned: boolean): Promise<{ ok: boolean; is_pinned: boolean }> {
+  return request(`/api/studio/sessions/${encodeURIComponent(id)}/pin`, {
+    method: 'POST',
+    body: JSON.stringify({ is_pinned }),
+  })
 }
 
 export async function setSessionPushEnabled(id: string, pushEnabled: boolean): Promise<boolean> {

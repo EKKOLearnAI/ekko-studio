@@ -1,3 +1,4 @@
+import { hermesStudioMcpCapabilities } from './studio-mcp'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 /**
  * CLI Bridge run handler — handles runs that use the agent bridge
@@ -119,6 +120,38 @@ function fallbackTitleFromText(text: string, limit: number, ellipsis: boolean): 
   return ellipsis ? `${normalized.slice(0, limit)}...` : normalized.slice(0, limit)
 }
 
+function firstUserTextVariants(content: unknown): string[] {
+  const raw = String(content || '')
+  if (!raw.trimStart().startsWith('[')) return raw ? [raw] : []
+
+  try {
+    const blocks = JSON.parse(raw) as unknown
+    if (!Array.isArray(blocks)) return raw ? [raw] : []
+    const text = blocks
+      .filter((block): block is { type?: unknown; text?: unknown } => Boolean(block) && typeof block === 'object')
+      .filter(block => block.type === 'text')
+      .map(block => String(block.text ?? ''))
+      .join('\n')
+    // A plain-text JSON prompt has the same stored shape as content blocks.
+    // Keep both forms so its original fallback title remains replaceable.
+    return text.trim() ? [raw, text] : raw ? [raw] : []
+  } catch (error) {
+    logger.debug(error, '[chat-run-socket] failed to parse first user content title candidates')
+    return raw ? [raw] : []
+  }
+}
+
+function addTitleVariants(variants: Set<string>, text: string): void {
+  const normalized = normalizeTitleText(text)
+  if (!normalized) return
+  variants.add(normalized)
+  variants.add(fallbackTitleFromText(normalized, 40, true))
+  variants.add(fallbackTitleFromText(normalized, 63, false))
+  variants.add(fallbackTitleFromText(normalized, 100, false))
+  // Session creation truncates before title comparison collapses whitespace.
+  variants.add(normalizeTitleText(text.replace(/[\r\n]/g, ' ').substring(0, 100)))
+}
+
 function isReplaceableLocalTitle(sessionId: string): boolean {
   const session = getSession(sessionId)
   if (!session) return false
@@ -133,12 +166,8 @@ function isReplaceableLocalTitle(sessionId: string): boolean {
     variants.add(fallbackTitleFromText(preview, 100, false))
   }
   const firstUser = getFirstSessionMessageByRole(sessionId, 'user')
-  const firstUserText = normalizeTitleText(firstUser?.content)
-  if (firstUserText) {
-    variants.add(firstUserText)
-    variants.add(fallbackTitleFromText(firstUserText, 40, true))
-    variants.add(fallbackTitleFromText(firstUserText, 63, false))
-    variants.add(fallbackTitleFromText(firstUserText, 100, false))
+  for (const firstUserText of firstUserTextVariants(firstUser?.content)) {
+    addTitleVariants(variants, firstUserText)
   }
   return variants.has(current)
 }
@@ -147,7 +176,7 @@ function isBridgeSessionSource(source?: string | null): boolean {
   return source === 'cli' || source === 'global_agent'
 }
 
-function syncBridgeGeneratedTitle(sessionId: string, title: unknown, emit: (event: string, payload: any) => void): boolean {
+export function syncBridgeGeneratedTitle(sessionId: string, title: unknown, emit: (event: string, payload: any) => void): boolean {
   const nextTitle = normalizeTitleText(title)
   if (!nextTitle) return false
   const session = getSession(sessionId)
@@ -465,7 +494,7 @@ export async function handleBridgeRun(
   // message of every request. Compose only when a caller hands us nothing.
   let fullInstructions = callbackContext?.instructions
     || instructions
-    || getSystemPrompt(undefined, { source: data.session_source || data.source })
+    || getSystemPrompt(undefined, { source: data.session_source || data.source, mcpCapabilities: await hermesStudioMcpCapabilities(profile) })
   const sessionRow = getSession(session_id)
   if (sessionRow && !sessionRow.user_id && socketUser?.id != null) {
     updateSession(session_id, { user_id: String(socketUser.id) })

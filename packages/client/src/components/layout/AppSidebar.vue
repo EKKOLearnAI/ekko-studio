@@ -380,7 +380,7 @@ function handleUpdateClick() {
         <div class="version-links">
           <a
             class="sidebar-footer-link"
-            href="https://github.com/EKKOLearnAI/hermes-studio"
+            href="https://github.com/EKKOLearnAI/ekko-studio"
             target="_blank"
             rel="noopener noreferrer"
             title="GitHub"

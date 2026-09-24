@@ -43,6 +43,7 @@ export interface HermesSessionRow {
   preview: string
   last_active: number
   is_archived: number
+  is_pinned: number
   push_enabled: number
   workspace: string | null
   category_id: number | null
@@ -80,6 +81,7 @@ export interface HermesSessionSearchRow extends HermesSessionRow {
 export interface SessionListOptions {
   offset?: number
   categoryId?: number | null
+  pinned?: boolean
   includeSessionIds?: string[]
   sources?: string[]
   profiles?: string[]
@@ -149,6 +151,7 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
     preview: String(row.preview || ''),
     last_active: Number(row.last_active || 0),
     is_archived: Number(row.is_archived || 0),
+    is_pinned: Number(row.is_pinned || 0),
     push_enabled: Number(row.push_enabled || 0) !== 0 ? 1 : 0,
     workspace: row.workspace != null ? String(row.workspace) : null,
     category_id: row.category_id != null ? Number(row.category_id) : null,
@@ -219,7 +222,7 @@ export function createSession(data: {
       message_count: 0, tool_call_count: 0,
       input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0,
       billing_provider: null, estimated_cost_usd: 0, actual_cost_usd: null,
-      cost_status: '', preview: '', last_active: now, is_archived: 0, push_enabled: data.push_enabled ? 1 : 0, workspace: data.workspace || null,
+      cost_status: '', preview: '', last_active: now, is_archived: 0, is_pinned: 0, push_enabled: data.push_enabled === false || data.push_enabled === 0 ? 0 : 1, workspace: data.workspace || null,
       category_id: data.category_id ?? null,
       history_revision: 0,
     }
@@ -248,7 +251,7 @@ export function createSession(data: {
     now,
     data.workspace || null,
     data.category_id ?? null,
-    data.push_enabled ? 1 : 0,
+    data.push_enabled === false || data.push_enabled === 0 ? 0 : 1,
   )
   return getSession(data.id)!
 }
@@ -515,6 +518,13 @@ export function setSessionArchived(id: string, archived: boolean): boolean {
   return result.changes > 0
 }
 
+export function setSessionPinned(id: string, pinned: boolean): boolean {
+  if (!isSqliteAvailable()) return false
+  const result = getDb()!.prepare(`UPDATE ${SESSIONS_TABLE} SET is_pinned = ? WHERE id = ?`)
+    .run(pinned ? 1 : 0, id)
+  return result.changes > 0
+}
+
 export function setSessionPushEnabled(id: string, enabled: boolean): boolean {
   if (!isSqliteAvailable()) return false
   const db = getDb()!
@@ -572,7 +582,7 @@ export function listSessions(
     FROM ${SESSIONS_TABLE} s
     LEFT JOIN ${SESSIONS_TABLE} p ON p.id = s.parent_session_id
     WHERE ${filters.sql}
-    ORDER BY s.last_active DESC, s.id DESC
+    ORDER BY s.is_pinned DESC, s.last_active DESC, s.id DESC
     LIMIT ? OFFSET ?
   `
 
@@ -648,6 +658,7 @@ function sessionFilterSql(
   if (options.includeArchived === false) {
     clauses.push('COALESCE(s.is_archived, 0) = 0')
   }
+  if (options.pinned !== undefined) clauses.push(options.pinned ? 's.is_pinned = 1' : 's.is_pinned = 0')
   if (options.categoryId === null) {
     clauses.push(`(s.category_id IS NULL OR NOT EXISTS (SELECT 1 FROM ${SESSION_CATEGORIES_TABLE} c WHERE c.id = s.category_id))`)
   } else if (options.categoryId !== undefined) {

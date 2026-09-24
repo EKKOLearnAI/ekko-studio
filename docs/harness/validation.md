@@ -32,6 +32,16 @@ npm run build
 | Desktop packaging | `npm run harness:check`, `npm run build`, and a platform-specific desktop build when practical |
 | GitHub workflow | `npm run harness:check` and `actionlint` when available |
 | Package manifests | `npm ci --ignore-scripts` and lockfile workflow expectations |
+| JEV consumers/settings | `npm run harness:check`, `tests/server/jev-harness.test.ts`, focused feature tests and JEV settings e2e |
+
+## JEV integration controls
+
+Follow [the JEV integration contract](jev-integrations.md) for every new consumer
+or setting. Each feature needs a registered integration point, its own switch with
+an explicitly registered Studio default, and frontend controls for user-adjustable
+options. `harness:check` detects
+unregistered consumers and missing configuration wiring; feature tests must prove
+that disabling the switch prevents upstream requests and preserves the old flow.
 
 ## Managed MCP launch environment
 

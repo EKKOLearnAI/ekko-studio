@@ -186,6 +186,15 @@ for (const [namespace, tools] of HERMES_STUDIO_SPLIT_MCP_TOOLS) {
   for (const tool of tools) HERMES_STUDIO_MCP_TOOL_NAMESPACES.set(tool.name, namespace)
 }
 
+// These tools are exposed by the dedicated, context-scoped interaction server.
+// Restore only the return-call namespace; do not synthesize tools or expand
+// permissions when the MCP server has intentionally omitted them.
+for (const prefix of ['ekko', 'hermes']) {
+  for (const suffix of ['update_plan', 'clarify']) {
+    HERMES_STUDIO_MCP_TOOL_NAMESPACES.set(`${prefix}_studio_${suffix}`, `mcp__${prefix}_studio_interaction`)
+  }
+}
+
 function inputSchema(properties: Record<string, unknown> = {}, required: string[] = []) {
   return {
     type: 'object',

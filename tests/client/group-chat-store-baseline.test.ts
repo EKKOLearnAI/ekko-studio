@@ -1109,6 +1109,47 @@ describe('group chat store baseline lifecycle', () => {
     expect(store.pendingApprovals.size).toBe(0)
   })
 
+  it('keeps the cleared room Agent avatars after switching away and back', async () => {
+    const store = await loadStore()
+    const roster = [1, 2, 3].map(index => ({ ...agent, id: `agent-${index}`, name: `Worker ${index}`, avatar: JSON.stringify({ type: 'generated', seed: `worker-${index}` }) }))
+    groupChatApiMock.getRoomDetail.mockImplementation(async (id: string) => ({
+      room: { ...room, id }, messages: [], agents: id === room.id ? roster : [], members: [], total: 0, hasMore: false,
+    }))
+    groupChatApiMock.socket.emit.mockImplementation((event: string, data?: any, ack?: Function) => {
+      if (event === 'join') ack?.({ roomId: data.roomId, agents: data.roomId === room.id ? roster : [] })
+      return groupChatApiMock.socket
+    })
+    await store.connect()
+    await store.joinRoom(room.id)
+    const avatars = store.roomAgentsForRoom(room.id)
+    expect(avatars).toHaveLength(3)
+    await store.clearCurrentRoomContext()
+    expect(store.roomAgentsForRoom(room.id)).toEqual(avatars)
+    await store.joinRoom('room-2')
+    expect(store.roomAgentsForRoom(room.id)).toEqual(avatars)
+    await store.joinRoom(room.id)
+    expect(store.roomAgentsForRoom(room.id)).toEqual(avatars)
+    await store.joinRoom('room-2')
+    expect(store.roomAgentsForRoom(room.id)).toEqual(avatars)
+  })
+
+  it('applies a delayed clear response only to the room that was cleared', async () => {
+    const store = await loadStore()
+    store.rooms = [{ ...room, agents: [] }, { ...room, id: 'room-2', totalTokens: 20 }]
+    store.currentRoomId = room.id
+    let finish!: (value: any) => void
+    groupChatApiMock.clearRoomContext.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const clearing = store.clearCurrentRoomContext()
+    store.currentRoomId = 'room-2'
+    store.messages = [userMessage({ roomId: 'room-2', content: 'Keep this' })]
+    finish({ success: true, room: { ...room, totalTokens: 0 } })
+    await clearing
+    expect(store.messages[0]?.content).toBe('Keep this')
+    expect(store.rooms.map(item => item.id)).toEqual(['room-1', 'room-2'])
+    expect(store.rooms.find(item => item.id === room.id)?.totalTokens).toBe(0)
+    expect(store.rooms.find(item => item.id === 'room-2')?.totalTokens).toBe(20)
+  })
+
   it('tracks live rolling-summary status by room', async () => {
     const store = await loadStore()
     await store.connect()

@@ -64,6 +64,20 @@ const DEFAULT_EVENT_TYPES: ChatWebhookEventType[] = [
   'chat.clarification.resolved',
   'chat.run.completed',
   'chat.run.failed',
+  'group.message.created',
+  'group.run.failed',
+  'group.approval.requested',
+  'group.approval.resolved',
+  'group.clarification.requested',
+  'group.clarification.resolved',
+  'workflow.run.completed',
+  'workflow.run.failed',
+  'chat.run.updated',
+  'group.run.updated',
+  'workflow.run.updated',
+  'chat.plan.updated',
+  'group.plan.updated',
+  'workflow.plan.updated',
 ]
 
 const EVENT_LABEL_KEYS: Record<ChatWebhookEventType, string> = {
@@ -79,6 +93,20 @@ const EVENT_LABEL_KEYS: Record<ChatWebhookEventType, string> = {
   'chat.clarification.resolved': 'clarificationResolved',
   'chat.run.completed': 'completed',
   'chat.run.failed': 'failed',
+  'group.message.created': 'groupMessageCreated',
+  'group.run.failed': 'failed',
+  'group.approval.requested': 'approvalRequested',
+  'group.approval.resolved': 'approvalResolved',
+  'group.clarification.requested': 'clarificationRequested',
+  'group.clarification.resolved': 'clarificationResolved',
+  'workflow.run.completed': 'completed',
+  'workflow.run.failed': 'failed',
+  'chat.run.updated': 'runUpdated',
+  'group.run.updated': 'runUpdated',
+  'workflow.run.updated': 'runUpdated',
+  'chat.plan.updated': 'planUpdated',
+  'group.plan.updated': 'planUpdated',
+  'workflow.plan.updated': 'planUpdated',
 }
 
 const form = reactive({
@@ -96,12 +124,13 @@ const form = reactive({
 })
 
 const eventOptions = computed(() => DEFAULT_EVENT_TYPES.map(value => ({
-  label: t(`settings.webhooks.events.${EVENT_LABEL_KEYS[value]}`),
+  label: eventLabel(value),
   value,
 })))
 
 function eventLabel(event: ChatWebhookEventType): string {
-  return t(`settings.webhooks.events.${EVENT_LABEL_KEYS[event]}`)
+  const label = t(`settings.webhooks.events.${EVENT_LABEL_KEYS[event]}`)
+  return event.startsWith('chat.') ? label : `${event} · ${label}`
 }
 
 const profileOptions = computed(() => profilesStore.profiles.map(profile => ({

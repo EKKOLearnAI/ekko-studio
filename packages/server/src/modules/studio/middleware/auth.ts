@@ -1,3 +1,4 @@
+import { handleSessionShareHttp } from '../services/session-shares/http-access'
 import type { Context, Next } from 'koa'
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { getToken } from '../services/auth/token-auth'
@@ -320,6 +321,8 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
     return
   }
 
+  if (await handleSessionShareHttp(ctx, next)) return
+
   const secret = await getJwtSecret()
   const token = requestToken(ctx)
   const payload = token ? verifyUserJwt(token, secret) : null
@@ -387,6 +390,7 @@ export function resolveRequestedProfile(ctx: Context): string {
 }
 
 export async function resolveUserProfile(ctx: Context, next: Next): Promise<void> {
+  if (ctx.state.sessionShare) { await next(); return }
   const user = ctx.state.user
   if (!user) {
     await next()

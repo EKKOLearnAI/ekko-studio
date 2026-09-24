@@ -108,6 +108,22 @@ export function getActiveProfileName(): string | null {
   return localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY)
 }
 
+// The Models page keeps its filter in the URL; it never changes the active Profile.
+export function getModelsPageProfile(): string | null {
+  const route = router.currentRoute.value
+  return route.name === 'hermes.models' && typeof route.query?.modelProfile === 'string'
+    ? route.query.modelProfile.trim() || null
+    : null
+}
+
+function modelSettingsRequestProfile(path: string): string | null {
+  const pathname = path.split('?')[0]
+  const isModelSettings = /^\/api\/hermes\/(?:config(?:\/|$)|auth\/|provider-models(?:\/|$)|model-alias$|model-visibility$|custom-model$)/.test(pathname)
+    || /^\/api\/studio\/(?:stt|tts)\/(?:settings|local-model)(?:\/|$)/.test(pathname)
+    || pathname === '/api/voice/providers/probe'
+  return isModelSettings ? getModelsPageProfile() : null
+}
+
 function bodyHasProfileSelector(body: BodyInit | null | undefined): boolean {
   if (typeof body !== 'string') return false
   try {
@@ -191,6 +207,7 @@ function responseErrorCode(text: string): string | undefined {
 }
 
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const selectedProfile = modelSettingsRequestProfile(path)
   await ensureDesktopAuthReady()
   const base = getBaseUrl()
   const url = `${base}${path}`
@@ -207,8 +224,8 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 
   // Inject active profile header for request-scoped endpoints. Explicit profile
   // selectors in the URL/body and profile-name routes are validated directly.
-  const profileName = getActiveProfileName()
-  if (profileName && shouldAttachProfileHeader(path, options)) {
+  const profileName = selectedProfile || getActiveProfileName()
+  if (profileName && !new Headers(options.headers).has('X-Hermes-Profile') && shouldAttachProfileHeader(path, options)) {
     headers['X-Hermes-Profile'] = profileName
   }
 

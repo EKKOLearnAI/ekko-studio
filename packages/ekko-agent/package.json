@@ -6,7 +6,7 @@
   "description": "Standalone Ekko Agent runtime embedded in Ekko Studio.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/EKKOLearnAI/hermes-studio.git",
+    "url": "https://github.com/EKKOLearnAI/ekko-studio.git",
     "directory": "packages/ekko-agent"
   },
   "engines": {
@@ -40,6 +40,7 @@
     "test:watch": "cd ../.. && vitest tests/ekko-agent"
   },
   "dependencies": {
+    "@typesafe-ai/sdk": "0.6.0",
     "@modelcontextprotocol/client": "^2.0.0",
     "agent-browser": "^0.26.0",
     "js-tiktoken": "^1.0.21"

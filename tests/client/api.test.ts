@@ -7,7 +7,7 @@ vi.stubGlobal('fetch', mockFetch)
 // vi.mock is hoisted, so mockReplace must be inside the factory
 vi.mock('@/router', () => ({
   default: {
-    currentRoute: { value: { name: 'hermes.chat' } },
+    currentRoute: { value: { name: 'hermes.chat', query: {} as Record<string, string> } },
     replace: vi.fn(),
   },
 }))
@@ -29,6 +29,30 @@ describe('API Client', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.clearAllMocks()
+    Object.assign(router.currentRoute.value, { name: 'hermes.chat', query: {} })
+  })
+
+  it('uses the Models page Profile for settings requests without changing global Profile or other requests', async () => {
+    localStorage.setItem('hermes_active_profile_name', 'default')
+    Object.assign(router.currentRoute.value, { name: 'hermes.models', query: { modelProfile: 'research' } })
+    mockFetch.mockImplementation(async () => ({ ok: true, json: async () => ({ success: true }) }))
+    for (const path of ['/api/hermes/config/providers', '/api/hermes/config/moa', '/api/hermes/auth/copilot/start', '/api/studio/tts/settings/openai']) {
+      await request(path, { method: 'PUT', body: '{}' })
+      expect(mockFetch.mock.calls.at(-1)?.[1].headers['X-Hermes-Profile']).toBe('research')
+    }
+    await request('/api/studio/chat-run/runs', { method: 'POST', body: '{}' })
+    expect(mockFetch.mock.calls.at(-1)?.[1].headers['X-Hermes-Profile']).toBe('default')
+    Object.assign(router.currentRoute.value, { name: 'hermes.chat', query: {} })
+    await request('/api/hermes/config/moa')
+    expect(mockFetch.mock.calls.at(-1)?.[1].headers['X-Hermes-Profile']).toBe('default')
+    expect(localStorage.getItem('hermes_active_profile_name')).toBe('default')
+  })
+
+  it('preserves an explicit request Profile on the Models page', async () => {
+    Object.assign(router.currentRoute.value, { name: 'hermes.models', query: { modelProfile: 'research' } })
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    await request('/api/hermes/config/moa', { headers: { 'X-Hermes-Profile': 'original' } })
+    expect(mockFetch.mock.calls.at(-1)?.[1].headers['X-Hermes-Profile']).toBe('original')
   })
 
   describe('token management', () => {

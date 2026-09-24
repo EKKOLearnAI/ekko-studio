@@ -41,14 +41,29 @@ describe('group chat approval and context baseline', () => {
     vi.restoreAllMocks()
   })
 
+  it('restores pending clarification notifications only for rooms the requesting socket can manage', async () => {
+    const human = await connectGroupChatClient(port, 'notification-user', 'Notification user')
+    harness.sockets.push(human)
+    const server = groupServer as any
+    vi.spyOn(server, 'pendingClarifySnapshots').mockReturnValue([
+      { roomId: 'allowed-room', clarify_id: 'allowed-question', remaining_timeout_ms: 1000 },
+      { roomId: 'private-room', clarify_id: 'private-question', remaining_timeout_ms: 1000 },
+    ])
+    vi.spyOn(server, 'canSocketManageRoom').mockImplementation((socket: any, roomId: unknown) => socket.id === human.id && roomId === 'allowed-room')
+    const snapshot = await emitAck<any>(human, 'load_pending_approvals', {})
+    expect(snapshot.pendingClarifies).toEqual([
+      { roomId: 'allowed-room', clarify_id: 'allowed-question', remaining_timeout_ms: 1000 },
+    ])
+  })
+
   it('group reply notifications recheck visibility, never replay duplicate messages', async () => {
     const { bindLegacyAppEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/legacy-app-events')
-    const allowed = { id: 'notice-allowed', emit: vi.fn(), data: {}, handshake: {auth:{}}, on: vi.fn() }
-    const denied = { id: 'notice-denied', emit: vi.fn(), data: {}, handshake: {auth:{}}, on: vi.fn() }
+    const allowed = { id: 'notice-allowed', emit: vi.fn(), data: {authUser:{id:1,role:'admin'}}, handshake: {auth:{}}, on: vi.fn() }
+    const denied = { id: 'notice-denied', emit: vi.fn(), data: {authUser:{id:2,role:'super_admin'}}, handshake: {auth:{}}, on: vi.fn() }
     const server = groupServer as any
     const old = server.nsp.sockets
     server.nsp.sockets = new Map([[allowed.id, allowed], [denied.id, denied]])
-    const access = vi.spyOn(server, 'canSocketObserveRoom').mockImplementation((socket: any) => socket.id === allowed.id)
+    vi.spyOn(server, 'canSocketObserveRoom').mockReturnValue(true)
     bindLegacyAppEvents(allowed as any, 'group', event => server.canSocketObserveRoom(allowed, event.subject.room_id))
     bindLegacyAppEvents(denied as any, 'group', event => server.canSocketObserveRoom(denied, event.subject.room_id))
     try {
@@ -57,10 +72,50 @@ describe('group chat approval and context baseline', () => {
       server.notifyGroupReply('room-1', message)
       expect(allowed.emit).toHaveBeenCalledTimes(1)
       expect(denied.emit).not.toHaveBeenCalled()
-      access.mockReturnValue(false)
+      harness.db.prepare('UPDATE gc_rooms SET ownerAuthUserId = 2 WHERE id = ?').run('room-1')
       server.notifyGroupReply('room-1', { ...message, id:'second-message' })
       expect(allowed.emit).toHaveBeenCalledTimes(1)
+      expect(denied.emit).toHaveBeenCalledTimes(1)
     } finally { for (const socket of [allowed, denied]) socket.on.mock.calls.find(call=>call[0] === 'disconnect')?.[1](); server.nsp.sockets = old }
+  })
+
+  it('sends group live events and reconnect snapshots only to the current room owner', async () => {
+    const { authenticateUserToken } = await import('../../packages/server/src/modules/studio/public/auth')
+    const { bindAppEventSubscription } = await import('../../packages/server/src/modules/studio/services/webhooks/app-events')
+    const { stateEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+    const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+    // All candidates may view the room, including a member and a super admin.
+    vi.spyOn(groupServer as any, 'canSocketObserveRoom').mockReturnValue(true)
+    vi.mocked(authenticateUserToken).mockImplementation(async token => ({ id: Number(token), username: token, role: 'super_admin' }))
+    const events = [
+      stateEvent('group.run.updated', 'default', { room_id: 'room-1', run_id: 'r' }, { state: { status: 'replying' } }),
+      stateEvent('group.run.failed', 'default', { room_id: 'room-1', run_id: 'r' }, {}),
+      stateEvent('group.approval.requested', 'default', { room_id: 'room-1', approval_id: 'a' }, { owner_member_id: 'auth:1' }),
+      stateEvent('group.clarification.requested', 'default', { room_id: 'room-1', clarification_id: 'c' }, {}),
+    ]
+    const clients = [1, 1, 2, 3].map((userId, index) => {
+      const handlers = new Map<string, Function>()
+      const s = { id: `owner-test-${index}`, handshake: { auth: { token: String(userId) } }, data: {}, emit: vi.fn(), on: (name: string, fn: Function) => handlers.set(name, fn), handlers }
+      bindAppEventSubscription(s as any, () => events)
+      return s
+    })
+    try {
+      for (const [index, client] of clients.entries()) {
+        const ack = vi.fn()
+        await client.handlers.get('app.events.subscribe')!({ schema_version: 1, include_snapshot: true }, ack)
+        expect(ack.mock.calls[0][0].snapshot).toHaveLength(index < 2 ? events.length : 0)
+      }
+      events.forEach(event => businessEvents.publish(event))
+      await vi.waitFor(() => expect(clients[0].emit).toHaveBeenCalledTimes(events.length))
+      expect(clients[1].emit).toHaveBeenCalledTimes(events.length)
+      expect(clients[2].emit).not.toHaveBeenCalled()
+      expect(clients[3].emit).not.toHaveBeenCalled()
+      harness.db.prepare('UPDATE gc_rooms SET ownerAuthUserId = NULL WHERE id = ?').run('room-1')
+      events.forEach(event => businessEvents.publish({ ...event, id: `ownerless:${event.id}` }))
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(clients[0].emit).toHaveBeenCalledTimes(events.length)
+      expect(clients[2].emit).not.toHaveBeenCalled()
+    } finally { clients.forEach(client => client.handlers.get('disconnect')!()) }
   })
 
   async function joinPair() {
@@ -82,6 +137,30 @@ describe('group chat approval and context baseline', () => {
   function wait(ms = 30) {
     return new Promise(resolve => setTimeout(resolve, ms))
   }
+
+  it('publishes authenticated group interactions through webhooks with the initiating run target', async () => {
+    const { agent, human, agentSessionId } = await joinPair()
+    const { bindRunPushTarget, linkPushRun } = await import('../../packages/server/src/modules/studio/repositories/run-push-store')
+    const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+    const target = bindRunPushTarget({ kind: 'group', profile: 'default', runId: 'human-root' }, 'room-1',
+      { userId: 1, deviceId: 'phone-a', studioDeviceId: 'studio-a' })
+    linkPushRun('group_runtime', 'room-1', 'agent-runtime', target)
+    const events: any[] = []
+    const stop = businessEvents.subscribe('test-group-interactions', event => { if (event.type.startsWith('group.')) events.push(event) })
+    try {
+      for (const [request, resolved, id] of [ ['approval.requested', 'approval.resolved', 'approval_id'], ['clarify.requested', 'clarify.resolved', 'clarify_id'] ]) {
+        const requested = once(human, request)
+        agent.emit(request, { roomId: 'room-1', agentName: 'Agent', agentSessionId, runId: 'agent-runtime', [id]: id, command: 'SECRET', question: 'SECRET' })
+        await requested
+        const finished = once(human, resolved)
+        agent.emit(resolved, { roomId: 'room-1', agentName: 'Agent', agentSessionId, [id]: id, resolved: true })
+        await finished
+      }
+      expect(events.map(event => event.type)).toEqual(['group.approval.requested', 'group.approval.resolved', 'group.clarification.requested', 'group.clarification.resolved'])
+      expect(events.every(event => event.push_target_id === target.id && event.subject.run_id === 'agent-runtime')).toBe(true)
+      expect(JSON.stringify(events)).not.toContain('SECRET')
+    } finally { stop() }
+  })
 
   it('relays context status without overwriting the persisted room token count', async () => {
     const { agent, human, agentSessionId } = await joinPair()
@@ -238,6 +317,7 @@ describe('group chat approval and context baseline', () => {
     }
 
     await expect(emitAck<any>(owner, 'load_pending_approvals', {})).resolves.toEqual({
+      pendingClarifies: [],
       pendingApprovals: [expect.objectContaining({
         roomId: 'room-1',
         agentName: 'Agent',
@@ -979,7 +1059,7 @@ describe('group chat approval and context baseline', () => {
     await expect(clarifyResolved).resolves.toMatchObject({
       clarify_id: 'clarify-expired', resolved: false, reason: 'Remote Agent run timed out',
     })
-    await expect(emitAck<any>(human, 'load_pending_approvals', {})).resolves.toEqual({ pendingApprovals: [] })
+    await expect(emitAck<any>(human, 'load_pending_approvals', {})).resolves.toEqual({ pendingApprovals: [], pendingClarifies: [] })
   })
 
   it('interrupts only the active run generation and denies its pending approvals', async () => {
@@ -1025,6 +1105,7 @@ describe('group chat approval and context baseline', () => {
     expect(respondApproval).toHaveBeenCalledTimes(1)
     expect(respondApproval).toHaveBeenCalledWith('approval-current', 'deny')
     await expect(emitAck<any>(human, 'load_pending_approvals', {})).resolves.toEqual({
+      pendingClarifies: [],
       pendingApprovals: [
         expect.objectContaining({ approval_id: 'approval-next' }),
         expect.objectContaining({ approval_id: 'approval-missing-generation' }),
@@ -1121,7 +1202,7 @@ describe('group chat approval and context baseline', () => {
     await expect(resolved).resolves.toMatchObject({
       approval_id: 'approval-stale', choice: 'deny', reason: 'unknown approval request: approval-stale',
     })
-    await expect(emitAck<any>(human, 'load_pending_approvals', {})).resolves.toEqual({ pendingApprovals: [] })
+    await expect(emitAck<any>(human, 'load_pending_approvals', {})).resolves.toEqual({ pendingApprovals: [], pendingClarifies: [] })
   })
 
   it('does not route a pending approval through a different room', async () => {

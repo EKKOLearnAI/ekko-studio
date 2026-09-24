@@ -1,8 +1,11 @@
+import { codingAgentId } from './types'
+import { studioMcpCapabilities, type StudioMcpCapabilities } from '../../public/runs/mcp-capabilities'
 import { clarificationTurnInstruction } from '../clarification-runs'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 import type { Server, Socket } from 'socket.io'
 import { chatCodingAgentRunManager as codingAgentRunManager } from '../../public/chat-agent-runtime'
 import {
+  getChatCodingAgentMcpServers,
   handleChatCodingAgentSessionCommand as handleCodingAgentSessionCommand,
   parseChatCodingAgentSessionCommand as parseCodingAgentSessionCommand,
   sendChatCodingAgentRunInput as sendCodingAgentRunInput,
@@ -14,11 +17,12 @@ import type { ContentBlock, SessionState } from './types'
 import type { ChatCodingAgentId } from './types'
 import { writeModelRunProfileToken } from './model-run-prompt'
 import type { AuthenticatedUser } from '../../public/auth'
-import { getSystemPrompt } from '../../public/runs/prompt'
+import { getSystemPrompt, studioMcpUsageGuidelines } from '../../public/runs/prompt'
 import { getSession, updateSession } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
 
 export interface CodingAgentRunSocketData {
+  studio_mcp_capabilities?: StudioMcpCapabilities
   interaction_context_id?: string
   task_plan_context_id?: string
   input: string | ContentBlock[]
@@ -48,12 +52,6 @@ export interface CodingAgentRunSocketData {
   group_agent_id?: string
 }
 
-function codingAgentId(data: CodingAgentRunSocketData): Exclude<ChatCodingAgentId, 'ekko-agent'> {
-  const value = data.coding_agent_id || data.agent_id || 'claude-code'
-  if (value === 'codex' || value === 'pi' || value === 'grok' || (value === 'opencode' || value === 'dsh')) return value
-  return 'claude-code'
-}
-
 export async function handleCodingAgentRun(
   nsp: ReturnType<Server['of']>,
   socket: Socket,
@@ -70,6 +68,10 @@ export async function handleCodingAgentRun(
 
   socket.join(`session:${sessionId}`)
   const agentId = codingAgentId(data)
+  const mcpCapabilities = data.studio_mcp_capabilities
+    ?? studioMcpCapabilities(getChatCodingAgentMcpServers(agentId, profile))
+  const taskPlanContext = mcpCapabilities.interaction ? data.task_plan_context_id : undefined
+  const interactionContext = mcpCapabilities.interaction ? data.interaction_context_id : undefined
   const state = getOrCreateSession(sessionMap, sessionId)
   state.profile = profile
   state.source = data.session_source === 'group_chat' || data.source === 'group_chat'
@@ -163,14 +165,16 @@ export async function handleCodingAgentRun(
     await writeModelRunProfileToken(socketUser, profile)
     const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || (agentId === 'opencode' || agentId === 'dsh')
     const runPrompt = [
-      groupSystemPrompt || (includeBaseSystemPrompt ? getSystemPrompt(undefined, { source: data.session_source || data.source }) : ''),
+      groupSystemPrompt
+        ? [groupSystemPrompt, studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
+        : (includeBaseSystemPrompt ? getSystemPrompt(undefined, { source: data.session_source || data.source, mcpCapabilities }) : ''),
       String(data.instructions || '').trim() === groupSystemPrompt ? '' : String(data.instructions || '').trim(),
     ].filter(Boolean).join('\n')
-    const plannedInput = withTaskPlanTurnContext(codingInput.text, data.task_plan_context_id) as string
-    const runtimeInput = data.interaction_context_id
-      ? `${plannedInput}\n\n${clarificationTurnInstruction(data.interaction_context_id)}`
+    const plannedInput = withTaskPlanTurnContext(codingInput.text, taskPlanContext) as string
+    const runtimeInput = interactionContext
+      ? `${plannedInput}\n\n${clarificationTurnInstruction(interactionContext)}`
       : plannedInput
-    const sent = await (Array.isArray(data.input) || data.task_plan_context_id || data.interaction_context_id
+    const sent = await (Array.isArray(data.input) || taskPlanContext || interactionContext
       ? sendCodingAgentRunInput(
         sessionId,
         runtimeInput,

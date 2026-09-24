@@ -2,7 +2,7 @@
  * Tests that handle-bridge-run properly writes ended_at / end_reason
  * to the session DB when a run terminates (normal or error).
  *
- * Relates to: https://github.com/EKKOLearnAI/hermes-studio/issues/1998
+ * Relates to: https://github.com/EKKOLearnAI/ekko-studio/issues/1998
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 

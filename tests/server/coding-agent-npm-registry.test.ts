@@ -27,6 +27,7 @@ describe('coding Agent npm registry policy', () => {
       'install',
       '-g',
       packageName,
+      ...(agentId === 'dsh' ? ['--prefer-dedupe'] : []),
       '--registry=https://registry.npmjs.org',
     ])
     expect(withCodingAgentRegistry(agentId, ['view', packageName, 'version'])).toEqual([

@@ -1,3 +1,4 @@
+import { authorizeShareDownload } from '../services/session-shares/access'
 import { basename, extname, isAbsolute } from 'path'
 import {
   createFileProvider,
@@ -80,11 +81,13 @@ export async function download(ctx: any) {
     const profile = requestedProfile(ctx)
     // Validate the path first
     // Support both absolute and relative paths
-    const validPath = isAbsolute(filePath) ? validatePath(filePath) : resolveProfileFilePath(filePath, profile)
+    const validPath = ctx.state?.sessionShare
+      ? await authorizeShareDownload(ctx.state.sessionShare, filePath)
+      : isAbsolute(filePath) ? validatePath(filePath) : resolveProfileFilePath(filePath, profile)
 
     // Choose provider: always use local for upload directory files
     let data: Buffer
-    if (isInUploadDir(validPath)) {
+    if (ctx.state?.sessionShare || isInUploadDir(validPath)) {
       data = await localProvider.readFile(validPath)
     } else {
       const provider = await createFileProvider(profile)
@@ -122,7 +125,7 @@ export async function download(ctx: any) {
       backend_error: 502,
       backend_timeout: 504,
     }
-    ctx.status = statusMap[code] || 500
+    ctx.status = Number(err.status) || statusMap[code] || 500
     ctx.body = { error: err.message, code }
   }
 }

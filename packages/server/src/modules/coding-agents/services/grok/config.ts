@@ -1,5 +1,6 @@
 import { readTomlAssignment } from '../toml-assignment'
 import { existsSync } from 'fs'
+import { compactionPercent, type CodingAgentContextPolicy } from '../context-policy'
 import { copyFile, cp, lstat, mkdir, readFile, readdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { writeManagedPromptFile } from '../prompt-file'
@@ -332,6 +333,7 @@ export async function prepareScopedGrokRuntime(input: {
   proxyBaseUrl: string
   contextWindow: number
   outputLimit: number
+  contextPolicy?: CodingAgentContextPolicy
   reasoningEffort: string
   systemPrompt: string
   userInstructions: string
@@ -356,6 +358,7 @@ export async function prepareScopedGrokRuntime(input: {
     'api_backend = "responses"',
     `context_window = ${Math.max(1, Math.floor(input.contextWindow))}`,
     `max_completion_tokens = ${Math.max(1, Math.floor(input.outputLimit))}`,
+    ...(input.contextPolicy ? [`auto_compact_threshold_percent = ${compactionPercent(input.contextPolicy.threshold)}`] : []),
     '',
     input.managedMcpToml.trim(),
     '',

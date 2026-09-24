@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+
+enableAutoUnmount(afterEach)
 
 const routerReplace = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({
@@ -46,6 +48,7 @@ vi.mock('naive-ui', async () => {
         return () => h('button', { onClick: () => emit('click') }, slots.default?.())
       },
     }),
+    NSelect: defineComponent({ name: 'NSelect', props: ['value', 'options'], emits: ['update:value'], setup: () => () => h('select') }),
     NSpin: defineComponent({
       name: 'NSpin',
       setup(_props, { slots }) {
@@ -76,10 +79,12 @@ vi.mock('@/stores/hermes/app', () => ({ useAppStore: () => appStore }))
 vi.mock('@/stores/hermes/profiles', () => ({ useProfilesStore: () => profilesStore }))
 vi.mock('@/stores/hermes/settings', () => ({ useSettingsStore: () => settingsStore }))
 vi.mock('@/api/hermes/copilot-auth', () => ({ checkCopilotToken: vi.fn(async () => {}) }))
+vi.mock('@/api/hermes/profiles', () => ({ fetchProfiles: vi.fn(async () => [{ name: 'default' }, { name: 'work' }, { name: 'research' }]) }))
 vi.mock('@/api/client', () => ({ isStoredSuperAdmin: () => false }))
 
 vi.mock('@/components/hermes/models/AuxiliaryModelsPanel.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/models/CombinationModelsPanel.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/hermes/models/JevSettingsPanel.vue', () => ({ default: { props: ['profile'], template: '<div class="jev-settings-stub" :data-profile="profile" />' } }))
 vi.mock('@/components/hermes/models/ProvidersPanel.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/models/ProviderFormModal.vue', () => ({
   default: {

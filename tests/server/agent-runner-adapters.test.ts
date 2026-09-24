@@ -661,6 +661,17 @@ describe('agent runner Responses adapters', () => {
     })
   })
 
+  it.each(['ekko', 'hermes'])('restores %s interaction namespace without changing context or arguments', prefix => {
+    for (const suffix of ['update_plan', 'clarify']) {
+      const name = `${prefix}_studio_${suffix}`
+      const args = JSON.stringify({ context_id: 'current-turn', plan: [{ id: 'a', step: 'Verify', status: 'in_progress' }] })
+      expect(normalizeResponseFunctionCall(name, args)).toEqual({
+        name, arguments: args, namespace: `mcp__${prefix}_studio_interaction`,
+      })
+    }
+    expect(responseToolNamespaceForName('unrelated_update_plan')).toBeUndefined()
+  })
+
   it('keeps unknown MCP namespaces callable through a generic function fallback', () => {
     const body = {
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'call custom mcp' }] }],
@@ -956,6 +967,18 @@ describe('agent runner Responses stream adapters', () => {
     expect((events.at(-1)?.data as any).response.output[0]).toMatchObject({
       type: 'reasoning',
       summary: [{ type: 'summary_text', text: 'first second' }],
+    })
+  })
+
+  it.each(['ekko_studio_update_plan', 'ekko_studio_clarify'])('routes streamed %s to interaction rather than default functions', async name => {
+    const args = JSON.stringify({ context_id: 'current-turn' })
+    const chunk = { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_plan', function: { name, arguments: args } }] } }] }
+    const events = await collectEvents(openAiChatSseToResponsesEvents(encodedChunks([
+      `data: ${JSON.stringify(chunk)}\n\n`, 'data: [DONE]\n\n',
+    ]), codexTarget))
+    const done = events.find(event => event.type === 'response.output_item.done')
+    expect((done?.data as any).item).toMatchObject({
+      type: 'function_call', name, namespace: 'mcp__ekko_studio_interaction', arguments: args,
     })
   })
 

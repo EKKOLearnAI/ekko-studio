@@ -49,7 +49,7 @@ test('opens the provider form when model settings are entered from setup guidanc
   await expect(apiKeyInput).toHaveAttribute('autocomplete', 'new-password')
   await expect(apiKeyInput).toHaveAttribute('name', 'new-provider-api-key')
   await expect(apiKeyInput).toHaveAttribute('data-1p-ignore', 'true')
-  await expect(page).toHaveURL(/#\/hermes\/models$/)
+  await expect(page).toHaveURL(/#\/hermes\/models\?modelProfile=default$/)
 })
 
 test('fetches custom provider models through the backend proxy', async ({ page }) => {

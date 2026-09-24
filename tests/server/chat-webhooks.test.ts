@@ -203,6 +203,23 @@ describe('chat run webhooks', () => {
     expect(listLocalChatWebhookTestInbox()).toEqual([])
   })
 
+  it('correlates mobile turns without deduplicating separate roots or leaking targets to webhook payloads', async () => {
+    const service = await import('../../packages/server/src/modules/studio/services/webhooks/index')
+    const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+    const enqueue = vi.spyOn(service.getChatWebhookDispatcher(), 'enqueue').mockReturnValue(true)
+    const events: any[] = []
+    const unsubscribe = businessEvents.subscribe('test-push-target', event => { events.push(event) })
+    const input = { event: 'run.completed', sessionId: 'session-a', profile: 'default', source: 'chat', agent: 'codex' as const, payload: { run_id: 'persistent-agent-session', output: 'done' } }
+    service.observeChatRunWebhookEvent({ ...input, pushTargetId: 'root-a' })
+    service.observeChatRunWebhookEvent({ ...input, pushTargetId: 'root-b' })
+    service.observeChatRunWebhookEvent({ ...input, pushTargetId: 'root-b' })
+    unsubscribe()
+    expect(events.map(event => event.push_target_id)).toEqual(['root-a', 'root-b', 'root-b'])
+    expect(events[0].id).not.toBe(events[1].id)
+    expect(events[1].id).toBe(events[2].id)
+    expect(enqueue.mock.calls.every(([event]) => !('push_target_id' in event))).toBe(true)
+  })
+
   it('normalizes terminal Chat Run events before enqueueing them', async () => {
     const webhookService = await import('../../packages/server/src/modules/studio/services/webhooks/index')
     const dispatcher = webhookService.getChatWebhookDispatcher()
@@ -242,7 +259,7 @@ describe('chat run webhooks', () => {
     enqueue.mockRestore()
   })
 
-  it('fans session notifications out from the unified webhook observer', async () => {
+  it('keeps HTTP webhook delivery active without forwarding session notifications to social media', async () => {
     const notifySessionPush = vi.fn(async () => 1)
     vi.doMock('../../packages/server/src/modules/studio/services/social-messages/session-push', () => ({
       notifySessionPush,
@@ -277,28 +294,13 @@ describe('chat run webhooks', () => {
       payload: { tool_call_id: 'tool-1' },
     })
 
-    await vi.waitFor(() => expect(notifySessionPush).toHaveBeenCalledTimes(3))
-    expect(notifySessionPush).toHaveBeenNthCalledWith(
-      1,
-      'session-push',
-      'run.completed',
-      { run_id: 'run-1', output: 'done' },
-      'bridge',
-    )
-    expect(notifySessionPush).toHaveBeenNthCalledWith(
-      2,
-      'session-push',
-      'approval.requested',
-      { approval_id: 'approval-1', command: 'npm test' },
-      'bridge',
-    )
-    expect(notifySessionPush).toHaveBeenNthCalledWith(
-      3,
-      'session-push',
-      'clarify.requested',
-      { clarify_id: 'clarify-1', question: 'Continue?' },
-      'bridge',
-    )
+    expect(enqueue.mock.calls.map(([event]) => event.type)).toEqual([
+      'chat.run.completed',
+      'chat.approval.requested',
+      'chat.clarification.requested',
+      'chat.tool.started',
+    ])
+    expect(notifySessionPush).not.toHaveBeenCalled()
     enqueue.mockRestore()
   })
 
@@ -361,6 +363,71 @@ describe('chat run webhooks', () => {
     enqueue.mockRestore()
   })
 
+  it('delivers subscribed group/workflow events through HTTP with content opt-in and no internal target', async () => {
+    await createEndpoint({ event_types: ['group.message.created', 'group.clarification.requested', 'workflow.run.completed'], include_content: true })
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 })) as typeof fetch
+    const { ChatWebhookDispatcher, getChatWebhookDispatcher } = await import('../../packages/server/src/modules/studio/services/webhooks/dispatcher')
+    const dispatcher = new ChatWebhookDispatcher({ fetchImpl })
+    dispatchers.push(dispatcher); dispatcher.start()
+    const forward = vi.spyOn(getChatWebhookDispatcher(), 'enqueue').mockImplementation(event => dispatcher.enqueue(event))
+    try {
+      const { publishGroupMessage, publishGroupInteraction, publishDomainEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/domain-events')
+      const room = { id: 'room', name: 'Room', summaryProfile: 'default' }
+      publishGroupMessage(room, { id: 'message', senderType: 'agent', role: 'assistant', content: 'Group answer' }, [])
+      publishGroupInteraction(room, 'group.clarification.requested', 'group-run', 'question')
+      publishDomainEvent('workflow.run.completed', 'default', { workflow_id: 'workflow', run_id: 'workflow-run' }, { title: 'Workflow' })
+      await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(3))
+      const delivered = vi.mocked(fetchImpl).mock.calls.map(([, request]) => JSON.parse(String(request?.body)))
+      expect(delivered.map(event => event.type)).toEqual(['group.message.created', 'group.clarification.requested', 'workflow.run.completed'])
+      expect(delivered[0].message).toMatchObject({ role: 'assistant', text: 'Group answer' })
+      expect(delivered[1].subject).toMatchObject({ room_id: 'room', clarification_id: 'question', run_id: 'group-run' })
+      expect(delivered[2].subject).toEqual({ workflow_id: 'workflow', run_id: 'workflow-run' })
+      expect(JSON.stringify(delivered)).not.toMatch(/push_target_id|push_token|apns_token/)
+    } finally { forward.mockRestore() }
+  })
+
+  it.each(['chat', 'workflow'])('publishes %s task progress by plan revision with bounded, allowlisted metadata', async source => {
+    const service = await import('../../packages/server/src/modules/studio/services/webhooks/index')
+    const enqueue = vi.spyOn(service.getChatWebhookDispatcher(), 'enqueue').mockReturnValue(true)
+    const snapshot = {
+      session_id: 'plan-session', run_id: 'plan-run', plan_id: 'card', revision: 1,
+      execution_state: 'running', created_at: 1786233600000, updated_at: 1786233600100,
+      explanation: 'Private explanation', token: 'SECRET', command: 'SECRET',
+      plan: [{ id: 'inspect', step: 'Private step', status: 'completed', token: 'SECRET' },
+        { id: 'verify', step: 'Verify', status: 'in_progress' }],
+    }
+    const base = { event: 'plan.updated', sessionId: 'plan-session', profile: 'default', source, agent: 'ekko' as const,
+      ...(source === 'workflow' ? { workflowId: 'workflow-a', workflowNodeId: 'node-a' } : {}), payload: snapshot }
+    try {
+      expect(service.observeChatRunWebhookEvent({ ...base, pushTargetId: 'target-a' })).toBe(true)
+      expect(service.observeChatRunWebhookEvent(base)).toBe(false)
+      expect(service.observeChatRunWebhookEvent({ ...base, payload: { ...snapshot, revision: 2, execution_state: 'interrupted',
+        plan: snapshot.plan.map(step => ({ ...step, status: step.status === 'in_progress' ? 'pending' : step.status })) } })).toBe(true)
+      const [first, next] = enqueue.mock.calls.map(([event]) => event)
+      expect(first.type).toBe(`${source}.plan.updated`)
+      expect(first.id).not.toBe(next.id)
+      expect(service.observeChatRunWebhookEvent(base)).toBe(false)
+      expect(first.occurred_at).toBe('2026-08-09T00:00:00.100Z')
+      expect(first.subject).toMatchObject({ session_id: 'plan-session', run_id: 'plan-run', plan_id: 'card',
+        ...(source === 'workflow' ? { workflow_id: 'workflow-a', workflow_node_id: 'node-a' } : {}) })
+      expect(first.task_plan?.progress).toEqual({ total: 2, completed: 1, in_progress: 1, pending: 0, percent: 50 })
+      expect(next.task_plan).toMatchObject({ execution_state: 'interrupted', progress: { completed: 1, pending: 1, percent: 50 } })
+      const hidden = service.buildChatWebhookEnvelope(first, false)
+      expect(hidden.task_plan?.plan).toEqual([{ id: 'inspect', status: 'completed' }, { id: 'verify', status: 'in_progress' }])
+      expect(JSON.stringify(hidden)).not.toMatch(/Private|SECRET|push_target_id/)
+      const included = service.buildChatWebhookEnvelope(first, true)
+      expect(included.task_plan?.explanation).toBe('Private explanation')
+      expect(included.task_plan?.plan[0].step).toBe('Private step')
+      expect(JSON.stringify(included)).not.toContain('SECRET')
+      for (const patch of [{ revision: 0 }, { revision: 1.5 }, { execution_state: 'invalid' }, { updated_at: 1e30 },
+        { session_id: 'foreign' }, { plan: [] }, { plan: [{ id: 'bad', status: 'unknown', step: 'Bad' }] }]) {
+        expect(service.observeChatRunWebhookEvent({ ...base, payload: { ...snapshot, ...patch } })).toBe(false)
+      }
+      expect(service.observeChatRunWebhookEvent({ ...base, source: 'group_chat' })).toBe(false)
+      expect(enqueue).toHaveBeenCalledTimes(2)
+    } finally { enqueue.mockRestore() }
+  })
+
   it('sends the built-in test event through the normal signed delivery path', async () => {
     const endpoint = await createEndpoint({ include_content: true })
     const fetchImpl = vi.fn(async () => new Response(null, { status: 204 })) as typeof fetch
@@ -390,11 +457,14 @@ describe('chat run webhooks', () => {
     await createEndpoint({ name: 'Parallel', url: 'https://93.184.216.35/parallel', max_retries: 0 })
     const calls: Array<{ url: string; eventId: string }> = []
     let firstRunAttempt = true
+    let releaseFirstAttempt!: () => void
+    const firstAttemptGate = new Promise<void>(resolve => { releaseFirstAttempt = resolve })
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       const eventId = JSON.parse(String(init?.body || '{}')).id
       calls.push({ url: String(url), eventId })
       if (String(url).includes('93.184.216.34') && eventId === 'run-a' && firstRunAttempt) {
         firstRunAttempt = false
+        await firstAttemptGate
         return new Response('temporary', { status: 503 })
       }
       return new Response(null, { status: 204 })
@@ -426,6 +496,7 @@ describe('chat run webhooks', () => {
     expect(firstWave).toContain('https://93.184.216.34/hermes:run-a')
     expect(firstWave).toContain('https://93.184.216.35/parallel:run-a')
     expect(calls.filter(call => call.url.includes('93.184.216.34')).map(call => call.eventId)).toEqual(['run-a'])
+    releaseFirstAttempt()
 
     await waitFor(() => calls.filter(call => call.url.includes('93.184.216.34')).length === 3)
     expect(calls.filter(call => call.url.includes('93.184.216.34')).map(call => call.eventId)).toEqual([

@@ -37,6 +37,7 @@ export interface ChatAgentRuntimeDependencies {
   serializeEkkoAgentReasoningDetails(...args: any[]): any
   waitForEkkoToolApproval(...args: any[]): Promise<any>
   waitForEkkoClarification(...args: any[]): Promise<any>
+  getCodingAgentMcpServers(id: string, profile: string): Record<string, unknown>
   resolveEkkoMcpServers(...args: any[]): any
   resolveEkkoProviderRuntimeConfig(...args: any[]): Promise<any>
   createEkkoAuthorizedProviderFetch(...args: any[]): any
@@ -97,3 +98,5 @@ export const resolveChatEkkoProviderRuntimeConfig = (...args: any[]) => configur
 export const createChatEkkoAuthorizedProviderFetch = (...args: any[]) => configured().createEkkoAuthorizedProviderFetch(...args)
 export const respondToChatEkkoToolApproval = (...args: any[]) => configured().respondToEkkoToolApproval(...args)
 export const respondToChatEkkoClarification = (...args: any[]) => configured().respondToEkkoClarification(...args)
+
+export const getChatCodingAgentMcpServers = (id: string, profile: string) => configured().getCodingAgentMcpServers(id, profile)

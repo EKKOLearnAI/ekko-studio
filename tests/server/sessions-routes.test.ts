@@ -70,6 +70,7 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
   archive: archiveMock,
   unarchive: unarchiveMock,
   setPushEnabled: setPushEnabledMock,
+  setPinned: vi.fn(),
   setWorkspace: setWorkspaceMock,
   setCategory: setCategoryMock,
   setModel: setModelMock,
