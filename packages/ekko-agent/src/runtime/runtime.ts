@@ -358,7 +358,12 @@ export class AgentRuntime {
   async run(input: AgentRuntimeRunInput): Promise<AgentRuntimeRunResult> {
     const runId = randomUUID()
     return this.jev.runScoped(input.signal, () => this.runWithSnapshot(input, runId), diagnostic => {
-      this.runtimeLogger?.memoryJev(runId, diagnostic, { sessionId: this.contextKeyFor(input), ...input.logContext })
+      const context = { sessionId: this.contextKeyFor(input), ...input.logContext }
+      if (diagnostic.stage === 'skill_routing' || diagnostic.stage === 'skill_review') {
+        this.runtimeLogger?.skillJev(runId, diagnostic, context)
+      } else {
+        this.runtimeLogger?.memoryJev(runId, diagnostic, context)
+      }
     })
   }
 
@@ -443,12 +448,7 @@ export class AgentRuntime {
         memoryIds: memoryContext.usedMemoryIds,
       })
     }
-    const skillRouting = await this.skillRouting(input)
-    const messages = this.prepareMessages(
-      input,
-      memoryContext ? this.memory?.contextPrompt(memoryContext) : undefined,
-      skillRouting.names,
-    )
+    const messages: AgentMessage[] = []
     let output: AgentOutputMessage = {
       role: 'assistant',
       content: '',
@@ -470,6 +470,13 @@ export class AgentRuntime {
 
     input.signal?.addEventListener('abort', interruptPlan, { once: true })
     try {
+      const skillRouting = await this.skillRouting(input, true)
+      messages.push(...this.prepareMessages(
+        input,
+        memoryContext ? this.memory?.contextPrompt(memoryContext) : undefined,
+        skillRouting.names,
+      ))
+      if (activeBoundaryRun?.pending) return completeBoundaryInterrupt(0)
       const automaticRecoveryCalls = this.currentRecoveryDirective()?.automaticToolCalls ?? []
       if (automaticRecoveryCalls.length) {
         const toolCalls: AgentToolCall[] = automaticRecoveryCalls
@@ -892,7 +899,7 @@ export class AgentRuntime {
     }
   }
 
-  private async skillRouting(input: AgentRuntimeRunInput): Promise<SkillRoutingResolution> {
+  private async skillRouting(input: AgentRuntimeRunInput, semantic = false): Promise<SkillRoutingResolution> {
     if (
       !this.toolsEnabled ||
       !this.areSkillsAvailable() ||
@@ -914,6 +921,7 @@ export class AgentRuntime {
       latestUserMessage,
       this.externalSkillDirectories,
       this.disabledSkillNames,
+      semantic,
     )
   }
 

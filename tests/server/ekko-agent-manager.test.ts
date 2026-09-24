@@ -81,11 +81,11 @@ function modelClient(content: string): ModelClient {
 describe('GlobalEkkoAgent', () => {
   it('passes current Profile JEV settings to Ekko without overwriting its persisted defaults', async () => {
     const setup = createTestSetup(['work', 'personal'])
-    setup.config.update({ jev: { enabled: true, memoryEnabled: true, apiKey: 'ekko-local-key' } })
+    setup.config.update({ skills: { enabled: false }, jev: { enabled: true, memoryEnabled: true, skillsEnabled: true, apiKey: 'ekko-local-key' } })
     const before = await readFile(setup.layout.configPath, 'utf8')
     const createRuntime = vi.spyOn(setup, 'createRuntime')
     getJevRuntimeConfigMock.mockImplementation(async profile => ({
-      ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, memoryEnabled: profile === 'personal', apiKey: `studio-${profile}`, model: `jev-${profile}`,
+      ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, memoryEnabled: profile === 'personal', skillsEnabled: profile === 'personal', apiKey: `studio-${profile}`, model: `jev-${profile}`,
     }))
     const work = createGlobalEkkoAgent({ setup, profile: 'work', memory: false })
     const personal = createGlobalEkkoAgent({ setup, profile: 'personal', memory: false })
@@ -100,13 +100,17 @@ describe('GlobalEkkoAgent', () => {
     expect(personalRuntime.jev.settings.model).toBe('jev-personal')
     expect(workRuntime.jev.settings.memoryEnabled).toBe(false)
     expect(personalRuntime.jev.settings.memoryEnabled).toBe(true)
+    expect(workRuntime.jev.settings.skillsEnabled).toBe(false)
+    expect(personalRuntime.jev.settings.skillsEnabled).toBe(true)
     // The cached runtime picks up edits before the next run.
     getJevRuntimeConfigMock.mockResolvedValue({ ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, memoryEnabled: true, apiKey: 'edited-key', model: 'jev-edited',
+      skillsEnabled: true, skillsCandidateLimit: 9, skillsMinConfidence: 0.95, skillsTimeoutMs: 1100,
       memoryKindRoutingEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true,
       memoryRelevanceFilterEnabled: true, memoryFilterMinConfidence: 0.9, memoryCandidateLimit: 7, memoryMinConfidence: 0.95, memoryTimeoutMs: 1200 })
     await work.run({ messages: ['again'], modelClient: modelClient('updated') })
     expect(createRuntime).toHaveBeenCalledTimes(2)
     expect(workRuntime.jev.settings.model).toBe('jev-edited')
+    expect(workRuntime.jev.settings).toMatchObject({ skillsEnabled: true, skillsCandidateLimit: 9, skillsMinConfidence: 0.95, skillsTimeoutMs: 1100 })
     expect(workRuntime.jev.settings).toMatchObject({ memoryKindRoutingEnabled: true, memoryRerankEnabled: true,
       memoryWriteReviewEnabled: true, memoryRelevanceFilterEnabled: true, memoryFilterMinConfidence: 0.9, memoryCandidateLimit: 7, memoryMinConfidence: 0.95, memoryTimeoutMs: 1200 })
     expect(workRuntime.jev.settings.memoryEnabled).toBe(true)
@@ -114,6 +118,8 @@ describe('GlobalEkkoAgent', () => {
     getJevRuntimeConfigMock.mockResolvedValue({ ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, apiKey: 'edited-key', model: 'jev-edited', memoryEnabled: false })
     await work.run({ messages: ['memory JEV off'], modelClient: modelClient('continued') })
     expect(workRuntime.jev.settings.memoryEnabled).toBe(false)
+    expect(workRuntime.jev.settings.skillsEnabled).toBe(false)
+    expect(personalRuntime.jev.settings.skillsEnabled).toBe(true)
     expect(workRuntime.jev.available).toBe(true)
     expect(personalRuntime.jev.settings.memoryEnabled).toBe(true)
     // Removing Studio's key explicitly disables JEV instead of falling back to Ekko's local key.

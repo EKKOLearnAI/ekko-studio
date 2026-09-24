@@ -2,6 +2,17 @@ import { socialMessagesEn } from '../social-messages'
 
 export default {
   jev: {
+    ekkoSkillsEnabled: "Use JEV for Ekko skills",
+    skillsDisabled: "Disabled; existing skill matching and learning remain active.",
+    skillsReady: "Enabled for semantic matching and learning preflight.",
+    skillsOptions: "Skill enhancement parameters",
+    skillsOptionsHint: "One switch controls both features. Saved settings apply to the next run. Uncertain results and provider failures preserve the existing behavior.",
+    skillsCandidateLimit: "Skill candidate limit",
+    skillsCandidateLimitHint: "Maximum additional candidates evaluated per request; up to three confident matches are loaded.",
+    skillsMinConfidence: "Skill decision confidence",
+    skillsMinConfidenceHint: "Minimum confidence to add a semantic match or skip a review with no reusable learning.",
+    skillsTimeout: "Skill decision timeout (ms)",
+    skillsTimeoutHint: "Time budget for each matching or learning decision; timeout preserves the existing behavior.",
     connectionSettings: "Connection settings",
     useCases: "Use cases",
     memoryOptions: "Memory enhancement options",

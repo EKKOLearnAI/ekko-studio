@@ -2,6 +2,17 @@ import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
   jev: {
+    ekkoSkillsEnabled: "Ekko スキルに JEV を使用",
+    skillsDisabled: "無効。既存のスキル照合と学習を使用します。",
+    skillsReady: "意味による照合と学習の事前判定が有効です。",
+    skillsOptions: "スキル拡張の設定",
+    skillsOptionsHint: "1つのスイッチで両機能を制御します。保存した設定は次の実行から適用されます。判定が不確か、またはサービスに障害がある場合は既存の動作を維持します。",
+    skillsCandidateLimit: "スキル候補の上限",
+    skillsCandidateLimitHint: "リクエストごとに評価する追加候補数。信頼度の高い候補を最大3件読み込みます。",
+    skillsMinConfidence: "スキル判定の信頼度",
+    skillsMinConfidenceHint: "意味による候補の追加、または再利用可能な学習内容がないレビューの省略に必要な最低信頼度。",
+    skillsTimeout: "スキル判定のタイムアウト（ミリ秒）",
+    skillsTimeoutHint: "照合または学習判定ごとの制限時間。タイムアウト時は既存の動作を維持します。",
     connectionSettings: "接続設定",
     useCases: "利用用途",
     memoryOptions: "メモリ拡張オプション",

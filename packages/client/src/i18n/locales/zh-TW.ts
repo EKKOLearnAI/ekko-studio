@@ -2,6 +2,17 @@ import { socialMessagesZhTw } from '../social-messages'
 
 export default {
   jev: {
+    ekkoSkillsEnabled: "啟用 Ekko 技能 JEV 增強",
+    skillsDisabled: "未啟用；繼續使用原有技能匹配與學習流程。",
+    skillsReady: "已啟用技能語意匹配與學習預篩選。",
+    skillsOptions: "技能增強參數",
+    skillsOptionsHint: "一個開關同時控制兩項能力，儲存後從下次執行生效。結果不確定或服務失敗時沿用原流程。",
+    skillsCandidateLimit: "技能候選上限",
+    skillsCandidateLimitHint: "每次請求評估的額外技能候選數量，最多載入三個高信心度匹配。",
+    skillsMinConfidence: "技能判斷信心度",
+    skillsMinConfidenceHint: "補充語意匹配或略過無可重用經驗的回顧所需的最低信心度。",
+    skillsTimeout: "技能判斷逾時（毫秒）",
+    skillsTimeoutHint: "每次匹配或學習判斷的時間預算；逾時後沿用原流程。",
     connectionSettings: "連線設定",
     useCases: "使用情境",
     memoryOptions: "記憶增強選項",

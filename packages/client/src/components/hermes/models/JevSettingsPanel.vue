@@ -14,6 +14,8 @@ const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const testResult = ref<{ model: string; durationMs: number } | null>(null)
+const skillsStatus = computed(() => !settings.value?.ekkoSkillsEnabled ? 'jev.skillsDisabled'
+  : !settings.value.hasApiKey ? 'common.notConfigured' : 'jev.skillsReady')
 const memoryStatus = computed(() => !settings.value?.ekkoMemoryEnabled ? 'jev.memoryDisabled'
   : !settings.value.hasApiKey ? 'common.notConfigured'
     : !settings.value.ekkoMemoryKindRoutingEnabled && !settings.value.ekkoMemoryRelevanceFilterEnabled && !settings.value.ekkoMemoryRerankEnabled && !settings.value.ekkoMemoryWriteReviewEnabled
@@ -51,10 +53,10 @@ async function perform(action: 'save' | 'delete' | 'test') {
       const result = await testJevConnection(profile)
       if (!disposed) testResult.value = { model: result.model, durationMs: result.durationMs }
     } else {
-      const { baseUrl, model, timeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+      const { baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
         ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs } = settings.value
       const result = action === 'delete' ? await deleteJevSettings(profile)
-        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
           ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs,
           ...(apiKey.value.trim() ? { apiKey: apiKey.value.trim() } : {}) })
       if (!disposed) { settings.value = result; apiKey.value = ''; message.success(t(action === 'delete' ? 'jev.deleted' : 'common.saved')) }
@@ -133,6 +135,26 @@ async function perform(action: 'save' | 'delete' | 'test') {
             </div>
           </details>
         </details>
+        <div class="settings-rows">
+          <SettingRow :label="t('jev.ekkoSkillsEnabled')" :hint="t(skillsStatus)">
+            <NSwitch v-model:value="settings.ekkoSkillsEnabled" :aria-label="t('jev.ekkoSkillsEnabled')" />
+          </SettingRow>
+        </div>
+        <details class="skills-options" :open="settings.ekkoSkillsEnabled">
+          <summary>{{ t('jev.skillsOptions') }}</summary>
+          <p class="section-hint">{{ t('jev.skillsOptionsHint') }}</p>
+          <div class="settings-rows">
+            <SettingRow :label="t('jev.skillsCandidateLimit')" :hint="t('jev.skillsCandidateLimitHint')">
+              <NInputNumber :value="settings.ekkoSkillsCandidateLimit" @update:value="value => { if (value !== null) settings!.ekkoSkillsCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': t('jev.skillsCandidateLimit') }" />
+            </SettingRow>
+            <SettingRow :label="t('jev.skillsMinConfidence')" :hint="t('jev.skillsMinConfidenceHint')">
+              <NInputNumber :value="settings.ekkoSkillsMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoSkillsMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.skillsMinConfidence') }" />
+            </SettingRow>
+            <SettingRow :label="t('jev.skillsTimeout')" :hint="t('jev.skillsTimeoutHint')">
+              <NInputNumber :value="settings.ekkoSkillsTimeoutMs" @update:value="value => { if (value !== null) settings!.ekkoSkillsTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.skillsTimeout') }" />
+            </SettingRow>
+          </div>
+        </details>
         <div class="settings-actions">
           <NButton type="primary" :loading="busy" :disabled="busy" @click="perform('save')">{{ t('common.save') }}</NButton>
           <NButton :disabled="busy || !settings.hasApiKey" @click="perform('test')">{{ t('jev.testSaved') }}</NButton>
@@ -186,7 +208,7 @@ async function perform(action: 'save' | 'delete' | 'test') {
 
 .feedback { margin-bottom: 16px; }
 .group-title { margin: 20px 0 8px; color: $text-primary; font-size: 14px; }
-.memory-options, .memory-advanced {
+.memory-options, .memory-advanced, .skills-options {
   margin-top: 12px;
   summary { cursor: pointer; padding: 8px 0; color: $text-primary; font-size: 13px; }
 }

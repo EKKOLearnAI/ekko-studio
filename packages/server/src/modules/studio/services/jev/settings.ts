@@ -5,6 +5,10 @@ import { config } from '../../public/config'
 import { safeFileStore } from '../../public/safe-file-store'
 
 export interface JevSettings {
+  ekkoSkillsEnabled: boolean
+  ekkoSkillsCandidateLimit: number
+  ekkoSkillsMinConfidence: number
+  ekkoSkillsTimeoutMs: number
   ekkoMemoryEnabled: boolean
   ekkoMemoryKindRoutingEnabled: boolean
   ekkoMemoryRelevanceFilterEnabled: boolean
@@ -28,6 +32,10 @@ export class JevError extends Error {
 }
 
 const defaults: StoredSettings = {
+  ekkoSkillsEnabled: false,
+  ekkoSkillsCandidateLimit: 20,
+  ekkoSkillsMinConfidence: 0.8,
+  ekkoSkillsTimeoutMs: 3000,
   ekkoMemoryEnabled: false,
   ekkoMemoryKindRoutingEnabled: true,
   ekkoMemoryRelevanceFilterEnabled: true,
@@ -52,7 +60,7 @@ function settingsPath(profile: string): string {
 function normalize(input: unknown, current = defaults): StoredSettings {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new JevError('Invalid JEV settings')
   const value = input as Record<string, unknown>
-  if (Object.keys(value).some(key => !['baseUrl', 'model', 'timeoutMs', 'apiKey', 'ekkoMemoryEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled', 'ekkoMemoryCandidateLimit', 'ekkoMemoryRecallMinConfidence', 'ekkoMemoryFilterMinConfidence', 'ekkoMemoryMinConfidence', 'ekkoMemoryTimeoutMs'].includes(key))) {
+  if (Object.keys(value).some(key => !['baseUrl', 'model', 'timeoutMs', 'apiKey', 'ekkoSkillsEnabled', 'ekkoSkillsCandidateLimit', 'ekkoSkillsMinConfidence', 'ekkoSkillsTimeoutMs', 'ekkoMemoryEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled', 'ekkoMemoryCandidateLimit', 'ekkoMemoryRecallMinConfidence', 'ekkoMemoryFilterMinConfidence', 'ekkoMemoryMinConfidence', 'ekkoMemoryTimeoutMs'].includes(key))) {
     throw new JevError('Unknown JEV setting')
   }
   const next = { ...current }
@@ -60,11 +68,17 @@ function normalize(input: unknown, current = defaults): StoredSettings {
     if (typeof value.ekkoMemoryEnabled !== 'boolean') throw new JevError('JEV ekkoMemoryEnabled must be a boolean')
     next.ekkoMemoryEnabled = value.ekkoMemoryEnabled
   }
-  for (const key of ['ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled'] as const) {
+  for (const key of ['ekkoSkillsEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled'] as const) {
     if (value[key] === undefined) continue
     if (typeof value[key] !== 'boolean') throw new JevError(`Invalid JEV ${key}`)
     next[key] = value[key]
   }
+  if (value.ekkoSkillsCandidateLimit !== undefined) next.ekkoSkillsCandidateLimit = value.ekkoSkillsCandidateLimit as number
+  if (value.ekkoSkillsMinConfidence !== undefined) next.ekkoSkillsMinConfidence = value.ekkoSkillsMinConfidence as number
+  if (value.ekkoSkillsTimeoutMs !== undefined) next.ekkoSkillsTimeoutMs = value.ekkoSkillsTimeoutMs as number
+  if (!Number.isInteger(next.ekkoSkillsCandidateLimit) || next.ekkoSkillsCandidateLimit < 1 || next.ekkoSkillsCandidateLimit > 50) throw new JevError('Invalid JEV skills candidate limit')
+  if (!Number.isFinite(next.ekkoSkillsMinConfidence) || next.ekkoSkillsMinConfidence < 0.5 || next.ekkoSkillsMinConfidence > 1) throw new JevError('Invalid JEV skills confidence')
+  if (!Number.isInteger(next.ekkoSkillsTimeoutMs) || next.ekkoSkillsTimeoutMs < 100 || next.ekkoSkillsTimeoutMs > 30000) throw new JevError('Invalid JEV skills timeout')
   if (value.ekkoMemoryCandidateLimit !== undefined) next.ekkoMemoryCandidateLimit = value.ekkoMemoryCandidateLimit as number
   if (value.ekkoMemoryRecallMinConfidence !== undefined) next.ekkoMemoryRecallMinConfidence = value.ekkoMemoryRecallMinConfidence as number
   if (value.ekkoMemoryFilterMinConfidence !== undefined) next.ekkoMemoryFilterMinConfidence = value.ekkoMemoryFilterMinConfidence as number
@@ -97,7 +111,9 @@ function normalize(input: unknown, current = defaults): StoredSettings {
 }
 
 function publicSettings(value: StoredSettings): JevSettings {
-  return { baseUrl: value.baseUrl, model: value.model, timeoutMs: value.timeoutMs, ekkoMemoryEnabled: value.ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled: value.ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled: value.ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled: value.ekkoMemoryRerankEnabled, ekkoMemoryWriteReviewEnabled: value.ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit: value.ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence: value.ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence: value.ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence: value.ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs: value.ekkoMemoryTimeoutMs, hasApiKey: !!value.apiKey }
+  return { ekkoSkillsEnabled: value.ekkoSkillsEnabled, ekkoSkillsCandidateLimit: value.ekkoSkillsCandidateLimit,
+    ekkoSkillsMinConfidence: value.ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs: value.ekkoSkillsTimeoutMs,
+    baseUrl: value.baseUrl, model: value.model, timeoutMs: value.timeoutMs, ekkoMemoryEnabled: value.ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled: value.ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled: value.ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled: value.ekkoMemoryRerankEnabled, ekkoMemoryWriteReviewEnabled: value.ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit: value.ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence: value.ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence: value.ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence: value.ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs: value.ekkoMemoryTimeoutMs, hasApiKey: !!value.apiKey }
 }
 
 export async function readJevCredentials(profile: string): Promise<StoredSettings> {
@@ -115,8 +131,12 @@ export async function getJevSettings(profile: string): Promise<JevSettings> {
 
 /** Server-only host configuration for agent runtimes; never return this from an HTTP endpoint. */
 export async function getJevRuntimeConfig(profile: string) {
-  const { ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled, ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs, ...settings } = await readJevCredentials(profile)
+  const { ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled, ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs, ...settings } = await readJevCredentials(profile)
   return { ...settings, enabled: Boolean(settings.apiKey), memoryEnabled: ekkoMemoryEnabled,
+    skillsEnabled: ekkoSkillsEnabled,
+    skillsCandidateLimit: ekkoSkillsCandidateLimit,
+    skillsMinConfidence: ekkoSkillsMinConfidence,
+    skillsTimeoutMs: ekkoSkillsTimeoutMs,
     memoryKindRoutingEnabled: ekkoMemoryKindRoutingEnabled,
     memoryRelevanceFilterEnabled: ekkoMemoryRelevanceFilterEnabled,
     memoryRerankEnabled: ekkoMemoryRerankEnabled,

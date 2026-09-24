@@ -379,6 +379,11 @@ Studio 在每次普通或隔离运行开始前读取当前 Profile 的 Studio JE
 映射到此字段；显式 false 会覆盖本地 true，且不关闭其他模块的 JEV 调用。
 开启总开关后，按子开关执行分类路由、逐条相关性过滤、候选重排和写入审查；具体默认值与回退语义见 [memory-jev.md](memory-jev.md)。
 
+`jev.skillsEnabled` 将技能语义匹配和后台学习预筛选归为一个增强功能，默认 false，独立于记忆开关。
+Studio 的 `ekkoSkillsEnabled` 映射到此字段；共用参数为 `skillsCandidateLimit`（20）、
+`skillsMinConfidence`（0.8）和 `skillsTimeoutMs`（3000）。精确匹配始终保留，语义匹配最多补充
+三个技能；学习预筛选仅在高置信度判断无可复用经验时跳过完整复盘。详情见 [skills-jev.md](skills-jev.md)。
+
 ## `authorization` 模块
 
 | 方法/字段 | 参数 | 返回/说明 |
@@ -404,7 +409,7 @@ Studio 在每次普通或隔离运行开始前读取当前 Profile 的 Studio JE
 
 | 路径 | 类型 | 说明 |
 | --- | --- | --- |
-| `schemaVersion` | `number` | 当前为 13；读取旧配置时补齐新字段。 |
+| `schemaVersion` | `number` | 当前为 14；读取旧配置时补齐新字段。 |
 | `runtime.maxSteps` | `number` | 单次主循环最大步数。 |
 | `runtime.maxModelRetries` | `number` | 单次模型步骤最大重试。 |
 | `runtime.toolFailureRecoveryThreshold` | `number` | 同一工具连续失败后要求模型纠错或换方案的阈值；默认 3，不终止运行。 |
@@ -428,6 +433,10 @@ Studio 在每次普通或隔离运行开始前读取当前 Profile 的 Studio JE
 | `jev.memoryFilterMinConfidence` | `number` | 排除无关记忆的最低置信度，默认 0.8，范围 0.5–1；不确定时保留该条。 |
 | `jev.memoryMinConfidence` | `number` | 写入审查阈值，默认 0.8，范围 0.5–1。 |
 | `jev.memoryTimeoutMs` | `number` | 单次召回或写入的总预算，默认 3000，范围 100–30000 毫秒。 |
+| `jev.skillsEnabled` | `boolean` | 技能语义匹配和学习预筛选的统一开关，默认 false。 |
+| `jev.skillsCandidateLimit` | `number` | 语义技能候选上限，默认 20，范围 1–50。 |
+| `jev.skillsMinConfidence` | `number` | 补充匹配或跳过学习复盘的最低置信度，默认 0.8，范围 0.5–1。 |
+| `jev.skillsTimeoutMs` | `number` | 单次技能判断总预算，默认 3000，范围 100–30000 毫秒。 |
 | `jev.apiKey` | `string` | 独立运行时可保存的本地密钥，默认空；运行参数可临时覆盖。 |
 | `jev.baseUrl` | `string` | API 根地址，默认 `https://api.typesafe.ai`，不带 `/v1`。 |
 | `jev.model` | `string` | 默认 `jev-latest`。 |
@@ -782,7 +791,7 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig
 ### `src/config.ts`
 
 ```ts
-export const EKKO_CONFIG_SCHEMA_VERSION = 13
+export const EKKO_CONFIG_SCHEMA_VERSION = 14
 
 export const EKKO_CONFIG_DIRECTORY_NAME = 'config'
 
@@ -1480,7 +1489,7 @@ export interface EkkoJevSettings extends Omit<EkkoJevConfig, 'apiKey'> {
 }
 
 export interface EkkoJevDiagnostic {
-  stage: 'recall' | 'routing' | 'filter' | 'rerank' | 'write_review'
+  stage: 'recall' | 'routing' | 'filter' | 'rerank' | 'write_review' | 'skill_routing' | 'skill_review'
   status: 'completed' | 'fallback' | 'skipped' | 'cancelled'
   durationMs: number
   reason?: string
@@ -1520,6 +1529,10 @@ export interface EkkoJevConfig {
   memoryMinConfidence: number
   memoryFilterMinConfidence: number
   memoryTimeoutMs: number
+  skillsEnabled: boolean
+  skillsCandidateLimit: number
+  skillsMinConfidence: number
+  skillsTimeoutMs: number
   apiKey: string
   baseUrl: string
   model: string
@@ -1528,7 +1541,7 @@ export interface EkkoJevConfig {
 
 export type EkkoJevOverrides = Partial<EkkoJevConfig> | false
 
-export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRelevanceFilterEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.8, memoryFilterMinConfidence: 0.8, memoryTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
+export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRelevanceFilterEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.8, memoryFilterMinConfidence: 0.8, memoryTimeoutMs: 3000, skillsEnabled: false, skillsCandidateLimit: 20, skillsMinConfidence: 0.8, skillsTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
 
 export function resolveEkkoJevConfig( ...layers: Array<EkkoJevOverrides | undefined> ): EkkoJevConfig
 ```
@@ -1652,6 +1665,7 @@ export interface EkkoModelRequestSpan {
 export class EkkoRuntimeLogger {
   constructor(private readonly writer: EkkoLogWriter, private readonly defaultContext: EkkoRuntimeLogContext = {})
   memoryJev(runId: string, diagnostic: EkkoJevDiagnostic, inputContext?: EkkoRuntimeLogContext): void
+  skillJev(runId: string, diagnostic: EkkoJevDiagnostic, inputContext?: EkkoRuntimeLogContext): void
   startModelRequest(input: EkkoModelRequestLogInput): EkkoModelRequestSpan
 }
 ```
@@ -3056,6 +3070,13 @@ export function resolveEkkoExternalSkillDirectories( entries: readonly string[] 
 
 export async function describeEkkoExternalSkillDirectories( entries: readonly string[] = [], options: ResolveEkkoExternalSkillDirectoriesOptions = {}, ): Promise<EkkoExternalSkillDirectoryStatus[]>
 ```
+### `src/skills/jev.ts`
+
+```ts
+export async function enhanceSkillMatches( request: string, available: DiscoveredSkill[], baseline: DiscoveredSkill[], ): Promise<DiscoveredSkill[]>
+
+export async function shouldReviewSkills(messages: AgentMessage[]): Promise<boolean>
+```
 ### `src/skills/manager.ts`
 
 ```ts
@@ -3498,7 +3519,7 @@ export async function listSkillNames(skillDirectory?: string): Promise<string[]>
 
 export async function matchSkillsForUserMessage( skillDirectory: string | undefined, userMessage: string, externalSkillDirectories: EkkoExternalSkillDirectory[] = [], disabledSkillNames: string[] = [], ): Promise<DiscoveredSkill[]>
 
-export async function resolveSkillRouting( skillDirectory: string | undefined, userMessage = '', externalSkillDirectories: EkkoExternalSkillDirectory[] = [], disabledSkillNames: string[] = [], ): Promise<SkillRoutingResolution>
+export async function resolveSkillRouting( skillDirectory: string | undefined, userMessage = '', externalSkillDirectories: EkkoExternalSkillDirectory[] = [], disabledSkillNames: string[] = [], semantic = false, ): Promise<SkillRoutingResolution>
 
 export function validateSkillContent(name: string, content: string): string | null
 

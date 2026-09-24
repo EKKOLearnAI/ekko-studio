@@ -16,6 +16,11 @@ export interface EkkoJevConfig {
   memoryFilterMinConfidence: number
   /** Total budget per automatic recall or write batch, including all JEV stages. */
   memoryTimeoutMs: number
+  /** One switch controls semantic skill matching and background learning preflight. */
+  skillsEnabled: boolean
+  skillsCandidateLimit: number
+  skillsMinConfidence: number
+  skillsTimeoutMs: number
   apiKey: string
   baseUrl: string
   model: string
@@ -37,6 +42,10 @@ export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({
   memoryMinConfidence: 0.8,
   memoryFilterMinConfidence: 0.8,
   memoryTimeoutMs: 3000,
+  skillsEnabled: false,
+  skillsCandidateLimit: 20,
+  skillsMinConfidence: 0.8,
+  skillsTimeoutMs: 3000,
   apiKey: '',
   baseUrl: 'https://api.typesafe.ai',
   model: 'jev-latest',
@@ -60,6 +69,16 @@ export function resolveEkkoJevConfig(
   }
   if (typeof next.enabled !== 'boolean') throw new TypeError('JEV enabled must be a boolean.')
   if (typeof next.memoryEnabled !== 'boolean') throw new TypeError('JEV memoryEnabled must be a boolean.')
+  if (typeof next.skillsEnabled !== 'boolean') throw new TypeError('JEV skillsEnabled must be a boolean.')
+  if (!Number.isInteger(next.skillsCandidateLimit) || next.skillsCandidateLimit < 1 || next.skillsCandidateLimit > 50) {
+    throw new TypeError('JEV skills candidate limit must be between 1 and 50.')
+  }
+  if (!Number.isFinite(next.skillsMinConfidence) || next.skillsMinConfidence < 0.5 || next.skillsMinConfidence > 1) {
+    throw new TypeError('JEV skills confidence must be between 0.5 and 1.')
+  }
+  if (!Number.isInteger(next.skillsTimeoutMs) || next.skillsTimeoutMs < 100 || next.skillsTimeoutMs > 30_000) {
+    throw new TypeError('JEV skills timeout must be between 100 and 30000 ms.')
+  }
   for (const key of ['memoryKindRoutingEnabled', 'memoryRelevanceFilterEnabled', 'memoryRerankEnabled', 'memoryWriteReviewEnabled'] as const) {
     if (typeof next[key] !== 'boolean') throw new TypeError(`JEV ${key} must be a boolean.`)
   }

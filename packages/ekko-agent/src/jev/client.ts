@@ -22,7 +22,7 @@ export interface EkkoJevSettings extends Omit<EkkoJevConfig, 'apiKey'> {
 
 /** Compact diagnostics only; never include request text, evidence or provider errors. */
 export interface EkkoJevDiagnostic {
-  stage: 'recall' | 'routing' | 'filter' | 'rerank' | 'write_review'
+  stage: 'recall' | 'routing' | 'filter' | 'rerank' | 'write_review' | 'skill_routing' | 'skill_review'
   status: 'completed' | 'fallback' | 'skipped' | 'cancelled'
   durationMs: number
   reason?: string

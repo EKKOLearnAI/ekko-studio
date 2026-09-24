@@ -58,7 +58,7 @@ Use `evaluateJev(profile, input, signal?)` from `@/api/studio/jev`. It has the s
 typed request/response shape and routes through the authenticated Studio server.
 
 - `GET /api/studio/jev/settings`: read non-secret settings.
-- `PUT /api/studio/jev/settings`: save `baseUrl`, `model`, `timeoutMs`, optional `apiKey` and the memory options listed below.
+- `PUT /api/studio/jev/settings`: save `baseUrl`, `model`, `timeoutMs`, optional `apiKey` and the memory/skill options listed below.
 - `DELETE /api/studio/jev/settings`: reset settings and remove the key.
 - `POST /api/studio/jev/test`: test saved settings with a fixed sample.
 - `POST /api/studio/jev/evaluate`: accept `{ state, questions, model? }`.
@@ -145,3 +145,25 @@ by session/run/turn. They include timings, routing probabilities, thresholds and
 sanitized failure codes; filter diagnostics also report per-card decisions, confidence
 and removed ids, never card text or credentials. See the
 [recall verification guide](../packages/ekko-agent/docs/memory-jev.md#diagnostics-and-manual-verification).
+
+## Unified Ekko skill enhancement
+
+Models → JEV includes **Use JEV for Ekko skills**. One Profile-scoped switch,
+`ekkoSkillsEnabled`, enables semantic matching and background learning preflight
+independently of memory. It defaults to false in Studio and standalone Ekko.
+
+| Studio field | Ekko `jev` field | Default / range |
+| --- | --- | --- |
+| `ekkoSkillsEnabled` | `skillsEnabled` | false |
+| `ekkoSkillsCandidateLimit` | `skillsCandidateLimit` | 20 / integer 1–50 |
+| `ekkoSkillsMinConfidence` | `skillsMinConfidence` | 0.8 / 0.5–1 |
+| `ekkoSkillsTimeoutMs` | `skillsTimeoutMs` | 3000 / integer 100–30000 ms |
+
+All parameters are editable in the same skills section. Save applies on the next
+run; disable retains parameters; delete resets them. Routing adds at most three
+confident semantic matches after exact matches. Learning preflight skips the
+existing full reviewer only when confidently no reusable experience is present.
+Both use the run snapshot, one request per decision, bounded input and conservative
+fallback. Background review snapshots remain isolated while queued. Skill JEV
+logs use `skill.jev`; context estimation makes no JEV calls.
+See [Ekko skill JEV behavior](../packages/ekko-agent/docs/skills-jev.md) for details.

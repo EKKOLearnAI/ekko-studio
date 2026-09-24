@@ -45,6 +45,7 @@ must still be enabled before its configured child features can use JEV.
 | `ekko-memory-relevance-filter` | Active: `memory/jev-filter.ts` | `ekkoMemoryRelevanceFilterEnabled` | `jev.memoryRelevanceFilterEnabled` | Memory options → Irrelevant memory filtering |
 | `ekko-memory-rerank` | Active: `memory/jev-rerank.ts` | `ekkoMemoryRerankEnabled` | `jev.memoryRerankEnabled` | Memory options → Candidate reranking |
 | `ekko-memory-write-review` | Active: `memory/jev-write-review.ts` | `ekkoMemoryWriteReviewEnabled` | `jev.memoryWriteReviewEnabled` | Memory options → Review memory writes |
+| `ekko-skills` | Active: `skills/jev.ts`, routing and learning preflight | `ekkoSkillsEnabled` | `jev.skillsEnabled` | Models → JEV → Use JEV for Ekko skills |
 
 Agent source paths above are relative to `packages/ekko-agent/src`. Studio's memory
 master defaults to false; its four child switches default to true. Existing saved
@@ -53,6 +54,15 @@ defaults for every switch. Studio reads the selected Profile before each normal/
 the runtime snapshots the values for all subsequent memory operations. Shared memory
 services never store a mutable JEV client or Profile configuration. No runtime
 setting is written back to Ekko's local file.
+
+Skill enhancement is one integration with two stages under one switch, as requested
+for the unified skills configuration. It owns `ekkoSkillsCandidateLimit`,
+`ekkoSkillsMinConfidence` and `ekkoSkillsTimeoutMs`, and remains independent of
+memory. Both Studio and standalone defaults are off. Routing preserves exact
+matches and adds at most three confident semantic matches. Learning preflight
+only skips the existing reviewer on a confident negative; uncertain or unavailable
+judgments retain it. Queued reviews capture the originating run's configuration.
+See [skills JEV behavior](../../packages/ekko-agent/docs/skills-jev.md).
 
 The parent integration owns the candidate limit, recall threshold and per-operation
 time budget. Relevance filtering owns its exclusion confidence threshold and write

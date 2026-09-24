@@ -6,6 +6,7 @@ import { evaluateJev, getJevRuntimeConfig, choice, score, noul } from '../../pac
 import { getJevSettings, saveJevSettings, deleteJevSettings, readJevCredentials } from '../../packages/server/src/modules/studio/services/jev/settings'
 import { getSettings, saveSettings, evaluate } from '../../packages/server/src/modules/studio/controllers/jev'
 
+const skillsDefaults = { ekkoSkillsEnabled: false, ekkoSkillsCandidateLimit: 20, ekkoSkillsMinConfidence: 0.8, ekkoSkillsTimeoutMs: 3000 }
 const directory = join(config.appHome, 'models', 'jev')
 const upstream = vi.fn<typeof fetch>()
 const questions = {
@@ -30,12 +31,26 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('JEV settings', () => {
+  it('round-trips one skills switch and shared parameters, with isolated defaults and reset', async () => {
+    const options = { ekkoSkillsEnabled: true, ekkoSkillsCandidateLimit: 7, ekkoSkillsMinConfidence: 0.95, ekkoSkillsTimeoutMs: 1200 }
+    expect(await getJevSettings('work')).toMatchObject(skillsDefaults)
+    await saveJevSettings('work', { ...options, apiKey: 'work-key' })
+    expect(await getJevSettings('work')).toMatchObject(options)
+    expect(await getJevRuntimeConfig('work')).toMatchObject({ enabled: true, skillsEnabled: true,
+      skillsCandidateLimit: 7, skillsMinConfidence: 0.95, skillsTimeoutMs: 1200, memoryEnabled: false })
+    await saveJevSettings('work', { ekkoSkillsEnabled: false })
+    expect(await getJevRuntimeConfig('work')).toMatchObject({ enabled: true, skillsEnabled: false, skillsCandidateLimit: 7 })
+    expect(await getJevSettings('default')).toMatchObject(skillsDefaults)
+    expect(await deleteJevSettings('work')).toMatchObject({ ...skillsDefaults, hasApiKey: false })
+  })
+
   it('round-trips all memory options, preserves them while disabled, and resets only the selected Profile', async () => {
     const options = { ekkoMemoryEnabled: true, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true,
       ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 7, ekkoMemoryRecallMinConfidence: 0.65, ekkoMemoryFilterMinConfidence: 0.9, ekkoMemoryMinConfidence: 0.95, ekkoMemoryTimeoutMs: 1200 }
     await saveJevSettings('research', { ...options, apiKey: 'research-key' })
     await saveJevSettings('research', { ekkoMemoryEnabled: false })
     expect(await getJevSettings('research')).toMatchObject({ ...options, ekkoMemoryEnabled: false })
+    expect(await getJevSettings('research')).toMatchObject(skillsDefaults)
     expect(await getJevRuntimeConfig('research')).toMatchObject({ enabled: true, memoryEnabled: false,
       memoryKindRoutingEnabled: true, memoryRelevanceFilterEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true,
       memoryCandidateLimit: 7, memoryRecallMinConfidence: 0.65, memoryFilterMinConfidence: 0.9, memoryMinConfidence: 0.95, memoryTimeoutMs: 1200 })
@@ -50,13 +65,14 @@ describe('JEV settings', () => {
     await saveJevSettings('research', { apiKey: 'research-key', model: 'jev-research' })
     expect(await getJevRuntimeConfig('research')).toMatchObject({ enabled: true, apiKey: 'research-key', model: 'jev-research' })
     expect(await getJevRuntimeConfig('other')).toEqual({
+      skillsEnabled: false, skillsCandidateLimit: 20, skillsMinConfidence: 0.8, skillsTimeoutMs: 3000,
       enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: true, memoryRelevanceFilterEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryFilterMinConfidence: 0.8, memoryMinConfidence: 0.8, memoryTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000,
     })
     expect(JSON.stringify(await getJevSettings('research'))).not.toContain('research-key')
   })
   it('isolates profiles and returns only credential presence', async () => {
     const saved = await saveJevSettings('research', { apiKey: 'private-key', model: 'jev-research' })
-    expect(saved).toEqual({ baseUrl: 'https://api.typesafe.ai', model: 'jev-research', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 })
+    expect(saved).toEqual({ ...skillsDefaults, baseUrl: 'https://api.typesafe.ai', model: 'jev-research', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 })
     expect(JSON.stringify(await getJevSettings('research'))).not.toContain('private-key')
     expect(await getJevSettings('default')).toMatchObject({ model: 'jev-latest', hasApiKey: false })
     const [file] = await readdir(directory)
@@ -135,6 +151,9 @@ describe('JEV settings', () => {
     { ekkoMemoryRecallMinConfidence: 0.2 }, { ekkoMemoryRecallMinConfidence: 1.1 }, { ekkoMemoryRecallMinConfidence: '0.5' },
     { ekkoMemoryRelevanceFilterEnabled: 'true' }, { ekkoMemoryFilterMinConfidence: 0.4 }, { ekkoMemoryFilterMinConfidence: 1.1 }, { ekkoMemoryFilterMinConfidence: '0.8' },
     { ekkoMemoryMinConfidence: '0.9' }, { ekkoMemoryTimeoutMs: 99 }, { ekkoMemoryTimeoutMs: 30001 },
+    { ekkoSkillsEnabled: 'false' }, { ekkoSkillsEnabled: null }, { ekkoSkillsCandidateLimit: 0 }, { ekkoSkillsCandidateLimit: 51 },
+    { ekkoSkillsMinConfidence: 0.4 }, { ekkoSkillsMinConfidence: 1.1 }, { ekkoSkillsMinConfidence: '0.8' },
+    { ekkoSkillsTimeoutMs: 99 }, { ekkoSkillsTimeoutMs: 30001 },
     { ekkoMemoryEnabled: 'false' }, { ekkoMemoryEnabled: 1 }, { ekkoMemoryEnabled: null },
   ])('rejects invalid settings without changing saved data: %j', async input => {
     await saveJevSettings('research', { apiKey: 'key' })

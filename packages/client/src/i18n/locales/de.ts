@@ -2,6 +2,17 @@ import { socialMessagesDe } from '../social-messages-locales'
 
 export default {
   jev: {
+    ekkoSkillsEnabled: "JEV für Ekko-Skills verwenden",
+    skillsDisabled: "Deaktiviert; bestehende Skill-Auswahl und Lernen bleiben aktiv.",
+    skillsReady: "Semantische Auswahl und Lernvorprüfung sind aktiviert.",
+    skillsOptions: "Einstellungen zur Skill-Erweiterung",
+    skillsOptionsHint: "Ein Schalter steuert beide Funktionen. Gespeicherte Einstellungen gelten ab dem nächsten Lauf. Unsichere Ergebnisse und Dienstfehler behalten das bisherige Verhalten bei.",
+    skillsCandidateLimit: "Maximale Skill-Kandidaten",
+    skillsCandidateLimitHint: "Maximale Zahl zusätzlicher Kandidaten pro Anfrage; bis zu drei sichere Treffer werden geladen.",
+    skillsMinConfidence: "Konfidenz der Skill-Entscheidung",
+    skillsMinConfidenceHint: "Mindestkonfidenz für einen zusätzlichen semantischen Treffer oder das Überspringen einer Prüfung ohne wiederverwendbare Erkenntnisse.",
+    skillsTimeout: "Zeitlimit für Skill-Entscheidungen (ms)",
+    skillsTimeoutHint: "Zeitbudget pro Auswahl- oder Lernentscheidung; bei Zeitüberschreitung bleibt das bisherige Verhalten erhalten.",
     connectionSettings: "Verbindungseinstellungen",
     useCases: "Anwendungsfälle",
     memoryOptions: "Speichererweiterungen",

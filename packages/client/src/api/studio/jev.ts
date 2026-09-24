@@ -4,6 +4,10 @@ export { choice, score, noul } from '@typesafe-ai/sdk'
 export type { Questions, SystemOneRequest, SystemOneResult } from '@typesafe-ai/sdk'
 
 export interface JevSettings {
+  ekkoSkillsEnabled: boolean
+  ekkoSkillsCandidateLimit: number
+  ekkoSkillsMinConfidence: number
+  ekkoSkillsTimeoutMs: number
   ekkoMemoryEnabled: boolean
   ekkoMemoryKindRoutingEnabled: boolean
   ekkoMemoryRelevanceFilterEnabled: boolean

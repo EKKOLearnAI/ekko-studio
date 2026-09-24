@@ -13,6 +13,7 @@ import {
 } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { EkkoExternalSkillDirectory } from '../skills/external-directories'
+import { enhanceSkillMatches } from '../skills/jev'
 import type { AgentTool, AgentToolContext, AgentToolResult } from './types'
 
 interface SkillListInput extends Record<string, unknown> {
@@ -735,28 +736,30 @@ export async function matchSkillsForUserMessage(
   )).matches
 }
 
-/** Resolves prompt names and deterministic exact matches from one directory scan. */
+/** Resolve exact matches, optionally adding run-scoped JEV matches during execution. */
 export async function resolveSkillRouting(
   skillDirectory: string | undefined,
   userMessage = '',
   externalSkillDirectories: EkkoExternalSkillDirectory[] = [],
   disabledSkillNames: string[] = [],
+  semantic = false,
 ): Promise<SkillRoutingResolution> {
   const skills = await discoverSkills(skillDirectory, externalSkillDirectories, disabledSkillNames)
   const enabledSkills = skills.filter(skill => skill.enabled && skill.validationStatus !== 'invalid')
   const normalizedMessage = normalizeMatchText(userMessage)
+  const matches = normalizedMessage
+    ? enabledSkills.filter(skill => {
+        const terms = [
+          skill.name,
+          skill.name.replaceAll(/[-_]+/g, ' '),
+          ...(skill.validationStatus === 'valid' ? skill.keywords : []),
+        ]
+        return terms.some(term => matchNormalizedTerm(normalizedMessage, term))
+      })
+    : []
   return {
     names: enabledSkills.map(skill => skill.name),
-    matches: normalizedMessage
-      ? enabledSkills.filter(skill => {
-          const terms = [
-            skill.name,
-            skill.name.replaceAll(/[-_]+/g, ' '),
-            ...(skill.validationStatus === 'valid' ? skill.keywords : []),
-          ]
-          return terms.some(term => matchNormalizedTerm(normalizedMessage, term))
-        })
-      : [],
+    matches: semantic ? await enhanceSkillMatches(userMessage, enabledSkills, matches) : matches,
   }
 }
 

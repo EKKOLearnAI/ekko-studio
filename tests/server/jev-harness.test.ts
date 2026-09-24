@@ -29,7 +29,7 @@ function fixture() {
 }
 
 describe('JEV integration harness', () => {
-  it('accepts the registered memory integrations', () => {
+  it('accepts the registered memory and unified skills integrations', () => {
     const { sources, manifest } = fixture()
     expect(jevHarnessViolations(sources, manifest)).toEqual([])
   })
@@ -146,13 +146,15 @@ describe('JEV integration harness', () => {
 
   it('rejects a switch that is displayed but never saved', () => {
     const f = fixture()
-    f.change(f.form, 'saveJevSettings(profile, { baseUrl, model, timeoutMs, ekkoMemoryEnabled,', 'saveJevSettings(profile, { baseUrl, model, timeoutMs,')
+    const source = f.sources.get(f.form)!
+    const saveStart = source.indexOf('saveJevSettings(profile, {')
+    f.sources.set(f.form, source.slice(0, saveStart) + source.slice(saveStart).replace('ekkoMemoryEnabled, ', ''))
     expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('ekkoMemoryEnabled is not submitted')
   })
 
   it('rejects missing server validation and response wiring', () => {
     const f = fixture()
-    f.change(f.server, "'apiKey', 'ekkoMemoryEnabled'", "'apiKey'")
+    f.change(f.server, "'ekkoMemoryEnabled', ", "")
     f.change(f.server, 'ekkoMemoryEnabled: value.ekkoMemoryEnabled, ', '')
     const failures = jevHarnessViolations(f.sources, f.manifest).join('\n')
     expect(failures).toContain('be accepted by settings validation')

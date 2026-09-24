@@ -76,6 +76,26 @@
         "control": "NInputNumber",
         "binding": "settings.ekkoMemoryFilterMinConfidence",
         "label": "jev.memoryFilterMinConfidence"
+      },
+      "ekkoSkillsEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoSkillsEnabled",
+        "label": "jev.ekkoSkillsEnabled"
+      },
+      "ekkoSkillsCandidateLimit": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoSkillsCandidateLimit",
+        "label": "jev.skillsCandidateLimit"
+      },
+      "ekkoSkillsMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoSkillsMinConfidence",
+        "label": "jev.skillsMinConfidence"
+      },
+      "ekkoSkillsTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoSkillsTimeoutMs",
+        "label": "jev.skillsTimeout"
       }
     }
   },
@@ -204,6 +224,37 @@
       "tests": [
         "tests/ekko-agent/memory-jev.test.ts",
         "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "ekko-skills",
+      "purpose": "One opt-in enhancement for semantic skill matching and background learning preflight, with run snapshots and conservative fallback.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/skills/jev.ts",
+        "packages/ekko-agent/src/skills/review.ts",
+        "packages/ekko-agent/src/tools/skills.ts"
+      ],
+      "enabledKey": "ekkoSkillsEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "ekkoSkillsCandidateLimit",
+        "ekkoSkillsMinConfidence",
+        "ekkoSkillsTimeoutMs"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "skillsEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": [
+        "tests/ekko-agent/skills-jev.test.ts",
+        "tests/ekko-agent/jev.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/server/ekko-agent-manager.test.ts",
         "tests/e2e/jev-settings.spec.ts"
       ]
     }

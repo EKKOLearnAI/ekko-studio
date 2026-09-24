@@ -47,15 +47,28 @@ function requestKey(index = 0): string | null {
 }
 
 describe('Ekko JEV configuration', () => {
+  it('defaults legacy skill enhancement off and preserves explicit host overrides without write-back', () => {
+    const legacy = normalizeEkkoConfig({ schemaVersion: 13, jev: { enabled: true, apiKey: 'local-key', memoryEnabled: true } })
+    expect(legacy.jev).toMatchObject({ skillsEnabled: false, skillsCandidateLimit: 20, skillsMinConfidence: 0.8, skillsTimeoutMs: 3000, memoryEnabled: true })
+    const agent = create({ config: { jev: { enabled: true, apiKey: 'local-key', skillsEnabled: true } }, jev: { skillsEnabled: false } })
+    expect(agent.readConfig().jev.skillsEnabled).toBe(true)
+    expect(agent.default.runtime.create().jev.settings.skillsEnabled).toBe(false)
+    expect(agent.default.runtime.create({ jev: { skillsEnabled: true } }).jev.settings.skillsEnabled).toBe(true)
+    expect(agent.readConfig().jev.skillsEnabled).toBe(true)
+  })
+
   it('migrates existing JEV settings without automatically activating memory enhancements', () => {
     const config = normalizeEkkoConfig({ schemaVersion: 10, jev: { enabled: true, memoryEnabled: true, apiKey: 'legacy' } })
     expect(config.jev).toEqual({ ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, memoryEnabled: true, apiKey: 'legacy' })
-    expect(config.schemaVersion).toBe(13)
+    expect(config.schemaVersion).toBe(14)
     expect(resolveEkkoJevConfig(config.jev, { memoryWriteReviewEnabled: true }, { memoryWriteReviewEnabled: false }))
       .toMatchObject({ memoryWriteReviewEnabled: false, apiKey: 'legacy' })
   })
 
   it.each([
+    { skillsEnabled: 'true' }, { skillsCandidateLimit: 0 }, { skillsCandidateLimit: 51 }, { skillsCandidateLimit: 1.5 },
+    { skillsMinConfidence: 0.4 }, { skillsMinConfidence: Number.NaN }, { skillsMinConfidence: '0.8' },
+    { skillsTimeoutMs: 99 }, { skillsTimeoutMs: 30001 },
     { memoryKindRoutingEnabled: 'false' }, { memoryRerankEnabled: 1 }, { memoryWriteReviewEnabled: null },
     { memoryCandidateLimit: 0 }, { memoryCandidateLimit: 51 }, { memoryCandidateLimit: 1.5 },
     { memoryMinConfidence: 0.1 }, { memoryMinConfidence: Number.NaN }, { memoryMinConfidence: 2 },
@@ -69,7 +82,7 @@ describe('Ekko JEV configuration', () => {
     const config = normalizeEkkoConfig({ schemaVersion: 9, runtime: { maxSteps: 17 } })
     expect(config.jev).toEqual(DEFAULT_EKKO_JEV_CONFIG)
     expect(config.runtime.maxSteps).toBe(17)
-    expect(config.schemaVersion).toBe(13)
+    expect(config.schemaVersion).toBe(14)
   })
 
   it('uses local settings when no override is supplied, including after restarting', async () => {

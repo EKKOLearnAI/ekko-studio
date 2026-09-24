@@ -2,6 +2,17 @@ import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
   jev: {
+    ekkoSkillsEnabled: "استخدام JEV لمهارات Ekko",
+    skillsDisabled: "معطّل؛ يستمر اختيار المهارات والتعلّم بالطريقة الحالية.",
+    skillsReady: "تم تفعيل المطابقة الدلالية والتقييم المسبق للتعلّم.",
+    skillsOptions: "إعدادات تحسين المهارات",
+    skillsOptionsHint: "يتحكم مفتاح واحد في الميزتين. تُطبّق الإعدادات المحفوظة في التشغيل التالي. عند عدم اليقين أو تعطل الخدمة يستمر السلوك الحالي.",
+    skillsCandidateLimit: "حد المهارات المرشحة",
+    skillsCandidateLimitHint: "أقصى عدد من المرشحين الإضافيين لكل طلب؛ تُحمّل حتى ثلاث مطابقات عالية الثقة.",
+    skillsMinConfidence: "ثقة قرار المهارات",
+    skillsMinConfidenceHint: "الحد الأدنى للثقة لإضافة مطابقة دلالية أو تخطي مراجعة لا تتضمن خبرة قابلة لإعادة الاستخدام.",
+    skillsTimeout: "مهلة قرار المهارات (مللي ثانية)",
+    skillsTimeoutHint: "الوقت المتاح لكل قرار مطابقة أو تعلّم؛ عند انتهاء المهلة يستمر السلوك الحالي.",
     connectionSettings: "إعدادات الاتصال",
     useCases: "حالات الاستخدام",
     memoryOptions: "خيارات تحسين الذاكرة",

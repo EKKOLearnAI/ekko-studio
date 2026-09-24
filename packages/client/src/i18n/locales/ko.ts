@@ -2,6 +2,17 @@ import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
   jev: {
+    ekkoSkillsEnabled: "Ekko 스킬에 JEV 사용",
+    skillsDisabled: "비활성화됨. 기존 스킬 매칭과 학습을 사용합니다.",
+    skillsReady: "의미 기반 매칭과 학습 사전 판단이 활성화되었습니다.",
+    skillsOptions: "스킬 강화 설정",
+    skillsOptionsHint: "하나의 스위치로 두 기능을 제어합니다. 저장한 설정은 다음 실행부터 적용됩니다. 결과가 불확실하거나 서비스가 실패하면 기존 동작을 유지합니다.",
+    skillsCandidateLimit: "스킬 후보 한도",
+    skillsCandidateLimitHint: "요청마다 평가할 추가 후보 수입니다. 신뢰도가 높은 후보를 최대 3개 불러옵니다.",
+    skillsMinConfidence: "스킬 판단 신뢰도",
+    skillsMinConfidenceHint: "의미 기반 후보를 추가하거나 재사용할 학습 내용이 없는 검토를 건너뛰는 데 필요한 최소 신뢰도입니다.",
+    skillsTimeout: "스킬 판단 제한 시간(ms)",
+    skillsTimeoutHint: "매칭 또는 학습 판단별 시간 한도입니다. 시간 초과 시 기존 동작을 유지합니다.",
     connectionSettings: "연결 설정",
     useCases: "사용 목적",
     memoryOptions: "메모리 강화 옵션",

@@ -31,7 +31,7 @@ export interface EkkoModelRequestSpan {
 /**
  * Writes one compact record for each model-client request attempt.
  *
- * General runtime events are not persisted; optional memory JEV writes compact stage summaries.
+ * General runtime events are not persisted; optional JEV writes compact stage summaries.
  * A model request writes exactly one
  * terminal record (completed or failed), so streaming and tool events cannot
  * multiply file volume.
@@ -49,6 +49,15 @@ export class EkkoRuntimeLogger {
         profile: context.profile, sessionId: context.sessionId, turnId: context.turnId,
         data: { ...diagnostic } })
     } catch { /* Diagnostics must never change memory execution. */ }
+  }
+
+  skillJev(runId: string, diagnostic: EkkoJevDiagnostic, inputContext?: EkkoRuntimeLogContext): void {
+    const context = { ...this.defaultContext, ...inputContext }
+    try {
+      this.writer.write({ category: 'skill', event: 'skill.jev', level: 'info', runId,
+        profile: context.profile, sessionId: context.sessionId, turnId: context.turnId,
+        data: { ...diagnostic } })
+    } catch { /* Diagnostics must never change skill execution. */ }
   }
 
   startModelRequest(input: EkkoModelRequestLogInput): EkkoModelRequestSpan {
