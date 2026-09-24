@@ -2260,4 +2260,61 @@ describe('bridge run final context usage', () => {
     })
   })
 
+  it.each([
+    { name: 'a failed gateway resolution', resolved: false },
+    { name: 'a successful gateway resolution', resolved: true },
+  ])('keeps the bridge approval outcome in the replayed run state for $name', async ({ resolved }) => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    const state = makeState()
+    const sessionMap = new Map([['session-1', state]])
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-approval', status: 'started' }),
+      contextEstimate: vi.fn().mockResolvedValue({
+        token_count: 100,
+        fixed_context_tokens: 80,
+        message_count: 0,
+        tool_count: 0,
+        system_prompt_chars: 13,
+      }),
+      streamOutput: vi.fn(async function* () {
+        yield {
+          run_id: 'run-approval',
+          done: true,
+          status: 'completed',
+          output: 'done',
+          events: [{
+            event: 'approval.resolved',
+            run_id: 'run-approval',
+            approval_id: 'approval-replayed',
+            choice: 'once',
+            resolved,
+          }],
+        }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1' },
+      'research',
+      sessionMap,
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    const replayed = replaceStateMock.mock.calls.filter(call => call[2] === 'approval.resolved')
+    expect(replayed).toHaveLength(1)
+    expect(replayed[0][3]).toMatchObject({
+      approval_id: 'approval-replayed',
+      choice: 'once',
+      resolved,
+    })
+  })
+
 })

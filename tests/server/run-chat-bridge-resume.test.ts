@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { foregroundNotification } from '../../packages/server/src/modules/studio/services/chat-run/foreground-notification'
 
 const addMessageMock = vi.fn()
 const updateSessionStatsMock = vi.fn()
@@ -389,6 +390,82 @@ describe('resumeBridgeRun', () => {
       choice: 'once',
       resolved,
     })
+  })
+
+  it.each([
+    { name: 'a failed gateway resolution', resolved: false, notified: false },
+    { name: 'a successful gateway resolution', resolved: true, notified: true },
+  ])('reports the bridge approval outcome to the run event observer for $name', async ({ resolved, notified }) => {
+    const { resumeBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    const { nsp } = createNamespace()
+    const socket = { id: 'socket-1', connected: true, emit: vi.fn() }
+    const sessionMap = new Map<string, any>()
+    const onEvent = vi.fn()
+    sessionMap.set('session-resume', {
+      messages: [{ id: 1, session_id: 'session-resume', role: 'user', content: 'hello', timestamp: 1 }],
+      isWorking: true,
+      events: [],
+      queue: [],
+    })
+
+    const bridge = {
+      getResult: vi.fn(async () => ({
+        ok: true,
+        run_id: 'run-resume',
+        session_id: 'session-resume',
+        status: 'running',
+        output: '',
+        deltas: [],
+        events: [],
+      })),
+      getOutput: vi.fn(async () => ({
+        ok: true,
+        run_id: 'run-resume',
+        session_id: 'session-resume',
+        status: 'complete',
+        delta: '',
+        cursor: 0,
+        output: '',
+        done: true,
+        result: { final_response: '' },
+        error: null,
+        events: [{
+          event: 'approval.resolved',
+          run_id: 'run-resume',
+          approval_id: 'approval-observed',
+          choice: 'once',
+          resolved,
+        }],
+        event_cursor: 1,
+      })),
+    }
+
+    await resumeBridgeRun(
+      nsp as any,
+      socket as any,
+      {
+        sessionId: 'session-resume',
+        runId: 'run-resume',
+        profile: 'default',
+        instructions: 'system prompt',
+        model: 'gpt-test',
+        provider: 'openai',
+        onEvent,
+      },
+      sessionMap,
+      bridge as any,
+      vi.fn(),
+    )
+
+    const observed = onEvent.mock.calls.filter(call => call[0] === 'approval.resolved')
+    expect(observed).toHaveLength(1)
+    expect(observed[0][1]).toMatchObject({
+      session_id: 'session-resume',
+      approval_id: 'approval-observed',
+      choice: 'once',
+      resolved,
+    })
+    expect(foregroundNotification('approval.resolved', observed[0][1], 10) !== null).toBe(notified)
   })
 
   it('omits resolved when an older bridge runtime does not report an approval outcome', async () => {
