@@ -22,9 +22,16 @@ async function uploadedFileRealPath(path: string, profile: string): Promise<stri
 }
 
 /** Call only for authenticated host input, never share-recipient packets. */
-export async function recordSessionUploadAttachments(sessionId: string, profile: string, input: unknown): Promise<void> {
+export async function recordSessionUploadAttachments(
+  sessionId: string,
+  profile: string,
+  input: unknown,
+  options: { allowPendingSession?: boolean } = {},
+): Promise<void> {
   const session = getSession(sessionId)
-  if (!session || session.profile !== profile) return
+  if (session ? session.profile !== profile : !options.allowPendingSession) return
+  // The authenticated first run can register uploads before its runtime creates the session.
+  // Keep that provenance even if the run is queued or its content blocks are converted to text.
   for (const path of new Set(attachmentPaths(input))) {
     const actual = await uploadedFileRealPath(path, profile)
     if (actual) sessionUploadsStore.record(sessionId, profile, resolve(path), actual)

@@ -391,6 +391,28 @@ describe('existing APIs with session share credentials', () => {
     expect((await request(share.token, url(own))).status).toBe(410)
   })
 
+  it.each(['file', 'image'])('preserves a first-message %s upload grant when the new session is created and shared', async type => {
+    const { recordSessionUploadAttachments } = await import('../../packages/server/src/modules/studio/services/files/session-uploads')
+    const { sessionUploadsStore } = await import('../../packages/server/src/modules/studio/repositories/session-uploads-store')
+    const { createSession, getSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    await mkdir(join(root, 'uploads'))
+    const own = join(root, 'uploads', 'd'.repeat(24) + '.txt')
+    await writeFile(own, 'first attachment')
+    const input = [{ type, path: own }]
+    expect(getSession('new-local-session')).toBeFalsy()
+    await recordSessionUploadAttachments('new-local-session', 'default', input)
+    expect(sessionUploadsStore.find('new-local-session', 'default', own)).toBeUndefined()
+    await recordSessionUploadAttachments('new-local-session', 'default', input, { allowPendingSession: true })
+    expect(sessionUploadsStore.find('new-local-session', 'default', own)).toBe(await realpath(own))
+    expect(getSession('new-local-session')).toBeFalsy()
+    createSession({ id: 'new-local-session', profile: 'default', source: 'cli' })
+    const share = await issue({ download: true }, 'new-local-session')
+    expect(await request(share.token, '/api/studio/files/download?path=' + encodeURIComponent(own)))
+      .toMatchObject({ status: 200, body: 'first attachment' })
+    await recordSessionUploadAttachments('s1', 'another-profile', input, { allowPendingSession: true })
+    expect(sessionUploadsStore.find('s1', 'another-profile', own)).toBeUndefined()
+  })
+
   it('records host attachments after sharing without exposing other uploads or symlink targets', async () => {
     const { recordSessionUploadAttachments } = await import('../../packages/server/src/modules/studio/services/files/session-uploads')
     const share = await issue({ download: true })

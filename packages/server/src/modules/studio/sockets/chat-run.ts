@@ -900,8 +900,9 @@ export class ChatRunSocket {
       try {
         runProfile = resolveRunProfile(data.session_id, data.profile)
         if (!shared && data.session_id && Array.isArray(data.input)) {
-          requireSocketSessionAccess(data.session_id)
-          await recordSessionUploadAttachments(data.session_id, runProfile, data.input)
+          // New chats carry a client-generated id; the runtime persists them on the first run.
+          if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id)
+          await recordSessionUploadAttachments(data.session_id, runProfile, data.input, { allowPendingSession: true })
         }
       } catch (err) {
         const payload = {
