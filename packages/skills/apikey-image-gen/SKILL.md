@@ -16,12 +16,12 @@ prerequisites:
 
 Use this skill when the user wants to generate an image or edit an existing image.
 
-Always call Ekko Studio's media endpoint. Do not call an upstream image API directly, and do not ask the user for an API key. The server reads the selected/requested profile's `config.yaml` and uses a configured custom provider. By default it uses the provider named `fun-codex`, but callers may request another configured provider by sending `provider`, `provider_name`, or `custom_provider`.
+Always call Ekko Studio's media endpoint. Do not call an upstream image API directly, and do not ask the user for an API key. The server reads the selected/requested profile's `config.yaml` and routes through either Hermes Agent's native image-provider registry or a configured OpenAI-compatible custom provider. If the Studio auxiliary route is automatic, its active native Hermes image provider is preferred; `fun-codex` remains the compatibility fallback.
 
-This skill is separate from Hermes Agent's native `image_generate` tool. The
-native tool reads `image_gen` from `config.yaml`; this Studio-managed endpoint
-reads the `auxiliary.image_generation` and `auxiliary.image_edit` routes below.
-Changing one does not change the other.
+Studio stores explicit native selections as `image:<provider>` under
+`auxiliary.image_generation` and `auxiliary.image_edit`. The server resolves
+the provider through Hermes Agent's `ImageGenProvider` registry, so provider
+credentials, capabilities, and model catalogs continue to be owned by Hermes.
 
 Do not use any built-in image generation tool as a fallback. If the Hermes Web UI endpoint returns `401`, `403`, connection failure, or any other error, stop and report the Hermes Web UI error to the user.
 
@@ -120,9 +120,9 @@ Use when there is no input image.
 }
 ```
 
-The server calls `POST /v1/images/generations` against the configured
-`auxiliary.image_generation` provider, then falls back to `fun-codex`.
-If `provider`, `provider_name`, or `custom_provider` is present, the server calls the requested provider's base URL instead.
+For `image:<provider>`, the server invokes the corresponding native Hermes
+image provider. For a custom provider, it calls `POST /v1/images/generations`
+against `auxiliary.image_generation`, then falls back to `fun-codex`.
 
 ### Image To Image
 
@@ -138,10 +138,10 @@ Use when the user provides an existing image and wants the model to modify or re
 }
 ```
 
-The server calls `POST /v1/responses` against the configured
-`auxiliary.image_edit` provider, then the image-generation provider, then
-`fun-codex`.
-If `provider`, `provider_name`, or `custom_provider` is present, the server calls the requested provider's base URL instead.
+For `image:<provider>`, the same native Hermes provider handles the source
+image according to its advertised capabilities. For a custom provider, the
+server calls `POST /v1/responses` against `auxiliary.image_edit`, then the
+image-generation provider, then `fun-codex`.
 
 ### Image Edit
 
@@ -157,15 +157,15 @@ Use when the user wants to modify an existing image while preserving parts of it
 }
 ```
 
-The server calls `POST /v1/images/edits` against the configured
-`auxiliary.image_generation` provider, then falls back to `fun-codex`.
-If `provider`, `provider_name`, or `custom_provider` is present, the server calls the requested provider's base URL instead.
+For `image:<provider>`, the same native Hermes provider performs the edit. For
+a custom provider, the server calls `POST /v1/images/edits` against
+`auxiliary.image_generation`, then falls back to `fun-codex`.
 
 ## Request Fields
 
 - `mode`: `text`, `image`, or `edit`.
 - `prompt`: required.
-- `provider`: optional configured custom provider name. Defaults to `fun-codex`. `custom:<name>` is accepted and normalized to `<name>`.
+- `provider`: optional provider selection. Use `image:<name>` for a registered native Hermes image provider. Custom provider names and `custom:<name>` remain supported. When omitted, Studio uses the configured auxiliary route, then the active native Hermes image provider, then `fun-codex`.
 - `provider_name`: optional alias for `provider`.
 - `custom_provider`: optional alias for `provider`.
 - `image_path`: local png, jpeg, or webp path. Required for `image` and `edit` unless using `image_url` or `image_base64`.

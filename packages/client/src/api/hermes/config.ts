@@ -143,6 +143,23 @@ export interface FallbackProvidersResponse {
   fallback_providers: FallbackProviderEntry[]
 }
 
+export interface StudioImageProvider {
+  name: string
+  display_name: string
+  available: boolean
+  active: boolean
+  default_model?: string | null
+  models: Array<{ id: string; display?: string; [key: string]: unknown }>
+  capabilities: { modalities?: string[]; max_reference_images?: number; [key: string]: unknown }
+  setup?: { badge?: string; tag?: string; required_env_vars?: string[] }
+}
+
+export interface StudioImageProvidersResponse {
+  ok: boolean
+  profile: string
+  providers: StudioImageProvider[]
+}
+
 export interface MoaModelSlot {
   provider: string
   model: string
@@ -216,6 +233,10 @@ export async function saveDelegationModel(delegation: DelegationModelConfig): Pr
 
 export async function fetchFallbackProviders(): Promise<FallbackProvidersResponse> {
   return request<FallbackProvidersResponse>('/api/hermes/config/fallback-providers')
+}
+
+export async function fetchStudioImageProviders(): Promise<StudioImageProvidersResponse> {
+  return request<StudioImageProvidersResponse>('/api/studio/media/image-providers')
 }
 
 export async function saveFallbackProviders(fallbackProviders: FallbackProviderEntry[]): Promise<{

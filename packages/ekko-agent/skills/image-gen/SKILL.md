@@ -57,7 +57,7 @@ Use when parts of the source should be preserved:
 ## Options
 
 - `--profile <name>`: required in Ekko runs; use the current runtime Profile.
-- `--provider <name>`: optional configured custom provider. Omit it to use the Profile's image route and server fallback.
+- `--provider <name>`: optional configured provider. Native Hermes image providers use `image:<name>`; custom OpenAI-compatible providers use their configured name. Omit it to use the Profile's image route and server fallback.
 - `--size <width>x<height>`: defaults to `1024x1024`. Also accepts `auto` when supported.
 - `--quality <value>`: optional provider quality setting.
 - `--n <count>`: number of images; defaults to `1`.
@@ -72,5 +72,6 @@ Do not invent a provider or model override. Use them only when the user requeste
 
 - `missing_fun_codex_provider`: the current Profile has no default `fun-codex` provider or configured image route.
 - `missing_apikey_image_provider`: the requested provider is absent from the current Profile.
+- `native_image_generation_failed`: the selected Hermes image provider returned an error or no image.
 - `profile_not_found`: the Ekko Profile does not map to an existing Studio/Hermes Profile used by the media endpoint.
 - `401`, `403`, connection failure, timeout, or any provider error: report the Studio error and stop. Do not bypass Studio or silently retry against another service.

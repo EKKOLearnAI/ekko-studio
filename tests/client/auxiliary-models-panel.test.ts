@@ -5,6 +5,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 const apiMocks = vi.hoisted(() => ({
   fetchAuxiliaryModels: vi.fn(),
   fetchDelegationModel: vi.fn(),
+  fetchStudioImageProviders: vi.fn(),
   saveAuxiliaryModels: vi.fn(),
   saveDelegationModel: vi.fn(),
 }))
@@ -106,6 +107,7 @@ describe('AuxiliaryModelsPanel', () => {
     apiMocks.fetchDelegationModel.mockResolvedValue({
       delegation: { provider: 'openrouter', model: 'old-model', reasoning_effort: 'low' },
     })
+    apiMocks.fetchStudioImageProviders.mockResolvedValue({ ok: true, profile: 'default', providers: [] })
     apiMocks.saveDelegationModel
       .mockResolvedValueOnce({
         success: true,
@@ -205,6 +207,50 @@ describe('AuxiliaryModelsPanel', () => {
     await wrapper.findAll('.auxiliary-row')[1].get('button').trigger('click')
 
     expect(wrapper.getComponent('[data-testid="auxiliary-provider"]').props('value')).toBe('auto')
+  })
+
+  it('uses Hermes native image providers and filters them by task capability', async () => {
+    apiMocks.fetchAuxiliaryModels.mockResolvedValueOnce({
+      tasks: [
+        { key: 'image_generation', label: 'Image generation', default_timeout: 600 },
+        { key: 'image_edit', label: 'Image edit', default_timeout: 600 },
+      ],
+      auxiliary: {},
+    })
+    apiMocks.fetchStudioImageProviders.mockResolvedValueOnce({
+      ok: true,
+      profile: 'default',
+      providers: [
+        {
+          name: 'openai', display_name: 'OpenAI Images', available: true, active: true,
+          default_model: 'gpt-image-2', models: [{ id: 'gpt-image-2' }],
+          capabilities: { modalities: ['text', 'image'] },
+        },
+        {
+          name: 'deepinfra', display_name: 'DeepInfra', available: false, active: false,
+          default_model: 'flux', models: [{ id: 'flux' }], capabilities: { modalities: ['text'] },
+        },
+      ],
+    })
+
+    const wrapper = mount(AuxiliaryModelsPanel)
+    await flushPromises()
+    await wrapper.findAll('.auxiliary-row')[1].get('button').trigger('click')
+
+    const generationOptions = wrapper.getComponent('[data-testid="auxiliary-provider"]').props('options')
+    expect(generationOptions).toContainEqual({ label: 'OpenAI Images', value: 'image:openai', disabled: false })
+    expect(generationOptions).toContainEqual({ label: 'DeepInfra', value: 'image:deepinfra', disabled: true })
+    wrapper.getComponent('[data-testid="auxiliary-provider"]').vm.$emit('update:value', 'image:openai')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.getComponent('[data-testid="auxiliary-model"]').props('value')).toBe('gpt-image-2')
+
+    wrapper.getComponent('[data-testid="auxiliary-provider"]').vm.$emit('update:value', 'auto')
+    await wrapper.vm.$nextTick()
+    await wrapper.get('.modal-stub button').trigger('click')
+    await wrapper.findAll('.auxiliary-row')[2].get('button').trigger('click')
+    const editOptions = wrapper.getComponent('[data-testid="auxiliary-provider"]').props('options')
+    expect(editOptions).toContainEqual({ label: 'OpenAI Images', value: 'image:openai', disabled: false })
+    expect(editOptions).not.toContainEqual(expect.objectContaining({ value: 'image:deepinfra' }))
   })
 
   it('labels an unconfigured Studio image route as the Studio default', async () => {

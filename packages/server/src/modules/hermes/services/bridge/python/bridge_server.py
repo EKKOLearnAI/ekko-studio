@@ -177,6 +177,88 @@ class BridgeServer:
                     "relogin_required": bool(getattr(exc, "relogin_required", False)),
                 }
 
+        if action == "image_providers":
+            _ensure_agent_imports()
+            from hermes_cli.plugins import _ensure_plugins_discovered
+            from agent.image_gen_registry import get_active_provider, list_providers
+
+            _ensure_plugins_discovered()
+            active = get_active_provider()
+            providers = []
+            for provider in list_providers():
+                try:
+                    available = bool(provider.is_available())
+                except Exception:
+                    available = False
+                try:
+                    models = provider.list_models() or []
+                except Exception:
+                    models = []
+                try:
+                    default_model = provider.default_model()
+                except Exception:
+                    default_model = None
+                try:
+                    capabilities = provider.capabilities() or {}
+                except Exception:
+                    capabilities = {}
+                try:
+                    setup = provider.get_setup_schema() or {}
+                except Exception:
+                    setup = {}
+                providers.append({
+                    "name": provider.name,
+                    "display_name": provider.display_name,
+                    "available": available,
+                    "active": active is not None and active.name == provider.name,
+                    "default_model": default_model,
+                    "models": models,
+                    "capabilities": capabilities,
+                    "setup": {
+                        "badge": setup.get("badge", ""),
+                        "tag": setup.get("tag", ""),
+                        "required_env_vars": [
+                            item.get("key")
+                            for item in setup.get("env_vars", [])
+                            if isinstance(item, dict) and item.get("key")
+                        ],
+                    },
+                })
+            return {"providers": _jsonable(providers)}
+
+        if action == "image_generate":
+            prompt = str(req.get("prompt") or "").strip()
+            if not prompt:
+                raise ValueError("prompt is required")
+            _ensure_agent_imports()
+            from hermes_cli.plugins import _ensure_plugins_discovered
+            from agent.image_gen_registry import get_active_provider, get_provider
+
+            _ensure_plugins_discovered()
+            requested_provider = str(req.get("provider") or "").strip()
+            provider = get_provider(requested_provider) if requested_provider else get_active_provider()
+            if provider is None:
+                raise ValueError(
+                    f"image provider '{requested_provider}' is not registered"
+                    if requested_provider else "no active image provider is configured"
+                )
+            if not provider.is_available():
+                raise ValueError(f"image provider '{provider.name}' is not configured")
+            kwargs = {}
+            for key in ("model", "quality", "output_format", "upscale"):
+                if req.get(key) is not None:
+                    kwargs[key] = req.get(key)
+            result = provider.generate(
+                prompt,
+                str(req.get("aspect_ratio") or "landscape"),
+                image_url=req.get("image_url"),
+                reference_image_urls=req.get("reference_image_urls"),
+                **kwargs,
+            )
+            if not isinstance(result, dict):
+                raise RuntimeError(f"image provider '{provider.name}' returned an invalid result")
+            return {"provider": provider.name, "result": _jsonable(result)}
+
         if action == "get_result":
             return self.pool.get_result(str(req.get("run_id") or ""))
 

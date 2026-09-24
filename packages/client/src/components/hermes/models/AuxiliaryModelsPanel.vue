@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, NInput, NInputNumber, NModal, NSelect, NSpin, useMessage } from 'naive-ui'
+import { NButton, NInput, NInputNumber, NModal, NSelect, NSpin, useMessage, type SelectOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   fetchAuxiliaryModels,
   fetchDelegationModel,
+  fetchStudioImageProviders,
   saveAuxiliaryModels,
   saveDelegationModel,
   type AuxiliaryModelSettings,
   type AuxiliaryModelTask,
   type AuxiliaryModelsConfig,
   type DelegationModelConfig,
+  type StudioImageProvider,
 } from '@/api/hermes/config'
 import { useModelsStore } from '@/stores/hermes/models'
 import { useProfilesStore } from '@/stores/hermes/profiles'
@@ -27,6 +29,7 @@ const savingDelegation = ref(false)
 const tasks = ref<AuxiliaryModelTask[]>([])
 const auxiliary = ref<AuxiliaryModelsConfig>({})
 const delegation = ref<DelegationModelConfig>({})
+const studioImageProviders = ref<StudioImageProvider[]>([])
 const showEditor = ref(false)
 const showDelegationEditor = ref(false)
 const editingTask = ref<AuxiliaryModelTask | null>(null)
@@ -108,7 +111,7 @@ const isEditingStudioImage = computed(() => (
 
 const providerOptions = computed(() => {
   const seen = new Set<string>()
-  const options = [{
+  const options: SelectOption[] = [{
     label: isEditingStudioImage.value
       ? t('models.auxiliaryProviderStudioDefault')
       : t('models.auxiliaryProviderAuto'),
@@ -116,6 +119,19 @@ const providerOptions = computed(() => {
   }]
   if (!isEditingStudioImage.value) {
     options.push({ label: t('models.auxiliaryProviderMain'), value: 'main' })
+  } else {
+    const modality = editingTask.value?.key === 'image_edit' ? 'image' : 'text'
+    for (const provider of studioImageProviders.value) {
+      const modalities = provider.capabilities?.modalities || ['text']
+      if (!modalities.includes(modality)) continue
+      const value = `image:${provider.name}`
+      seen.add(value)
+      options.push({
+        label: provider.display_name || provider.name,
+        value,
+        disabled: !provider.available,
+      })
+    }
   }
   for (const group of modelsStore.providers) {
     if (!group.provider) continue
@@ -135,6 +151,9 @@ function canonicalProviderValue(value: string): string {
 function selectableProviderValue(provider: string, customOnly = false): string {
   if (!provider || provider === 'auto') return provider
   if (provider === 'main') return customOnly ? '' : provider
+  if (customOnly && provider.startsWith('image:')) {
+    return studioImageProviders.value.some(item => `image:${item.name}` === provider) ? provider : ''
+  }
   const direct = modelsStore.providers.find(group => group.provider === provider)
   if (direct && (!customOnly || direct.provider.startsWith('custom:'))) return direct.provider
   const canonical = canonicalProviderValue(provider)
@@ -145,6 +164,13 @@ function selectableProviderValue(provider: string, customOnly = false): string {
 }
 
 function modelsForProvider(provider: string): string[] {
+  if (provider.startsWith('image:')) {
+    const name = provider.slice('image:'.length)
+    return studioImageProviders.value
+      .find(item => item.name === name)
+      ?.models.map(model => model.id)
+      .filter(Boolean) || []
+  }
   const group = modelsStore.providers.find(item => item.provider === provider)
   return group?.models || []
 }
@@ -175,9 +201,13 @@ function configuredLabel(task: AuxiliaryModelTask, settings?: AuxiliaryModelSett
     ? t('models.auxiliaryProviderStudioDefault')
     : t('models.auxiliaryProviderAuto')
   if (!settings || Object.keys(settings).length === 0) return defaultProviderLabel
-  const provider = !settings.provider || settings.provider === 'auto'
+  let provider = !settings.provider || settings.provider === 'auto'
     ? (settings.base_url ? t('models.auxiliaryCustomEndpoint') : defaultProviderLabel)
     : settings.provider
+  if (provider.startsWith('image:')) {
+    const native = studioImageProviders.value.find(item => `image:${item.name}` === provider)
+    provider = native?.display_name || provider.slice('image:'.length)
+  }
   return settings.model ? `${provider} / ${settings.model}` : provider
 }
 
@@ -196,13 +226,15 @@ function timeoutLabel(task: AuxiliaryModelTask, settings?: AuxiliaryModelSetting
 async function loadModelRouting() {
   loading.value = true
   try {
-    const [auxiliaryData, delegationData] = await Promise.all([
+    const [auxiliaryData, delegationData, imageProviderData] = await Promise.all([
       fetchAuxiliaryModels(),
       fetchDelegationModel(),
+      fetchStudioImageProviders().catch(() => ({ ok: false, profile: '', providers: [] })),
     ])
     tasks.value = auxiliaryData.tasks
     auxiliary.value = auxiliaryData.auxiliary
     delegation.value = delegationData.delegation
+    studioImageProviders.value = imageProviderData.providers
   } catch (e: any) {
     message.error(e.message || t('models.modelRoutingLoadFailed'))
   } finally {
@@ -307,7 +339,7 @@ function buildSettings(): AuxiliaryModelSettings {
   const extraBody = readExtraBody()
   const model = form.value.model.trim()
   if (provider) settings.provider = provider
-  if (provider && provider !== 'auto' && provider !== 'main' && !model) {
+  if (provider && provider !== 'auto' && provider !== 'main' && !model && modelsForProvider(provider).length > 0) {
     throw new Error(t('models.modelRequired'))
   }
   if (model) settings.model = model
@@ -379,7 +411,10 @@ watch(() => form.value.provider, (provider) => {
     return
   }
   if (!modelsForProvider(provider).includes(form.value.model)) {
-    form.value.model = ''
+    const native = provider.startsWith('image:')
+      ? studioImageProviders.value.find(item => `image:${item.name}` === provider)
+      : undefined
+    form.value.model = native?.default_model || ''
   }
 }, { flush: 'sync' })
 

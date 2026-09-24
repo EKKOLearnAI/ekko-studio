@@ -33,6 +33,10 @@ import {
 
 configureChatAgentRuntime({
   createPrimaryAgentBridge: options => new AgentBridgeClient(options),
+  listPrimaryImageProviders: profile => new AgentBridgeClient({ timeoutMs: 15000 }).imageProviders(profile),
+  generatePrimaryImage: (profile, payload, options) => new AgentBridgeClient({
+    timeoutMs: Number(options?.timeoutMs) || 10 * 60 * 1000,
+  }).imageGenerate(profile, payload, options),
   getPrimaryAgentBridgeManager: getAgentBridgeManager,
   redactPrimaryAgentBridgeError: redactAgentBridgeError,
   codingAgentRunManager,

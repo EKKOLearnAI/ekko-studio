@@ -150,6 +150,33 @@ export interface AgentBridgeProviderCredentials extends AgentBridgeResponse {
   relogin_required?: boolean
 }
 
+export interface AgentBridgeImageProvider {
+  name: string
+  display_name: string
+  available: boolean
+  active: boolean
+  default_model?: string | null
+  models: Array<{ id: string; display?: string; [key: string]: unknown }>
+  capabilities: { modalities?: string[]; max_reference_images?: number; [key: string]: unknown }
+  setup: { badge?: string; tag?: string; required_env_vars?: string[] }
+}
+
+export interface AgentBridgeImageProviders extends AgentBridgeResponse {
+  providers: AgentBridgeImageProvider[]
+}
+
+export interface AgentBridgeImageGenerateResult extends AgentBridgeResponse {
+  provider: string
+  result: {
+    success: boolean
+    image?: string | null
+    model?: string
+    error?: string
+    error_type?: string
+    [key: string]: unknown
+  }
+}
+
 export interface AgentBridgeCommandResult extends AgentBridgeResponse {
   session_id: string
   command: string
@@ -562,6 +589,22 @@ export class AgentBridgeClient {
       provider,
       ...(model ? { model } : {}),
     })
+  }
+
+  imageProviders(profile: string): Promise<AgentBridgeImageProviders> {
+    return this.request<AgentBridgeImageProviders>({ action: 'image_providers', profile })
+  }
+
+  imageGenerate(
+    profile: string,
+    payload: Record<string, unknown>,
+    options: AgentBridgeRequestOptions = {},
+  ): Promise<AgentBridgeImageGenerateResult> {
+    return this.request<AgentBridgeImageGenerateResult>({
+      action: 'image_generate',
+      profile,
+      ...payload,
+    }, options)
   }
 
   command(sessionId: string, command: string, profile?: string): Promise<AgentBridgeCommandResult> {

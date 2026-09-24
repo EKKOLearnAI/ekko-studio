@@ -5,6 +5,7 @@ import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '.
 import { readConfigYamlForProfile } from '../public/media-profile-config'
 import { config } from '../public/config'
 import { getCompatibleCustomProviders } from '../contracts/provider-compat'
+import { generatePrimaryImage, listPrimaryImageProviders } from '../public/chat-agent-runtime'
 
 const XAI_VIDEO_GENERATIONS_URL = 'https://api.x.ai/v1/videos/generations'
 const XAI_VIDEO_STATUS_URL = 'https://api.x.ai/v1/videos'
@@ -57,6 +58,8 @@ type ApiKeyImageProvider = {
   baseUrl: string
   model: string
 }
+
+const NATIVE_IMAGE_PROVIDER_PREFIX = 'image:'
 
 function requestedProfileName(ctx: Context): string {
   const headerProfile = ctx.get('x-hermes-profile')
@@ -123,6 +126,13 @@ function requestedApiKeyImageProviderName(body: any): string {
   // No fallback to the built-in name here: resolveApiKeyImageProvider consults
   // the profile's configured provider before reaching for the constant.
   return normalizeCustomProviderName(body?.provider || body?.provider_name || body?.custom_provider)
+}
+
+function nativeImageProviderName(value: unknown): string {
+  const provider = String(value || '').trim()
+  return provider.startsWith(NATIVE_IMAGE_PROVIDER_PREFIX)
+    ? provider.slice(NATIVE_IMAGE_PROVIDER_PREFIX.length).trim()
+    : ''
 }
 
 /**
@@ -629,6 +639,116 @@ function saveGeneratedImages(images: string[], requestedOutputPath?: string): st
   })
 }
 
+function requestedAspectRatio(body: any): 'landscape' | 'square' | 'portrait' {
+  const explicit = String(body.aspect_ratio || '').trim().toLowerCase()
+  if (explicit === 'landscape' || explicit === 'square' || explicit === 'portrait') return explicit
+  const match = String(body.size || '').match(/^(\d+)x(\d+)$/)
+  if (!match) return 'landscape'
+  const width = Number(match[1])
+  const height = Number(match[2])
+  return width === height ? 'square' : width > height ? 'landscape' : 'portrait'
+}
+
+async function nativeImageInput(body: any): Promise<string | undefined> {
+  if (!body.image_url && !body.image_base64 && !body.image_path) return undefined
+  if (typeof body.image_path === 'string' && body.image_path.trim()) {
+    const path = isAbsolute(body.image_path) ? body.image_path : resolve(process.cwd(), body.image_path)
+    if (!existsSync(path)) {
+      const err: any = new Error('image_path does not exist')
+      err.status = 404
+      throw err
+    }
+    return path
+  }
+  return normalizeImageInput(body)
+}
+
+async function saveNativeImage(image: string, outputPath: string): Promise<void> {
+  let buffer: Buffer
+  if (image.startsWith('data:image/')) {
+    buffer = imageDataUriToBytes(image).buffer
+  } else if (/^https?:\/\//i.test(image)) {
+    buffer = (await fetchImageBytes(image)).buffer
+  } else {
+    const source = isAbsolute(image) ? image : resolve(process.cwd(), image)
+    if (!existsSync(source)) throw new Error('image provider returned a file that does not exist')
+    buffer = readFileSync(source)
+  }
+  if (buffer.length > MAX_IMAGE_BYTES) {
+    const err: any = new Error(`image is too large (max ${MAX_IMAGE_BYTES} bytes)`)
+    err.status = 413
+    throw err
+  }
+  mkdirSync(dirname(outputPath), { recursive: true })
+  writeFileSync(outputPath, buffer)
+}
+
+async function requestNativeImages(
+  profile: string,
+  provider: string,
+  mode: ApiKeyImageMode,
+  body: any,
+  configuredModel: string,
+  configuredTimeoutMs?: number,
+): Promise<{ outputPaths: string[]; model?: string }> {
+  const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+  if (!prompt) {
+    const err: any = new Error('prompt is required')
+    err.status = 400
+    throw err
+  }
+  const count = normalizePositiveInt(body.n, 1, 'n')
+  const timeoutMs = body.timeout_ms === undefined || body.timeout_ms === null || body.timeout_ms === ''
+    ? configuredTimeoutMs || DEFAULT_TIMEOUT_MS
+    : normalizePositiveInt(body.timeout_ms, DEFAULT_TIMEOUT_MS, 'timeout_ms')
+  const source = mode === 'text' ? undefined : await nativeImageInput(body)
+  const references = Array.isArray(body.reference_image_urls)
+    ? body.reference_image_urls.filter((item: unknown) => typeof item === 'string' && item.trim())
+    : undefined
+  const outputPaths: string[] = []
+  let model: string | undefined
+  for (let index = 0; index < count; index += 1) {
+    const response = await generatePrimaryImage(profile, {
+      provider,
+      prompt,
+      aspect_ratio: requestedAspectRatio(body),
+      ...(source ? { image_url: source } : {}),
+      ...(references?.length ? { reference_image_urls: references } : {}),
+      ...((body.model || configuredModel) ? { model: body.model || configuredModel } : {}),
+      ...(body.quality ? { quality: body.quality } : {}),
+      ...(body.output_format ? { output_format: body.output_format } : {}),
+      ...(body.upscale !== undefined ? { upscale: Boolean(body.upscale) } : {}),
+    }, { timeoutMs })
+    if (!response.result?.success || !response.result?.image) {
+      const err: any = new Error(response.result?.error || `image provider '${provider}' did not return an image`)
+      err.status = 502
+      err.code = response.result?.error_type || 'native_image_generation_failed'
+      throw err
+    }
+    model = response.result.model || model
+    const requestedOutputPath = typeof body.output_path === 'string' ? body.output_path.trim() : ''
+    const outputPath = requestedOutputPath && count === 1
+      ? requestedOutputPath
+      : requestedOutputPath
+        ? requestedOutputPath.replace(/(\.[^.\\/]+)?$/, `${index > 0 ? `-${index + 1}` : ''}$1`)
+        : defaultImageOutputPath(`image_${Date.now()}`, index)
+    await saveNativeImage(response.result.image, outputPath)
+    outputPaths.push(outputPath)
+  }
+  return { outputPaths, model }
+}
+
+export async function getImageProviders(ctx: Context) {
+  try {
+    const profile = resolveMediaProfile(ctx)
+    const response = await listPrimaryImageProviders(profile)
+    ctx.body = { ok: true, profile, providers: response.providers || [] }
+  } catch (err: any) {
+    ctx.status = err.status || 503
+    ctx.body = { error: err.message || String(err), code: err.code || 'image_providers_unavailable' }
+  }
+}
+
 export async function apiKeyImageGenerate(ctx: Context) {
   let profile: string
   try {
@@ -653,6 +773,36 @@ export async function apiKeyImageGenerate(ctx: Context) {
     const activeSettings = mode === 'image' ? editSettings : generationSettings
     const configuredProvider = activeSettings.provider
       || (mode === 'image' ? generationSettings.provider : editSettings.provider)
+    const requestedProvider = String(body?.provider || body?.provider_name || '').trim()
+    let nativeProvider = nativeImageProviderName(requestedProvider || configuredProvider)
+    if (!requestedProvider && !configuredProvider) {
+      try {
+        const nativeProviders = await listPrimaryImageProviders(profile)
+        nativeProvider = nativeProviders.providers?.find((entry: any) => entry.active && entry.available)?.name || ''
+      } catch {
+        // The existing OpenAI-compatible Studio route remains the fallback
+        // when the bundled Hermes runtime predates image provider discovery.
+      }
+    }
+    if (nativeProvider) {
+      const native = await requestNativeImages(
+        profile,
+        nativeProvider,
+        mode,
+        body,
+        activeSettings.model,
+        activeSettings.timeoutMs,
+      )
+      ctx.body = {
+        ok: true,
+        mode,
+        output_paths: native.outputPaths,
+        provider: `${NATIVE_IMAGE_PROVIDER_PREFIX}${nativeProvider}`,
+        model: native.model,
+        profile,
+      }
+      return
+    }
     const providerName = requestedApiKeyImageProviderName(body)
     const resolution = resolveApiKeyImageProvider(hermesConfig, providerName, configuredProvider)
     if (!resolution.provider) {

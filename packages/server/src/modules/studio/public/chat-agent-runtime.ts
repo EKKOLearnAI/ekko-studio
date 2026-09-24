@@ -19,6 +19,8 @@ export type ChatModelResponse = any
 
 export interface ChatAgentRuntimeDependencies {
   createPrimaryAgentBridge(options?: Record<string, unknown>): PrimaryAgentBridgeClient
+  listPrimaryImageProviders(profile: string): Promise<any>
+  generatePrimaryImage(profile: string, payload: Record<string, unknown>, options?: Record<string, unknown>): Promise<any>
   getPrimaryAgentBridgeManager(): any
   redactPrimaryAgentBridgeError(error: string | undefined, endpoint?: string, replacement?: string): string | undefined
   codingAgentRunManager: Record<string, any>
@@ -59,6 +61,12 @@ function configured(): ChatAgentRuntimeDependencies {
 export const createPrimaryAgentBridge = (options?: Record<string, unknown>) => (
   configured().createPrimaryAgentBridge(options)
 )
+export const listPrimaryImageProviders = (profile: string) => configured().listPrimaryImageProviders(profile)
+export const generatePrimaryImage = (
+  profile: string,
+  payload: Record<string, unknown>,
+  options?: Record<string, unknown>,
+) => configured().generatePrimaryImage(profile, payload, options)
 export const getPrimaryAgentBridgeManager = () => configured().getPrimaryAgentBridgeManager()
 export const redactPrimaryAgentBridgeError = (
   error: string | undefined,

@@ -21,6 +21,60 @@ afterEach(() => {
 })
 
 describe('media controller', () => {
+  it('lists and generates through the profile-scoped Hermes image provider registry', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'hermes-native-image-'))
+    temporaryProfileDirs.push(directory)
+    const outputPath = join(directory, 'native.png')
+    const listPrimaryImageProviders = vi.fn(async () => ({
+      providers: [{
+        name: 'openai', display_name: 'OpenAI Images', available: true, active: true,
+        default_model: 'gpt-image-2', models: [{ id: 'gpt-image-2' }],
+        capabilities: { modalities: ['text', 'image'] }, setup: {},
+      }],
+    }))
+    const generatePrimaryImage = vi.fn(async () => ({
+      provider: 'openai',
+      result: {
+        success: true,
+        image: 'data:image/png;base64,aW1hZ2UtYnl0ZXM=',
+        model: 'gpt-image-2',
+      },
+    }))
+    vi.doMock('../../packages/server/src/modules/studio/public/profile-config', () => ({
+      getActiveProfileName: () => 'default',
+      getProfileDir: () => directory,
+      listProfileNamesFromDisk: () => ['default'],
+    }))
+    vi.doMock('../../packages/server/src/modules/studio/public/media-profile-config', () => ({
+      readConfigYamlForProfile: vi.fn(async () => ({
+        auxiliary: { image_generation: { provider: 'image:openai', model: 'gpt-image-2', timeout: 45 } },
+      })),
+    }))
+    vi.doMock('../../packages/server/src/modules/studio/public/chat-agent-runtime', () => ({
+      listPrimaryImageProviders,
+      generatePrimaryImage,
+    }))
+    const { apiKeyImageGenerate, getImageProviders } = await import('../../packages/server/src/modules/studio/controllers/media')
+    const baseCtx: any = {
+      state: { serverTokenAuth: true }, query: {}, request: {}, get: vi.fn(() => ''), status: 200, body: undefined,
+    }
+    await getImageProviders({ ...baseCtx })
+    expect(listPrimaryImageProviders).toHaveBeenCalledWith('default')
+
+    const ctx: any = {
+      ...baseCtx,
+      request: { body: { mode: 'text', prompt: 'make an icon', output_path: outputPath, size: '1024x1024' } },
+    }
+    await apiKeyImageGenerate(ctx)
+
+    expect(ctx.body).toMatchObject({
+      ok: true, provider: 'image:openai', model: 'gpt-image-2', output_paths: [outputPath], profile: 'default',
+    })
+    expect(generatePrimaryImage).toHaveBeenCalledWith('default', expect.objectContaining({
+      provider: 'openai', prompt: 'make an icon', model: 'gpt-image-2', aspect_ratio: 'square',
+    }), { timeoutMs: 45_000 })
+  })
+
   it('uses Hermes Web UI media directory as the default generated video output path', async () => {
     process.env.HERMES_WEB_UI_HOME = '/tmp/hermes-web-ui-test-home'
     const { defaultImageOutputPath, defaultMediaOutputPath } = await import('../../packages/server/src/modules/studio/controllers/media')

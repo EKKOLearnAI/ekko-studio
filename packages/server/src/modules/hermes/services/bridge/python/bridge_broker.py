@@ -249,7 +249,7 @@ class BridgeBroker:
             profile = self._normalize_profile(req.get("profile"))
             return self._forward(profile, req, self._normalize_worker_key(profile, req.get("worker_key")))
 
-        if action == "provider_credentials":
+        if action in {"provider_credentials", "image_providers", "image_generate"}:
             profile = self._normalize_profile(req.get("profile"))
             return self._forward(profile, req, self._normalize_worker_key(profile, req.get("worker_key")))
 
