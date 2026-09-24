@@ -1,3 +1,4 @@
+import { readTomlAssignment } from './toml-assignment'
 import { prepareDshRuntime, DSH_API_KEY_ENV } from './dsh/runtime-config'
 import { readDshMcpServers, validateDshSettings } from './dsh/config'
 import { createDshHost } from './dsh/host'
@@ -1336,57 +1337,6 @@ function parseCodexExternalMcpBlocks(...contents: Array<string | null | undefine
   return Array.from(blockByServer.values()).filter(Boolean)
 }
 
-interface TomlArrayScanState {
-  quote: '"' | "'" | null
-  multiline: boolean
-}
-
-function scanTomlArrayBrackets(line: string, state: TomlArrayScanState): number {
-  let delta = 0
-  let escaped = false
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    if (state.quote) {
-      if (state.multiline) {
-        if (state.quote === '"' && char === '\\') {
-          escaped = !escaped
-          continue
-        }
-        if (char === state.quote && !escaped) {
-          let quoteCount = 1
-          while (line[index + quoteCount] === state.quote) quoteCount += 1
-          if (quoteCount >= 3) {
-            state.quote = null
-            state.multiline = false
-            index += quoteCount - 1
-          }
-        }
-        escaped = false
-        continue
-      }
-      if (state.quote === '"' && char === '\\' && !escaped) {
-        escaped = true
-        continue
-      }
-      if (char === state.quote && !escaped) {
-        state.quote = null
-      }
-      escaped = false
-      continue
-    }
-    if (char === '#') break
-    if (char === '"' || char === "'") {
-      state.quote = char
-      state.multiline = line.slice(index, index + 3) === char.repeat(3)
-      if (state.multiline) index += 2
-      continue
-    }
-    if (char === '[') delta += 1
-    else if (char === ']') delta -= 1
-  }
-  return delta
-}
-
 function isManagedCodexSection(section: string): boolean {
   return section === 'models'
     || section.startsWith('model.')
@@ -1449,29 +1399,23 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
         }
         continue
       }
-      const assignment = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=/)
+      const assignment = readTomlAssignment(lines, lineIndex)
+      if (assignment) lineIndex = assignment.endIndex
+      const assignmentKey = assignment ? JSON.stringify(assignment.key) : ''
+      const settingName = assignment?.key.length === 1 ? assignment.key[0] : ''
       if (!section) {
-        if (assignment && !runtimeKeys.has(assignment[1])) {
-          let mergedLine = line
-          const scanState: TomlArrayScanState = { quote: null, multiline: false }
-          let bracketDepth = scanTomlArrayBrackets(line.slice(line.indexOf('=') + 1), scanState)
-          while ((bracketDepth > 0 || scanState.multiline) && lineIndex + 1 < lines.length) {
-            lineIndex += 1
-            const nextLine = lines[lineIndex]
-            mergedLine += `\n${nextLine}`
-            bracketDepth += scanTomlArrayBrackets(nextLine, scanState)
-          }
-          topLevel.set(assignment[1], mergedLine)
+        if (assignment && !runtimeKeys.has(settingName)) {
+          topLevel.set(assignmentKey, assignment.lines.join('\n'))
         }
         continue
       }
       if (section === 'features') {
-        if (assignment && !runtimeFeatures.has(assignment[1])) featureLines.set(assignment[1], line)
+        if (assignment && !runtimeFeatures.has(settingName)) {
+          featureLines.set(assignmentKey, assignment.lines.join('\n'))
+        }
         continue
       }
-      if (isManagedCodexSection(section)) {
-        continue
-      }
+      if (isManagedCodexSection(section)) continue
       const sectionBlock = sections.get(sectionKey)
       if (!sectionBlock || !line.trim()) continue
       if (!assignment) {
@@ -1479,22 +1423,12 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
         continue
       }
 
-      const entryLines = [line]
-      const scanState: TomlArrayScanState = { quote: null, multiline: false }
-      let bracketDepth = scanTomlArrayBrackets(line.slice(line.indexOf('=') + 1), scanState)
-      while ((bracketDepth > 0 || scanState.multiline) && lineIndex + 1 < lines.length) {
-        lineIndex += 1
-        const nextLine = lines[lineIndex]
-        entryLines.push(nextLine)
-        bracketDepth += scanTomlArrayBrackets(nextLine, scanState)
-      }
-
-      const previousIndex = sectionBlock.assignmentIndexes.get(assignment[1])
+      const previousIndex = sectionBlock.assignmentIndexes.get(assignmentKey)
       if (previousIndex === undefined) {
-        sectionBlock.assignmentIndexes.set(assignment[1], sectionBlock.entries.length)
-        sectionBlock.entries.push(entryLines)
+        sectionBlock.assignmentIndexes.set(assignmentKey, sectionBlock.entries.length)
+        sectionBlock.entries.push(assignment.lines)
       } else {
-        sectionBlock.entries[previousIndex] = entryLines
+        sectionBlock.entries[previousIndex] = assignment.lines
       }
     }
   }

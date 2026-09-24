@@ -300,6 +300,46 @@ describe('coding agent launch preparation', () => {
     expect(config.slice(0, config.indexOf('\n['))).toContain('model = "codex-model"')
   })
 
+  it.each([
+    {
+      name: 'quoted multiline values',
+      source: '[shell_environment_policy.set]\n"SCRIPT" = """\nmode=first\nmode=second\n"""\n',
+      expected: { shell_environment_policy: { set: { SCRIPT: 'mode=first\nmode=second\n' } } },
+    },
+    {
+      name: 'quoted multiline values containing a table header',
+      source: '[custom]\n"template" = """first line\n[features]\nthis remains string content\n"""\n\n[features]\ngoals = true\n',
+      expected: { custom: { template: 'first line\n[features]\nthis remains string content\n' }, features: { goals: true } },
+    },
+    {
+      name: 'literal keys and multiline literal strings',
+      source: "[shell_environment_policy.set]\n'SCRIPT' = '''\nmode=first\n\n[features]\nmode=second\n'''\n",
+      expected: { shell_environment_policy: { set: { SCRIPT: 'mode=first\n\n[features]\nmode=second\n' } } },
+    },
+    {
+      name: 'multiline values in excluded provider tables',
+      source: '[model_providers.original]\nname = """first line\n[custom]\ntext = "from provider name"\n"""\n\n[shell_environment_policy]\ninherit = "core"\n',
+      expected: { shell_environment_policy: { inherit: 'core' } },
+    },
+    {
+      name: 'settings after an excluded top-level multiline value',
+      source: '"developer_instructions" = """\n[custom]\ntext = "discarded"\n"""\nsandbox_mode = "workspace-write"\n',
+      expected: { sandbox_mode: 'workspace-write' },
+    },
+  ])('preserves $name in scoped Codex configuration', async ({ source, expected }) => {
+    parseToml(source)
+    const home = makeHome()
+    const globalConfigPath = join(home, 'global-home', '.codex', 'config.toml')
+    mkdirSync(dirname(globalConfigPath), { recursive: true })
+    writeFileSync(globalConfigPath, source)
+    const launch = await prepareCodingAgentLaunch('codex', {
+      profile: 'default', provider: 'openrouter', model: 'codex-model',
+      baseUrl: 'https://api.example.com/v1', apiKey: 'test-key', apiMode: 'codex_responses',
+      sessionId: 'codex-multiline-config', agentSessionId: 'codex-multiline-config-agent',
+    })
+    expect(parseToml(readFileSync(join(launch.rootDir, 'config.toml'), 'utf-8'))).toMatchObject(expected)
+  })
+
   it('deduplicates inherited Codex table keys when scoped config overrides global config', async () => {
     const home = makeHome()
     const globalConfigPath = join(home, 'global-home', '.codex', 'config.toml')
@@ -341,6 +381,46 @@ describe('coding agent launch preparation', () => {
     expect(parsed.projects['/workspace']).toEqual({
       trust_level: 'untrusted',
       notify: ['scoped'],
+    })
+  })
+
+  it('merges equivalent quoted Codex keys and replaces entire multiline values', async () => {
+    const home = makeHome()
+    const globalConfigPath = join(home, 'global-home', '.codex', 'config.toml')
+    const scopedConfigPath = join(home, 'coding-agent', 'model', 'default', 'openrouter', 'codex', 'config.toml')
+    mkdirSync(dirname(globalConfigPath), { recursive: true })
+    mkdirSync(dirname(scopedConfigPath), { recursive: true })
+    writeFileSync(globalConfigPath, [
+      '[custom]',
+      '"template" = """global',
+      'retired line"""',
+      'notify = ["global"]',
+      '"tool=mode" = """first',
+      'second"""',
+      'nested . "key" = "global"',
+      '"nested.key" = "literal key"',
+    ].join('\n'))
+    writeFileSync(scopedConfigPath, [
+      '[custom]',
+      "'template' = '''scoped",
+      "replacement'''",
+      '"not\\u0069fy" = [',
+      '  "scoped", # ] is only a comment',
+      ']',
+      'nested.key = "scoped"',
+    ].join('\n'))
+    const launch = await prepareCodingAgentLaunch('codex', {
+      profile: 'default', provider: 'openrouter', model: 'codex-model',
+      baseUrl: 'https://api.example.com/v1', apiKey: 'test-key', apiMode: 'codex_responses',
+      sessionId: 'codex-quoted-config', agentSessionId: 'codex-quoted-config-agent',
+    })
+    const parsed = parseToml(readFileSync(join(launch.rootDir, 'config.toml'), 'utf-8'))
+    expect(parsed.custom).toEqual({
+      template: 'scoped\nreplacement',
+      notify: ['scoped'],
+      'tool=mode': 'first\nsecond',
+      nested: { key: 'scoped' },
+      'nested.key': 'literal key',
     })
   })
 
