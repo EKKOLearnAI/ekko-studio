@@ -5,7 +5,7 @@ import { getChatRunServer } from '../chat-run/server-registry'
 import { createHash, randomUUID } from 'node:crypto'
 import { listAppConnections } from '../../repositories/app-connections-store'
 import { listLiveActivityDestinations } from '../../repositories/live-activity-store'
-import { getLiveActivityRun, listActiveLiveActivityRuns, saveLiveActivityRun, getLiveActivityLastStart, recordLiveActivityStart, type LiveActivityRunRecord } from '../../repositories/live-activity-runtime-store'
+import { getLiveActivityRun, listActiveLiveActivityRuns, saveLiveActivityRun, saveLiveActivityRunIfActive, getLiveActivityLastStart, recordLiveActivityStart, type LiveActivityRunRecord } from '../../repositories/live-activity-runtime-store'
 import { findUserById } from '../../repositories/users-store'
 import { getSession, getSessionNotificationPreview } from '../../repositories/session-store'
 import type { BusinessEvent } from '../webhooks/business-events'
@@ -24,6 +24,7 @@ function displayFields(event: BusinessEvent, registration: Record<string, any>, 
   let result: Record<string, string | number> = {}
   try { result = JSON.parse(state.display_json || '{}') } catch { /* old row */ }
   if (['light', 'dark'].includes(registration.appearance)) result.appearance = registration.appearance
+  if (/^(?:zh|zh-TW|en|ja|ko|fr|es|de|pt|ru|ar)$/.test(String(registration.locale || ''))) result.locale = registration.locale
   const started = getChatRunServer()?.getLiveActivityStartedAt?.(event.subject.session_id, event.profile, event.subject.run_id)
   if (result.startedAtEpoch === undefined && typeof started === 'number' && Number.isFinite(started) && started >= 0) result.startedAtEpoch = started
   const through = terminal(event) ? Date.parse(event.occurred_at) : Date.now()
@@ -115,10 +116,10 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
   async function dispatch(event: BusinessEvent, device: ReturnType<typeof listLiveActivityDestinations>[number], registration: Record<string, any>, key: string, requested?: 'start'|'update'|'end') {
     let state = getLiveActivityRun(key)
     if (!state || state.terminal) return
-    if (requested !== 'end' && runKind(event) === 'chat' && getSession(subjectId(event))?.push_enabled === 0) return
     const ending = requested === 'end' || terminal(event)
     const action = requested || (!state.started ? 'start' : ending ? 'end' : 'update')
     if (!state.started && action !== 'start') return
+    const expectedRevision = state.revision
     state = { ...state, revision: state.revision + 1, updated_at: Date.now() }
     const now = Math.floor(Date.now() / 1000)
     const body: Record<string, unknown> = { schema_version: 1, event_id: randomUUID(), event: action,
@@ -144,7 +145,8 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
     console.info('[live-activity] delivery', { connection: device.connection_id, action,
       agent: agent(event), revision: state.revision, http: response.status, status: result.status, error: result.error })
     if (response.status >= 200 && response.status < 300) {
-      state.started = 1; state.terminal = action === 'end' ? 1 : 0; saveLiveActivityRun(state)
+      state.started = 1; state.terminal = action === 'end' ? 1 : 0
+      if (!saveLiveActivityRunIfActive(state, expectedRevision)) return
       if (action === 'start') recordLiveActivityStart(device.destination_id, Date.now())
     }
     const deadline = Date.now() + (action === 'end' ? 580_000 : 110_000)
@@ -185,8 +187,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
         const user = findUserById(device.user_id); if (!user || user.status !== 'active' || !canReceiveAppEvent(user, event)) return
         let registration: Record<string, any>; try { registration = JSON.parse(decryptPushSecret(device.ciphertext)) } catch { console.warn('[live-activity] registration_unreadable', { connection: device.connection_id }); return }
         const key = stableKey(event, device.destination_id)
-        const sessionMuted = runKind(event) === 'chat' && getSession(subjectId(event))?.push_enabled === 0
-        const muted = sessionMuted || connections.find(row => row.id === device.connection_id)?.push_enabled === 0
+        const muted = connections.find(row => row.id === device.connection_id)?.push_enabled === 0
         if (muted) {
           cancelRefresh(key); latest.delete(key); polling.get(key)?.controller.abort()
           await serialized(key, async () => {

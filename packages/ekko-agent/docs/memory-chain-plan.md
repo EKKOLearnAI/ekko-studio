@@ -10,9 +10,11 @@ Ekko 只维护一种可操作的长期记忆：`memory_nodes` 中的记忆卡片
 Ekko Agent turn
   -> 保存当前用户消息证据
   -> 按宿主授权的 scope 检索 active memory_nodes
-  -> 注入相关记忆卡片
+  -> 可选 JEV 分类补充与候选重排（默认关闭，失败使用原结果）
+  -> 按原 token 预算注入相关记忆卡片
   -> 主模型调用 memory_search / memory_get / memory_write / memory_forget
-  -> memory_write / memory_forget 在当前 run 中直接生效
+  -> memory_write 可选 JEV 证据校验，随后原子提交；memory_forget 保持原规则
+  -> 在当前 run 中直接生效
   -> run 完成后仅补录助手消息证据
 ```
 
@@ -36,6 +38,8 @@ Ekko Agent turn
 - 枚举全部记忆使用 `memory_search({ all: true })`。中文“所有/全部记忆”和英文
   “all/every memories”等旧式 list-all 查询也会自动转成全量枚举，不做相关性过滤。
 - 没有匹配结果时，Agent 不得据此宣称整个记忆库为空，除非执行过全量枚举。
+
+JEV 的配置、运行隔离与回退约定见 [memory-jev.md](memory-jev.md)。
 
 ## 删除规则
 

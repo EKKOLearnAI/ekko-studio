@@ -1,3 +1,4 @@
+import { recordSessionUploadAttachments } from '../services/files/session-uploads'
 import { authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
 import { bindSessionShareSocket } from '../services/session-shares/socket-access'
 import { codingAgentId } from '../services/chat-run/types'
@@ -899,6 +900,11 @@ export class ChatRunSocket {
       let runProfile: string
       try {
         runProfile = resolveRunProfile(data.session_id, data.profile)
+        if (!shared && data.session_id && Array.isArray(data.input)) {
+          // New chats carry a client-generated id; the runtime persists them on the first run.
+          if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id)
+          await recordSessionUploadAttachments(data.session_id, runProfile, data.input, { allowPendingSession: true })
+        }
       } catch (err) {
         const payload = {
           event: 'run.failed',

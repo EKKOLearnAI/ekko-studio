@@ -2,7 +2,7 @@ import { catchUpLiveActivities } from './live-activity-catchup'
 import { inspectAppUserToken } from '../../public/auth'
 import { getAppRelayDeviceIdentity } from '../../public/system-info'
 import { hashAppCredential, listAppConnections } from '../../repositories/app-connections-store'
-import { removeConnectionLiveActivities, saveLiveActivityDestination } from '../../repositories/live-activity-store'
+import { removeConnectionLiveActivities, replaceLiveActivityDestination } from '../../repositories/live-activity-store'
 import { encryptPushSecret } from './push-registration'
 import { PushRegistrationError } from './user-push-registration'
 
@@ -15,6 +15,7 @@ export async function updateLiveActivityDestination(token: string, value: unknow
   if (remove) { removeConnectionLiveActivities(connection.id); return }
   const body = value as Record<string, unknown> | null, studio = (await getAppRelayDeviceIdentity()).device_id
   if (body?.appearance !== undefined && !['light', 'dark'].includes(String(body.appearance))) throw new PushRegistrationError('invalid_live_activity_appearance', 400)
+  if (body?.locale !== undefined && !/^(?:zh|zh-TW|en|ja|ko|fr|es|de|pt|ru|ar)$/.test(String(body.locale))) throw new PushRegistrationError('invalid_live_activity_locale', 400)
   if (!body || body.schema_version !== 1 || body.platform !== 'ios' || body.studio_device_id !== studio
     || body.installation_ref !== app.deviceCode || connection.cloud_user_id > 0 && body.cloud_user_id !== connection.cloud_user_id
     || !/^[A-Za-z0-9._:-]{1,128}$/.test(String(body.destination_id || '')) || body.enabled !== true
@@ -23,8 +24,9 @@ export async function updateLiveActivityDestination(token: string, value: unknow
   const saved = { schema_version: 1, studio_device_id: studio, installation_ref: app.deviceCode,
     cloud_user_id: body.cloud_user_id, app_id: body.app_id, apns_environment: body.apns_environment,
     ...(body.appearance === undefined ? {} : { appearance: body.appearance }),
+    ...(body.locale === undefined ? {} : { locale: body.locale }),
     grant_id: body.grant_id, push_token: body.push_token, destination_id: body.destination_id }
-  saveLiveActivityDestination({ user_id: app.user.id, device_id: app.deviceCode, connection_id: connection.id,
+  replaceLiveActivityDestination({ user_id: app.user.id, device_id: app.deviceCode, connection_id: connection.id,
     connection_token_hash: connection.token_hash, app_id: String(body.app_id), environment: String(body.apns_environment),
     destination_id: String(body.destination_id), ciphertext: encryptPushSecret(JSON.stringify(saved)), enabled: 1 })
   void catchUpLiveActivities(connection.id).catch(() => { console.warn('[live-activity] catchup_failed') })

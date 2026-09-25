@@ -314,7 +314,7 @@ describe('ChatInput draft persistence', () => {
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).style.height).not.toBe('180px')
   })
 
-  it('shows context usage for coding-agent sessions', async () => {
+  it('shows coding-agent context usage and keeps the full display for Ekko and Hermes', async () => {
     const wrapper = mountForSession('session-codex', {
       source: 'coding_agent',
       agent: 'codex',
@@ -325,8 +325,24 @@ describe('ChatInput draft persistence', () => {
     })
     await nextTick()
 
-    expect(wrapper.find('.context-info').exists()).toBe(true)
-    expect(wrapper.find('.context-info').text()).toContain('2.0k')
+    expect(wrapper.get('.context-info').text()).toBe('chat.contextUsed 2.0k')
+    expect(wrapper.find('.context-limit-editable').exists()).toBe(false)
+    expect(wrapper.find('.context-bar').exists()).toBe(false)
+
+    const chatStore = useChatStore()
+    Object.assign(chatStore.activeSession!, { agent: 'ekko-agent', codingAgentId: 'ekko-agent' })
+    await flushPromises()
+
+    expect(wrapper.get('.context-info').text()).toMatch(/2\.0k\s+\//)
+    expect(wrapper.get('.context-limit-editable').text()).toBe('256.0k')
+    expect(wrapper.get('.context-info').text()).toContain('chat.contextRemaining 254.0k')
+    expect(wrapper.find('.context-bar').exists()).toBe(true)
+
+    Object.assign(chatStore.activeSession!, { source: 'cli', agent: 'hermes', codingAgentId: undefined })
+    await nextTick()
+
+    expect(wrapper.get('.context-info').text()).toMatch(/2\.0k\s+\//)
+    expect(wrapper.get('.context-limit-editable').text()).toBe('256.0k')
     expect(wrapper.find('.context-bar').exists()).toBe(true)
   })
 

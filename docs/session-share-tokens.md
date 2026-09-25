@@ -80,7 +80,7 @@ Studio 向自身配置的 App 线路 `/api/app/auth/session-share-identity` 核�
 
 额外目录格式为 `extraPaths: [{ path: "/absolute/directory", writable: false }]`，最多 16 项，必须存在且由本地超级管理员授权。`outsideWorkspace=true` 要求非空白名单。工作区和额外目录固定真实路径，文件入口检查路径穿越、符号链接越界及已知凭据路径（`.env*`、`.token`、`.model-run-token`、`auth.json`、`.ssh` 等）。rename/copy 同时校验两端。工作区改变后需重新分享。
 
-分享上传写入由服务端按 session 划分的附件目录；上传分片还绑定具体 share ID。`upload` 不等于工作区写权限。下载只允许授权工作区/额外目录或该 session 的分享上传目录，不能按任意路径读取整个 Profile 的附件。历史附件如位于这些范围之外，需要明确的目录授权，不根据聊天文本中的路径自动授权。
+分享上传写入由服务端按 session 划分的附件目录；上传分片还绑定具体 share ID。`upload` 不等于工作区写权限。下载只允许授权工作区/额外目录或该 session 的分享上传目录，不能按任意路径读取整个 Profile 的附件。会话附件会自动纳入文件访问范围，无需开启 `outsideWorkspace`：分享者发送的结构化上传附件按会话持久化登记；首次分享之前的历史结构化附件按文件匹配补录。普通聊天文本、Markdown 链接和其他会话附件不会产生授权。旧版本在首次分享之后写入且缺少可信归属的附件不自动补录。附件预览仍需 `workspaceRead`，下载仍需 `download`；自动纳入不授予目录浏览、工作区写入或删除权限。
 
 **按本功能约定，权限只限制 App 对接口的直接调用。Agent 和终端沿用既有执行权限，不引入文件系统或工具沙箱。** 开启 `input` 后，Agent 能执行原有工具；开启 `terminal` 后，shell 能执行宿主机账号允许的命令。因此 `outsideWorkspace=false` 不限制 Agent/shell 的间接文件访问，关闭 `download` 也不是对已显示内容的防复制措施。
 

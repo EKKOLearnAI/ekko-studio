@@ -83,6 +83,7 @@ const tagMappings = {
   'modules/studio/routes/chat-webhooks.ts': { name: 'Chat Webhooks', description: 'Cross-agent Chat Run webhook endpoint management' },
   'modules/studio/routes/tts.ts': { name: 'TTS', description: 'Text-to-speech generation and settings' },
   'modules/studio/routes/stt.ts': { name: 'STT', description: 'Speech-to-text transcription and settings' },
+  'modules/studio/routes/jev.ts': { name: 'JEV', description: 'Profile-scoped TypeSafe JEV configuration and shared Choice, Score, Noul evaluations' },
   'modules/studio/routes/media.ts': { name: 'Media', description: 'Media generation endpoints' },
   'modules/studio/routes/performance-monitor.ts': { name: 'Performance', description: 'Runtime performance monitoring' },
   'modules/studio/routes/petdex.ts': { name: 'Petdex', description: 'Desktop pet catalog and assets' },
@@ -1384,6 +1385,47 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
       operation.responses['201'] = { description: 'New independent invitation; secret is returned only at creation', content: { 'application/json': { schema: {
         type: 'object', required: ['share', 'token'], properties: { share: { $ref: '#/components/schemas/SessionShare' }, token: { type: 'string', pattern: '^sst1_[A-Za-z0-9_-]{43}$' } },
       } } } }
+    }
+  }
+}
+
+// JEV accepts named heterogeneous questions and never returns its stored API key.
+const jevSettingsProperties = {
+  baseUrl: { type: 'string', format: 'uri', default: 'https://api.typesafe.ai' },
+  model: { type: 'string', default: 'jev-latest', maxLength: 200 },
+  timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000, default: 10000 },
+}
+const jevSettingsSchema = { type: 'object', properties: { ...jevSettingsProperties, hasApiKey: { type: 'boolean' } }, required: ['baseUrl', 'model', 'timeoutMs', 'hasApiKey'] }
+openapi.components.schemas.JevError = {
+  type: 'object', required: ['error'], properties: {
+    error: { type: 'string', description: 'Sanitized diagnostic message.' },
+    code: { type: 'string', pattern: '^jev_', description: 'Stable JEV error code used for client-side translation; middleware errors may omit it.' },
+  },
+}
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  if (!path.startsWith('/api/studio/jev/')) continue
+  for (const [method, operation] of Object.entries(methods)) {
+    operation.parameters = [{ name: 'X-Hermes-Profile', in: 'header', required: true, schema: { type: 'string' }, description: 'Authorized Profile; never changes the global active Profile.' }]
+    if (path.endsWith('/settings')) {
+      operation.responses['200'] = { description: 'Non-secret JEV settings', content: { 'application/json': { schema: jevSettingsSchema } } }
+      if (method === 'put') operation.requestBody = { required: true, content: { 'application/json': { schema: {
+        type: 'object', additionalProperties: false, properties: { ...jevSettingsProperties,
+          apiKey: { type: 'string', writeOnly: true, description: 'Omit or leave blank to preserve the saved key. DELETE clears it.' },
+        },
+      } } } }
+    }
+    if (path.endsWith('/evaluate')) operation.requestBody = { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['state', 'questions'], properties: {
+        state: { nullable: true, oneOf: [{ type: 'string' }, { type: 'object', additionalProperties: true }, { type: 'array', items: {} }] },
+        questions: { type: 'object', minProperties: 1, additionalProperties: {
+          type: 'object', required: ['type'], properties: {
+            type: { type: 'string', enum: ['choice', 'score', 'noul'] }, instructions: {}, criteria: {},
+          }, description: 'Choice: at least two named criteria. Score: at least two ordered criteria. Noul: optional true/false criteria.',
+        } }, model: { type: 'string' },
+      },
+    } } } }
+    for (const [status, description] of Object.entries({ 400: 'Invalid input or missing Profile', 403: 'Profile access denied', 409: 'API key not configured', 499: 'Request cancelled', 500: 'Settings operation failed', 502: 'Provider request failed', 504: 'Provider request timed out' })) {
+      operation.responses[status] = { description, content: { 'application/json': { schema: { $ref: '#/components/schemas/JevError' } } } }
     }
   }
 }

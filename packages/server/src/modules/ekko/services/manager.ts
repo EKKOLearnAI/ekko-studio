@@ -4,6 +4,8 @@ import {
   EkkoFileLogger,
   MemoryService,
   setupEkkoAgent,
+  DEFAULT_EKKO_JEV_CONFIG,
+  type EkkoJevConfig,
   type AgentRuntimeRunInput,
   type AgentRuntimeRunResult,
   type AgentRuntimeBoundaryInterruptRequest,
@@ -15,6 +17,7 @@ import {
 } from '../../../../../ekko-agent/src'
 import { config } from '../../studio/public/config'
 import { logger } from '../../studio/public/logging'
+import { getJevRuntimeConfig } from '../../studio/public/jev'
 import {
   getProfilesBaseDir,
   listProfileNames,
@@ -64,9 +67,9 @@ export class GlobalEkkoAgent {
   async run(input: AgentRuntimeRunInput): Promise<AgentRuntimeRunResult> {
     this.lastUsedAt = Date.now()
     this.runCount += 1
-    const runtime = this.runtimeInstance()
     this.activeRuns += 1
     try {
+      const runtime = this.runtimeInstance(await this.jevRuntimeConfig())
       return await runtime.run(this.withDefaultWorkspace(input))
     } finally {
       this.activeRuns -= 1
@@ -79,15 +82,16 @@ export class GlobalEkkoAgent {
     options: Omit<AgentRuntimeOptions, 'logWriter' | 'logProfile'>,
     input: AgentRuntimeRunInput,
   ): Promise<AgentRuntimeRunResult> {
-    const runtime = this.setup.createRuntime({
-      ...options,
-      profile: this.options.profile || 'default',
-      memory: options.memory ?? false,
-      logWriter: this.fileLogger,
-      logProfile: this.options.profile || 'default',
-    })
     this.activeRuns += 1
     try {
+      const runtime = this.setup.createRuntime({
+        ...options,
+        jev: await this.jevRuntimeConfig(),
+        profile: this.options.profile || 'default',
+        memory: options.memory ?? false,
+        logWriter: this.fileLogger,
+        logProfile: this.options.profile || 'default',
+      })
       return await runtime.run(input)
     } finally {
       this.activeRuns -= 1
@@ -163,16 +167,29 @@ export class GlobalEkkoAgent {
     return this.setup.config.read()
   }
 
-  private runtimeInstance(): AgentRuntime {
+  private runtimeInstance(jev?: EkkoJevConfig): AgentRuntime {
     this.applyPendingRuntimeRefresh()
-    if (this.runtime) return this.runtime
+    if (this.runtime) {
+      if (jev) this.runtime.jev.configure(jev)
+      return this.runtime
+    }
     this.runtime = this.setup.createRuntime({
+      jev: jev ?? false,
       profile: this.options.profile || 'default',
       memory: this.memory ?? false,
       logWriter: this.fileLogger,
       logProfile: this.options.profile || 'default',
     })
     return this.runtime
+  }
+
+  private async jevRuntimeConfig(): Promise<EkkoJevConfig> {
+    try {
+      return await getJevRuntimeConfig(this.options.profile || 'default')
+    } catch {
+      logger.warn('[ekko-agent] Studio JEV settings unavailable; JEV is disabled for this run')
+      return { ...DEFAULT_EKKO_JEV_CONFIG }
+    }
   }
 
   private applyPendingRuntimeRefresh(): void {

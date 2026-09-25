@@ -124,6 +124,22 @@ function interpolationNames(value: string): string[] {
   return [...value.matchAll(/\{([^}]+)\}/g)].map(match => match[1]).sort()
 }
 
+it('localizes all JEV messages and error codes without relying on English fallback', () => {
+  const expected = flattenLeafPaths(en.jev)
+  for (const locale of supportedLocales) {
+    const actual = flattenLeafPaths(rawMessages[locale].jev)
+    expect([...actual.keys()].sort(), locale).toEqual([...expected.keys()].sort())
+    const i18n = createI18n({ legacy: false, locale, messages: { [locale]: rawMessages[locale] } })
+    for (const [key, english] of expected) {
+      const value = actual.get(key)!
+      expect(value.trim(), `${locale}: jev.${key}`).not.toBe('')
+      expect(interpolationNames(value), `${locale}: jev.${key}`).toEqual(interpolationNames(english))
+      expect(() => i18n.global.t(`jev.${key}`, { model: 'jev-test', duration: '123' })).not.toThrow()
+      if (locale !== 'en') expect(value, `${locale}: jev.${key} copies English`).not.toBe(english)
+    }
+  }
+})
+
 const SKILLS_USAGE_LOCALIZED_KEYS = [
   'sidebar.skillsUsage',
   'skillsUsage.title',

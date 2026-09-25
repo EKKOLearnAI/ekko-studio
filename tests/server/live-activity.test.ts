@@ -25,6 +25,36 @@ describe('Studio Live Activity orchestration', () => {
  afterEach(()=>{vi.useRealTimers();db.close();rmSync(home,{recursive:true,force:true});vi.resetModules()})
  async function setup(){const {updateLiveActivityDestination}=await import('../../packages/server/src/modules/studio/services/notifications/live-activity-registration');await updateLiveActivityDestination('login',{schema_version:1,platform:'ios',studio_device_id:'studio-a',installation_ref:'phone-a',cloud_user_id:107,grant_id:'grant-a',push_token:'push_'+'a'.repeat(43),app_id:'com.ekkostudio.ai',apns_environment:'development',destination_id:'dest-a',enabled:true});return (await import('../../packages/server/src/modules/studio/services/notifications/live-activity')).createLiveActivityConsumer(fetchMock)}
  const event=(type:string,revision=1,status='in_progress')=>({schema_version:1 as const,id:`e-${revision}`,type,occurred_at:new Date().toISOString(),profile:'default',source:'chat',subject:{session_id:'session-a',run_id:'run-a'},payload:{},chat:type.endsWith('plan.updated')?{task_plan:{plan_id:'p',session_id:'session-a',run_id:'run-a',revision,execution_state:'running',updated_at:Date.now(),progress:{total:2,completed:status==='completed'?2:revision-1,in_progress:status==='in_progress'?1:0,pending:0,percent:50},plan:[{id:'a',step:'Inspect',status},{id:'b',step:'Verify',status:status==='completed'?'completed':'pending'}]}}:undefined} as any)
+ it('keeps only the newest APNs environment for one device and retires the old runtime',async()=>{
+  const {updateLiveActivityDestination}=await import('../../packages/server/src/modules/studio/services/notifications/live-activity-registration')
+  const base={schema_version:1,platform:'ios',studio_device_id:'studio-a',installation_ref:'phone-a',cloud_user_id:107,grant_id:'grant-a',push_token:'push_'+'a'.repeat(43),app_id:'com.ekkostudio.ai',enabled:true}
+  await updateLiveActivityDestination('login',{...base,apns_environment:'production',destination_id:'dest-production'})
+  const runtime=await import('../../packages/server/src/modules/studio/repositories/live-activity-runtime-store')
+  runtime.saveLiveActivityRun({run_key:'dest-production:chat:session-a',destination_id:'dest-production',activity_ref:'old-ref',revision:3,started:1,terminal:0,title:'Old',completed:1,total:3,updated_at:Date.now()})
+  await updateLiveActivityDestination('login',{...base,apns_environment:'development',destination_id:'dest-development'})
+  const store=await import('../../packages/server/src/modules/studio/repositories/live-activity-store')
+  expect(store.listLiveActivityDestinations().map(row=>[row.environment,row.destination_id,row.enabled]).sort()).toEqual([
+    ['development','dest-development',1],['production','dest-production',0],
+  ].sort())
+  expect(runtime.getLiveActivityRun('dest-production:chat:session-a')?.terminal).toBe(1)
+ })
+
+ it('cannot resurrect a retired destination when an in-flight start completes',async()=>{
+  const {updateLiveActivityDestination}=await import('../../packages/server/src/modules/studio/services/notifications/live-activity-registration')
+  const base={schema_version:1,platform:'ios',studio_device_id:'studio-a',installation_ref:'phone-a',cloud_user_id:107,grant_id:'grant-a',push_token:'push_'+'a'.repeat(43),app_id:'com.ekkostudio.ai',enabled:true}
+  await updateLiveActivityDestination('login',{...base,apns_environment:'production',destination_id:'dest-production'})
+  let resolveFetch:((value:any)=>void)|undefined
+  fetchMock.mockImplementationOnce(()=>new Promise(resolve=>{resolveFetch=resolve}))
+  let consume=(await import('../../packages/server/src/modules/studio/services/notifications/live-activity')).createLiveActivityConsumer(fetchMock)
+  const pending=consume(event('chat.plan.updated'))
+  await vi.advanceTimersByTimeAsync(0)
+  await updateLiveActivityDestination('login',{...base,apns_environment:'development',destination_id:'dest-development'})
+  resolveFetch!({status:200,json:async()=>({status:'accepted'}),body:null})
+  await pending
+  const runtime=await import('../../packages/server/src/modules/studio/repositories/live-activity-runtime-store')
+  expect(runtime.getLiveActivityRun('dest-production:chat:session-a')?.terminal).toBe(1)
+ })
+
  it('persists an encrypted destination and emits ordered start update end without exposing credentials',async()=>{const consume=await setup();await consume(event('chat.plan.updated'));await consume(event('chat.plan.updated',2,'completed'));await consume(event('chat.run.completed',3));expect(fetchMock).toHaveBeenCalledTimes(3);const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body));expect(bodies.map(b=>b.event)).toEqual(['start','update','end']);expect(bodies.map(b=>b.revision)).toEqual([1,2,3]);expect(bodies.every(b=>b.content_state.agent==='codex')).toBe(true);expect(bodies[0].ekko_run).toMatchObject({session_id:'session-a',studio_device_id:'studio-a',cloud_user_id:107});expect(JSON.stringify(bodies)).not.toContain('push_')})
  it('preserves Pi runtime identity instead of the default session agent',async()=>{const consume=await setup();const e=event('chat.plan.updated');e.chat.agent='pi';await consume(e);expect(JSON.parse(fetchMock.mock.calls[0][1].body).content_state.agent).toBe('pi')})
  it('reports rejected start without logging credentials or task text',async()=>{const log=vi.spyOn(console,'info').mockImplementation(()=>{});try{const consume=await setup();fetchMock.mockResolvedValueOnce({status:403,json:async()=>({error:'grant_revoked'}),body:null});await consume(event('chat.plan.updated'));expect(log).toHaveBeenCalledWith('[live-activity] delivery',expect.objectContaining({connection:1,action:'start',http:403,error:'grant_revoked'}));expect(JSON.stringify(log.mock.calls)).not.toContain('push_');expect(JSON.stringify(log.mock.calls)).not.toContain('Build App')}finally{log.mockRestore()}})
@@ -65,16 +95,17 @@ describe('Studio Live Activity orchestration', () => {
   for(const [,request] of fetchMock.mock.calls) expect(JSON.parse(request.body)).not.toHaveProperty('relevance_score')
  })
 
- it('does not start a muted session and closes an existing card with a redacted terminal snapshot',async()=>{
-  let muted=false
+ it('ignores the legacy session push opt-out and still honors an explicit disable event',async()=>{
+  let muted=true
   vi.doMock('../../packages/server/src/modules/studio/repositories/session-store',()=>({getSession:()=>({title:'Private title',profile:'default',user_id:7,agent:'pi',push_enabled:muted?0:1}),getSessionNotificationPreview:()=>({})}))
   const consume=await setup();await consume(event('chat.plan.updated'))
-  muted=true
+  expect(fetchMock).toHaveBeenCalledTimes(1)
   await consume(event('chat.push.disabled',2))
   const end=JSON.parse(fetchMock.mock.calls[1][1].body)
   expect(end.event).toBe('end');expect(end.dismissal_at).toBe(end.occurred_at)
   expect(end.content_state).toEqual({title:'Ekko Studio',status:'cancelled',currentStep:'',completedSteps:0,totalSteps:0})
-  await consume(event('chat.plan.updated',3));expect(fetchMock).toHaveBeenCalledTimes(2)
+  await consume(event('chat.plan.updated',3));expect(fetchMock).toHaveBeenCalledTimes(3)
+  expect(JSON.parse(fetchMock.mock.calls[2][1].body).event).toBe('start')
  })
  it('does not start cards for terminal-only or unknown-total work',async()=>{const consume=await setup();await consume(event('chat.run.completed'));await consume({...event('chat.plan.updated'),chat:{task_plan:{...event('chat.plan.updated').chat.task_plan,progress:{total:0,completed:0}}}});expect(fetchMock).not.toHaveBeenCalled()})
 })
@@ -138,6 +169,7 @@ describe('Studio Live Activity plan-trigger policy', () => {
   expect(body.event).toBe('end');expect(body.content_state.status).toBe('completed')
   expect(body.dismissal_at).toBe(body.occurred_at+60)
  })
+
 
  it('refreshes only a verified active run without changing progress or starting another activity',async()=>{
   let running=true

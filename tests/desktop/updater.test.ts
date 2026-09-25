@@ -33,7 +33,7 @@ describe('desktop updater helpers', () => {
     expect(updaterSource).toContain('autoUpdater.autoDownload = false')
     expect(updaterSource).toContain('autoUpdater.autoInstallOnAppQuit = true')
     expect(updaterSource).toContain("buttons: [t('update.download'), t('update.later')]")
-    expect(updaterSource).toContain('if (response === 0) {\n    await autoUpdater.downloadUpdate()')
+    expect(updaterSource).toContain('if (response === 0) downloadDesktopUpdate()')
     expect(updaterSource).not.toContain('setInterval(')
   })
 
@@ -43,7 +43,7 @@ describe('desktop updater helpers', () => {
 
     expect(mainSource).toContain('async function prepareAppShutdown(): Promise<void>')
     expect(mainSource).toContain('await stopWebUiServer().catch(() => undefined)')
-    expect(mainSource).toContain('initAutoUpdater({ beforeQuitAndInstall: prepareAppShutdown })')
+    expect(mainSource).toContain('beforeQuitAndInstall: prepareAppShutdown,')
     expect(mainSource).toContain('try {\n      await prepareAppShutdown()\n    } finally {\n      appLifecycle.finalizeExit(0)')
 
     const prepareCurrentInstance = updaterSource.indexOf('await options.beforeQuitAndInstall?.()')

@@ -10,6 +10,7 @@ import type { SkillReviewUsageEvent } from '../skills/review'
 import type { EkkoLogWriter } from '../logging/file-logger'
 import type { EkkoRuntimeLogContext } from '../logging/runtime-logger'
 import type { EkkoExternalSkillDirectory } from '../skills/external-directories'
+import type { EkkoJevOverrides } from '../jev'
 
 export interface AgentRuntimeContextEstimate {
   contextTokens: number
@@ -44,6 +45,8 @@ export interface AgentRuntimeRecoveryDirective {
 }
 
 export interface AgentRuntimeOptions {
+  /** JEV configuration values only; the runtime creates its own client and never persists overrides. */
+  jev?: EkkoJevOverrides
   /** Fixed profile identity for tool and memory operations. Per-run input cannot override it. */
   profileId?: string
   modelClient?: ModelClient

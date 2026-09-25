@@ -1,6 +1,6 @@
 {
   "name": "hermes-studio",
-  "version": "0.7.23",
+  "version": "0.7.24",
   "description": "Ekko Studio desktop app for multi-agent chat, coding, and visual workflows, with bundled local runtimes.",
   "homepage": "https://ekkostudio.xyz",
   "author": {
@@ -13,6 +13,7 @@
   "scripts": {
     "build:main": "tsc -p tsconfig.json",
     "build": "npm run build:main",
+    "test:updater": "npm run build && node --test tests/*.test.cjs",
     "fetch:node": "node scripts/fetch-node.mjs",
     "fetch:git": "node scripts/fetch-git.mjs",
     "fetch:python": "node scripts/fetch-python.mjs",
@@ -26,6 +27,7 @@
     "prune:python": "node scripts/prune-python.mjs",
     "dev": "npm run build:main && electron .",
     "dist": "npm run build && node scripts/electron-builder.mjs",
+    "dist:update-test": "npm run build && node scripts/build-update-test.mjs",
     "dist:mac": "npm run build && node scripts/electron-builder.mjs --mac",
     "dist:win": "npm run build && node scripts/electron-builder.mjs --win",
     "dist:linux": "npm run build && node scripts/electron-builder.mjs --linux"

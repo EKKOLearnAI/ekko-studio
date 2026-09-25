@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { ALWAYS_RECALLED_MEMORY_KINDS } from './recall-policy'
 import {
   buildMemoryContextPrompt,
   selectMemoryNodesByTokenBudget,
@@ -9,6 +10,9 @@ import {
   DEFAULT_MEMORY_SEARCH_RESULT_LIMIT,
 } from '../config'
 import { resolveMemoryQuery } from './retrieval'
+import { enhanceMemoryRecall } from './jev-recall'
+import { reviewMemoryWrites } from './jev-write-review'
+import { throwIfMemoryRunAborted } from './jev-policy'
 import { canonicalizeMemoryDraft, memoryKindForCanonicalKey, normalizeMemoryNode } from './schema'
 import { memoryScopeAllowed, normalizeMemoryScopes, PROFILE_MEMORY_SCOPE } from './scope'
 import { stableJson } from './store'
@@ -41,14 +45,6 @@ import type {
 
 const MEMORY_CANDIDATE_LIMIT = 500
 const MAX_MEMORY_SEARCH_RESULTS = 50
-const ALWAYS_RECALLED_MEMORY_KINDS: NonNullable<MemoryQuery['kinds']> = [
-  'interaction_contract',
-  'language_preference',
-  'accessibility_need',
-  'communication_preference',
-  'hard_constraint',
-]
-
 export interface MemoryServiceOptions {
   store?: MemoryStore
   enabled?: boolean
@@ -207,13 +203,14 @@ export class MemoryService {
         }),
         exactCandidatesPromise,
       ])
-      const result = resolveMemoryQuery(
+      const baseline = resolveMemoryQuery(
         exactCandidates,
         relevantCandidates,
         recallQueryText,
         overrides.limit === undefined ? Number.MAX_SAFE_INTEGER : positiveInteger(overrides.limit, 1),
         new Date(),
       )
+      const result = await enhanceMemoryRecall(this.store, baseQuery, recallQueryText, baseline)
       const selection = selectMemoryNodesByTokenBudget(
         [...result.exact, ...result.relevant],
         this.automaticRecallTokenBudget,
@@ -237,6 +234,7 @@ export class MemoryService {
         },
       }
     } catch (error) {
+      throwIfMemoryRunAborted()
       this.recordWarning(error)
       return this.degradedContext()
     }
@@ -332,6 +330,9 @@ export class MemoryService {
   async write(input: MemoryWriteInput): Promise<MemoryWriteResult> {
     if (!this.isEnabled || !this.store) return { accepted: false, reason: 'Memory store is disabled.' }
     const prepared = await this.prepareWrite(input)
+    const review = await reviewMemoryWrites(this.store, [prepared.mutation], input.identity)
+    if (review) return { accepted: false, reason: review.reason }
+    throwIfMemoryRunAborted()
     if (prepared.mutation) await this.store.applyMutations([prepared.mutation])
     return prepared.result
   }
@@ -384,6 +385,9 @@ export class MemoryService {
       prepared.push(mutation)
     }
 
+    const review = await reviewMemoryWrites(this.store, prepared.map(item => item.mutation), input.identity)
+    if (review) return { accepted: false, done: true, results: [], failedOperationIndex: review.index, reason: review.reason }
+    throwIfMemoryRunAborted()
     try {
       await this.store.applyMutations(prepared.flatMap(item => item.mutation ? [item.mutation] : []))
     } catch (error) {

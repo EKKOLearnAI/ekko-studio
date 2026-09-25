@@ -101,6 +101,10 @@ jobs:
       - name: Install desktop dependencies
         run: npm ci --prefix packages/desktop --no-audit --no-fund
 
+      - name: Verify desktop updater download lifecycle
+        # This workflow can check out an older release tag without this script.
+        run: npm --prefix packages/desktop run test:updater --if-present
+
       - name: Write runtime release metadata
         shell: bash
         env:

@@ -2,7 +2,7 @@
 
 日期：2026-09-12
 
-状态：规划 v0.2，已有原生预设清单、附加 ACP 包管理与 Web 后端配置/预设用于 ACP 的局部实现，范围和限制见[当前实现](dsh-plugin-management-implementation.md)；完整 M1–M3 尚未完成；T01/T02 首轮后端实验已通过，范围见[兼容性证据](dsh-compatibility-evidence.md)。作为[主规划](dsh-profiles-and-plugins.md)的实施附件，随 [PR #3011](https://github.com/EKKOLearnAI/hermes-studio/pull/3011)维护。下文 API、事件名、错误码及测试文件名均为拟议契约；源码核对不等于运行测试通过。
+状态：规划 v0.2，已有原生预设清单、附加 ACP 包管理与 Web 后端配置/预设用于 ACP 的局部实现，范围和限制见[当前实现](dsh-plugin-management-implementation.md)；完整 M1–M3 尚未完成；T01/T02 首轮后端实验已通过，范围见[兼容性证据](dsh-compatibility-evidence.md)。作为[主规划](dsh-profiles-and-plugins.md)的实施附件，随 [PR #3011](https://github.com/EKKOLearnAI/ekko-studio/pull/3011)维护。下文 API、事件名、错误码及测试文件名均为拟议契约；源码核对不等于运行测试通过。
 
 ## 1. 本轮收敛的技术决定
 

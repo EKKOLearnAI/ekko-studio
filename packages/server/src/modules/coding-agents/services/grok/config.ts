@@ -1,3 +1,4 @@
+import { readTomlAssignment } from '../toml-assignment'
 import { existsSync } from 'fs'
 import { compactionPercent, type CodingAgentContextPolicy } from '../context-policy'
 import { copyFile, cp, lstat, mkdir, readFile, readdir, writeFile } from 'fs/promises'
@@ -100,57 +101,6 @@ export function grokSettingsConfig(content: string): string {
   return value ? `${value}\n` : ''
 }
 
-interface TomlArrayScanState {
-  quote: '"' | "'" | null
-  multiline: boolean
-}
-
-function scanTomlArrayBrackets(line: string, state: TomlArrayScanState): number {
-  let delta = 0
-  let escaped = false
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    if (state.quote) {
-      if (state.multiline) {
-        if (state.quote === '"' && char === '\\') {
-          escaped = !escaped
-          continue
-        }
-        if (char === state.quote && !escaped) {
-          let quoteCount = 1
-          while (line[index + quoteCount] === state.quote) quoteCount += 1
-          if (quoteCount >= 3) {
-            state.quote = null
-            state.multiline = false
-            index += quoteCount - 1
-          }
-        }
-        escaped = false
-        continue
-      }
-      if (state.quote === '"' && char === '\\' && !escaped) {
-        escaped = true
-        continue
-      }
-      if (char === state.quote && !escaped) {
-        state.quote = null
-      }
-      escaped = false
-      continue
-    }
-    if (char === '#') break
-    if (char === '"' || char === "'") {
-      state.quote = char
-      state.multiline = line.slice(index, index + 3) === char.repeat(3)
-      if (state.multiline) index += 2
-      continue
-    }
-    if (char === '[') delta += 1
-    else if (char === ']') delta -= 1
-  }
-  return delta
-}
-
 function isManagedGrokSection(section: string): boolean {
   return section === 'models'
     || section.startsWith('model.')
@@ -163,7 +113,11 @@ function isManagedGrokSection(section: string): boolean {
 
 export function grokRuntimeSettingsConfig(...contents: Array<string | null | undefined>): string {
   const topLevel = new Map<string, string>()
-  const sections = new Map<string, { header: string; lines: string[] }>()
+  const sections = new Map<string, {
+    header: string
+    entries: string[][]
+    assignmentIndexes: Map<string, number>
+  }>()
   const runtimeKeys = new Set([
     'model',
     'default',
@@ -180,16 +134,9 @@ export function grokRuntimeSettingsConfig(...contents: Array<string | null | und
   for (const content of contents) {
     let section = ''
     let sectionKey = ''
-    const sectionScanState: TomlArrayScanState = { quote: null, multiline: false }
     const lines = String(content || '').split(/\r?\n/)
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
       const line = lines[lineIndex]
-      if (sectionScanState.multiline) {
-        const sectionBlock = sections.get(sectionKey)
-        if (sectionBlock && !isManagedGrokSection(section)) sectionBlock.lines.push(line)
-        scanTomlArrayBrackets(line, sectionScanState)
-        continue
-      }
       const arrayHeader = line.match(/^\s*\[\[([^\]]+)\]\]\s*$/)
       if (arrayHeader) {
         section = arrayHeader[1].trim()
@@ -198,44 +145,49 @@ export function grokRuntimeSettingsConfig(...contents: Array<string | null | und
           continue
         }
         sectionKey = `array:${arraySectionIndex++}`
-        sections.set(sectionKey, { header: line.trim(), lines: [] })
+        sections.set(sectionKey, { header: line.trim(), entries: [], assignmentIndexes: new Map() })
         continue
       }
       const tableHeader = line.match(/^\s*\[([^\]]+)\]\s*$/)
       if (tableHeader) {
         section = tableHeader[1].trim()
         sectionKey = `table:${section}`
-        if (!sections.has(sectionKey)) sections.set(sectionKey, { header: line.trim(), lines: [] })
-        continue
-      }
-      const assignment = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=/)
-      if (!section) {
-        if (assignment && !runtimeKeys.has(assignment[1])) {
-          let mergedLine = line
-          const scanState: TomlArrayScanState = { quote: null, multiline: false }
-          let bracketDepth = scanTomlArrayBrackets(line.slice(line.indexOf('=') + 1), scanState)
-          while ((bracketDepth > 0 || scanState.multiline) && lineIndex + 1 < lines.length) {
-            lineIndex += 1
-            const nextLine = lines[lineIndex]
-            mergedLine += `\n${nextLine}`
-            bracketDepth += scanTomlArrayBrackets(nextLine, scanState)
-          }
-          topLevel.set(assignment[1], mergedLine)
+        if (!sections.has(sectionKey)) {
+          sections.set(sectionKey, { header: line.trim(), entries: [], assignmentIndexes: new Map() })
         }
         continue
       }
-      if (isManagedGrokSection(section)) {
-        scanTomlArrayBrackets(line, sectionScanState)
+      const assignment = readTomlAssignment(lines, lineIndex)
+      if (assignment) lineIndex = assignment.endIndex
+      const assignmentKey = assignment ? JSON.stringify(assignment.key) : ''
+      const settingName = assignment?.key.length === 1 ? assignment.key[0] : ''
+      if (!section) {
+        if (assignment && !runtimeKeys.has(settingName)) {
+          topLevel.set(assignmentKey, assignment.lines.join('\n'))
+        }
         continue
       }
+      if (isManagedGrokSection(section)) continue
       const sectionBlock = sections.get(sectionKey)
-      if (sectionBlock && line.trim()) sectionBlock.lines.push(line)
-      scanTomlArrayBrackets(line, sectionScanState)
+      if (!sectionBlock || !line.trim()) continue
+      if (!assignment) {
+        sectionBlock.entries.push([line])
+        continue
+      }
+
+      const previousIndex = sectionBlock.assignmentIndexes.get(assignmentKey)
+      if (previousIndex === undefined) {
+        sectionBlock.assignmentIndexes.set(assignmentKey, sectionBlock.entries.length)
+        sectionBlock.entries.push(assignment.lines)
+      } else {
+        sectionBlock.entries[previousIndex] = assignment.lines
+      }
     }
   }
 
   const blocks = [...topLevel.values()]
-  for (const [key, { header, lines }] of sections) {
+  for (const [key, { header, entries }] of sections) {
+    const lines = entries.flat()
     if (lines.length || key.startsWith('array:')) {
       blocks.push(lines.length ? `${header}\n${lines.join('\n')}` : header)
     }

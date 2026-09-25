@@ -10,6 +10,8 @@ import { AgentToolRegistry } from '../tools/registry'
 import { createSkillTools } from '../tools/skills'
 import type { EkkoRuntimeLogContext, EkkoRuntimeLogger } from '../logging/runtime-logger'
 import type { EkkoExternalSkillDirectory } from './external-directories'
+import { currentEkkoJevRun } from '../jev/client'
+import { shouldReviewSkills } from './jev'
 
 export interface SkillReviewUsageEvent {
   purpose: 'ekko-skill-review'
@@ -49,12 +51,15 @@ export class SkillReviewService {
 
   schedule(input: SkillReviewScheduleInput): void {
     const reviewId = randomUUID()
+    // Capture the originating run even when an earlier Profile's review delays this queue.
+    const run = currentEkkoJevRun()
+    const review = async () => {
+      safelyInvoke(() => input.onStarted?.(reviewId))
+      const mutations = await this.review(reviewId, input)
+      safelyInvoke(() => input.onCompleted?.(reviewId, mutations))
+    }
     this.queue = this.queue
-      .then(async () => {
-        safelyInvoke(() => input.onStarted?.(reviewId))
-        const mutations = await this.review(reviewId, input)
-        safelyInvoke(() => input.onCompleted?.(reviewId, mutations))
-      })
+      .then(() => run ? run.client.runScoped(run.signal, review, run.onDiagnostic) : review())
       .catch(error => {
         safelyInvoke(() => input.onFailed?.(
           reviewId,
@@ -68,6 +73,9 @@ export class SkillReviewService {
   }
 
   private async review(reviewId: string, input: SkillReviewScheduleInput): Promise<number> {
+    if (!await shouldReviewSkills(input.messages)) return 0
+    const signal = currentEkkoJevRun()?.signal
+    signal?.throwIfAborted()
     const tools = new AgentToolRegistry()
     tools.registerMany(createSkillTools(this.options.skillDirectory, {
       externalSkillDirectories: this.options.externalSkillDirectories,
@@ -82,7 +90,9 @@ export class SkillReviewService {
     let mutations = 0
 
     for (let step = 0; step < maxSteps; step += 1) {
+      signal?.throwIfAborted()
       const response = await this.createWithRetries({
+        signal,
         model: input.model,
         messages,
         temperature: 0.1,
@@ -106,8 +116,10 @@ export class SkillReviewService {
       if (!toolCalls.length) return mutations
 
       for (const toolCall of toolCalls) {
+        signal?.throwIfAborted()
         const result = await tools.execute(toolCall.name, toolCall.arguments, {
           runId: reviewId,
+          signal,
           skillMutationSource: 'background-review',
         })
         if (toolCall.name === 'skill_manage' && result.ok) mutations += 1
@@ -128,6 +140,7 @@ export class SkillReviewService {
     const maxRetries = Math.max(0, this.options.maxModelRetries ?? 3)
     let lastError: unknown
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      request.signal?.throwIfAborted()
       const span = input.requestLogger?.startModelRequest({
         client: modelClient,
         request,

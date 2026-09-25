@@ -8,6 +8,7 @@ Use this checklist before pushing or updating a pull request.
 - The diff is limited to the requested task and required harness updates.
 - Unrelated formatting or refactors are not bundled into the change.
 - User-facing text has locale coverage.
+- JEV consumers are registered with independent switches and frontend configuration; configuration-only status must not imply an active evaluation policy.
 
 ## Architecture
 

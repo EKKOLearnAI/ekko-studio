@@ -10,6 +10,15 @@ creates one `EkkoProfileAgent` per configured Profile, so modules are used as
 `ekko.agent.get('work').tool`. See the complete field, method, parameter, and
 configuration reference in [docs/API.md](docs/API.md).
 
+Ekko includes its own optional JEV evaluator through `ekko.jev` and `runtime.jev`.
+Persist defaults in `config.jev`, or pass a `jev` object to the constructor/runtime
+to override fields in memory without rewriting the local configuration. The host
+passes settings, and Ekko creates the SDK client itself. See the
+[JEV module API](docs/API.md#jev-模块) for precedence and fallback behavior.
+`jev.memoryEnabled` gates optional category routing, per-card relevance filtering, candidate reranking and foreground
+write review. Each feature has its own default-off switch and retains the original
+flow when JEV is unavailable. See [memory JEV behavior](docs/memory-jev.md).
+
 `default` is always created, even when `profiles` is omitted or does not list
 it. Existing first-level Profile directories under `.ekko/skills`,
 `.ekko/logs`, and `.ekko/workspace` are discovered automatically; explicit
@@ -566,12 +575,14 @@ next event would exceed that cap, the existing content is discarded and
 logging continues in the same file; no rotated or per-session files are
 created.
 
-The persistent log is intentionally request-only. Every model-client request
-attempt writes one terminal `model.request` record after it completes or fails.
+Every model-client request attempt writes one terminal `model.request` record after it completes or fails.
 That single record combines safe request metadata, status, duration, usage, and
 response sizes. Runtime events, streaming deltas, tool events, prompts, and
 response bodies are not written, so log volume tracks model calls instead of
-the much larger runtime event stream.
+the much larger runtime event stream. Optional memory JEV also writes compact
+`memory.jev` stage summaries with timings, routing probabilities, thresholds and
+sanitized fallback reasons, correlated by session/run/turn. It never logs card
+content, query text or credentials.
 
 Endpoints and common credential shapes are redacted, large strings are
 truncated, and base64 payloads are omitted. `EkkoFileLogReader.query()` can

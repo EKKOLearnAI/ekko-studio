@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const recordSessionUploadAttachmentsMock = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('../../packages/server/src/modules/studio/services/files/session-uploads', () => ({
+  recordSessionUploadAttachments: recordSessionUploadAttachmentsMock,
+}))
+vi.mock('../../packages/server/src/modules/studio/services/session-shares/socket-access', () => ({
+  bindSessionShareSocket: vi.fn(),
+}))
+
 const saveTaskPlanMock = vi.hoisted(() => vi.fn())
 vi.mock('../../packages/server/src/modules/studio/repositories/task-plan-store', () => ({
   saveTaskPlan: saveTaskPlanMock, listTaskPlansForPage: vi.fn(() => []),
@@ -1143,4 +1151,55 @@ describe('MCP-aware run guidance', () => {
     expect((handleCodingAgentRunMock.mock.calls as any)[0][2].instructions || '').not.toContain('ekko_studio_use_mobile_')
   })
 
+})
+
+describe('session upload provenance at the socket boundary', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getSessionMock.mockImplementation((sessionId?: string) => sessionId
+      ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai' }
+      : undefined)
+  })
+
+  it.each(['file', 'image', 'text'])('accepts a %s block in a new local session before it is persisted', async type => {
+    getSessionMock.mockReturnValue(undefined)
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const run = vi.spyOn(server as any, 'handleRun').mockResolvedValue(undefined)
+    ;(server as any).onConnection(socket)
+    const input = [{ type, path: '/uploads/attachment.txt', name: 'attachment.txt', text: 'hello' }]
+    await handlers.get('run')!({ session_id: 'new-local-session', profile: 'default', input })
+    expect(socket.emit).not.toHaveBeenCalledWith('run.failed', expect.anything())
+    expect(run).toHaveBeenCalledWith(socket, expect.objectContaining({ session_id: 'new-local-session', input }), 'default', false, undefined, undefined)
+    expect(recordSessionUploadAttachmentsMock).toHaveBeenCalledWith('new-local-session', 'default', input, { allowPendingSession: true })
+  })
+
+  it('still rejects existing attachments from a different profile before registering or running', async () => {
+    getSessionMock.mockReturnValue({ id: 'research-session', profile: 'research', source: 'cli', model: 'gpt-test', provider: 'openai' })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const run = vi.spyOn(server as any, 'handleRun').mockResolvedValue(undefined)
+    ;(server as any).onConnection(socket)
+    await handlers.get('run')!({ session_id: 'research-session', input: [{ type: 'file', path: '/uploads/private.txt' }] })
+    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'Profile "research" is not available on this connection' }))
+    expect(recordSessionUploadAttachmentsMock).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('registers host attachments but never recipient-provided paths (shared=%s)', async shared => {
+    recordSessionUploadAttachmentsMock.mockClear()
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    if (shared) socket.data = { sessionShare: { share: { session_id: 'session-1', profile: 'default' } } }
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).onConnection(socket)
+    ;(server as any).sessionMap.set('session-1', { isWorking: true, queue: [], events: [] })
+    const input = [{ type: 'file', path: '/uploads/attachment.txt', name: 'attachment.txt' }]
+    await handlers.get('run')!({ session_id: 'session-1', input })
+    if (shared) expect(recordSessionUploadAttachmentsMock).not.toHaveBeenCalled()
+    else expect(recordSessionUploadAttachmentsMock).toHaveBeenCalledWith('session-1', 'default', input, { allowPendingSession: true })
+    expect((server as any).sessionMap.get('session-1').queue).toHaveLength(1)
+  })
 })

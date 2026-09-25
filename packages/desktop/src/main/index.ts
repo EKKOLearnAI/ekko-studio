@@ -26,7 +26,8 @@ import {
   stopWebUiServer,
 } from './webui-server'
 import { bundledNode, desktopIcon, desktopLinuxTrayIcon, desktopMacTrayIcon, desktopRuntimeVersion, desktopWindowsTrayIcon, runtimeStorageRoot, webuiDir, webUiHome } from './paths'
-import { checkForDesktopUpdates, initAutoUpdater } from './updater'
+import { cancelDesktopUpdateDownload, checkForDesktopUpdates, downloadDesktopUpdate, getDesktopUpdateState, initAutoUpdater, installDesktopUpdate } from './updater'
+import { DESKTOP_UPDATE_STATE_CHANNEL, type DesktopUpdateState } from './updater-types'
 import { t } from './desktop-i18n'
 import { resetDesktopDefaultLogin } from './desktop-login-reset'
 import { installHermesStudioCliShim, installHermesStudioMcpShim } from './cli-shim'
@@ -1054,6 +1055,42 @@ function isTrustedDesktopWindowSender(sender: WebContents): boolean {
   return windows.some(window => window && !window.isDestroyed() && window.webContents === sender)
 }
 
+function requireDesktopUpdaterSender(event: IpcMainInvokeEvent): void {
+  if (!isTrustedDesktopWindowSender(event.sender)
+    || event.senderFrame !== event.sender.mainFrame
+    || !isTrustedDesktopAppUrl(event.senderFrame?.url || '', serverUrl)) {
+    throw new Error('Desktop updates can only be controlled from a Studio window')
+  }
+}
+
+ipcMain.handle('hermes-desktop:update-get-state', event => {
+  requireDesktopUpdaterSender(event)
+  return getDesktopUpdateState()
+})
+ipcMain.handle('hermes-desktop:update-cancel', event => {
+  requireDesktopUpdaterSender(event)
+  return cancelDesktopUpdateDownload()
+})
+ipcMain.handle('hermes-desktop:update-download', event => {
+  requireDesktopUpdaterSender(event)
+  return downloadDesktopUpdate()
+})
+ipcMain.handle('hermes-desktop:update-install', event => {
+  requireDesktopUpdaterSender(event)
+  return installDesktopUpdate()
+})
+
+function broadcastDesktopUpdateState(state: DesktopUpdateState): void {
+  for (const target of [mainWindow, ...chatWindows.values()]) {
+    if (!target || target.isDestroyed() || target.webContents.isDestroyed()) continue
+    try {
+      target.webContents.send(DESKTOP_UPDATE_STATE_CHANNEL, state)
+    } catch (err) {
+      console.warn('[updater] failed to notify desktop window:', err)
+    }
+  }
+}
+
 ipcMain.handle('hermes-desktop:open-external-url', async (event, url?: unknown) => {
   if (!isTrustedDesktopWindowSender(event.sender)) {
     throw new Error('External URLs can only be opened from a Hermes desktop window')
@@ -1330,7 +1367,16 @@ function runDesktopApp() {
       console.error('[desktop-browser] failed to initialize:', error)
     })
     void bootstrap()
-    initAutoUpdater({ beforeQuitAndInstall: prepareAppShutdown })
+    initAutoUpdater({
+      beforeQuitAndInstall: prepareAppShutdown,
+      onInstallFailure: async () => {
+        await prepareAppShutdown()
+        app.relaunch()
+        appLifecycle.finalizeExit(0)
+      },
+      onStateChange: broadcastDesktopUpdateState,
+      onShowProgress: showMainWindow,
+    })
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         void createWindow()

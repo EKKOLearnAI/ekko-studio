@@ -5,10 +5,12 @@ import path from 'node:path'
 import { checkServerModuleBoundaries } from './server-module-boundaries.mjs'
 import { hasManagedMcpNodeMode } from './managed-mcp-harness.mjs'
 import { checkDshModuleBoundaries } from './dsh-module-harness.mjs'
+import { checkJevIntegrations } from './jev-harness.mjs'
 
 const root = process.cwd()
 const failures = []
 failures.push(...await checkDshModuleBoundaries(root))
+failures.push(...await checkJevIntegrations(root))
 
 function fail(message) {
   failures.push(message)
@@ -39,6 +41,8 @@ for (const file of [
   'docs/harness/worktree-runbook.md',
   'docs/harness/pr-review.md',
   'docs/harness/server-module-boundaries.md',
+  'docs/harness/jev-integrations.md',
+  'scripts/jev-integrations.json',
 ]) {
   requireFile(file)
 }
@@ -137,6 +141,7 @@ for (const [file, factory] of [
 
 const desktopReleaseWorkflow = await readText('.github/workflows/desktop-release.yml')
 const desktopManualBuildWorkflow = await readText('.github/workflows/desktop-manual-build.yml')
+const desktopUpdateTestWorkflow = await readText('.github/workflows/desktop-update-test.yml')
 const desktopMacUpdateManifestWorkflow = await readText('.github/workflows/desktop-mac-update-manifest.yml')
 const desktopRuntimeWorkflow = await readText('.github/workflows/desktop-runtime.yml')
 const webuiReleaseWorkflow = await readText('.github/workflows/webui-release.yml')
@@ -154,6 +159,7 @@ const desktopPackageRuntime = await readText('packages/desktop/scripts/package-r
 const desktopWebuiServer = await readText('packages/desktop/src/main/webui-server.ts')
 const desktopMain = await readText('packages/desktop/src/main/index.ts')
 const desktopUpdater = await readText('packages/desktop/src/main/updater.ts')
+const desktopUpdaterSource = await readText('packages/desktop/src/main/updater-source.ts')
 const desktopInstallerScript = await readText('packages/desktop/build/installer.nsh')
 const desktopRuntimeManager = await readText('packages/desktop/src/main/runtime-manager.ts')
 const desktopPaths = await readText('packages/desktop/src/main/paths.ts')
@@ -418,16 +424,27 @@ for (const phrase of [
 
 for (const phrase of [
   'https://download.ekkolearnai.com/latest',
-  'https://github.com/EKKOLearnAI/hermes-studio/releases/latest/download',
-  'checkForUpdatesWithFallback()',
+  'https://github.com/EKKOLearnAI/ekko-studio/releases/latest/download',
 ]) {
-  if (!desktopUpdater.includes(phrase)) {
-    fail(`desktop updater must check Cloudflare first and keep GitHub as fallback: ${phrase}`)
+  if (!desktopUpdaterSource.includes(phrase)) {
+    fail(`desktop updater source must preserve the production primary and fallback feeds: ${phrase}`)
   }
 }
 
-if (desktopUpdater.includes('fetch(')) {
+for (const phrase of ['checkForUpdatesWithFallback()', 'readDesktopUpdateSource(app.getAppPath())', 'configureUpdateFeed(source.fallbackUrl)']) {
+  if (!desktopUpdater.includes(phrase)) fail(`desktop updater must use the packaged source policy: ${phrase}`)
+}
+
+if (desktopUpdater.includes('fetch(') || desktopUpdaterSource.includes('fetch(')) {
   fail('desktop updater must not make custom fetch requests to resolve the latest release tag')
+}
+
+if (!desktopUpdateTestWorkflow.includes('contents: read')
+  || /contents:\s*write|action-gh-release|gh\s+release/.test(desktopUpdateTestWorkflow)) {
+  fail('desktop update test workflow must not have a production release publication path')
+}
+for (const phrase of ['configure-macos-signing.mjs --require-signed', 'run dist:update-test', 'run test:updater']) {
+  if (!desktopUpdateTestWorkflow.includes(phrase)) fail(`desktop update test workflow must include: ${phrase}`)
 }
 
 for (const phrase of [

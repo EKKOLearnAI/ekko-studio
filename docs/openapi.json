@@ -3,7 +3,7 @@
   "info": {
     "title": "Ekko Studio API",
     "description": "Ekko Studio API — chat sessions, scheduled jobs, platform channels, model management, skills, memory, logs, file browser, group chat, and terminal.",
-    "version": "0.7.23"
+    "version": "0.7.24"
   },
   "servers": [
     {
@@ -159,6 +159,10 @@
     {
       "name": "STT",
       "description": "Speech-to-text transcription and settings"
+    },
+    {
+      "name": "JEV",
+      "description": "Profile-scoped TypeSafe JEV configuration and shared Choice, Score, Noul evaluations"
     },
     {
       "name": "Media",
@@ -16509,6 +16513,719 @@
         ]
       }
     },
+    "/api/studio/jev/evaluate": {
+      "post": {
+        "tags": [
+          "JEV"
+        ],
+        "summary": "Create evaluate",
+        "description": "POST /api/studio/jev/evaluate",
+        "operationId": "evaluate",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Profile access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "API key not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "Request cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Settings operation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Provider request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Provider request timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "state",
+                  "questions"
+                ],
+                "properties": {
+                  "state": {
+                    "nullable": true,
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  },
+                  "questions": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                      "type": "object",
+                      "required": [
+                        "type"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "choice",
+                            "score",
+                            "noul"
+                          ]
+                        },
+                        "instructions": {},
+                        "criteria": {}
+                      },
+                      "description": "Choice: at least two named criteria. Score: at least two ordered criteria. Noul: optional true/false criteria."
+                    }
+                  },
+                  "model": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ]
+      }
+    },
+    "/api/studio/jev/settings": {
+      "get": {
+        "tags": [
+          "JEV"
+        ],
+        "summary": "Get settings",
+        "description": "GET /api/studio/jev/settings",
+        "operationId": "getSettings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Non-secret JEV settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "baseUrl": {
+                      "type": "string",
+                      "format": "uri",
+                      "default": "https://api.typesafe.ai"
+                    },
+                    "model": {
+                      "type": "string",
+                      "default": "jev-latest",
+                      "maxLength": 200
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "minimum": 1000,
+                      "maximum": 120000,
+                      "default": 10000
+                    },
+                    "hasApiKey": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "baseUrl",
+                    "model",
+                    "timeoutMs",
+                    "hasApiKey"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Profile access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "API key not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "Request cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Settings operation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Provider request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Provider request timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "JEV"
+        ],
+        "summary": "Update settings",
+        "description": "PUT /api/studio/jev/settings",
+        "operationId": "saveSettings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Non-secret JEV settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "baseUrl": {
+                      "type": "string",
+                      "format": "uri",
+                      "default": "https://api.typesafe.ai"
+                    },
+                    "model": {
+                      "type": "string",
+                      "default": "jev-latest",
+                      "maxLength": 200
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "minimum": 1000,
+                      "maximum": 120000,
+                      "default": 10000
+                    },
+                    "hasApiKey": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "baseUrl",
+                    "model",
+                    "timeoutMs",
+                    "hasApiKey"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Profile access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "API key not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "Request cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Settings operation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Provider request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Provider request timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "baseUrl": {
+                    "type": "string",
+                    "format": "uri",
+                    "default": "https://api.typesafe.ai"
+                  },
+                  "model": {
+                    "type": "string",
+                    "default": "jev-latest",
+                    "maxLength": 200
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 120000,
+                    "default": 10000
+                  },
+                  "apiKey": {
+                    "type": "string",
+                    "writeOnly": true,
+                    "description": "Omit or leave blank to preserve the saved key. DELETE clears it."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "JEV"
+        ],
+        "summary": "Delete settings",
+        "description": "DELETE /api/studio/jev/settings",
+        "operationId": "deleteSettings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Non-secret JEV settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "baseUrl": {
+                      "type": "string",
+                      "format": "uri",
+                      "default": "https://api.typesafe.ai"
+                    },
+                    "model": {
+                      "type": "string",
+                      "default": "jev-latest",
+                      "maxLength": 200
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "minimum": 1000,
+                      "maximum": 120000,
+                      "default": 10000
+                    },
+                    "hasApiKey": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "baseUrl",
+                    "model",
+                    "timeoutMs",
+                    "hasApiKey"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Profile access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "API key not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "Request cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Settings operation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Provider request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Provider request timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ]
+      }
+    },
+    "/api/studio/jev/test": {
+      "post": {
+        "tags": [
+          "JEV"
+        ],
+        "summary": "Create test",
+        "description": "POST /api/studio/jev/test",
+        "operationId": "testConnection",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Profile access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "API key not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "Request cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Settings operation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Provider request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Provider request timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ]
+      }
+    },
     "/api/studio/live-activities/registration": {
       "put": {
         "tags": [
@@ -23771,6 +24488,23 @@
             "format": "int64",
             "description": "Unix epoch milliseconds",
             "nullable": true
+          }
+        }
+      },
+      "JevError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Sanitized diagnostic message."
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^jev_",
+            "description": "Stable JEV error code used for client-side translation; middleware errors may omit it."
           }
         }
       }

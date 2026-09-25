@@ -6,7 +6,7 @@ Electron desktop distribution for Ekko Studio.
 
 Download the latest macOS, Windows, or Linux installer for your CPU
 architecture from the project
-[GitHub Releases](https://github.com/EKKOLearnAI/hermes-studio/releases/latest).
+[GitHub Releases](https://github.com/EKKOLearnAI/ekko-studio/releases/latest).
 
 The desktop app bundles the Web UI runtime and launches it locally from the
 native shell app.
@@ -20,6 +20,10 @@ Keep the application ID, signing identity, update feeds, and Linux package
 identity stable. Update manifests reference the actual artifact filenames.
 Validate an upgrade from the previous signed release on macOS and Windows
 before rollout.
+
+For isolated A → B testing without a production Release, use the
+[desktop update testing guide](UPDATE-TESTING.md) and the **Desktop Update Test Build**
+workflow. Test packages use a fixed HTTPS test feed and never fall back to production.
 
 ## Command shims
 

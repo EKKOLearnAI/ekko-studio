@@ -1,3 +1,4 @@
+import { readTomlAssignment } from './toml-assignment'
 import { studioMcpCapabilities } from '../../studio/public/runs/mcp-capabilities'
 import { prepareDshRuntime, DSH_API_KEY_ENV } from './dsh/runtime-config'
 import { readDshMcpServers, validateDshSettings } from './dsh/config'
@@ -1387,57 +1388,6 @@ function parseCodexExternalMcpBlocks(...contents: Array<string | null | undefine
   return Array.from(blockByServer.values()).filter(Boolean)
 }
 
-interface TomlArrayScanState {
-  quote: '"' | "'" | null
-  multiline: boolean
-}
-
-function scanTomlArrayBrackets(line: string, state: TomlArrayScanState): number {
-  let delta = 0
-  let escaped = false
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    if (state.quote) {
-      if (state.multiline) {
-        if (state.quote === '"' && char === '\\') {
-          escaped = !escaped
-          continue
-        }
-        if (char === state.quote && !escaped) {
-          let quoteCount = 1
-          while (line[index + quoteCount] === state.quote) quoteCount += 1
-          if (quoteCount >= 3) {
-            state.quote = null
-            state.multiline = false
-            index += quoteCount - 1
-          }
-        }
-        escaped = false
-        continue
-      }
-      if (state.quote === '"' && char === '\\' && !escaped) {
-        escaped = true
-        continue
-      }
-      if (char === state.quote && !escaped) {
-        state.quote = null
-      }
-      escaped = false
-      continue
-    }
-    if (char === '#') break
-    if (char === '"' || char === "'") {
-      state.quote = char
-      state.multiline = line.slice(index, index + 3) === char.repeat(3)
-      if (state.multiline) index += 2
-      continue
-    }
-    if (char === '[') delta += 1
-    else if (char === ']') delta -= 1
-  }
-  return delta
-}
-
 function isManagedCodexSection(section: string): boolean {
   return section === 'models'
     || section.startsWith('model.')
@@ -1455,7 +1405,11 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
   featureLines: string[]
 } {
   const topLevel = new Map<string, string>()
-  const sections = new Map<string, { header: string; lines: string[] }>()
+  const sections = new Map<string, {
+    header: string
+    entries: string[][]
+    assignmentIndexes: Map<string, number>
+  }>()
   const featureLines = new Map<string, string>()
   const runtimeKeys = new Set([
     'model',
@@ -1481,65 +1435,62 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
     if (!content?.trim()) continue
     let section = ''
     let sectionKey = ''
-    const sectionScanState: TomlArrayScanState = { quote: null, multiline: false }
     const lines = content.split(/\r?\n/)
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
       const line = lines[lineIndex]
-      if (sectionScanState.multiline) {
-        const sectionBlock = sections.get(sectionKey)
-        if (sectionBlock && section !== 'features' && !isManagedCodexSection(section)) {
-          sectionBlock.lines.push(line)
-        }
-        scanTomlArrayBrackets(line, sectionScanState)
-        continue
-      }
       const arrayHeader = line.match(/^\s*\[\[([^\]]+)\]\]\s*$/)
       if (arrayHeader) {
         section = arrayHeader[1].trim()
         sectionKey = `array:${arraySectionIndex++}`
-        sections.set(sectionKey, { header: line.trim(), lines: [] })
+        sections.set(sectionKey, { header: line.trim(), entries: [], assignmentIndexes: new Map() })
         continue
       }
       const tableHeader = line.match(/^\s*\[([^\]]+)\]\s*$/)
       if (tableHeader) {
         section = tableHeader[1].trim()
         sectionKey = `table:${section}`
-        if (!sections.has(sectionKey)) sections.set(sectionKey, { header: line.trim(), lines: [] })
+        if (!sections.has(sectionKey)) {
+          sections.set(sectionKey, { header: line.trim(), entries: [], assignmentIndexes: new Map() })
+        }
         continue
       }
-      const assignment = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=/)
+      const assignment = readTomlAssignment(lines, lineIndex)
+      if (assignment) lineIndex = assignment.endIndex
+      const assignmentKey = assignment ? JSON.stringify(assignment.key) : ''
+      const settingName = assignment?.key.length === 1 ? assignment.key[0] : ''
       if (!section) {
-        if (assignment && !runtimeKeys.has(assignment[1])) {
-          let mergedLine = line
-          const scanState: TomlArrayScanState = { quote: null, multiline: false }
-          let bracketDepth = scanTomlArrayBrackets(line.slice(line.indexOf('=') + 1), scanState)
-          while ((bracketDepth > 0 || scanState.multiline) && lineIndex + 1 < lines.length) {
-            lineIndex += 1
-            const nextLine = lines[lineIndex]
-            mergedLine += `\n${nextLine}`
-            bracketDepth += scanTomlArrayBrackets(nextLine, scanState)
-          }
-          topLevel.set(assignment[1], mergedLine)
+        if (assignment && !runtimeKeys.has(settingName)) {
+          topLevel.set(assignmentKey, assignment.lines.join('\n'))
         }
         continue
       }
       if (section === 'features') {
-        if (assignment && !runtimeFeatures.has(assignment[1])) featureLines.set(assignment[1], line)
-        scanTomlArrayBrackets(line, sectionScanState)
+        if (assignment && !runtimeFeatures.has(settingName)) {
+          featureLines.set(assignmentKey, assignment.lines.join('\n'))
+        }
         continue
       }
-      if (isManagedCodexSection(section)) {
-        scanTomlArrayBrackets(line, sectionScanState)
-        continue
-      }
+      if (isManagedCodexSection(section)) continue
       const sectionBlock = sections.get(sectionKey)
-      if (sectionBlock && line.trim()) sectionBlock.lines.push(line)
-      scanTomlArrayBrackets(line, sectionScanState)
+      if (!sectionBlock || !line.trim()) continue
+      if (!assignment) {
+        sectionBlock.entries.push([line])
+        continue
+      }
+
+      const previousIndex = sectionBlock.assignmentIndexes.get(assignmentKey)
+      if (previousIndex === undefined) {
+        sectionBlock.assignmentIndexes.set(assignmentKey, sectionBlock.entries.length)
+        sectionBlock.entries.push(assignment.lines)
+      } else {
+        sectionBlock.entries[previousIndex] = assignment.lines
+      }
     }
   }
 
   const sectionBlocks: string[] = []
-  for (const [key, { header, lines }] of sections) {
+  for (const [key, { header, entries }] of sections) {
+    const lines = entries.flat()
     if (lines.length || key.startsWith('array:')) {
       sectionBlocks.push(lines.length ? `${header}\n${lines.join('\n')}` : header)
     }
@@ -2851,8 +2802,11 @@ export function getCodingAgentDefinition(id: string): CodingAgentDefinition | nu
 }
 
 export function withCodingAgentRegistry(id: CodingAgentId, args: string[]): string[] {
+  // DSH's native dependencies share a process-wide FFI type registry; duplicate
+  // copies can crash plugin startup after an otherwise successful npm update.
+  const installOptions = id === 'dsh' && args[0] === 'install' ? ['--prefer-dedupe'] : []
   return id === 'codex' || id === 'grok' || id === 'opencode' || id === 'dsh'
-    ? [...args, `--registry=${OFFICIAL_NPM_REGISTRY}`]
+    ? [...args, ...installOptions, `--registry=${OFFICIAL_NPM_REGISTRY}`]
     : [...args]
 }
 

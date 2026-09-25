@@ -120,7 +120,26 @@ export interface DesktopBrowserBridge {
   onStateChange: (callback: (state: DesktopBrowserState) => void) => () => void
 }
 
+export interface DesktopUpdateState {
+  revision: number
+  status: 'idle' | 'downloading' | 'cancelling' | 'cancelled' | 'preparing' | 'downloaded' | 'error' | 'installing'
+  version: string
+  percent: number | null
+  transferred: number
+  total: number
+  bytesPerSecond: number
+}
+
+export interface DesktopUpdaterBridge {
+  getState: () => Promise<DesktopUpdateState>
+  cancel: () => Promise<DesktopUpdateState>
+  download: () => Promise<DesktopUpdateState>
+  install: () => Promise<DesktopUpdateState>
+  onStateChange: (callback: (state: DesktopUpdateState) => void) => () => void
+}
+
 export interface HermesDesktopBridge {
+  updater?: DesktopUpdaterBridge
   getToken: () => Promise<string>
   ensureAuth?: () => Promise<boolean>
   retryBootstrap: (source?: 'cf' | 'github') => Promise<void>

@@ -8,6 +8,7 @@ import {
   type EkkoDirectoryLayout,
 } from './directories'
 import { MemoryService } from './memory/service'
+import { EkkoJevClient, resolveEkkoJevConfig, type EkkoJevOverrides } from './jev'
 import { resolveEkkoDataDirectory } from './memory/paths'
 import { SqliteMemoryStore } from './memory/store'
 import { EkkoToolApprovalService } from './tools/approval'
@@ -64,6 +65,8 @@ export interface SetupEkkoAgentOptions extends EkkoDirectoryInitializationOption
    * Profile agents and runtime services are created.
    */
   config?: EkkoConfigPatch
+  /** In-memory JEV overrides, applied after persisted config.jev; never written back. */
+  jev?: EkkoJevOverrides
   env?: Record<string, string | undefined>
   packageRoot?: string
   authorizationRefresher?: EkkoModelAuthorizationRefresher
@@ -126,6 +129,7 @@ export class EkkoAgentSetup {
   readonly diagnostics: EkkoDiagnosticsRegistry
   readonly recovery: EkkoRecoveryService
   readonly config: EkkoConfigStore
+  readonly jev: EkkoJevClient
   readonly database: EkkoDatabaseManager
   readonly memoryStore: SqliteMemoryStore
   readonly memory: MemoryService
@@ -144,9 +148,11 @@ export class EkkoAgentSetup {
   private readonly directProfileProperties = new Set<string>()
   private currentToolApprovals: EkkoToolApprovalService
   private readonly unsubscribeConfig: () => void
+  private readonly jevOverrides?: EkkoJevOverrides
   private closed = false
 
   constructor(options: SetupEkkoAgentOptions = {}) {
+    this.jevOverrides = options.jev === undefined ? undefined : structuredClone(options.jev)
     const dataDirectory = resolveEkkoDataDirectory({
       baseDirectory: options.baseDirectory,
       env: options.env,
@@ -183,6 +189,7 @@ export class EkkoAgentSetup {
     const config = options.config
       ? this.config.update(options.config)
       : startupConfig
+    this.jev = new EkkoJevClient(resolveEkkoJevConfig(config.jev, this.jevOverrides))
     this.authorizations = new EkkoModelAuthorizationManager({
       config: this.config,
       refresher: options.authorizationRefresher,
@@ -195,6 +202,7 @@ export class EkkoAgentSetup {
       createRegistry: profile => this.createProfileToolRegistry(profile),
     })
     this.unsubscribeConfig = this.config.onDidChange(nextConfig => {
+      this.jev.configure(resolveEkkoJevConfig(nextConfig.jev, this.jevOverrides))
       this.currentToolApprovals = this.createToolApprovals(nextConfig)
       this.tool.invalidate()
       this.memory?.configure({
@@ -469,6 +477,7 @@ export class EkkoAgentSetup {
 
     return new AgentRuntime({
       ...runtimeOverrides,
+      jev: resolveEkkoJevConfig(config.jev, this.jevOverrides, runtimeOverrides.jev),
       profileId: profile,
       modelClient,
       toolsEnabled,
