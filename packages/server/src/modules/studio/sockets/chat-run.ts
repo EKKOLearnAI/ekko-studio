@@ -1113,6 +1113,37 @@ export class ChatRunSocket {
         data.queue_id, data.session_id, state.queue.length)
     })
 
+    socket.on('edit_queued_run', (data: { session_id?: string; queue_id?: string; content?: string }) => {
+      if (!data.session_id || !data.queue_id || typeof data.content !== 'string') return
+      const content = data.content.trim()
+      if (!content) return
+      try {
+        requireSocketSessionAccess(data.session_id)
+      } catch {
+        return
+      }
+      const state = this.sessionMap.get(data.session_id)
+      if (!state?.queue.length) return
+      const item = state.queue.find(entry => entry.queue_id === data.queue_id)
+      if (!item) return
+      // Only plain user text messages are editable from the Web UI queue panel.
+      if (typeof item.input !== 'string') return
+      if (item.displayInput !== undefined && item.displayInput !== null && typeof item.displayInput !== 'string') return
+      if (item.displayRole === 'command' || content.trimStart().startsWith('/')) return
+      item.input = content
+      if (item.displayInput !== undefined && item.displayInput !== null) {
+        item.displayInput = content
+      }
+      this.nsp.to(`session:${data.session_id}`).emit('run.queued', {
+        event: 'run.queued',
+        session_id: data.session_id,
+        queue_length: state.queue.length,
+        queued_messages: this.serializeQueuedMessages(state.queue),
+      })
+      logger.info('[chat-run-socket] edited queued run %s for session %s (queue: %d)',
+        data.queue_id, data.session_id, state.queue.length)
+    })
+
     socket.on('resume', async (data: { session_id?: string }) => {
       if (!data.session_id) return
       const sid = data.session_id

@@ -212,6 +212,41 @@ describe('chat store session.command fanout', () => {
     expect(store.queueInsertionStates.get('session-1')).toBeUndefined()
   })
 
+  it('edits a queued message locally and emits edit_queued_run', () => {
+    const store = useChatStore()
+    const session = makeSession()
+    session.source = 'cli'
+    session.agent = 'hermes'
+    store.sessions = [session]
+    store.activeSessionId = 'session-1'
+    store.activeSession = session
+    store.queuedUserMessages = new Map([['session-1', [{
+      id: 'queue-edit-me',
+      role: 'user',
+      content: 'original text',
+      timestamp: 2,
+      queued: true,
+    }]]])
+
+    store.editQueuedMessage('session-1', 'queue-edit-me', '  edited text  ')
+    expect(store.queuedUserMessages.get('session-1')?.[0]).toEqual(expect.objectContaining({
+      id: 'queue-edit-me',
+      content: 'edited text',
+      queued: true,
+    }))
+    expect(chatApi.socketEmit).toHaveBeenCalledWith('edit_queued_run', {
+      session_id: 'session-1',
+      queue_id: 'queue-edit-me',
+      content: 'edited text',
+    })
+
+    chatApi.socketEmit.mockClear()
+    store.editQueuedMessage('session-1', 'queue-edit-me', '   ')
+    store.editQueuedMessage('session-1', 'queue-missing', 'nope')
+    expect(chatApi.socketEmit).not.toHaveBeenCalled()
+    expect(store.queuedUserMessages.get('session-1')?.[0].content).toBe('edited text')
+  })
+
   it('does not clear the transcript for goal done commands', () => {
     const store = useChatStore()
     const session = makeSession()
