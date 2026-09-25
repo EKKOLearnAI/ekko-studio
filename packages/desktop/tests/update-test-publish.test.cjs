@@ -13,19 +13,26 @@ async function fixture(t, version = '0.7.900', target = 'darwin-arm64') {
   const config = publishConfig({ DESKTOP_UPDATE_TEST_TARGET: target, DESKTOP_UPDATE_TEST_VERSION: version })
   config.feed = await mkdtemp(join(tmpdir(), 'ekko-test-publish-fixture-'))
   t.after(() => rm(config.feed, { recursive: true, force: true }))
+  const linux = target.startsWith('linux')
   const files = []
-  for (const ext of target.startsWith('darwin') ? ['zip', 'dmg'] : ['exe']) {
+  for (const ext of target.startsWith('darwin') ? ['zip', 'dmg'] : linux ? ['AppImage'] : ['exe']) {
     const name = `Ekko.Studio-${version}-${target.split('-')[1]}.${ext}`
     const bytes = Buffer.from(`fixture ${name}`)
     await writeFile(join(config.feed, name), bytes)
-    await writeFile(join(config.feed, `${name}.blockmap`), `fixture blockmap ${name}`)
-    files.push({ url: name, size: bytes.length, sha512: createHash('sha512').update(bytes).digest('base64') })
+    if (linux) {
+      const { appendBlockmap } = require('app-builder-lib/out/targets/differentialUpdateInfoBuilder')
+      files.push({ url: name, ...await appendBlockmap(join(config.feed, name)) })
+    } else {
+      await writeFile(join(config.feed, `${name}.blockmap`), `fixture blockmap ${name}`)
+      files.push({ url: name, size: bytes.length, sha512: createHash('sha512').update(bytes).digest('base64') })
+    }
   }
-  const manifest = target.startsWith('darwin') ? 'latest-mac.yml' : 'latest.yml'
+  const manifest = linux ? (target.endsWith('arm64') ? 'latest-linux-arm64.yml' : 'latest-linux.yml')
+    : target.startsWith('darwin') ? 'latest-mac.yml' : 'latest.yml'
   await writeFile(join(config.feed, manifest), JSON.stringify({ version, files, path: files[0].url, sha512: files[0].sha512 }))
   await writeFile(join(config.feed, 'update-test-build.json'), JSON.stringify({
     version, target, source: config.metadata.desktopUpdate, manifest,
-    artifacts: [manifest, ...files.flatMap(file => [file.url, `${file.url}.blockmap`])],
+    artifacts: [manifest, ...files.flatMap(file => linux ? [file.url] : [file.url, `${file.url}.blockmap`])],
   }))
   return { ...config, manifest }
 }
@@ -60,10 +67,10 @@ function fakeGithub() {
   return { state, client, current: name => state.assets.find(asset => asset.name === name)?.bytes.toString() }
 }
 
-test('GitHub publisher fixes the repo and separates all three target feeds', async () => {
+test('GitHub publisher fixes the repo and separates all five target feeds', async () => {
   const { TEST_REPOSITORY, publishConfig, checkRepository } = await script()
   assert.equal(TEST_REPOSITORY, 'EKKOLearnAI/ekko-studio-update-test')
-  for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
+  for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64', 'linux-arm64']) {
     const env = { DESKTOP_UPDATE_TEST_TARGET: target, DESKTOP_UPDATE_TEST_VERSION: '0.7.900' }
     assert.equal(publishConfig(env).url, `https://github.com/${TEST_REPOSITORY}/releases/download/update-test-${target}/`)
     assert.throws(() => publishConfig({ ...env, DESKTOP_UPDATE_TEST_URL: 'https://github.com/EKKOLearnAI/ekko-studio/releases/latest/download/' }), /fixed/)
@@ -101,7 +108,7 @@ test('GitHub CLI adapter always uses the test repo, paginates, and never marks l
 
 test('A → B uploads installers first, switches manifest last, retains A, and supports exact retries on every target', async t => {
   const { publishFeed } = await script()
-  for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
+  for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64', 'linux-arm64']) {
     const a = await fixture(t, '0.7.900', target), b = await fixture(t, '0.7.901', target)
     const { state, client, current } = fakeGithub()
     await publishFeed(a, client)

@@ -42,7 +42,7 @@ async function until(predicate, message) {
   }
 }
 
-async function fixture(t, mac = false, testSource) {
+async function fixture(t, mac = false, testSource, linuxArch) {
   const root = await mkdtemp(join(tmpdir(), 'ekko-updater-test-'))
   const writers = []
   const createWriteStream = fs.createWriteStream
@@ -55,8 +55,30 @@ async function fixture(t, mac = false, testSource) {
     fs.createWriteStream = createWriteStream
     for (const stream of writers) stream.destroy()
   })
-  const bytes = randomBytes(1024 * 1024)
-  const fileName = mac ? 'update-1.1.0.zip' : 'update-1.1.0.exe'
+  let bytes = randomBytes(1024 * 1024)
+  const fileName = linuxArch ? 'update-1.1.0.AppImage' : mac ? 'update-1.1.0.zip' : 'update-1.1.0.exe'
+  let appImageInfo
+  if (linuxArch) {
+    const originalAppImage = process.env.APPIMAGE
+    const originalArch = process.env.TEST_UPDATER_ARCH
+    t.after(() => {
+      if (originalAppImage === undefined) delete process.env.APPIMAGE
+      else process.env.APPIMAGE = originalAppImage
+      if (originalArch === undefined) delete process.env.TEST_UPDATER_ARCH
+      else process.env.TEST_UPDATER_ARCH = originalArch
+    })
+    const { appendBlockmap } = require('app-builder-lib/out/targets/differentialUpdateInfoBuilder')
+    process.env.APPIMAGE = join(root, 'update-1.0.0.AppImage')
+    process.env.TEST_UPDATER_ARCH = linuxArch
+    const oldBytes = Buffer.from(bytes)
+    oldBytes.fill(0, bytes.length / 2)
+    await writeFile(process.env.APPIMAGE, oldBytes)
+    await appendBlockmap(process.env.APPIMAGE)
+    const newFile = join(root, fileName)
+    await writeFile(newFile, bytes)
+    appImageInfo = await appendBlockmap(newFile)
+    bytes = await fs.promises.readFile(newFile)
+  }
   const sha512 = createHash('sha512').update(bytes).digest('base64')
   const control = {
     corrupt: false, rejectSignature: false, slow: true, failPrimary: false, failTest: false, chunked: false, disconnect: false,
@@ -82,7 +104,7 @@ async function fixture(t, mac = false, testSource) {
       }
       const body = JSON.stringify({
         version: '1.1.0', releaseDate: '2026-09-25T00:00:00Z',
-        files: [{ url: fileName, sha512, size: bytes.length }], path: fileName, sha512,
+        files: [{ url: fileName, sha512, size: bytes.length, ...(appImageInfo ? { blockMapSize: appImageInfo.blockMapSize } : {}) }], path: fileName, sha512,
       })
       res.writeHead(200, { 'content-type': 'text/yaml', 'content-length': Buffer.byteLength(body) }).end(body)
       return
@@ -133,6 +155,7 @@ async function fixture(t, mac = false, testSource) {
   Object.defineProperty(process, 'platform', { value: mac ? 'darwin' : 'linux' })
   const { NsisUpdater } = require('electron-updater/out/NsisUpdater')
   const { MacUpdater } = require('electron-updater/out/MacUpdater')
+  const { AppImageUpdater } = require('electron-updater/out/AppImageUpdater')
   const config = join(root, 'app-update.yml')
   await writeFile(join(root, 'package.json'), JSON.stringify({
     name: 'UpdaterFixture', version: '1.0.0',
@@ -145,7 +168,7 @@ async function fixture(t, mac = false, testSource) {
     whenReady: async () => {}, onQuit: handler => control.quitHandlers.push(handler),
     quit: () => { throw new Error('Tests must not quit the app') },
   }
-  realUpdater = mac ? new MacUpdater(undefined, adapter) : new NsisUpdater(undefined, adapter)
+  realUpdater = linuxArch ? new AppImageUpdater(undefined, adapter) : mac ? new MacUpdater(undefined, adapter) : new NsisUpdater(undefined, adapter)
   realUpdater.httpExecutor = new LocalHttpExecutor()
   realUpdater.logger = null
   realUpdater.disableDifferentialDownload = true
@@ -154,7 +177,7 @@ async function fixture(t, mac = false, testSource) {
       control.signatureChecks++
       return control.rejectSignature ? 'fixture signature rejected' : null
     }
-    // The only replaced NsisUpdater action is launching the installer.
+    // Replace the OS installation action for NSIS/AppImage.
     realUpdater.quitAndInstall = () => { control.installs++ }
   }
   const setFeed = realUpdater.setFeedURL.bind(realUpdater)
@@ -186,6 +209,45 @@ async function fixture(t, mac = false, testSource) {
   })
   return { control, controller, updater, native, writers, root, bytes, ready: status => until(() => controller.getDesktopUpdateState().status === status, status) }
 }
+
+test('real AppImage embedded differential download cancels and retries for both Linux channels', { timeout: 30000 }, async t => {
+  for (const arch of ['x64', 'arm64']) await t.test(arch, async t => {
+    const { control, controller, updater, writers, bytes, ready } = await fixture(t, false,
+      { channel: 'test', url: `https://updates.example.com/linux-${arch}/` }, arch)
+    const oldFile = process.env.APPIMAGE
+    const original = fs.readFileSync(oldFile)
+    updater.disableDifferentialDownload = false
+    await controller.checkForDesktopUpdates(false)
+    await until(() => control.ranges.length >= 2 && writers.some(stream => stream.bytesWritten > 0), 'AppImage differential transfer started')
+    controller.cancelDesktopUpdateDownload()
+    await ready('cancelled')
+    await until(() => control.interrupted >= 1, 'AppImage range request aborted')
+    // DifferentialDownloader closes its raw descriptors directly on error;
+    // WriteStream.closed does not reflect that external close.
+    await until(() => writers.every(stream => {
+      if (stream.closed) return true
+      try { fs.fstatSync(stream.fd); return false } catch (error) {
+        if (error.code !== 'EBADF') throw error
+        return true
+      }
+    }), 'AppImage file descriptors closed after cancellation')
+    // Do not destroy these externally closed streams during fixture cleanup:
+    // their stale descriptor numbers can be reused by the retry.
+    writers.length = 0
+    assert.equal(updater.autoInstallOnAppQuit, false)
+    assert.equal(control.installs, 0)
+    assert.deepEqual(fs.readFileSync(oldFile), original)
+    control.slow = false
+    controller.downloadDesktopUpdate()
+    await ready('downloaded')
+    assert.deepEqual(fs.readFileSync(updater.installerPath), bytes)
+    if (originalPlatform !== 'win32') assert.equal(fs.statSync(updater.installerPath).mode & 0o777, 0o755)
+    assert.equal(control.downloads, control.ranges.length, 'AppImage retry must use real embedded-blockmap ranges, not full-download fallback')
+    assert(control.requests.some(url => url.startsWith(`/test/latest-linux${arch === 'x64' ? '' : '-arm64'}.yml`)))
+    assert(control.requests.every(url => url.startsWith('/test/')))
+    assert.equal(control.installs, 0)
+  })
+})
 
 test('real HTTP progress, fallback feed, cancellation and retry', { timeout: 20000 }, async t => {
   const { control, controller, updater, writers, ready } = await fixture(t)

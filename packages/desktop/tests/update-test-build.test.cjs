@@ -83,7 +83,10 @@ async function artifactsFixture(t, target = 'darwin-arm64') {
   const { config } = createTestBuildConfig({ ...baseEnv, DESKTOP_UPDATE_TEST_TARGET: target })
   const metadata = config.extraMetadata
   const mac = target.startsWith('darwin')
-  const resources = join(output, mac ? `${target.endsWith('arm64') ? 'mac-arm64' : 'mac'}/Ekko Studio.app/Contents/Resources` : 'win-unpacked/resources')
+  const linux = target.startsWith('linux')
+  const manifestName = linux ? (target.endsWith('arm64') ? 'latest-linux-arm64.yml' : 'latest-linux.yml') : mac ? 'latest-mac.yml' : 'latest.yml'
+  const resources = join(output, mac ? `${target.endsWith('arm64') ? 'mac-arm64' : 'mac'}/Ekko Studio.app/Contents/Resources`
+    : linux ? `${target.endsWith('arm64') ? 'linux-arm64-unpacked' : 'linux-unpacked'}/resources` : 'win-unpacked/resources')
   const source = join(output, 'package-source')
   await mkdir(source)
   await mkdir(resources, { recursive: true })
@@ -97,26 +100,51 @@ async function artifactsFixture(t, target = 'darwin-arm64') {
   const feedPath = join(resources, 'app-update.yml')
   await writeFile(feedPath, JSON.stringify(config.publish[0]))
   const files = []
-  for (const extension of (mac ? ['zip', 'dmg'] : ['exe'])) {
+  for (const extension of (mac ? ['zip', 'dmg'] : linux ? ['AppImage'] : ['exe'])) {
     const name = `Ekko.Studio-${metadata.version}-${target.split('-')[1]}.${extension}`
     const bytes = Buffer.from(`fixture:${name}`)
     await writeFile(join(output, name), bytes)
-    await writeFile(join(output, `${name}.blockmap`), 'fixture blockmap')
-    files.push({ url: name, sha512: createHash('sha512').update(bytes).digest('base64'), size: bytes.length })
+    if (linux) {
+      const { appendBlockmap } = require('app-builder-lib/out/targets/differentialUpdateInfoBuilder')
+      files.push({ url: name, ...await appendBlockmap(join(output, name)) })
+    } else {
+      await writeFile(join(output, `${name}.blockmap`), 'fixture blockmap')
+      files.push({ url: name, sha512: createHash('sha512').update(bytes).digest('base64'), size: bytes.length })
+    }
   }
   const manifest = { version: metadata.version, files, path: files[0].url, sha512: files[0].sha512 }
-  const manifestPath = join(output, mac ? 'latest-mac.yml' : 'latest.yml')
+  const manifestPath = join(output, manifestName)
   await writeFile(manifestPath, JSON.stringify(manifest))
-  return { output, metadata, manifest, manifestPath, feedPath, writePackage }
+  return { output, metadata, manifest, manifestPath, manifestName, feedPath, writePackage }
 }
 
 test('artifact verification accepts real ASAR packages and complete manifests for every supported target', async t => {
   const { verifyTestArtifacts } = await script()
-  for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
+  for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64', 'linux-arm64']) {
     const fixture = await artifactsFixture(t, target)
     const files = await verifyTestArtifacts(fixture.output, target, fixture.metadata)
-    assert(files.includes(target.startsWith('darwin') ? 'latest-mac.yml' : 'latest.yml'))
-    assert(files.includes(`${fixture.manifest.path}.blockmap`))
+    assert(files.includes(fixture.manifestName))
+    assert.equal(files.includes(`${fixture.manifest.path}.blockmap`), !target.startsWith('linux'))
+  }
+})
+
+test('Linux feed verifies builder-generated embedded blockmaps and rejects broken metadata/footer', async t => {
+  const { verifyTestFeed } = await script()
+  for (const target of ['linux-x64', 'linux-arm64']) {
+    const { output, metadata, manifest, manifestPath, manifestName } = await artifactsFixture(t, target)
+    assert.deepEqual(await verifyTestFeed(output, target, metadata), [manifestName, manifest.path])
+    const size = manifest.files[0].blockMapSize
+    delete manifest.files[0].blockMapSize
+    await writeFile(manifestPath, JSON.stringify(manifest))
+    await assert.rejects(verifyTestFeed(output, target, metadata), /blockmap size/)
+    manifest.files[0].blockMapSize = size
+    const file = join(output, manifest.path)
+    const bytes = await readFile(file)
+    bytes.writeUInt32BE(size + 1, bytes.length - 4)
+    await writeFile(file, bytes)
+    manifest.sha512 = manifest.files[0].sha512 = createHash('sha512').update(bytes).digest('base64')
+    await writeFile(manifestPath, JSON.stringify(manifest))
+    await assert.rejects(verifyTestFeed(output, target, metadata), /blockmap footer/)
   }
 })
 
@@ -150,6 +178,10 @@ test('test workflow isolates cross-repo credentials and requires signing on macO
   assert.deepEqual(workflow.permissions, { contents: 'read' })
   assert.equal(workflow.on.workflow_dispatch.inputs.release_tag, undefined)
   assert.equal(workflow.on.workflow_dispatch.inputs.update_feed_url, undefined)
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.target.options,
+    ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64', 'linux-arm64'])
+  assert(workflow.jobs.build['runs-on'].includes('"linux-x64":"ubuntu-22.04"'))
+  assert(workflow.jobs.build['runs-on'].includes('"linux-arm64":"ubuntu-22.04-arm"'))
   assert.equal(workflow.concurrency.group, 'desktop-update-test-${{ inputs.target }}')
   assert.equal(workflow.concurrency['cancel-in-progress'], false)
   assert.equal(workflow.jobs.build.env.DESKTOP_UPDATE_TEST_URL,

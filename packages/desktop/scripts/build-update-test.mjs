@@ -2,11 +2,12 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { inflateRawSync } from 'node:zlib'
 
 const require = createRequire(import.meta.url)
 const { validateTestUpdateUrl, resolveDesktopUpdateSource } = require('../dist/main/updater-source.js')
@@ -16,6 +17,8 @@ const targets = {
   'darwin-arm64': { platform: 'darwin', args: ['--mac', 'dmg', 'zip', '--arm64'], resources: 'mac-arm64/Ekko Studio.app/Contents/Resources', manifest: 'latest-mac.yml' },
   'darwin-x64': { platform: 'darwin', args: ['--mac', 'dmg', 'zip', '--x64'], resources: 'mac/Ekko Studio.app/Contents/Resources', manifest: 'latest-mac.yml' },
   'win32-x64': { platform: 'win32', args: ['--win', 'nsis', '--x64'], resources: 'win-unpacked/resources', manifest: 'latest.yml' },
+  'linux-x64': { platform: 'linux', args: ['--linux', 'AppImage', '--x64'], resources: 'linux-unpacked/resources', manifest: 'latest-linux.yml' },
+  'linux-arm64': { platform: 'linux', args: ['--linux', 'AppImage', '--arm64'], resources: 'linux-arm64-unpacked/resources', manifest: 'latest-linux-arm64.yml' },
 }
 
 export function createTestBuildConfig(env) {
@@ -27,7 +30,7 @@ export function createTestBuildConfig(env) {
   }
   const target = env.DESKTOP_UPDATE_TEST_TARGET
   if (!Object.hasOwn(targets, target ?? '')) {
-    throw new Error('DESKTOP_UPDATE_TEST_TARGET must be darwin-arm64, darwin-x64 or win32-x64')
+    throw new Error(`DESKTOP_UPDATE_TEST_TARGET must be one of: ${Object.keys(targets).join(', ')}`)
   }
   return {
     target,
@@ -52,6 +55,32 @@ async function sha512(path) {
   const hash = createHash('sha512')
   for await (const chunk of createReadStream(path)) hash.update(chunk)
   return hash.digest('base64')
+}
+
+async function verifyAppImageBlockmap(file, entry) {
+  const size = entry.blockMapSize
+  if (!Number.isSafeInteger(size) || size <= 0 || size > 16 * 1024 * 1024 || size + 4 >= entry.size) {
+    throw new Error('Missing or invalid embedded AppImage blockmap size')
+  }
+  const handle = await open(file, 'r')
+  try {
+    const footer = Buffer.alloc(4)
+    const dataSize = entry.size - size - 4
+    const compressed = Buffer.alloc(size)
+    if ((await handle.read(footer, 0, 4, entry.size - 4)).bytesRead !== 4 || footer.readUInt32BE(0) !== size
+      || (await handle.read(compressed, 0, size, dataSize)).bytesRead !== size) {
+      throw new Error('Embedded AppImage blockmap footer differs from the manifest')
+    }
+    const map = JSON.parse(inflateRawSync(compressed, { maxOutputLength: 64 * 1024 * 1024 }).toString('utf8'))
+    const data = map.files?.[0]
+    if (map.version !== '2' || !Array.isArray(map.files) || map.files.length !== 1 || data?.offset !== 0
+      || !Array.isArray(data.sizes) || !data.sizes.length || !Array.isArray(data.checksums)
+      || data.checksums.length !== data.sizes.length || data.checksums.some(value => typeof value !== 'string' || !value)
+      || data.sizes.some(value => !Number.isSafeInteger(value) || value <= 0)
+      || data.sizes.reduce((sum, value) => sum + value, 0) !== dataSize) {
+      throw new Error('Invalid embedded AppImage blockmap contents')
+    }
+  } finally { await handle.close() }
 }
 
 export async function verifyTestArtifacts(output, target, metadata) {
@@ -90,13 +119,19 @@ export async function verifyTestFeed(output, target, metadata) {
     if ((await stat(file)).size !== entry.size || await sha512(file) !== entry.sha512) {
       throw new Error(`Test artifact checksum or size mismatch: ${name}`)
     }
-    const blockmap = `${name}.blockmap`
-    if ((await stat(join(output, blockmap))).size === 0) throw new Error(`Empty blockmap: ${blockmap}`)
-    names.push(name, blockmap)
+    names.push(name)
+    if (info.platform === 'linux') {
+      if (!name.endsWith('.AppImage')) throw new Error('Linux update tests require AppImage artifacts')
+      await verifyAppImageBlockmap(file, entry)
+    } else {
+      const blockmap = `${name}.blockmap`
+      if ((await stat(join(output, blockmap))).size === 0) throw new Error(`Empty blockmap: ${blockmap}`)
+      names.push(blockmap)
+    }
   }
-  const required = info.platform === 'darwin' ? ['.zip', '.dmg'] : ['.exe']
+  const required = info.platform === 'darwin' ? ['.zip', '.dmg'] : info.platform === 'linux' ? ['.AppImage'] : ['.exe']
   if (required.some(extension => !names.some(name => name.endsWith(extension)))) {
-    throw new Error('Test feed is missing required installers or the macOS update ZIP')
+    throw new Error('Test feed is missing required installers or update archives')
   }
   if (!names.includes(manifest.path) || !manifest.files.some(entry => entry.url === manifest.path && entry.sha512 === manifest.sha512)) {
     throw new Error('Legacy manifest path/checksum must refer to a verified test artifact')

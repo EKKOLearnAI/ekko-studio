@@ -20,20 +20,24 @@
 | macOS Apple Silicon | `https://github.com/EKKOLearnAI/ekko-studio-update-test/releases/download/update-test-darwin-arm64/` | `latest-mac.yml` |
 | macOS Intel | `https://github.com/EKKOLearnAI/ekko-studio-update-test/releases/download/update-test-darwin-x64/` | `latest-mac.yml` |
 | Windows x64 | `https://github.com/EKKOLearnAI/ekko-studio-update-test/releases/download/update-test-win32-x64/` | `latest.yml` |
+| Linux x64 | `https://github.com/EKKOLearnAI/ekko-studio-update-test/releases/download/update-test-linux-x64/` | `latest-linux.yml` |
+| Linux arm64 | `https://github.com/EKKOLearnAI/ekko-studio-update-test/releases/download/update-test-linux-arm64/` | `latest-linux-arm64.yml` |
 
-目录地址由工作流写进测试包。浏览下载页请打开[测试仓库 Releases](https://github.com/EKKOLearnAI/ekko-studio-update-test/releases)，目录地址本身不是网页。三个目标独立发布，避免 macOS 清单互相覆盖；不要把这些测试 Release 改为正式版、latest 或 immutable。默认 token 的权限范围见 [GitHub 认证文档](https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication)。
+目录地址由工作流写进测试包。浏览下载页请打开[测试仓库 Releases](https://github.com/EKKOLearnAI/ekko-studio-update-test/releases)，目录地址本身不是网页。五个目标独立发布，避免不同架构的清单互相覆盖；不要把这些测试 Release 改为正式版、latest 或 immutable。默认 token 的权限范围见 [GitHub 认证文档](https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication)。
 
 ## 2. 构建 A 和 B
 
 在 GitHub Actions 运行 **Desktop Update Test Build**（`desktop-update-test.yml`），选择包含新更新逻辑的分支，填写：
 
-- `target`：测试机器的系统和架构。
+- `target`：测试机器的系统和架构：`darwin-arm64`、`darwin-x64`、`win32-x64`、`linux-x64`、`linux-arm64`。
 - `version`：纯数字 `X.Y.Z`，例如 A=`0.7.900`、B=`0.7.901`。必须 B > A，不使用 `-beta` 等预发布后缀。
 - `runtime_release_tag`：可选的现有运行时版本，A 和 B 保持一致，以便只测试桌面更新。
 
 分别运行两次。版本会通过打包配置写进应用和安装器，不修改仓库的 package.json / lockfile。应用名称、appId 和安装身份保持一致，A 和 B 均固定使用测试源；不会提供用户切换正式/测试源的设置。
 
 macOS 必须配置现有的 `MAC_CSC_LINK`、`MAC_CSC_KEY_PASSWORD`（证书需要密码时）、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID` secrets，并使用相同签名身份构建 A/B。缺少签名或公证配置会失败，不会退成 unsigned 测试包。Windows 延用现有 NSIS 签名配置，需在目标机器实际验证安装权限和安全软件行为。
+
+Linux 两种架构均使用 AppImage 验证应用内更新，分别使用原生 x64/arm64 runner。测试流程不生成 DEB；正式 Linux 打包配置保持原样。AppImage 的差分 blockmap 嵌在二进制尾部，构建校验会核对 `blockMapSize`、尾部长度和解压后的分段结构，不要求单独的 `.blockmap` 文件。参见 [AppImage 更新说明](https://www.electron.build/v26/docs/appimage/)。
 
 构建会检查包内 package.json 与 app-update.yml 的测试地址、清单版本、安装文件的 SHA-512/大小和 blockmap 是否齐全。验证后自动上传到对应平台 Release；Actions 运行摘要提供下载链接。`update-test-<target>-<version>` Actions 附件仍保留 14 天，包含相同的 `feed` 文件及记录版本、地址和文件列表的 `update-test-build.json`。
 
@@ -45,13 +49,22 @@ macOS 必须配置现有的 `MAC_CSC_LINK`、`MAC_CSC_KEY_PASSWORD`（证书需�
 
 测试包保留正式应用身份，可能覆盖同机正式安装、共用本地数据和命令入口。使用专用测试机、虚拟机快照或独立系统用户，不要在日常工作的正式安装上试升级。
 
-1. 构建 A，确认工作流上传成功；从测试 Release 下载 A 的 DMG/EXE 并正常安装应用。
+1. 构建 A，确认工作流上传成功；从测试 Release 下载 A 的 DMG/EXE 并正常安装应用。Linux 则下载对应架构的 AppImage，按下文赋予执行权限并启动。
 2. 启动 A，确认“检查更新”显示当前版本，并建立一条测试会话，作为升级后的数据检查。
 3. 构建更高版本 B，确认自动上传成功，无需手动复制文件或调整地址。
 4. 在 A 中“检查更新”并同意下载。核对新建会话上方的版本、百分比和速度。
 5. 下载中停止：网络传输应结束，不进入安装状态；退出再打开后仍是 A。再次检查/下载应成功。
 6. 下载完成选“稍后”：应用继续可用。单独验证“重启更新”和下载完成后普通退出这两条安装路径。
 7. 安装后确认已启动 B，测试会话和设置仍在，B 再次检查更新显示最新版本。macOS 要验证 Finder 正常打开、公证和系统签名校验均通过。
+
+Linux 请将 AppImage 放在当前用户有写权限的目录，并以普通用户从 AppImage 启动，例如 x64：
+
+```sh
+chmod +x Ekko.Studio-0.7.900-x64.AppImage
+./Ekko.Studio-0.7.900-x64.AppImage
+```
+
+arm64 使用文件名中的 `arm64`。需要安装发行版提供的 FUSE 2 兼容库时，按系统提示安装（Ubuntu 22.04 为 `libfuse2`）。AppImage 启动器会设置更新器所需的 `APPIMAGE` 环境变量；直接运行解压后的程序或改用 DEB 不属于这个测试链路。AppImage 更新会替换原文件，文件名带版本时可能变成 B 的文件名；检查重启后的版本和桌面快捷方式仍能正确启动。下载完成后的“稍后”、普通退出和“重启更新”均需在测试机验证。
 
 失败用例分别从 A 快照重新开始：限速/断网后重试、测试源返回 404/503、篡改测试文件造成哈希失败、安装目录权限不足。GitHub 不提供故障注入，404/503/损坏文件场景使用测试机的网络代理或本地构建的独立故障测试源，不修改共享测试 Release 中已校验的文件。测试源失败应报错且不访问正式源；失败下载不能显示“重启更新”；取消后不能悄悄安装。保留应用更新日志、Actions 日志和最终版本作为结果证据。
 
@@ -78,4 +91,4 @@ npm --prefix packages/desktop run test:updater
 npm run test -- tests/desktop/updater-source.test.ts tests/desktop/updater-download.test.ts
 ```
 
-自动化验证覆盖配置隔离、真实 HTTP 下载/取消/重试、包内容校验、跨仓库上传顺序和失败恢复；不能代替签名安装包在 macOS/Windows 上的实际覆盖安装和重启。
+自动化验证覆盖配置隔离、真实 HTTP 下载/取消/重试、AppImage 内嵌 blockmap 差分下载、包内容校验、跨仓库上传顺序和失败恢复；不能代替 macOS/Windows/Linux 测试机上的实际覆盖安装和重启。

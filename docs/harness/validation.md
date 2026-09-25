@@ -111,7 +111,8 @@ dependencies. This builds the production main process and exercises the installe
 or installer execution. It verifies cancellation closes HTTP requests and file
 handles, interrupted and unknown-length transfers, differential Range-download
 retry, SHA-512 rejection, signature-verification failure handling, verified-cache
-retry, and macOS native readiness. The OS signature verifier and installer are simulated.
+retry, AppImage embedded-blockmap cancellation/retry on both Linux channels,
+and macOS native readiness. The OS signature verifier and installer are simulated.
 All desktop packaging workflows run it before producing artifacts. The release
 workflow uses `--if-present` because its requested tag may predate this test
 script; existing test failures must still stop packaging. It also checks
@@ -125,14 +126,16 @@ for Electron's native `update-downloaded` event before stopping local services;
 the `electron-updater` event only indicates that the ZIP can be served to Squirrel.
 
 Before release, also exercise a signed old-to-new macOS upgrade and an installed
-Windows NSIS upgrade (download, stop/retry, Later/quit, restart, and installer
+Windows NSIS and Linux AppImage upgrade (download, stop/retry, Later/quit, restart, and installer
 failure) on disposable installations. Local tests do not verify actual signing,
 OS permissions, installer replacement, or relaunch into the new version.
 
 Use the [isolated desktop update test workflow](../../packages/desktop/UPDATE-TESTING.md)
-to produce A/B packages without a GitHub Release. The test workflow has read-only
-repository permissions, forces `--publish never`, requires macOS signing and
-notarization, and uploads verified feed files as Actions artifacts only. A test
+to produce A/B packages without publishing a production GitHub Release. The test
+workflow's built-in token has read-only repository permissions, forces the builder's
+`--publish never`, and requires macOS signing and notarization. It retains verified
+Actions artifacts and uses a dedicated secret to upload to fixed per-target
+prereleases in the public test repository. A test
 feed failure or invalid packaged test configuration must never fall back to a
 production feed; keep integration coverage for that invariant.
 

@@ -12,6 +12,8 @@ on:
           - darwin-arm64
           - darwin-x64
           - win32-x64
+          - linux-x64
+          - linux-arm64
       version:
         description: "Test app version X.Y.Z (build B must be newer than A)"
         required: true
@@ -32,7 +34,7 @@ concurrency:
 jobs:
   build:
     name: Update test (${{ inputs.target }} / ${{ inputs.version }})
-    runs-on: ${{ fromJSON('{"darwin-arm64":"macos-26","darwin-x64":"macos-26-intel","win32-x64":"windows-latest"}')[inputs.target] }}
+    runs-on: ${{ fromJSON('{"darwin-arm64":"macos-26","darwin-x64":"macos-26-intel","win32-x64":"windows-latest","linux-x64":"ubuntu-22.04","linux-arm64":"ubuntu-22.04-arm"}')[inputs.target] }}
     env:
       DESKTOP_UPDATE_TEST_TARGET: ${{ inputs.target }}
       DESKTOP_UPDATE_TEST_VERSION: ${{ inputs.version }}
