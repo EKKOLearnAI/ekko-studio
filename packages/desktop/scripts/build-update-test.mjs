@@ -70,6 +70,12 @@ export async function verifyTestArtifacts(output, target, metadata) {
   if (nativeFeed?.provider !== 'generic' || nativeFeed.url !== expectedSource.url || nativeFeed.channel !== 'latest') {
     throw new Error('Packaged app-update.yml must also point exclusively at the test feed')
   }
+  return verifyTestFeed(output, target, metadata)
+}
+
+export async function verifyTestFeed(output, target, metadata) {
+  const info = targets[target]
+  if (!info) throw new Error('Unknown test artifact target')
   const manifest = loadYaml(await readFile(join(output, info.manifest), 'utf8'))
   if (manifest?.version !== metadata.version || !Array.isArray(manifest.files) || !manifest.files.length) {
     throw new Error('Missing or mismatched test update manifest')

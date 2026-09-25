@@ -16,21 +16,17 @@ on:
         description: "Test app version X.Y.Z (build B must be newer than A)"
         required: true
         type: string
-      update_feed_url:
-        description: "Isolated HTTPS feed directory for this OS/architecture (not a .yml file)"
-        required: true
-        type: string
       runtime_release_tag:
         description: "Optional existing runtime release tag; use the same value for A and B"
         required: false
         type: string
 
-# This workflow cannot create, modify or mark a GitHub Release as latest.
+# The built-in token stays read-only; only the dedicated test publisher gets a cross-repo token.
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-update-test-${{ inputs.target }}-${{ github.ref }}
+  group: desktop-update-test-${{ inputs.target }}
   cancel-in-progress: false
 
 jobs:
@@ -40,7 +36,7 @@ jobs:
     env:
       DESKTOP_UPDATE_TEST_TARGET: ${{ inputs.target }}
       DESKTOP_UPDATE_TEST_VERSION: ${{ inputs.version }}
-      DESKTOP_UPDATE_TEST_URL: ${{ inputs.update_feed_url }}
+      DESKTOP_UPDATE_TEST_URL: https://github.com/EKKOLearnAI/ekko-studio-update-test/releases/download/update-test-${{ inputs.target }}/
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -58,9 +54,12 @@ jobs:
         run: npm ci --prefix packages/desktop --include=dev --no-audit --no-fund
 
       - name: Validate isolated update configuration
+        env:
+          GH_TOKEN: ${{ secrets.DESKTOP_UPDATE_TEST_TOKEN }}
         run: |
           npm --prefix packages/desktop run build
           node packages/desktop/scripts/build-update-test.mjs --validate
+          node packages/desktop/scripts/publish-update-test.mjs --check
 
       - name: Verify updater and test packaging
         run: npm --prefix packages/desktop run test:updater
@@ -117,3 +116,8 @@ jobs:
           path: packages/desktop/release-update-test/**/feed/*
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish to isolated test repository
+        env:
+          GH_TOKEN: ${{ secrets.DESKTOP_UPDATE_TEST_TOKEN }}
+        run: node packages/desktop/scripts/publish-update-test.mjs

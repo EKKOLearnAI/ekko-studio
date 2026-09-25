@@ -145,14 +145,27 @@ test('artifact verification rejects corrupt bytes, missing blockmaps and incompl
   await assert.rejects(verifyTestArtifacts(output, 'darwin-arm64', metadata), /missing required/)
 })
 
-test('test workflow has no release publication path and requires signing on macOS', async () => {
+test('test workflow isolates cross-repo credentials and requires signing on macOS', async () => {
   const workflow = loadYaml(await readFile(join(desktopRoot, '../../.github/workflows/desktop-update-test.yml'), 'utf8'))
   assert.deepEqual(workflow.permissions, { contents: 'read' })
   assert.equal(workflow.on.workflow_dispatch.inputs.release_tag, undefined)
+  assert.equal(workflow.on.workflow_dispatch.inputs.update_feed_url, undefined)
+  assert.equal(workflow.concurrency.group, 'desktop-update-test-${{ inputs.target }}')
+  assert.equal(workflow.concurrency['cancel-in-progress'], false)
+  assert.equal(workflow.jobs.build.env.DESKTOP_UPDATE_TEST_URL,
+    'https://github.com/EKKOLearnAI/ekko-studio-update-test/releases/download/update-test-${{ inputs.target }}/')
+  assert.equal(workflow.jobs.build.env.GH_TOKEN, undefined)
   const steps = workflow.jobs.build.steps
   assert(steps.some(step => step.run?.includes('configure-macos-signing.mjs --require-signed')))
   assert(steps.some(step => step.run?.includes('run dist:update-test')))
   assert(steps.some(step => step.uses === 'actions/upload-artifact@v4'))
+  const publishers = steps.filter(step => step.env?.GH_TOKEN)
+  assert.equal(publishers.length, 2)
+  for (const step of publishers) {
+    assert.equal(step.env.GH_TOKEN, '${{ secrets.DESKTOP_UPDATE_TEST_TOKEN }}')
+    assert(step.run.includes('scripts/publish-update-test.mjs'))
+  }
+  assert(steps.at(-1).run.endsWith('scripts/publish-update-test.mjs'))
   assert(!steps.some(step => /action-gh-release|gh release/.test(`${step.uses ?? ''} ${step.run ?? ''}`)))
 })
 
