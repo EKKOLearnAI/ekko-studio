@@ -16,7 +16,8 @@ async function fixture(t, version = '0.7.900', target = 'darwin-arm64') {
   const linux = target.startsWith('linux')
   const files = []
   for (const ext of target.startsWith('darwin') ? ['zip', 'dmg'] : linux ? ['AppImage'] : ['exe']) {
-    const name = `Ekko.Studio-${version}-${target.split('-')[1]}.${ext}`
+    const arch = target === 'linux-x64' ? 'x86_64' : target.split('-')[1]
+    const name = `Ekko.Studio-${version}-${arch}.${ext}`
     const bytes = Buffer.from(`fixture ${name}`)
     await writeFile(join(config.feed, name), bytes)
     if (linux) {

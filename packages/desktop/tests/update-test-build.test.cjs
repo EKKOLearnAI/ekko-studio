@@ -101,7 +101,8 @@ async function artifactsFixture(t, target = 'darwin-arm64') {
   await writeFile(feedPath, JSON.stringify(config.publish[0]))
   const files = []
   for (const extension of (mac ? ['zip', 'dmg'] : linux ? ['AppImage'] : ['exe'])) {
-    const name = `Ekko.Studio-${metadata.version}-${target.split('-')[1]}.${extension}`
+    const arch = target === 'linux-x64' ? 'x86_64' : target.split('-')[1]
+    const name = `Ekko.Studio-${metadata.version}-${arch}.${extension}`
     const bytes = Buffer.from(`fixture:${name}`)
     await writeFile(join(output, name), bytes)
     if (linux) {
