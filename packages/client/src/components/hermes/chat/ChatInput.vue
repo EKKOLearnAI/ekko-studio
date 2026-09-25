@@ -821,6 +821,12 @@ const totalTokens = computed(() => {
   return input + output
 })
 const showContextUsage = computed(() => !!chatStore.activeSession)
+const showContextLimit = computed(() => {
+  const session = chatStore.activeSession
+  return !isCodingAgentSession.value
+    || session?.codingAgentId === 'ekko-agent'
+    || session?.agent === 'ekko-agent'
+})
 
 const remainingTokens = computed(() => Math.max(0, contextLength.value - totalTokens.value))
 
@@ -1175,19 +1181,23 @@ function openAttachmentPreview(attachment: Attachment) {
         @dblclick="resetTextareaHeight"
       ></div>
       <div v-if="showContextUsage" class="context-usage-row">
-        <span class="context-info" :class="{ 'context-warning': usagePercent > 80 }">
-          {{ formatTokens(totalTokens) }} /
-          <NTooltip trigger="hover" :disabled="isMobileViewport">
-            <template #trigger>
-              <span class="context-limit-editable" @click="handleEditContextLimit">
-                {{ formatTokens(contextLength) }}
-              </span>
-            </template>
-            <span>{{ t('chat.contextClickToEdit') }}</span>
-          </NTooltip>
-          · {{ t('chat.contextRemaining') }} {{ formatTokens(remainingTokens) }}
+        <span class="context-info" :class="{ 'context-warning': showContextLimit && usagePercent > 80 }">
+          <template v-if="!showContextLimit">{{ t('chat.contextUsed') }} </template>
+          {{ formatTokens(totalTokens) }}
+          <template v-if="showContextLimit">
+            /
+            <NTooltip trigger="hover" :disabled="isMobileViewport">
+              <template #trigger>
+                <span class="context-limit-editable" @click="handleEditContextLimit">
+                  {{ formatTokens(contextLength) }}
+                </span>
+              </template>
+              <span>{{ t('chat.contextClickToEdit') }}</span>
+            </NTooltip>
+            · {{ t('chat.contextRemaining') }} {{ formatTokens(remainingTokens) }}
+          </template>
         </span>
-        <div class="context-bar">
+        <div v-if="showContextLimit" class="context-bar">
           <div
             class="context-bar-fill"
             :class="{
