@@ -1,4 +1,5 @@
-import { delimiter } from 'path'
+import { delimiter, join } from 'path'
+import { homedir } from 'os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const execState = vi.hoisted(() => {
@@ -38,6 +39,19 @@ vi.mock('child_process', () => ({
   execFile: execState.execFile,
 }))
 
+const startRunMock = vi.hoisted(() => vi.fn(() => ({ pid: 1234 })))
+
+vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({
+  codingAgentRunManager: {
+    start: startRunMock,
+  },
+}))
+
+vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
+  getSession: vi.fn(() => null),
+  updateSession: vi.fn(),
+}))
+
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
   return {
@@ -57,6 +71,7 @@ function setPlatform(platform: NodeJS.Platform) {
 
 beforeEach(() => {
   execState.calls.length = 0
+  startRunMock.mockClear()
   setPlatform('darwin')
   process.env.HERMES_DESKTOP = 'true'
   process.env.SHELL = '/bin/zsh'
@@ -89,5 +104,20 @@ describe('coding agent desktop PATH detection', () => {
 
     const versionCall = execState.calls.find(call => call.command === 'claude' && call.args[0] === '--version')
     expect(versionCall?.options.env.PATH.split(delimiter)).toContain('/Users/example/.npm-global/bin')
+  })
+
+  it('keeps desktop local-bin executables available when spawning a group-chat agent', async () => {
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
+    await startCodingAgentRun('claude-code', {
+      sessionId: 'session-1',
+      mode: 'global',
+      profile: 'default',
+      sessionSource: 'group_chat',
+    })
+
+    const launch = startRunMock.mock.calls[0]?.[0]
+    expect(launch).toMatchObject({ env: expect.anything() })
+    expect(launch.env.PATH.split(delimiter)).toContain('/Users/example/.npm-global/bin')
+    expect(launch.env.PATH.split(delimiter)).toContain(join(homedir(), '.local', 'bin'))
   })
 })
