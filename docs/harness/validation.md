@@ -112,8 +112,10 @@ or installer execution. It verifies cancellation closes HTTP requests and file
 handles, interrupted and unknown-length transfers, differential Range-download
 retry, SHA-512 rejection, signature-verification failure handling, verified-cache
 retry, and macOS native readiness. The OS signature verifier and installer are simulated.
-All desktop packaging workflows run it before producing artifacts. It also
-checks test-feed isolation and verifies the test build configuration and artifact
+All desktop packaging workflows run it before producing artifacts. The release
+workflow uses `--if-present` because its requested tag may predate this test
+script; existing test failures must still stop packaging. It also checks
+test-feed isolation and verifies the test build configuration and artifact
 checks against generated package fixtures.
 
 The updater's request-cancellation adapter accesses the upstream HTTP executor
