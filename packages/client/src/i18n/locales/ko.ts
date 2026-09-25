@@ -432,6 +432,17 @@ export default {
   },
 
   sidebar: {
+    desktopUpdatePreparing: "업데이트 준비 중",
+    desktopUpdateStopping: "다운로드 중지 중…",
+    desktopUpdateReady: "업데이트 준비 완료",
+    desktopUpdateFailed: "다운로드 실패",
+    desktopUpdateInstalling: "업데이트를 위해 재시작 중…",
+    desktopUpdateInstall: "재시작하여 업데이트",
+    desktopUpdateActionFailed: "작업을 완료하지 못했습니다. 다시 시도하세요.",
+    desktopUpdateStop: "다운로드 중지",
+    desktopUpdateStopped: "다운로드 중지됨",
+    desktopUpdateRetry: "다시 다운로드",
+    desktopUpdateDownloading: "업데이트 다운로드 중",
     chat: '채팅',
     backToChat: '뒤로',
     search: '검색',

@@ -101,6 +101,9 @@ jobs:
       - name: Install desktop dependencies
         run: npm ci --prefix packages/desktop --no-audit --no-fund
 
+      - name: Verify desktop updater download lifecycle
+        run: npm --prefix packages/desktop run test:updater
+
       - name: Write runtime release metadata
         shell: bash
         env:

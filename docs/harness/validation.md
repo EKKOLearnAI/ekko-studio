@@ -103,6 +103,37 @@ Expected desktop release outputs:
 | Linux x64 | `*.AppImage`, `*.deb`, `latest*.yml` |
 | Linux arm64 | `*.AppImage`, `latest*.yml` |
 
+### Desktop updater changes
+
+Run `npm --prefix packages/desktop run test:updater` after installing desktop
+dependencies. This builds the production main process and exercises the installed
+`electron-updater` against a temporary local HTTP feed, with no release downloads
+or installer execution. It verifies cancellation closes HTTP requests and file
+handles, interrupted and unknown-length transfers, differential Range-download
+retry, SHA-512 rejection, signature-verification failure handling, verified-cache
+retry, and macOS native readiness. The OS signature verifier and installer are simulated.
+All desktop packaging workflows run it before producing artifacts. It also
+checks test-feed isolation and verifies the test build configuration and artifact
+checks against generated package fixtures.
+
+The updater's request-cancellation adapter accesses the upstream HTTP executor
+because its cancellation token alone does not abort a full-download request.
+Keep this integration check when upgrading `electron-updater`. macOS must wait
+for Electron's native `update-downloaded` event before stopping local services;
+the `electron-updater` event only indicates that the ZIP can be served to Squirrel.
+
+Before release, also exercise a signed old-to-new macOS upgrade and an installed
+Windows NSIS upgrade (download, stop/retry, Later/quit, restart, and installer
+failure) on disposable installations. Local tests do not verify actual signing,
+OS permissions, installer replacement, or relaunch into the new version.
+
+Use the [isolated desktop update test workflow](../../packages/desktop/UPDATE-TESTING.md)
+to produce A/B packages without a GitHub Release. The test workflow has read-only
+repository permissions, forces `--publish never`, requires macOS signing and
+notarization, and uploads verified feed files as Actions artifacts only. A test
+feed failure or invalid packaged test configuration must never fall back to a
+production feed; keep integration coverage for that invariant.
+
 ## Failure Handling
 
 When a command fails:

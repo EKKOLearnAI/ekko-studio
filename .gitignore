@@ -26,6 +26,7 @@ packages/server/node_modules/
 .hermes-web-ui/
 packages/desktop/dist/
 packages/desktop/release/
+packages/desktop/release-update-test/
 packages/desktop/resources/
 packages/desktop/resources/python/
 packages/desktop/node_modules/

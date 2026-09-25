@@ -420,6 +420,17 @@ export default {
 
   // Sidebar
   sidebar: {
+    desktopUpdatePreparing: "جارٍ تجهيز التحديث",
+    desktopUpdateStopping: "جارٍ إيقاف التنزيل…",
+    desktopUpdateReady: "التحديث جاهز",
+    desktopUpdateFailed: "فشل التنزيل",
+    desktopUpdateInstalling: "جارٍ إعادة التشغيل للتحديث…",
+    desktopUpdateInstall: "إعادة التشغيل للتحديث",
+    desktopUpdateActionFailed: "تعذر إكمال الإجراء. حاول مرة أخرى.",
+    desktopUpdateStop: "إيقاف التنزيل",
+    desktopUpdateStopped: "تم إيقاف التنزيل",
+    desktopUpdateRetry: "تنزيل مرة أخرى",
+    desktopUpdateDownloading: "جارٍ تنزيل التحديث",
     chat: 'محادثة',
     backToChat: 'رجوع',
     search: 'بحث',

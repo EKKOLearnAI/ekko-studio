@@ -346,6 +346,17 @@ export default {
 
 
   sidebar: {
+    desktopUpdatePreparing: "Подготовка обновления",
+    desktopUpdateStopping: "Остановка загрузки…",
+    desktopUpdateReady: "Обновление готово",
+    desktopUpdateFailed: "Ошибка загрузки",
+    desktopUpdateInstalling: "Перезапуск для обновления…",
+    desktopUpdateInstall: "Перезапустить и обновить",
+    desktopUpdateActionFailed: "Не удалось выполнить действие. Повторите попытку.",
+    desktopUpdateStop: "Остановить загрузку",
+    desktopUpdateStopped: "Загрузка остановлена",
+    desktopUpdateRetry: "Скачать снова",
+    desktopUpdateDownloading: "Загрузка обновления",
     chat: 'Чат',
     backToChat: 'Назад',
     search: 'Поиск',

@@ -420,6 +420,17 @@ export default {
 
   // Sidebar
   sidebar: {
+    desktopUpdatePreparing: "Preparing update",
+    desktopUpdateStopping: "Stopping download…",
+    desktopUpdateReady: "Update ready",
+    desktopUpdateFailed: "Download failed",
+    desktopUpdateInstalling: "Restarting to update…",
+    desktopUpdateInstall: "Restart to update",
+    desktopUpdateActionFailed: "Could not complete the action. Please try again.",
+    desktopUpdateStop: "Stop download",
+    desktopUpdateStopped: "Download stopped",
+    desktopUpdateRetry: "Download again",
+    desktopUpdateDownloading: "Downloading update",
     chat: 'Chat',
     backToChat: 'Back',
     search: 'Search',

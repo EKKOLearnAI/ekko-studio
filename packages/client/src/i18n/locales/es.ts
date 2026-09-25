@@ -432,6 +432,17 @@ export default {
 
   // Sidebar
   sidebar: {
+    desktopUpdatePreparing: "Preparando actualización",
+    desktopUpdateStopping: "Deteniendo descarga…",
+    desktopUpdateReady: "Actualización lista",
+    desktopUpdateFailed: "Descarga fallida",
+    desktopUpdateInstalling: "Reiniciando para actualizar…",
+    desktopUpdateInstall: "Reiniciar para actualizar",
+    desktopUpdateActionFailed: "No se pudo completar la acción. Inténtelo de nuevo.",
+    desktopUpdateStop: "Detener descarga",
+    desktopUpdateStopped: "Descarga detenida",
+    desktopUpdateRetry: "Volver a descargar",
+    desktopUpdateDownloading: "Descargando actualización",
     chat: 'Chat',
     backToChat: 'Volver',
     search: 'Buscar',

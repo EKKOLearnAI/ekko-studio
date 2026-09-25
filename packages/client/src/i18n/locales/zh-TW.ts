@@ -420,6 +420,17 @@ export default {
   },
 
   sidebar: {
+    desktopUpdatePreparing: "正在準備更新",
+    desktopUpdateStopping: "正在停止下載…",
+    desktopUpdateReady: "更新已就緒",
+    desktopUpdateFailed: "下載失敗",
+    desktopUpdateInstalling: "正在重新啟動更新…",
+    desktopUpdateInstall: "重新啟動更新",
+    desktopUpdateActionFailed: "操作失敗，請重試。",
+    desktopUpdateStop: "停止下載",
+    desktopUpdateStopped: "下載已停止",
+    desktopUpdateRetry: "重新下載",
+    desktopUpdateDownloading: "正在下載更新",
     chat: '對話',
     backToChat: '返回',
     search: '搜尋',

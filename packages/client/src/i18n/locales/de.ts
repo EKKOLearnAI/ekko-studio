@@ -432,6 +432,17 @@ export default {
 
   // Sidebar
   sidebar: {
+    desktopUpdatePreparing: "Update wird vorbereitet",
+    desktopUpdateStopping: "Download wird gestoppt…",
+    desktopUpdateReady: "Update bereit",
+    desktopUpdateFailed: "Download fehlgeschlagen",
+    desktopUpdateInstalling: "Neustart für Update…",
+    desktopUpdateInstall: "Zum Aktualisieren neu starten",
+    desktopUpdateActionFailed: "Die Aktion ist fehlgeschlagen. Bitte erneut versuchen.",
+    desktopUpdateStop: "Download stoppen",
+    desktopUpdateStopped: "Download gestoppt",
+    desktopUpdateRetry: "Erneut herunterladen",
+    desktopUpdateDownloading: "Update wird heruntergeladen",
     chat: 'Chat',
     backToChat: 'Zuruck',
     search: 'Suche',

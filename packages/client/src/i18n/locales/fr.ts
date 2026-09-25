@@ -432,6 +432,17 @@ export default {
 
   // Sidebar
   sidebar: {
+    desktopUpdatePreparing: "Préparation de la mise à jour",
+    desktopUpdateStopping: "Arrêt du téléchargement…",
+    desktopUpdateReady: "Mise à jour prête",
+    desktopUpdateFailed: "Échec du téléchargement",
+    desktopUpdateInstalling: "Redémarrage pour mise à jour…",
+    desktopUpdateInstall: "Redémarrer pour mettre à jour",
+    desktopUpdateActionFailed: "Impossible de terminer cette action. Réessayez.",
+    desktopUpdateStop: "Arrêter le téléchargement",
+    desktopUpdateStopped: "Téléchargement arrêté",
+    desktopUpdateRetry: "Télécharger à nouveau",
+    desktopUpdateDownloading: "Téléchargement de la mise à jour",
     chat: 'Discussion',
     backToChat: 'Retour',
     search: 'Rechercher',

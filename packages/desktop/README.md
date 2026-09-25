@@ -21,6 +21,10 @@ identity stable. Update manifests reference the actual artifact filenames.
 Validate an upgrade from the previous signed release on macOS and Windows
 before rollout.
 
+For isolated A → B testing without a production Release, use the
+[desktop update testing guide](UPDATE-TESTING.md) and the **Desktop Update Test Build**
+workflow. Test packages use a fixed HTTPS test feed and never fall back to production.
+
 ## Command shims
 
 After the packaged desktop app starts, it installs managed command shims:

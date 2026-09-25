@@ -1,0 +1,119 @@
+name: Desktop Update Test Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Test machine OS and architecture"
+        required: true
+        type: choice
+        default: darwin-arm64
+        options:
+          - darwin-arm64
+          - darwin-x64
+          - win32-x64
+      version:
+        description: "Test app version X.Y.Z (build B must be newer than A)"
+        required: true
+        type: string
+      update_feed_url:
+        description: "Isolated HTTPS feed directory for this OS/architecture (not a .yml file)"
+        required: true
+        type: string
+      runtime_release_tag:
+        description: "Optional existing runtime release tag; use the same value for A and B"
+        required: false
+        type: string
+
+# This workflow cannot create, modify or mark a GitHub Release as latest.
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-update-test-${{ inputs.target }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Update test (${{ inputs.target }} / ${{ inputs.version }})
+    runs-on: ${{ fromJSON('{"darwin-arm64":"macos-26","darwin-x64":"macos-26-intel","win32-x64":"windows-latest"}')[inputs.target] }}
+    env:
+      DESKTOP_UPDATE_TEST_TARGET: ${{ inputs.target }}
+      DESKTOP_UPDATE_TEST_VERSION: ${{ inputs.version }}
+      DESKTOP_UPDATE_TEST_URL: ${{ inputs.update_feed_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm ci --prefix packages/desktop --include=dev --no-audit --no-fund
+
+      - name: Validate isolated update configuration
+        run: |
+          npm --prefix packages/desktop run build
+          node packages/desktop/scripts/build-update-test.mjs --validate
+
+      - name: Verify updater and test packaging
+        run: npm --prefix packages/desktop run test:updater
+
+      - name: Install web UI dependencies
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild node-pty
+
+      - name: Test Windows CLI and startup compatibility
+        if: inputs.target == 'win32-x64'
+        run: npm run test -- tests/desktop/cli-shim.test.ts tests/desktop/mcp-cli.test.ts tests/desktop/login-item-migration.test.ts
+
+      - name: Build web UI
+        run: npm run build
+
+      - name: Keep production web UI dependencies only
+        run: npm prune --omit=dev --no-audit --no-fund
+
+      - name: Verify image processing runtime
+        run: npm run verify:sharp-runtime
+
+      - name: Write runtime release metadata
+        env:
+          RUNTIME_RELEASE_TAG: ${{ inputs.runtime_release_tag }}
+        run: npm --prefix packages/desktop run write:runtime-release
+
+      - name: Require macOS signing and notarization
+        if: startsWith(inputs.target, 'darwin-')
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          MAC_APPLE_ID: ${{ secrets.APPLE_ID }}
+          MAC_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          MAC_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node packages/desktop/scripts/configure-macos-signing.mjs --require-signed
+
+      - name: Build and verify test update artifacts (never publish)
+        shell: bash
+        run: |
+          if [[ "$DESKTOP_UPDATE_TEST_TARGET" == darwin-* ]]; then
+            ulimit -n 10240 || true
+          fi
+          npm --prefix packages/desktop run dist:update-test
+
+      - name: Remove macOS signing keychain
+        if: always() && startsWith(inputs.target, 'darwin-')
+        run: node packages/desktop/scripts/configure-macos-signing.mjs --cleanup
+
+      - name: Upload verified test feed files
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-test-${{ inputs.target }}-${{ inputs.version }}
+          path: packages/desktop/release-update-test/**/feed/*
+          if-no-files-found: error
+          retention-days: 14

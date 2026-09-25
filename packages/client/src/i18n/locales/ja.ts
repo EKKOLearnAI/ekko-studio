@@ -432,6 +432,17 @@ export default {
   },
 
   sidebar: {
+    desktopUpdatePreparing: "更新を準備中",
+    desktopUpdateStopping: "ダウンロードを停止中…",
+    desktopUpdateReady: "更新の準備完了",
+    desktopUpdateFailed: "ダウンロード失敗",
+    desktopUpdateInstalling: "再起動して更新中…",
+    desktopUpdateInstall: "再起動して更新",
+    desktopUpdateActionFailed: "操作できませんでした。再試行してください。",
+    desktopUpdateStop: "ダウンロードを停止",
+    desktopUpdateStopped: "ダウンロードを停止しました",
+    desktopUpdateRetry: "再ダウンロード",
+    desktopUpdateDownloading: "更新をダウンロード中",
     chat: 'チャット',
     backToChat: '戻る',
     search: '検索',
