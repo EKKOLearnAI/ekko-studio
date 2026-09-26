@@ -2,6 +2,13 @@ import { socialMessagesZhTw } from '../social-messages'
 
 export default {
   jev: {
+    groupSummaryReviewEnabled: '使用 JEV 檢查群聊摘要',
+    groupSummaryDisabled: '已關閉；群聊摘要沿用原流程。',
+    groupSummaryReady: '已為此設定檔建立的摘要啟用。',
+    groupSummaryReviewMinConfidence: '摘要檢查信心門檻',
+    groupSummaryReviewMinConfidenceHint: '回報摘要品質問題所需的最低信心值。',
+    groupSummaryReviewTimeout: '摘要檢查時間預算（毫秒）',
+    groupSummaryReviewTimeoutHint: '原摘要儲存後可使用的 JEV 總時間預算。',
     ekkoSkillsEnabled: "啟用 Ekko 技能 JEV 增強",
     skillsDisabled: "未啟用；繼續使用原有技能匹配與學習流程。",
     skillsReady: "已啟用技能語意匹配與學習預篩選。",
@@ -3203,6 +3210,15 @@ export default {
 
   // 群聊
   groupChat: {
+    summaryEvaluationProfile: "JEV evaluation Profile",
+    summaryReviewEnabled: "Review summaries with JEV",
+    summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",
+    summaryRevisionEnabled: "Apply one safe revision",
+    summaryRevisionHint: "When review finds a reliable issue, revise once without moving the summary anchor.",
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent 预设',
     agentPresets: 'Agent 预设',
     agentPresetPlaceholder: '选择预设',

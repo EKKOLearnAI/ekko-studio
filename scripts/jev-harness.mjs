@@ -12,6 +12,12 @@ const infrastructure = new Set([
   'packages/server/src/bootstrap/routes.ts',
   'packages/server/src/modules/studio/services/jev/client.ts',
   'packages/server/src/modules/studio/services/jev/settings.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar-budget.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar-contract.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar-payload.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar-queue.ts',
+  'packages/server/src/modules/studio/services/jev/snapshot.ts',
   'packages/server/src/modules/studio/public/jev.ts',
   'packages/server/src/modules/studio/controllers/jev.ts',
   'packages/server/src/modules/studio/routes/jev.ts',
@@ -23,6 +29,7 @@ const infrastructure = new Set([
 ])
 const evaluationInfrastructure = new Set([
   'packages/server/src/modules/studio/services/jev/client.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar.ts',
   'packages/server/src/modules/studio/controllers/jev.ts',
   'packages/ekko-agent/src/jev/client.ts',
 ])
@@ -83,7 +90,7 @@ export function jevUsage(file, source) {
   let used = false
   let evaluates = false
   let directSdk = false
-  const evaluators = new Set(['evaluateJev', 'evaluateMemory'])
+  const evaluators = new Set(['evaluateJev', 'evaluateMemory', 'evaluateJevWithCredentials', 'createJevSidecar'])
   walk(ast, node => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       if (!node.moduleSpecifier || !ts.isStringLiteralLike(node.moduleSpecifier)) return
@@ -96,8 +103,8 @@ export function jevUsage(file, source) {
       for (const item of elements) {
         if (item.isTypeOnly) continue
         const imported = name(item.propertyName ?? item.name)
-        if (['evaluateJev', 'evaluateMemory'].includes(imported)) evaluators.add(name(item.name))
-        if (/^(EkkoJevClient|evaluateJev|getJevRuntimeConfig)$/.test(imported)) used = true
+        if (['evaluateJev', 'evaluateMemory', 'evaluateJevWithCredentials', 'createJevSidecar'].includes(imported)) evaluators.add(name(item.name))
+        if (/^(EkkoJevClient|evaluateJev|evaluateJevWithCredentials|createJevSidecar|getJevRuntimeConfig)$/.test(imported)) used = true
       }
       if (/(?:^|\/)jev(?:\/|$|\.)/.test(specifier)) used = true
       if (specifier === '@typesafe-ai/sdk') { used = true; directSdk = true }
@@ -112,7 +119,7 @@ export function jevUsage(file, source) {
         if (specifier === '@typesafe-ai/sdk') { used = true; directSdk = true }
       }
       const method = member(node.expression) ?? name(node.expression)
-      if (evaluators.has(method) || ['systemOne', 'tryEvaluate'].includes(method)
+      if (evaluators.has(method) || ['systemOne', 'tryEvaluate', 'trySchedule'].includes(method)
         || method === 'evaluate' && /jev/i.test(node.expression.getText())) {
         used = true
         evaluates = true

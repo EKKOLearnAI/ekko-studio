@@ -72,7 +72,7 @@ describe('JEV settings', () => {
   })
   it('isolates profiles and returns only credential presence', async () => {
     const saved = await saveJevSettings('research', { apiKey: 'private-key', model: 'jev-research' })
-    expect(saved).toEqual({ ...skillsDefaults, baseUrl: 'https://api.typesafe.ai', model: 'jev-research', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 })
+    expect(saved).toEqual({ groupSummaryReviewEnabled: false, groupSummaryReviewMinConfidence: 0.8, groupSummaryReviewTimeoutMs: 3000, ...skillsDefaults, baseUrl: 'https://api.typesafe.ai', model: 'jev-research', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 })
     expect(JSON.stringify(await getJevSettings('research'))).not.toContain('private-key')
     expect(await getJevSettings('default')).toMatchObject({ model: 'jev-latest', hasApiKey: false })
     const [file] = await readdir(directory)
