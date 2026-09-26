@@ -4,7 +4,7 @@ import { NButton, NDropdown, NInput, NModal, NSpace, NSpin, useDialog, useMessag
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api/client'
 import { copyToClipboard } from '@/utils/clipboard'
-import PinIcon from '@/components/common/PinIcon.vue'
+import StarIcon from '@/components/common/StarIcon.vue'
 
 interface FolderEntry {
   name: string
@@ -384,7 +384,7 @@ const flatNodes = computed<FlatNode[]>(() => {
         :aria-pressed="Boolean(props.favorite)"
         @click.stop="emit('toggle-favorite')"
       >
-        <PinIcon :filled="props.favorite" />
+        <StarIcon :filled="props.favorite" />
       </button>
     </div>
 

@@ -44,7 +44,7 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { copyToClipboard } from "@/utils/clipboard";
 import FolderPicker from "./FolderPicker.vue";
-import PinIcon from "@/components/common/PinIcon.vue";
+import StarIcon from "@/components/common/StarIcon.vue";
 import ChatInput from "./ChatInput.vue";
 import RealtimeVoiceStage from "./RealtimeVoiceStage.vue";
 import ConversationMonitorPane from "./ConversationMonitorPane.vue";
@@ -3138,7 +3138,7 @@ async function handleSessionModelCustomSubmit() {
                       @click.stop="handleTogglePinRecent(ws.path)"
                       :title="defaultWorkspaces.includes(ws.path) ? t('chat.workspaceUnpin') : t('chat.workspacePin')"
                     >
-                      <PinIcon :filled="defaultWorkspaces.includes(ws.path)" width="14" height="14" />
+                      <StarIcon :filled="defaultWorkspaces.includes(ws.path)" width="14" height="14" />
                     </span>
                   </template>
                   {{ getFolderName(ws.path) }}
