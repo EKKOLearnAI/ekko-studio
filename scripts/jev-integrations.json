@@ -111,6 +111,21 @@
         "control": "NInputNumber",
         "binding": "settings.groupSummaryReviewTimeoutMs",
         "label": "jev.groupSummaryReviewTimeout"
+      },
+      "workflowQualityEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.workflowQualityEnabled",
+        "label": "jev.workflowQualityEnabled"
+      },
+      "workflowQualityMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.workflowQualityMinConfidence",
+        "label": "jev.workflowQualityMinConfidence"
+      },
+      "workflowQualityTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.workflowQualityTimeoutMs",
+        "label": "jev.workflowQualityTimeout"
       }
     }
   },
@@ -288,6 +303,25 @@
       ],
       "tests": [
         "tests/server/group-chat-summary-review.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "workflow-quality-review",
+      "purpose": "Observe completed workflow node quality without affecting execution, routing or approval.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/modules/studio/services/workflow/quality-review.ts"
+      ],
+      "enabledKey": "workflowQualityEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "workflowQualityMinConfidence",
+        "workflowQualityTimeoutMs"
+      ],
+      "tests": [
+        "tests/server/workflow-quality-review.test.ts",
         "tests/server/jev.test.ts",
         "tests/e2e/jev-settings.spec.ts"
       ]

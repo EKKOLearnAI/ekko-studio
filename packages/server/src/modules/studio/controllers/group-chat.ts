@@ -1392,14 +1392,14 @@ export async function updateRoomConfig(ctx: any) {
                     summaryModel: model,
                     summaryApiMode: apiMode,
                     summaryEveryTurns: everyTurns,
-                    evaluationProfile: evalProfile,
-                    summaryReviewMode: summaryReviewMode ?? room.summaryReviewMode ?? 'inherit',
-                    summaryRevisionEnabled: summaryRevisionEnabled ?? Number(room.summaryRevisionEnabled || 0) === 1,
-                    messageRoutingMode: messageRoutingMode ?? room.messageRoutingMode ?? 'off',
+                    ...(evaluationProfile !== undefined ? { evaluationProfile: evalProfile } : {}),
+                    ...(summaryReviewMode !== undefined ? { summaryReviewMode } : {}),
+                    ...(summaryRevisionEnabled !== undefined ? { summaryRevisionEnabled } : {}),
+                    ...(messageRoutingMode !== undefined ? { messageRoutingMode } : {}),
                 } : {}),
-                agentHandoffEnabled,
-                agentHandoffMaxDepth,
-                agentHandoffUnlimited,
+                ...(agentHandoffEnabled !== undefined ? { agentHandoffEnabled } : {}),
+                ...(agentHandoffMaxDepth !== undefined ? { agentHandoffMaxDepth } : {}),
+                ...(agentHandoffUnlimited !== undefined ? { agentHandoffUnlimited } : {}),
             })
         }
     })

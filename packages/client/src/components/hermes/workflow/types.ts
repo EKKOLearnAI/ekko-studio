@@ -24,6 +24,7 @@ export interface WorkflowAgentNodeData {
   images: string[]
   approvalRequired: boolean
   orchestration: { join: 'all' | 'any' }
+  qualityReview?: { mode: 'off' | 'observe'; criteria: Array<{ id: string; text: string; evidence: 'output' | 'execution' }> }
   status: WorkflowNodeStatus
   statusError?: string | null
   readonly?: boolean
@@ -35,4 +36,4 @@ export interface WorkflowAgentNodeData {
   onUploadImages: (id: string, files: File[]) => Promise<string[]>
 }
 
-export type WorkflowAgentNodeEditableData = Pick<WorkflowAgentNodeData, 'title' | 'agent' | 'agentMode' | 'agentPreset' | 'agentPresetReady' | 'provider' | 'model' | 'apiMode' | 'reasoningEffort' | 'input' | 'skills' | 'images' | 'approvalRequired' | 'orchestration'>
+export type WorkflowAgentNodeEditableData = Pick<WorkflowAgentNodeData, 'title' | 'agent' | 'agentMode' | 'agentPreset' | 'agentPresetReady' | 'provider' | 'model' | 'apiMode' | 'reasoningEffort' | 'input' | 'skills' | 'images' | 'approvalRequired' | 'orchestration' | 'qualityReview'>
