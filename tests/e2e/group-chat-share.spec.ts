@@ -188,7 +188,8 @@ async function mockInviteApi(page: Page, valid = true, delayMs = 0) {
 
 test.describe('invite-only group chat share page', () => {
   test('folds group tool calls with the same summary used in single chat', async ({ page }) => {
-    await mockInviteSocket(page, null, 'Read the project files.', true)
+    const reply = 'Read the project files. ' + 'The tool summary should fill the existing message bubble. '.repeat(6)
+    await mockInviteSocket(page, null, reply, true)
     await mockInviteApi(page)
     await page.goto('/#/share/group-chat/ROOM1')
     await page.locator('#group-chat-guest-name input').fill('Visitor')
@@ -205,10 +206,24 @@ test.describe('invite-only group chat share page', () => {
     await expect(card.locator('.run-tool-list')).toBeVisible()
     await card.locator('.tool-line').click()
     await expect(card.locator('.tool-details')).toContainText('File contents')
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 })
+      await expect.poll(() => card.locator('.tool-run-card').evaluate(element => {
+        const summary = element.getBoundingClientRect()
+        const bubble = element.closest('.run-card')!.getBoundingClientRect()
+        const header = element.querySelector('.tool-run-header')!.getBoundingClientRect()
+        const list = element.querySelector('.run-tool-list')!.getBoundingClientRect()
+        const style = getComputedStyle(element)
+        const innerWidth = summary.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        return Math.abs(summary.width - bubble.width) < 0.75
+          && Math.abs(header.width - innerWidth) < 0.75 && Math.abs(list.width - innerWidth) < 0.75
+          && element.scrollWidth <= element.clientWidth
+      }), { message: `Tool summary and expanded calls fill the bubble at ${width}px` }).toBe(true)
+    }
     await toggle.press('Enter')
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await expect(card.locator('.run-tool-list')).toHaveCount(0)
-    await expect(page.getByText('Read the project files.', { exact: true })).toBeVisible()
+    await expect(page.getByText(reply.trim(), { exact: true })).toBeVisible()
   })
 
   test('loads an Agent Markdown image through the room invite without filesystem API access', async ({ page }) => {
@@ -344,9 +359,10 @@ test('group task cards survive history reload and live stale updates with tool t
       const column = element.closest('.run-column')!.getBoundingClientRect()
       const gaps = [card.left - container.left, container.right - card.right,
         card.top - container.top, container.bottom - card.bottom]
-      return gaps.every(gap => Math.abs(gap - 5) < 0.75) && Math.abs(column.width - run.width) < 0.75
+      return gaps.every(gap => Math.abs(gap - 5) < 0.75)
+        && (window.innerWidth < 768 || column.width < run.width / 2)
         && element.scrollWidth <= element.clientWidth
-    })), { message: `Task cards retain four visible 5px gaps and fill the group run at ${width}px` }).toBe(true)
+    })), { message: `Task cards retain four visible 5px gaps without stretching short message bubbles at ${width}px` }).toBe(true)
   }
   await cards.first().getByRole('button').click()
   await expect(cards.first().locator('ol')).toHaveCount(0)
