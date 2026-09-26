@@ -141,7 +141,10 @@ function stripTrailingSlash(value: string): string {
 }
 
 function providerKeys(provider: AuthorizedProvider): string[] {
-  return provider === 'claude-oauth' ? ['claude-oauth', 'anthropic'] : [provider]
+  // `anthropic` is the Hermes-owned singleton-backed alias. Prefer it over
+  // the dashboard-only alias so a refresh performed by Hermes is visible to
+  // Studio too. Refreshes still update both aliases for compatibility.
+  return provider === 'claude-oauth' ? ['anthropic', 'claude-oauth'] : [provider]
 }
 
 function hasCredential(value: unknown): boolean {
@@ -227,7 +230,38 @@ function derivedExpiryMs(
   tokens: JsonRecord,
   state: JsonRecord,
   poolEntry: JsonRecord,
+  preferPoolEntry = false,
 ): number | undefined {
+  if (preferPoolEntry) {
+    const explicit = [
+      poolEntry.expires_at_ms,
+      poolEntry.expiry_date,
+      poolEntry.expires_at,
+      tokens.expires_at_ms,
+      state.expires_at_ms,
+      tokens.expiry_date,
+      state.expiry_date,
+      tokens.expires_at,
+      state.expires_at,
+    ].map(parseTimestampMs).find(value => value !== undefined)
+    if (explicit !== undefined) return explicit
+
+    const expiresIn = Number(poolEntry.expires_in ?? tokens.expires_in ?? state.expires_in)
+    const anchor = parseTimestampMs(
+      firstText(
+        poolEntry.last_refresh,
+        tokens.last_refresh,
+        state.last_refresh,
+        poolEntry.obtained_at,
+        state.obtained_at,
+      ),
+    )
+    if (Number.isFinite(expiresIn) && expiresIn > 0 && anchor !== undefined) {
+      return anchor + expiresIn * 1000
+    }
+    return jwtExpiryMs(accessToken)
+  }
+
   const explicit = [
     tokens.expires_at_ms,
     state.expires_at_ms,
@@ -265,6 +299,22 @@ function poolEntryFor(auth: JsonRecord, keys: string[]): { key: string; entry: J
     if (entry) return { key, entry: objectValue(entry) }
   }
   return { key: keys[0], entry: {} }
+}
+
+function freshestClaudePoolEntry(auth: JsonRecord, keys: string[]): { key: string; entry: JsonRecord } | null {
+  const pool = objectValue(auth.credential_pool)
+  let freshest: { key: string; entry: JsonRecord } | null = null
+  for (const key of keys) {
+    const entries = Array.isArray(pool[key]) ? pool[key] : []
+    for (const candidate of entries) {
+      const entry = objectValue(candidate)
+      if (!clean(entry.refresh_token)) continue
+      if (!freshest || Number(entry.expires_at_ms || 0) > Number(freshest.entry.expires_at_ms || 0)) {
+        freshest = { key, entry }
+      }
+    }
+  }
+  return freshest
 }
 
 function providerStateFor(auth: JsonRecord, keys: string[]): { key: string; state: JsonRecord } {
@@ -309,10 +359,19 @@ function snapshotFromAuth(
 ): CredentialSnapshot {
   const keys = providerKeys(provider)
   const { key: stateKey, state } = providerStateFor(auth, keys)
-  const { key: poolKey, entry: poolEntry } = poolEntryFor(auth, keys)
+  const fallbackPool = poolEntryFor(auth, keys)
+  // Dashboard and Hermes OAuth records can coexist. Prefer the freshest
+  // refreshable Claude pool entry over stale provider-level state.
+  const freshestPool = provider === 'claude-oauth' ? freshestClaudePoolEntry(auth, keys) : null
+  const poolEntry = freshestPool?.entry || fallbackPool.entry
+  const poolKey = freshestPool?.key || fallbackPool.key
   const tokens = objectValue(state.tokens)
-  const accessToken = firstText(tokens.access_token, state.access_token, poolEntry.access_token)
-  const refreshToken = firstText(tokens.refresh_token, state.refresh_token, poolEntry.refresh_token)
+  const accessToken = provider === 'claude-oauth'
+    ? firstText(poolEntry.access_token, tokens.access_token, state.access_token)
+    : firstText(tokens.access_token, state.access_token, poolEntry.access_token)
+  const refreshToken = provider === 'claude-oauth'
+    ? firstText(poolEntry.refresh_token, tokens.refresh_token, state.refresh_token)
+    : firstText(tokens.refresh_token, state.refresh_token, poolEntry.refresh_token)
   const defaults = runtimeDefaults(provider)
   let baseUrl = firstText(
     poolEntry.base_url,
@@ -323,7 +382,9 @@ function snapshotFromAuth(
   if (provider === 'openai-codex') baseUrl = firstText(env.HERMES_CODEX_BASE_URL, baseUrl)
   if (provider === 'xai-oauth') baseUrl = firstText(env.HERMES_XAI_BASE_URL, env.XAI_BASE_URL, baseUrl)
   if (provider === 'nous') baseUrl = firstText(env.NOUS_INFERENCE_BASE_URL, baseUrl)
-  const lastRefresh = firstText(state.last_refresh, tokens.last_refresh, poolEntry.last_refresh) || undefined
+  const lastRefresh = provider === 'claude-oauth'
+    ? firstText(poolEntry.last_refresh, state.last_refresh, tokens.last_refresh) || undefined
+    : firstText(state.last_refresh, tokens.last_refresh, poolEntry.last_refresh) || undefined
   return {
     provider,
     authPath,
@@ -338,7 +399,7 @@ function snapshotFromAuth(
     apiMode: firstText(poolEntry.api_mode, state.api_mode, defaults.apiMode),
     source: firstText(poolEntry.source, state.source, defaults.source),
     lastRefresh,
-    expiresAtMs: derivedExpiryMs(accessToken, tokens, state, poolEntry),
+    expiresAtMs: derivedExpiryMs(accessToken, tokens, state, poolEntry, provider === 'claude-oauth'),
   }
 }
 
