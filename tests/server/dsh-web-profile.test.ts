@@ -6,6 +6,7 @@ import { parse } from 'yaml'
 import { afterEach, expect, it, vi } from 'vitest'
 import { prepareDshManagementProfile } from '../../packages/server/src/modules/coding-agents/services/dsh/management-profile'
 import { prepareDshWebProfile } from '../../packages/server/src/modules/coding-agents/services/dsh/web-profile'
+import { writeDshAcpAdapter } from '../../packages/server/src/modules/coding-agents/services/dsh/acp-adapter'
 
 vi.mock('../../packages/server/src/modules/coding-agents/services/dsh/acp-adapter', () => ({ writeDshAcpAdapter: vi.fn() }))
 const roots: string[] = []
@@ -34,7 +35,7 @@ async function fixture() {
   await writeFile(join(bundle, 'cordis.patch.yml'), '[]\n')
   const patch = '- insert:\n  - id: local-plugin\n    name: ./local.mjs\n    disabled: !!js process.env.DISABLE_LOCAL\n- id: agent-presets\n  config:\n    default: custom\n    roots:\n      - path: /external/presets\n        trust: user\n'
   await writeFile(join(profile, 'cordis.patch.yml'), patch)
-  return { command, sourceHome, rootDir, profile, bundle, patch, manifest }
+  return { command, installation: join(cli, 'package.json'), sourceHome, rootDir, profile, bundle, patch, manifest }
 }
 
 it('keeps Web bundle order, profile-relative paths and custom preset roots without writing back', async () => {
@@ -44,6 +45,8 @@ it('keeps Web bundle order, profile-relative paths and custom preset roots witho
   const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
   expect(manifest.dsh.profile).toEqual({ bundles: [...input.manifest.dsh.profile.bundles, '@deepseek-ai/dsh-acp-app'], patchReload: 'startup' })
   expect(await realpath(join(directory, 'node_modules/my-web-plugin'))).toBe(await realpath(input.bundle))
+  expect(writeDshAcpAdapter).toHaveBeenLastCalledWith(await realpath(input.installation), join(directory, 'studio-acp.mjs'),
+    await realpath(join(directory, 'node_modules/@deepseek-ai/dsh-acp-app')))
   const copied = await readFile(join(directory, 'cordis.patch.yml'), 'utf8')
   expect(copied).toContain(pathToFileURL(join(input.profile, 'local.mjs')).href)
   expect(copied).toContain('!!js process.env.DISABLE_LOCAL')
