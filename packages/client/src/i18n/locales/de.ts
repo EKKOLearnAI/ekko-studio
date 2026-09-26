@@ -2,6 +2,21 @@ import { socialMessagesDe } from '../social-messages-locales'
 
 export default {
   jev: {
+    workflowQualityEnabled: "de Workflow JEV",
+    workflowQualityDisabled: "de disabled",
+    workflowQualityReady: "de ready",
+    workflowQualityMinConfidence: "de confidence",
+    workflowQualityMinConfidenceHint: "de minimum confidence",
+    workflowQualityTimeout: "de timeout",
+    workflowQualityTimeoutHint: "de total budget",
+
+    groupSummaryReviewEnabled: 'Gruppenzusammenfassungen mit JEV prüfen',
+    groupSummaryDisabled: 'Deaktiviert; Zusammenfassungen bleiben unverändert.',
+    groupSummaryReady: 'Für Zusammenfassungen dieses Profils aktiviert.',
+    groupSummaryReviewMinConfidence: 'Konfidenz der Zusammenfassungsprüfung',
+    groupSummaryReviewMinConfidenceHint: 'Mindestkonfidenz zum Melden eines Qualitätsproblems.',
+    groupSummaryReviewTimeout: 'Zeitbudget der Zusammenfassungsprüfung (ms)',
+    groupSummaryReviewTimeoutHint: 'Gesamtes JEV-Budget nach dem Speichern der ursprünglichen Zusammenfassung.',
     ekkoSkillsEnabled: "JEV für Ekko-Skills verwenden",
     skillsDisabled: "Deaktiviert; bestehende Skill-Auswahl und Lernen bleiben aktiv.",
     skillsReady: "Semantische Auswahl und Lernvorprüfung sind aktiviert.",
@@ -2796,6 +2811,7 @@ jobTriggered: 'Job ausgelost',
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Profil',
     namePlaceholder: 'Workflow-Name',
@@ -2951,6 +2967,9 @@ jobTriggered: 'Job ausgelost',
       loopId: 'Schleifenkennung', loopIdPlaceholder: 'Automatisch wählen oder eigene ID eingeben', loopIdAutomatic: 'Automatisch (empfohlen) · {id}', loopIdHelp: 'Dient nur zur Kennzeichnung im Ausführungsverlauf und ändert nicht, wann die Schleife läuft. Normalerweise automatisch lassen.', invalidLoopId: 'Ungültiges Format der Schleifen-ID',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'Knotenname', agent: 'Agent', model: 'Modell', apiMode: 'API-Modus', input: 'Eingabe', approvalRequired: 'Freigabe nach Lauf',
       join: 'Zusammenführung', joinAll: 'Alle eingehenden Routen', joinAny: 'Beliebige eingehende Route',
       joinAllHelp: 'Wird nur ausgeführt, wenn alle eingehenden Routen genommen werden; sonst übersprungen.', joinAnyHelp: 'Wird bei der ersten genommenen Route einmal ausgeführt; nur übersprungen, wenn keine passt.',
@@ -2963,6 +2982,15 @@ jobTriggered: 'Job ausgelost',
 
   // Anderungsprotokoll
   groupChat: {
+    summaryEvaluationProfile: "JEV evaluation Profile",
+    summaryReviewEnabled: "Review summaries with JEV",
+    summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",
+    summaryRevisionEnabled: "Apply one safe revision",
+    summaryRevisionHint: "When review finds a reliable issue, revise once without moving the summary anchor.",
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',

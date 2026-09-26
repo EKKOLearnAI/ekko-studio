@@ -96,6 +96,36 @@
         "control": "NInputNumber",
         "binding": "settings.ekkoSkillsTimeoutMs",
         "label": "jev.skillsTimeout"
+      },
+      "groupSummaryReviewEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.groupSummaryReviewEnabled",
+        "label": "jev.groupSummaryReviewEnabled"
+      },
+      "groupSummaryReviewMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.groupSummaryReviewMinConfidence",
+        "label": "jev.groupSummaryReviewMinConfidence"
+      },
+      "groupSummaryReviewTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.groupSummaryReviewTimeoutMs",
+        "label": "jev.groupSummaryReviewTimeout"
+      },
+      "workflowQualityEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.workflowQualityEnabled",
+        "label": "jev.workflowQualityEnabled"
+      },
+      "workflowQualityMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.workflowQualityMinConfidence",
+        "label": "jev.workflowQualityMinConfidence"
+      },
+      "workflowQualityTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.workflowQualityTimeoutMs",
+        "label": "jev.workflowQualityTimeout"
       }
     }
   },
@@ -255,6 +285,44 @@
         "tests/ekko-agent/jev.test.ts",
         "tests/server/jev.test.ts",
         "tests/server/ekko-agent-manager.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "group-summary-review",
+      "purpose": "Review committed group summaries without delaying or failing the baseline summary flow.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/modules/studio/services/group-chat/summary-review.ts"
+      ],
+      "enabledKey": "groupSummaryReviewEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "groupSummaryReviewMinConfidence",
+        "groupSummaryReviewTimeoutMs"
+      ],
+      "tests": [
+        "tests/server/group-chat-summary-review.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "workflow-quality-review",
+      "purpose": "Observe completed workflow node quality without affecting execution, routing or approval.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/modules/studio/services/workflow/quality-review.ts"
+      ],
+      "enabledKey": "workflowQualityEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "workflowQualityMinConfidence",
+        "workflowQualityTimeoutMs"
+      ],
+      "tests": [
+        "tests/server/workflow-quality-review.test.ts",
+        "tests/server/jev.test.ts",
         "tests/e2e/jev-settings.spec.ts"
       ]
     }

@@ -2,6 +2,21 @@ import { socialMessagesEn } from '../social-messages'
 
 export default {
   jev: {
+    workflowQualityEnabled: "Review Workflow node quality with JEV",
+    workflowQualityDisabled: "Disabled; Workflow execution is unchanged.",
+    workflowQualityReady: "Enabled for completed nodes with quality criteria.",
+    workflowQualityMinConfidence: "Workflow quality confidence",
+    workflowQualityMinConfidenceHint: "Minimum confidence required to report a criterion as needing improvement.",
+    workflowQualityTimeout: "Workflow quality time budget (ms)",
+    workflowQualityTimeoutHint: "Total JEV budget after a node has completed.",
+
+    groupSummaryReviewEnabled: "Review group summaries with JEV",
+    groupSummaryDisabled: "Disabled; group summaries keep their existing behavior.",
+    groupSummaryReady: "Enabled for summaries created with this Profile.",
+    groupSummaryReviewMinConfidence: "Summary review confidence",
+    groupSummaryReviewMinConfidenceHint: "Minimum confidence required to report a quality issue.",
+    groupSummaryReviewTimeout: "Summary review time budget (ms)",
+    groupSummaryReviewTimeoutHint: "Total JEV budget after the original summary has already been saved.",
     ekkoSkillsEnabled: "Use JEV for Ekko skills",
     skillsDisabled: "Disabled; existing skill matching and learning remain active.",
     skillsReady: "Enabled for semantic matching and learning preflight.",
@@ -1263,6 +1278,7 @@ export default {
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Profile',
     namePlaceholder: 'Workflow name',
@@ -1427,6 +1443,9 @@ export default {
       cycle: 'The workflow contains a cycle. Adjust the connections before saving.',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'Node name',
       agent: 'Agent',
       model: 'Model',
@@ -3261,6 +3280,15 @@ export default {
 
   // Group Chat
   groupChat: {
+    summaryEvaluationProfile: "JEV evaluation Profile",
+    summaryReviewEnabled: "Review summaries with JEV",
+    summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",
+    summaryRevisionEnabled: "Apply one safe revision",
+    summaryRevisionHint: "When review finds a reliable issue, revise once without moving the summary anchor.",
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',

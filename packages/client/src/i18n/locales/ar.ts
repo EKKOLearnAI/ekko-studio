@@ -2,6 +2,21 @@ import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
   jev: {
+    workflowQualityEnabled: "ar Workflow JEV",
+    workflowQualityDisabled: "ar disabled",
+    workflowQualityReady: "ar ready",
+    workflowQualityMinConfidence: "ar confidence",
+    workflowQualityMinConfidenceHint: "ar minimum confidence",
+    workflowQualityTimeout: "ar timeout",
+    workflowQualityTimeoutHint: "ar total budget",
+
+    groupSummaryReviewEnabled: 'مراجعة ملخصات المجموعة باستخدام JEV',
+    groupSummaryDisabled: 'معطّل؛ تستمر الملخصات بالسلوك الحالي.',
+    groupSummaryReady: 'مفعّل للملخصات المنشأة بهذا الملف.',
+    groupSummaryReviewMinConfidence: 'ثقة مراجعة الملخص',
+    groupSummaryReviewMinConfidenceHint: 'الحد الأدنى للثقة للإبلاغ عن مشكلة جودة.',
+    groupSummaryReviewTimeout: 'مهلة مراجعة الملخص (مللي ثانية)',
+    groupSummaryReviewTimeoutHint: 'ميزانية JEV بعد حفظ الملخص الأصلي.',
     ekkoSkillsEnabled: "استخدام JEV لمهارات Ekko",
     skillsDisabled: "معطّل؛ يستمر اختيار المهارات والتعلّم بالطريقة الحالية.",
     skillsReady: "تم تفعيل المطابقة الدلالية والتقييم المسبق للتعلّم.",
@@ -1256,6 +1271,7 @@ export default {
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'مسار العمل',
     profile: 'البروفايل',
     namePlaceholder: 'اسم مسار العمل',
@@ -1466,6 +1482,9 @@ export default {
       cycle: 'يحتوي مسار العمل على حلقة. اضبط الاتصالات قبل الحفظ.',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'اسم العقدة',
       agent: 'وكيل',
       model: 'النموذج',
@@ -3242,6 +3261,15 @@ export default {
 
   // Group Chat
   groupChat: {
+    summaryEvaluationProfile: "JEV evaluation Profile",
+    summaryReviewEnabled: "Review summaries with JEV",
+    summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",
+    summaryRevisionEnabled: "Apply one safe revision",
+    summaryRevisionHint: "When review finds a reliable issue, revise once without moving the summary anchor.",
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',

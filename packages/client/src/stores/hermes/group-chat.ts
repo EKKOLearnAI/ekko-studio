@@ -26,6 +26,7 @@ import {
     type RoomAgentInput,
     type RoomSummaryConfig,
     type RoomSummaryState,
+    type RoomSummaryReview,
     type ChatMessage,
     type GroupChatMention,
     type GroupExecutionQueueItem,
@@ -209,6 +210,7 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     const contextStatuses = ref<Map<string, { agentName: string; status: string }>>(new Map())
     const activeAgentRuns = ref<Map<string, GroupAgentActivity>>(new Map())
     const roomSummaryStates = ref<Map<string, RoomSummaryState>>(new Map())
+    const roomSummaryReviews = ref<Map<string, RoomSummaryReview>>(new Map())
     const handoffChains = ref<Map<string, RoomAgentHandoffChain>>(new Map())
     const executionQueue = ref<GroupExecutionQueueItem[]>([])
     const autoPlaySpeechEnabled = ref(false)
@@ -603,6 +605,14 @@ export const useGroupChatStore = defineStore('groupChat', () => {
             || (previous.version === summary.version && previous.updatedAt > summary.updatedAt))) return
         roomSummaryStates.value.set(summary.roomId, summary)
         roomSummaryStates.value = new Map(roomSummaryStates.value)
+    }
+
+    function applyRoomSummaryReview(review: RoomSummaryReview) {
+        if (!review?.roomId) return
+        const previous = roomSummaryReviews.value.get(review.roomId)
+        if (previous && (previous.createdAt > review.createdAt || previous.sourceVersion > review.sourceVersion)) return
+        roomSummaryReviews.value.set(review.roomId, review)
+        roomSummaryReviews.value = new Map(roomSummaryReviews.value)
     }
 
     function clearCurrentRoomTransientState() {
@@ -1211,6 +1221,7 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         })
 
         socket.on('room_summary_updated', applyRoomSummaryState)
+        socket.on('room_summary_review_updated', applyRoomSummaryReview)
 
         socket.on('handoff_updated', (chain: RoomAgentHandoffChain) => {
             if (!chain?.chainId || chain.roomId !== currentRoomId.value) return
@@ -1994,7 +2005,9 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         contextStatuses,
         activeAgentRuns,
         roomSummaryStates,
+        roomSummaryReviews,
         applyRoomSummaryState,
+        applyRoomSummaryReview,
         handoffChains,
         executionQueue,
         pendingApprovals,
