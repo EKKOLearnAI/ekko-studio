@@ -2291,6 +2291,7 @@ class AgentPool:
                 "run_id": gateway_run_id,
                 "approval_id": approval_id,
                 "choice": cleaned,
+                "resolved": resolved,
             })
             return {"approval_id": approval_id, "resolved": resolved, "choice": cleaned}
         return {"approval_id": approval_id, "resolved": True, "choice": cleaned}

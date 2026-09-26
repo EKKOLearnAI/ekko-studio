@@ -1560,6 +1560,8 @@ async function applyBridgeChunkAsync(
         run_id: chunk.run_id,
         approval_id: ev.approval_id,
         choice: ev.choice,
+        // Older runtimes omit resolved; forward only an explicit outcome.
+        ...(typeof ev.resolved === 'boolean' ? { resolved: ev.resolved } : {}),
       }
       replaceState(sessionMap, sessionId, 'approval.resolved', payload)
       emit('approval.resolved', payload)
