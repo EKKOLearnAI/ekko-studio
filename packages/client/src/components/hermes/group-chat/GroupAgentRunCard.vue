@@ -258,7 +258,7 @@ function handleToolListWheel(event: WheelEvent): void {
 .run-column {
     display: flex;
     flex-direction: column;
-    min-width: min(260px, 85%);
+    min-width: min(500px, 100%);
     width: fit-content;
     max-width: min(85%, 920px);
 }
@@ -308,6 +308,7 @@ function handleToolListWheel(event: WheelEvent): void {
 
 .run-tools {
     box-sizing: border-box;
+    width: 100%;
     padding: 6px;
 }
 
@@ -359,7 +360,7 @@ function handleToolListWheel(event: WheelEvent): void {
 @media (max-width: $breakpoint-mobile) {
     .run-column {
         min-width: 0;
-        width: fit-content;
+        width: 100%;
         max-width: 100%;
     }
 }
