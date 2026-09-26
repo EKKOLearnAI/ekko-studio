@@ -44,6 +44,7 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { copyToClipboard } from "@/utils/clipboard";
 import FolderPicker from "./FolderPicker.vue";
+import PinIcon from "@/components/common/PinIcon.vue";
 import ChatInput from "./ChatInput.vue";
 import RealtimeVoiceStage from "./RealtimeVoiceStage.vue";
 import ConversationMonitorPane from "./ConversationMonitorPane.vue";
@@ -3132,17 +3133,13 @@ async function handleSessionModelCustomSubmit() {
                 >
                   <template #icon>
                     <span
-                      v-if="defaultWorkspaces.includes(ws.path)"
                       class="recent-pin-icon"
+                      :class="{ 'is-pinned': defaultWorkspaces.includes(ws.path) }"
                       @click.stop="handleTogglePinRecent(ws.path)"
-                      :title="t('chat.workspaceUnpin')"
-                    >★</span>
-                    <span
-                      v-else
-                      class="recent-pin-icon"
-                      @click.stop="handleTogglePinRecent(ws.path)"
-                      :title="t('chat.workspacePin')"
-                    >☆</span>
+                      :title="defaultWorkspaces.includes(ws.path) ? t('chat.workspaceUnpin') : t('chat.workspacePin')"
+                    >
+                      <PinIcon :filled="defaultWorkspaces.includes(ws.path)" width="14" height="14" />
+                    </span>
                   </template>
                   {{ getFolderName(ws.path) }}
                 </NButton>
@@ -4644,14 +4641,18 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .recent-pin-icon {
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
   cursor: pointer;
-  color: $text-muted;
-  transition: color $transition-fast;
+  color: inherit;
+  opacity: 0.6;
+  transition: opacity $transition-fast;
 
-  &:hover {
-    color: #f5a623;
+  &:hover,
+  &.is-pinned {
+    opacity: 1;
   }
 }
 </style>
