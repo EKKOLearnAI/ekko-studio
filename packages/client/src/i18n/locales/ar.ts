@@ -2,6 +2,14 @@ import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
   jev: {
+    workflowQualityEnabled: "ar Workflow JEV",
+    workflowQualityDisabled: "ar disabled",
+    workflowQualityReady: "ar ready",
+    workflowQualityMinConfidence: "ar confidence",
+    workflowQualityMinConfidenceHint: "ar minimum confidence",
+    workflowQualityTimeout: "ar timeout",
+    workflowQualityTimeoutHint: "ar total budget",
+
     groupSummaryReviewEnabled: 'مراجعة ملخصات المجموعة باستخدام JEV',
     groupSummaryDisabled: 'معطّل؛ تستمر الملخصات بالسلوك الحالي.',
     groupSummaryReady: 'مفعّل للملخصات المنشأة بهذا الملف.',
@@ -1263,6 +1271,7 @@ export default {
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'مسار العمل',
     profile: 'البروفايل',
     namePlaceholder: 'اسم مسار العمل',
@@ -1473,6 +1482,9 @@ export default {
       cycle: 'يحتوي مسار العمل على حلقة. اضبط الاتصالات قبل الحفظ.',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'اسم العقدة',
       agent: 'وكيل',
       model: 'النموذج',

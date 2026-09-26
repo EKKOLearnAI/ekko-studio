@@ -2,6 +2,14 @@ import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
   jev: {
+    workflowQualityEnabled: "ja Workflow JEV",
+    workflowQualityDisabled: "ja disabled",
+    workflowQualityReady: "ja ready",
+    workflowQualityMinConfidence: "ja confidence",
+    workflowQualityMinConfidenceHint: "ja minimum confidence",
+    workflowQualityTimeout: "ja timeout",
+    workflowQualityTimeoutHint: "ja total budget",
+
     groupSummaryReviewEnabled: 'JEVでグループ要約を確認',
     groupSummaryDisabled: '無効です。要約は従来どおり動作します。',
     groupSummaryReady: 'このプロファイルで作成した要約に対して有効です。',
@@ -2802,6 +2810,7 @@ export default {
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'ワークフロー',
     profile: 'プロファイル',
     namePlaceholder: 'ワークフロー名',
@@ -2957,6 +2966,9 @@ export default {
       loopId: 'ループ識別子', loopIdPlaceholder: '自動を選ぶかカスタム ID を入力', loopIdAutomatic: '自動（推奨）· {id}', loopIdHelp: '実行履歴でループを識別するだけで、実行条件は変わりません。通常は自動のままにします。', invalidLoopId: 'ループ ID の形式が正しくありません',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'ノード名', agent: 'エージェント', model: 'モデル', apiMode: 'API モード', input: '入力', approvalRequired: '完了後承認',
       join: '合流方法', joinAll: 'すべての入力ルート', joinAny: 'いずれかの入力ルート',
       joinAllHelp: 'すべての入力ルートが有効な場合のみ実行し、1つでも不一致ならスキップします。', joinAnyHelp: '最初の有効な入力ルートで1回実行し、すべて不一致の場合のみスキップします。',

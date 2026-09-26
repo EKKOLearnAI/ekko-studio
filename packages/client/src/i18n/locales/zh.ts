@@ -2,6 +2,14 @@ import { socialMessagesZh } from '../social-messages'
 
 export default {
   jev: {
+    workflowQualityEnabled: "使用 JEV 检查 Workflow 节点质量",
+    workflowQualityDisabled: "已关闭；Workflow 执行保持不变。",
+    workflowQualityReady: "已为配置质量标准的完成节点启用。",
+    workflowQualityMinConfidence: "Workflow 质量置信度",
+    workflowQualityMinConfidenceHint: "将标准判断为需要改进所需的最低置信度。",
+    workflowQualityTimeout: "Workflow 质量时间预算（毫秒）",
+    workflowQualityTimeoutHint: "节点完成后 JEV 检查可使用的总时间预算。",
+
     groupSummaryReviewEnabled: "使用 JEV 检查群聊摘要",
     groupSummaryDisabled: "已关闭；群聊摘要继续沿用原流程。",
     groupSummaryReady: "已为使用此配置档案生成的摘要启用。",
@@ -1270,6 +1278,7 @@ export default {
   },
 
   workflow: {
+    quality: { results: "JEV 质量观察", rerun: "编辑并从此节点重跑", decision: { pass: "已通过", needs_improvement: "需要改进", unknown: "未知" } },
     title: '工作流',
     profile: '配置',
     namePlaceholder: '工作流名称',
@@ -1480,6 +1489,9 @@ export default {
       cycle: '流程中存在循环连接，请调整后再保存',
     },
     node: {
+      qualityReview: "JEV 质量标准",
+      qualityCriterion: "描述可观察的质量标准",
+      addQualityCriterion: "添加质量标准",
       title: '节点名称',
       agent: 'Agent',
       model: '模型',

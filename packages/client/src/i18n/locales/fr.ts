@@ -2,6 +2,14 @@ import { socialMessagesFr } from '../social-messages-locales'
 
 export default {
   jev: {
+    workflowQualityEnabled: "fr Workflow JEV",
+    workflowQualityDisabled: "fr disabled",
+    workflowQualityReady: "fr ready",
+    workflowQualityMinConfidence: "fr confidence",
+    workflowQualityMinConfidenceHint: "fr minimum confidence",
+    workflowQualityTimeout: "fr timeout",
+    workflowQualityTimeoutHint: "fr total budget",
+
     groupSummaryReviewEnabled: 'Vérifier les résumés de groupe avec JEV',
     groupSummaryDisabled: 'Désactivé ; les résumés conservent leur comportement actuel.',
     groupSummaryReady: 'Activé pour les résumés créés avec ce profil.',
@@ -2803,6 +2811,7 @@ jobTriggered: 'Job declenche',
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Profil',
     namePlaceholder: 'Nom du Workflow',
@@ -2958,6 +2967,9 @@ jobTriggered: 'Job declenche',
       loopId: 'Identité de boucle', loopIdPlaceholder: 'Choisir automatique ou saisir un ID', loopIdAutomatic: 'Automatique (recommandé) · {id}', loopIdHelp: 'Identifie seulement la boucle dans l’historique et ne modifie pas son déclenchement. Gardez automatique sauf besoin avancé.', invalidLoopId: 'Format d’ID de boucle invalide',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'Nom du nœud', agent: 'Agent', model: 'Modèle', apiMode: 'Mode API', input: 'Entrée', approvalRequired: 'Approbation après le nœud',
       join: 'Stratégie de jonction', joinAll: 'Toutes les routes entrantes', joinAny: 'N’importe quelle route entrante',
       joinAllHelp: 'S’exécute seulement si toutes les routes entrantes sont prises ; sinon le nœud est ignoré.', joinAnyHelp: 'S’exécute une fois dès la première route prise ; ignoré seulement si aucune ne correspond.',

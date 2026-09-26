@@ -7,6 +7,9 @@ export interface JevSettings {
   groupSummaryReviewEnabled: boolean
   groupSummaryReviewMinConfidence: number
   groupSummaryReviewTimeoutMs: number
+  workflowQualityEnabled: boolean
+  workflowQualityMinConfidence: number
+  workflowQualityTimeoutMs: number
   ekkoSkillsEnabled: boolean
   ekkoSkillsCandidateLimit: number
   ekkoSkillsMinConfidence: number

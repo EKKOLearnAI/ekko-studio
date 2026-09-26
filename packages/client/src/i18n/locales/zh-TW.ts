@@ -2,6 +2,14 @@ import { socialMessagesZhTw } from '../social-messages'
 
 export default {
   jev: {
+    workflowQualityEnabled: "zh-TW Workflow JEV",
+    workflowQualityDisabled: "zh-TW disabled",
+    workflowQualityReady: "zh-TW ready",
+    workflowQualityMinConfidence: "zh-TW confidence",
+    workflowQualityMinConfidenceHint: "zh-TW minimum confidence",
+    workflowQualityTimeout: "zh-TW timeout",
+    workflowQualityTimeoutHint: "zh-TW total budget",
+
     groupSummaryReviewEnabled: '使用 JEV 檢查群聊摘要',
     groupSummaryDisabled: '已關閉；群聊摘要沿用原流程。',
     groupSummaryReady: '已為此設定檔建立的摘要啟用。',
@@ -1263,6 +1271,7 @@ export default {
   },
 
   workflow: {
+    quality: { results: "JEV 质量观察", rerun: "编辑并从此节点重跑", decision: { pass: "已通过", needs_improvement: "需要改进", unknown: "未知" } },
     title: '工作流',
     profile: '設定檔',
     namePlaceholder: '工作流名稱',
@@ -1468,6 +1477,9 @@ export default {
       cycle: '流程中存在循環連接，請調整後再保存',
     },
     node: {
+      qualityReview: "JEV 质量标准",
+      qualityCriterion: "描述可观察的质量标准",
+      addQualityCriterion: "添加质量标准",
       title: '節點名稱',
       agent: 'Agent',
       model: '模型',

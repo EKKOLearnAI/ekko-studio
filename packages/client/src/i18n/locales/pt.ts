@@ -2,6 +2,14 @@ import { socialMessagesPt } from '../social-messages-locales'
 
 export default {
   jev: {
+    workflowQualityEnabled: "pt Workflow JEV",
+    workflowQualityDisabled: "pt disabled",
+    workflowQualityReady: "pt ready",
+    workflowQualityMinConfidence: "pt confidence",
+    workflowQualityMinConfidenceHint: "pt minimum confidence",
+    workflowQualityTimeout: "pt timeout",
+    workflowQualityTimeoutHint: "pt total budget",
+
     groupSummaryReviewEnabled: 'Revisar resumos do grupo com JEV',
     groupSummaryDisabled: 'Desativado; os resumos mantêm o comportamento atual.',
     groupSummaryReady: 'Ativado para resumos criados com este perfil.',
@@ -2803,6 +2811,7 @@ jobTriggered: 'Job acionado',
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Perfil',
     namePlaceholder: 'Nome do Workflow',
@@ -2958,6 +2967,9 @@ jobTriggered: 'Job acionado',
       loopId: 'Identidade do loop', loopIdPlaceholder: 'Selecione automático ou digite um ID', loopIdAutomatic: 'Automático (recomendado) · {id}', loopIdHelp: 'Apenas identifica o loop no histórico e não muda quando ele executa. Mantenha automático salvo uso avançado.', invalidLoopId: 'Formato de ID do loop inválido',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'Nome do nó', agent: 'Agente', model: 'Modelo', apiMode: 'Modo de API', input: 'Entrada', approvalRequired: 'Aprovação após o nó',
       join: 'Estratégia de junção', joinAll: 'Todas as rotas de entrada', joinAny: 'Qualquer rota de entrada',
       joinAllHelp: 'Executa apenas se todas as rotas de entrada forem tomadas; caso contrário, o nó é ignorado.', joinAnyHelp: 'Executa uma vez na primeira rota tomada; só é ignorado quando nenhuma corresponde.',

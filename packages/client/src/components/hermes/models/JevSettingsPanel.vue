@@ -14,6 +14,7 @@ const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const testResult = ref<{ model: string; durationMs: number } | null>(null)
+const workflowStatus = computed(() => !settings.value?.workflowQualityEnabled ? 'jev.workflowQualityDisabled' : !settings.value.hasApiKey ? 'common.notConfigured' : 'jev.workflowQualityReady')
 const summaryStatus = computed(() => !settings.value?.groupSummaryReviewEnabled ? 'jev.groupSummaryDisabled' : !settings.value.hasApiKey ? 'common.notConfigured' : 'jev.groupSummaryReady')
 const skillsStatus = computed(() => !settings.value?.ekkoSkillsEnabled ? 'jev.skillsDisabled'
   : !settings.value.hasApiKey ? 'common.notConfigured' : 'jev.skillsReady')
@@ -54,10 +55,10 @@ async function perform(action: 'save' | 'delete' | 'test') {
       const result = await testJevConnection(profile)
       if (!disposed) testResult.value = { model: result.model, durationMs: result.durationMs }
     } else {
-      const { baseUrl, model, timeoutMs, groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryReviewTimeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+      const { baseUrl, model, timeoutMs, groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryReviewTimeoutMs, workflowQualityEnabled, workflowQualityMinConfidence, workflowQualityTimeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
         ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs } = settings.value
       const result = action === 'delete' ? await deleteJevSettings(profile)
-        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryReviewTimeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryReviewTimeoutMs, workflowQualityEnabled, workflowQualityMinConfidence, workflowQualityTimeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
           ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs,
           ...(apiKey.value.trim() ? { apiKey: apiKey.value.trim() } : {}) })
       if (!disposed) { settings.value = result; apiKey.value = ''; message.success(t(action === 'delete' ? 'jev.deleted' : 'common.saved')) }
@@ -93,6 +94,11 @@ async function perform(action: 'save' | 'delete' | 'test') {
           </SettingRow>
         </div>
         <h4 class="group-title">{{ t('jev.useCases') }}</h4>
+        <div class="settings-rows">
+          <SettingRow :label="t('jev.workflowQualityEnabled')" :hint="t(workflowStatus)"><NSwitch v-model:value="settings.workflowQualityEnabled" :aria-label="t('jev.workflowQualityEnabled')" /></SettingRow>
+          <SettingRow :label="t('jev.workflowQualityMinConfidence')" :hint="t('jev.workflowQualityMinConfidenceHint')"><NInputNumber :value="settings.workflowQualityMinConfidence" @update:value="value => { if (value !== null) settings!.workflowQualityMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.workflowQualityMinConfidence') }" /></SettingRow>
+          <SettingRow :label="t('jev.workflowQualityTimeout')" :hint="t('jev.workflowQualityTimeoutHint')"><NInputNumber :value="settings.workflowQualityTimeoutMs" @update:value="value => { if (value !== null) settings!.workflowQualityTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :input-props="{ 'aria-label': t('jev.workflowQualityTimeout') }" /></SettingRow>
+        </div>
         <div class="settings-rows">
           <SettingRow :label="t('jev.groupSummaryReviewEnabled')" :hint="t(summaryStatus)">
             <NSwitch v-model:value="settings.groupSummaryReviewEnabled" :aria-label="t('jev.groupSummaryReviewEnabled')" />
