@@ -81,7 +81,7 @@ function handleToolListWheel(event: WheelEvent): void {
 
 <template>
     <div class="group-agent-run" :data-run-id="message.run_id || undefined">
-        <div class="run-column">
+        <div class="run-column" :class="{ 'has-task-plan': items.some(item => item.taskPlan) }">
             <div class="run-header">
                 <div
                     class="run-avatar"
@@ -261,6 +261,11 @@ function handleToolListWheel(event: WheelEvent): void {
     min-width: min(260px, 85%);
     width: fit-content;
     max-width: min(85%, 920px);
+
+    &.has-task-plan {
+        width: 100%;
+        max-width: 100%;
+    }
 }
 
 .run-header {
