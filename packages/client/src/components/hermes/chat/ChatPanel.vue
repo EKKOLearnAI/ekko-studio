@@ -44,6 +44,7 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { copyToClipboard } from "@/utils/clipboard";
 import FolderPicker from "./FolderPicker.vue";
+import StarIcon from "@/components/common/StarIcon.vue";
 import ChatInput from "./ChatInput.vue";
 import RealtimeVoiceStage from "./RealtimeVoiceStage.vue";
 import ConversationMonitorPane from "./ConversationMonitorPane.vue";
@@ -3095,8 +3096,16 @@ async function handleSessionModelCustomSubmit() {
                   <span v-if="index < visibleDefaultWorkspaces.length - 1 || hasHiddenDefaults" class="workspace-chip-separator">/</span>
                 </template>
                 <div v-if="hasHiddenDefaults" class="workspace-chip-dropdown">
-                  <button class="workspace-chip-more" @click="showDefaultWorkspaceMenu = !showDefaultWorkspaceMenu">
-                    {{ t("chat.more") }} ▼
+                  <button
+                    class="workspace-chip-more"
+                    type="button"
+                    :aria-expanded="showDefaultWorkspaceMenu"
+                    @click="showDefaultWorkspaceMenu = !showDefaultWorkspaceMenu"
+                  >
+                    <span>{{ t("chat.more") }}</span>
+                    <svg class="workspace-more-chevron" :class="{ expanded: showDefaultWorkspaceMenu }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
                   </button>
                   <div v-if="showDefaultWorkspaceMenu" class="workspace-dropdown-menu">
                     <div
@@ -3132,17 +3141,13 @@ async function handleSessionModelCustomSubmit() {
                 >
                   <template #icon>
                     <span
-                      v-if="defaultWorkspaces.includes(ws.path)"
                       class="recent-pin-icon"
+                      :class="{ 'is-pinned': defaultWorkspaces.includes(ws.path) }"
                       @click.stop="handleTogglePinRecent(ws.path)"
-                      :title="t('chat.workspaceUnpin')"
-                    >★</span>
-                    <span
-                      v-else
-                      class="recent-pin-icon"
-                      @click.stop="handleTogglePinRecent(ws.path)"
-                      :title="t('chat.workspacePin')"
-                    >☆</span>
+                      :title="defaultWorkspaces.includes(ws.path) ? t('chat.workspaceUnpin') : t('chat.workspacePin')"
+                    >
+                      <StarIcon :filled="defaultWorkspaces.includes(ws.path)" width="14" height="14" />
+                    </span>
                   </template>
                   {{ getFolderName(ws.path) }}
                 </NButton>
@@ -4507,7 +4512,9 @@ async function handleSessionModelCustomSubmit() {
 .default-workspace-chips {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-width: 0;
   margin-bottom: 8px;
 }
 
@@ -4519,6 +4526,8 @@ async function handleSessionModelCustomSubmit() {
 
 .workspace-chips-container {
   display: flex;
+  flex: 1 1 240px;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
@@ -4526,6 +4535,7 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .workspace-chip {
+  min-width: 0;
   padding: 4px 12px;
   font-size: 13px;
   color: var(--text-secondary);
@@ -4554,6 +4564,7 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .workspace-chip-separator {
+  flex-shrink: 0;
   color: var(--n-text-color-3);
   font-size: 13px;
   user-select: none;
@@ -4561,12 +4572,16 @@ async function handleSessionModelCustomSubmit() {
 
 .workspace-chip-dropdown {
   position: relative;
-  display: inline-block;
+  display: flex;
+  flex-shrink: 0;
 }
 
 .workspace-chip-more {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  line-height: inherit;
   padding: 4px 12px;
   font-size: 13px;
   background: var(--bg-card);
@@ -4583,12 +4598,21 @@ async function handleSessionModelCustomSubmit() {
   color: var(--text-primary);
 }
 
+.workspace-more-chevron {
+  flex-shrink: 0;
+
+  &.expanded {
+    transform: rotate(180deg);
+  }
+}
+
 .workspace-dropdown-menu {
   position: absolute;
   top: 100%;
-  left: 0;
+  inset-inline-end: 0;
   margin-top: 4px;
-  min-width: 200px;
+  width: 240px;
+  max-width: calc(100vw - 48px);
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -4644,14 +4668,18 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .recent-pin-icon {
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
   cursor: pointer;
-  color: $text-muted;
-  transition: color $transition-fast;
+  color: inherit;
+  opacity: 0.6;
+  transition: opacity $transition-fast;
 
-  &:hover {
-    color: #f5a623;
+  &:hover,
+  &.is-pinned {
+    opacity: 1;
   }
 }
 </style>
