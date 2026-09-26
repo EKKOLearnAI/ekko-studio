@@ -267,12 +267,12 @@ describe('provider presets', () => {
   it('treats Claude OAuth as OAuth-only while keeping Anthropic API key separate', () => {
     expect(PROVIDER_ENV_MAP[CLAUDE_OAUTH_PROVIDER]).toEqual({ api_key_env: '', base_url_env: '' })
     expect(PROVIDER_ENV_MAP.anthropic).toEqual({ api_key_env: 'ANTHROPIC_API_KEY', base_url_env: 'ANTHROPIC_BASE_URL' })
-    expect(modelsForProvider(SERVER_PROVIDER_PRESETS, CLAUDE_OAUTH_PROVIDER)).toContain('claude-sonnet-4-6')
+    expect(modelsForProvider(SERVER_PROVIDER_PRESETS, CLAUDE_OAUTH_PROVIDER)).toContain('claude-sonnet-5')
   })
 
-  it('includes Claude Fable 5 for direct Anthropic and Claude OAuth', () => {
+  it('includes Claude Fable 5.1 for direct Anthropic and Claude OAuth', () => {
     expect(modelsForProvider(SERVER_PROVIDER_PRESETS, ANTHROPIC_PROVIDER)).toContain('claude-fable-5')
-    expect(modelsForProvider(SERVER_PROVIDER_PRESETS, CLAUDE_OAUTH_PROVIDER)).toContain('claude-fable-5')
+    expect(modelsForProvider(SERVER_PROVIDER_PRESETS, CLAUDE_OAUTH_PROVIDER)).toContain('claude-fable-5-1')
   })
 
   it('keeps Kimi Coding Plan and China credentials distinct without duplicate Moonshot presets', () => {
