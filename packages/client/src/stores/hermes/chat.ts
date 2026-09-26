@@ -4529,6 +4529,16 @@ export const useChatStore = defineStore('chat', () => {
    */
   function resumeServerWorkingRun(sid: string, force = false, passive = false) {
     const generation = runtimeGeneration
+    // The resume payload is the server's authoritative answer about this run, and the
+    // caller has already folded it into `serverWorking`. A stream entry we still hold for
+    // an idle session is left over from an aborted run, a server restart, or a dropped
+    // socket — drop it here, or the chat keeps rendering as busy and the thinking timer
+    // restarts from zero every time the session is opened.
+    if (!serverWorking.value.has(sid) && streamStates.value.has(sid)) {
+      streamStates.value.delete(sid)
+      clearRunStartedAt(sid)
+      unregisterSessionHandlers(sid)
+    }
     // Don't register duplicate listeners if already streaming
     if (streamStates.value.has(sid)) return
     // Only set up listeners if the server reported an active run during resume.
