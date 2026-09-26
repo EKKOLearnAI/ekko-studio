@@ -19,6 +19,9 @@ export function nextCodingAgentMode(input: {
   agentMode: 'scoped' | 'global'
   priorAgentMode?: 'scoped' | 'global'
 }): { agentMode: 'scoped' | 'global'; priorAgentMode?: 'scoped' | 'global' } {
+  if (!KNOWN_CODING_AGENTS.has(input.nextAgent)) {
+    return { agentMode: 'scoped', priorAgentMode: undefined }
+  }
   if (input.previousAgent === input.nextAgent) {
     return { agentMode: input.agentMode, priorAgentMode: input.priorAgentMode }
   }
@@ -33,9 +36,6 @@ export function nextCodingAgentMode(input: {
       agentMode: input.priorAgentMode === 'global' ? 'global' : 'scoped',
       priorAgentMode: undefined,
     }
-  }
-  if (!KNOWN_CODING_AGENTS.has(input.nextAgent)) {
-    return { agentMode: 'scoped', priorAgentMode: undefined }
   }
   return { agentMode: input.agentMode, priorAgentMode: input.priorAgentMode }
 }

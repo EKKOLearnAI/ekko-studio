@@ -1354,7 +1354,7 @@ describe('group chat REST route baseline', () => {
     })
     expect(unsupported.status).toBe(400)
     await expect(unsupported.json()).resolves.toEqual({
-      error: 'Global mode is only available for Claude, Codex, Pi, and Grok',
+      error: 'Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor',
     })
   })
 

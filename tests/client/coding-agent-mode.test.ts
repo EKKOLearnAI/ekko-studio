@@ -13,6 +13,16 @@ describe('storedPriorAgentMode', () => {
 })
 
 describe('nextCodingAgentMode', () => {
+  it.each(['hermes', 'ekko', 'ekko-agent'])('saves scoped mode when leaving Cursor for %s after a global Agent', agent => {
+    const entered = nextCodingAgentMode({ previousAgent: 'codex', nextAgent: 'cursor', agentMode: 'global' })
+    const left = nextCodingAgentMode({ previousAgent: 'cursor', nextAgent: agent, ...entered })
+    expect(left).toEqual({ agentMode: 'scoped', priorAgentMode: undefined })
+    expect(workflowSavedAgentFields({ agent, ...left, provider: 'studio', model: 'custom' }))
+      .toMatchObject({ agent, agentMode: 'scoped', provider: 'studio', model: 'custom' })
+    expect(submittedCodingAgentSelection({ agent, ...left, provider: 'studio', model: 'custom', usesGlobal: false }))
+      .toMatchObject({ agent, agentMode: 'scoped', priorAgentMode: '', provider: 'studio', model: 'custom' })
+  })
+
   it('restores the mode stashed when leaving Cursor', () => {
     for (const agent of existingAgents) {
       const entered = nextCodingAgentMode({

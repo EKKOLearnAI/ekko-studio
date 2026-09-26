@@ -111,4 +111,18 @@ Cursor is a user-installed external CLI, not an npm package Studio installs. The
 
 Cursor launches in global mode with `agent -p`. It does not receive a Studio provider, base URL, or model API key. `CURSOR_API_KEY` is a Cursor account credential, not a Studio model key. Bring-your-own-key and `agent acp` are outside this release.
 
+Studio supplies its managed MCP servers through a session-local Cursor plugin
+under the Web UI runtime directory, using `--plugin-dir`. This requires a Cursor
+CLI version that supports local plugins (verified with `2026.09.26-dd393fe`).
+The plugin contains only Studio-managed servers and the current profile/run
+credential paths. Native user/project MCP settings, disabled-server preferences,
+login state, and the working directory stay under Cursor's control. Studio does
+not copy or overwrite them. `--add-dir` is not an MCP configuration override.
+
+See [Cursor plugin MCP configuration](https://cursor.com/docs/reference/plugins#mcp-servers)
+and [CLI parameters](https://cursor.com/docs/cli/reference/parameters). The CLI's
+`mcp list` subcommand only enumerates user/project configuration; it does not
+verify chat's plugin MCP discovery. Test the chat plugin loader when verifying
+this integration, including concurrent profiles and run-specific credentials.
+
 Also outside this release: Windows prompts that exceed the command-line length limit, the native `/compact` command, and Cursor skills. A long Windows prompt, a compact request, or a missing skill is unsupported, not a sign that Cursor is fully managed like Claude, Codex, Pi, or Grok.

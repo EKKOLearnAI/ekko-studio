@@ -1327,11 +1327,10 @@ function claudeMcpConfigJson(profile: string, runTokenFile: string | undefined, 
   return `${JSON.stringify({ mcpServers }, null, 2)}\n`
 }
 
-function cursorMcpConfigJson(profile: string, runTokenFile: string | undefined, ...existingContents: Array<string | null | undefined>): string {
+function cursorMcpConfigJson(profile: string, runTokenFile: string | undefined): string {
   const mcpServers: Record<string, unknown> = {}
-  for (const content of existingContents) {
-    Object.assign(mcpServers, parseClaudeMcpServers(content))
-  }
+  // Cursor loads user/project MCP itself. Copying those entries into the plugin
+  // would start them twice and bypass Cursor's own disabled-server preferences.
   for (const server of HERMES_MCP_SERVERS) {
     if (getDisabledManagedMcpServers('cursor', profile).has(server.name)) continue
     mcpServers[server.name] = managedHermesMcpServerConfig('cursor', profile, server.name, server.toolset, runTokenFile)
@@ -1343,14 +1342,21 @@ async function prepareCursorMcp(rootDir: string, profile: string, runTokenFile?:
   files: Array<{ key: string; path: string; absolutePath: string }>
   args: string[]
 }> {
-  const livePath = getLiveConfigFileDefinition('cursor', 'mcp')?.absolutePath || ''
-  const runtimePath = join(rootDir, '.cursor', 'mcp.json')
-  const content = cursorMcpConfigJson(profile, runTokenFile, livePath ? await safeReadFile(livePath) : null)
-  await mkdir(dirname(runtimePath), { recursive: true })
+  // --add-dir adds workspace files, not MCP configuration. A CLI-local plugin
+  // supplies per-run MCP servers without changing cwd, login state or user files.
+  const pluginRoot = join(rootDir, 'ekko-studio-mcp')
+  const manifestPath = join(pluginRoot, '.cursor-plugin', 'plugin.json')
+  const runtimePath = join(pluginRoot, 'mcp.json')
+  const content = cursorMcpConfigJson(profile, runTokenFile)
+  await mkdir(dirname(manifestPath), { recursive: true, mode: 0o700 })
+  await writeFile(manifestPath, `${JSON.stringify({ name: 'ekko-studio-mcp', version: '1.0.0', mcpServers: 'mcp.json' }, null, 2)}\n`, { mode: 0o600 })
   await writeFile(runtimePath, content, { mode: 0o600 })
   return {
-    files: [{ key: 'mcp', path: '.cursor/mcp.json', absolutePath: runtimePath }],
-    args: ['--approve-mcps', '--add-dir', rootDir],
+    files: [
+      { key: 'mcp', path: 'ekko-studio-mcp/mcp.json', absolutePath: runtimePath },
+      { key: 'plugin', path: 'ekko-studio-mcp/.cursor-plugin/plugin.json', absolutePath: manifestPath },
+    ],
+    args: ['--approve-mcps', '--plugin-dir', pluginRoot],
   }
 }
 

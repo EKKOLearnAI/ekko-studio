@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { configureProfileConfig } from '../../../../packages/server/src/modules/studio/public/profile-config'
 import { prepareCodingAgentLaunch } from '../../../../packages/server/src/bootstrap/coding-agents'
 import { isolateUnhealthyRuntimeMcpServers } from '../../../../packages/server/src/modules/coding-agents/services/mcp-runtime-isolation'
+import { setManagedMcpServerEnabled } from '../../../../packages/server/src/modules/coding-agents/services/mcp-overrides'
 
 const homes: string[] = []
 
@@ -38,7 +39,7 @@ afterEach(() => {
 })
 
 describe('Cursor MCP launch wiring', () => {
-  it('keeps the user MCP file unchanged and writes the runtime copy', async () => {
+  it('loads a managed MCP plugin without copying or rewriting native user/project MCP', async () => {
     const home = makeHome()
     mkdirSync(join(home, '.cursor'), { recursive: true })
     const userMcp = `${JSON.stringify({
@@ -49,20 +50,33 @@ describe('Cursor MCP launch wiring', () => {
     }, null, 2)}\n`
     writeFileSync(join(home, '.cursor', 'mcp.json'), userMcp)
 
+    const workspace = join(home, 'project')
+    mkdirSync(join(workspace, '.cursor'), { recursive: true })
+    writeFileSync(join(workspace, '.cursor', 'mcp.json'), userMcp)
     const launch = await prepareCodingAgentLaunch('cursor', {
       mode: 'global',
       profile: 'alpha',
       sessionId: 'cursor-mcp',
+      workspace,
     })
+
+    expect(launch.workspaceDir).toBe(workspace)
+    for (const key of ['HOME', 'USERPROFILE', 'CURSOR_CONFIG_DIR', 'CURSOR_API_KEY']) {
+      expect(launch.env).not.toHaveProperty(key)
+    }
+    expect(readFileSync(join(workspace, '.cursor', 'mcp.json'), 'utf8')).toBe(userMcp)
+    const manifest = JSON.parse(readFileSync(join(launch.args[2], '.cursor-plugin', 'plugin.json'), 'utf8'))
+    expect(manifest).toMatchObject({ name: 'ekko-studio-mcp', mcpServers: 'mcp.json' })
+    expect(join(launch.args[2], manifest.mcpServers)).toBe(launch.files.find(file => file.key === 'mcp')?.absolutePath)
 
     expect(launch.args).not.toContain('--mcp-config')
     const mcpFile = launch.files.find(file => file.key === 'mcp')
-    expect(launch.args).toEqual(['--approve-mcps', '--add-dir', dirname(dirname(mcpFile!.absolutePath))])
+    expect(launch.args).toEqual(['--approve-mcps', '--plugin-dir', dirname(mcpFile!.absolutePath)])
     expect(mcpFile?.absolutePath).toBeTruthy()
     expect(mcpFile?.absolutePath).not.toBe(join(home, '.cursor', 'mcp.json'))
     expect(readFileSync(join(home, '.cursor', 'mcp.json'), 'utf8')).toBe(userMcp)
     const runtime = JSON.parse(readFileSync(mcpFile!.absolutePath, 'utf8'))
-    expect(runtime.mcpServers.docs).toEqual({ command: 'docs-mcp' })
+    expect(runtime.mcpServers.docs).toBeUndefined()
     expect(runtime.mcpServers.later).toBeUndefined()
     expect(runtime.mcpServers['ekko-studio-api']).toMatchObject({
       env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: '1' }),
@@ -75,7 +89,7 @@ describe('Cursor MCP launch wiring', () => {
     })
     const secondFile = second.files.find(file => file.key === 'mcp')
     expect(secondFile?.absolutePath).not.toBe(mcpFile?.absolutePath)
-    expect(second.args).toEqual(['--approve-mcps', '--add-dir', dirname(dirname(secondFile!.absolutePath))])
+    expect(second.args).toEqual(['--approve-mcps', '--plugin-dir', dirname(secondFile!.absolutePath)])
     expect(second.args[2]).not.toBe(launch.args[2])
     expect(readFileSync(join(home, '.cursor', 'mcp.json'), 'utf8')).toBe(userMcp)
 
@@ -107,7 +121,7 @@ describe('Cursor MCP launch wiring', () => {
     expect(launch.mode).toBe('global')
     expect(launch.command).toBe('agent')
     expect(launch.args[0]).toBe('--approve-mcps')
-    expect(launch.args[1]).toBe('--add-dir')
+    expect(launch.args[1]).toBe('--plugin-dir')
     expect(launch.args).not.toContain('--mcp-config')
     expect(launch.args).not.toContain('streaming-json')
     expect(launch.args).not.toContain('--prompt-file')
@@ -135,7 +149,11 @@ describe('Cursor MCP launch wiring', () => {
 
     const mcpFile = launch.files.find(file => file.key === 'mcp')
     const runtime = JSON.parse(readFileSync(mcpFile!.absolutePath, 'utf8'))
-    expect(runtime.mcpServers['ekko-studio-api'].env.HERMES_WEB_UI_RUN_TOKEN_FILE).toBe(runTokenFile)
+    for (const server of Object.values(runtime.mcpServers) as Array<{ env: Record<string, string> }>) {
+      expect(server.env.HERMES_WEB_UI_RUN_TOKEN_FILE).toBe(runTokenFile)
+      expect(server.env.HERMES_WEB_UI_PROFILE).toBe('alpha')
+      expect(server.env.ELECTRON_RUN_AS_NODE).toBe('1')
+    }
     expect(readFileSync(join(home, '.cursor', 'mcp.json'), 'utf8')).toBe(userMcp)
   })
 
@@ -171,16 +189,16 @@ describe('Cursor MCP launch wiring', () => {
     const mcpFile = second.files.find(file => file.key === 'mcp')
     expect(mcpFile?.absolutePath).toBeTruthy()
     expect(mcpFile?.absolutePath).not.toBe(userPath)
-    expect(second.args).toEqual(['--approve-mcps', '--add-dir', dirname(dirname(mcpFile!.absolutePath))])
+    expect(second.args).toEqual(['--approve-mcps', '--plugin-dir', dirname(mcpFile!.absolutePath)])
     expect(second.args[2]).toBe(first.args[2])
     expect(readFileSync(userPath, 'utf8')).toBe(resumedUser)
     const runtime = JSON.parse(readFileSync(mcpFile!.absolutePath, 'utf8'))
-    expect(runtime.mcpServers.docs).toEqual({ command: 'docs-mcp' })
-    expect(runtime.mcpServers.kept).toEqual({ command: 'kept-mcp' })
+    expect(runtime.mcpServers.docs).toBeUndefined()
+    expect(runtime.mcpServers.kept).toBeUndefined()
     expect(runtime.mcpServers.later).toBeUndefined()
   })
 
-  it('removes an unhealthy server from the runtime copy only', async () => {
+  it('leaves native MCP health checks and disabled entries to Cursor', async () => {
     const home = makeHome()
     mkdirSync(join(home, '.cursor'), { recursive: true })
     const userMcp = `${JSON.stringify({
@@ -196,11 +214,11 @@ describe('Cursor MCP launch wiring', () => {
       sessionId: 'cursor-unhealthy',
     })
     const mcpFile = launch.files.find(file => file.key === 'mcp')
-    const removed = await isolateUnhealthyRuntimeMcpServers('cursor', mcpFile!.absolutePath, {
-      probe: async () => ({ ok: false, error: 'timeout' }),
-    })
+    const probe = vi.fn(async () => ({ ok: false, error: 'timeout' }))
+    const removed = await isolateUnhealthyRuntimeMcpServers('cursor', mcpFile!.absolutePath, { probe })
 
-    expect(removed).toEqual(['docs'])
+    expect(removed).toEqual([])
+    expect(probe).not.toHaveBeenCalled()
     expect(readFileSync(join(home, '.cursor', 'mcp.json'), 'utf8')).toBe(userMcp)
     const runtime = JSON.parse(readFileSync(mcpFile!.absolutePath, 'utf8'))
     expect(runtime.mcpServers.docs).toBeUndefined()
@@ -208,5 +226,20 @@ describe('Cursor MCP launch wiring', () => {
     expect(runtime.mcpServers['ekko-studio-api']).toMatchObject({
       env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: '1' }),
     })
+  })
+
+  it('isolates disabled managed servers per profile and refreshes them on resume', async () => {
+    makeHome()
+    setManagedMcpServerEnabled('cursor', 'alpha', 'ekko-studio-browser', false)
+    const input = { profile: 'alpha', sessionId: 'cursor-disabled', agentSessionId: 'agent-disabled' }
+    const alpha = await prepareCodingAgentLaunch('cursor', input)
+    const beta = await prepareCodingAgentLaunch('cursor', { ...input, profile: 'beta' })
+    const servers = (launch: typeof alpha) => JSON.parse(readFileSync(launch.files.find(file => file.key === 'mcp')!.absolutePath, 'utf8')).mcpServers
+    expect(servers(alpha)['ekko-studio-browser']).toBeUndefined()
+    expect(servers(beta)['ekko-studio-browser']).toBeDefined()
+    setManagedMcpServerEnabled('cursor', 'alpha', 'ekko-studio-browser', true)
+    const resumed = await prepareCodingAgentLaunch('cursor', input)
+    expect(resumed.args).toEqual(alpha.args)
+    expect(servers(resumed)['ekko-studio-browser']).toBeDefined()
   })
 })
