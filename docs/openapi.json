@@ -15678,6 +15678,12 @@
                   "agentHandoffUnlimited": {
                     "type": "boolean"
                   },
+                  "evaluationProfile": {
+                    "type": "string"
+                  },
+                  "messageRoutingMode": {
+                    "type": "string"
+                  },
                   "name": {
                     "type": "string"
                   },
@@ -15695,6 +15701,12 @@
                   },
                   "summaryProvider": {
                     "type": "string"
+                  },
+                  "summaryReviewMode": {
+                    "type": "string"
+                  },
+                  "summaryRevisionEnabled": {
+                    "type": "boolean"
                   }
                 }
               }

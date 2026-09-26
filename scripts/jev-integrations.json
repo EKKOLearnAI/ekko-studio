@@ -97,40 +97,20 @@
         "binding": "settings.ekkoSkillsTimeoutMs",
         "label": "jev.skillsTimeout"
       },
-      "browserMatchEnabled": {
+      "groupSummaryReviewEnabled": {
         "control": "NSwitch",
-        "binding": "settings.browserMatchEnabled",
-        "label": "jev.browserMatchEnabled"
+        "binding": "settings.groupSummaryReviewEnabled",
+        "label": "jev.groupSummaryReviewEnabled"
       },
-      "browserMatchCandidateLimit": {
+      "groupSummaryReviewMinConfidence": {
         "control": "NInputNumber",
-        "binding": "settings.browserMatchCandidateLimit",
-        "label": "jev.browserMatchCandidateLimit"
+        "binding": "settings.groupSummaryReviewMinConfidence",
+        "label": "jev.groupSummaryReviewMinConfidence"
       },
-      "browserMatchMinConfidence": {
+      "groupSummaryReviewTimeoutMs": {
         "control": "NInputNumber",
-        "binding": "settings.browserMatchMinConfidence",
-        "label": "jev.browserMatchMinConfidence"
-      },
-      "browserMatchTimeoutMs": {
-        "control": "NInputNumber",
-        "binding": "settings.browserMatchTimeoutMs",
-        "label": "jev.browserMatchTimeoutMs"
-      },
-      "browserVerifyEnabled": {
-        "control": "NSwitch",
-        "binding": "settings.browserVerifyEnabled",
-        "label": "jev.browserVerifyEnabled"
-      },
-      "browserVerifyMinConfidence": {
-        "control": "NInputNumber",
-        "binding": "settings.browserVerifyMinConfidence",
-        "label": "jev.browserVerifyMinConfidence"
-      },
-      "browserVerifyTimeoutMs": {
-        "control": "NInputNumber",
-        "binding": "settings.browserVerifyTimeoutMs",
-        "label": "jev.browserVerifyTimeoutMs"
+        "binding": "settings.groupSummaryReviewTimeoutMs",
+        "label": "jev.groupSummaryReviewTimeout"
       }
     }
   },
@@ -294,49 +274,21 @@
       ]
     },
     {
-      "id": "browser-match",
-      "purpose": "Suggest existing browser snapshot refs from a target description.",
+      "id": "group-summary-review",
+      "purpose": "Review committed group summaries without delaying or failing the baseline summary flow.",
       "status": "active",
       "sources": [
-        "packages/server/src/modules/studio/services/browser/jev.ts",
-        "bin/browser/jev.mjs",
-        "bin/ekko-studio-mcp.mjs"
+        "packages/server/src/modules/studio/services/group-chat/summary-review.ts"
       ],
-      "enabledKey": "browserMatchEnabled",
+      "enabledKey": "groupSummaryReviewEnabled",
       "studioDefaultEnabled": false,
       "options": [
-        "browserMatchCandidateLimit",
-        "browserMatchMinConfidence",
-        "browserMatchTimeoutMs"
+        "groupSummaryReviewMinConfidence",
+        "groupSummaryReviewTimeoutMs"
       ],
       "tests": [
-        "tests/server/browser-jev.test.ts",
-        "tests/server/browser-jev-mcp.test.ts",
+        "tests/server/group-chat-summary-review.test.ts",
         "tests/server/jev.test.ts",
-        "tests/server/hermes-studio-browser-mcp.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
-    },
-    {
-      "id": "browser-verify",
-      "purpose": "Assess visible evidence after successful browser interactions without retrying or altering execution status.",
-      "status": "active",
-      "sources": [
-        "packages/server/src/modules/studio/services/browser/jev.ts",
-        "bin/browser/jev.mjs",
-        "bin/ekko-studio-mcp.mjs"
-      ],
-      "enabledKey": "browserVerifyEnabled",
-      "studioDefaultEnabled": false,
-      "options": [
-        "browserVerifyMinConfidence",
-        "browserVerifyTimeoutMs"
-      ],
-      "tests": [
-        "tests/server/browser-jev.test.ts",
-        "tests/server/browser-jev-mcp.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/server/hermes-studio-browser-mcp.test.ts",
         "tests/e2e/jev-settings.spec.ts"
       ]
     }

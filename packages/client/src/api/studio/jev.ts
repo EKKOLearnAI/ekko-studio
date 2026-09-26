@@ -4,14 +4,9 @@ export { choice, score, noul } from '@typesafe-ai/sdk'
 export type { Questions, SystemOneRequest, SystemOneResult } from '@typesafe-ai/sdk'
 
 export interface JevSettings {
-  browserMatchEnabled: boolean
-  browserMatchCandidateLimit: number
-  browserMatchMinConfidence: number
-  browserMatchTimeoutMs: number
-  browserVerifyEnabled: boolean
-  browserVerifyMinConfidence: number
-  browserVerifyTimeoutMs: number
-
+  groupSummaryReviewEnabled: boolean
+  groupSummaryReviewMinConfidence: number
+  groupSummaryReviewTimeoutMs: number
   ekkoSkillsEnabled: boolean
   ekkoSkillsCandidateLimit: number
   ekkoSkillsMinConfidence: number
