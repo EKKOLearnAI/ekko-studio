@@ -782,6 +782,10 @@ export const GC_ROOMS_SCHEMA: Record<string, string> = {
   summaryApiMode: "TEXT NOT NULL DEFAULT ''",
   summaryEveryTurns: 'INTEGER NOT NULL DEFAULT 20',
   summaryGeneration: 'INTEGER NOT NULL DEFAULT 0',
+  evaluationProfile: "TEXT NOT NULL DEFAULT ''",
+  summaryReviewMode: "TEXT NOT NULL DEFAULT 'inherit'",
+  summaryRevisionEnabled: 'INTEGER NOT NULL DEFAULT 0',
+  messageRoutingMode: "TEXT NOT NULL DEFAULT 'off'",
   triggerTokens: 'INTEGER NOT NULL DEFAULT 100000',
   maxHistoryTokens: 'INTEGER NOT NULL DEFAULT 32000',
   tailMessageCount: 'INTEGER NOT NULL DEFAULT 10',
@@ -1063,6 +1067,29 @@ export const GC_ROOM_SUMMARIES_SCHEMA: Record<string, string> = {
   summaryLeaseExpiresAt: 'INTEGER NOT NULL DEFAULT 0',
   summaryRunGeneration: 'INTEGER NOT NULL DEFAULT 0',
   summaryDrainThroughMessageId: "TEXT NOT NULL DEFAULT ''",
+}
+
+export const GC_SUMMARY_REVIEWS_TABLE = 'gc_summary_reviews'
+export const GC_SUMMARY_REVIEWS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  roomId: 'TEXT NOT NULL',
+  sourceVersion: 'INTEGER NOT NULL',
+  sourceSummaryHash: 'TEXT NOT NULL',
+  sourceAnchor: "TEXT NOT NULL DEFAULT ''",
+  sourceTurnCount: 'INTEGER NOT NULL DEFAULT 0',
+  inputHash: 'TEXT NOT NULL',
+  configHash: 'TEXT NOT NULL',
+  status: "TEXT NOT NULL DEFAULT 'completed'",
+  decision: "TEXT NOT NULL DEFAULT 'unknown'",
+  ruleResultsJson: "TEXT NOT NULL DEFAULT '[]'",
+  reasonCode: "TEXT NOT NULL DEFAULT ''",
+  durationMs: 'INTEGER NOT NULL DEFAULT 0',
+  createdAt: 'INTEGER NOT NULL',
+  appliedRevisionVersion: 'INTEGER',
+}
+export const GC_SUMMARY_REVIEWS_INDEXES = {
+  idx_gc_summary_reviews_room_version: 'CREATE INDEX IF NOT EXISTS idx_gc_summary_reviews_room_version ON gc_summary_reviews(roomId, sourceVersion, createdAt DESC)',
+  idx_gc_summary_reviews_attempt: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_gc_summary_reviews_attempt ON gc_summary_reviews(roomId, inputHash, configHash)',
 }
 
 export const GC_ROOM_MEMBERS_TABLE = 'gc_room_members'
@@ -1740,6 +1767,7 @@ export function initAllHermesTables(): void {
     migrateGroupChatActivityTimes(db, Date.now())
     syncTable(GC_CONTEXT_SNAPSHOTS_TABLE, GC_CONTEXT_SNAPSHOTS_SCHEMA)
     syncTable(GC_ROOM_SUMMARIES_TABLE, GC_ROOM_SUMMARIES_SCHEMA)
+    syncTable(GC_SUMMARY_REVIEWS_TABLE, GC_SUMMARY_REVIEWS_SCHEMA, { indexes: GC_SUMMARY_REVIEWS_INDEXES })
     syncTable(GC_PENDING_SESSION_DELETES_TABLE, GC_PENDING_SESSION_DELETES_SCHEMA)
     syncTable(GC_SESSION_PROFILES_TABLE, GC_SESSION_PROFILES_SCHEMA)
 

@@ -2,6 +2,13 @@ import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
   jev: {
+    groupSummaryReviewEnabled: 'JEVでグループ要約を確認',
+    groupSummaryDisabled: '無効です。要約は従来どおり動作します。',
+    groupSummaryReady: 'このプロファイルで作成した要約に対して有効です。',
+    groupSummaryReviewMinConfidence: '要約確認の信頼度',
+    groupSummaryReviewMinConfidenceHint: '品質問題を報告する最小信頼度です。',
+    groupSummaryReviewTimeout: '要約確認の時間予算（ms）',
+    groupSummaryReviewTimeoutHint: '元の要約を保存した後に使用できるJEVの総時間です。',
     ekkoSkillsEnabled: "Ekko スキルに JEV を使用",
     skillsDisabled: "無効。既存のスキル照合と学習を使用します。",
     skillsReady: "意味による照合と学習の事前判定が有効です。",
@@ -2962,6 +2969,15 @@ export default {
 
   // 更新履歴
   groupChat: {
+    summaryEvaluationProfile: "JEV evaluation Profile",
+    summaryReviewEnabled: "Review summaries with JEV",
+    summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",
+    summaryRevisionEnabled: "Apply one safe revision",
+    summaryRevisionHint: "When review finds a reliable issue, revise once without moving the summary anchor.",
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',

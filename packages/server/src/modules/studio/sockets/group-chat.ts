@@ -35,6 +35,7 @@ import { config } from '../public/config'
 import { createSocketIoCorsOrigin, shouldRejectUpgradeOrigin } from '../public/security'
 import { paginateRecentGroupMessagesCanonical, sliceGroupMessagesCanonical, type GroupMessageCursorCutoff } from '../services/group-chat/group-message-ordering'
 import { GroupRoomSummaryService, type GroupRoomSummary } from '../services/group-chat/room-summary'
+import { GroupSummaryReviewService, type GroupSummaryReviewRecord } from '../services/group-chat/summary-review'
 import { isAgentMentioned, isAllAgentsMentioned, isReservedMentionName, resolveMentionTargets } from '../services/group-chat/mention-routing'
 import { isGroupChatRoomOwner } from '../services/group-chat/access'
 import { normalizeHumanGroupChatContent, type PublishedGroupChatAttachmentBlock } from '../services/group-chat/attachments'
@@ -334,6 +335,10 @@ export interface RoomInfo {
     summaryApiMode: string
     summaryEveryTurns: number
     summaryGeneration: number
+    evaluationProfile: string
+    summaryReviewMode: 'inherit' | 'off'
+    summaryRevisionEnabled: number
+    messageRoutingMode: 'off' | 'suggest' | 'auto'
     triggerTokens: number
     maxHistoryTokens: number
     tailMessageCount: number
@@ -363,6 +368,10 @@ const ROOM_SELECT_COLUMNS = [
     'summaryApiMode',
     'summaryEveryTurns',
     'summaryGeneration',
+    'evaluationProfile',
+    'summaryReviewMode',
+    'summaryRevisionEnabled',
+    'messageRoutingMode',
     'triggerTokens',
     'maxHistoryTokens',
     'tailMessageCount',
@@ -443,6 +452,10 @@ export interface RoomSummaryConfig {
     summaryModel?: string
     summaryApiMode?: string
     summaryEveryTurns?: number
+    evaluationProfile?: string
+    summaryReviewMode?: 'inherit' | 'off'
+    summaryRevisionEnabled?: boolean
+    messageRoutingMode?: 'off' | 'suggest' | 'auto'
 }
 
 export interface RoomAgentHandoffConfig {
@@ -1070,10 +1083,10 @@ class ChatStorage {
         this.db()?.prepare(
             `INSERT OR IGNORE INTO gc_rooms (
                 id, name, inviteCode, summaryProfile, summaryProvider, summaryModel,
-                summaryApiMode, summaryEveryTurns, workspace, ownerAuthUserId, createdAt,
+                summaryApiMode, summaryEveryTurns, evaluationProfile, summaryReviewMode, summaryRevisionEnabled, messageRoutingMode, workspace, ownerAuthUserId, createdAt,
                 agentHandoffEnabled, agentHandoffMaxDepth, agentHandoffUnlimited,
                 tokenAccountingVersion
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
             id,
             name,
@@ -1083,6 +1096,10 @@ class ChatStorage {
             String(config?.summaryModel || '').trim(),
             String(config?.summaryApiMode || '').trim(),
             Math.max(1, Math.floor(Number(config?.summaryEveryTurns || 20))),
+            String(config?.evaluationProfile || config?.summaryProfile || 'default').trim() || 'default',
+            config?.summaryReviewMode === 'off' ? 'off' : 'inherit',
+            config?.summaryRevisionEnabled ? 1 : 0,
+            ['suggest', 'auto'].includes(String(config?.messageRoutingMode)) ? String(config?.messageRoutingMode) : 'off',
             config?.workspace || '',
             ownerAuthUserId,
             Date.now(),
@@ -1125,6 +1142,10 @@ class ChatStorage {
         if (config.summaryModel !== undefined) { sets.push('summaryModel = ?'); vals.push(config.summaryModel) }
         if (config.summaryApiMode !== undefined) { sets.push('summaryApiMode = ?'); vals.push(config.summaryApiMode) }
         if (config.summaryEveryTurns !== undefined) { sets.push('summaryEveryTurns = ?'); vals.push(config.summaryEveryTurns) }
+        if (config.evaluationProfile !== undefined) { sets.push('evaluationProfile = ?'); vals.push(config.evaluationProfile) }
+        if (config.summaryReviewMode !== undefined) { sets.push('summaryReviewMode = ?'); vals.push(config.summaryReviewMode) }
+        if (config.summaryRevisionEnabled !== undefined) { sets.push('summaryRevisionEnabled = ?'); vals.push(config.summaryRevisionEnabled ? 1 : 0) }
+        if (config.messageRoutingMode !== undefined) { sets.push('messageRoutingMode = ?'); vals.push(config.messageRoutingMode) }
         if (config.agentHandoffEnabled !== undefined) { sets.push('agentHandoffEnabled = ?'); vals.push(config.agentHandoffEnabled ? 1 : 0) }
         if (config.agentHandoffMaxDepth !== undefined) {
             sets.push('agentHandoffMaxDepth = ?')
@@ -2357,6 +2378,7 @@ class ChatStorage {
             db.prepare('DELETE FROM gc_messages WHERE roomId = ?').run(roomId)
             db.prepare('DELETE FROM gc_room_agents WHERE roomId = ? AND removedAt > 0').run(roomId)
             db.prepare('DELETE FROM gc_context_snapshots WHERE roomId = ?').run(roomId)
+            db.prepare('DELETE FROM gc_summary_reviews WHERE roomId = ?').run(roomId)
             db.prepare('DELETE FROM gc_room_summaries WHERE roomId = ?').run(roomId)
             db.prepare('UPDATE gc_rooms SET totalTokens = 0, sessionSeed = ?, summaryGeneration = summaryGeneration + 1 WHERE id = ?').run(`${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, roomId)
         })
@@ -2528,6 +2550,7 @@ class ChatStorage {
                  SET totalTokens = ?, summaryGeneration = summaryGeneration + 1
                  WHERE id = ?`,
             ).run(totalTokens, roomId)
+            db.prepare('DELETE FROM gc_summary_reviews WHERE roomId = ?').run(roomId)
             db.prepare('DELETE FROM gc_room_summaries WHERE roomId = ?').run(roomId)
 
             return {
@@ -2942,6 +2965,42 @@ class ChatStorage {
         return Number(result?.changes || 0) === 1
     }
 
+    getLatestSummaryReview(roomId: string): GroupSummaryReviewRecord | null {
+        const row = this.db()?.prepare('SELECT * FROM gc_summary_reviews WHERE roomId = ? ORDER BY createdAt DESC, id DESC LIMIT 1').get(roomId) as any
+        if (!row) return null
+        return { ...row, ruleResults: JSON.parse(row.ruleResultsJson || '[]'), appliedRevisionVersion: row.appliedRevisionVersion ?? null }
+    }
+
+    applySummaryReviewOutcome(input: { record: GroupSummaryReviewRecord; revision?: { expected: { roomId: string; generation: number; version: number; summaryHash: string; anchor: string; turnCount: number }; nextText: string } }): boolean {
+        const db = this.db()
+        if (!db) return false
+        try {
+            return this.withImmediateTransaction(db, () => {
+                let appliedVersion: number | null = null
+                if (input.revision) {
+                    const { expected, nextText } = input.revision
+                    const current = this.getRoomSummary(expected.roomId)
+                    if (!current || createHash('sha256').update(JSON.stringify(current.summary)).digest('hex') !== expected.summaryHash) return false
+                    const result = db.prepare(`UPDATE gc_room_summaries SET summary = ?, version = version + 1, updatedAt = ?
+                        WHERE roomId = ? AND version = ? AND summaryThroughMessageId = ? AND summarizedTurnCount = ?
+                          AND status = 'success' AND summaryRunToken = ''
+                          AND EXISTS (SELECT 1 FROM gc_rooms WHERE id = ? AND summaryGeneration = ?)`)
+                      .run(nextText, Date.now(), expected.roomId, expected.version, expected.anchor, expected.turnCount, expected.roomId, expected.generation)
+                    if (Number(result.changes || 0) !== 1) return false
+                    appliedVersion = expected.version + 1
+                } else if (!this.getRoomSummary(input.record.roomId)) return false
+                const record = { ...input.record, appliedRevisionVersion: appliedVersion }
+                db.prepare(`INSERT INTO gc_summary_reviews (id, roomId, sourceVersion, sourceSummaryHash, sourceAnchor,
+                    sourceTurnCount, inputHash, configHash, status, decision, ruleResultsJson, reasonCode, durationMs, createdAt, appliedRevisionVersion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                  .run(record.id, record.roomId, record.sourceVersion, record.sourceSummaryHash, record.sourceAnchor,
+                    record.sourceTurnCount, record.inputHash, record.configHash, record.status, record.decision,
+                    JSON.stringify(record.ruleResults), record.reasonCode, record.durationMs, record.createdAt, record.appliedRevisionVersion)
+                return true
+            })
+        } catch { return false }
+    }
+
     deleteRoom(roomId: string): void {
         const db = this.db()
         if (!db) return
@@ -2957,6 +3016,7 @@ class ChatStorage {
             db.prepare('DELETE FROM gc_room_agents WHERE roomId = ?').run(roomId)
             db.prepare('DELETE FROM gc_room_members WHERE roomId = ?').run(roomId)
             db.prepare('DELETE FROM gc_context_snapshots WHERE roomId = ?').run(roomId)
+            db.prepare('DELETE FROM gc_summary_reviews WHERE roomId = ?').run(roomId)
             db.prepare('DELETE FROM gc_room_summaries WHERE roomId = ?').run(roomId)
             db.prepare('DELETE FROM gc_rooms WHERE id = ?').run(roomId)
         })
@@ -3365,8 +3425,22 @@ export class GroupChatServer {
 
         logger.info('[GroupChat] Socket.IO ready at /group-chat')
 
+        let summaryReviewService: GroupSummaryReviewService
         this.roomSummaryService = new GroupRoomSummaryService(this.storage, (summary) => {
             this.nsp.to(summary.roomId).emit('room_summary_updated', summary)
+        }, undefined, committed => summaryReviewService.schedule(committed))
+        summaryReviewService = new GroupSummaryReviewService(this.storage, async committed => {
+            const room = this.storage.getRoom(committed.summary.roomId)
+            if (!room) throw new Error('Room not found')
+            return this.roomSummaryService.reviseCommittedSummary({ profile: String(room.evaluationProfile || room.summaryProfile),
+                provider: room.summaryProvider, model: room.summaryModel, apiMode: room.summaryApiMode,
+                previousSummary: committed.previous.summary, candidateSummary: committed.summary.summary,
+                messages: committed.messages, roomId: committed.summary.roomId })
+        }, roomId => {
+            const review = this.storage.getLatestSummaryReview(roomId)
+            this.nsp.to(roomId).emit('room_summary_review_updated', review)
+            const summary = this.storage.getRoomSummary(roomId)
+            if (summary && review?.appliedRevisionVersion === summary.version) this.nsp.to(roomId).emit('room_summary_updated', summary)
         })
         this.agentClients.setStorage(this.storage)
         this.storage.setRoomAgentOnlineProvider((roomId, agentId) =>

@@ -2,6 +2,13 @@ import { socialMessagesDe } from '../social-messages-locales'
 
 export default {
   jev: {
+    groupSummaryReviewEnabled: 'Gruppenzusammenfassungen mit JEV prüfen',
+    groupSummaryDisabled: 'Deaktiviert; Zusammenfassungen bleiben unverändert.',
+    groupSummaryReady: 'Für Zusammenfassungen dieses Profils aktiviert.',
+    groupSummaryReviewMinConfidence: 'Konfidenz der Zusammenfassungsprüfung',
+    groupSummaryReviewMinConfidenceHint: 'Mindestkonfidenz zum Melden eines Qualitätsproblems.',
+    groupSummaryReviewTimeout: 'Zeitbudget der Zusammenfassungsprüfung (ms)',
+    groupSummaryReviewTimeoutHint: 'Gesamtes JEV-Budget nach dem Speichern der ursprünglichen Zusammenfassung.',
     ekkoSkillsEnabled: "JEV für Ekko-Skills verwenden",
     skillsDisabled: "Deaktiviert; bestehende Skill-Auswahl und Lernen bleiben aktiv.",
     skillsReady: "Semantische Auswahl und Lernvorprüfung sind aktiviert.",
@@ -2963,6 +2970,15 @@ jobTriggered: 'Job ausgelost',
 
   // Anderungsprotokoll
   groupChat: {
+    summaryEvaluationProfile: "JEV evaluation Profile",
+    summaryReviewEnabled: "Review summaries with JEV",
+    summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",
+    summaryRevisionEnabled: "Apply one safe revision",
+    summaryRevisionHint: "When review finds a reliable issue, revise once without moving the summary anchor.",
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',

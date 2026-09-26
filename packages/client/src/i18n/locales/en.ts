@@ -2,6 +2,13 @@ import { socialMessagesEn } from '../social-messages'
 
 export default {
   jev: {
+    groupSummaryReviewEnabled: "Review group summaries with JEV",
+    groupSummaryDisabled: "Disabled; group summaries keep their existing behavior.",
+    groupSummaryReady: "Enabled for summaries created with this Profile.",
+    groupSummaryReviewMinConfidence: "Summary review confidence",
+    groupSummaryReviewMinConfidenceHint: "Minimum confidence required to report a quality issue.",
+    groupSummaryReviewTimeout: "Summary review time budget (ms)",
+    groupSummaryReviewTimeoutHint: "Total JEV budget after the original summary has already been saved.",
     ekkoSkillsEnabled: "Use JEV for Ekko skills",
     skillsDisabled: "Disabled; existing skill matching and learning remain active.",
     skillsReady: "Enabled for semantic matching and learning preflight.",
@@ -3261,6 +3268,15 @@ export default {
 
   // Group Chat
   groupChat: {
+    summaryEvaluationProfile: "JEV evaluation Profile",
+    summaryReviewEnabled: "Review summaries with JEV",
+    summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",
+    summaryRevisionEnabled: "Apply one safe revision",
+    summaryRevisionHint: "When review finds a reliable issue, revise once without moving the summary anchor.",
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',

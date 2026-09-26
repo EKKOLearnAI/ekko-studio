@@ -14,7 +14,7 @@ function fixture() {
   const manifest = structuredClone(registered)
   const { server, client, form } = manifest.settings
   const integration = manifest.integrations[0]
-  const files = [server, client, form, manifest.settings.host, ...manifest.integrations.flatMap((item: typeof integration) => [item.runtimeConfig.file, ...item.sources, ...item.tests])]
+  const files = [server, client, form, manifest.settings.host, ...manifest.integrations.flatMap((item: typeof integration) => [...(item.runtimeConfig?.file ? [item.runtimeConfig.file] : []), ...item.sources, ...item.tests])]
   const sources = new Map<string, string>(files.map(file => [file, readFileSync(resolve(root, file), 'utf8')]))
   const labels = Object.values(manifest.settings.fields).map((field: any) => field.label as string)
   sources.set('packages/client/src/i18n/locales/en.ts', `export default ${JSON.stringify({
@@ -130,7 +130,7 @@ describe('JEV integration harness', () => {
   it('rejects a commented-out switch and a wrong binding', () => {
     for (const mutation of ['comment', 'binding']) {
       const f = fixture()
-      const control = f.sources.get(f.form)!.match(/<NSwitch[^>]+\/>/)![0]
+      const control = f.sources.get(f.form)!.match(/<NSwitch[^>]+settings\.ekkoMemoryEnabled[^>]+\/>/)![0]
       f.change(f.form, control, mutation === 'comment' ? `<!-- ${control} -->` : control.replace('settings.ekkoMemoryEnabled', 'settings.unrelated'))
       expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('ekkoMemoryEnabled needs an editable NSwitch')
     }

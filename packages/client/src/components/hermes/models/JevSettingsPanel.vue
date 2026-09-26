@@ -14,6 +14,7 @@ const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const testResult = ref<{ model: string; durationMs: number } | null>(null)
+const summaryStatus = computed(() => !settings.value?.groupSummaryReviewEnabled ? 'jev.groupSummaryDisabled' : !settings.value.hasApiKey ? 'common.notConfigured' : 'jev.groupSummaryReady')
 const skillsStatus = computed(() => !settings.value?.ekkoSkillsEnabled ? 'jev.skillsDisabled'
   : !settings.value.hasApiKey ? 'common.notConfigured' : 'jev.skillsReady')
 const memoryStatus = computed(() => !settings.value?.ekkoMemoryEnabled ? 'jev.memoryDisabled'
@@ -53,10 +54,10 @@ async function perform(action: 'save' | 'delete' | 'test') {
       const result = await testJevConnection(profile)
       if (!disposed) testResult.value = { model: result.model, durationMs: result.durationMs }
     } else {
-      const { baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+      const { baseUrl, model, timeoutMs, groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryReviewTimeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
         ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs } = settings.value
       const result = action === 'delete' ? await deleteJevSettings(profile)
-        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryReviewTimeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
           ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs,
           ...(apiKey.value.trim() ? { apiKey: apiKey.value.trim() } : {}) })
       if (!disposed) { settings.value = result; apiKey.value = ''; message.success(t(action === 'delete' ? 'jev.deleted' : 'common.saved')) }
@@ -92,6 +93,17 @@ async function perform(action: 'save' | 'delete' | 'test') {
           </SettingRow>
         </div>
         <h4 class="group-title">{{ t('jev.useCases') }}</h4>
+        <div class="settings-rows">
+          <SettingRow :label="t('jev.groupSummaryReviewEnabled')" :hint="t(summaryStatus)">
+            <NSwitch v-model:value="settings.groupSummaryReviewEnabled" :aria-label="t('jev.groupSummaryReviewEnabled')" />
+          </SettingRow>
+          <SettingRow :label="t('jev.groupSummaryReviewMinConfidence')" :hint="t('jev.groupSummaryReviewMinConfidenceHint')">
+            <NInputNumber :value="settings.groupSummaryReviewMinConfidence" @update:value="value => { if (value !== null) settings!.groupSummaryReviewMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.groupSummaryReviewMinConfidence') }" />
+          </SettingRow>
+          <SettingRow :label="t('jev.groupSummaryReviewTimeout')" :hint="t('jev.groupSummaryReviewTimeoutHint')">
+            <NInputNumber :value="settings.groupSummaryReviewTimeoutMs" @update:value="value => { if (value !== null) settings!.groupSummaryReviewTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.groupSummaryReviewTimeout') }" />
+          </SettingRow>
+        </div>
         <div class="settings-rows">
           <SettingRow :label="t('jev.ekkoMemoryEnabled')" :hint="t(memoryStatus)">
             <NSwitch v-model:value="settings.ekkoMemoryEnabled" :aria-label="t('jev.ekkoMemoryEnabled')" />
