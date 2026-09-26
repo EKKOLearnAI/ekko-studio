@@ -236,3 +236,23 @@ describe('JEV integration harness', () => {
     expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('missing required file')
   })
 })
+
+describe('JEV sidecar harness boundary', () => {
+  it('rejects an unregistered sidecar consumer imported through the public facade', () => {
+    const { sources, manifest } = fixture()
+    sources.set(consumer, `import { createJevSidecar } from '../../studio/public/jev'; createJevSidecar(options)`)
+    expect(jevHarnessViolations(sources, manifest).join('\n')).toContain(`${consumer} is an unregistered JEV integration`)
+  })
+
+  it('rejects an injected sidecar trySchedule consumer without registration', () => {
+    const { sources, manifest } = fixture()
+    sources.set(consumer, `const jevSidecar = runtime.jevSidecar; jevSidecar.trySchedule(task)`)
+    expect(jevHarnessViolations(sources, manifest).join('\n')).toContain(`${consumer} is an unregistered JEV integration`)
+  })
+
+  it('keeps the sidecar factory as narrow evaluation infrastructure', () => {
+    const usage = jevUsage('packages/server/src/modules/studio/services/jev/sidecar.ts',
+      `import { evaluateJevWithCredentials } from './client'; export function createJevSidecar() { evaluateJevWithCredentials(settings, request) }`)
+    expect(usage).toMatchObject({ used: true, evaluates: true, directSdk: false })
+  })
+})
