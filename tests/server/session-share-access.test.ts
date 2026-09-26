@@ -561,6 +561,8 @@ describe('shared speech authorization', () => {
     await ready
     await service.change(7, 's1', allowed.record.id, { permissions: { voice: false } })
     await result
-    expect(signal.aborted).toBe(true)
+    await vi.waitFor(() => {
+      expect(signal.aborted).toBe(true)
+    })
   })
 })

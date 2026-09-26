@@ -38,6 +38,7 @@ const settingsKeys: Record<CodingAgentId, Record<SettingsEditor, string>> = {
   grok: { preference: 'agents', configuration: 'settings' },
   opencode: { preference: 'memory', configuration: 'settings' },
   dsh: { preference: 'memory', configuration: 'settings' },
+  cursor: { preference: 'memory', configuration: 'settings' },
 }
 
 const skillTargets: Record<CodingAgentId, SkillTarget> = {
@@ -47,6 +48,7 @@ const skillTargets: Record<CodingAgentId, SkillTarget> = {
   grok: 'grok',
   opencode: 'opencode',
   dsh: 'dsh',
+  cursor: 'hermes',
 }
 
 const editorKinds: SettingsEditor[] = ['preference', 'configuration']
@@ -80,7 +82,7 @@ function resetEditors() {
 async function loadSettingsFiles() {
   const version = ++loadVersion
   resetEditors()
-  if (!validAgentId.value || section.value !== 'settings') {
+  if (!validAgentId.value || section.value !== 'settings' || validAgentId.value === 'cursor') {
     loading.value = false
     return
   }
@@ -146,6 +148,9 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
       <CodingAgentMcpPanel :agent-id="validAgentId" />
     </div>
 
+    <div v-else-if="section === 'settings' && validAgentId === 'cursor'" class="coding-agent-settings-content">
+      <p>{{ t('agentManager.cursorNoManagedConfig') }}</p>
+    </div>
     <div v-else-if="section === 'settings' && validAgentId" class="coding-agent-settings-content">
       <NSpin v-if="loading" class="settings-loading" />
       <div v-else class="settings-editors">

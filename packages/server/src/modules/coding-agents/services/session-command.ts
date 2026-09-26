@@ -238,6 +238,16 @@ export async function handleCodingAgentSessionCommand(
       })
       return
     }
+    if (compactAgentId === 'cursor') {
+      emitCommand({
+        ok: false,
+        action: 'compact',
+        terminal: !compactInfo?.running && !state.isWorking,
+        message: 'Cursor /compact is not available in Studio. The Cursor CLI does not expose native compaction.',
+        compacted: false,
+      })
+      return
+    }
     const compactAgentName = compactAgentId === 'codex'
       ? 'Codex'
       : compactAgentId === 'pi'

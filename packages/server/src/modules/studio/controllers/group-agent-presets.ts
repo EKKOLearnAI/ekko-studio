@@ -42,6 +42,7 @@ export async function resolveGroupAgentPresetForApplication(user: any, presetId:
   return {
     agent: preset.agent,
     agentMode: preset.agentMode,
+    priorAgentMode: preset.priorAgentMode,
     profile: preset.profile,
     provider: preset.provider,
     model: preset.model,

@@ -9,7 +9,7 @@ describe('coding Agent configuration navigation', () => {
 
     expect(manager).toContain(':data-testid="`agent-settings-${agent.id}`"')
     expect(manager).toContain("name: 'codingAgent.config'")
-    expect(manager).toContain("params: { agentId: agent.id, section: 'settings' }")
+    expect(manager).toContain("params: { agentId: agent.id, section: agent.id === 'cursor' ? 'mcp' : 'settings' }")
   })
 
   it('shows skills, MCP, and settings in the Agent configuration sidebar', () => {
@@ -39,6 +39,8 @@ describe('coding Agent configuration navigation', () => {
 
     expect(view).not.toContain('NEmpty')
     expect(view).not.toContain("router.push({ name: 'hermes.agentManager' })")
+    expect(view).not.toContain('isUnmanagedLocalCli')
+    expect(view).toContain("t('agentManager.cursorNoManagedConfig')")
     expect(view).toContain('readCodingAgentConfigFile')
     expect(view).toContain('writeCodingAgentConfigFile')
     expect(view).toContain('<CodingAgentSkillsPanel :target="skillTarget" />')

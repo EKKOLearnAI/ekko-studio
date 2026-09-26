@@ -15,6 +15,7 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
+import { nextCodingAgentMode, workflowSavedAgentFields } from '@/utils/coding-agent-mode'
 import { buildWorkflowEvidenceRows, latestWorkflowNodeSession, workflowNodeSessionByExecution, summarizeWorkflowEvidenceRows, workflowEdgePlaybackState, type WorkflowEvidenceRow } from '@/utils/workflow-history'
 import { resolveWorkflowRunPageSwipe, type WorkflowRunPagerPage } from '@/utils/workflow-run-pager'
 import {
@@ -420,6 +421,7 @@ const workflowAgentDefinitions: WorkflowSelectOption[] = [
   { label: 'Codex', value: 'codex' },
   { label: 'Pi', value: 'pi' },
   { label: 'Grok', value: 'grok' },
+  { label: 'Cursor', value: 'cursor' },
   { label: 'OpenCode', value: 'opencode' },
   { label: 'DeepSeek Harness', value: 'dsh' },
 ]
@@ -656,7 +658,8 @@ function makeNode(
     data: {
       title,
       agent,
-      agentMode: data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(agent) ? 'global' : 'scoped',
+      agentMode: agent === 'cursor' || (data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(agent)) ? 'global' : 'scoped',
+      priorAgentMode: data.priorAgentMode === 'global' || data.priorAgentMode === 'scoped' ? data.priorAgentMode : undefined,
       provider: data.provider || defaultModelSelection.value.provider,
       model: data.model || defaultModelSelection.value.model,
       apiMode: data.apiMode || defaultApiMode(data.provider || defaultModelSelection.value.provider),
@@ -1089,10 +1092,13 @@ function serializeWorkflowNodes(source: WorkflowNode[]): unknown[] {
     style: { ...node.style },
     data: {
       title: node.data.title,
-      agent: node.data.agent,
-      agentMode: node.data.agentMode,
-      provider: node.data.provider,
-      model: node.data.model,
+      ...workflowSavedAgentFields({
+        agent: node.data.agent,
+        agentMode: node.data.agentMode,
+        priorAgentMode: node.data.priorAgentMode,
+        provider: node.data.provider,
+        model: node.data.model,
+      }),
       apiMode: node.data.apiMode,
       agentPreset: node.data.agentPreset,
       reasoningEffort: node.data.reasoningEffort,
@@ -1151,6 +1157,7 @@ function normalizeStoredNode(raw: unknown, index: number): WorkflowNode {
     {
       agent: data.agent,
       agentMode: data.agentMode === 'global' ? 'global' : 'scoped',
+      priorAgentMode: data.priorAgentMode === 'global' || data.priorAgentMode === 'scoped' ? data.priorAgentMode : undefined,
       provider: data.provider,
       model: data.model,
       apiMode: data.apiMode,
@@ -2562,7 +2569,7 @@ function workflowValidationError(): string | null {
     const label = workflowNodeLabel(node)
     if (node.data.agent === 'dsh' && (!node.data.agentPreset || node.data.agentPresetReady === false)) return t('dshPresets.selectMode')
     if (!node.data.title.trim()) return t('workflow.validation.nodeNameRequired', { node: node.id })
-    const usesGlobalCodingAgent = ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(node.data.agent)
+    const usesGlobalCodingAgent = ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(node.data.agent)
       && node.data.agentMode === 'global'
     if (!usesGlobalCodingAgent && !node.data.provider.trim()) return t('workflow.validation.providerRequired', { node: label })
     if (!usesGlobalCodingAgent && !node.data.model.trim()) return t('workflow.validation.modelRequired', { node: label })
@@ -2802,11 +2809,19 @@ function updateNodeData(id: string, patch: Partial<WorkflowAgentNodeEditableData
     if (node.id !== id) return node
     const agentChanged = typeof patch.agent === 'string' && patch.agent !== node.data.agent
     const nextAgent = typeof patch.agent === 'string' ? patch.agent : node.data.agent
+    const switched = agentChanged
+      ? nextCodingAgentMode({
+        previousAgent: node.data.agent,
+        nextAgent,
+        agentMode: node.data.agentMode,
+        priorAgentMode: node.data.priorAgentMode,
+      })
+      : null
     const data = {
       ...node.data,
       ...patch,
       ...(agentChanged ? { agentPreset: undefined, agentPresetReady: undefined } : {}),
-      ...(agentChanged && !['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(nextAgent) ? { agentMode: 'scoped' as const } : {}),
+      ...(switched ? { agentMode: switched.agentMode, priorAgentMode: switched.priorAgentMode } : {}),
       skills: agentChanged ? [] : patch.skills ?? node.data.skills,
     }
     return {

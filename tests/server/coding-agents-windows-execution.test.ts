@@ -12,7 +12,7 @@ const execState = vi.hoisted(() => {
     if (command === 'where' && args[0] === 'codex') {
       return { stdout: '"C:\\nvm4w\\nodejs\\codex.cmd"\r\n', stderr: '' }
     }
-    if (command === 'cmd.exe') {
+    if (command === (process.env.comspec || 'cmd.exe')) {
       return { stdout: 'codex-cli 1.2.3\n', stderr: '' }
     }
     throw new Error(`unexpected command: ${command}`)
@@ -55,7 +55,7 @@ describe('coding agent Windows command execution', () => {
     expect(status.installed).toBe(true)
     expect(status.version).toBe('1.2.3')
 
-    const versionCall = execState.calls.find(call => call.command === 'cmd.exe')
+    const versionCall = execState.calls.find(call => call.command === (process.env.comspec || 'cmd.exe'))
     expect(versionCall).toBeTruthy()
     expect(versionCall?.args).toEqual([
       '/d',

@@ -19,14 +19,14 @@ type CapabilityGroup = {
 }
 
 const ALLOWED_FIELDS = new Set([
-  'agent', 'agentMode', 'profile', 'provider', 'model', 'apiMode', 'reasoningEffort', 'agentPreset',
+  'agent', 'agentMode', 'priorAgentMode', 'profile', 'provider', 'model', 'apiMode', 'reasoningEffort', 'agentPreset',
   'name', 'description', 'avatar',
 ])
-const AGENTS = new Set<GroupAgentPresetAgent>(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh'])
+const AGENTS = new Set<GroupAgentPresetAgent>(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor'])
 const API_MODES = new Set(['chat_completions', 'codex_responses', 'anthropic_messages'])
 const REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 const AVATAR_MAX_LENGTH = 1_500_000
-const GLOBAL_MODE_AGENTS = new Set<GroupAgentPresetAgent>(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh'])
+const GLOBAL_MODE_AGENTS = new Set<GroupAgentPresetAgent>(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor'])
 
 function requiredText(value: unknown, field: string, max = 200): string {
   const normalized = typeof value === 'string' ? value.trim() : ''
@@ -75,9 +75,13 @@ export function normalizeGroupAgentPresetInput(input: unknown): Omit<GroupAgentP
   }
   const agent = requiredText(record.agent || 'hermes', 'agent', 20) as GroupAgentPresetAgent
   if (!AGENTS.has(agent)) throw Object.assign(new Error('Invalid agent'), { status: 400 })
-  const agentMode = record.agentMode === 'global' ? 'global' : 'scoped'
+  const agentMode = agent === 'cursor' ? 'global' : record.agentMode === 'global' ? 'global' : 'scoped'
+  if (record.priorAgentMode != null && record.priorAgentMode !== '' && record.priorAgentMode !== 'global' && record.priorAgentMode !== 'scoped') {
+    throw Object.assign(new Error('Invalid priorAgentMode'), { status: 400 })
+  }
+  const priorAgentMode = record.priorAgentMode === 'global' || record.priorAgentMode === 'scoped' ? record.priorAgentMode : ''
   if (agentMode === 'global' && !GLOBAL_MODE_AGENTS.has(agent)) {
-    throw Object.assign(new Error('Global mode is only available for Claude, Codex, Pi, and Grok'), { status: 400 })
+    throw Object.assign(new Error('Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor'), { status: 400 })
   }
   const apiMode = agent === 'hermes' || agentMode === 'global' ? '' : requiredText(record.apiMode, 'apiMode', 40)
   if (apiMode && !API_MODES.has(apiMode)) throw Object.assign(new Error('Invalid apiMode'), { status: 400 })
@@ -86,6 +90,7 @@ export function normalizeGroupAgentPresetInput(input: unknown): Omit<GroupAgentP
   return {
     agent,
     agentMode,
+    priorAgentMode,
     profile: requiredText(record.profile, 'profile'),
     provider: agentMode === 'global' ? '' : requiredText(record.provider, 'provider'),
     model: agentMode === 'global' ? '' : requiredText(record.model, 'model'),

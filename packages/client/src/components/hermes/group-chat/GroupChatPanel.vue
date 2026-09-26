@@ -4,6 +4,7 @@ import { ref, computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, 
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useMessage, NInput, NButton, NSpace, NSelect, NPopconfirm, NInputNumber, NDropdown, NModal, NPopover, NDrawer, NDrawerContent, NSwitch, type DropdownOption } from 'naive-ui'
+import { nextCodingAgentMode, storedPriorAgentMode, submittedCodingAgentSelection } from '@/utils/coding-agent-mode'
 import { useGroupChatStore } from '@/stores/hermes/group-chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
@@ -170,6 +171,7 @@ let agentPairingRefreshTimer: ReturnType<typeof setInterval> | null = null
 let remoteRoomRefreshTimer: ReturnType<typeof setInterval> | null = null
 const selectedAgentType = ref<GroupAgentType>('hermes')
 const selectedAgentMode = ref<'scoped' | 'global'>('scoped')
+const priorAgentMode = ref<'scoped' | 'global' | undefined>()
 const selectedProfile = ref<string | null>(null)
 const selectedAgentProvider = ref('')
 const selectedAgentModel = ref('')
@@ -236,7 +238,7 @@ const profileOptions = computed(() =>
     profilesStore.profiles.map(p => ({ label: p.name, value: p.name }))
 )
 
-type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
 
 const groupAgentTypeDefinitions: Array<{ label: string; value: GroupAgentType }> = [
     { label: 'Hermes', value: 'hermes' },
@@ -245,6 +247,7 @@ const groupAgentTypeDefinitions: Array<{ label: string; value: GroupAgentType }>
     { label: 'Codex', value: 'codex' },
     { label: 'Pi', value: 'pi' },
     { label: 'Grok', value: 'grok' },
+    { label: 'Cursor', value: 'cursor' },
     { label: 'OpenCode', value: 'opencode' },
   { label: 'DeepSeek Harness', value: 'dsh' },
 ]
@@ -261,7 +264,7 @@ const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.map((opti
 const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
     groupAgentTypeOptions.value.find(option => !option.disabled)?.value || null
 )
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
     { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -301,6 +304,8 @@ function getAgentModelGroups(profile: string) {
                         ? 'pi'
                         : selectedAgentType.value === 'grok'
                             ? 'grok'
+                            : selectedAgentType.value === 'cursor'
+                                ? 'cursor'
                             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
                                 ? 'opencode'
                             : 'codex'
@@ -530,8 +535,15 @@ function handleAgentTypeChange(agent: GroupAgentType) {
     }
     selectedRuntimePreset.value = undefined
     selectedRuntimePresetReady.value = false
+    const switched = nextCodingAgentMode({
+        previousAgent: selectedAgentType.value,
+        nextAgent: agent,
+        agentMode: selectedAgentMode.value,
+        priorAgentMode: priorAgentMode.value,
+    })
     selectedAgentType.value = agent
-    if (!['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(agent)) selectedAgentMode.value = 'scoped'
+    selectedAgentMode.value = switched.agentMode
+    priorAgentMode.value = switched.priorAgentMode
     if (selectedProfile.value) syncAgentModelSelection(selectedProfile.value)
 }
 
@@ -1334,6 +1346,7 @@ function resetAgentForm() {
     selectedRuntimePresetReady.value = false
     selectedAgentType.value = firstAvailableGroupAgentType.value || 'hermes'
     selectedAgentMode.value = 'scoped'
+    priorAgentMode.value = undefined
     selectedAgentProvider.value = ''
     selectedAgentModel.value = ''
     selectedAgentApiMode.value = 'codex_responses'
@@ -1346,11 +1359,15 @@ function resetAgentForm() {
 function currentAgentPresetInput(): GroupAgentPresetInput | null {
     if (!canConfirmAddAgent.value || !selectedProfile.value) return null
     return {
-        agent: selectedAgentType.value,
-        agentMode: usesGlobalAgentMode.value ? 'global' : 'scoped',
+        ...submittedCodingAgentSelection({
+            agent: selectedAgentType.value,
+            agentMode: selectedAgentMode.value,
+            priorAgentMode: priorAgentMode.value,
+            provider: selectedAgentProvider.value,
+            model: selectedAgentModel.value,
+            usesGlobal: usesGlobalAgentMode.value,
+        }),
         profile: selectedProfile.value,
-        provider: usesGlobalAgentMode.value ? '' : selectedAgentProvider.value,
-        model: usesGlobalAgentMode.value ? '' : selectedAgentModel.value,
         apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
         reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
         agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
@@ -1416,6 +1433,7 @@ function applyAgentPreset(presetId: string | null) {
     const input = groupAgentPresetToRoomAgentInput(preset)
     selectedAgentType.value = input.agent
     selectedAgentMode.value = input.agentMode === 'global' ? 'global' : 'scoped'
+    priorAgentMode.value = storedPriorAgentMode(input.priorAgentMode)
     selectedProfile.value = input.profile
     selectedAgentProvider.value = input.provider || ''
     selectedAgentModel.value = input.model || ''
@@ -1565,6 +1583,7 @@ async function handleEditAgent(agent: RoomAgent) {
     editingAgent.value = agent
     selectedAgentType.value = agent.agent || 'hermes'
     selectedAgentMode.value = agent.agentMode === 'global' ? 'global' : 'scoped'
+    priorAgentMode.value = storedPriorAgentMode(agent.priorAgentMode)
     selectedProfile.value = agent.profile
     selectedAgentProvider.value = agent.provider || ''
     selectedAgentModel.value = agent.model || ''
@@ -1712,11 +1731,15 @@ async function confirmAddAgent() {
     try {
         await store.addAgentToRoom(store.currentRoomId, {
             presetId: selectedAgentPresetId.value || undefined,
-            agent: selectedAgentType.value,
-            agentMode: usesGlobalAgentMode.value ? 'global' : 'scoped',
+            ...submittedCodingAgentSelection({
+                agent: selectedAgentType.value,
+                agentMode: selectedAgentMode.value,
+                priorAgentMode: priorAgentMode.value,
+                provider: selectedAgentProvider.value,
+                model: selectedAgentModel.value,
+                usesGlobal: usesGlobalAgentMode.value,
+            }),
             profile: selectedProfile.value,
-            provider: usesGlobalAgentMode.value ? '' : selectedAgentProvider.value,
-            model: usesGlobalAgentMode.value ? '' : selectedAgentModel.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
             reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
@@ -1747,11 +1770,15 @@ async function confirmUpdateAgent() {
     isSavingAgent.value = true
     try {
         await store.updateAgentInRoom(store.currentRoomId, editingAgent.value.id, {
-            agent: selectedAgentType.value,
-            agentMode: usesGlobalAgentMode.value ? 'global' : 'scoped',
+            ...submittedCodingAgentSelection({
+                agent: selectedAgentType.value,
+                agentMode: selectedAgentMode.value,
+                priorAgentMode: priorAgentMode.value,
+                provider: selectedAgentProvider.value,
+                model: selectedAgentModel.value,
+                usesGlobal: usesGlobalAgentMode.value,
+            }),
             profile: selectedProfile.value,
-            provider: usesGlobalAgentMode.value ? '' : selectedAgentProvider.value,
-            model: usesGlobalAgentMode.value ? '' : selectedAgentModel.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
             reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
@@ -2845,7 +2872,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     <DshSessionPresetSelect v-if="selectedAgentType === 'dsh'" class="form-group"
                         v-model="selectedRuntimePreset" :disabled="isSavingAgent"
                         @valid="selectedRuntimePresetReady = $event" />
-                    <div v-if="supportsGlobalAgentMode" class="form-group">
+                    <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="form-group">
                         <label class="form-label">{{ t('codingAgents.launchModeScope') }}</label>
                         <NSelect
                             :value="selectedAgentMode"

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isWindowsUpdaterLockError, pendingUpdateDirectories } from '../../packages/desktop/src/main/updater-helpers'
 
@@ -11,16 +11,18 @@ describe('desktop updater helpers', () => {
   })
 
   it('includes local and roaming pending update cache directories', async () => {
+    const local = 'C:\\Users\\A\\AppData\\Local'
+    const roaming = 'C:\\Users\\A\\AppData\\Roaming'
     expect(pendingUpdateDirectories({
-      appDataPath: 'C:\\Users\\A\\AppData\\Roaming',
-      localAppData: 'C:\\Users\\A\\AppData\\Local',
+      appDataPath: roaming,
+      localAppData: local,
       appName: 'Ekko Studio',
     })).toEqual(expect.arrayContaining([
-      'C:\\Users\\A\\AppData\\Local/Ekko Studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Local/ekko-studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Local/Hermes Studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Local/hermes-studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Roaming/hermes-studio-updater/pending',
+      join(local, 'Ekko Studio-updater', 'pending'),
+      join(local, 'ekko-studio-updater', 'pending'),
+      join(local, 'Hermes Studio-updater', 'pending'),
+      join(local, 'hermes-studio-updater', 'pending'),
+      join(roaming, 'hermes-studio-updater', 'pending'),
     ]))
   })
 

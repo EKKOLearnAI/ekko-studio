@@ -368,7 +368,7 @@ function splitCommandLine(command: string): string[] {
     if (escaped) {
       current += character
       escaped = false
-    } else if (character === '\\') {
+    } else if (character === '\\' && process.platform !== 'win32') {
       escaped = true
     } else if (quote) {
       if (character === quote) quote = undefined

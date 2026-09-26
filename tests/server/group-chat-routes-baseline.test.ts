@@ -45,7 +45,7 @@ describe('group chat REST route baseline', () => {
       source: 'user-cli',
       path: '/usr/local/bin/hermes',
     })
-    for (const id of ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] as const) {
+    for (const id of ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'] as const) {
       updateAgentStatus(id, { installed: true, source: 'user-cli', path: `/usr/local/bin/${id}` })
     }
     storage = {
@@ -953,6 +953,7 @@ describe('group chat REST route baseline', () => {
       {
         agent: 'codex',
         agentMode: 'scoped',
+        priorAgentMode: '',
         provider: 'openai',
         model: 'gpt-test',
         apiMode: 'codex_responses',
@@ -1227,6 +1228,7 @@ describe('group chat REST route baseline', () => {
       {
         agent: 'codex',
         agentMode: 'scoped',
+        priorAgentMode: '',
         provider: 'openai',
         model: 'new-model',
         apiMode: 'codex_responses',
@@ -1240,6 +1242,58 @@ describe('group chat REST route baseline', () => {
       name: 'Reviewer',
     })
     expect(broadcastRoomAgents).toHaveBeenCalledWith('room-1')
+  })
+
+  it('keeps the stashed launch mode when saving a Cursor room agent', async () => {
+    storage.rooms.set('room-1', { id: 'room-1', name: 'Room', inviteCode: 'ROOM1' })
+
+    const res = await fetch(`${baseUrl}/api/studio/group-chat/rooms/room-1/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent: 'cursor',
+        agentMode: 'global',
+        priorAgentMode: 'global',
+        profile: 'research',
+        name: 'Cursor',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    const created = await res.json()
+    expect(created).toMatchObject({
+      agent: expect.objectContaining({
+        agent: 'cursor',
+        agentMode: 'global',
+        priorAgentMode: 'global',
+      }),
+    })
+    expect(storage.addRoomAgent.mock.calls.at(-1)?.[6]).toMatchObject({
+      agent: 'cursor',
+      agentMode: 'global',
+      priorAgentMode: 'global',
+    })
+
+    const updated = await fetch(`${baseUrl}/api/studio/group-chat/rooms/room-1/agents/${created.agent.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent: 'codex',
+        agentMode: 'global',
+        profile: 'research',
+        provider: 'openai',
+        model: 'gpt-test',
+        apiMode: 'codex_responses',
+        name: 'Codex',
+      }),
+    })
+
+    expect(updated.status).toBe(200)
+    expect(storage.updateRoomAgent.mock.calls.at(-1)?.[5]).toMatchObject({
+      agent: 'codex',
+      agentMode: 'global',
+      priorAgentMode: '',
+    })
   })
 
   it.each(['codex', 'dsh'] as const)('uses global CLI configuration for %s without persisting scoped overrides', async agent => {

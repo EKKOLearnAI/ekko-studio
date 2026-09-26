@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { CodingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
+import { configureRunState } from '../../packages/server/src/modules/studio/public/run-state'
+import { applyResponseStreamEvent } from '../../packages/server/src/modules/studio/services/chat-run/response-stream'
 
 const describeWindows = process.platform === 'win32' ? describe : describe.skip
 const roots: string[] = []
@@ -33,6 +35,17 @@ afterAll(async () => {
 
 describeWindows('real Windows .cmd Pi-compatible RPC launch', () => {
   it('preserves non-ASCII paths and sends long UTF-8 text and images over RPC stdin', async () => {
+    configureRunState({
+      applyResponseStreamEvent,
+      calcAndUpdateUsage: async () => ({}),
+      completeWorkspaceRunCheckpoint: () => undefined,
+      extractResponseText: () => '',
+      flushResponseRunToDb: () => undefined,
+      getChatRunServer: () => null,
+      getOrCreateSession: () => ({ messages: [], isWorking: false, events: [], queue: [] }) as any,
+      startWorkspaceRunCheckpoint: () => undefined,
+      updateContextTokenUsage: () => undefined,
+    })
     const root = await mkdtemp(join(tmpdir(), 'Hermes Pi 中文 '))
     roots.push(root)
     const binDir = join(root, '工具 目录')

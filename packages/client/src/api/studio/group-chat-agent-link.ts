@@ -1,8 +1,9 @@
 import { request } from '../client'
 
 export type RemoteGroupAgentDescriptor = {
-  agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+  agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
   agentMode: 'scoped' | 'global'
+  priorAgentMode?: 'scoped' | 'global' | ''
   profile: string
   provider: string
   model: string

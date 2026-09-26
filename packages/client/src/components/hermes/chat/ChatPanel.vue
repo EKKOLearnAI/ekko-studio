@@ -1009,6 +1009,7 @@ const newChatAgentOptions = computed(() => [
   { label: "Grok", value: "grok" },
   { label: "OpenCode", value: "opencode" },
   { label: "DeepSeek Harness", value: "dsh" },
+  { label: "Cursor", value: "cursor" },
 ]);
 
 const newChatApiModeOptions = computed(() => [
@@ -1026,7 +1027,9 @@ function effectiveNewChatMode(
   agent: typeof newChatAgent.value,
   requestedMode: typeof newChatAgentMode.value,
 ) {
-  return agent === "ekko-agent" ? "scoped" : requestedMode;
+  if (agent === "ekko-agent") return "scoped";
+  if (agent === "cursor") return "global";
+  return requestedMode;
 }
 
 function getModelGroupsForProfile(profile: string) {
@@ -1125,7 +1128,7 @@ const selectedNewChatProviderGroup = computed(() =>
 );
 
 const isNewChatCodingAgent = computed(() => newChatAgent.value !== "hermes");
-const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
+const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || newChatAgent.value === "cursor" || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
 const effectiveNewChatAgentMode = computed(() =>
   effectiveNewChatMode(newChatAgent.value, newChatAgentMode.value),
 );
@@ -1371,6 +1374,8 @@ async function confirmNewChat() {
         ? "grok"
       : newChatAgent.value === "dsh" ? "dsh" : newChatAgent.value === "opencode"
         ? "opencode"
+      : newChatAgent.value === "cursor"
+        ? "cursor"
       : newChatAgent.value === "ekko-agent"
         ? "ekko-agent"
       : "hermes";
@@ -2129,6 +2134,8 @@ const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>
         ? "grok"
       : sessionModelSession.value?.agent === "dsh" ? "dsh" : sessionModelSession.value?.agent === "opencode"
         ? "opencode"
+      : sessionModelSession.value?.agent === "cursor"
+        ? "cursor"
       : sessionModelSession.value?.agent === "ekko-agent"
         ? "ekko-agent"
         : undefined),
@@ -2975,7 +2982,7 @@ async function handleSessionModelCustomSubmit() {
             v-if="showNewChatModal && newChatAgent === 'dsh'"
             v-model="newChatAgentPreset" :disabled="newChatLoading" @valid="newChatPresetReady = $event"
           />
-          <label v-if="isNewChatExternalCodingAgent" class="new-chat-field">
+          <label v-if="isNewChatExternalCodingAgent && newChatAgent !== 'cursor'" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.launchModeScope") }}</span>
             <NRadioGroup v-model:value="newChatAgentMode" name="new-chat-coding-agent-mode">
               <NRadioButton

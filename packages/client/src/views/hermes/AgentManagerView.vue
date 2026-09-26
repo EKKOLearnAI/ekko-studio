@@ -86,6 +86,14 @@ const codingAgents: CodingAgentCard[] = [
     packageName: 'opencode-ai',
   },
   { id: 'dsh', name: 'DeepSeek Harness', provider: 'DeepSeek', logo: '/coding-agents/deepseek.svg', command: 'dsh', packageName: '@deepseek-ai/dsh' },
+  {
+    id: 'cursor',
+    name: 'Cursor',
+    provider: 'Cursor',
+    logo: '/coding-agents/cursor.svg',
+    command: 'agent',
+    packageName: 'cursor-agent',
+  },
 ]
 
 const updatePolicies = ref<Record<string, AgentUpdatePolicyState>>({})
@@ -122,9 +130,9 @@ const hermesRuntimeStatus = ref<RuntimeVersionStatus | null>(null)
 const aiHelpDrawerVisible = ref(false)
 const aiHelpPrompt = ref('')
 const legacyDataMigrationChecked = ref(false)
-const installing = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false })
-const deleting = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false })
-const checkingUpdate = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false })
+const installing = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false })
+const deleting = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false })
+const checkingUpdate = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false })
 const updateInfo = ref<Record<CodingAgentId, CodingAgentUpdateResult | null>>({
   'claude-code': null,
   codex: null,
@@ -132,6 +140,7 @@ const updateInfo = ref<Record<CodingAgentId, CodingAgentUpdateResult | null>>({
   grok: null,
   opencode: null,
   dsh: null,
+  cursor: null,
 })
 
 const hermesStatus = computed(() => agentStatusSnapshot.value?.agents.find(agent => agent.id === 'hermes'))
@@ -361,9 +370,16 @@ async function maybePromptLegacyWindowsDataMigration() {
 async function handleInstall(id: CodingAgentId) {
   installing.value[id] = true
   try {
+    if (id === 'cursor' && typeof window !== 'undefined') {
+      window.open('https://cursor.com/install', '_blank', 'noopener,noreferrer')
+    }
     const result = await installCodingAgent(id)
     tools.value = result.tools
     if (result.updateState) updatePolicies.value[id] = result.updateState
+    if (id === 'cursor' && !result.success) {
+      message.info(t('agentManager.cursorDescription'))
+      return
+    }
     if (!result.success) throw new Error(result.message || t('codingAgents.installFailed'))
     updateInfo.value[id] = null
     message.success(t('codingAgents.installSuccess'))
@@ -561,7 +577,7 @@ onMounted(() => {
                     <p v-if="toolStatus(agent.id)?.installed" class="agent-version">
                       {{ installedVersion(agent.id) }}
                     </p>
-                    <p v-else>{{ t('agentManager.codingAgentDescription') }}</p>
+                    <p v-else>{{ agent.id === 'cursor' ? t('agentManager.cursorDescription') : t('agentManager.codingAgentDescription') }}</p>
                   </div>
                 </div>
               </header>
@@ -573,7 +589,7 @@ onMounted(() => {
                   :data-testid="`agent-settings-${agent.id}`"
                   @click="router.push({
                     name: 'codingAgent.config',
-                    params: { agentId: agent.id, section: 'settings' },
+                    params: { agentId: agent.id, section: agent.id === 'cursor' ? 'mcp' : 'settings' },
                   })"
                 >
                   {{ t('sidebar.settings') }}
@@ -586,10 +602,10 @@ onMounted(() => {
                   :loading="installing[agent.id]"
                   @click="handleInstall(agent.id)"
                 >
-                  {{ t('codingAgents.installNow') }}
+                  {{ agent.id === 'cursor' ? t('codingAgents.cursorInstallGuide') : t('codingAgents.installNow') }}
                 </NButton>
                 <NButton
-                  v-else-if="availableUpdateVersion(agent.id)"
+                  v-else-if="agent.id !== 'cursor' && availableUpdateVersion(agent.id)"
                   type="primary"
                   secondary
                   size="small"
@@ -599,7 +615,7 @@ onMounted(() => {
                   {{ t('agentManager.updateToVersion', { version: formatVersion(availableUpdateVersion(agent.id)) }) }}
                 </NButton>
                 <NButton
-                  v-if="toolStatus(agent.id)?.installed && !availableUpdateVersion(agent.id)"
+                  v-if="agent.id !== 'cursor' && toolStatus(agent.id)?.installed && !availableUpdateVersion(agent.id)"
                   secondary
                   size="small"
                   :loading="checkingUpdate[agent.id]"
@@ -610,7 +626,7 @@ onMounted(() => {
                 </NButton>
 
                 <NPopconfirm
-                  v-if="toolStatus(agent.id)?.installed"
+                  v-if="agent.id !== 'cursor' && toolStatus(agent.id)?.installed"
                   @positive-click="handleDelete(agent.id)"
                 >
                   <template #trigger>
@@ -627,7 +643,7 @@ onMounted(() => {
                   {{ t('agentManager.deleteConfirm', { name: agent.name }) }}
                 </NPopconfirm>
               </div>
-              <div v-if="toolStatus(agent.id)?.installed && updatePolicies[agent.id]" class="agent-update-policy">
+              <div v-if="agent.id !== 'cursor' && toolStatus(agent.id)?.installed && updatePolicies[agent.id]" class="agent-update-policy">
                 <div class="agent-update-policy-row"><span>{{ t('agentAutoUpdate.label') }}</span><NSwitch class="agent-update-switch" size="small" :theme-overrides="{ railHeightSmall: '16px', railWidthSmall: '28px', buttonHeightSmall: '12px', buttonWidthSmall: '12px' }" :disabled="!updatePolicies[agent.id]?.autoUpdateSupported" :value="updatePolicies[agent.id]?.autoUpdate" @update:value="toggleAutoUpdate(agent.id, $event)" /></div>
 
                 <small v-if="updatePolicies[agent.id]?.error" class="agent-update-error">{{ t('codingAgents.checkUpdateFailed') }}</small>

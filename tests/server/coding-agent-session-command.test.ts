@@ -189,6 +189,24 @@ describe('coding agent session commands', () => {
     expect(commands[0].payload.started).toBeUndefined()
   })
 
+  it.each([false, true])('does not launch manual Cursor compaction when running=%s', async running => {
+    getSessionMock.mockReturnValue({ id: 'session-1', agent: 'cursor' })
+    getRunInfoMock.mockReturnValue(running ? { agentId: 'cursor', running: true } : null)
+    const { handleCodingAgentSessionCommand } = await import('../../packages/server/src/modules/coding-agents/services/session-command')
+    const { socket, nsp, emitted } = makeSocket()
+    await handleCodingAgentSessionCommand(nsp, socket as any, { session_id: 'session-1' },
+      { name: 'compact', rawName: 'compact', args: '' }, 'default', new Map())
+    expect(compactMock).not.toHaveBeenCalled()
+    expect(startCodingAgentRunMock).not.toHaveBeenCalled()
+    expect(compactStoredCodingAgentSessionMock).not.toHaveBeenCalled()
+    const commands = emitted.filter(item => item.event === 'session.command')
+    expect(commands).toHaveLength(1)
+    expect(commands[0].payload).toMatchObject({ ok: false, terminal: !running, compacted: false,
+      message: expect.stringContaining('Cursor CLI does not expose native compaction') })
+    expect(commands[0].payload.message).not.toContain('Claude')
+    expect(commands[0].payload.started).toBeUndefined()
+  })
+
   it('detaches an oversized Codex native thread when native compact cannot fit', async () => {
     const overflow = new Error('context_length_exceeded: input exceeds the context window')
     compactMock.mockRejectedValue(overflow)

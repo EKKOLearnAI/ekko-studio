@@ -16,12 +16,17 @@ let mobileQuery: MediaQueryList | null = null
 const agentId = computed(() => String(route.params.agentId || ''))
 const activeSection = computed(() => String(route.params.section || 'settings'))
 
-const items = computed(() => [
-  ...(agentId.value === 'dsh' ? [{ section: 'plugins', label: t('sidebar.plugins'), icon: 'plugins' }, { section: 'presets', label: t('dshPresets.title'), icon: 'presets' }] : []),
-  { section: 'skills', label: t('sidebar.skills'), icon: 'skills' },
-  { section: 'mcp', label: t('sidebar.mcp'), icon: 'mcp' },
-  { section: 'settings', label: t('sidebar.settings'), icon: 'settings' },
-])
+const items = computed(() => agentId.value === 'cursor'
+  ? [
+    { section: 'mcp', label: t('sidebar.mcp'), icon: 'mcp' },
+    { section: 'settings', label: t('sidebar.settings'), icon: 'settings' },
+  ]
+  : [
+    ...(agentId.value === 'dsh' ? [{ section: 'plugins', label: t('sidebar.plugins'), icon: 'plugins' }, { section: 'presets', label: t('dshPresets.title'), icon: 'presets' }] : []),
+    { section: 'skills', label: t('sidebar.skills'), icon: 'skills' },
+    { section: 'mcp', label: t('sidebar.mcp'), icon: 'mcp' },
+    { section: 'settings', label: t('sidebar.settings'), icon: 'settings' },
+  ])
 
 function setExpanded(value: boolean) {
   expanded.value = value

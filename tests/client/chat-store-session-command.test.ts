@@ -203,6 +203,27 @@ describe('chat store session.command fanout', () => {
       event: 'run.queue_insertion.updated',
       session_id: 'session-1',
       generation: 'generation-1',
+      run_id: 'run-1',
+      queue_id: 'queue-follow-up',
+      runtime: 'cursor',
+      phase: 'stopping_current_turn',
+      guarantee: 'immediate',
+      requested_at: 125,
+    })
+    expect(store.queueInsertionStates.get('session-1')).toEqual({
+      generation: 'generation-1',
+      runId: 'run-1',
+      queueId: 'queue-follow-up',
+      runtime: 'cursor',
+      phase: 'stopping_current_turn',
+      guarantee: 'immediate',
+      requestedAt: 125,
+    })
+
+    handlers.onQueueInsertionUpdated({
+      event: 'run.queue_insertion.updated',
+      session_id: 'session-1',
+      generation: 'generation-1',
       queue_id: 'queue-follow-up',
       runtime: 'codex',
       phase: 'starting_queued_message',

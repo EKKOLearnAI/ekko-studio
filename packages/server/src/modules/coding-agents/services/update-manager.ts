@@ -7,7 +7,7 @@ const policy = new AgentUpdatePolicy(config.appHome, {
  ids:()=>getCodingAgentDefinitions().map(v=>v.id),
  check:checkUpdateAgent,
  busy:id=>agentPreparing(id) || codingAgentRunManager.isAgentBusyForUpdate(id),
- safelyManaged:id=>getCodingAgentDefinitions().some(agent=>agent.id===id),
+ safelyManaged:id=>id!=='cursor' && getCodingAgentDefinitions().some(agent=>agent.id===id),
  activityRevision:agentActivityRevision,
  install:async id=>{
   const release=lockAgentUpdate(id)

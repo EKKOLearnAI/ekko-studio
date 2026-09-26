@@ -443,6 +443,8 @@ export default {
     ekkoDescription: 'Ekko входит в состав Studio и не требует отдельной установки, обновления или удаления.',
     version: 'Версия',
     codingAgentDescription: 'Studio может установить, проверить обновления и удалить этого агента.',
+    cursorDescription: 'Установите Cursor CLI (`agent`) с https://cursor.com/install и обновите список. Studio не устанавливает его через npm.',
+    cursorNoManagedConfig: 'Запуск не перезаписывает ~/.cursor/mcp.json. Управляемые серверы находятся в рабочей копии этого сеанса.',
     updateToVersion: 'Обновить до {version}',
     deleteConfirm: 'Удалить {name}?',
     installOperation: 'установка',
@@ -551,6 +553,7 @@ export default {
   },
 
   codingAgents: {
+    cursorInstallGuide: 'Руководство по установке',
     installFailedHermesHint: 'Installation failed. Ask Hermes to install it for you.',
     installFailureReason: 'Reason',
     preference: 'Предпочтения',
@@ -3130,7 +3133,7 @@ export default {
     cacheHitRate: 'Попадания в кэш',
     modelBreakdown: 'Распределение по моделям',
     agentBreakdown: 'Распределение по агентам',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', ekkoAgent: 'Ekko', unknown: 'Неизвестно' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: 'Неизвестно' },
     dailyTrend: 'Ежедневная динамика',
     date: 'Дата',
     tokens: 'Токены',

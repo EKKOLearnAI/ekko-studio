@@ -263,11 +263,13 @@ describe('coding agent completion errors', () => {
         content: [{ type: 'text', text: 'API Error: stream ended without terminal event' }],
       },
     })
-    writeFileSync(fixturePath, [
-      "const { spawn } = require('child_process')",
-      `spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => process.stdout.write(${JSON.stringify(`${nativeError}\n`)}), 75)`) }], { stdio: ['ignore', 1, 2] })`,
-      'process.exit(0)',
-    ].join('\n'))
+    writeFileSync(fixturePath, process.platform === 'win32'
+      ? `setTimeout(() => { process.stdout.write(${JSON.stringify(`${nativeError}\n`)}); process.exit(0) }, 75)\n`
+      : [
+          "const { spawn } = require('child_process')",
+          `spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => process.stdout.write(${JSON.stringify(`${nativeError}\n`)}), 75)`) }], { stdio: ['ignore', 1, 2] })`,
+          'process.exit(0)',
+        ].join('\n'))
 
     const manager = new CodingAgentRunManager()
     const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`

@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +14,23 @@ import {
 } from '../../packages/server/src/modules/ekko/services/manager'
 import { DEFAULT_EKKO_JEV_CONFIG, EkkoFileLogReader, noul, setupEkkoAgent } from '../../packages/ekko-agent/src'
 import type { EkkoAgentSetup, ModelClient, ModelRequest } from '../../packages/ekko-agent/src'
+
+const execFileAsync = promisify(execFile)
+
+async function revokeDirectoryWrite(directory: string): Promise<void> {
+  await chmod(directory, 0o500)
+  if (process.platform !== 'win32') return
+  const user = process.env.USERNAME
+  if (!user) throw new Error('USERNAME is required to revoke write access')
+  await execFileAsync('icacls', [directory, '/deny', `${user}:(W)`])
+}
+
+async function restoreDirectoryWrite(directory: string): Promise<void> {
+  if (process.platform === 'win32' && process.env.USERNAME) {
+    await execFileAsync('icacls', [directory, '/remove:d', process.env.USERNAME])
+  }
+  await chmod(directory, 0o700)
+}
 
 const getHermesBaseDirMock = vi.hoisted(() => vi.fn())
 const getJevRuntimeConfigMock = vi.hoisted(() => vi.fn())
@@ -177,7 +196,7 @@ describe('GlobalEkkoAgent', () => {
     initial.close()
     await rm(databasePath)
     await mkdir(databasePath, { recursive: true })
-    await chmod(ekkoRoot, 0o500)
+    await revokeDirectoryWrite(ekkoRoot)
 
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const degradedSetup = setupGlobalEkkoAgent({
@@ -190,7 +209,7 @@ describe('GlobalEkkoAgent', () => {
 
     try {
       expect(degradedSetup.database.databasePath).toBe(':memory:')
-      await chmod(ekkoRoot, 0o700)
+      await restoreDirectoryWrite(ekkoRoot)
       await rm(databasePath, { recursive: true })
 
       await expect(degradedAgent.run({
@@ -223,7 +242,7 @@ describe('GlobalEkkoAgent', () => {
       })).resolves.toMatchObject({ output: { content: 'persistent again' } })
       expect(recoveredAgent.status()).toMatchObject({ memoryDatabasePath: databasePath })
     } finally {
-      await chmod(ekkoRoot, 0o700)
+      await restoreDirectoryWrite(ekkoRoot)
       warning.mockRestore()
     }
   })

@@ -10,6 +10,7 @@ import {
   defaultGroupAgentAvatar,
   parseStoredAvatar,
 } from '@/utils/group-agent-avatar'
+import { nextCodingAgentMode, storedPriorAgentMode, submittedCodingAgentSelection } from '@/utils/coding-agent-mode'
 import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import {
   inferCodingAgentApiMode,
@@ -43,6 +44,7 @@ type GroupAgentType = RemoteGroupAgentDescriptor['agent']
 const selectedAgentType = ref<GroupAgentType>('hermes')
 const selectedProfile = ref('')
 const selectedAgentMode = ref<'scoped' | 'global'>('scoped')
+const priorAgentMode = ref<'scoped' | 'global' | undefined>()
 const selectedAgentProvider = ref('')
 const selectedAgentModel = ref('')
 const selectedAgentApiMode = ref<CodingAgentApiMode>('codex_responses')
@@ -104,6 +106,7 @@ const groupAgentTypeDefinitions: Array<{ label: string; value: GroupAgentType }>
   { label: 'Codex', value: 'codex' },
   { label: 'Pi', value: 'pi' },
   { label: 'Grok', value: 'grok' },
+  { label: 'Cursor', value: 'cursor' },
   { label: 'OpenCode', value: 'opencode' },
   { label: 'DeepSeek Harness', value: 'dsh' },
 ]
@@ -136,6 +139,8 @@ function getAgentModelGroups(profile: string) {
             ? 'pi'
             : selectedAgentType.value === 'grok'
               ? 'grok'
+            : selectedAgentType.value === 'cursor'
+              ? 'cursor'
             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
               ? 'opencode'
               : 'codex'
@@ -185,7 +190,7 @@ const agentReasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
   { label: t('chat.reasoningEffort.options.max'), value: 'max' },
 ])
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -198,11 +203,15 @@ const selectedAgent = computed<RemoteGroupAgentDescriptor | null>(() => {
   if (!isAgentStatusAvailable(agentStatusSnapshot.value, selectedAgentType.value)) return null
   if (!selectedProfile.value || (!usesGlobalAgentMode.value && (!selectedAgentProvider.value || !selectedAgentModel.value))) return null
   return {
-    agent: selectedAgentType.value,
-    agentMode: usesGlobalAgentMode.value ? 'global' : 'scoped',
+    ...submittedCodingAgentSelection({
+      agent: selectedAgentType.value,
+      agentMode: selectedAgentMode.value,
+      priorAgentMode: priorAgentMode.value,
+      provider: selectedAgentProvider.value,
+      model: selectedAgentModel.value,
+      usesGlobal: usesGlobalAgentMode.value,
+    }),
     profile: selectedProfile.value,
-    provider: usesGlobalAgentMode.value ? '' : selectedAgentProvider.value,
-    model: usesGlobalAgentMode.value ? '' : selectedAgentModel.value,
     apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
     reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
     name: agentName.value.trim() || selectedProfile.value,
@@ -290,8 +299,15 @@ function handleAgentTypeChange(agent: GroupAgentType): void {
     return
   }
   error.value = ''
+  const switched = nextCodingAgentMode({
+    previousAgent: selectedAgentType.value,
+    nextAgent: agent,
+    agentMode: selectedAgentMode.value,
+    priorAgentMode: priorAgentMode.value,
+  })
   selectedAgentType.value = agent
-  if (!['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(agent)) selectedAgentMode.value = 'scoped'
+  selectedAgentMode.value = switched.agentMode
+  priorAgentMode.value = switched.priorAgentMode
   syncAgentModelSelection(selectedProfile.value)
 }
 
@@ -315,6 +331,7 @@ function handleAgentModelChange(model: string): void {
 function applyAgentConfiguration(agent: RemoteGroupAgentDescriptor): void {
   selectedAgentType.value = agent.agent
   selectedAgentMode.value = agent.agentMode === 'global' ? 'global' : 'scoped'
+  priorAgentMode.value = storedPriorAgentMode(agent.priorAgentMode)
   selectedProfile.value = agent.profile
   selectedAgentProvider.value = agent.provider
   selectedAgentModel.value = agent.model
@@ -677,7 +694,7 @@ onUnmounted(() => {
               @update:value="handleAgentProfileChange"
             />
           </div>
-          <div v-if="supportsGlobalAgentMode" class="field">
+          <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="field">
             <label>{{ t('codingAgents.launchModeScope') }}</label>
             <NSelect
               v-model:value="selectedAgentMode"

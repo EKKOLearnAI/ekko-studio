@@ -14,7 +14,18 @@ sys.modules['tools'] = tools
 layout = sys.argv[1]
 module_name = 'tools.mcp_tool_config' if layout == 'split' else 'tools.mcp_tool'
 module = types.ModuleType(module_name)
-module._build_safe_env = lambda env: {'PATH': os.environ.get('PATH', ''), **(env or {})}
+def process_env(extra=None):
+    base = {'PATH': os.environ.get('PATH', '')}
+    # Node's Windows CSPRNG aborts unless SystemRoot is present. Hermes keeps
+    # the process environment; this stub only models that baseline.
+    if os.name == 'nt':
+        system_root = os.environ.get('SystemRoot') or os.environ.get('SYSTEMROOT')
+        if system_root:
+            base['SystemRoot'] = system_root
+    if extra:
+        base.update(extra)
+    return base
+module._build_safe_env = process_env
 sys.modules[module_name] = module
 if layout == 'legacy':
     sys.modules['tools.mcp_tool_config'] = None
@@ -45,9 +56,9 @@ for key, value in owner.items():
 assert actual['HERMES_WEB_UI_PROFILE'] == 'research'
 assert 'HERMES_WEB_UI_TOKEN' not in actual
 assert actual['CUSTOM'] == 'keep' and actual['HERMES_MCP_TOOLSET'] == 'plan'
-assert installed(None) == {'PATH': os.environ.get('PATH', '')}
+assert installed(None) == process_env()
 custom = {**stale, 'HERMES_WEB_UI_MANAGED_MCP': '0'}
-assert installed(custom) == {'PATH': os.environ.get('PATH', ''), **custom}
+assert installed(custom) == process_env(custom)
 print('ok')
 `, layout], { encoding: 'utf8' })
     expect(output.trim()).toBe('ok')

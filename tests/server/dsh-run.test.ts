@@ -127,9 +127,15 @@ describe('DSH chat runner', () => {
   })
   it('cancels its ACP session and terminates its owned child on shutdown', async () => {
     const child = await prompt('work')
-    manager.shutdown()
-    expect(child.sent.at(-1)).toMatchObject({ method: 'session/cancel', params: { sessionId: 'dsh-native' } })
-    expect(process.kill).toHaveBeenCalledWith(-child.pid, 'SIGINT')
-    expect(manager.getRunInfo(sessionId)).toBeNull()
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    try {
+      manager.shutdown()
+      expect(child.sent.at(-1)).toMatchObject({ method: 'session/cancel', params: { sessionId: 'dsh-native' } })
+      expect(process.kill).toHaveBeenCalledWith(-child.pid, 'SIGINT')
+      expect(manager.getRunInfo(sessionId)).toBeNull()
+    } finally {
+      if (platform) Object.defineProperty(process, 'platform', platform)
+    }
   })
 })
