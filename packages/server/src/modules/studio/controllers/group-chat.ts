@@ -14,6 +14,7 @@ import {
     groupChatUserProfiles as userProfiles,
     isGroupChatRoomOwner,
 } from '../services/group-chat/access'
+import { userCanAccessProfile } from '../public/users'
 import { setGroupChatRuntimeServer } from '../services/group-chat/runtime'
 import * as inviteCtrl from './group-chat-invite'
 import * as uploadCtrl from './group-chat-upload'
@@ -1282,13 +1283,17 @@ export async function updateRoomConfig(ctx: any) {
     }
 
     const roomId = ctx.params.roomId
-    const { name, summaryProfile, summaryProvider, summaryModel, summaryApiMode, summaryEveryTurns, agentHandoffEnabled, agentHandoffMaxDepth, agentHandoffUnlimited } = ctx.request.body as {
+    const { name, summaryProfile, summaryProvider, summaryModel, summaryApiMode, summaryEveryTurns, evaluationProfile, summaryReviewMode, summaryRevisionEnabled, messageRoutingMode, agentHandoffEnabled, agentHandoffMaxDepth, agentHandoffUnlimited } = ctx.request.body as {
         name?: string
         summaryProfile?: string
         summaryProvider?: string
         summaryModel?: string
         summaryApiMode?: string
         summaryEveryTurns?: number
+        evaluationProfile?: string
+        summaryReviewMode?: 'inherit' | 'off'
+        summaryRevisionEnabled?: boolean
+        messageRoutingMode?: 'off' | 'suggest' | 'auto'
         agentHandoffEnabled?: boolean
         agentHandoffMaxDepth?: number | null
         agentHandoffUnlimited?: boolean
@@ -1314,6 +1319,7 @@ export async function updateRoomConfig(ctx: any) {
         summaryModel,
         summaryApiMode,
         summaryEveryTurns,
+        evaluationProfile, summaryReviewMode, summaryRevisionEnabled, messageRoutingMode,
     ].some(value => value !== undefined)
     const hasHandoffUpdate = [agentHandoffEnabled, agentHandoffMaxDepth, agentHandoffUnlimited].some(value => value !== undefined)
     if (!hasNameUpdate && !hasSummaryUpdate && !hasHandoffUpdate) {
@@ -1351,6 +1357,22 @@ export async function updateRoomConfig(ctx: any) {
             return
         }
     }
+    const evalProfile = String(evaluationProfile ?? room.evaluationProfile ?? profile).trim() || profile
+    if (evaluationProfile !== undefined && ctx.state?.user?.id && ctx.state.user.role !== 'super_admin'
+        && !userCanAccessProfile(ctx.state.user.id, evalProfile)) {
+        ctx.status = 403
+        ctx.body = { error: 'Profile access denied' }
+        return
+    }
+    if (summaryReviewMode !== undefined && !['inherit', 'off'].includes(summaryReviewMode)) {
+        ctx.status = 400; ctx.body = { error: 'Invalid summaryReviewMode' }; return
+    }
+    if (summaryRevisionEnabled !== undefined && typeof summaryRevisionEnabled !== 'boolean') {
+        ctx.status = 400; ctx.body = { error: 'summaryRevisionEnabled must be a boolean' }; return
+    }
+    if (messageRoutingMode !== undefined && !['off', 'suggest', 'auto'].includes(messageRoutingMode)) {
+        ctx.status = 400; ctx.body = { error: 'Invalid messageRoutingMode' }; return
+    }
     if (agentHandoffMaxDepth !== undefined && agentHandoffMaxDepth !== null
         && (!Number.isInteger(Number(agentHandoffMaxDepth)) || Number(agentHandoffMaxDepth) < 1 || Number(agentHandoffMaxDepth) > 100)) {
         ctx.status = 400
@@ -1370,10 +1392,14 @@ export async function updateRoomConfig(ctx: any) {
                     summaryModel: model,
                     summaryApiMode: apiMode,
                     summaryEveryTurns: everyTurns,
+                    ...(evaluationProfile !== undefined ? { evaluationProfile: evalProfile } : {}),
+                    ...(summaryReviewMode !== undefined ? { summaryReviewMode } : {}),
+                    ...(summaryRevisionEnabled !== undefined ? { summaryRevisionEnabled } : {}),
+                    ...(messageRoutingMode !== undefined ? { messageRoutingMode } : {}),
                 } : {}),
-                agentHandoffEnabled,
-                agentHandoffMaxDepth,
-                agentHandoffUnlimited,
+                ...(agentHandoffEnabled !== undefined ? { agentHandoffEnabled } : {}),
+                ...(agentHandoffMaxDepth !== undefined ? { agentHandoffMaxDepth } : {}),
+                ...(agentHandoffUnlimited !== undefined ? { agentHandoffUnlimited } : {}),
             })
         }
     })
@@ -1554,11 +1580,13 @@ export async function getRoomSummary(ctx: any) {
     }
 
     const summary = chatServer.getRoomSummaryService().getState(roomId)
+    const review = storage.getLatestSummaryReview?.(roomId) || null
     const anchorMessage = summary.summaryThroughMessageId
         ? storage.getMessage(summary.summaryThroughMessageId)
         : null
     ctx.body = {
         summary,
+        review,
         anchor: anchorMessage ? {
             id: anchorMessage.id,
             timestamp: anchorMessage.timestamp,
