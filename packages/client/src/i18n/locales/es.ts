@@ -2,6 +2,14 @@ import { socialMessagesEs } from '../social-messages-locales'
 
 export default {
   jev: {
+    groupMessageRoutingEnabled: "es Use JEV for group message routing",
+    groupRoutingDisabled: "es Disabled; unmentioned messages remain unassigned.",
+    groupRoutingReady: "es Enabled for room suggest/auto modes.",
+    groupMessageRoutingMinConfidence: "es Routing confidence",
+    groupMessageRoutingMinConfidenceHint: "es Minimum confidence required to suggest or auto-route.",
+    groupMessageRoutingTimeout: "es Routing time budget (ms)",
+    groupMessageRoutingTimeoutHint: "es Total JEV budget for one unaddressed message.",
+
     workflowQualityEnabled: "es Workflow JEV",
     workflowQualityDisabled: "es disabled",
     workflowQualityReady: "es ready",
@@ -2982,6 +2990,7 @@ jobTriggered: 'Job ejecutado',
 
   // Registro de cambios
   groupChat: {
+    messageRoutingMode: "JEV message routing", routingOff: "Off", routingSuggest: "Suggest an Agent", routingAuto: "Automatically assign", routingSuggested: "JEV suggests {agent}", routingUseSuggestion: "Assign", routingAutoQueued: "JEV assigned {agent}",
     summaryEvaluationProfile: "JEV evaluation Profile",
     summaryReviewEnabled: "Review summaries with JEV",
     summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",

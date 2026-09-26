@@ -10,6 +10,9 @@ export interface JevSettings {
   workflowQualityEnabled: boolean
   workflowQualityMinConfidence: number
   workflowQualityTimeoutMs: number
+  groupMessageRoutingEnabled: boolean
+  groupMessageRoutingMinConfidence: number
+  groupMessageRoutingTimeoutMs: number
   ekkoSkillsEnabled: boolean
   ekkoSkillsCandidateLimit: number
   ekkoSkillsMinConfidence: number
