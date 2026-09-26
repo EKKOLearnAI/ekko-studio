@@ -1510,7 +1510,13 @@ export default {
 
   // Kanban
   kanban: {
-    title: 'Kanban Board',
+    title: 'Kanban Approval Center',
+    approval: {
+      title: 'Approval Center', claim: 'Claim / Start', requestReview: 'Request Review', approve: 'Approve', requestChanges: 'Request Changes', archive: 'Archive',
+      reasonPlaceholder: 'Decision reason or review summary', reasonRequired: 'A reason is required', unauthorized: 'This Studio identity is not authorized for approval actions.',
+      success: 'Approval action recorded', duplicate: 'This approval event was already processed', failed: 'Approval action failed',
+      risk: 'RISK', riskDetected: 'High-impact change — review carefully', runId: 'Run ID', eventId: 'Latest event ID',
+    },
     createTask: 'New Task',
     noTasks: 'No tasks',
     allStatuses: 'All Statuses',

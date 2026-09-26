@@ -16,6 +16,8 @@ import {
   createBoard,
   archiveBoard,
   getCapabilities,
+  getApprovalCapabilities,
+  performApprovalAction,
   listTasks,
   getTask,
   listAttachments,
@@ -107,6 +109,42 @@ describe('Kanban API', () => {
       ['/api/hermes/kanban/unblock?board=project-a', { method: 'POST', body: JSON.stringify({ task_ids: ['task-1'] }) }],
       ['/api/hermes/kanban/task-1/assign?board=project-a', { method: 'POST', body: JSON.stringify({ profile: 'bob' }) }],
     ])
+  })
+
+  it('uses dedicated approval endpoints and keeps decision reasons out of the URL', async () => {
+    const approval = { can_approve: true, allowed_boards: ['codex-tech'], dingtalk_configured: true }
+    const result = { receipt: { event_id: 'evt-1', after_status: 'done' } }
+    mockRequest.mockResolvedValueOnce({ approval }).mockResolvedValueOnce(result)
+
+    await expect(getApprovalCapabilities()).resolves.toEqual(approval)
+    await expect(performApprovalAction('task 1', 'request_changes', {
+      reason: 'missing rollback test',
+      event_id: 'evt-1',
+    }, { board: 'codex-tech' })).resolves.toEqual(result)
+
+    expect(mockRequest.mock.calls).toEqual([
+      ['/api/hermes/kanban/approval/capabilities'],
+      ['/api/hermes/kanban/task%201/request-changes?board=codex-tech', {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'missing rollback test', event_id: 'evt-1' }),
+      }],
+    ])
+  })
+
+  it('reuses a generated approval event ID after a lost response and clears it only after success', async () => {
+    mockRequest
+      .mockRejectedValueOnce(new Error('connection reset'))
+      .mockResolvedValueOnce({ receipt: { event_id: 'server-ack', after_status: 'review' } })
+
+    await expect(performApprovalAction('task-1', 'request_review', {}, { board: 'codex-tech' }))
+      .rejects.toThrow('connection reset')
+    await expect(performApprovalAction('task-1', 'request_review', {}, { board: 'codex-tech' }))
+      .resolves.toMatchObject({ receipt: { after_status: 'review' } })
+
+    const bodies = mockRequest.mock.calls.map(call => JSON.parse(call[1].body))
+    expect(bodies[0].event_id).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(bodies[1].event_id).toBe(bodies[0].event_id)
+    expect(localStorage.getItem('hermes:kanban:approval:codex-tech:task-1:request_review')).toBeNull()
   })
 
   it('lists attachments and builds their authenticated content path', async () => {

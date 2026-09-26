@@ -1544,7 +1544,13 @@ export default {
 
   // 看板
   kanban: {
-    title: '看板',
+    title: '看板審批中心',
+    approval: {
+      title: '審批中心', claim: '領取 / 開始執行', requestReview: '請求審核', approve: '批准', requestChanges: '退回修改', archive: '封存',
+      reasonPlaceholder: '填寫審批原因或審核摘要', reasonRequired: '必須填寫原因', unauthorized: '目前 Studio 身分無權執行審批操作。',
+      success: '審批操作已記錄', duplicate: '此審批事件已處理', failed: '審批操作失敗',
+      risk: '風險', riskDetected: '高影響變更，請謹慎審核', runId: '執行 ID', eventId: '最新事件 ID',
+    },
     createTask: '新增任務',
     noTasks: '目前無任務',
     allStatuses: '所有狀態',

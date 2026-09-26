@@ -239,6 +239,13 @@ export default {
     deleteProfileTitle: '프로필을 삭제할까요?', deleteProfileWarning: '관리 데이터는 휴지통으로 이동하며 사용자 지정 경로는 유지됩니다.', clearCache: '캐시 지우기', clearPermissionAudit: '권한 기록 지우기', clearSiteData: '사이트 데이터 지우기', clearSiteDataWarning: '선택한 프로필의 로그인, 쿠키 및 로컬 저장소를 지웁니다.', dataCleared: '브라우저 데이터를 지웠습니다', loadFailed: '내장 브라우저를 시작하지 못했습니다',
   },
   kanban: {
+    title: '칸반 승인 센터',
+    approval: {
+      title: '승인 센터', claim: '가져오기 / 시작', requestReview: '검토 요청', approve: '승인', requestChanges: '수정 요청', archive: '보관',
+      reasonPlaceholder: '결정 사유 또는 검토 요약', reasonRequired: '사유를 입력해야 합니다', unauthorized: '이 Studio 계정은 승인 작업 권한이 없습니다.',
+      success: '승인 작업이 기록되었습니다', duplicate: '이미 처리된 승인 이벤트입니다', failed: '승인 작업에 실패했습니다',
+      risk: '위험', riskDetected: '영향도가 높은 변경 — 주의 깊게 검토하세요', runId: '실행 ID', eventId: '최근 이벤트 ID',
+    },
     board: {
       defaultArchiveUnavailable: '기본 칸반은 보관할 수 없습니다',
     },

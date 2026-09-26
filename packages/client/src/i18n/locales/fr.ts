@@ -239,6 +239,13 @@ export default {
     deleteProfileTitle: 'Supprimer le profil ?', deleteProfileWarning: 'Les données gérées seront placées dans la corbeille. Les dossiers personnalisés sont conservés.', clearCache: 'Vider le cache', clearPermissionAudit: 'Effacer le journal des autorisations', clearSiteData: 'Effacer les données des sites', clearSiteDataWarning: 'Efface les connexions, cookies et le stockage local du profil sélectionné.', dataCleared: 'Données du navigateur effacées', loadFailed: 'Impossible de démarrer le navigateur intégré',
   },
   kanban: {
+    title: 'Centre d’approbation Kanban',
+    approval: {
+      title: 'Centre d’approbation', claim: 'Prendre / démarrer', requestReview: 'Demander une revue', approve: 'Approuver', requestChanges: 'Demander des modifications', archive: 'Archiver',
+      reasonPlaceholder: 'Motif de la décision ou résumé', reasonRequired: 'Un motif est requis', unauthorized: 'Cette identité Studio n’est pas autorisée à approuver.',
+      success: 'Action d’approbation enregistrée', duplicate: 'Cet événement a déjà été traité', failed: 'Échec de l’approbation',
+      risk: 'RISQUE', riskDetected: 'Modification à fort impact — vérifier attentivement', runId: 'ID d’exécution', eventId: 'ID du dernier événement',
+    },
     board: {
       defaultArchiveUnavailable: 'Le tableau par défaut ne peut pas être archivé',
     },

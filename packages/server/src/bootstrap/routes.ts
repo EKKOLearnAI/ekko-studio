@@ -48,7 +48,7 @@ import { fileRoutes } from '../modules/studio/routes/files'
 import { downloadRoutes } from '../modules/studio/routes/download'
 import { jobRoutes } from '../modules/hermes/routes/jobs'
 import { cronHistoryRoutes } from '../modules/hermes/routes/cron-history'
-import { kanbanRoutes } from '../modules/hermes/routes/kanban'
+import { kanbanPublicRoutes, kanbanRoutes } from '../modules/hermes/routes/kanban'
 import { workflowRoutes } from '../modules/studio/routes/workflows'
 import { ttsRoutes, ttsProtectedRoutes } from '../modules/studio/routes/tts'
 import { sttProtectedRoutes } from '../modules/studio/routes/stt'
@@ -93,6 +93,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(groupChatPublicRoutes.routes())
   app.use(sessionSharePublicRoutes.routes())
   app.use(chatWebhookPublicRoutes.routes())
+  app.use(kanbanPublicRoutes.routes())
 
   // --- Auth middleware: all routes below require authentication ---
   authMiddleware.forEach((middleware) => app.use(middleware))

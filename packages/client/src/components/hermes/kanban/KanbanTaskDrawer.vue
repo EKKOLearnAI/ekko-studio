@@ -4,15 +4,15 @@ import { NDrawer, NDrawerContent, NButton, NSelect, NInput, NSpin, NModal, useDi
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { request } from '@/api/client'
-import { getAttachmentContentPath, getTask, listAttachments } from '@/api/hermes/kanban'
+import { getApprovalCapabilities, getAttachmentContentPath, getTask, listAttachments, performApprovalAction } from '@/api/hermes/kanban'
 import { useKanbanStore } from '@/stores/hermes/kanban'
+import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useFilesStore } from '@/stores/hermes/files'
-import { withDefaultAssignee } from '@/utils/hermes/kanban-assignees'
 import HistoryMessageList from '@/components/hermes/chat/HistoryMessageList.vue'
 import FilePreview from '@/components/hermes/files/FilePreview.vue'
 import { fetchAuthenticatedBlob, saveBlob } from '@/api/studio/binary-content'
 import type { Session, Message } from '@/stores/hermes/chat'
-import type { KanbanAttachment, KanbanTaskDetail } from '@/api/hermes/kanban'
+import type { KanbanApprovalAction, KanbanApprovalCapabilities, KanbanAttachment, KanbanTaskDetail } from '@/api/hermes/kanban'
 
 const RUN_HISTORY_PAGE_SIZE = 10
 
@@ -31,6 +31,7 @@ const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
 const kanbanStore = useKanbanStore()
+const profilesStore = useProfilesStore()
 const filesStore = useFilesStore()
 
 const detail = ref<KanbanTaskDetail | null>(null)
@@ -50,6 +51,9 @@ const recoveryReason = ref('')
 const runHistoryPage = ref(1)
 const attachments = ref<KanbanAttachment[]>([])
 const showAttachmentPreview = ref(false)
+const approvalCapabilities = ref<KanbanApprovalCapabilities | null>(null)
+const approvalReason = ref('')
+const approvalLoading = ref<KanbanApprovalAction | null>(null)
 
 const completionSummary = computed(() => {
   if (!detail.value) return ''
@@ -73,6 +77,22 @@ const canAssignTask = computed(() => canMutateTask.value && detail.value?.task.s
 const canReclaimTask = computed(() => detail.value?.task.status === 'running')
 const canReassignTask = computed(() => canMutateTask.value)
 const canSpecifyTask = computed(() => detail.value?.task.status === 'triage')
+const canUseApproval = computed(() => Boolean(
+  approvalCapabilities.value?.can_approve
+  && approvalCapabilities.value.allowed_boards.includes(kanbanStore.selectedBoard),
+))
+const currentRunId = computed(() => detail.value?.task.current_run_id
+  || [...(detail.value?.runs || [])].reverse().find(run => !run.ended_at)?.id
+  || [...(detail.value?.runs || [])].reverse()[0]?.id
+  || null)
+const latestEvent = computed(() => [...(detail.value?.events || [])].reverse()[0] || null)
+const hasRiskFlag = computed(() => {
+  const task = detail.value?.task
+  if (!task) return false
+  if (task.priority >= 3) return true
+  return /\b(risk|blocker|breaking|security|data loss|payment|credential)\b/i.test(`${task.title} ${task.body || ''}`)
+})
+const isApprovalLifecycleStatus = computed(() => ['ready', 'running', 'review', 'done'].includes(detail.value?.task.status || ''))
 
 const sessionResults = ref<any[]>([])
 const sessionLoading = ref(false)
@@ -105,6 +125,9 @@ function resetTaskScopedState() {
   sessionLoading.value = false
   showSessions.value = false
   attachments.value = []
+  approvalCapabilities.value = null
+  approvalReason.value = ''
+  approvalLoading.value = null
   if (showAttachmentPreview.value) {
     showAttachmentPreview.value = false
     filesStore.closePreview()
@@ -162,8 +185,12 @@ const historySession = computed<Session | null>(() => {
 })
 
 const assigneeOptions = computed(() => {
-  return withDefaultAssignee(kanbanStore.assignees, kanbanStore.stats?.by_assignee || {})
-    .map(a => ({ label: a.name, value: a.name }))
+  // profilesStore.profiles 是全集；kanbanStore.assignees 仅作"已被使用过"的标记
+  return profilesStore.profiles.map(p => ({
+    label: p.alias || p.name,
+    value: p.name,
+    used: kanbanStore.assignees.includes(p.name),
+  }))
 })
 
 const runHistoryPageCount = computed(() => {
@@ -193,13 +220,15 @@ watch(() => [props.taskId, kanbanStore.selectedBoard] as const, async ([id, boar
   }
   loading.value = true
   try {
-    const [nextDetail, nextAttachments] = await Promise.all([
+    const [nextDetail, nextAttachments, nextApprovalCapabilities] = await Promise.all([
       getTask(id, { board }),
       listAttachments(id, { board }).catch(() => []),
+      getApprovalCapabilities().catch(() => null),
     ])
     if (isActiveTask(id, board)) {
       detail.value = nextDetail
       attachments.value = nextAttachments
+      approvalCapabilities.value = nextApprovalCapabilities
     }
   } catch (err: any) {
     if (isActiveTask(id, board)) {
@@ -434,6 +463,52 @@ async function handleSpecify() {
   }
 }
 
+async function handleApproval(action: KanbanApprovalAction) {
+  if (!props.taskId || !detail.value || !canUseApproval.value) return
+  const reason = approvalReason.value.trim()
+  if (['request_review', 'approve', 'request_changes'].includes(action) && !reason) {
+    message.error(t('kanban.approval.reasonRequired'))
+    return
+  }
+  const taskId = props.taskId
+  const board = kanbanStore.selectedBoard
+  approvalLoading.value = action
+  try {
+    const result = await performApprovalAction(taskId, action, { reason: reason || undefined }, { board })
+    if (!isActiveTask(taskId, board)) return
+    const [nextDetail, nextAttachments] = await Promise.all([
+      getTask(taskId, { board }),
+      listAttachments(taskId, { board }).catch(() => []),
+    ])
+    if (!isActiveTask(taskId, board)) return
+    detail.value = nextDetail
+    attachments.value = nextAttachments
+    approvalReason.value = ''
+    message.success(t(result.receipt.duplicate ? 'kanban.approval.duplicate' : 'kanban.approval.success'))
+    emit('updated')
+  } catch (err: any) {
+    message.error(err.message || t('kanban.approval.failed'))
+  } finally {
+    if (isActiveTask(taskId, board)) approvalLoading.value = null
+  }
+}
+
+function handleApprovalArchive() {
+  if (!props.taskId) return
+  const taskId = props.taskId
+  const board = kanbanStore.selectedBoard
+  dialog.warning({
+    title: t('kanban.action.archive'),
+    content: t('kanban.action.archiveConfirm'),
+    positiveText: t('kanban.action.archive'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      if (!isActiveTask(taskId, board)) return
+      await handleApproval('archive')
+    },
+  })
+}
+
 function handleNavigateTask(taskId: string) {
   emit('updated')
   emit('navigate', taskId)
@@ -475,6 +550,18 @@ function handleNavigateTask(taskId: string) {
               <span class="detail-label">{{ t('kanban.detail.priority') }}</span>
               <span class="detail-value">{{ detail.task.priority }}</span>
             </div>
+            <div v-if="hasRiskFlag" class="detail-row" data-testid="approval-risk">
+              <span class="detail-label">{{ t('kanban.approval.risk') }}</span>
+              <span class="detail-value approval-risk">{{ t('kanban.approval.riskDetected') }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">{{ t('kanban.approval.runId') }}</span>
+              <span class="detail-value">{{ currentRunId || '—' }}</span>
+            </div>
+            <div class="detail-row" data-testid="approval-event-id">
+              <span class="detail-label">{{ t('kanban.approval.eventId') }}</span>
+              <span class="detail-value">{{ latestEvent?.id || '—' }}</span>
+            </div>
             <div class="detail-row">
               <span class="detail-label">{{ t('kanban.detail.tenant') }}</span>
               <span class="detail-value">{{ detail.task.tenant || '—' }}</span>
@@ -505,19 +592,69 @@ function handleNavigateTask(taskId: string) {
             <div class="result-summary" dir="auto" @click="openResultDetail">{{ completionSummary }}</div>
           </div>
 
+          <div v-if="isApprovalLifecycleStatus" class="detail-section approval-section">
+            <div class="section-title">{{ t('kanban.approval.title') }}</div>
+            <template v-if="canUseApproval">
+              <NInput
+                v-if="detail.task.status === 'running' || detail.task.status === 'review'"
+                v-model:value="approvalReason"
+                data-testid="approval-reason"
+                :placeholder="t('kanban.approval.reasonPlaceholder')"
+              />
+              <div class="action-group approval-actions">
+                <NButton
+                  v-if="detail.task.status === 'ready'"
+                  data-testid="approval-claim"
+                  type="primary"
+                  :loading="approvalLoading === 'claim'"
+                  @click="handleApproval('claim')"
+                >{{ t('kanban.approval.claim') }}</NButton>
+                <NButton
+                  v-if="detail.task.status === 'running'"
+                  data-testid="approval-request-review"
+                  type="primary"
+                  :loading="approvalLoading === 'request_review'"
+                  @click="handleApproval('request_review')"
+                >{{ t('kanban.approval.requestReview') }}</NButton>
+                <NButton
+                  v-if="detail.task.status === 'review'"
+                  data-testid="approval-approve"
+                  type="success"
+                  :loading="approvalLoading === 'approve'"
+                  @click="handleApproval('approve')"
+                >{{ t('kanban.approval.approve') }}</NButton>
+                <NButton
+                  v-if="detail.task.status === 'review'"
+                  data-testid="approval-request-changes"
+                  type="warning"
+                  :loading="approvalLoading === 'request_changes'"
+                  @click="handleApproval('request_changes')"
+                >{{ t('kanban.approval.requestChanges') }}</NButton>
+                <NButton
+                  v-if="detail.task.status === 'done'"
+                  data-testid="approval-archive"
+                  secondary
+                  :loading="approvalLoading === 'archive'"
+                  @click="handleApprovalArchive"
+                >{{ t('kanban.approval.archive') }}</NButton>
+              </div>
+            </template>
+            <div v-else class="approval-unauthorized">{{ t('kanban.approval.unauthorized') }}</div>
+          </div>
+
           <!-- Actions for active tasks and the terminal done-to-archived transition -->
           <div v-if="canMutateTask || canArchiveTask" class="detail-section">
             <div class="section-title">{{ t('kanban.action.title') }}</div>
             <div class="action-group">
-              <NButton v-if="canArchiveTask" size="small" secondary type="warning" @click="handleArchive">
+              <NButton v-if="canArchiveTask && !canUseApproval" size="small" secondary type="warning" @click="handleArchive">
                 {{ t('kanban.action.archive') }}
               </NButton>
-              <template v-if="canCompleteTask && !showCompleteInput">
+              <template v-if="canCompleteTask && !canUseApproval && !showCompleteInput">
                 <NButton size="small" @click="showCompleteInput = true">
                   {{ t('kanban.action.complete') }}
                 </NButton>
               </template>
-              <div v-else-if="canCompleteTask" class="complete-input">
+              <div v-else-if="canCompleteTask && !canUseApproval" class="complete-input">
                 <NInput v-model:value="completeSummary" size="small" :placeholder="t('kanban.action.completeSummary')" />
                 <NButton size="small" type="primary" @click="handleComplete">{{ t('common.ok') }}</NButton>
                 <NButton size="small" @click="showCompleteInput = false; completeSummary = ''">{{ t('common.cancel') }}</NButton>
@@ -634,6 +771,7 @@ function handleNavigateTask(taskId: string) {
             <div class="section-title">{{ t('kanban.detail.events') }}</div>
             <div v-for="event in detail.events.slice(-10)" :key="event.id" class="event-item">
               <span class="event-kind">{{ event.kind }}</span>
+              <span class="event-id">#{{ event.id }}<template v-if="event.run_id"> · run {{ event.run_id }}</template></span>
               <span class="event-time">{{ formatTime(event.created_at) }}</span>
             </div>
           </div>

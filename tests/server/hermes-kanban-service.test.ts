@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mockExecFileAsync = vi.hoisted(() => vi.fn())
 const mockSpawnHermes = vi.hoisted(() => vi.fn())
 const mockLoggerError = vi.hoisted(() => vi.fn())
+const mockApprovalAuditStore = vi.hoisted(() => ({
+  get: vi.fn(),
+  prepare: vi.fn(),
+  complete: vi.fn(),
+}))
 
 vi.mock('../../packages/server/src/modules/hermes/services/runtime/process', () => ({
   execHermes: (args: string[], options: unknown) => mockExecFileAsync('hermes', args, options),
@@ -15,11 +20,30 @@ vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({
   },
 }))
 
+vi.mock('../../packages/server/src/modules/hermes/services/kanban/approval-audit-store', () => ({
+  getKanbanApprovalAuditStore: () => mockApprovalAuditStore,
+}))
+
 import * as service from '../../packages/server/src/modules/hermes/services/kanban/kanban-service'
 
 describe('hermes kanban service', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    const records = new Map<string, any>()
+    const key = (board: string, taskId: string, eventId: string) => `${board}:${taskId}:${eventId}`
+    mockApprovalAuditStore.get.mockImplementation(async (board: string, taskId: string, eventId: string) => (
+      records.get(key(board, taskId, eventId)) || null
+    ))
+    mockApprovalAuditStore.prepare.mockImplementation(async (record: any) => {
+      records.set(key(record.board, record.task_id, record.event_id), record)
+      return { record, created: true }
+    })
+    mockApprovalAuditStore.complete.mockImplementation(async (recordKey: any, patch: any) => {
+      const id = key(recordKey.board, recordKey.taskId, recordKey.eventId)
+      const record = { ...records.get(id), ...patch, phase: 'completed' }
+      records.set(id, record)
+      return record
+    })
   })
 
   it('lists boards without mutating or depending on CLI current', async () => {
@@ -233,6 +257,515 @@ describe('hermes kanban service', () => {
     expect(mockExecFileAsync.mock.calls[3][1]).toEqual(['kanban', '--board', 'default', 'unblock', 'task-1'])
     expect(mockExecFileAsync.mock.calls[4][1]).toEqual(['kanban', '--board', 'default', 'assign', 'task-1', 'alice'])
     expect(mockExecFileAsync.mock.calls[5][1]).toEqual(['kanban', '--board', 'default', 'assignees', '--json'])
+  })
+
+  it('runs approval-center transitions through canonical CLI commands and verifies readback', async () => {
+    const detail = (status: string, events: unknown[] = []) => JSON.stringify({
+      task: { id: 'task-1', title: 'Ship', assignee: 'codex-worker', status },
+      comments: [],
+      events,
+      runs: [],
+    })
+    mockExecFileAsync
+      // ready -> running
+      .mockResolvedValueOnce({ stdout: detail('ready') })
+      .mockResolvedValueOnce({ stdout: 'Claimed task-1\n' })
+      .mockResolvedValueOnce({ stdout: detail('running', [{ id: 11, kind: 'claimed', created_at: 101, run_id: 7 }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+      // running -> review
+      .mockResolvedValueOnce({ stdout: detail('running') })
+      .mockResolvedValueOnce({ stdout: 'Requested review for task-1\n' })
+      .mockResolvedValueOnce({ stdout: detail('review', [{ id: 12, kind: 'review_requested', created_at: 102, run_id: 7 }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+      // review -> done
+      .mockResolvedValueOnce({ stdout: detail('review') })
+      .mockResolvedValueOnce({ stdout: 'Completed task-1\n' })
+      .mockResolvedValueOnce({ stdout: detail('done', [{ id: 13, kind: 'completed', created_at: 103, run_id: 8 }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+      // done -> archived
+      .mockResolvedValueOnce({ stdout: detail('done') })
+      .mockResolvedValueOnce({ stdout: 'Archived task-1\n' })
+      .mockResolvedValueOnce({ stdout: detail('archived', [{ id: 14, kind: 'archived', created_at: 104, run_id: 8 }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+
+    const actor = 'james'
+    await expect(service.performApprovalAction('task-1', 'claim', { board: 'codex-tech', actor, eventId: 'evt-claim' }))
+      .resolves.toMatchObject({ before_status: 'ready', after_status: 'running', event_id: 'evt-claim', canonical_event_id: 11 })
+    await expect(service.performApprovalAction('task-1', 'request_review', { board: 'codex-tech', actor, eventId: 'evt-review', reason: 'tests pass' }))
+      .resolves.toMatchObject({ before_status: 'running', after_status: 'review', canonical_event_id: 12 })
+    await expect(service.performApprovalAction('task-1', 'approve', { board: 'codex-tech', actor, eventId: 'evt-approve', reason: 'approved' }))
+      .resolves.toMatchObject({ before_status: 'review', after_status: 'done', canonical_event_id: 13 })
+    await expect(service.performApprovalAction('task-1', 'archive', { board: 'codex-tech', actor, eventId: 'evt-archive' }))
+      .resolves.toMatchObject({ before_status: 'done', after_status: 'archived', canonical_event_id: 14 })
+
+    expect(mockExecFileAsync.mock.calls[1][1]).toEqual(['kanban', '--board', 'codex-tech', 'claim', 'task-1'])
+    expect(mockExecFileAsync.mock.calls[5][1]).toEqual(expect.arrayContaining([
+      'kanban', '--board', 'codex-tech', 'request-review', 'task-1', '--summary', 'tests pass', '--metadata',
+    ]))
+    expect(mockExecFileAsync.mock.calls[9][1]).toEqual(expect.arrayContaining([
+      'kanban', '--board', 'codex-tech', 'complete', 'task-1', '--summary', 'approved', '--metadata',
+    ]))
+    expect(mockExecFileAsync.mock.calls[13][1]).toEqual(['kanban', '--board', 'codex-tech', 'archive', 'task-1'])
+    for (const index of [3, 7, 11, 15]) {
+      expect(mockExecFileAsync.mock.calls[index][1]).toEqual(expect.arrayContaining([
+        'kanban', '--board', 'codex-tech', 'comment', 'task-1', expect.stringContaining('KANBAN_APPROVAL_AUDIT'), '--author', 'studio:james',
+      ]))
+    }
+    expect(mockExecFileAsync.mock.calls[11][1][5]).toContain('"before_status":"review"')
+    expect(mockExecFileAsync.mock.calls[11][1][5]).toContain('"after_status":"done"')
+    expect(mockExecFileAsync.mock.calls[11][1][5]).toContain('"canonical_event_id":13')
+  })
+
+  it('rejects invalid and duplicate approval actions without running a transition', async () => {
+    mockExecFileAsync.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        task: { id: 'task-1', status: 'review' },
+        comments: [{ id: 1, body: '[KANBAN_APPROVAL_AUDIT] {"event_id":"evt-duplicate"}' }],
+        events: [],
+        runs: [],
+      }),
+    })
+
+    await expect(service.performApprovalAction('task-1', 'approve', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-duplicate',
+    })).resolves.toMatchObject({ duplicate: true, before_status: 'review', after_status: 'review' })
+    expect(mockExecFileAsync).toHaveBeenCalledTimes(1)
+
+    mockExecFileAsync.mockResolvedValueOnce({
+      stdout: JSON.stringify({ task: { id: 'task-2', status: 'ready' }, comments: [], events: [], runs: [] }),
+    })
+    await expect(service.performApprovalAction('task-2', 'approve', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-wrong-state',
+    })).rejects.toThrow('Cannot approve task "task-2" from status "ready"')
+    expect(mockExecFileAsync).toHaveBeenCalledTimes(2)
+  })
+
+  it('fails closed before a transition when the durable audit intent cannot be prepared', async () => {
+    mockExecFileAsync.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        task: { id: 'task-1', status: 'ready' }, comments: [], events: [], runs: [],
+      }),
+    })
+    const auditStore = {
+      get: vi.fn().mockResolvedValue(null),
+      prepare: vi.fn().mockRejectedValue(new Error('audit disk unavailable')),
+      complete: vi.fn(),
+    }
+
+    await expect(service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-audit-down', auditStore,
+    })).rejects.toThrow('audit disk unavailable')
+
+    expect(mockExecFileAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it('recovers an already-transitioned action after durable audit finalization fails', async () => {
+    const ready = JSON.stringify({
+      task: { id: 'task-1', title: 'Ship', status: 'ready' }, comments: [], events: [], runs: [],
+    })
+    const running = JSON.stringify({
+      task: { id: 'task-1', title: 'Ship', status: 'running', current_run_id: 7 },
+      comments: [],
+      events: [{ id: 11, kind: 'claimed', created_at: 101, run_id: 7 }],
+      runs: [{ id: 7, profile: process.env.HERMES_PROFILE || 'default', metadata: null }],
+    })
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: ready })
+      .mockResolvedValueOnce({ stdout: 'Claimed task-1\n' })
+      .mockResolvedValueOnce({ stdout: running })
+      .mockResolvedValueOnce({ stdout: running })
+      .mockResolvedValueOnce({ stdout: '' })
+
+    let record: any = null
+    const auditStore = {
+      get: vi.fn(async () => record),
+      prepare: vi.fn(async (next: any) => {
+        record = next
+        return { record, created: true }
+      }),
+      complete: vi.fn()
+        .mockRejectedValueOnce(new Error('audit finalize interrupted'))
+        .mockImplementationOnce(async (_key: unknown, patch: any) => {
+          record = { ...record, ...patch, phase: 'completed' }
+          return record
+        }),
+    }
+
+    await expect(service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-recover', auditStore,
+    })).rejects.toThrow('audit finalize interrupted')
+
+    await expect(service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-recover', auditStore,
+    })).resolves.toMatchObject({
+      duplicate: true,
+      before_status: 'ready',
+      after_status: 'running',
+      canonical_event_id: 11,
+    })
+
+    const transitionCalls = mockExecFileAsync.mock.calls.filter(call => call[1]?.[3] === 'claim')
+    expect(transitionCalls).toHaveLength(1)
+    expect(auditStore.complete).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not attribute a pre-existing canonical event to a prepared audit intent during recovery', async () => {
+    mockExecFileAsync.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        task: { id: 'task-1', title: 'Ship', status: 'done', current_run_id: 7 },
+        comments: [], runs: [],
+        events: [{ id: 11, kind: 'completed', created_at: 100, run_id: 7 }],
+      }),
+    })
+    const prepared = {
+      schema: 1 as const,
+      phase: 'prepared' as const,
+      board: 'codex-tech',
+      task_id: 'task-1',
+      event_id: 'evt-stale-recovery',
+      action: 'approve' as const,
+      actor: 'james',
+      channel: 'studio' as const,
+      reason: null,
+      before_status: 'review' as const,
+      before_event_ids: ['11'],
+      after_status: null,
+      canonical_event_id: null,
+      run_id: 7,
+      timestamp: 101,
+      updated_at: 101,
+    }
+    const auditStore = {
+      get: vi.fn().mockResolvedValue(prepared),
+      prepare: vi.fn(),
+      complete: vi.fn(),
+    }
+
+    await expect(service.performApprovalAction('task-1', 'approve', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-stale-recovery', auditStore,
+    })).rejects.toThrow('Cannot recover approval event')
+    expect(auditStore.complete).not.toHaveBeenCalled()
+  })
+
+  it('does not recover a prepared intent from another actor canonical event', async () => {
+    mockExecFileAsync.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        task: { id: 'task-1', title: 'Ship', status: 'running', current_run_id: 7 },
+        comments: [],
+        events: [{ id: 11, kind: 'claimed', created_at: 101, run_id: 7 }],
+        runs: [{ id: 7, profile: 'other-worker', metadata: null }],
+      }),
+    })
+    const prepared = {
+      schema: 1 as const,
+      phase: 'prepared' as const,
+      board: 'codex-tech',
+      task_id: 'task-1',
+      event_id: 'evt-wrong-actor',
+      action: 'claim' as const,
+      actor: 'james',
+      channel: 'studio' as const,
+      reason: null,
+      reviewer: null,
+      canonical_profile: 'default',
+      before_status: 'ready' as const,
+      before_event_ids: [],
+      after_status: null,
+      canonical_event_id: null,
+      run_id: null,
+      timestamp: 100,
+      updated_at: 100,
+    }
+    const auditStore = {
+      get: vi.fn().mockResolvedValue(prepared),
+      prepare: vi.fn(),
+      complete: vi.fn(),
+    }
+
+    await expect(service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-wrong-actor', auditStore,
+    })).rejects.toThrow('without matching canonical identity')
+    expect(auditStore.complete).not.toHaveBeenCalled()
+  })
+
+  it('does not repeat a completed transition when a later action returned the task to its original status', async () => {
+    mockExecFileAsync
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          task: { id: 'task-1', title: 'Ship', status: 'ready', current_run_id: 8 },
+          comments: [],
+          runs: [{
+            id: 7,
+            profile: 'worker',
+            metadata: { approval: { event_id: 'evt-lost-response', action: 'request_review' } },
+          }],
+          events: [
+            { id: 11, kind: 'review_requested', created_at: 100, run_id: 7 },
+            { id: 12, kind: 'changes_requested', created_at: 101, run_id: 8 },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({ stdout: '' })
+    const prepared = {
+      schema: 1 as const,
+      phase: 'prepared' as const,
+      board: 'codex-tech',
+      task_id: 'task-1',
+      event_id: 'evt-lost-response',
+      action: 'request_review' as const,
+      actor: 'james',
+      channel: 'studio' as const,
+      reason: null,
+      reviewer: null,
+      before_status: 'ready' as const,
+      before_event_ids: [],
+      after_status: null,
+      canonical_event_id: null,
+      run_id: 7,
+      timestamp: 99,
+      updated_at: 99,
+    }
+    const auditStore = {
+      get: vi.fn().mockResolvedValue(prepared),
+      prepare: vi.fn(),
+      complete: vi.fn().mockImplementation(async (_key: unknown, patch: any) => ({
+        ...prepared, ...patch, phase: 'completed',
+      })),
+    }
+
+    await expect(service.performApprovalAction('task-1', 'request_review', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-lost-response', auditStore,
+    })).resolves.toMatchObject({ duplicate: true, before_status: 'ready', after_status: 'review', canonical_event_id: 11 })
+    expect(mockExecFileAsync.mock.calls.filter(call => call[1]?.[3] === 'request-review')).toHaveLength(0)
+  })
+
+  it('retries the canonical audit comment after a completed durable audit without repeating the transition', async () => {
+    const ready = JSON.stringify({
+      task: { id: 'task-1', title: 'Ship', status: 'ready' }, comments: [], events: [], runs: [],
+    })
+    const running = JSON.stringify({
+      task: { id: 'task-1', title: 'Ship', status: 'running', current_run_id: 7 },
+      comments: [],
+      events: [{ id: 11, kind: 'claimed', created_at: 101, run_id: 7 }],
+      runs: [],
+    })
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: ready })
+      .mockResolvedValueOnce({ stdout: 'Claimed task-1\n' })
+      .mockResolvedValueOnce({ stdout: running })
+      .mockRejectedValueOnce(new Error('comment store unavailable'))
+      .mockResolvedValueOnce({ stdout: running })
+      .mockResolvedValueOnce({ stdout: '' })
+
+    await expect(service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-comment-recover',
+    })).rejects.toThrow('Failed to comment on kanban task')
+
+    await expect(service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-comment-recover',
+    })).resolves.toMatchObject({ duplicate: true, before_status: 'ready', after_status: 'running' })
+
+    expect(mockExecFileAsync.mock.calls.filter(call => call[1]?.[3] === 'claim')).toHaveLength(1)
+    expect(mockExecFileAsync.mock.calls.filter(call => call[1]?.[3] === 'comment')).toHaveLength(2)
+  })
+
+  it('serializes concurrent duplicate approval requests for the same task', async () => {
+    let status = 'ready'
+    let releaseTransition!: () => void
+    const transitionGate = new Promise<void>(resolve => { releaseTransition = resolve })
+    let transitionStarted!: () => void
+    const transitionStartedGate = new Promise<void>(resolve => { transitionStarted = resolve })
+    mockExecFileAsync.mockImplementation(async (_command: string, args: string[]) => {
+      const operation = args[3]
+      if (operation === 'show') {
+        return {
+          stdout: JSON.stringify({
+            task: { id: 'task-1', title: 'Ship', status, current_run_id: status === 'running' ? 7 : null },
+            comments: [],
+            events: status === 'running' ? [{ id: 11, kind: 'claimed', created_at: 101, run_id: 7 }] : [],
+            runs: [],
+          }),
+        }
+      }
+      if (operation === 'claim') {
+        transitionStarted()
+        await transitionGate
+        status = 'running'
+        return { stdout: 'Claimed task-1\n' }
+      }
+      if (operation === 'comment') return { stdout: '' }
+      throw new Error(`Unexpected operation ${operation}`)
+    })
+
+    const first = service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-concurrent',
+    })
+    await transitionStartedGate
+    const second = service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-concurrent',
+    })
+    releaseTransition()
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ duplicate: false, after_status: 'running' }),
+      expect.objectContaining({ duplicate: true, after_status: 'running' }),
+    ])
+    expect(mockExecFileAsync.mock.calls.filter(call => call[1]?.[3] === 'claim')).toHaveLength(1)
+  })
+
+  it('continues the transition when a matching durable audit intent wins the creation race', async () => {
+    const ready = JSON.stringify({
+      task: { id: 'task-1', title: 'Ship', status: 'ready' }, comments: [], events: [], runs: [],
+    })
+    const running = JSON.stringify({
+      task: { id: 'task-1', title: 'Ship', status: 'running', current_run_id: 7 },
+      comments: [],
+      events: [{ id: 11, kind: 'claimed', created_at: 101, run_id: 7 }],
+      runs: [],
+    })
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: ready })
+      .mockResolvedValueOnce({ stdout: 'Claimed task-1\n' })
+      .mockResolvedValueOnce({ stdout: running })
+      .mockResolvedValueOnce({ stdout: '' })
+    const racedRecord = {
+      schema: 1 as const,
+      phase: 'prepared' as const,
+      board: 'codex-tech',
+      task_id: 'task-1',
+      event_id: 'evt-matching-race',
+      action: 'claim' as const,
+      actor: 'james',
+      channel: 'studio' as const,
+      reason: null,
+      before_status: 'ready' as const,
+      before_event_ids: [],
+      after_status: null,
+      canonical_event_id: null,
+      run_id: null,
+      timestamp: 1,
+      updated_at: 1,
+    }
+    const auditStore = {
+      get: vi.fn().mockResolvedValue(null),
+      prepare: vi.fn().mockResolvedValue({ record: racedRecord, created: false }),
+      complete: vi.fn(async (_key: unknown, patch: any) => ({
+        ...racedRecord, ...patch, phase: 'completed' as const,
+      })),
+    }
+
+    await expect(service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-matching-race', auditStore,
+    })).resolves.toMatchObject({
+      duplicate: false,
+      before_status: 'ready',
+      after_status: 'running',
+      canonical_event_id: 11,
+    })
+
+    expect(mockExecFileAsync.mock.calls.filter(call => call[1]?.[3] === 'claim')).toHaveLength(1)
+    expect(auditStore.complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed when another process wins the durable audit intent creation race', async () => {
+    mockExecFileAsync.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        task: { id: 'task-1', title: 'Ship', status: 'ready' }, comments: [], events: [], runs: [],
+      }),
+    })
+    const racedRecord = {
+      schema: 1 as const,
+      phase: 'prepared' as const,
+      board: 'codex-tech',
+      task_id: 'task-1',
+      event_id: 'evt-race',
+      action: 'archive' as const,
+      actor: 'other-process',
+      channel: 'studio' as const,
+      reason: null,
+      before_status: 'done' as const,
+      after_status: null,
+      canonical_event_id: null,
+      run_id: null,
+      timestamp: 1,
+      updated_at: 1,
+    }
+    const auditStore = {
+      get: vi.fn().mockResolvedValue(null),
+      prepare: vi.fn().mockResolvedValue({ record: racedRecord, created: false }),
+      complete: vi.fn(),
+    }
+
+    await expect(service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-race', auditStore,
+    })).rejects.toThrow('already bound to another action')
+
+    expect(mockExecFileAsync.mock.calls.filter(call => call[1]?.[3] === 'claim')).toHaveLength(0)
+  })
+
+  it('fails closed when another actor wins the durable audit intent creation race', async () => {
+    mockExecFileAsync.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        task: { id: 'task-1', title: 'Ship', status: 'ready' }, comments: [], events: [], runs: [],
+      }),
+    })
+    const racedRecord = {
+      schema: 1 as const,
+      phase: 'prepared' as const,
+      board: 'codex-tech',
+      task_id: 'task-1',
+      event_id: 'evt-actor-race',
+      action: 'claim' as const,
+      actor: 'other-process',
+      channel: 'studio' as const,
+      reason: null,
+      before_status: 'ready' as const,
+      after_status: null,
+      canonical_event_id: null,
+      run_id: null,
+      timestamp: 1,
+      updated_at: 1,
+    }
+    const auditStore = {
+      get: vi.fn().mockResolvedValue(null),
+      prepare: vi.fn().mockResolvedValue({ record: racedRecord, created: false }),
+      complete: vi.fn(),
+    }
+
+    await expect(service.performApprovalAction('task-1', 'claim', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-actor-race', auditStore,
+    })).rejects.toThrow('already bound to another action')
+
+    expect(mockExecFileAsync.mock.calls.filter(call => call[1]?.[3] === 'claim')).toHaveLength(0)
+  })
+
+  it('uses canonical changes-requested semantics for active reviewer runs and the canonical dashboard reopen for review cards', async () => {
+    const base = (status: string, events: unknown[] = []) => JSON.stringify({
+      task: { id: 'task-1', status }, comments: [], events, runs: [],
+    })
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: base('running', [{ id: 20, kind: 'claimed', run_id: 9, payload: { source_status: 'review' } }]) })
+      .mockResolvedValueOnce({ stdout: 'Requested changes for task-1\n' })
+      .mockResolvedValueOnce({ stdout: base('ready', [{ id: 21, kind: 'changes_requested', created_at: 201, run_id: 9 }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+      .mockResolvedValueOnce({ stdout: base('review') })
+      .mockResolvedValueOnce({ stdout: 'Reopened task-1\n' })
+      .mockResolvedValueOnce({ stdout: base('ready', [{ id: 22, kind: 'review_reopened', created_at: 202, run_id: null }]) })
+      .mockResolvedValueOnce({ stdout: '' })
+
+    await service.performApprovalAction('task-1', 'request_changes', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-active-review', reason: 'add evidence',
+    })
+    expect(mockExecFileAsync.mock.calls[1][1]).toEqual([
+      'kanban', '--board', 'codex-tech', 'request-changes', 'task-1', 'add evidence',
+    ])
+
+    await service.performApprovalAction('task-1', 'request_changes', {
+      board: 'codex-tech', actor: 'james', eventId: 'evt-review-card', reason: 'fix tests',
+    })
+    expect(mockExecFileAsync.mock.calls[5][1]).toEqual([
+      'kanban', '--board', 'codex-tech', 'reopen-review', 'task-1', '--reason', 'fix tests',
+    ])
   })
 
   it('normalizes 0.19 detail ids and lists durable attachments', async () => {
