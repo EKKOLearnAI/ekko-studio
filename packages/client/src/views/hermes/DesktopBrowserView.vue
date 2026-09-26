@@ -392,7 +392,7 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 .browser-settings-page { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; color: var(--text-color); }
-.settings-card { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 20px; }
+.settings-card { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 20px; background-color: transparent; }
 .settings-card :deep(.n-card__content) { max-width: 1120px; width: 100%; margin: 0 auto; }
 .profiles-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 14px; }
 .profile-card { min-width: 0; display: flex; flex-direction: column; padding: 16px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-card); transition: border-color .16s ease, box-shadow .16s ease; }
