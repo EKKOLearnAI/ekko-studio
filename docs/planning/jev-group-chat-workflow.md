@@ -4,9 +4,11 @@
 
 本版按用户最新要求修订：**JEV 是可选增强，关闭、未配置、失败或超时均不能阻断原有业务；不改变既有数据约束与业务链路。** 本版替代此前的强制验收与自动返工方案。新增字段、服务与界面均为规划，尚未实现。
 
-评审核对基线：评审附件使用 `ccf26506a`；本轮规划工作区基于本地 main `7ecfdcf1`，已包含 `6cbf17f0`（Skill JEV，PR #3169），规划初稿提交为 `56cfe85c`。这些是已检查的本地提交，不代表对后续远端 HEAD 的声明。
+评审核对基线：评审附件使用 `ccf26506a`；上一轮初稿核对使用本地 main `7ecfdcf1`，已包含 `6cbf17f0`（Skill JEV，PR #3169），规划初稿提交为 `56cfe85c`。本轮在已保存评审修订的工作树提交 `15c1e8f9` 上继续；这些是已检查的本地提交，不代表对后续远端 HEAD 的声明。
 
 摘要检查、工作流质量观察和群聊分派使用 **Studio 共享 JEV facade**，不扩展 Ekko Memory JEV 的业务代码，也不依赖某个 Agent 的 memory/skills 开关。
+
+2026-09-26 补充契约基于评审版 `15c1e8f9`：每次 provider 请求前复核权威开关/授权、明确自动评估终态、持久绑定原请求者、采用明确的事务内 hash，以及不可信 state 与临时状态规则。PR 0 的具体接口与测试拆分见同目录 `jev-sidecar-pr0-design.md`。
 
 ## 1. 必须保持的行为契约
 
@@ -110,11 +112,17 @@ evaluateJevSnapshot(snapshot, request, { signal, timeoutMs })
 
 摘要检查与复评共享一次 JEV 预算；修订生成另有 30 秒硬预算，整个任务硬截止不晚于接受时间 + JEV 预算 + 30 秒。阶段计时使用单调时间，生成耗时不重置剩余 JEV 预算；队列等待与配置读取计入累计预算。取消、业务 deadline、provider timeout 和普通 provider 错误分别记录，不自动重试。
 
-配置快照在原任务边界或可选后台任务中取得，不能新增一个阻塞原业务的凭据读取步骤。异步任务冻结来源 Profile、策略版本、授权范围和来源 hash，防止执行时串到另一个 Profile。
+配置快照在原任务边界或可选后台任务中取得，不能新增一个阻塞原业务的凭据读取步骤。异步任务绑定来源 Profile、策略版本、已验证的身份引用、请求范围上界和来源 hash，防止执行时串到另一个 Profile；不保存可一直复用的 allow 结论。
 
-API Key 只在服务端内存使用，不进 run 快照、导出、socket 或日志。重启后未完成的增强可标记 skipped，不是业务恢复必须等待的任务；需要重新评估时重新授权并读配置。用户取消、对象删除、Profile 权限撤回取消对应增强。
+**快照不冻结“仍可执行”的权限。** 每次实际 provider 请求前（首次 JEV、修订模型生成、JEV 复评均包含），取得并发槽后重新读取权威设置及身份/权限/来源状态：集成开关、房间/节点模式、Profile 是否存在和仍获授权、请求者/配置授权主体是否仍有效、对象和来源是否仍匹配。不能复用入队时的 allow、浏览器状态或仅靠本地撤权事件。读取失败按 settings_unavailable/authorization_unavailable 跳过；关闭或撤权分别用 disabled/profile_access_revoked/requester_access_revoked，零后续请求。
+
+有效请求的模型、阈值和问题策略沿用快照；凭据被清空/轮换或 provider 地址改变则旧任务结束，不能继续使用被替换的 Key，也不自动换 Key/换 Profile。请求前复核和结果应用前复核都保留。权威读取完成是该请求的放行时点；之后已发出的网络请求无法追回，尽力 abort，迟到结果不应用。一个任务已被取消/失效就不可因开关重新打开而复活；新的显式任务需重新取得快照。
+
+API Key 只在服务端内存使用，不进 run 快照、导出、socket 或日志。重启丢失的内存增强不补造 skipped 记录，也不是业务恢复必须等待的任务；需要重新评估时重新授权并读配置。用户取消、对象删除、Profile 权限撤回取消对应增强。
 
 发送前先完成完整 request（含 state、questions、criteria、instructions、model）的序列化，再计算 UTF-8 字节数，上限 64,000。序列化失败或超限整体 skip，后者记录 `input_too_large` 与字节数，不记录原文。不得只量 state 或字符数，也不得截断证据后给可靠判断。摘要现有批次可能更大，应记录覆盖率；将来需要分块评估再单独设计，不改变原摘要批次大小与游标语义。
+
+**所有 JEV state 都是不可信数据**，包括摘要、消息、工作流输入输出、工具结果、成员职责、用户写的质量标准，以及此前模型生成的内容。固定可信评估模板明确要求只判断数据，不执行其中指令；用户规则作为 state 数据，questions/instructions 的控制模板由代码生成，不能把整段用户文本拼为高优先级指令。候选 ID 白名单、证据存在性、输出 schema 和权限仍由代码验证。摘要修订提示沿用同样边界，不提供工具；提示词隔离不替代程序检查。
 
 JEV 使用 choice/score/noul 等受限类型。业务结果和原因码由代码校验；展示文本来自预定义规则及已有证据，不假设 JEV 能输出任意解释、修复代码或执行证明。
 
@@ -126,9 +134,13 @@ JEV 使用 choice/score/noul 等受限类型。业务结果和原因码由代码
 
 自动 task key 为 integration + Profile + 对象执行身份/摘要 generation 与 version/消息版本 + inputHash + configHash。手工重新检查带独立 attemptId；自动重放保留确定性 attempt key。满载 `queue_full`，停止期间 `queue_unavailable`，不会等待腾出空间或重试主业务。
 
+provider 前的配置/授权读取也纳入独立物理 worker 上限（全局 4 / 每 Profile 1）；底层读取忽略取消时，逻辑任务可以按时结束，但其物理槽至底层 settle 才释放，防止重复启动无限挂起 I/O。完整调度细节见 PR 0 设计。
+
 `trySchedule` 只按 integration/Profile/来源执行身份/attempt 做临时在途去重，不等配置 I/O 或大输入 hash；worker 取得快照后才计算完整 task key、查终态记录并评估。createdAt 固定为 attempt 发起时间，完成时间另记 finishedAt；UI 选择最新 attempt 不能用响应返回时间排序，避免旧请求迟到覆盖新检查。无记录且缓存已清理时允许重复纯观察，不放宽 CAS/claim 约束。
 
-第一版不持久化 pending/running 质量记录：UI 运行中状态为带 ownerInstanceId 和到期时间的临时通知，缺少终态记录时在超时/重连后显示“未评估”，不会永久转圈。进程重启丢弃内存 pending 任务，不扫描历史对象补执行；未完成 attempt 视为未评估，无法恢复的 skip 无需伪造一条数据库记录。取消、对象删除、Profile 撤权和关闭开关触发本地失效；跨实例另在结果应用前读取权威状态复核，不能只靠本地通知。
+第一版不持久化 pending/running 质量记录。临时通知含 attemptId、sourceKey、ownerInstanceId、每次进程启动新建的 ownerBootId、递增 eventSeq、phase、有限 expiresAt/maxAgeMs。UI 仅在收到有效且来源匹配的活跃任务确认后显示“排队中/检查中”；消息过期、断线重连、实例切换或查不到任务都退回“未评估/状态不可用”，不推断任务已失败或服务已重启。进程重启丢弃内存任务，不扫描历史对象补执行，不事后伪造 skipped 记录。
+
+首版从任务原因码中移除 `process_restarted`：没有持久任务日志或明确的原 owner 启动记录，不能根据缺记录/连接断开给出这一诊断。临时状态不算完成证据；只以独立仓储的终态记录显示完成。较旧 attempt/eventSeq 或旧 sourceKey 的迟到通知不能恢复 spinner、覆盖新结果；状态 TTL 的客户端单调计时必须有上限，不能靠服务器时钟差无限续期。取消/对象删除/撤权/关闭的本地通知用于尽快终止，跨实例仍在每次 provider 请求和结果应用前权威复核。
 
 多实例允许重复的纯观察 provider 调用，不承诺集群级 at-most-once；终态记录通过任务/attempt 唯一键做 first-write-wins 去重。单实例的内存队列不能保证数据库副作用唯一：摘要修订必须用专用 CAS，auto 必须用消息级 claim+queue 事务。群聊现有队列是 SQLite 路径，无数据库则 skip，不另建无事务的 JSON 自动执行旁路；Workflow 的质量仓储按既有 JSON fallback 的单进程能力实现，不声称其支持跨进程文件事务。
 
@@ -139,6 +151,20 @@ JEV 使用 choice/score/noul 等受限类型。业务结果和原因码由代码
 定义带版本的 canonical serialization：对象键递归按确定的字典序排列；业务有序数组保持顺序；只有明确作为集合的 ID 才去重排序；字符串保留原始内容，不做 trim 或 Unicode 改写；省略可选对象属性的 undefined，拒绝循环、非有限数值和数组 undefined，不把序列化失败转成空输入。
 
 inputHash 包含最终组装的节点输入/摘要来源/消息文本、上游 edge evidence IDs、最终输出、证据 ID 及内容 hash 或 revision、criterion IDs/text/evidence type、执行身份和 iterationPath。不能只 hash 引用 ID 而忽略可变内容。configHash 包含集成、非敏感 provider/model 配置、阈值/预算、策略及 schema 版本，不包含 API Key 或其散列；无需保存这份配置正文。阈值/模型按任务快照执行，应用前独立重检当前开关/权限；更改策略只对新任务生效，人工改了质量规则则旧规则结果只留历史。
+
+### 4.5 消息、职责和权限的并发令牌
+
+首版选择 **SHA-256(canonical JSON) 的权威投影 hash**，不把现有 timestamp/updatedAt 当 revision，也不假设表里已有 messageRevision 或 authzRevision。以下令牌均带 `projectionVersion: 1`，业务 PR 定义同一投影函数供捕获与复核使用：
+
+| 令牌 | 精确投影 | 原子校验位置 |
+| --- | --- | --- |
+| messageHash | gc_messages 的 id、roomId、senderId、senderType、senderAgentRecordId、role、原 content、归一化 mentions、run_id、timestamp、persistedAt，及服务端保存的 handoff/continuation/任务归属 | 读取冻结来源；S1 CAS 或 auto 入队事务中重读同一行和归属记录重算；缺行直接失效 |
+| candidateHash | 候选按稳定成员记录 ID 排序；每项含 gc_room_agents.id/agentId、name、description、agent/agentMode、profile、provider/model/apiMode、reasoningEffort、agentPreset、executorType、ownerMemberId、connectorId、removedAt 及现有禁用/策略字段 | provider 前复核；auto 事务中重算；连接在线状态单独实时检查，不用旧 hash 代替 |
+| authorizationHash | 原请求者 principal 的持久 ID/类型、users.id/status/role、该 Profile 的 user_profiles 授权行；gc_room_members.id/roomId/userId/authUserId；房间 owner、增强模式和实际 admission 使用的 Agent/handoff/guest/远程访问策略字段；适用时含 App/grant 的持久 ID 与撤销状态 | 每次 provider 前新读；写入/入队事务内对数据库部分重算，并再次执行实际 admission 判定 |
+
+显示名、头像、登录时间等非授权字段不参与 authorizationHash。原请求者成员记录删除后重建，其 PK 改变使旧绑定失效，即使显示名相同。外部 Profile 设置/文件不伪装成 SQL 原子数据：在请求/短事务前通过权威读取单独复核，事务内不做网络或文件 I/O。hash 相同只证明该次检查的状态相同，不承诺检测撤权后又重新授权等全部历史变化；已观察到失效的任务始终保持终止。
+
+实际 admission 若读取了投影表之外的新字段，必须同步扩充授权投影与测试，不能把缓存中的 allow 布尔值放进 hash 就当授权。事务内重算与条件写入处于同一写事务；不能在 JS 先查 hash、释放锁后再无条件写。摘要自身仍使用既有 generation/version + 专用 CAS 条件；Workflow 使用持久 execution 身份 + inputHash，两者不被这些投影替代。
 
 ## 5. 群聊摘要增强
 
@@ -181,7 +207,7 @@ flowchart TD
 - sourceVersion、sourceSummaryHash/正文等值匹配；hash 在事务内校验或使用持久化 hash，不允许无保护的先读后写；
 - summaryThroughMessageId、summaryThroughMessageTimestamp、summarizedTurnCount 匹配；
 - **status = success，summaryRunToken 为空**；下一批 claim 仅改变 status 时也必须阻止旧 S1；
-- 冻结来源消息仍存在且版本/内容 hash 匹配，房间修订开关和数据库内的授权/成员版本仍有效。外部 Profile 权限在进入事务前按现有授权机制重检，不能把文件读取放进长期持有的数据库锁。
+- 冻结来源消息仍存在且 messageHash 匹配，房间修订开关、原成员 PK 和 authorizationHash 仍有效（投影见 4.5）。外部 Profile 权限在进入事务前按现有授权机制重检，不能把文件读取放进长期持有的数据库锁。
 
 成功只修改正文、version = sourceVersion + 1、updatedAt；不修改锚点、计数、游标、generation、租约或 drain 字段。冲突记 `cas_conflict`，直接丢弃，不强写、不自动重试。若同时写修订应用回执，使用同一事务；回执失败可放弃 S1，但不能回滚已经独立提交的 S0。
 
@@ -199,7 +225,15 @@ UI 只展示匹配当前摘要 generation/version/hash 的最新完成 attempt�
 
 ### 6.1 旁路执行
 
-仅在原节点终态已由 `updateWorkflowRunNodeSession` 成功持久化后，捕获该次节点输入、上游引用、最终输出和可用证据，用不会抛错的 `trySchedule` 非阻塞调度。未完成持久化不创建质量任务。普通 DAG 和回环执行器都接入这个完成边界，不为提前评估重排原执行代码。
+**首版仅对已持久化为 completed 的节点执行自动质量评估。** 捕获该次节点输入、上游引用、最终输出和可用证据，用不会抛错的 `trySchedule` 非阻塞调度。普通 DAG 和回环执行器都接入这个完成边界，不为提前评估重排原执行代码。
+
+| 节点状态 | 首版自动评估 |
+| --- | --- |
+| completed | 可以排队；配置、来源、权限和截止时间仍需通过检查；空输出可作质量数据，不能借缺输出重新运行节点 |
+| failed、canceled、blocked、approval_rejected | 不排队，零 JEV 请求；失败诊断使用原业务记录 |
+| queued、running、运行时 pending_approval、未创建执行记录的 skipped 节点 | 不排队，零 JEV 请求 |
+
+用户主动“重新检查”也仅作用于保留的 completed 执行，失败节点质量诊断不在首版范围。所属 run 后来 completed 或因其他节点失败而 failed，不抹掉已完成节点的资格；run canceled、原 run deadline 已到、对应执行被重跑清理或删除则取消/跳过未完成评估。自动任务不能以 run.failed 为理由把失败节点当成 completed。没有父 deadline 时仅用旁路预算；有 deadline 时旁路硬截止取两者较早者，绝不延长原运行预算。
 
 `evaluateWorkflowEdgeRoute()`、后继调度、`waitForNodeApproval()` 和 run terminal status 更新均不得 await 质量任务。当前完成状态通常在人工审批之后写入，因此首版不承诺当前审批前会有本节点的新评估；只能展示已存在且明确标注来源执行的历史参考。
 
@@ -246,7 +280,7 @@ qualityEvaluation: {
 
 必须新增独立的 `workflow_run_quality_evaluations` 仓储/表及 JSON fallback 集合，不能复用 edge evaluation。当前 `createWorkflowRunEdgeEvaluation()` 明确禁止向 terminal run 追加，而质量记录需要允许 completed/failed 后到达。质量数据不写入 workflow_runs.status、node session status、edge condition evidence 或原业务 error。
 
-写入必须以父记录存在为条件，并验证 `runId, workflowId, nodeSessionId, nodeId, executionId, iterationPath` 完整匹配。SQLite 在同一短事务内验证和插入；JSON fallback 在其现有单进程串行存储边界内无 await 地验证/插入，不承诺多进程共享 JSON。取消/删除的执行不接收迟到新结果，终态 completed/failed 且父身份仍有效则允许。
+写入必须以父记录存在为条件，并验证 `runId, workflowId, nodeSessionId, nodeId, executionId, iterationPath` 完整匹配，node session 仍为 completed。SQLite 在同一短事务内验证和插入；JSON fallback 在其现有单进程串行存储边界内无 await 地验证/插入，不承诺多进程共享 JSON。取消/删除的执行不接收迟到新结果；允许追加的是 completed/failed 的 **run** 中仍有效的 completed **node session**，不允许评估失败节点。
 
 唯一键为 `(nodeSessionId, attemptKey)`，其中自动 attemptKey 按 inputHash/configHash/评估 schema 版本确定，手动重查带新的稳定 attemptId。重试网络响应、socket 重放或两实例排队不覆盖已有终态记录。历史 attempt 保留；UI 从当前 nodeSessionId 下按 createdAt 与 attemptId 确定最新记录，并显示来源配置，规则变更后的旧结果不冒充新评估。
 
@@ -278,13 +312,21 @@ suggest 显示“建议交给 X”，点击后仍经过已有 @/入队流程。�
 
 auto 只补充本来没有目标的消息。入队前再次核对内容版本、房间开关、权限、成员状态及是否已被人工处理；判断不可用就不自动分派，消息保留，用户仍可 @。这与当前无目标消息不会自动叫起 Agent 的行为一致。
 
+**auto 的执行主体持久绑定原请求者。** 在原消息完成保存后的独立旁路步骤，由服务端认证上下文建立 `gc_message_routing_contexts`（拟议表，messageId 唯一）；至少存 `roomId, messageId, messageHash, requesterPrincipalType, requesterAuthUserId, requesterMemberRecordId, requesterMemberId, authorizationHash, authGrantRef?, createdAt`。`requesterMemberRecordId` 是 gc_room_members.id，`requesterMemberId` 是现有队列使用的 member.userId，不能混用；必须和原消息 senderId 对应。
+
+认证来源只能是服务端实际验证的用户及授权，不信任握手里的自报 authUserId/userId、显示名或任意文本。首版 auto 只接收可持久复核的 authenticated_user；邀请访客和无认证本地连接若尚无服务端可验证的持久主体/授权引用，就记 requester_unverifiable，跳过自动分派，不影响原发言、显式 @ 或用户主动采用推荐。不能为兼容而自动套用房主、目标 Agent owner 或系统管理员身份。
+
+claim 与 execution queue 均关联这份路由上下文，入队/恢复/真正调用前重新查原用户 active 状态、原成员 PK、当前 room admission、Profile 的显式房间授权及适用的 App/grant 撤销状态。房间提供 Profile 凭据的配置主体与原请求者是两个角色：可以按既有房间授权使用该 Profile，但不能把提供凭据者替换为任务请求者。原成员被移除、账号禁用或授权已失效就跳过/取消尚未开始的自动项。持久化身份与授权引用，不持久化 JWT、API Key 或原始取消 capability；正常 socket 断连不自动等同于账号撤权。
+
+旁路身份记录写失败不影响消息保存，只禁止 auto；重放不得用当前点击者/worker 身份覆盖原上下文，历史消息缺少可信绑定时不猜测补齐。人工明确采用推荐或替换是另一次有授权的操作，另记 appliedBy 主体，保留原消息作者，不能伪称 auto。消息/房间删除一并清理 routing context/claim。
+
 原 `UNIQUE(messageId, targetAgentId)` 只能防止同目标重复。新增 `gc_message_routing_claims`，以 messageId 为唯一键，保存房间、消息 hash、targetAgentId、queueId、状态、创建/更新时间和版本。claim 保留至原消息清理，不因任务失败立即删掉使其可再次自动分派。
 
 新增专用存储命令 `claimAndEnqueueAutoRouting(...)`，在同一个 `BEGIN IMMEDIATE` 事务里完成：
 
 1. 确认消息/房间存在，消息正文、mention、角色和所属任务的 hash/版本仍匹配。
 2. 确认没有显式目标、handoff/continuation、人工处理记录或已有 queue/claim，房间仍为 auto。
-3. 验证数据库中的成员资格、策略/权限版本、未禁用状态，以及本次目标与候选快照一致。
+3. 验证持久的原请求者绑定、成员资格、实际 admission 和第 4.5 节的权限/职责 hash；原请求者仍获授权，本次目标与候选快照一致。
 4. 插入消息级 claim；生成队列 ID、房间 sequence，插入现有 execution queue，并写回 queueId。
 5. 提交后才通知原执行队列；任一步失败回滚全部写入，不调用 Agent。
 
@@ -364,6 +406,12 @@ JEV 设置验证保存/回读、Profile 隔离和显式 false。浏览器验证�
 | auto 覆盖 | queued 与 start CAS 竞争、同目标替换、running 覆盖 | 取消和启动只有一个获胜；不删原消息、不重置摘要、不暗中调用第二次 |
 | 资源隔离 | 队列满、provider 忽略 abort、修订挂起、存储锁竞争 | 原聊天与运行继续可用，增强 pending/在途数有上限，无无限重试 |
 | 设置兼容 | 旧文件/旧 PUT、空 Key、显式 false、DELETE、跨 Profile | 合并保存、重置、隔离正确；缺 JEV 可运行既有图 |
+| 每次请求门控 | 槽等待中关闭、初评后撤权、生成前撤权、凭据轮换、权威读取失败 | 对应阶段及所有后续 provider 请求为零；快照不能绕过许可 |
+| Workflow 终态 | completed 与 failed/canceled/blocked/approval_rejected/非终态逐一输入 | 只有持久 completed 可自动排队；run.failed 不扩大节点资格 |
+| 原请求者 | 账号禁用、成员删除重建、同显示名替换、worker 恢复、缺可信身份 | 不替换成房主/系统身份；未获授权的 auto 不入队、不调用 |
+| 事务 hash | 分别改 message/candidate/authorization 投影，保持 timestamp 不变 | 事务重算拒绝旧结果；非授权字段如头像变化不误触发权限失效 |
+| 不可信 state | state/职责/criteria/工具结果含改规则、换目标或泄露指令 | 模板仍只判断数据；未知 ID/缺证据被代码拒绝，不能触发工具 |
+| 临时状态 | 丢通知、跨实例查不到、断线重连、TTL 到期、旧 boot/attempt 迟到 | 清理临时状态，不推断重启/失败，不生成 process_restarted 记录 |
 
 测试先构造固定时间、稳定输入与 mock provider/模型，排除模型随机输出造成的假差异；并行执行比较依赖关系与并发边界，不要求本来无序的两个节点拥有相同墙钟结束顺序。
 
@@ -381,14 +429,14 @@ JEV 设置验证保存/回读、Profile 隔离和显式 false。浏览器验证�
 
 | 分类 | reasonCode |
 | --- | --- |
-| 配置/资源 | disabled、not_configured、settings_unavailable、queue_full、queue_unavailable、storage_unavailable、storage_busy、process_restarted |
-| 身份/来源 | object_deleted、profile_access_revoked、source_changed、superseded |
+| 配置/资源 | disabled、not_configured、settings_unavailable、configuration_changed、queue_full、queue_unavailable、storage_unavailable、storage_busy |
+| 身份/来源 | object_deleted、profile_access_revoked、requester_access_revoked、requester_unverifiable、authorization_unavailable、source_changed、superseded |
 | 预算/取消 | input_too_large、invalid_input、deadline_exceeded、caller_cancelled |
 | provider | provider_timeout、provider_rate_limited、provider_auth_failed、provider_error |
 | 结果/资格 | invalid_result、low_confidence、insufficient_evidence、no_candidates、not_eligible、no_match |
 | 应用/记录 | cas_conflict、record_write_failed |
 
-一般时间顺序上，caller cancellation 优先分类；否则本地累计 deadline 先到记 deadline_exceeded，单请求 SDK 超时先到记 provider_timeout。无持久记录的重启任务可由 UI 显示 process_restarted/未评估，不承诺事后补全准确失败时间。诊断回调本身抛错必须吸收。
+一般时间顺序上，caller cancellation 优先分类；否则本地累计 deadline 先到记 deadline_exceeded，单请求 SDK 超时先到记 provider_timeout。无记录只表示“未评估/状态不可用”，不能凭此写 process_restarted 或生成任务失败证据。临时 phase 到期是展示状态失效，不能推断 provider 超时；真实任务原因只由持有任务的服务端在观察到事件后生成。诊断回调本身抛错必须吸收。
 
 质量记录和日志默认只包含集成/关联对象 ID、来源与配置 hash、输入字节/候选/规则数量、决定/置信值、有限 evidence refs、耗时、reasonCode 和可用的 usage。规则显示从原节点快照读取，不为评估复制整份输入。禁止默认记录 Key、完整群聊消息/摘要、Workflow 输入输出、provider 原始响应和错误 body，亦不采集其他房间、私聊或私人记忆。引用读取仍走原权限，日志不把引用当作授权。
 
@@ -413,6 +461,8 @@ JEV 设置验证保存/回读、Profile 隔离和显式 false。浏览器验证�
 | 实施拆分与验收矩阵 | 采用 PR 0–6；业务设置随消费者交付，不在 PR 0 提前展示不可用功能 | 9、9.1 |
 
 额外代码核对发现：当前自动覆盖不能复用撤回消息 API（会删除消息并重置摘要）；已在 7.2 单独规定窄取消事务。原有接口的行为不在本次规划中被改写。
+
+本轮追加契约对应位置：请求前权威复核见 4.2；Workflow 明确终态见 6.1/6.4；原请求者持久绑定见 7.2；事务内 hash 定义见 4.5；不可信 state 见 4.2；临时检查状态和移除无依据 process_restarted 见 4.3/9.3。实现测试必须覆盖：初次评估后关闭再复评、排队后撤权、修订前撤权、原请求者被删除、消息/职责/权限投影变化、全部节点终态零调用矩阵，以及断线/多实例切换不误报重启。
 
 ## 11. 本次完成边界
 
