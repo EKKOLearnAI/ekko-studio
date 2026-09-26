@@ -10,6 +10,7 @@ import { getSystemPrompt } from '../../public/runs/prompt'
 import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
 import { logger, bridgeLogger } from '../../public/logging'
 import { normalizeTokenUsage, recordSessionUsage } from '../usage/usage-recorder'
+import { getRecordedUsageByRun } from '../../repositories/usage-store'
 import type {
   PrimaryAgentBridgeClient as AgentBridgeClient,
   PrimaryAgentBridgeContextEstimate as AgentBridgeContextEstimate,
@@ -352,7 +353,7 @@ function processBridgeInterimMessage(
   state.bridgePendingAssistantContent = text
   message.content = text
   syncBridgeReasoningToMessage(message, state.bridgePendingReasoningContent)
-  flushBridgePendingToDb(state, sessionId, runMarker)
+  flushBridgePendingToDb(state, sessionId, runMarker, runId)
 
   emit('message.interim', {
     event: 'message.interim',
@@ -949,7 +950,7 @@ export async function handleBridgeRun(
     state.activeRunMarker = undefined
     state.events = []
     state.bridgePendingToolCallMarkup = undefined
-    flushBridgePendingToDb(state, session_id, runMarker)
+    flushBridgePendingToDb(state, session_id, runMarker) // aborted/failed run — no run_id to bind
     updateSessionStats(session_id)
     const message = err instanceof Error ? err.message : String(err)
     const errUsage = await calcAndUpdateUsage(session_id, state, emit)
@@ -1382,7 +1383,7 @@ async function applyBridgeChunkAsync(
       // come for this assistant message — the next chunk is the tool call
       // itself. See bridge-delta.ts for full rationale.
       flushPendingToolMarkupToAssistant(state, runMarker, chunk.run_id, emit)
-      flushBridgePendingToDb(state, sessionId, runMarker)
+      flushBridgePendingToDb(state, sessionId, runMarker, chunk.run_id ? String(chunk.run_id) : undefined)
       const toolName = (ev.tool_name as string) || ''
       const args = ev.args as Record<string, unknown> | undefined
       const tool = recordBridgeToolStarted(state, sessionId, runMarker, toolName, args, ev.tool_call_id)
@@ -1478,7 +1479,7 @@ async function applyBridgeChunkAsync(
       pushState(sessionMap, sessionId, evType, payload)
       emit(evType, payload)
     } else if (evType === 'turn.boundary') {
-      flushBridgePendingToDb(state, sessionId, runMarker)
+      flushBridgePendingToDb(state, sessionId, runMarker, chunk.run_id ? String(chunk.run_id) : undefined)
     } else if (evType === 'reasoning.delta' || evType === 'thinking.delta') {
       const text = String(ev.text || '')
       if (text) {
@@ -1785,7 +1786,7 @@ async function applyBridgeChunkAsync(
   }
 
   flushPendingToolMarkupToAssistant(state, runMarker, chunk.run_id, emit)
-  flushBridgePendingToDb(state, sessionId, runMarker)
+  flushBridgePendingToDb(state, sessionId, runMarker, chunk.run_id ? String(chunk.run_id) : undefined)
   finalResponse = bridgeFinalResponse(chunk, state, useMoaFinalResponse)
   state.bridgePendingToolCallMarkup = undefined
   if (runMetadata?.backgroundDelegationIds.size) {
@@ -1875,6 +1876,7 @@ async function applyBridgeChunkAsync(
   state.runId = undefined
   state.activeRunMarker = undefined
   state.events = []
+  const runUsage = getRecordedUsageByRun(sessionId, 'hermes', String(chunk.run_id || ''))
   const payload = {
     event: eventName,
     run_id: chunk.run_id,
@@ -1885,6 +1887,16 @@ async function applyBridgeChunkAsync(
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     contextTokens,
+    // Provider-recorded usage for THIS run only (sum of model_call rows).
+    // Distinct from inputTokens/outputTokens above, which are session/context estimates.
+    runUsage: {
+      input: runUsage.inputTokens,
+      output: runUsage.outputTokens,
+      cacheRead: runUsage.cacheReadTokens,
+      cacheWrite: runUsage.cacheWriteTokens,
+      reasoning: runUsage.reasoningTokens,
+      apiCalls: runUsage.apiCalls,
+    },
     queue_remaining: state.queue.length,
     background_pending: backgroundPendingCount(state),
     autonomous: runMetadata?.autonomous === true,

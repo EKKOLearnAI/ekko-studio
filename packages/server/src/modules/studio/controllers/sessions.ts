@@ -2146,7 +2146,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
   const limit = ctx.query.limit ? parseInt(ctx.query.limit as string, 10) : 150
   const profile = requestedProfile(ctx)
 
-  const { getSessionDetailPaginated } = await import('../public/sessions')
+  const { getSessionDetailPaginated, attachRunUsageToMessages } = await import('../public/sessions')
   const localResult = getSessionDetailPaginated(ctx.params.id, offset, limit)
   const result = localResult && (!profile || localResult.session.profile === profile)
     ? localResult
@@ -2164,6 +2164,10 @@ export async function getConversationMessagesPaginated(ctx: any) {
   const assistantMessageIds = result.messages
     .filter((message: any) => String(message.display_role || message.role || '') === 'assistant')
     .map((message: any) => message.id)
+
+  // Attach provider-recorded usage (by run_id) to assistant messages so the
+  // UI can render token usage after a page refresh / session reload.
+  const messagesWithUsage = attachRunUsageToMessages(ctx.params.id, result.messages)
 
   ctx.body = {
     session: {
@@ -2189,7 +2193,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
       input_tokens: session.input_tokens,
       output_tokens: session.output_tokens,
     },
-    messages: result.messages,
+    messages: messagesWithUsage,
     taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),
     total: result.total,

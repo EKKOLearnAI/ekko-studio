@@ -369,6 +369,57 @@ function formatDuration(ms: number): string {
 
 const timeStr = computed(() => formatChatTimestamp(props.message.timestamp));
 
+function formatTokenCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
+}
+
+const messageRunUsage = computed(() => {
+  const usage = props.message.usage;
+  if (!usage) return null;
+  const input = Number(usage.input || 0);
+  const output = Number(usage.output || 0);
+  const cacheRead = Number(usage.cacheRead || 0);
+  const reasoning = Number(usage.reasoning || 0);
+  if (input <= 0 && output <= 0 && cacheRead <= 0 && reasoning <= 0) return null;
+  return {
+    input,
+    output,
+    cacheRead,
+    reasoning,
+  };
+});
+
+const showTokenUsage = computed(() => {
+  if (!settingsStore.display.show_cost) return false;
+  if (props.message.role !== 'assistant') return false;
+  if (props.message.isStreaming || isAgentError.value) return false;
+
+  const visibleBody = (parsedThinking.value.body || props.message.content || '').trim();
+  if (!visibleBody) return false;
+
+  // Prefer provider-recorded usage for THIS reply/run. Session-level counters
+  // are cumulative context estimates and must not be shown as reply cost.
+  return messageRunUsage.value != null;
+});
+
+const tokenUsageLabel = computed(() => {
+  const usage = messageRunUsage.value;
+  if (!usage) return '';
+  if (usage.cacheRead > 0) {
+    return t('chat.tokenUsageWithCache', {
+      input: formatTokenCount(usage.input),
+      cache: formatTokenCount(usage.cacheRead),
+      output: formatTokenCount(usage.output),
+    });
+  }
+  return t('chat.tokenUsage', {
+    input: formatTokenCount(usage.input),
+    output: formatTokenCount(usage.output),
+  });
+});
+
 function isImage(type: string): boolean {
   return type.startsWith("image/");
 }
@@ -1259,6 +1310,11 @@ onBeforeUnmount(() => {
               <span></span><span></span><span></span>
             </span>
           </div>
+          <span
+            v-if="showTokenUsage"
+            class="message-usage"
+            :title="tokenUsageLabel"
+          >{{ tokenUsageLabel }}</span>
           <div class="message-meta">
             <button
               v-if="canPlaySpeech"
@@ -1871,6 +1927,21 @@ onBeforeUnmount(() => {
   }
   50% {
     opacity: 0.5;
+  }
+}
+
+.message-usage {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: $text-muted;
+  white-space: nowrap;
+  user-select: none;
+
+  .dark & {
+    color: #999999;
   }
 }
 

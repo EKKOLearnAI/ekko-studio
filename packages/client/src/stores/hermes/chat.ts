@@ -107,6 +107,16 @@ export interface Message {
   runMarker?: string | null
   toolRunId?: string
   toolMessages?: Message[]
+  /** Provider-recorded usage for the run that produced this assistant reply. */
+  usage?: {
+    input: number
+    output: number
+    cacheRead?: number
+    cacheWrite?: number
+    reasoning?: number
+    apiCalls?: number
+  }
+  runId?: string | null
 }
 
 export type SubagentStreamStatus =
@@ -1103,6 +1113,19 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
     // Normal user/assistant/command messages
     const displayRole = msg.display_role || msg.role
     const displayContent = msg.display_content ?? msg.content
+    // Server attaches provider-recorded usage (by run_id) to assistant rows on
+    // history read-back, so it survives refresh / reload. Surface it on the
+    // mapped Message so MessageItem can render it without a live run event.
+    const usage = displayRole === 'assistant' && msg.usage
+      ? {
+          input: msg.usage.input ?? 0,
+          output: msg.usage.output ?? 0,
+          ...(msg.usage.cacheRead != null ? { cacheRead: msg.usage.cacheRead } : {}),
+          ...(msg.usage.cacheWrite != null ? { cacheWrite: msg.usage.cacheWrite } : {}),
+          ...(msg.usage.reasoning != null ? { reasoning: msg.usage.reasoning } : {}),
+          ...(msg.usage.apiCalls != null ? { apiCalls: msg.usage.apiCalls } : {}),
+        }
+      : undefined
     result.push({
       id: String(msg.id),
       role: displayRole === 'moa' ? 'system' : displayRole,
@@ -1112,6 +1135,8 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
       systemType: displayRole === 'command' ? 'command' : undefined,
       finishReason: readFinishReason(msg),
       runMarker: readRunMarker(msg),
+      runId: msg.run_id || undefined,
+      usage,
     })
   }
   const restored = mergeTaskPlanMessages(result, taskPlans)
@@ -1866,8 +1891,14 @@ export const useChatStore = defineStore('chat', () => {
           existing.reasoningEffort = fresh.reasoningEffort
           if (!pushEnabledWriteTargets.has(existing.id)) existing.pushEnabled = fresh.pushEnabled
           existing.messageCount = fresh.messageCount
-          existing.inputTokens = fresh.inputTokens
-          existing.outputTokens = fresh.outputTokens
+          // sessions.input_tokens/output_tokens are often still 0 in the list API.
+          // Never let that wipe runtime usage from usage.updated / run.completed.
+          const freshInput = Number(fresh.inputTokens || 0)
+          const freshOutput = Number(fresh.outputTokens || 0)
+          if (freshInput > 0 || freshOutput > 0) {
+            existing.inputTokens = fresh.inputTokens
+            existing.outputTokens = fresh.outputTokens
+          }
           existing.workspace = fresh.workspace
           existing.isPinned = fresh.isPinned
           existing.categoryId = fresh.categoryId
@@ -2472,6 +2503,70 @@ export const useChatStore = defineStore('chat', () => {
       // Add new session
       sessions.value.push(session)
     }
+  }
+
+  function normalizeRunUsage(raw: any): Message['usage'] | undefined {
+    if (!raw || typeof raw !== 'object') return undefined
+    const input = Number(
+      raw.input ?? raw.inputTokens ?? raw.input_tokens ?? 0,
+    )
+    const output = Number(
+      raw.output ?? raw.outputTokens ?? raw.output_tokens ?? 0,
+    )
+    const cacheRead = Number(
+      raw.cacheRead ?? raw.cacheReadTokens ?? raw.cache_read ?? raw.cache_read_tokens ?? 0,
+    )
+    const cacheWrite = Number(
+      raw.cacheWrite ?? raw.cacheWriteTokens ?? raw.cache_write ?? raw.cache_write_tokens ?? 0,
+    )
+    const reasoning = Number(
+      raw.reasoning ?? raw.reasoningTokens ?? raw.reasoning_tokens ?? 0,
+    )
+    const apiCalls = Number(raw.apiCalls ?? raw.api_calls ?? 0)
+    if (![input, output, cacheRead, cacheWrite, reasoning].some(n => Number.isFinite(n) && n > 0)) {
+      return undefined
+    }
+    return {
+      input: Number.isFinite(input) ? input : 0,
+      output: Number.isFinite(output) ? output : 0,
+      ...(Number.isFinite(cacheRead) && cacheRead > 0 ? { cacheRead } : {}),
+      ...(Number.isFinite(cacheWrite) && cacheWrite > 0 ? { cacheWrite } : {}),
+      ...(Number.isFinite(reasoning) && reasoning > 0 ? { reasoning } : {}),
+      ...(Number.isFinite(apiCalls) && apiCalls > 0 ? { apiCalls } : {}),
+    }
+  }
+
+  function attachRunUsageToAssistant(
+    sessionId: string,
+    preferredMessageId: string | null | undefined,
+    evt: any,
+  ) {
+    const usage = normalizeRunUsage(evt?.runUsage || evt?.usage)
+    if (!usage) return
+    const runId = typeof evt?.run_id === 'string' && evt.run_id.trim()
+      ? evt.run_id
+      : typeof evt?.runId === 'string' && evt.runId.trim()
+        ? evt.runId
+        : null
+    const msgs = getSessionMsgs(sessionId)
+    let target = preferredMessageId
+      ? msgs.find(m => m.id === preferredMessageId && m.role === 'assistant')
+      : undefined
+    if (!target) {
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        const message = msgs[i]
+        if (message.role !== 'assistant') continue
+        if (message.systemType === 'error') continue
+        if (!(message.content || '').trim() && !(message.reasoning || '').trim()) continue
+        target = message
+        break
+      }
+    }
+    if (!target) return
+    updateMessage(sessionId, target.id, {
+      usage,
+      ...(runId ? { runId } : {}),
+    })
   }
 
   function updateMessage(sessionId: string, id: string, update: Partial<Message>) {
@@ -4314,6 +4409,7 @@ export const useChatStore = defineStore('chat', () => {
                   if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
                 }
               }
+              attachRunUsageToAssistant(sid, completedAssistantMessageId || activeAssistantMessageId, evt)
               // Belt-and-suspenders: some providers may deliver the final
               // assistant text only via run.completed.output (no message.delta
               // stream). If we never produced assistant text but the gateway
@@ -4984,6 +5080,7 @@ export const useChatStore = defineStore('chat', () => {
               if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
             }
           }
+          attachRunUsageToAssistant(sid, completedAssistantMessageId || activeAssistantMessageId, evt)
           // Check if backend provided parsed content (from stringified array format)
           let finalOutputTrimmed = ''
           if ((evt as any).parsed_content !== undefined) {
@@ -5053,7 +5150,7 @@ export const useChatStore = defineStore('chat', () => {
               runProducedAssistantContent = true
             }
           }
-          const queueInsertionInterruption = isQueueInsertionInterruption(evt)
+const queueInsertionInterruption = isQueueInsertionInterruption(evt)
           const swallowedError = !runProducedAssistantText
             && !runHadToolActivity
             && finalOutputTrimmed === ''

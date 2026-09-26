@@ -1171,6 +1171,8 @@ export default {
     resumeSpeech: '再開',
     stopSpeech: '停止',
     speechNotSupported: 'このブラウザは音声読み上げをサポートしていません',
+    tokenUsage: '入力 {input} · 出力 {output}',
+    tokenUsageWithCache: '入力 {input} · キャッシュ {cache} · 出力 {output}',
     searchEnterHint: 'Enter で開く · Esc で閉じる',
     searchHint: 'Cmd/Ctrl+K',
     searchScope: '検索範囲: Web UI のローカルセッション DB のみ。読み取り専用の Hermes 履歴セッションは含まれません。',

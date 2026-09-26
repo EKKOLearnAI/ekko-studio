@@ -1171,6 +1171,8 @@ export default {
     resumeSpeech: 'Reanudar',
     stopSpeech: 'Detener',
     speechNotSupported: 'Reproducción de voz no soportada en este navegador',
+    tokenUsage: '{input} entrada · {output} salida',
+    tokenUsageWithCache: '{input} entrada · {cache} caché · {output} salida',
     searchEnterHint: 'Enter para abrir · Esc para cerrar',
     searchHint: 'Cmd/Ctrl+K',
     searchScope: 'Alcance de búsqueda: solo base de datos local de sesiones de Web UI; no incluye sesiones históricas Hermes de solo lectura.',

@@ -6,6 +6,7 @@ export type RunMessageDraft = Omit<SessionMessage, 'id' | 'session_id' | 'runMar
   runMarker?: string | null
   run_marker?: string | null
   timestamp?: number
+  run_id?: string | null
 }
 
 interface PersistRunMessagesOptions {
@@ -71,6 +72,7 @@ export function persistRunMessages(
     reasoning: message.reasoning ?? null,
     reasoning_details: message.reasoning_details ?? null,
     reasoning_content: message.reasoning_content ?? null,
+    run_id: message.run_id ?? '',
   }))
   const ids = atomic
     ? addMessages(rows).map(id => id as number | undefined)

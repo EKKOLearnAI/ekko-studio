@@ -1171,6 +1171,8 @@ export default {
     resumeSpeech: 'Reprendre',
     stopSpeech: 'Arrêter',
     speechNotSupported: 'Reproduction vocale non prise en charge dans ce navigateur',
+    tokenUsage: '{input} entrées · {output} sorties',
+    tokenUsageWithCache: '{input} entrées · {cache} cache · {output} sorties',
     searchEnterHint: 'Entrée pour ouvrir · Échap pour fermer',
     searchHint: 'Cmd/Ctrl+K',
     searchScope: 'Portée de recherche : base locale des sessions Web UI uniquement ; les sessions d’historique Hermes en lecture seule ne sont pas incluses.',

@@ -458,7 +458,7 @@ export function getResponseRunState(state: SessionState, runMarker?: string): Re
 }
 
 /** Flush all non-user messages for this run to DB in order. */
-export function flushResponseRunToDb(state: SessionState, sessionId: string): string | undefined {
+export function flushResponseRunToDb(state: SessionState, sessionId: string, runId?: string): string | undefined {
   const run = state.responseRun
   if (!run?.runMarker) return undefined
   const messages = state.messages.filter(msg => msg.runMarker === run.runMarker && msg.role !== 'user')
