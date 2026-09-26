@@ -133,3 +133,38 @@ restore the complete original recall. Write review retains its independent confi
 (default 0.8). Missing legacy recall settings inherit the new default; saved write
 thresholds are preserved. All numeric thresholds require frontend controls and
 round-trip tests.
+
+## Studio sidecar infrastructure
+
+Studio business features that evaluate JEV after their baseline operation may use
+`createJevSidecar` from the public facade. The sidecar is infrastructure, not an
+integration switch: PRs that call the factory must still register their concrete
+business source, independent Profile switch, options, frontend controls and tests.
+
+The sidecar accepts only statically registered adapters. An adapter parses its
+non-secret policy from the same private Profile settings read that creates the
+provider snapshot, supplies a bounded admission ceiling and call counts, and
+rechecks an explicit source/authorization expectation before every real provider
+dispatch and before application. A snapshot freezes calculation parameters; it
+never freezes permission. Opaque handles cannot be serialized or reused after the
+task ends.
+
+Sidecar consumers must preserve these constraints:
+
+- `trySchedule` is synchronous, bounded and never performs provider/config IO.
+- The complete request is validated and limited to 64,000 UTF-8 bytes. Queue input
+  is plain bounded JSON; accessors, custom `toJSON`, cycles and non-finite values
+  are rejected.
+- Cumulative deadlines include queue and settings/authority reads. A logical
+  timeout does not free a physical request slot until the real operation settles.
+- All request state is untrusted data. Questions and finite candidate/evidence IDs
+  are constructed by trusted code and validated again after evaluation.
+- Result application uses the registered adapter's synchronous typed apply port.
+  It must perform its domain CAS/claim in a short transaction; thenables are
+  rejected. A fatal skip, cancellation or successful apply cannot be resumed.
+- Sidecar diagnostics contain only stable IDs, hashes, counts, durations and
+  reason codes. Secrets, source text and provider bodies are excluded.
+
+The sidecar does not provide durable tasks, cluster-wide provider-call
+at-most-once, summary CAS, workflow quality storage or group routing claims. Those
+remain requirements of each registered business integration.
