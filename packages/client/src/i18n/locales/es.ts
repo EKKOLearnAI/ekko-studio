@@ -2,6 +2,14 @@ import { socialMessagesEs } from '../social-messages-locales'
 
 export default {
   jev: {
+    workflowQualityEnabled: "es Workflow JEV",
+    workflowQualityDisabled: "es disabled",
+    workflowQualityReady: "es ready",
+    workflowQualityMinConfidence: "es confidence",
+    workflowQualityMinConfidenceHint: "es minimum confidence",
+    workflowQualityTimeout: "es timeout",
+    workflowQualityTimeoutHint: "es total budget",
+
     groupSummaryReviewEnabled: 'Revisar resúmenes de grupo con JEV',
     groupSummaryDisabled: 'Desactivado; los resúmenes conservan su comportamiento actual.',
     groupSummaryReady: 'Activado para resúmenes creados con este perfil.',
@@ -2803,6 +2811,7 @@ jobTriggered: 'Job ejecutado',
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Perfil',
     namePlaceholder: 'Nombre del Workflow',
@@ -2958,6 +2967,9 @@ jobTriggered: 'Job ejecutado',
       loopId: 'Identidad del bucle', loopIdPlaceholder: 'Selecciona automático o escribe un ID', loopIdAutomatic: 'Automático (recomendado) · {id}', loopIdHelp: 'Solo identifica el bucle en el historial; no cambia cuándo se ejecuta. Déjalo automático salvo diseños avanzados.', invalidLoopId: 'El formato del ID del bucle no es válido',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'Nombre del nodo', agent: 'Agente', model: 'Modelo', apiMode: 'Modo de API', input: 'Entrada', approvalRequired: 'Aprobación tras el nodo',
       join: 'Estrategia de unión', joinAll: 'Todas las rutas entrantes', joinAny: 'Cualquier ruta entrante',
       joinAllHelp: 'Se ejecuta solo si se toman todas las rutas entrantes; si alguna no coincide, se omite.', joinAnyHelp: 'Se ejecuta una vez con la primera ruta tomada; se omite solo si ninguna coincide.',

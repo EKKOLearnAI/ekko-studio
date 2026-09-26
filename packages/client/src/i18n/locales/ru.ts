@@ -2,6 +2,14 @@ import { socialMessagesRu } from '../social-messages-locales'
 
 export default {
   jev: {
+    workflowQualityEnabled: "ru Workflow JEV",
+    workflowQualityDisabled: "ru disabled",
+    workflowQualityReady: "ru ready",
+    workflowQualityMinConfidence: "ru confidence",
+    workflowQualityMinConfidenceHint: "ru minimum confidence",
+    workflowQualityTimeout: "ru timeout",
+    workflowQualityTimeoutHint: "ru total budget",
+
     groupSummaryReviewEnabled: 'Проверять сводки группы с JEV',
     groupSummaryDisabled: 'Отключено; сводки работают как раньше.',
     groupSummaryReady: 'Включено для сводок этого профиля.',
@@ -1144,6 +1152,7 @@ export default {
 
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Рабочий процесс',
     profile: 'Профиль',
     namePlaceholder: 'Название рабочего процесса',
@@ -1324,6 +1333,9 @@ export default {
       cycle: 'Рабочий процесс содержит цикл. Исправьте соединения перед сохранением.',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'Название узла',
       agent: 'Агент',
       model: 'Модель',

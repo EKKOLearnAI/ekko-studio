@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { getDb, jsonDelete, jsonGet, jsonGetAll, jsonSet } from '../infrastructure/database'
-import { WORKFLOW_RUN_EDGE_EVALUATIONS_TABLE, WORKFLOW_RUN_LOOP_EPOCHS_TABLE, WORKFLOW_RUN_NODE_SESSIONS_TABLE, WORKFLOW_RUNS_TABLE } from '../infrastructure/database/schemas'
+import { WORKFLOW_RUN_EDGE_EVALUATIONS_TABLE, WORKFLOW_RUN_LOOP_EPOCHS_TABLE, WORKFLOW_RUN_NODE_SESSIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUNS_TABLE } from '../infrastructure/database/schemas'
 
 export type WorkflowRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'canceled'
 export type WorkflowRunNodeStatus = 'queued' | 'running' | 'completed' | 'failed' | 'blocked' | 'approval_rejected' | 'canceled'
@@ -39,6 +39,7 @@ export interface WorkflowRunLoopEpochRecord {
 
 export interface WorkflowRunWithEvidenceRecord extends WorkflowRunRecord {
   node_sessions: WorkflowRunNodeSessionRecord[]
+  quality_evaluations: WorkflowRunQualityEvaluationRecord[]
   edge_evaluations: WorkflowRunEdgeEvaluationRecord[]
   loop_epochs: WorkflowRunLoopEpochRecord[]
 }
@@ -63,6 +64,33 @@ export interface WorkflowRunNodeSessionRecord {
   created_at: number
   updated_at: number
   error: string | null
+}
+
+export interface WorkflowRunQualityEvaluationRecord {
+  id: string; run_id: string; workflow_id: string; node_session_id: string; node_id: string; execution_id: string
+  iteration_path: unknown[]; input_hash: string; config_hash: string; status: 'completed' | 'skipped'
+  decision: 'pass' | 'needs_improvement' | 'unknown'; criteria: Array<{ id: string; decision: 'pass' | 'needs_improvement' | 'unknown'; confidence?: number; evidenceRefs: string[] }>
+  reason_code: string; duration_ms: number; created_at: number
+}
+
+export function listWorkflowRunQualityEvaluations(runId: string): WorkflowRunQualityEvaluationRecord[] {
+  const db = getDb()
+  const rows = db ? db.prepare(`SELECT * FROM ${WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE} WHERE run_id = ? ORDER BY created_at`).all(runId) as any[]
+    : Object.values(jsonGetAll(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE)).filter((row:any) => row.run_id === runId)
+  return rows.map((row:any) => ({ ...row, iteration_path: parseArrayJson(row.iteration_path_json || row.iteration_path), criteria: parseArrayJson(row.criteria_json || row.criteria) })) as WorkflowRunQualityEvaluationRecord[]
+}
+
+export function saveWorkflowRunQualityEvaluation(record: WorkflowRunQualityEvaluationRecord): boolean {
+  const parent = getWorkflowRunNodeSession(record.node_session_id)
+  if (!parent || parent.status !== 'completed' || parent.run_id !== record.run_id || parent.execution_id !== record.execution_id) return false
+  const row:any = { ...record, iteration_path_json: JSON.stringify(record.iteration_path), criteria_json: JSON.stringify(record.criteria) }
+  const db = getDb()
+  try {
+    if (!db) { jsonSet(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, record.id, row); return true }
+    db.prepare(`INSERT INTO ${WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE} (id, run_id, workflow_id, node_session_id, node_id, execution_id, iteration_path_json, input_hash, config_hash, status, decision, criteria_json, reason_code, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(record.id, record.run_id, record.workflow_id, record.node_session_id, record.node_id, record.execution_id, row.iteration_path_json, record.input_hash, record.config_hash, record.status, record.decision, row.criteria_json, record.reason_code, record.duration_ms, record.created_at)
+    return true
+  } catch { return false }
 }
 
 function profileName(value?: string | null): string {
@@ -362,6 +390,7 @@ export function getWorkflowRunWithEvidence(id: string): WorkflowRunWithEvidenceR
   return {
     ...run,
     node_sessions: listWorkflowRunNodeSessions(id),
+    quality_evaluations: listWorkflowRunQualityEvaluations(id),
     edge_evaluations: listWorkflowRunEdgeEvaluations(id),
     loop_epochs: listWorkflowRunLoopEpochs(id),
   }
@@ -386,6 +415,7 @@ export function deleteWorkflowRun(id: string): boolean {
     for (const record of Object.values(jsonGetAll(WORKFLOW_RUN_LOOP_EPOCHS_TABLE)).map(rowToLoopEpochRecord)) {
       if (record.run_id === id) jsonDelete(WORKFLOW_RUN_LOOP_EPOCHS_TABLE, record.id)
     }
+    for (const record of Object.values(jsonGetAll(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE)) as any[]) if (record.run_id === id) jsonDelete(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, record.id)
     for (const record of Object.values(jsonGetAll(WORKFLOW_RUN_NODE_SESSIONS_TABLE)).map(rowToNodeSessionRecord)) {
       if (record.run_id === id) jsonDelete(WORKFLOW_RUN_NODE_SESSIONS_TABLE, record.id)
     }
@@ -396,6 +426,7 @@ export function deleteWorkflowRun(id: string): boolean {
   try {
     db.prepare(`DELETE FROM ${WORKFLOW_RUN_EDGE_EVALUATIONS_TABLE} WHERE run_id = ?`).run(id)
     db.prepare(`DELETE FROM ${WORKFLOW_RUN_LOOP_EPOCHS_TABLE} WHERE run_id = ?`).run(id)
+    db.prepare(`DELETE FROM ${WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE} WHERE run_id = ?`).run(id)
     db.prepare(`DELETE FROM ${WORKFLOW_RUN_NODE_SESSIONS_TABLE} WHERE run_id = ?`).run(id)
     db.prepare(`DELETE FROM ${WORKFLOW_RUNS_TABLE} WHERE id = ?`).run(id)
     db.exec('COMMIT')
@@ -601,6 +632,7 @@ export function deleteWorkflowRunNodeSessions(runId: string, nodeIds: string[]):
   const db = getDb()
   if (!db) {
     const deleted: WorkflowRunNodeSessionRecord[] = []
+    for (const record of Object.values(jsonGetAll(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE)) as any[]) if (record.run_id === normalizedRunId && nodeIdSet.has(record.node_id)) jsonDelete(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, record.id)
     for (const record of Object.values(jsonGetAll(WORKFLOW_RUN_NODE_SESSIONS_TABLE)).map(rowToNodeSessionRecord)) {
       if (record.run_id !== normalizedRunId || !nodeIdSet.has(record.node_id)) continue
       deleted.push(record)
@@ -615,6 +647,7 @@ export function deleteWorkflowRunNodeSessions(runId: string, nodeIds: string[]):
     WHERE run_id = ? AND node_id IN (${placeholders})
     ORDER BY sequence ASC
   `).all(normalizedRunId, ...nodeIdSet) as Record<string, any>[]
+  db.prepare(`DELETE FROM ${WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE} WHERE run_id = ? AND node_id IN (${placeholders})`).run(normalizedRunId, ...nodeIdSet)
   db.prepare(`
     DELETE FROM ${WORKFLOW_RUN_NODE_SESSIONS_TABLE}
     WHERE run_id = ? AND node_id IN (${placeholders})

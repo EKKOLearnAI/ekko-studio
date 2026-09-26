@@ -2,6 +2,14 @@ import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
   jev: {
+    workflowQualityEnabled: "ko Workflow JEV",
+    workflowQualityDisabled: "ko disabled",
+    workflowQualityReady: "ko ready",
+    workflowQualityMinConfidence: "ko confidence",
+    workflowQualityMinConfidenceHint: "ko minimum confidence",
+    workflowQualityTimeout: "ko timeout",
+    workflowQualityTimeoutHint: "ko total budget",
+
     groupSummaryReviewEnabled: 'JEV로 그룹 요약 검토',
     groupSummaryDisabled: '비활성화됨. 기존 요약 동작을 유지합니다.',
     groupSummaryReady: '이 프로필로 생성한 요약에 활성화되었습니다.',
@@ -2802,6 +2810,7 @@ export default {
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: '워크플로',
     profile: '프로필',
     namePlaceholder: '워크플로 이름',
@@ -2957,6 +2966,9 @@ export default {
       loopId: '루프 식별자', loopIdPlaceholder: '자동 선택 또는 사용자 ID 입력', loopIdAutomatic: '자동 (권장) · {id}', loopIdHelp: '실행 기록에서 루프를 표시할 뿐 실행 조건은 바꾸지 않습니다. 보통 자동을 유지하세요.', invalidLoopId: '루프 ID 형식이 올바르지 않습니다',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: '노드 이름', agent: '에이전트', model: '모델', apiMode: 'API 모드', input: '입력', approvalRequired: '완료 후 승인',
       join: '합류 전략', joinAll: '모든 입력 경로', joinAny: '입력 경로 중 하나',
       joinAllHelp: '모든 입력 경로가 선택되어야 실행하며 하나라도 불일치하면 건너뜁니다.', joinAnyHelp: '첫 번째 입력 경로가 선택되면 한 번 실행하며 모두 불일치할 때만 건너뜁니다.',

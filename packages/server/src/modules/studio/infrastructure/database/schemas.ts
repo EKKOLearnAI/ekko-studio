@@ -375,6 +375,19 @@ export const WORKFLOW_RUN_NODE_SESSIONS_SCHEMA: Record<string, string> = {
   error: 'TEXT',
 }
 
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE = 'workflow_run_quality_evaluations'
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY', run_id: 'TEXT NOT NULL', workflow_id: 'TEXT NOT NULL', node_session_id: 'TEXT NOT NULL',
+  node_id: 'TEXT NOT NULL', execution_id: 'TEXT NOT NULL', iteration_path_json: "TEXT NOT NULL DEFAULT '[]'",
+  input_hash: 'TEXT NOT NULL', config_hash: 'TEXT NOT NULL', status: "TEXT NOT NULL DEFAULT 'completed'",
+  decision: "TEXT NOT NULL DEFAULT 'unknown'", criteria_json: "TEXT NOT NULL DEFAULT '[]'", reason_code: "TEXT NOT NULL DEFAULT ''",
+  duration_ms: 'INTEGER NOT NULL DEFAULT 0', created_at: 'INTEGER NOT NULL',
+}
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES = {
+  idx_workflow_quality_run: 'CREATE INDEX IF NOT EXISTS idx_workflow_quality_run ON workflow_run_quality_evaluations(run_id, created_at)',
+  uniq_workflow_quality_attempt: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_workflow_quality_attempt ON workflow_run_quality_evaluations(node_session_id, input_hash, config_hash)',
+}
+
 export const WORKFLOW_RUN_NODE_SESSIONS_INDEXES = {
   idx_workflow_run_node_sessions_run: 'CREATE INDEX IF NOT EXISTS idx_workflow_run_node_sessions_run ON workflow_run_node_sessions(run_id)',
   idx_workflow_run_node_sessions_workflow: 'CREATE INDEX IF NOT EXISTS idx_workflow_run_node_sessions_workflow ON workflow_run_node_sessions(workflow_id)',
@@ -1272,6 +1285,7 @@ function syncWorkflowRunNodeSessions(
     syncTable(WORKFLOW_RUN_NODE_SESSIONS_TABLE, WORKFLOW_RUN_NODE_SESSIONS_SCHEMA, {
       indexes: WORKFLOW_RUN_NODE_SESSIONS_INDEXES,
     })
+    syncTable(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA, { indexes: WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES })
     return
   }
 
