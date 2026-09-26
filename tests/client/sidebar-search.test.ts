@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { enableAutoUnmount, mount } from "@vue/test-utils";
+import { createPinia } from "pinia";
+
+enableAutoUnmount(afterEach);
+
+vi.mock("@/api/studio/auth", () => ({
+  fetchCurrentUser: vi.fn().mockResolvedValue({ username: "test-user" }),
+  fetchMyAvatar: vi.fn().mockResolvedValue(null),
+}));
 
 const openSessionSearchMock = vi.hoisted(() => vi.fn());
 const mockAppStore = vi.hoisted(() => ({
@@ -103,6 +111,15 @@ vi.mock("naive-ui", async () => {
 });
 
 import AppSidebar from "@/components/layout/AppSidebar.vue";
+import SidebarAccountControls from "@/components/layout/SidebarAccountControls.vue";
+
+function mountSidebar() {
+  return mount(AppSidebar, {
+    global: {
+      plugins: [createPinia()],
+    },
+  });
+}
 
 function fakeJwt(payload: Record<string, unknown>) {
   return `header.${btoa(JSON.stringify(payload)).replace(/=/g, "")}.signature`;
@@ -110,6 +127,11 @@ function fakeJwt(payload: Record<string, unknown>) {
 
 describe("AppSidebar navigation", () => {
   beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
     localStorage.clear();
     delete (window as typeof window & { hermesDesktop?: unknown })
       .hermesDesktop;
@@ -126,56 +148,35 @@ describe("AppSidebar navigation", () => {
     mockAppStore.doUpdate.mockResolvedValue(false);
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("keeps page-sidebar-only actions out of the app sidebar", () => {
-    const wrapper = mount(AppSidebar, {
-      global: {
-        stubs: {
-          ProfileSelector: true,
-          ModelSelector: true,
-          LanguageSwitch: true,
-          ThemeSwitch: true,
-          NButton: true,
-        },
-      },
-    });
+    const wrapper = mountSidebar();
 
     expect(wrapper.text()).not.toContain("sidebar.search");
     expect(wrapper.text()).not.toContain("sidebar.reloadClientVersion");
     expect(wrapper.find(".sidebar-return-tab").exists()).toBe(true);
   });
 
-  it("does not show the legacy version management entry in the desktop shell", () => {
+  it("does not show the legacy version management entry in the desktop shell", async () => {
     (window as typeof window & { hermesDesktop?: unknown }).hermesDesktop = {
       isDesktop: true,
     };
-    const desktopWrapper = mount(AppSidebar, {
-      global: {
-        stubs: {
-          ProfileSelector: true,
-          ModelSelector: true,
-          LanguageSwitch: true,
-          ThemeSwitch: true,
-        },
-      },
-    });
+    const desktopWrapper = mountSidebar();
+    await desktopWrapper.get(".page-sidebar-account-btn").trigger("click");
+    const controls = desktopWrapper.getComponent(SidebarAccountControls);
 
     expect(desktopWrapper.find(".version-management-btn").exists()).toBe(false);
     expect(desktopWrapper.find(".version-management-modal-stub").exists()).toBe(false);
+    expect(controls.find(".version-management-btn").exists()).toBe(false);
+    expect(controls.find(".version-management-modal-stub").exists()).toBe(false);
   });
 
   it("keeps navigation flat when the sidebar is collapsed", () => {
     mockAppStore.sidebarCollapsed = true;
-    const wrapper = mount(AppSidebar, {
-      global: {
-        stubs: {
-          ProfileSelector: true,
-          ModelSelector: true,
-          LanguageSwitch: true,
-          ThemeSwitch: true,
-          NButton: true,
-        },
-      },
-    });
+    const wrapper = mountSidebar();
 
     expect(wrapper.classes()).toContain("collapsed");
     expect(wrapper.findAll(".nav-group-label")).toHaveLength(0);
@@ -189,17 +190,7 @@ describe("AppSidebar navigation", () => {
       "hermes_api_key",
       fakeJwt({ sub: "2", role: "admin" }),
     );
-    const wrapper = mount(AppSidebar, {
-      global: {
-        stubs: {
-          ProfileSelector: true,
-          ModelSelector: true,
-          LanguageSwitch: true,
-          ThemeSwitch: true,
-          NButton: true,
-        },
-      },
-    });
+    const wrapper = mountSidebar();
 
     const navigationLabels = wrapper
       .findAllComponents({ name: "RouteLinkItem" })
@@ -220,47 +211,35 @@ describe("AppSidebar navigation", () => {
     mockAppStore.isDocker = true;
     mockAppStore.updateAvailable = true;
     mockAppStore.latestVersion = "0.6.29";
-    const wrapper = mount(AppSidebar, {
-      global: {
-        stubs: {
-          ProfileSelector: true,
-          ModelSelector: true,
-          LanguageSwitch: true,
-          ThemeSwitch: true,
-        },
-      },
-    });
+    const wrapper = mountSidebar();
+    expect(wrapper.find(".update-btn").exists()).toBe(false);
+    await wrapper.get(".page-sidebar-account-btn").trigger("click");
+    const controls = wrapper.getComponent(SidebarAccountControls);
 
-    const button = wrapper.get(".update-btn:not(.version-management-btn)");
+    const button = controls.get(".update-btn:not(.version-management-btn)");
     expect(button.classes()).not.toContain("docker-update-btn");
     expect(button.text()).toContain("sidebar.updateVersion");
 
     await button.trigger("click");
 
     expect(mockAppStore.doUpdate).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("sidebar.dockerUpdateGuide");
+    expect(controls.text()).toContain("sidebar.dockerUpdateGuide");
   });
 
   it("keeps the original npm update action outside Docker", async () => {
     mockAppStore.isDocker = false;
     mockAppStore.updateAvailable = true;
     mockAppStore.latestVersion = "0.6.29";
-    const wrapper = mount(AppSidebar, {
-      global: {
-        stubs: {
-          ProfileSelector: true,
-          ModelSelector: true,
-          LanguageSwitch: true,
-          ThemeSwitch: true,
-        },
-      },
-    });
+    const wrapper = mountSidebar();
+    expect(wrapper.find(".update-btn").exists()).toBe(false);
+    await wrapper.get(".page-sidebar-account-btn").trigger("click");
+    const controls = wrapper.getComponent(SidebarAccountControls);
 
-    await wrapper
+    await controls
       .get(".update-btn:not(.version-management-btn)")
       .trigger("click");
 
     expect(mockAppStore.doUpdate).toHaveBeenCalledOnce();
-    expect(wrapper.text()).not.toContain("sidebar.dockerUpdateGuide");
+    expect(controls.text()).not.toContain("sidebar.dockerUpdateGuide");
   });
 });
