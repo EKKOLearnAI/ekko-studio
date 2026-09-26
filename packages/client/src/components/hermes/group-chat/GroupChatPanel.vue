@@ -3436,6 +3436,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                 <div><strong>{{ t('groupChat.summaryRevisionEnabled') }}</strong><p class="form-hint">{{ t('groupChat.summaryRevisionHint') }}</p></div>
                                 <NSwitch v-model:value="summaryConfig.summaryRevisionEnabled" />
                             </div>
+                            <div class="form-group"><label class="form-label">{{ t('groupChat.messageRoutingMode') }}</label><NSelect v-model:value="summaryConfig.messageRoutingMode" :options="[{label:t('groupChat.routingOff'),value:'off'},{label:t('groupChat.routingSuggest'),value:'suggest'},{label:t('groupChat.routingAuto'),value:'auto'}]" /></div>
                             <NButton
                                 type="primary"
                                 :disabled="!summaryConfig.summaryProvider || !summaryConfig.summaryModel || !summaryConfig.summaryApiMode"

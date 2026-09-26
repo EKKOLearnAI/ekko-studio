@@ -939,6 +939,13 @@ export const GC_MESSAGES_SCHEMA: Record<string, string> = {
   reasoning_content: 'TEXT',
 }
 
+export const GC_MESSAGE_ROUTING_CONTEXTS_TABLE = 'gc_message_routing_contexts'
+export const GC_MESSAGE_ROUTING_CONTEXTS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', requesterMemberId: 'TEXT NOT NULL', requesterAuthUserId: 'INTEGER', createdAt: 'INTEGER NOT NULL' }
+export const GC_MESSAGE_ROUTING_DECISIONS_TABLE = 'gc_message_routing_decisions'
+export const GC_MESSAGE_ROUTING_DECISIONS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', candidateHash: 'TEXT NOT NULL', configHash: 'TEXT NOT NULL', targetAgentId: 'TEXT', targetAgentName: 'TEXT', mode: "TEXT NOT NULL DEFAULT 'suggest'", status: "TEXT NOT NULL DEFAULT 'suggested'", queueId: 'TEXT', confidence: 'REAL', createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
+export const GC_MESSAGE_ROUTING_CLAIMS_TABLE = 'gc_message_routing_claims'
+export const GC_MESSAGE_ROUTING_CLAIMS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', targetAgentId: 'TEXT NOT NULL', queueId: 'TEXT NOT NULL', status: "TEXT NOT NULL DEFAULT 'queued'", createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
+
 export const GC_EXECUTION_QUEUE_TABLE = 'gc_execution_queue'
 
 export const GC_EXECUTION_QUEUE_SCHEMA: Record<string, string> = {
@@ -1774,6 +1781,9 @@ export function initAllHermesTables(): void {
     // need the context-window index migrated explicitly to avoid scanning and
     // sorting the full message table on every persisted message.
     createIndexes(db, groupChatMessageIndexes)
+    syncTable(GC_MESSAGE_ROUTING_CONTEXTS_TABLE, GC_MESSAGE_ROUTING_CONTEXTS_SCHEMA)
+    syncTable(GC_MESSAGE_ROUTING_DECISIONS_TABLE, GC_MESSAGE_ROUTING_DECISIONS_SCHEMA)
+    syncTable(GC_MESSAGE_ROUTING_CLAIMS_TABLE, GC_MESSAGE_ROUTING_CLAIMS_SCHEMA)
     syncTable(GC_EXECUTION_QUEUE_TABLE, GC_EXECUTION_QUEUE_SCHEMA, {
       indexes: GC_EXECUTION_QUEUE_INDEXES,
     })

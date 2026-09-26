@@ -133,6 +133,12 @@ export type RoomAgentSummary = Pick<
     'id' | 'roomId' | 'agentId' | 'agent' | 'name' | 'avatar'
 >
 
+export interface GroupMessageRoutingDecision {
+    messageId: string; roomId: string; targetAgentId: string | null; targetAgentName: string | null
+    mode: 'suggest' | 'auto'; status: 'suggested' | 'queued' | 'skipped'; queueId: string | null
+    confidence: number | null; createdAt: number; updatedAt: number
+}
+
 export interface GroupAgentActivity {
     roomId: string
     /** Stable gc_room_agents row identity. */

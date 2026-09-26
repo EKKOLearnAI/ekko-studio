@@ -126,6 +126,21 @@
         "control": "NInputNumber",
         "binding": "settings.workflowQualityTimeoutMs",
         "label": "jev.workflowQualityTimeout"
+      },
+      "groupMessageRoutingEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.groupMessageRoutingEnabled",
+        "label": "jev.groupMessageRoutingEnabled"
+      },
+      "groupMessageRoutingMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.groupMessageRoutingMinConfidence",
+        "label": "jev.groupMessageRoutingMinConfidence"
+      },
+      "groupMessageRoutingTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.groupMessageRoutingTimeoutMs",
+        "label": "jev.groupMessageRoutingTimeout"
       }
     }
   },
@@ -322,6 +337,25 @@
       ],
       "tests": [
         "tests/server/workflow-quality-review.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "group-message-routing",
+      "purpose": "Suggest or explicitly auto-route unaddressed human group messages without changing mention behavior.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/modules/studio/services/group-chat/message-routing.ts"
+      ],
+      "enabledKey": "groupMessageRoutingEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "groupMessageRoutingMinConfidence",
+        "groupMessageRoutingTimeoutMs"
+      ],
+      "tests": [
+        "tests/server/group-chat-message-routing.test.ts",
         "tests/server/jev.test.ts",
         "tests/e2e/jev-settings.spec.ts"
       ]

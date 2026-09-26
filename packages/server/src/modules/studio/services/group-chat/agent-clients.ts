@@ -2651,6 +2651,10 @@ export class AgentClients {
         }
     }
 
+    getRoutingCandidates(roomId: string): Array<{ id: string; name: string; description: string }> {
+        return this.getConnectedAgents(roomId).map(agent => ({ id: agent.agentId, name: agent.name, description: agent.description || '' }))
+    }
+
     /**
      * Server-side: parse @mentions and forward to matching agents directly.
      * If the room is already processing (compressing/replying), queue the mention.

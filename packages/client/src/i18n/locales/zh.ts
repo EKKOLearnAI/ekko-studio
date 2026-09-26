@@ -2,6 +2,14 @@ import { socialMessagesZh } from '../social-messages'
 
 export default {
   jev: {
+    groupMessageRoutingEnabled: "zh 群聊消息使用 JEV 分派",
+    groupRoutingDisabled: "zh 已关闭；未提及 Agent 的消息保持不分派。",
+    groupRoutingReady: "zh 已为房间建议/自动模式启用。",
+    groupMessageRoutingMinConfidence: "zh 分派置信度",
+    groupMessageRoutingMinConfidenceHint: "zh 建议或自动分派所需的最低置信度。",
+    groupMessageRoutingTimeout: "zh 分派时间预算（毫秒）",
+    groupMessageRoutingTimeoutHint: "zh 一条无明确目标消息的 JEV 总时间预算。",
+
     workflowQualityEnabled: "使用 JEV 检查 Workflow 节点质量",
     workflowQualityDisabled: "已关闭；Workflow 执行保持不变。",
     workflowQualityReady: "已为配置质量标准的完成节点启用。",
@@ -3328,6 +3336,7 @@ export default {
 
   // 群聊
   groupChat: {
+    messageRoutingMode: "JEV 消息分派", routingOff: "关闭", routingSuggest: "建议 Agent", routingAuto: "自动分派", routingSuggested: "JEV 建议交给 {agent}", routingUseSuggestion: "分派", routingAutoQueued: "JEV 已分派给 {agent}",
     summaryEvaluationProfile: "JEV 评估配置档案",
     summaryReviewEnabled: "使用 JEV 检查摘要",
     summaryReviewHint: "摘要保存后异步检查，不延迟群聊。",
