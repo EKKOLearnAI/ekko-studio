@@ -682,7 +682,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <TaskPlanCard v-if="message.taskPlan" class="group-task-plan-card" :plan="message.taskPlan" />
+    <div v-if="message.taskPlan" class="group-task-plan-container">
+        <TaskPlanCard class="group-task-plan-card" :plan="message.taskPlan" />
+    </div>
     <div v-else-if="isToolMessage" class="group-message tool-message" :class="{ embedded }">
         <div class="msg-body">
             <div v-if="!embedded" class="msg-header">
@@ -896,6 +898,12 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
+
+.group-task-plan-container {
+    display: flow-root;
+    width: 100%;
+    min-width: 0;
+}
 
 .group-task-plan-card {
     width: calc(100% - 10px);

@@ -335,6 +335,19 @@ test('group task cards survive history reload and live stale updates with tool t
   await page.evaluate(message => (window as any).__PW_SHARED_GROUP_SOCKET__.socket.__trigger('message', message), groupPlan(1, 'reviewer'))
   await expect(cards).toHaveCount(2)
   await expect(page.locator('.group-agent-run').filter({ hasText: 'Task output' }).getByTestId('task-plan-card')).toHaveCount(1)
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await expect.poll(() => cards.evaluateAll(elements => elements.every(element => {
+      const card = element.getBoundingClientRect()
+      const container = element.parentElement!.getBoundingClientRect()
+      const run = element.closest('.group-agent-run')!.getBoundingClientRect()
+      const column = element.closest('.run-column')!.getBoundingClientRect()
+      const gaps = [card.left - container.left, container.right - card.right,
+        card.top - container.top, container.bottom - card.bottom]
+      return gaps.every(gap => Math.abs(gap - 5) < 0.75) && Math.abs(column.width - run.width) < 0.75
+        && element.scrollWidth <= element.clientWidth
+    })), { message: `Task cards retain four visible 5px gaps and fill the group run at ${width}px` }).toBe(true)
+  }
   await cards.first().getByRole('button').click()
   await expect(cards.first().locator('ol')).toHaveCount(0)
   await page.reload()
