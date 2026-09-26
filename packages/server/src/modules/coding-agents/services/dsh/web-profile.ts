@@ -92,7 +92,7 @@ export async function prepareDshWebProfile(input: { command: string; sourceHome:
     }
   }
   const adapterPath = join(directory, 'studio-acp.mjs')
-  await writeDshAcpAdapter(installation, adapterPath)
+  await writeDshAcpAdapter(installation, adapterPath, dependencies.get('@deepseek-ai/dsh-acp-app')!)
   const adaptation = dshPatchDocument(stringify([
     ...disabled.map(id => ({ id, disabled: true })),
     { id: 'acp', disabled: true },
