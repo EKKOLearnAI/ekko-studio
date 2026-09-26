@@ -356,26 +356,27 @@ test('group task cards survive history reload and live stale updates with tool t
       senderName: 'Visitor', role: 'user', content: 'OK', timestamp: 4 })
   })
   await expect(page.locator('.group-message.self .msg-content')).toContainText('OK')
-  for (const width of [1440, 768, 390, 320]) {
+  for (const width of [1440, 1024, 769, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 1000 })
     await expect.poll(() => cards.evaluateAll(elements => elements.every(element => {
       const card = element.getBoundingClientRect()
       const container = element.parentElement!.getBoundingClientRect()
       const run = element.closest('.group-agent-run')!.getBoundingClientRect()
       const column = element.closest('.run-column')!.getBoundingClientRect()
+      const expectedWidth = window.innerWidth <= 768 ? run.width : Math.min(500, run.width)
       const gaps = [card.left - container.left, container.right - card.right,
         card.top - container.top, container.bottom - card.bottom]
       return gaps.every(gap => Math.abs(gap - 5) < 0.75)
-        && column.width >= Math.min(260, run.width) - 0.75 && column.width <= run.width + 0.75
-        && (window.innerWidth < 768 || column.width < run.width / 2)
+        && Math.abs(column.width - expectedWidth) < 0.75
         && element.scrollWidth <= element.clientWidth
-    })), { message: `Task cards retain four visible 5px gaps without stretching short message bubbles at ${width}px` }).toBe(true)
+    })), { message: `Task cards retain 5px gaps in 500px desktop or full-width mobile bubbles at ${width}px` }).toBe(true)
     await expect.poll(() => page.locator('.group-message:not(.embedded) .msg-content').evaluateAll(elements =>
       elements.every(element => {
         const bubble = element.getBoundingClientRect()
         const row = element.closest('.group-message')!.getBoundingClientRect()
-        return bubble.width >= Math.min(260, row.width) - 0.75 && bubble.width <= row.width + 0.75
-      })), { message: `Short user bubbles retain the 260px minimum when space permits at ${width}px` }).toBe(true)
+        const expectedWidth = window.innerWidth <= 768 ? row.width : Math.min(500, row.width)
+        return Math.abs(bubble.width - expectedWidth) < 0.75
+      })), { message: `Short user bubbles use 500px on desktop and fill the row on mobile at ${width}px` }).toBe(true)
   }
   await cards.first().getByRole('button').click()
   await expect(cards.first().locator('ol')).toHaveCount(0)
