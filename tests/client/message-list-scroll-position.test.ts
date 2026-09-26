@@ -2,11 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { defineComponent, nextTick } from 'vue'
+import { defineComponent, nextTick, ref } from 'vue'
 
 const mockScrollToBottom = vi.hoisted(() => vi.fn())
 const mockScrollToMessage = vi.hoisted(() => vi.fn())
 const mockScrollToAnchor = vi.hoisted(() => vi.fn())
+const mockCancelAnchorAlignment = vi.hoisted(() => vi.fn())
 const mockCaptureViewportPosition = vi.hoisted(() => vi.fn())
 const mockRestoreViewportPosition = vi.hoisted(() => vi.fn())
 const mockCaptureScrollPosition = vi.hoisted(() => vi.fn())
@@ -38,6 +39,7 @@ vi.mock('@/components/hermes/chat/VirtualMessageList.vue', () => ({
         scrollToBottom: mockScrollToBottom,
         scrollToMessage: mockScrollToMessage,
         scrollToAnchor: mockScrollToAnchor,
+        cancelAnchorAlignment: mockCancelAnchorAlignment,
         captureScrollPosition: mockCaptureScrollPosition,
         restoreScrollPosition: mockRestoreScrollPosition,
         captureViewportPosition: mockCaptureViewportPosition,
@@ -97,6 +99,7 @@ describe('MessageList session scroll position', () => {
     vi.clearAllMocks()
     mockIsNearBottom.mockReturnValue(true)
     mockShouldAutoFollowBottom.mockReturnValue(true)
+    mockScrollToMessage.mockReset().mockResolvedValue(true)
   })
 
   it('restores a previous session scroll position instead of forcing the bottom', async () => {
@@ -158,6 +161,119 @@ describe('MessageList session scroll position', () => {
     await flushSessionScroll()
 
     expect(wrapper.getComponent({ name: 'VirtualMessageList' }).props('virtualized')).toBe(false)
+  })
+
+  it('waits for search pagination to render before scrolling and virtualizes expanded history', async () => {
+    const store = useChatStore()
+    store.activeSessionId = 'search-scroll'
+    store.activeSession = makeSession('search-scroll')
+    store.focusMessageId = 'older-hit'
+    const loading = ref(true)
+    vi.spyOn(store, 'isLoadingMessages', 'get').mockImplementation(() => loading.value)
+    let finishPositioning!: (positioned: boolean) => void
+    mockScrollToMessage.mockReturnValue(new Promise<boolean>(resolve => { finishPositioning = resolve }))
+    const wrapper = mount(MessageList)
+    await flushSessionScroll()
+    expect(mockScrollToMessage).not.toHaveBeenCalled()
+    expect(wrapper.attributes('aria-busy')).toBe('true')
+    expect(wrapper.find('.message-search-loading').exists()).toBe(true)
+    const spinner = wrapper.get('.message-search-spinner').element
+    expect(wrapper.findComponent({ name: 'VirtualMessageList' }).exists()).toBe(false)
+
+    store.activeSession.messages.unshift(makeMessage('intermediate-page'))
+    await flushSessionScroll()
+    expect(wrapper.find('.stub-message').exists()).toBe(false)
+    expect(wrapper.get('.message-search-spinner').element).toBe(spinner)
+    store.activeSession.messages.unshift(makeMessage('older-hit'))
+    store.activeSession.loadedMessageCount = 450
+    loading.value = false
+    await flushSessionScroll()
+
+    expect(mockScrollToMessage).toHaveBeenCalledWith('older-hit')
+    expect(mockScrollToBottom).not.toHaveBeenCalled()
+    expect(wrapper.getComponent({ name: 'VirtualMessageList' }).props('virtualized')).toBe(true)
+    expect(wrapper.attributes('aria-busy')).toBe('true')
+    expect(wrapper.get('.message-search-spinner').element).toBe(spinner)
+    expect(wrapper.get('.virtual-message-list-stub').attributes('inert')).toBeDefined()
+    expect(wrapper.get('.virtual-message-list-stub').classes()).toContain('message-list--search-loading')
+
+    finishPositioning(true)
+    await flushSessionScroll()
+    expect(wrapper.attributes('aria-busy')).toBe('false')
+    expect(wrapper.find('.message-search-loading').exists()).toBe(false)
+    expect(wrapper.get('.virtual-message-list-stub').attributes('inert')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('keeps a newer search hidden when an older positioning task completes', async () => {
+    const store = useChatStore()
+    store.activeSessionId = 'search-replaced'
+    store.activeSession = makeSession('search-replaced')
+    store.activeSession.messages.push(makeMessage('first'), makeMessage('second'))
+    store.focusMessageId = 'first'
+    const finishes: Array<(positioned: boolean) => void> = []
+    mockScrollToMessage.mockImplementation(() => new Promise<boolean>(resolve => finishes.push(resolve)))
+    const wrapper = mount(MessageList)
+    await flushSessionScroll()
+
+    store.focusMessageId = 'second'
+    await flushSessionScroll()
+    expect(mockCancelAnchorAlignment).toHaveBeenCalledOnce()
+    finishes[0](false)
+    await flushSessionScroll()
+    expect(wrapper.attributes('aria-busy')).toBe('true')
+    finishes[1](true)
+    await flushSessionScroll()
+    expect(wrapper.attributes('aria-busy')).toBe('false')
+
+    // Incoming message/tool updates must not restart a completed search scroll.
+    store.activeSession.messages.push(makeMessage('new-message'))
+    await flushSessionScroll()
+    expect(mockScrollToMessage).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it.each(['cancel', 'timeout', 'switch'])('releases search loading on %s', async action => {
+    const store = useChatStore()
+    store.activeSessionId = `search-${action}`
+    store.activeSession = makeSession(`search-${action}`)
+    store.focusMessageId = `search-${action}-message`
+    let finish!: (positioned: boolean) => void
+    mockScrollToMessage.mockReturnValue(new Promise<boolean>(resolve => { finish = resolve }))
+    const wrapper = mount(MessageList)
+    await flushSessionScroll()
+    expect(wrapper.attributes('aria-busy')).toBe('true')
+
+    if (action === 'timeout') finish(false)
+    else {
+      store.focusMessageId = null
+      if (action === 'switch') {
+        store.activeSessionId = 'normal-session'
+        store.activeSession = makeSession('normal-session')
+      }
+      finish(false)
+    }
+    await flushSessionScroll()
+    expect(wrapper.attributes('aria-busy')).toBe('false')
+    expect(wrapper.find('.message-search-loading').exists()).toBe(false)
+    if (action === 'switch') expect(mockScrollToBottom).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('renders a focused tool individually even when tool traces are hidden', async () => {
+    const store = useChatStore()
+    store.activeSessionId = 'search-tool'
+    store.activeSession = makeSession('search-tool')
+    store.activeSession.messages.push({
+      id: 'tool-hit', role: 'tool', content: '', timestamp: 1,
+      toolName: 'read_file', toolStatus: 'done', runMarker: 'turn-1', toolResult: 'needle',
+    })
+    store.focusMessageId = 'tool-hit'
+    const wrapper = mount(MessageList)
+    await flushSessionScroll()
+    expect(wrapper.find('.stub-message[data-id="tool-hit"]').exists()).toBe(true)
+    expect(mockScrollToMessage).toHaveBeenCalledWith('tool-hit')
+    wrapper.unmount()
   })
 
   it('shows Ekko while the session is pending, then displays the loaded Agent', async () => {

@@ -171,7 +171,10 @@ async function openItem(item: SearchItem) {
         : undefined,
     })
   }
-  await chatStore.switchSession(item.id, messageId)
+  const opened = await chatStore.switchSession(item.id, messageId)
+  // A newer selection owns navigation when the user switches during loading.
+  if (chatStore.activeSessionId !== item.id) return
+  if (messageId && opened === false) message.error(t('chat.searchFailed'))
   const routeName = chatStore.runtimeMode === 'global_agent' ? 'hermes.globalAgentSession' : 'hermes.session'
   if (router.currentRoute.value.name !== routeName || router.currentRoute.value.params.sessionId !== item.id) {
     await router.push({ name: routeName, params: { sessionId: item.id } })
