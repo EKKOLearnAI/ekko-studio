@@ -1138,7 +1138,7 @@ onBeforeUnmount(() => {
 .msg-body {
     display: flex;
     flex-direction: column;
-    min-width: min(260px, 85%);
+    min-width: min(260px, 100%);
     max-width: 85%;
     box-sizing: border-box;
 }
@@ -1285,6 +1285,10 @@ onBeforeUnmount(() => {
             0 0 10px rgba(255, 107, 107, 0.4),
             0 0 20px rgba(255, 107, 107, 0.2);
     }
+}
+
+.group-message:not(.embedded) .msg-content {
+    min-width: min(260px, 100%);
 }
 
 .msg-content {
@@ -1518,7 +1522,6 @@ onBeforeUnmount(() => {
 }
 @media (max-width: $breakpoint-mobile) {
     .group-message .msg-body {
-        min-width: 0;
         max-width: 100%;
     }
 

@@ -350,7 +350,13 @@ test('group task cards survive history reload and live stale updates with tool t
   await page.evaluate(message => (window as any).__PW_SHARED_GROUP_SOCKET__.socket.__trigger('message', message), groupPlan(1, 'reviewer'))
   await expect(cards).toHaveCount(2)
   await expect(page.locator('.group-agent-run').filter({ hasText: 'Task output' }).getByTestId('task-plan-card')).toHaveCount(1)
-  for (const width of [1440, 390]) {
+  await page.evaluate(() => {
+    const state = (window as any).__PW_SHARED_GROUP_SOCKET__
+    state.socket.__trigger('message', { id: 'short-self', roomId: 'room-shared', senderId: state.options.auth.userId,
+      senderName: 'Visitor', role: 'user', content: 'OK', timestamp: 4 })
+  })
+  await expect(page.locator('.group-message.self .msg-content')).toContainText('OK')
+  for (const width of [1440, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 1000 })
     await expect.poll(() => cards.evaluateAll(elements => elements.every(element => {
       const card = element.getBoundingClientRect()
@@ -360,9 +366,16 @@ test('group task cards survive history reload and live stale updates with tool t
       const gaps = [card.left - container.left, container.right - card.right,
         card.top - container.top, container.bottom - card.bottom]
       return gaps.every(gap => Math.abs(gap - 5) < 0.75)
+        && column.width >= Math.min(260, run.width) - 0.75 && column.width <= run.width + 0.75
         && (window.innerWidth < 768 || column.width < run.width / 2)
         && element.scrollWidth <= element.clientWidth
     })), { message: `Task cards retain four visible 5px gaps without stretching short message bubbles at ${width}px` }).toBe(true)
+    await expect.poll(() => page.locator('.group-message:not(.embedded) .msg-content').evaluateAll(elements =>
+      elements.every(element => {
+        const bubble = element.getBoundingClientRect()
+        const row = element.closest('.group-message')!.getBoundingClientRect()
+        return bubble.width >= Math.min(260, row.width) - 0.75 && bubble.width <= row.width + 0.75
+      })), { message: `Short user bubbles retain the 260px minimum when space permits at ${width}px` }).toBe(true)
   }
   await cards.first().getByRole('button').click()
   await expect(cards.first().locator('ol')).toHaveCount(0)
