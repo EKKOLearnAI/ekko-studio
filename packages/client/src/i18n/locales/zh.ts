@@ -2,6 +2,29 @@ import { socialMessagesZh } from '../social-messages'
 
 export default {
   jev: {
+    groupMessageRoutingEnabled: "zh 群聊消息使用 JEV 分派",
+    groupRoutingDisabled: "zh 已关闭；未提及 Agent 的消息保持不分派。",
+    groupRoutingReady: "zh 已为房间建议/自动模式启用。",
+    groupMessageRoutingMinConfidence: "zh 分派置信度",
+    groupMessageRoutingMinConfidenceHint: "zh 建议或自动分派所需的最低置信度。",
+    groupMessageRoutingTimeout: "zh 分派时间预算（毫秒）",
+    groupMessageRoutingTimeoutHint: "zh 一条无明确目标消息的 JEV 总时间预算。",
+
+    workflowQualityEnabled: "使用 JEV 检查 Workflow 节点质量",
+    workflowQualityDisabled: "已关闭；Workflow 执行保持不变。",
+    workflowQualityReady: "已为配置质量标准的完成节点启用。",
+    workflowQualityMinConfidence: "Workflow 质量置信度",
+    workflowQualityMinConfidenceHint: "将标准判断为需要改进所需的最低置信度。",
+    workflowQualityTimeout: "Workflow 质量时间预算（毫秒）",
+    workflowQualityTimeoutHint: "节点完成后 JEV 检查可使用的总时间预算。",
+
+    groupSummaryReviewEnabled: "使用 JEV 检查群聊摘要",
+    groupSummaryDisabled: "已关闭；群聊摘要继续沿用原流程。",
+    groupSummaryReady: "已为使用此配置档案生成的摘要启用。",
+    groupSummaryReviewMinConfidence: "摘要检查置信度",
+    groupSummaryReviewMinConfidenceHint: "报告摘要质量问题所需的最低置信度。",
+    groupSummaryReviewTimeout: "摘要检查时间预算（毫秒）",
+    groupSummaryReviewTimeoutHint: "原摘要保存完成后，JEV 检查可使用的总时间预算。",
     ekkoSkillsEnabled: "启用 Ekko 技能 JEV 增强",
     skillsDisabled: "未启用；继续使用原有技能匹配和学习流程。",
     skillsReady: "已启用技能语义匹配和学习预筛选。",
@@ -1263,6 +1286,7 @@ export default {
   },
 
   workflow: {
+    quality: { results: "JEV 质量观察", rerun: "编辑并从此节点重跑", decision: { pass: "已通过", needs_improvement: "需要改进", unknown: "未知" } },
     title: '工作流',
     profile: '配置',
     namePlaceholder: '工作流名称',
@@ -1473,6 +1497,9 @@ export default {
       cycle: '流程中存在循环连接，请调整后再保存',
     },
     node: {
+      qualityReview: "JEV 质量标准",
+      qualityCriterion: "描述可观察的质量标准",
+      addQualityCriterion: "添加质量标准",
       title: '节点名称',
       agent: 'Agent',
       model: '模型',
@@ -3309,6 +3336,16 @@ export default {
 
   // 群聊
   groupChat: {
+    messageRoutingMode: "JEV 消息分派", routingOff: "关闭", routingSuggest: "建议 Agent", routingAuto: "自动分派", routingSuggested: "JEV 建议交给 {agent}", routingUseSuggestion: "分派", routingAutoQueued: "JEV 已分派给 {agent}",
+    summaryEvaluationProfile: "JEV 评估配置档案",
+    summaryReviewEnabled: "使用 JEV 检查摘要",
+    summaryReviewHint: "摘要保存后异步检查，不延迟群聊。",
+    summaryRevisionEnabled: "应用一次安全修订",
+    summaryRevisionHint: "发现可靠问题时只修订一次，且不移动摘要锚点。",
+    summaryQuality: "JEV 摘要质量",
+    summaryQualityVersion: "检查的摘要版本：{version}",
+    summaryQualityDecision: { pass: "已通过", needs_improvement: "有改进建议", unknown: "未评估" },
+    summaryQualityRule: { missing_constraints: "遗漏约束或任务", stale_or_overstated: "结论过时或表述过度", unsupported_completion: "无依据的完成声明" },
     agentPreset: 'Agent 预设',
     agentPresets: 'Agent 预设',
     agentPresetPlaceholder: '选择预设',

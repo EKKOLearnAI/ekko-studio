@@ -375,6 +375,19 @@ export const WORKFLOW_RUN_NODE_SESSIONS_SCHEMA: Record<string, string> = {
   error: 'TEXT',
 }
 
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE = 'workflow_run_quality_evaluations'
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY', run_id: 'TEXT NOT NULL', workflow_id: 'TEXT NOT NULL', node_session_id: 'TEXT NOT NULL',
+  node_id: 'TEXT NOT NULL', execution_id: 'TEXT NOT NULL', iteration_path_json: "TEXT NOT NULL DEFAULT '[]'",
+  input_hash: 'TEXT NOT NULL', config_hash: 'TEXT NOT NULL', status: "TEXT NOT NULL DEFAULT 'completed'",
+  decision: "TEXT NOT NULL DEFAULT 'unknown'", criteria_json: "TEXT NOT NULL DEFAULT '[]'", reason_code: "TEXT NOT NULL DEFAULT ''",
+  duration_ms: 'INTEGER NOT NULL DEFAULT 0', created_at: 'INTEGER NOT NULL',
+}
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES = {
+  idx_workflow_quality_run: 'CREATE INDEX IF NOT EXISTS idx_workflow_quality_run ON workflow_run_quality_evaluations(run_id, created_at)',
+  uniq_workflow_quality_attempt: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_workflow_quality_attempt ON workflow_run_quality_evaluations(node_session_id, input_hash, config_hash)',
+}
+
 export const WORKFLOW_RUN_NODE_SESSIONS_INDEXES = {
   idx_workflow_run_node_sessions_run: 'CREATE INDEX IF NOT EXISTS idx_workflow_run_node_sessions_run ON workflow_run_node_sessions(run_id)',
   idx_workflow_run_node_sessions_workflow: 'CREATE INDEX IF NOT EXISTS idx_workflow_run_node_sessions_workflow ON workflow_run_node_sessions(workflow_id)',
@@ -782,6 +795,10 @@ export const GC_ROOMS_SCHEMA: Record<string, string> = {
   summaryApiMode: "TEXT NOT NULL DEFAULT ''",
   summaryEveryTurns: 'INTEGER NOT NULL DEFAULT 20',
   summaryGeneration: 'INTEGER NOT NULL DEFAULT 0',
+  evaluationProfile: "TEXT NOT NULL DEFAULT ''",
+  summaryReviewMode: "TEXT NOT NULL DEFAULT 'inherit'",
+  summaryRevisionEnabled: 'INTEGER NOT NULL DEFAULT 0',
+  messageRoutingMode: "TEXT NOT NULL DEFAULT 'off'",
   triggerTokens: 'INTEGER NOT NULL DEFAULT 100000',
   maxHistoryTokens: 'INTEGER NOT NULL DEFAULT 32000',
   tailMessageCount: 'INTEGER NOT NULL DEFAULT 10',
@@ -921,6 +938,13 @@ export const GC_MESSAGES_SCHEMA: Record<string, string> = {
   reasoning_details: 'TEXT',
   reasoning_content: 'TEXT',
 }
+
+export const GC_MESSAGE_ROUTING_CONTEXTS_TABLE = 'gc_message_routing_contexts'
+export const GC_MESSAGE_ROUTING_CONTEXTS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', requesterMemberId: 'TEXT NOT NULL', requesterAuthUserId: 'INTEGER', createdAt: 'INTEGER NOT NULL' }
+export const GC_MESSAGE_ROUTING_DECISIONS_TABLE = 'gc_message_routing_decisions'
+export const GC_MESSAGE_ROUTING_DECISIONS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', candidateHash: 'TEXT NOT NULL', configHash: 'TEXT NOT NULL', targetAgentId: 'TEXT', targetAgentName: 'TEXT', mode: "TEXT NOT NULL DEFAULT 'suggest'", status: "TEXT NOT NULL DEFAULT 'suggested'", queueId: 'TEXT', confidence: 'REAL', createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
+export const GC_MESSAGE_ROUTING_CLAIMS_TABLE = 'gc_message_routing_claims'
+export const GC_MESSAGE_ROUTING_CLAIMS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', targetAgentId: 'TEXT NOT NULL', queueId: 'TEXT NOT NULL', status: "TEXT NOT NULL DEFAULT 'queued'", createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
 
 export const GC_EXECUTION_QUEUE_TABLE = 'gc_execution_queue'
 
@@ -1063,6 +1087,29 @@ export const GC_ROOM_SUMMARIES_SCHEMA: Record<string, string> = {
   summaryLeaseExpiresAt: 'INTEGER NOT NULL DEFAULT 0',
   summaryRunGeneration: 'INTEGER NOT NULL DEFAULT 0',
   summaryDrainThroughMessageId: "TEXT NOT NULL DEFAULT ''",
+}
+
+export const GC_SUMMARY_REVIEWS_TABLE = 'gc_summary_reviews'
+export const GC_SUMMARY_REVIEWS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  roomId: 'TEXT NOT NULL',
+  sourceVersion: 'INTEGER NOT NULL',
+  sourceSummaryHash: 'TEXT NOT NULL',
+  sourceAnchor: "TEXT NOT NULL DEFAULT ''",
+  sourceTurnCount: 'INTEGER NOT NULL DEFAULT 0',
+  inputHash: 'TEXT NOT NULL',
+  configHash: 'TEXT NOT NULL',
+  status: "TEXT NOT NULL DEFAULT 'completed'",
+  decision: "TEXT NOT NULL DEFAULT 'unknown'",
+  ruleResultsJson: "TEXT NOT NULL DEFAULT '[]'",
+  reasonCode: "TEXT NOT NULL DEFAULT ''",
+  durationMs: 'INTEGER NOT NULL DEFAULT 0',
+  createdAt: 'INTEGER NOT NULL',
+  appliedRevisionVersion: 'INTEGER',
+}
+export const GC_SUMMARY_REVIEWS_INDEXES = {
+  idx_gc_summary_reviews_room_version: 'CREATE INDEX IF NOT EXISTS idx_gc_summary_reviews_room_version ON gc_summary_reviews(roomId, sourceVersion, createdAt DESC)',
+  idx_gc_summary_reviews_attempt: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_gc_summary_reviews_attempt ON gc_summary_reviews(roomId, inputHash, configHash)',
 }
 
 export const GC_ROOM_MEMBERS_TABLE = 'gc_room_members'
@@ -1245,6 +1292,7 @@ function syncWorkflowRunNodeSessions(
     syncTable(WORKFLOW_RUN_NODE_SESSIONS_TABLE, WORKFLOW_RUN_NODE_SESSIONS_SCHEMA, {
       indexes: WORKFLOW_RUN_NODE_SESSIONS_INDEXES,
     })
+    syncTable(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA, { indexes: WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES })
     return
   }
 
@@ -1733,6 +1781,9 @@ export function initAllHermesTables(): void {
     // need the context-window index migrated explicitly to avoid scanning and
     // sorting the full message table on every persisted message.
     createIndexes(db, groupChatMessageIndexes)
+    syncTable(GC_MESSAGE_ROUTING_CONTEXTS_TABLE, GC_MESSAGE_ROUTING_CONTEXTS_SCHEMA)
+    syncTable(GC_MESSAGE_ROUTING_DECISIONS_TABLE, GC_MESSAGE_ROUTING_DECISIONS_SCHEMA)
+    syncTable(GC_MESSAGE_ROUTING_CLAIMS_TABLE, GC_MESSAGE_ROUTING_CLAIMS_SCHEMA)
     syncTable(GC_EXECUTION_QUEUE_TABLE, GC_EXECUTION_QUEUE_SCHEMA, {
       indexes: GC_EXECUTION_QUEUE_INDEXES,
     })
@@ -1740,6 +1791,7 @@ export function initAllHermesTables(): void {
     migrateGroupChatActivityTimes(db, Date.now())
     syncTable(GC_CONTEXT_SNAPSHOTS_TABLE, GC_CONTEXT_SNAPSHOTS_SCHEMA)
     syncTable(GC_ROOM_SUMMARIES_TABLE, GC_ROOM_SUMMARIES_SCHEMA)
+    syncTable(GC_SUMMARY_REVIEWS_TABLE, GC_SUMMARY_REVIEWS_SCHEMA, { indexes: GC_SUMMARY_REVIEWS_INDEXES })
     syncTable(GC_PENDING_SESSION_DELETES_TABLE, GC_PENDING_SESSION_DELETES_SCHEMA)
     syncTable(GC_SESSION_PROFILES_TABLE, GC_SESSION_PROFILES_SCHEMA)
 

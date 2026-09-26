@@ -2,6 +2,29 @@ import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
   jev: {
+    groupMessageRoutingEnabled: "ja Use JEV for group message routing",
+    groupRoutingDisabled: "ja Disabled; unmentioned messages remain unassigned.",
+    groupRoutingReady: "ja Enabled for room suggest/auto modes.",
+    groupMessageRoutingMinConfidence: "ja Routing confidence",
+    groupMessageRoutingMinConfidenceHint: "ja Minimum confidence required to suggest or auto-route.",
+    groupMessageRoutingTimeout: "ja Routing time budget (ms)",
+    groupMessageRoutingTimeoutHint: "ja Total JEV budget for one unaddressed message.",
+
+    workflowQualityEnabled: "ja Workflow JEV",
+    workflowQualityDisabled: "ja disabled",
+    workflowQualityReady: "ja ready",
+    workflowQualityMinConfidence: "ja confidence",
+    workflowQualityMinConfidenceHint: "ja minimum confidence",
+    workflowQualityTimeout: "ja timeout",
+    workflowQualityTimeoutHint: "ja total budget",
+
+    groupSummaryReviewEnabled: 'JEVでグループ要約を確認',
+    groupSummaryDisabled: '無効です。要約は従来どおり動作します。',
+    groupSummaryReady: 'このプロファイルで作成した要約に対して有効です。',
+    groupSummaryReviewMinConfidence: '要約確認の信頼度',
+    groupSummaryReviewMinConfidenceHint: '品質問題を報告する最小信頼度です。',
+    groupSummaryReviewTimeout: '要約確認の時間予算（ms）',
+    groupSummaryReviewTimeoutHint: '元の要約を保存した後に使用できるJEVの総時間です。',
     ekkoSkillsEnabled: "Ekko スキルに JEV を使用",
     skillsDisabled: "無効。既存のスキル照合と学習を使用します。",
     skillsReady: "意味による照合と学習の事前判定が有効です。",
@@ -2795,6 +2818,7 @@ export default {
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'ワークフロー',
     profile: 'プロファイル',
     namePlaceholder: 'ワークフロー名',
@@ -2950,6 +2974,9 @@ export default {
       loopId: 'ループ識別子', loopIdPlaceholder: '自動を選ぶかカスタム ID を入力', loopIdAutomatic: '自動（推奨）· {id}', loopIdHelp: '実行履歴でループを識別するだけで、実行条件は変わりません。通常は自動のままにします。', invalidLoopId: 'ループ ID の形式が正しくありません',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'ノード名', agent: 'エージェント', model: 'モデル', apiMode: 'API モード', input: '入力', approvalRequired: '完了後承認',
       join: '合流方法', joinAll: 'すべての入力ルート', joinAny: 'いずれかの入力ルート',
       joinAllHelp: 'すべての入力ルートが有効な場合のみ実行し、1つでも不一致ならスキップします。', joinAnyHelp: '最初の有効な入力ルートで1回実行し、すべて不一致の場合のみスキップします。',
@@ -2962,6 +2989,16 @@ export default {
 
   // 更新履歴
   groupChat: {
+    messageRoutingMode: "JEV message routing", routingOff: "Off", routingSuggest: "Suggest an Agent", routingAuto: "Automatically assign", routingSuggested: "JEV suggests {agent}", routingUseSuggestion: "Assign", routingAutoQueued: "JEV assigned {agent}",
+    summaryEvaluationProfile: "JEV evaluation Profile",
+    summaryReviewEnabled: "Review summaries with JEV",
+    summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",
+    summaryRevisionEnabled: "Apply one safe revision",
+    summaryRevisionHint: "When review finds a reliable issue, revise once without moving the summary anchor.",
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',

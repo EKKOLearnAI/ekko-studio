@@ -22,10 +22,12 @@ import {
     type RoomAgent,
     type RoomAgentSummary,
     type GroupAgentActivity,
+    type GroupMessageRoutingDecision,
     type RoomAgentHandoffChain,
     type RoomAgentInput,
     type RoomSummaryConfig,
     type RoomSummaryState,
+    type RoomSummaryReview,
     type ChatMessage,
     type GroupChatMention,
     type GroupExecutionQueueItem,
@@ -209,8 +211,10 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     const contextStatuses = ref<Map<string, { agentName: string; status: string }>>(new Map())
     const activeAgentRuns = ref<Map<string, GroupAgentActivity>>(new Map())
     const roomSummaryStates = ref<Map<string, RoomSummaryState>>(new Map())
+    const roomSummaryReviews = ref<Map<string, RoomSummaryReview>>(new Map())
     const handoffChains = ref<Map<string, RoomAgentHandoffChain>>(new Map())
     const executionQueue = ref<GroupExecutionQueueItem[]>([])
+    const messageRoutingDecisions = ref<Map<string, GroupMessageRoutingDecision>>(new Map())
     const autoPlaySpeechEnabled = ref(false)
     const pendingApprovals = ref<Map<string, GroupPendingApproval>>(new Map())
     const pendingClarifies = ref<Map<string, GroupPendingClarify>>(new Map())
@@ -605,6 +609,20 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         roomSummaryStates.value = new Map(roomSummaryStates.value)
     }
 
+    async function acceptRoutingSuggestion(messageId: string): Promise<void> {
+        const socket = getSocket(); const roomId = currentRoomId.value
+        if (!socket || !roomId) throw new Error('Group chat socket not connected')
+        await new Promise<void>((resolve, reject) => socket.emit('accept_routing_suggestion', { roomId, messageId }, (res?: { ok?: boolean; error?: string }) => res?.ok ? resolve() : reject(new Error(res?.error || 'Suggestion failed'))))
+    }
+
+    function applyRoomSummaryReview(review: RoomSummaryReview) {
+        if (!review?.roomId) return
+        const previous = roomSummaryReviews.value.get(review.roomId)
+        if (previous && (previous.createdAt > review.createdAt || previous.sourceVersion > review.sourceVersion)) return
+        roomSummaryReviews.value.set(review.roomId, review)
+        roomSummaryReviews.value = new Map(roomSummaryReviews.value)
+    }
+
     function clearCurrentRoomTransientState() {
         emitStopTyping()
         clearRemoteTypingState()
@@ -740,6 +758,7 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         }
         if (res.roomSummary?.roomId === currentRoomId.value) applyRoomSummaryState(res.roomSummary)
         executionQueue.value = Array.isArray(res.executionQueue) ? res.executionQueue : []
+        messageRoutingDecisions.value = new Map((Array.isArray(res.routingDecisions) ? res.routingDecisions : []).map((decision: GroupMessageRoutingDecision) => [decision.messageId, decision]))
         if (typeof res.roomId === 'string' && res.roomId) {
             replaceRoomPendingInteractions(res.roomId, res.pendingApprovals, res.pendingClarifies)
         }
@@ -1210,7 +1229,9 @@ export const useGroupChatStore = defineStore('groupChat', () => {
             hasMoreBefore.value = loadedMessageCount.value < totalMessages.value
         })
 
+        socket.on('message_routing_updated', (decision: GroupMessageRoutingDecision) => { messageRoutingDecisions.value.set(decision.messageId, decision); messageRoutingDecisions.value = new Map(messageRoutingDecisions.value) })
         socket.on('room_summary_updated', applyRoomSummaryState)
+        socket.on('room_summary_review_updated', applyRoomSummaryReview)
 
         socket.on('handoff_updated', (chain: RoomAgentHandoffChain) => {
             if (!chain?.chainId || chain.roomId !== currentRoomId.value) return
@@ -1994,9 +2015,13 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         contextStatuses,
         activeAgentRuns,
         roomSummaryStates,
+        roomSummaryReviews,
         applyRoomSummaryState,
+        applyRoomSummaryReview,
         handoffChains,
         executionQueue,
+        messageRoutingDecisions,
+        acceptRoutingSuggestion,
         pendingApprovals,
         pendingClarifies,
         activePendingApproval,

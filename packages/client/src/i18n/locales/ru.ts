@@ -2,6 +2,29 @@ import { socialMessagesRu } from '../social-messages-locales'
 
 export default {
   jev: {
+    groupMessageRoutingEnabled: "ru Use JEV for group message routing",
+    groupRoutingDisabled: "ru Disabled; unmentioned messages remain unassigned.",
+    groupRoutingReady: "ru Enabled for room suggest/auto modes.",
+    groupMessageRoutingMinConfidence: "ru Routing confidence",
+    groupMessageRoutingMinConfidenceHint: "ru Minimum confidence required to suggest or auto-route.",
+    groupMessageRoutingTimeout: "ru Routing time budget (ms)",
+    groupMessageRoutingTimeoutHint: "ru Total JEV budget for one unaddressed message.",
+
+    workflowQualityEnabled: "ru Workflow JEV",
+    workflowQualityDisabled: "ru disabled",
+    workflowQualityReady: "ru ready",
+    workflowQualityMinConfidence: "ru confidence",
+    workflowQualityMinConfidenceHint: "ru minimum confidence",
+    workflowQualityTimeout: "ru timeout",
+    workflowQualityTimeoutHint: "ru total budget",
+
+    groupSummaryReviewEnabled: 'Проверять сводки группы с JEV',
+    groupSummaryDisabled: 'Отключено; сводки работают как раньше.',
+    groupSummaryReady: 'Включено для сводок этого профиля.',
+    groupSummaryReviewMinConfidence: 'Уверенность проверки сводки',
+    groupSummaryReviewMinConfidenceHint: 'Минимальная уверенность для сообщения о проблеме качества.',
+    groupSummaryReviewTimeout: 'Бюджет проверки сводки (мс)',
+    groupSummaryReviewTimeoutHint: 'Общий бюджет JEV после сохранения исходной сводки.',
     ekkoSkillsEnabled: "Использовать JEV для навыков Ekko",
     skillsDisabled: "Отключено; действуют прежние подбор навыков и обучение.",
     skillsReady: "Включены семантический подбор и предварительная оценка обучения.",
@@ -1137,6 +1160,7 @@ export default {
 
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Рабочий процесс',
     profile: 'Профиль',
     namePlaceholder: 'Название рабочего процесса',
@@ -1317,6 +1341,9 @@ export default {
       cycle: 'Рабочий процесс содержит цикл. Исправьте соединения перед сохранением.',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: 'Название узла',
       agent: 'Агент',
       model: 'Модель',
@@ -2897,6 +2924,16 @@ export default {
 
 
   groupChat: {
+    messageRoutingMode: "JEV message routing", routingOff: "Off", routingSuggest: "Suggest an Agent", routingAuto: "Automatically assign", routingSuggested: "JEV suggests {agent}", routingUseSuggestion: "Assign", routingAutoQueued: "JEV assigned {agent}",
+    summaryEvaluationProfile: "JEV evaluation Profile",
+    summaryReviewEnabled: "Review summaries with JEV",
+    summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",
+    summaryRevisionEnabled: "Apply one safe revision",
+    summaryRevisionHint: "When review finds a reliable issue, revise once without moving the summary anchor.",
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',

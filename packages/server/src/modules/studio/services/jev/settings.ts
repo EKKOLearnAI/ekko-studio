@@ -5,6 +5,15 @@ import { config } from '../../public/config'
 import { safeFileStore } from '../../public/safe-file-store'
 
 export interface JevSettings {
+  groupSummaryReviewEnabled: boolean
+  groupSummaryReviewMinConfidence: number
+  groupSummaryReviewTimeoutMs: number
+  workflowQualityEnabled: boolean
+  workflowQualityMinConfidence: number
+  workflowQualityTimeoutMs: number
+  groupMessageRoutingEnabled: boolean
+  groupMessageRoutingMinConfidence: number
+  groupMessageRoutingTimeoutMs: number
   ekkoSkillsEnabled: boolean
   ekkoSkillsCandidateLimit: number
   ekkoSkillsMinConfidence: number
@@ -25,13 +34,23 @@ export interface JevSettings {
   hasApiKey: boolean
 }
 
-interface StoredSettings extends Omit<JevSettings, 'hasApiKey'> { apiKey: string }
+export interface JevCredentialSettings extends Omit<JevSettings, 'hasApiKey'> { apiKey: string }
+type StoredSettings = JevCredentialSettings
 
 export class JevError extends Error {
   constructor(message: string, public readonly status = 400, public readonly code = 'jev_invalid_request') { super(message) }
 }
 
 const defaults: StoredSettings = {
+  groupSummaryReviewEnabled: false,
+  groupSummaryReviewMinConfidence: 0.8,
+  groupSummaryReviewTimeoutMs: 3000,
+  workflowQualityEnabled: false,
+  workflowQualityMinConfidence: 0.8,
+  workflowQualityTimeoutMs: 5000,
+  groupMessageRoutingEnabled: false,
+  groupMessageRoutingMinConfidence: 0.9,
+  groupMessageRoutingTimeoutMs: 1500,
   ekkoSkillsEnabled: false,
   ekkoSkillsCandidateLimit: 20,
   ekkoSkillsMinConfidence: 0.8,
@@ -60,7 +79,7 @@ function settingsPath(profile: string): string {
 function normalize(input: unknown, current = defaults): StoredSettings {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new JevError('Invalid JEV settings')
   const value = input as Record<string, unknown>
-  if (Object.keys(value).some(key => !['baseUrl', 'model', 'timeoutMs', 'apiKey', 'ekkoSkillsEnabled', 'ekkoSkillsCandidateLimit', 'ekkoSkillsMinConfidence', 'ekkoSkillsTimeoutMs', 'ekkoMemoryEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled', 'ekkoMemoryCandidateLimit', 'ekkoMemoryRecallMinConfidence', 'ekkoMemoryFilterMinConfidence', 'ekkoMemoryMinConfidence', 'ekkoMemoryTimeoutMs'].includes(key))) {
+  if (Object.keys(value).some(key => !['baseUrl', 'model', 'timeoutMs', 'apiKey', 'groupSummaryReviewEnabled', 'groupSummaryReviewMinConfidence', 'groupSummaryReviewTimeoutMs', 'workflowQualityEnabled', 'workflowQualityMinConfidence', 'workflowQualityTimeoutMs', 'groupMessageRoutingEnabled', 'groupMessageRoutingMinConfidence', 'groupMessageRoutingTimeoutMs', 'ekkoSkillsEnabled', 'ekkoSkillsCandidateLimit', 'ekkoSkillsMinConfidence', 'ekkoSkillsTimeoutMs', 'ekkoMemoryEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled', 'ekkoMemoryCandidateLimit', 'ekkoMemoryRecallMinConfidence', 'ekkoMemoryFilterMinConfidence', 'ekkoMemoryMinConfidence', 'ekkoMemoryTimeoutMs'].includes(key))) {
     throw new JevError('Unknown JEV setting')
   }
   const next = { ...current }
@@ -68,11 +87,23 @@ function normalize(input: unknown, current = defaults): StoredSettings {
     if (typeof value.ekkoMemoryEnabled !== 'boolean') throw new JevError('JEV ekkoMemoryEnabled must be a boolean')
     next.ekkoMemoryEnabled = value.ekkoMemoryEnabled
   }
-  for (const key of ['ekkoSkillsEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled'] as const) {
+  for (const key of ['groupSummaryReviewEnabled', 'workflowQualityEnabled', 'groupMessageRoutingEnabled', 'ekkoSkillsEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled'] as const) {
     if (value[key] === undefined) continue
     if (typeof value[key] !== 'boolean') throw new JevError(`Invalid JEV ${key}`)
     next[key] = value[key]
   }
+  if (value.groupMessageRoutingMinConfidence !== undefined) next.groupMessageRoutingMinConfidence = value.groupMessageRoutingMinConfidence as number
+  if (value.groupMessageRoutingTimeoutMs !== undefined) next.groupMessageRoutingTimeoutMs = value.groupMessageRoutingTimeoutMs as number
+  if (!Number.isFinite(next.groupMessageRoutingMinConfidence) || next.groupMessageRoutingMinConfidence < 0.5 || next.groupMessageRoutingMinConfidence > 1) throw new JevError('Invalid JEV group message routing confidence')
+  if (!Number.isInteger(next.groupMessageRoutingTimeoutMs) || next.groupMessageRoutingTimeoutMs < 100 || next.groupMessageRoutingTimeoutMs > 30000) throw new JevError('Invalid JEV group message routing timeout')
+  if (value.workflowQualityMinConfidence !== undefined) next.workflowQualityMinConfidence = value.workflowQualityMinConfidence as number
+  if (value.workflowQualityTimeoutMs !== undefined) next.workflowQualityTimeoutMs = value.workflowQualityTimeoutMs as number
+  if (!Number.isFinite(next.workflowQualityMinConfidence) || next.workflowQualityMinConfidence < 0.5 || next.workflowQualityMinConfidence > 1) throw new JevError('Invalid JEV workflow quality confidence')
+  if (!Number.isInteger(next.workflowQualityTimeoutMs) || next.workflowQualityTimeoutMs < 100 || next.workflowQualityTimeoutMs > 30000) throw new JevError('Invalid JEV workflow quality timeout')
+  if (value.groupSummaryReviewMinConfidence !== undefined) next.groupSummaryReviewMinConfidence = value.groupSummaryReviewMinConfidence as number
+  if (value.groupSummaryReviewTimeoutMs !== undefined) next.groupSummaryReviewTimeoutMs = value.groupSummaryReviewTimeoutMs as number
+  if (!Number.isFinite(next.groupSummaryReviewMinConfidence) || next.groupSummaryReviewMinConfidence < 0.5 || next.groupSummaryReviewMinConfidence > 1) throw new JevError('Invalid JEV group summary review confidence')
+  if (!Number.isInteger(next.groupSummaryReviewTimeoutMs) || next.groupSummaryReviewTimeoutMs < 100 || next.groupSummaryReviewTimeoutMs > 30000) throw new JevError('Invalid JEV group summary review timeout')
   if (value.ekkoSkillsCandidateLimit !== undefined) next.ekkoSkillsCandidateLimit = value.ekkoSkillsCandidateLimit as number
   if (value.ekkoSkillsMinConfidence !== undefined) next.ekkoSkillsMinConfidence = value.ekkoSkillsMinConfidence as number
   if (value.ekkoSkillsTimeoutMs !== undefined) next.ekkoSkillsTimeoutMs = value.ekkoSkillsTimeoutMs as number
@@ -111,7 +142,7 @@ function normalize(input: unknown, current = defaults): StoredSettings {
 }
 
 function publicSettings(value: StoredSettings): JevSettings {
-  return { ekkoSkillsEnabled: value.ekkoSkillsEnabled, ekkoSkillsCandidateLimit: value.ekkoSkillsCandidateLimit,
+  return { groupMessageRoutingEnabled: value.groupMessageRoutingEnabled, groupMessageRoutingMinConfidence: value.groupMessageRoutingMinConfidence, groupMessageRoutingTimeoutMs: value.groupMessageRoutingTimeoutMs, workflowQualityEnabled: value.workflowQualityEnabled, workflowQualityMinConfidence: value.workflowQualityMinConfidence, workflowQualityTimeoutMs: value.workflowQualityTimeoutMs, groupSummaryReviewEnabled: value.groupSummaryReviewEnabled, groupSummaryReviewMinConfidence: value.groupSummaryReviewMinConfidence, groupSummaryReviewTimeoutMs: value.groupSummaryReviewTimeoutMs, ekkoSkillsEnabled: value.ekkoSkillsEnabled, ekkoSkillsCandidateLimit: value.ekkoSkillsCandidateLimit,
     ekkoSkillsMinConfidence: value.ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs: value.ekkoSkillsTimeoutMs,
     baseUrl: value.baseUrl, model: value.model, timeoutMs: value.timeoutMs, ekkoMemoryEnabled: value.ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled: value.ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled: value.ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled: value.ekkoMemoryRerankEnabled, ekkoMemoryWriteReviewEnabled: value.ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit: value.ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence: value.ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence: value.ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence: value.ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs: value.ekkoMemoryTimeoutMs, hasApiKey: !!value.apiKey }
 }
@@ -131,7 +162,7 @@ export async function getJevSettings(profile: string): Promise<JevSettings> {
 
 /** Server-only host configuration for agent runtimes; never return this from an HTTP endpoint. */
 export async function getJevRuntimeConfig(profile: string) {
-  const { ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled, ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs, ...settings } = await readJevCredentials(profile)
+  const { groupMessageRoutingEnabled: _groupMessageRoutingEnabled, groupMessageRoutingMinConfidence: _groupMessageRoutingMinConfidence, groupMessageRoutingTimeoutMs: _groupMessageRoutingTimeoutMs, workflowQualityEnabled: _workflowQualityEnabled, workflowQualityMinConfidence: _workflowQualityMinConfidence, workflowQualityTimeoutMs: _workflowQualityTimeoutMs, groupSummaryReviewEnabled: _groupSummaryReviewEnabled, groupSummaryReviewMinConfidence: _groupSummaryReviewMinConfidence, groupSummaryReviewTimeoutMs: _groupSummaryReviewTimeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled, ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs, ...settings } = await readJevCredentials(profile)
   return { ...settings, enabled: Boolean(settings.apiKey), memoryEnabled: ekkoMemoryEnabled,
     skillsEnabled: ekkoSkillsEnabled,
     skillsCandidateLimit: ekkoSkillsCandidateLimit,

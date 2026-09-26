@@ -67,6 +67,13 @@ function updateField<K extends keyof WorkflowAgentNodeEditableData>(key: K, valu
   props.data.onUpdate(props.id, { [key]: value } as Partial<WorkflowAgentNodeEditableData>)
 }
 
+function addQualityCriterion() {
+  const criteria = [...(props.data.qualityReview?.criteria || []), { id: `criterion-${Date.now().toString(36)}`, text: '', evidence: 'output' as const }].slice(0, 10)
+  updateField('qualityReview', { mode: 'observe', criteria })
+}
+function updateQualityCriterion(index: number, text: string) { const criteria = [...(props.data.qualityReview?.criteria || [])]; if (criteria[index]) criteria[index] = { ...criteria[index], text }; updateField('qualityReview', { mode: props.data.qualityReview?.mode || 'observe', criteria }) }
+function removeQualityCriterion(index: number) { const criteria = [...(props.data.qualityReview?.criteria || [])]; criteria.splice(index,1); updateField('qualityReview', { mode: props.data.qualityReview?.mode || 'observe', criteria }) }
+
 function handleModelSelect(selection: { provider: string; model: string; apiMode?: ProviderApiMode }) {
   const patch: Partial<WorkflowAgentNodeEditableData> = {
     provider: selection.provider,
@@ -240,6 +247,17 @@ async function uploadImages(files: File[]) {
           :disabled="data.readonly"
           @update:value="value => updateField('orchestration', { join: value as 'all' | 'any' })"
         />
+      </div>
+      <label class="node-toggle-row">
+        <span>{{ t('workflow.node.qualityReview') }}</span>
+        <NSwitch :value="data.qualityReview?.mode === 'observe'" size="small" :disabled="data.readonly" @update:value="value => updateField('qualityReview', { mode: value ? 'observe' : 'off', criteria: data.qualityReview?.criteria || [] })" />
+      </label>
+      <div v-if="data.qualityReview?.mode === 'observe'" class="quality-criteria">
+        <div v-for="(criterion, index) in data.qualityReview.criteria" :key="criterion.id" class="quality-criterion">
+          <NInput :value="criterion.text" size="small" :disabled="data.readonly" :placeholder="t('workflow.node.qualityCriterion')" @update:value="value => updateQualityCriterion(index, value)" />
+          <button type="button" :disabled="data.readonly" @click="removeQualityCriterion(index)">×</button>
+        </div>
+        <button v-if="data.qualityReview.criteria.length < 10" type="button" :disabled="data.readonly" @click="addQualityCriterion">{{ t('workflow.node.addQualityCriterion') }}</button>
       </div>
       <label class="node-toggle-row">
         <span>{{ t('workflow.node.approvalRequired') }}</span>
@@ -786,3 +804,5 @@ async function uploadImages(files: File[]) {
   bottom: -9px;
 }
 </style>
+
+<style scoped>.quality-criteria{display:grid;gap:6px}.quality-criterion{display:grid;grid-template-columns:1fr auto;gap:4px}.quality-criterion button,.quality-criteria>button{border:0;background:transparent;color:var(--text-color-2);cursor:pointer;text-align:start}</style>

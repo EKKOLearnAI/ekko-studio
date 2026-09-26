@@ -2,6 +2,29 @@ import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
   jev: {
+    groupMessageRoutingEnabled: "ko Use JEV for group message routing",
+    groupRoutingDisabled: "ko Disabled; unmentioned messages remain unassigned.",
+    groupRoutingReady: "ko Enabled for room suggest/auto modes.",
+    groupMessageRoutingMinConfidence: "ko Routing confidence",
+    groupMessageRoutingMinConfidenceHint: "ko Minimum confidence required to suggest or auto-route.",
+    groupMessageRoutingTimeout: "ko Routing time budget (ms)",
+    groupMessageRoutingTimeoutHint: "ko Total JEV budget for one unaddressed message.",
+
+    workflowQualityEnabled: "ko Workflow JEV",
+    workflowQualityDisabled: "ko disabled",
+    workflowQualityReady: "ko ready",
+    workflowQualityMinConfidence: "ko confidence",
+    workflowQualityMinConfidenceHint: "ko minimum confidence",
+    workflowQualityTimeout: "ko timeout",
+    workflowQualityTimeoutHint: "ko total budget",
+
+    groupSummaryReviewEnabled: 'JEV로 그룹 요약 검토',
+    groupSummaryDisabled: '비활성화됨. 기존 요약 동작을 유지합니다.',
+    groupSummaryReady: '이 프로필로 생성한 요약에 활성화되었습니다.',
+    groupSummaryReviewMinConfidence: '요약 검토 신뢰도',
+    groupSummaryReviewMinConfidenceHint: '품질 문제를 보고할 최소 신뢰도입니다.',
+    groupSummaryReviewTimeout: '요약 검토 시간 예산(ms)',
+    groupSummaryReviewTimeoutHint: '원본 요약 저장 후 사용하는 총 JEV 예산입니다.',
     ekkoSkillsEnabled: "Ekko 스킬에 JEV 사용",
     skillsDisabled: "비활성화됨. 기존 스킬 매칭과 학습을 사용합니다.",
     skillsReady: "의미 기반 매칭과 학습 사전 판단이 활성화되었습니다.",
@@ -2795,6 +2818,7 @@ export default {
   },
 
   workflow: {
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: '워크플로',
     profile: '프로필',
     namePlaceholder: '워크플로 이름',
@@ -2950,6 +2974,9 @@ export default {
       loopId: '루프 식별자', loopIdPlaceholder: '자동 선택 또는 사용자 ID 입력', loopIdAutomatic: '자동 (권장) · {id}', loopIdHelp: '실행 기록에서 루프를 표시할 뿐 실행 조건은 바꾸지 않습니다. 보통 자동을 유지하세요.', invalidLoopId: '루프 ID 형식이 올바르지 않습니다',
     },
     node: {
+      qualityReview: "JEV quality criteria",
+      qualityCriterion: "Describe an observable quality criterion",
+      addQualityCriterion: "Add quality criterion",
       title: '노드 이름', agent: '에이전트', model: '모델', apiMode: 'API 모드', input: '입력', approvalRequired: '완료 후 승인',
       join: '합류 전략', joinAll: '모든 입력 경로', joinAny: '입력 경로 중 하나',
       joinAllHelp: '모든 입력 경로가 선택되어야 실행하며 하나라도 불일치하면 건너뜁니다.', joinAnyHelp: '첫 번째 입력 경로가 선택되면 한 번 실행하며 모두 불일치할 때만 건너뜁니다.',
@@ -2962,6 +2989,16 @@ export default {
 
   // 변경 이력
   groupChat: {
+    messageRoutingMode: "JEV message routing", routingOff: "Off", routingSuggest: "Suggest an Agent", routingAuto: "Automatically assign", routingSuggested: "JEV suggests {agent}", routingUseSuggestion: "Assign", routingAutoQueued: "JEV assigned {agent}",
+    summaryEvaluationProfile: "JEV evaluation Profile",
+    summaryReviewEnabled: "Review summaries with JEV",
+    summaryReviewHint: "Checks the saved summary asynchronously without delaying chat.",
+    summaryRevisionEnabled: "Apply one safe revision",
+    summaryRevisionHint: "When review finds a reliable issue, revise once without moving the summary anchor.",
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',

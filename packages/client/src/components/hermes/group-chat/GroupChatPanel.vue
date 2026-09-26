@@ -51,6 +51,7 @@ import type {
     RoomSummaryAnchor,
     RoomSummaryConfig,
     RoomSummaryState,
+    RoomSummaryReview,
 } from '@/api/studio/group-chat'
 import { useFilesStore } from '@/stores/hermes/files'
 import { useToolPanelStore } from '@/stores/hermes/tool-panel'
@@ -135,6 +136,10 @@ const summaryConfig = ref<RoomSummaryConfig>({
     summaryModel: '',
     summaryApiMode: 'chat_completions',
     summaryEveryTurns: 20,
+    evaluationProfile: 'default',
+    summaryReviewMode: 'inherit',
+    summaryRevisionEnabled: false,
+    messageRoutingMode: 'off',
 })
 const agentHandoffEnabledDraft = ref(true)
 const agentHandoffMaxDepthDraft = ref<number | null>(4)
@@ -143,6 +148,7 @@ const agentHandoffRecommendation = computed(() => Math.max(4, store.agents.lengt
 const isContinuingHandoff = ref(false)
 const roomSummaryState = ref<RoomSummaryState | null>(null)
 const roomSummaryAnchor = ref<RoomSummaryAnchor | null>(null)
+const roomSummaryReview = ref<RoomSummaryReview | null>(null)
 const roomSummaryDraft = ref('')
 const isLoadingRoomSummary = ref(false)
 const isSavingRoomSummary = ref(false)
@@ -406,6 +412,10 @@ const summaryApiModeOptions = computed(() => [
     { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
     { label: t('codingAgents.protocolAnthropicMessages'), value: 'anthropic_messages' },
 ])
+const liveRoomSummaryReview = computed(() => {
+    const roomId = store.currentRoomId
+    return roomId ? store.roomSummaryReviews.get(roomId) || roomSummaryReview.value : roomSummaryReview.value
+})
 const liveRoomSummaryState = computed(() => {
     const roomId = store.currentRoomId
     return (roomId && store.roomSummaryStates.get(roomId))
@@ -1633,6 +1643,8 @@ async function loadRoomSummaryState(roomId: string) {
         if (store.currentRoomId !== roomId) return
         roomSummaryState.value = store.roomSummaryStates.get(roomId) || result.summary
         roomSummaryAnchor.value = result.anchor
+        roomSummaryReview.value = result.review
+        if (result.review) store.applyRoomSummaryReview(result.review)
         roomSummaryDraft.value = roomSummaryState.value.summary
     } catch {
         // A missing summary should not block entering or reading the room.
@@ -1837,6 +1849,10 @@ async function handleOpenRoomSettings() {
             summaryModel: room.summaryModel || '',
             summaryApiMode: room.summaryApiMode || 'chat_completions',
             summaryEveryTurns: room.summaryEveryTurns || 20,
+            evaluationProfile: room.evaluationProfile || room.summaryProfile || profilesStore.activeProfileName || 'default',
+            summaryReviewMode: room.summaryReviewMode || 'inherit',
+            summaryRevisionEnabled: Number(room.summaryRevisionEnabled || 0) === 1,
+            messageRoutingMode: room.messageRoutingMode || 'off',
         }
         agentHandoffEnabledDraft.value = Number(room.agentHandoffEnabled ?? 1) === 1
         agentHandoffMaxDepthDraft.value = room.agentHandoffMaxDepth ?? 4
@@ -1859,6 +1875,8 @@ async function handleOpenRoomSettings() {
         if (store.currentRoomId !== summaryRoomId) return
         roomSummaryState.value = store.roomSummaryStates.get(summaryRoomId) || result.summary
         roomSummaryAnchor.value = result.anchor
+        roomSummaryReview.value = result.review
+        if (result.review) store.applyRoomSummaryReview(result.review)
         roomSummaryDraft.value = roomSummaryState.value.summary
     } catch (err: any) {
         message.error(err?.message || t('groupChat.summaryLoadFailed'))
@@ -1961,6 +1979,7 @@ async function handleSaveSummaryConfig() {
     try {
         const res = await updateRoomConfig(store.currentRoomId, {
             ...summaryConfig.value,
+            summaryRevisionEnabled: summaryConfig.value.summaryRevisionEnabled === true,
             agentHandoffEnabled: agentHandoffEnabledDraft.value,
             agentHandoffMaxDepth: agentHandoffMaxDepthDraft.value,
             agentHandoffUnlimited: agentHandoffUnlimitedDraft.value,
@@ -3394,6 +3413,19 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                 <NInputNumber v-model:value="summaryConfig.summaryEveryTurns" :min="1" :max="1000" :step="1" style="width: 100%" />
                                 <p class="form-hint">{{ t('groupChat.summaryEveryTurnsDesc') }}</p>
                             </div>
+                            <div class="form-group">
+                                <label class="form-label">{{ t('groupChat.summaryEvaluationProfile') }}</label>
+                                <NSelect v-model:value="summaryConfig.evaluationProfile" :options="profilesStore.profiles.map(profile => ({ label: profile.name, value: profile.name }))" />
+                            </div>
+                            <div class="guest-agent-policy-row">
+                                <div><strong>{{ t('groupChat.summaryReviewEnabled') }}</strong><p class="form-hint">{{ t('groupChat.summaryReviewHint') }}</p></div>
+                                <NSwitch :value="summaryConfig.summaryReviewMode !== 'off'" @update:value="value => summaryConfig.summaryReviewMode = value ? 'inherit' : 'off'" />
+                            </div>
+                            <div class="guest-agent-policy-row">
+                                <div><strong>{{ t('groupChat.summaryRevisionEnabled') }}</strong><p class="form-hint">{{ t('groupChat.summaryRevisionHint') }}</p></div>
+                                <NSwitch v-model:value="summaryConfig.summaryRevisionEnabled" />
+                            </div>
+                            <div class="form-group"><label class="form-label">{{ t('groupChat.messageRoutingMode') }}</label><NSelect v-model:value="summaryConfig.messageRoutingMode" :options="[{label:t('groupChat.routingOff'),value:'off'},{label:t('groupChat.routingSuggest'),value:'suggest'},{label:t('groupChat.routingAuto'),value:'auto'}]" /></div>
                             <NButton
                                 type="primary"
                                 :disabled="!summaryConfig.summaryProvider || !summaryConfig.summaryModel || !summaryConfig.summaryApiMode"
@@ -3445,6 +3477,13 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                     <span>{{ t('groupChat.summarizedTurns') }}</span>
                                     <strong>{{ liveRoomSummaryState?.summarizedTurnCount || 0 }}</strong>
                                 </span>
+                            </div>
+                            <div v-if="liveRoomSummaryReview" class="summary-review" :class="`is-${liveRoomSummaryReview.decision}`">
+                                <strong>{{ t('groupChat.summaryQuality') }} · {{ t(`groupChat.summaryQualityDecision.${liveRoomSummaryReview.decision}`) }}</strong>
+                                <span>{{ t('groupChat.summaryQualityVersion', { version: liveRoomSummaryReview.sourceVersion }) }}</span>
+                                <ul v-if="liveRoomSummaryReview.ruleResults.length">
+                                    <li v-for="rule in liveRoomSummaryReview.ruleResults" :key="rule.id">{{ t(`groupChat.summaryQualityRule.${rule.id}`) }} · {{ t(`groupChat.summaryQualityDecision.${rule.decision}`) }}</li>
+                                </ul>
                             </div>
                             <div v-if="liveRoomSummaryState?.lastError" class="summary-error">
                                 {{ liveRoomSummaryState.lastError }}
@@ -5261,4 +5300,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
 }
+</style>
+
+<style scoped lang="scss">
+.summary-review { margin: 12px 0; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; display: grid; gap: 6px; }
+.summary-review.is-pass { border-color: #18a058; }
+.summary-review.is-needs_improvement { border-color: #f0a020; }
+.summary-review ul { margin: 0; padding-inline-start: 20px; }
 </style>
