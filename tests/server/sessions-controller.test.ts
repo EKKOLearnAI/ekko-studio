@@ -955,6 +955,7 @@ describe('session conversations controller', () => {
         cost_status: '',
         preview: '',
       },
+      { id: 'desktop-session', profile: 'default', source: 'desktop' },
       {
         id: 'secret-session',
         profile: 'secret',
@@ -991,12 +992,12 @@ describe('session conversations controller', () => {
     await mod.list(ctx)
 
     expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 2000, {
-      sources: ['api_server', 'cli', 'coding_agent', 'global_agent'],
+      sources: ['api_server', 'cli', 'desktop', 'coding_agent', 'global_agent'],
       profiles: ['default', 'travel'],
       includeArchived: false,
       excludeSessionIds: [],
     })
-    expect(ctx.body.sessions.map((session: any) => session.id)).toEqual(['default-session', 'travel-session'])
+    expect(ctx.body.sessions.map((session: any) => session.id)).toEqual(['default-session', 'travel-session', 'desktop-session'])
   })
 
   it('filters the single-chat session list when profile is explicitly provided', async () => {
@@ -1011,7 +1012,7 @@ describe('session conversations controller', () => {
     await mod.list(ctx)
 
     expect(localListSessionsMock).toHaveBeenCalledWith('travel', undefined, 2000, {
-      sources: ['api_server', 'cli', 'coding_agent', 'global_agent'],
+      sources: ['api_server', 'cli', 'desktop', 'coding_agent', 'global_agent'],
       profiles: undefined,
       includeArchived: false,
       excludeSessionIds: [],
@@ -1641,6 +1642,7 @@ describe('session conversations controller', () => {
     localSearchSessionsMock.mockReturnValue([
       { id: 'global-1', profile: 'default', source: 'global_agent' },
       { id: 'chat-1', profile: 'default', source: 'cli' },
+      { id: 'desktop-1', profile: 'travel', source: 'desktop' },
     ])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
@@ -1652,7 +1654,7 @@ describe('session conversations controller', () => {
     await mod.search(ctx)
 
     expect(localSearchSessionsMock).toHaveBeenCalledWith(undefined, 'docker', 10, {
-      sources: ['api_server', 'cli', 'coding_agent', 'global_agent'],
+      sources: ['api_server', 'cli', 'desktop', 'coding_agent', 'global_agent'],
       profiles: ['default', 'travel'],
       includeArchived: false,
       excludeSessionIds: [],
@@ -1660,6 +1662,7 @@ describe('session conversations controller', () => {
     expect(ctx.body.results).toEqual([
       expect.objectContaining({ id: 'global-1', source: 'global_agent' }),
       expect.objectContaining({ id: 'chat-1', source: 'cli' }),
+      expect.objectContaining({ id: 'desktop-1', source: 'desktop' }),
     ])
   })
 
