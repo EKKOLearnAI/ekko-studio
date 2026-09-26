@@ -602,7 +602,7 @@ onMounted(() => {
                   :loading="installing[agent.id]"
                   @click="handleInstall(agent.id)"
                 >
-                  {{ t('codingAgents.installNow') }}
+                  {{ agent.id === 'cursor' ? t('codingAgents.cursorInstallGuide') : t('codingAgents.installNow') }}
                 </NButton>
                 <NButton
                   v-else-if="agent.id !== 'cursor' && availableUpdateVersion(agent.id)"

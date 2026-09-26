@@ -119,7 +119,7 @@ describe('agent bridge manager command resolution', () => {
   it('uses the Python beside a shell-wrapped hermes command', async () => {
     const binDir = join(tempDir, 'bin')
     const homeDir = join(tempDir, 'home')
-    const siblingPython = join(binDir, 'python3')
+    const siblingPython = join(binDir, process.platform === 'win32' ? 'python3.exe' : 'python3')
     const shellWrappedHermes = join(binDir, 'hermes')
     mkdirSync(binDir, { recursive: true })
     mkdirSync(homeDir, { recursive: true })
@@ -234,7 +234,11 @@ describe('agent bridge manager command resolution', () => {
   it('uses an isolated default bridge endpoint while running under Vitest', async () => {
     const { DEFAULT_AGENT_BRIDGE_ENDPOINT } = await import('../../packages/server/src/modules/hermes/services/bridge/client')
 
-    expect(DEFAULT_AGENT_BRIDGE_ENDPOINT).toContain(`hermes-agent-bridge-test-${process.pid}`)
+    if (process.platform === 'win32') {
+      expect(DEFAULT_AGENT_BRIDGE_ENDPOINT).toBe(`tcp://127.0.0.1:${28000 + (process.pid % 10000)}`)
+    } else {
+      expect(DEFAULT_AGENT_BRIDGE_ENDPOINT).toContain(`hermes-agent-bridge-test-${process.pid}`)
+    }
     expect(DEFAULT_AGENT_BRIDGE_ENDPOINT).not.toBe('ipc:///tmp/hermes-agent-bridge.sock')
   })
 
@@ -562,6 +566,8 @@ describe('agent bridge manager command resolution', () => {
 
   it('force-kills the managed bridge tree when graceful shutdown times out', async () => {
     vi.useFakeTimers()
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
     process.env.HERMES_AGENT_BRIDGE_SHUTDOWN_TIMEOUT_MS = '25'
     try {
       const { AgentBridgeManager } = await import('../../packages/server/src/modules/hermes/services/bridge/manager')
@@ -584,6 +590,7 @@ describe('agent bridge manager command resolution', () => {
         pid: undefined,
       })
     } finally {
+      if (platform) Object.defineProperty(process, 'platform', platform)
       vi.useRealTimers()
     }
   })

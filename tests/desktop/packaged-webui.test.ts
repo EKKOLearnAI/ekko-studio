@@ -179,7 +179,7 @@ describe('packaged desktop Web UI', () => {
       electronPlatformName: 'win32',
       arch: 1,
       packager: { appInfo: { productFilename: 'Ekko Studio' } },
-    } as never)).rejects.toThrow('dist/ekko-skills/github/SKILL.md')
+    } as never)).rejects.toThrow(/dist[/\\]ekko-skills[/\\]github[/\\]SKILL\.md/)
   })
 
   it('rejects a package that omitted the target sherpa-onnx runtime', async () => {

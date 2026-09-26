@@ -104,6 +104,7 @@ export interface CodingAgentRunLaunch {
   sessionSource?: 'global_agent' | 'workflow' | 'group_chat'
   reasoningEffort?: string
   approvalRequired?: boolean
+  studioMcpTokenFile?: string
 }
 
 export interface CodingAgentRunInfo {
@@ -682,12 +683,14 @@ export class CodingAgentRunManager {
     model?: string
     reasoningEffort?: string
     apiMode?: ApiMode
+    studioMcpTokenFile?: string
   }): boolean {
     const run = this.getBySession(sessionId)
     if (!run || run.exited) return false
     const mode = launch.mode === 'global' ? 'global' : 'scoped'
     if (run.launch.agentId !== launch.agentId) return false
     if (run.launch.mode !== mode) return false
+    if (run.launch.studioMcpTokenFile !== launch.studioMcpTokenFile) return false
     if (mode === 'scoped') {
       const provider = String(launch.provider || '').trim()
       const model = String(launch.model || '').trim()

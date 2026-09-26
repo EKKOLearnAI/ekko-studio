@@ -394,6 +394,7 @@ describe('skills controller', () => {
   it('lists Codex user and system skills for the codex target', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-codex-skills-'))
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
     const userSkillDir = join(root, '.agents', 'skills', 'user-skill')
     const systemSkillDir = join(root, '.codex', 'skills', '.system', 'system-skill')
 
@@ -402,6 +403,7 @@ describe('skills controller', () => {
     await writeFile(join(userSkillDir, 'SKILL.md'), '# User Skill\nuser codex skill\n', 'utf-8')
     await writeFile(join(systemSkillDir, 'SKILL.md'), '# System Skill\nsystem codex skill\n', 'utf-8')
     process.env.HOME = root
+    process.env.USERPROFILE = root
 
     try {
       const { list } = await loadController()
@@ -422,6 +424,8 @@ describe('skills controller', () => {
     } finally {
       if (previousHome == null) delete process.env.HOME
       else process.env.HOME = previousHome
+      if (previousUserProfile == null) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -429,6 +433,7 @@ describe('skills controller', () => {
   it('lists shared user skills without Codex system skills for the pi target', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-pi-skills-'))
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
     const userSkillDir = join(root, '.agents', 'skills', 'pi-user-skill')
     const systemSkillDir = join(root, '.codex', 'skills', '.system', 'codex-only-skill')
 
@@ -437,6 +442,7 @@ describe('skills controller', () => {
     await writeFile(join(userSkillDir, 'SKILL.md'), '# Pi User Skill\nshared agent skill\n', 'utf-8')
     await writeFile(join(systemSkillDir, 'SKILL.md'), '# Codex Only\nmust not be exposed to Pi\n', 'utf-8')
     process.env.HOME = root
+    process.env.USERPROFILE = root
 
     try {
       const { list } = await loadController()
@@ -456,6 +462,8 @@ describe('skills controller', () => {
     } finally {
       if (previousHome == null) delete process.env.HOME
       else process.env.HOME = previousHome
+      if (previousUserProfile == null) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -463,6 +471,7 @@ describe('skills controller', () => {
   it('lists Grok shared agent skills as local skills', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-grok-skills-'))
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
     const grokSkillDir = join(root, '.grok', 'skills', 'grok-skill')
     const sharedSkillDir = join(root, '.agents', 'skills', 'shared-skill')
 
@@ -471,6 +480,7 @@ describe('skills controller', () => {
     await writeFile(join(grokSkillDir, 'SKILL.md'), '# Grok Skill\ngrok-local skill\n', 'utf-8')
     await writeFile(join(sharedSkillDir, 'SKILL.md'), '# Shared Skill\nshared agent skill\n', 'utf-8')
     process.env.HOME = root
+    process.env.USERPROFILE = root
 
     try {
       const { list } = await loadController()
@@ -486,6 +496,8 @@ describe('skills controller', () => {
     } finally {
       if (previousHome == null) delete process.env.HOME
       else process.env.HOME = previousHome
+      if (previousUserProfile == null) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -493,11 +505,13 @@ describe('skills controller', () => {
   it('rejects edits to Grok skills from the shared agent skills directory', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-grok-shared-skill-update-'))
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
     const sharedSkillDir = join(root, '.agents', 'skills', 'shared-skill')
 
     await mkdir(sharedSkillDir, { recursive: true })
     await writeFile(join(sharedSkillDir, 'SKILL.md'), '# Shared Skill\nbefore\n', 'utf-8')
     process.env.HOME = root
+    process.env.USERPROFILE = root
 
     try {
       const { updateSkill } = await loadController()
@@ -516,6 +530,8 @@ describe('skills controller', () => {
     } finally {
       if (previousHome == null) delete process.env.HOME
       else process.env.HOME = previousHome
+      if (previousUserProfile == null) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -571,12 +587,14 @@ describe('skills controller', () => {
   it('reads Codex system skill details for the codex target', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-codex-system-skill-'))
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
     const systemSkillDir = join(root, '.codex', 'skills', '.system', 'imagegen')
 
     await mkdir(join(systemSkillDir, 'references'), { recursive: true })
     await writeFile(join(systemSkillDir, 'SKILL.md'), '# Imagegen\nsystem image skill\n', 'utf-8')
     await writeFile(join(systemSkillDir, 'references', 'usage.md'), 'usage notes\n', 'utf-8')
     process.env.HOME = root
+    process.env.USERPROFILE = root
     mockListFilesRecursive.mockResolvedValue([
       { path: 'SKILL.md', isDir: false },
       { path: 'references/usage.md', isDir: false },
@@ -608,6 +626,8 @@ describe('skills controller', () => {
     } finally {
       if (previousHome == null) delete process.env.HOME
       else process.env.HOME = previousHome
+      if (previousUserProfile == null) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -813,6 +833,7 @@ describe('skills controller', () => {
   it('keeps Codex shared and system skills read-only', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-update-codex-skill-'))
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
     const userSkillDir = join(root, '.agents', 'skills', 'user-skill')
     const systemSkillDir = join(root, '.codex', 'skills', '.system', 'system-skill')
 
@@ -821,6 +842,7 @@ describe('skills controller', () => {
     await writeFile(join(userSkillDir, 'SKILL.md'), '# User Skill\n', 'utf-8')
     await writeFile(join(systemSkillDir, 'SKILL.md'), '# System Skill\n', 'utf-8')
     process.env.HOME = root
+    process.env.USERPROFILE = root
 
     try {
       const { updateSkill } = await loadController()
@@ -853,6 +875,8 @@ describe('skills controller', () => {
     } finally {
       if (previousHome == null) delete process.env.HOME
       else process.env.HOME = previousHome
+      if (previousUserProfile == null) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
       await rm(root, { recursive: true, force: true })
     }
   })

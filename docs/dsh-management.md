@@ -64,6 +64,10 @@ The installed DSH source remains unchanged. This check does not prove compatibil
 with every future semantic change; real native regression tests remain required
 when Studio changes its adapter.
 
+Studio resolves `@deepseek-ai/dsh-acp` from the selected `dsh-acp-app` bundle,
+including nested dependencies. The ACP package does not need to be hoisted into
+the CLI's top-level `node_modules` or installed separately in the Web profile.
+
 The adapter flushes persistence before resolving a completed ACP prompt. On normal completion Studio closes the ACP session to flush persistence, then closes stdin. The next turn starts a fresh process and resumes the same persisted session. Resume errors are reported without silently creating a replacement conversation. Cancelling a run or exiting Studio cancels ACP and terminates only Studio-owned processes, with forced cleanup if needed. This does not bind the DSH Web port or stop a separately started DSH instance.
 
 Validate the installed CLI without a paid model call with `NODE_ENV=test PORT=8648 DSH_REAL_ACP_E2E=1 npx vitest run tests/server/dsh-acp-real.test.ts`. This opt-in check uses an isolated temporary home and a local Responses fixture to verify model injection, shutdown and cross-process resume. The fixture pauses after its first text delta until Studio receives that delta, proving streaming happens before model completion; it also checks that final ACP output is not duplicated.

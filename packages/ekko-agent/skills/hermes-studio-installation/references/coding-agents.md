@@ -104,3 +104,11 @@ Studio builds its command PATH from its current Node directory, npm's global bin
 5. reinstall only if the resolved executable or package is genuinely absent.
 
 Do not create Agent model or credential configuration during this installation workflow. Authentication is a separate task after installation succeeds.
+
+## Cursor support boundary
+
+Cursor is a user-installed external CLI, not an npm package Studio installs. The install entry points at https://cursor.com/install. Studio does not install, update, or uninstall it. `deleteCodingAgent('cursor')` returns unsupported and does not stop running Cursor sessions.
+
+Cursor launches in global mode with `agent -p`. It does not receive a Studio provider, base URL, or model API key. `CURSOR_API_KEY` is a Cursor account credential, not a Studio model key. Bring-your-own-key and `agent acp` are outside this release.
+
+Also outside this release: Windows prompts that exceed the command-line length limit, the native `/compact` command, and Cursor skills. A long Windows prompt, a compact request, or a missing skill is unsupported, not a sign that Cursor is fully managed like Claude, Codex, Pi, or Grok.

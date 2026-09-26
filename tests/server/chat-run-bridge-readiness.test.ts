@@ -1027,7 +1027,7 @@ describe('ChatRunSocket MCP task plan lifecycle', () => {
       Object.assign(sessions.get(data.session_id), { isWorking: true, responseRun: { runMarker: 'coding-turn-1' } })
       return { runId: 'reused-runtime-id', messageId: 42 }
     }) as any)
-    await (server as any).handleRun(socket, { session_id: 'session-1', source: source === 'global_agent' ? 'coding_agent' : source, session_source: source === 'coding_agent' ? undefined : source, coding_agent_id: 'codex', input: 'Implement a feature' }, 'default')
+    await (server as any).handleRun(socket, { session_id: 'session-1', source: source === 'global_agent' ? 'coding_agent' : source, session_source: source === 'coding_agent' ? undefined : source, ...(source === 'group_chat' ? { group_room_id: 'room', group_agent_id: 'worker' } : {}), coding_agent_id: 'codex', input: 'Implement a feature' }, 'default')
     expect(handleCodingAgentRunMock).toHaveBeenCalledTimes(1)
     expect(planContext).toBeTruthy()
     if (source === 'workflow' || source === 'global_agent') {
@@ -1114,11 +1114,12 @@ describe('MCP-aware run guidance', () => {
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const { io, socket } = makeServerHarness()
     const server = new ChatRunSocket(io as any)
-    await (server as any).handleRun(socket, { session_id: 'session-1', source, coding_agent_id: 'codex', input: 'Plan work' }, 'research')
+    await (server as any).handleRun(socket, { session_id: 'session-1', source, ...(source === 'group_chat' ? { group_room_id: 'room', group_agent_id: 'worker' } : {}), coding_agent_id: 'codex', input: 'Plan work' }, 'research')
     const data = (handleCodingAgentRunMock.mock.calls as any)[0][2]
     expect(data.task_plan_context_id).toBeUndefined()
     expect(data.interaction_context_id).toBeUndefined()
     expect(data.instructions || '').not.toContain('ekko_studio_')
+    if (source === 'group_chat') expect(data.studio_mcp_token_file).toBeTruthy()
     expect(getChatCodingAgentMcpServers).toHaveBeenLastCalledWith('codex', 'research')
   })
 
@@ -1147,7 +1148,7 @@ describe('MCP-aware run guidance', () => {
     const { io, socket } = makeServerHarness()
     ;(socket.data as any).mobileDeviceTarget = { profile: 'default', platform: 'ios', deviceCode: 'phone', userId: 1 }
     const server = new ChatRunSocket(io as any)
-    await (server as any).handleRun(socket, { session_id: 'session-1', source: 'coding_agent', session_source, coding_agent_id: 'codex', input: 'Hello' }, 'default')
+    await (server as any).handleRun(socket, { session_id: 'session-1', source: 'coding_agent', session_source, ...(session_source === 'group_chat' ? { group_room_id: 'room', group_agent_id: 'worker' } : {}), coding_agent_id: 'codex', input: 'Hello' }, 'default')
     expect((handleCodingAgentRunMock.mock.calls as any)[0][2].instructions || '').not.toContain('ekko_studio_use_mobile_')
   })
 

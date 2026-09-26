@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CURSOR_COMPACT_UNSUPPORTED,
   buildCursorTurnArgs,
+  createCursorStdoutReader,
 } from '../../../../packages/server/src/modules/coding-agents/services/cursor/turn-process'
 
 describe('Cursor stream-json launch args', () => {
@@ -53,6 +54,18 @@ describe('Cursor stream-json launch args', () => {
       'hi',
     ])
     expect(args).not.toContain('--mcp-config')
+  })
+
+  it('reassembles UTF-8 text split across stdout chunks', () => {
+    const reader = createCursorStdoutReader()
+    const niHao = Buffer.from('你好\n', 'utf8')
+    expect(reader.push(niHao.subarray(0, 1))).toEqual([])
+    expect(reader.push(niHao.subarray(1))).toEqual(['你好'])
+    const emoji = Buffer.from('😀\n', 'utf8')
+    expect(reader.push(emoji.subarray(0, 2))).toEqual([])
+    expect(reader.push(emoji.subarray(2))).toEqual(['😀'])
+    expect(reader.push(Buffer.from('尾', 'utf8'))).toEqual([])
+    expect(reader.end()).toEqual(['尾'])
   })
 
   it('does not pretend compact is a CLI flag', () => {

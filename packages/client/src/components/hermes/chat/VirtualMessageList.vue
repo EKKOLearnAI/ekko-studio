@@ -20,6 +20,9 @@ type AnchorTarget = {
   messageId: string;
   anchorId: string;
   align: AnchorAlign;
+  stableSince: number;
+  layout: number[] | null;
+  resolve: (positioned: boolean) => void;
 }
 type BottomScrollOptions = number | {
   frames?: number;
@@ -66,6 +69,8 @@ let bottomFrameAttempts = 0;
 let programmaticScrollUntil = 0;
 let userDetachedFromBottom = false;
 let anchorFrame: number | null = null;
+let anchorTimeout: ReturnType<typeof setTimeout> | null = null;
+const isAligningAnchor = ref(false);
 let anchorToken = 0;
 let activeAnchorTarget: AnchorTarget | null = null;
 let viewportRestoreFrame: number | null = null;
@@ -113,7 +118,7 @@ function handleScroll() {
   if (delta < -1) {
     userDetachedFromBottom = true;
     cancelBottomScroll();
-  } else if (!isProgrammaticScroll()) {
+  } else if (!activeAnchorTarget && !isProgrammaticScroll()) {
     if (isNearBottom(32)) {
       userDetachedFromBottom = false;
     }
@@ -122,10 +127,11 @@ function handleScroll() {
     }
   }
   emit("scroll");
-  if (scrollTop.value <= props.topThreshold) emit("topReach");
+  if (!activeAnchorTarget && scrollTop.value <= props.topThreshold) emit("topReach");
 }
 
 function handleWheel(event: WheelEvent) {
+  cancelAnchorAlignment();
   if (event.deltaY < -1) {
     userDetachedFromBottom = true;
     cancelBottomScroll();
@@ -134,10 +140,14 @@ function handleWheel(event: WheelEvent) {
 
 function handleResize() {
   syncViewport();
+  if (activeAnchorTarget) {
+    activeAnchorTarget.layout = null;
+    scheduleAnchorAlignment(activeAnchorTarget.token);
+    return;
+  }
   if (!userDetachedFromBottom || Date.now() < keepBottomUntil || isNearBottom(64)) {
     scheduleScrollToBottom(2);
   }
-  if (activeAnchorTarget) scheduleAnchorAlignment(activeAnchorTarget.token, 4);
 }
 
 function isNearBottom(threshold = 200): boolean {
@@ -151,11 +161,13 @@ function shouldAutoFollowBottom(threshold = 200): boolean {
 }
 
 function scrollToBottom(options: BottomScrollOptions = {}) {
+  cancelAnchorAlignment();
   const frames = typeof options === "number" ? options : options.frames ?? 2;
   const keepAliveMs = typeof options === "number" ? 400 : options.keepAliveMs ?? 400;
   userDetachedFromBottom = false;
   keepBottomUntil = Date.now() + keepAliveMs;
   nextTick(() => {
+    if (userDetachedFromBottom) return;
     scheduleScrollToBottom(frames);
   });
 }
@@ -217,7 +229,7 @@ function findTargetElement(messageId: string, anchorId: string): HTMLElement | n
 
 function alignElement(targetEl: HTMLElement, align: AnchorAlign) {
   const el = getScrollerElement();
-  if (!el) return;
+  if (!el) return false;
 
   const scrollerRect = el.getBoundingClientRect();
   const targetRect = targetEl.getBoundingClientRect();
@@ -225,11 +237,13 @@ function alignElement(targetEl: HTMLElement, align: AnchorAlign) {
     ? targetRect.top + targetRect.height / 2 - (scrollerRect.top + scrollerRect.height / 2)
     : targetRect.top - scrollerRect.top - 24;
 
+  const previousScrollTop = el.scrollTop;
   if (Math.abs(delta) > 1) {
     markProgrammaticScroll();
     el.scrollTop = Math.max(0, el.scrollTop + delta);
   }
   syncViewport();
+  return Math.abs(el.scrollTop - previousScrollTop) > 1;
 }
 
 function findRowElement(index: number): HTMLElement | null {
@@ -264,10 +278,21 @@ function scrollToItem(index: number, options?: ScrollToOptions) {
   syncViewport();
 }
 
-function scheduleAnchorAlignment(token: number, frames = 1) {
-  if (anchorFrame != null) cancelAnimationFrame(anchorFrame);
+function hasPendingRowMeasurements(el: HTMLElement): boolean {
+  const scroller = scrollerRef.value;
+  if (!props.virtualized || !scroller) return false;
+  return Array.from(el.querySelectorAll<HTMLElement>(".virtual-row")).some(row => {
+    const index = Number(row.dataset.virtualIndex);
+    const message = props.messages[index];
+    const height = row.getBoundingClientRect().height;
+    return !!message && height > 0 && Math.abs(scroller.getItemSize(message, index) - height) > 1;
+  });
+}
 
-  const step = (remaining: number) => {
+function scheduleAnchorAlignment(token: number) {
+  if (anchorFrame != null) return;
+
+  const step = () => {
     const target = activeAnchorTarget;
     if (!target || target.token !== token) {
       anchorFrame = null;
@@ -275,8 +300,20 @@ function scheduleAnchorAlignment(token: number, frames = 1) {
     }
 
     const targetEl = findTargetElement(target.messageId, target.anchorId);
+    const el = getScrollerElement();
+    // A boundary row can leave the recycled window before its ResizeObserver
+    // result reaches the size cache. Re-centering against that stale size can
+    // alternate the window forever. Let visible rows finish measuring first.
+    if (targetEl && el && hasPendingRowMeasurements(el)) {
+      target.layout = null;
+      target.stableSince = performance.now();
+      anchorFrame = requestAnimationFrame(step);
+      return;
+    }
+
+    let corrected = false;
     if (targetEl) {
-      alignElement(targetEl, target.align);
+      corrected = alignElement(targetEl, target.align);
     } else {
       scrollToItem(target.index, {
         align: target.align,
@@ -284,64 +321,83 @@ function scheduleAnchorAlignment(token: number, frames = 1) {
       });
     }
 
-    if (remaining <= 1) {
-      anchorFrame = null;
-      activeAnchorTarget = null;
-      return;
+    if (targetEl && el) {
+      const rect = targetEl.getBoundingClientRect();
+      const layout = [el.scrollTop, el.scrollHeight, el.clientHeight, rect.top - el.getBoundingClientRect().top, rect.height];
+      const unchanged = target.layout?.every((value, index) => Math.abs(value - layout[index]) <= 1);
+      const imagesReady = Array.from(el.querySelectorAll("img")).every(image => image.complete);
+      if (corrected || !unchanged || !imagesReady || rect.height === 0 || el.clientHeight === 0) {
+        target.stableSince = performance.now();
+      }
+      target.layout = layout;
+      // Wait for a quiet layout, including virtual-row size measurements.
+      // A fixed number of scroll retries can end while rows are still moving.
+      if (performance.now() - target.stableSince >= 250) {
+        finishAnchorAlignment(true);
+        return;
+      }
+    } else {
+      target.layout = null;
+      target.stableSince = performance.now();
     }
-    anchorFrame = requestAnimationFrame(() => step(remaining - 1));
+    anchorFrame = requestAnimationFrame(step);
   };
 
-  anchorFrame = requestAnimationFrame(() => step(frames));
+  anchorFrame = requestAnimationFrame(step);
 }
 
-function cancelAnchorAlignment() {
+function finishAnchorAlignment(positioned: boolean) {
+  const target = activeAnchorTarget;
   anchorToken += 1;
   activeAnchorTarget = null;
+  isAligningAnchor.value = false;
+  if (anchorTimeout != null) {
+    clearTimeout(anchorTimeout);
+    anchorTimeout = null;
+  }
   if (anchorFrame != null) {
     cancelAnimationFrame(anchorFrame);
     anchorFrame = null;
   }
+  target?.resolve(positioned);
 }
 
-function scrollToMessage(messageId: string) {
-  const index = props.messages.findIndex(message => String(message.id) === messageId);
-  if (index < 0) return;
+function cancelAnchorAlignment() {
+  finishAnchorAlignment(false);
+}
 
+function positionAnchor(messageId: string, anchorId: string, align: AnchorAlign): Promise<boolean> {
   cancelAnchorAlignment();
-  const token = anchorToken;
-  activeAnchorTarget = {
-    token,
-    index,
-    messageId,
-    anchorId: `message-${messageId}`,
-    align: "center",
-  };
+  const index = props.messages.findIndex(message => String(message.id) === messageId);
+  if (index < 0) return Promise.resolve(false);
 
-  nextTick(() => {
-    scrollToItem(index, { align: "center" });
-    scheduleAnchorAlignment(token, 8);
+  userDetachedFromBottom = true;
+  cancelBottomScroll();
+  if (viewportRestoreFrame != null) cancelAnimationFrame(viewportRestoreFrame);
+  viewportRestoreFrame = null;
+  const token = anchorToken;
+  return new Promise(resolve => {
+    isAligningAnchor.value = true;
+    activeAnchorTarget = {
+      token, index, messageId, anchorId, align,
+      stableSince: performance.now(), layout: null, resolve,
+    };
+    // Broken media or a disappearing target must not leave the caller loading.
+    anchorTimeout = setTimeout(() => finishAnchorAlignment(false), 5000);
+    nextTick(() => {
+      if (activeAnchorTarget?.token !== token) return;
+      scrollToItem(index, { align, offset: align === "start" ? -24 : 0 });
+      scheduleAnchorAlignment(token);
+    });
   });
 }
 
-function scrollToAnchor(messageId: string, anchorId: string) {
-  const index = props.messages.findIndex(message => String(message.id) === messageId);
-  if (index < 0) return;
+function scrollToMessage(messageId: string): Promise<boolean> {
+  return positionAnchor(messageId, `message-${messageId}`, "center");
+}
 
-  cancelAnchorAlignment();
-  const token = anchorToken;
-  activeAnchorTarget = {
-    token,
-    index,
-    messageId,
-    anchorId,
-    align: "start",
-  };
-
-  nextTick(() => {
-    scrollToItem(index, { align: "start", offset: -24 });
-    scheduleAnchorAlignment(token, 10);
-  });
+function scrollToAnchor(messageId: string, anchorId: string): Promise<boolean> {
+  return positionAnchor(messageId, anchorId, "start");
 }
 
 function captureScrollPosition() {
@@ -487,13 +543,20 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   cancelBottomScroll();
-  if (anchorFrame != null) cancelAnimationFrame(anchorFrame);
+  cancelAnchorAlignment();
   if (viewportRestoreFrame != null) cancelAnimationFrame(viewportRestoreFrame);
   resizeObserver?.disconnect();
 });
 
 watch(messageKeys, () => {
-  cancelAnchorAlignment();
+  if (activeAnchorTarget) {
+    const index = messageKeys.value.indexOf(activeAnchorTarget.messageId);
+    if (index < 0) cancelAnchorAlignment();
+    else {
+      activeAnchorTarget.index = index;
+      activeAnchorTarget.layout = null;
+    }
+  }
   nextTick(syncViewport);
 });
 
@@ -503,6 +566,7 @@ defineExpose({
   scrollToBottom,
   scrollToMessage,
   scrollToAnchor,
+  cancelAnchorAlignment,
   captureScrollPosition,
   restoreScrollPosition,
   captureViewportPosition,
@@ -514,6 +578,7 @@ defineExpose({
   <div
     ref="hostRef"
     class="virtual-message-list-host"
+    :class="{ 'virtual-message-list-host--positioning': isAligningAnchor }"
     :style="{ '--virtual-row-gap': `${rowGap}px`, '--virtual-list-padding': padding }"
   >
     <DynamicScroller
@@ -528,6 +593,8 @@ defineExpose({
       :prerender="overscan"
       @scroll.passive="handleScroll"
       @wheel.passive="handleWheel"
+      @touchstart.passive="cancelAnchorAlignment"
+      @pointerdown="cancelAnchorAlignment"
       @resize="handleResize"
       @visible="syncViewport"
     >
@@ -535,7 +602,11 @@ defineExpose({
         <slot v-if="messages.length > 0" name="before" />
       </template>
       <template #default="{ item, index, active }">
+        <!-- Recreate measurement observers when a row is recycled or reactivated,
+             so delayed measurements cannot keep another message's stale size. -->
         <DynamicScrollerItem
+          v-if="active"
+          :key="messageKey(item)"
           :item="item"
           :index="index"
           :active="active"
@@ -543,7 +614,7 @@ defineExpose({
           :data-virtual-index="index"
           :data-message-id="messageKey(item)"
         >
-          <slot v-if="active" name="item" :message="item" />
+          <slot name="item" :message="item" />
         </DynamicScrollerItem>
       </template>
       <template #after>
@@ -555,6 +626,8 @@ defineExpose({
       class="virtual-message-list"
       @scroll.passive="handleScroll"
       @wheel.passive="handleWheel"
+      @touchstart.passive="cancelAnchorAlignment"
+      @pointerdown="cancelAnchorAlignment"
     >
       <div ref="contentRef" class="virtual-message-list-content">
         <slot v-if="messages.length > 0" name="before" />
@@ -599,6 +672,11 @@ defineExpose({
   padding: var(--virtual-list-padding);
   box-sizing: border-box;
   background-color: $bg-main-surface;
+}
+
+.virtual-message-list-host--positioning .virtual-message-list {
+  overflow-anchor: none;
+  scroll-behavior: auto;
 }
 
 .virtual-row {

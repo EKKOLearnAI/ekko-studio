@@ -304,6 +304,8 @@ export interface CodingAgentConfigFileContent extends CodingAgentConfigFileDefin
 }
 
 export interface CodingAgentLaunchInput extends CodingAgentConfigScope {
+  /** Server-issued credential file for this group turn's managed MCP servers. */
+  studioMcpTokenFile?: string
   agentPreset?: string
   mode?: 'scoped' | 'global'
   model?: string
@@ -908,7 +910,7 @@ function getScopedConfigRoot(id: CodingAgentId, scope: Required<CodingAgentConfi
 function getScopedRuntimeConfigRoot(
   id: CodingAgentId,
   scope: Required<CodingAgentConfigScope>,
-  input: Pick<CodingAgentLaunchInput, 'sessionId' | 'agentSessionId' | 'groupRuntimeScope'>,
+  input: Pick<CodingAgentLaunchInput, 'sessionId' | 'agentSessionId' | 'groupRuntimeScope' | 'studioMcpTokenFile'>,
 ): string {
   const groupRoomId = String(input.groupRuntimeScope?.roomId || '').trim()
   const groupAgentId = String(input.groupRuntimeScope?.agentId || '').trim()
@@ -923,6 +925,7 @@ function getScopedRuntimeConfigRoot(
       'group-chat',
       stableSegment(groupRoomId),
       stableSegment(groupAgentId),
+      ...(input.studioMcpTokenFile ? ['runs', createHash('sha256').update(input.studioMcpTokenFile).digest('hex').slice(0, 24)] : []),
     )
   }
   const rootDir = getScopedConfigRoot(id, scope)
@@ -1101,7 +1104,7 @@ async function activeGlobalCodexInstructions(sourceHome: string): Promise<string
   return await safeReadFile(join(sourceHome, 'AGENTS.md')) || ''
 }
 
-async function prepareGlobalCodexShadowHome(rootDir: string, systemPrompt: string, profile: string): Promise<string> {
+async function prepareGlobalCodexShadowHome(rootDir: string, systemPrompt: string, profile: string, runTokenFile?: string): Promise<string> {
   const sourceHome = getGlobalCodexHome()
   await mkdir(rootDir, { recursive: true, mode: 0o700 })
 
@@ -1124,7 +1127,7 @@ async function prepareGlobalCodexShadowHome(rootDir: string, systemPrompt: strin
     if (HERMES_MCP_SERVER_NAMES.has(name) || LEGACY_HERMES_MCP_SERVER_NAMES.has(name)
       || server?.env?.[HERMES_MCP_MANAGED_ENV_KEY]) delete externalMcp[name]
   }
-  config.mcp_servers = { ...externalMcp, ...getCodingAgentManagedMcpServerConfigs('codex', profile) } as any
+  config.mcp_servers = { ...externalMcp, ...getCodingAgentManagedMcpServerConfigs('codex', profile, runTokenFile) } as any
   await writeFile(join(rootDir, 'config.toml'), stringifyToml(config), { mode: 0o600 })
 
   const promptPath = join(rootDir, 'AGENTS.md')
@@ -1219,11 +1222,22 @@ function managedHermesMcpServerConfig(
   profile: string,
   serverName: string,
   toolset: string,
+  runTokenFile?: string,
 ): Record<string, unknown> {
   const override = getManagedMcpServerOverride(agentId, profile, serverName)
   const server: Record<string, unknown> = Object.keys(override).length
     ? override
     : hermesMcpServerConfig(profile, serverName, toolset)
+  if (runTokenFile) {
+    // A run credential is only entrusted to the bundled, local MCP transport.
+    // User-defined remote overrides must not receive this credential path.
+    const managed = hermesMcpServerConfig(profile, serverName, toolset)
+    Object.assign(server, managed, { env: { ...managed.env, HERMES_WEB_UI_RUN_TOKEN_FILE: runTokenFile } })
+    delete server.url
+    delete server.headers
+    delete server.type
+    delete server.transport
+  }
   if (toolset === 'plan') {
     const env = server.env as Record<string, string> | undefined
     if (env?.[HERMES_MCP_MANAGED_ENV_KEY] === '1') {
@@ -1300,47 +1314,43 @@ function inheritClaudeSettings(existingContent: string | null | undefined = ''):
   }
 }
 
-function claudeMcpConfigJson(profile: string, ...existingContents: Array<string | null | undefined>): string {
+function claudeMcpConfigJson(profile: string, runTokenFile: string | undefined, ...existingContents: Array<string | null | undefined>): string {
   const mcpServers: Record<string, unknown> = {}
   for (const content of existingContents) {
     Object.assign(mcpServers, parseClaudeMcpServers(content))
   }
   for (const server of HERMES_MCP_SERVERS) {
     if (getDisabledManagedMcpServers('claude-code', profile).has(server.name)) continue
-    const config = managedHermesMcpServerConfig('claude-code', profile, server.name, server.toolset)
+    const config = managedHermesMcpServerConfig('claude-code', profile, server.name, server.toolset, runTokenFile)
     mcpServers[server.name] = config
   }
   return `${JSON.stringify({ mcpServers }, null, 2)}\n`
 }
 
-function cursorMcpConfigJson(profile: string, ...existingContents: Array<string | null | undefined>): string {
+function cursorMcpConfigJson(profile: string, runTokenFile: string | undefined, ...existingContents: Array<string | null | undefined>): string {
   const mcpServers: Record<string, unknown> = {}
   for (const content of existingContents) {
     Object.assign(mcpServers, parseClaudeMcpServers(content))
   }
   for (const server of HERMES_MCP_SERVERS) {
     if (getDisabledManagedMcpServers('cursor', profile).has(server.name)) continue
-    mcpServers[server.name] = managedHermesMcpServerConfig('cursor', profile, server.name, server.toolset)
+    mcpServers[server.name] = managedHermesMcpServerConfig('cursor', profile, server.name, server.toolset, runTokenFile)
   }
   return `${JSON.stringify({ mcpServers }, null, 2)}\n`
 }
 
-async function prepareCursorMcp(rootDir: string, profile: string): Promise<{
+async function prepareCursorMcp(rootDir: string, profile: string, runTokenFile?: string): Promise<{
   files: Array<{ key: string; path: string; absolutePath: string }>
   args: string[]
 }> {
   const livePath = getLiveConfigFileDefinition('cursor', 'mcp')?.absolutePath || ''
   const runtimePath = join(rootDir, '.cursor', 'mcp.json')
-  const content = cursorMcpConfigJson(profile, livePath ? await safeReadFile(livePath) : null)
+  const content = cursorMcpConfigJson(profile, runTokenFile, livePath ? await safeReadFile(livePath) : null)
   await mkdir(dirname(runtimePath), { recursive: true })
   await writeFile(runtimePath, content, { mode: 0o600 })
-  if (livePath) {
-    await mkdir(dirname(livePath), { recursive: true })
-    await writeFile(livePath, content, { mode: 0o600 })
-  }
   return {
-    files: [{ key: 'mcp', path: '.cursor/mcp.json', absolutePath: livePath || runtimePath }],
-    args: ['--approve-mcps'],
+    files: [{ key: 'mcp', path: '.cursor/mcp.json', absolutePath: runtimePath }],
+    args: ['--approve-mcps', '--add-dir', rootDir],
   }
 }
 
@@ -1505,12 +1515,13 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
 function codexMcpConfigToml(
   profile: string,
   agentId: 'codex' | 'grok',
+  runTokenFile: string | undefined,
   ...externalContents: Array<string | null | undefined>
 ): string {
   const blocks: string[] = [...parseCodexExternalMcpBlocks(...externalContents)]
   const disabledManaged = getDisabledManagedMcpServers(agentId, profile)
   for (const item of HERMES_MCP_SERVERS) {
-    const server = managedHermesMcpServerConfig(agentId, profile, item.name, item.toolset)
+    const server = managedHermesMcpServerConfig(agentId, profile, item.name, item.toolset, runTokenFile)
     const lines = [
       `[mcp_servers.${item.name}]`,
     ]
@@ -1602,12 +1613,12 @@ function piStudioRuntimeExtension(): string {
   ].join('\n')
 }
 
-async function prepareGlobalPiMcp(rootDir: string, profile: string) {
+async function prepareGlobalPiMcp(rootDir: string, profile: string, runTokenFile?: string) {
   const settings = await readPiSettings()
   const userProvidesAdapter = userSettingsProvidesPiMcpAdapter(settings)
   if (!userProvidesAdapter && !existsSync(getPiMcpAdapterEntry())) await installBundledPiMcpAdapter()
   const mcpPath = join(rootDir, 'mcp.json')
-  await writeFile(mcpPath, piMcpConfig(profile,
+  await writeFile(mcpPath, piMcpConfig(profile, runTokenFile,
     await safeReadFile(getLiveConfigFileDefinition('pi', 'mcp')?.absolutePath || ''),
   ), { mode: 0o600 })
   return {
@@ -1679,13 +1690,13 @@ function piUserMcpConfig(...existingContents: Array<string | null | undefined>):
   }, null, 2)}\n`
 }
 
-function piMcpConfig(profile: string, ...externalContents: Array<string | null | undefined>): string {
+function piMcpConfig(profile: string, runTokenFile: string | undefined, ...externalContents: Array<string | null | undefined>): string {
   const external = parsePiExternalMcpConfig(...externalContents)
   const disabledManaged = getDisabledManagedMcpServers('pi', profile)
   const mcpServers = Object.fromEntries(HERMES_MCP_SERVERS
     .filter(item => !disabledManaged.has(item.name))
     .map((item) => {
-    const server = managedHermesMcpServerConfig('pi', profile, item.name, item.toolset)
+    const server = managedHermesMcpServerConfig('pi', profile, item.name, item.toolset, runTokenFile)
     const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
     const interaction = item.toolset === 'plan'
     return [item.name, {
@@ -1793,6 +1804,7 @@ function opencodeRuntimeConfig(
     baseUrl?: string
     systemPrompt?: string
     contextPolicy?: CodingAgentContextPolicy
+    studioMcpTokenFile?: string
   },
   ...existingContents: Array<string | null | undefined>
 ): string {
@@ -1803,7 +1815,7 @@ function opencodeRuntimeConfig(
   for (const name of [...HERMES_MCP_SERVER_NAMES, ...LEGACY_HERMES_MCP_SERVER_NAMES]) delete externalMcp[name]
   const disabledManaged = getDisabledManagedMcpServers('opencode', profile)
   const managedMcp = Object.fromEntries(HERMES_MCP_SERVERS.map((item) => {
-    const server = managedHermesMcpServerConfig('opencode', profile, item.name, item.toolset)
+    const server = managedHermesMcpServerConfig('opencode', profile, item.name, item.toolset, runtime.studioMcpTokenFile)
     return [item.name, opencodeMcpServerConfig(server, !disabledManaged.has(item.name))]
   }))
   const inheritedInstructions = Array.isArray(config.instructions)
@@ -1891,11 +1903,12 @@ function openCodeRuntimeEnv(input: {
 export function getCodingAgentManagedMcpServerConfigs(
   id: CodingAgentId,
   profile = 'default',
+  runTokenFile?: string,
 ): Record<string, Record<string, unknown>> {
   if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(id)) return {}
   const disabledManaged = getDisabledManagedMcpServers(id, profile)
   return Object.fromEntries(HERMES_MCP_SERVERS.map((item) => {
-    const server = managedHermesMcpServerConfig(id, profile || 'default', item.name, item.toolset)
+    const server = managedHermesMcpServerConfig(id, profile || 'default', item.name, item.toolset, runTokenFile)
     if (id === 'pi') {
       const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
       return [item.name, {
@@ -2787,7 +2800,7 @@ async function commandEnv(): Promise<NodeJS.ProcessEnv> {
   const loginShellPath = await getLoginShellPath()
   prependPathEntries(env, [
     npmBin,
-    loginShellPath,
+    ...(loginShellPath ? loginShellPath.split(':') : []),
     ...getDesktopCommonBinPaths(),
   ])
   return env
@@ -2973,11 +2986,11 @@ export async function checkUpdateAgent(id: string): Promise<CodingAgentUpdateRes
   if (!codingAgentUsesNpm(tool.id)) {
     const status = await getCodingAgentStatus(tool)
     return {
-      success: true,
+      success: false,
       tool: status,
       latestVersion: '',
       updateAvailable: false,
-      message: `Update the Cursor CLI from ${CURSOR_CLI_INSTALL_URL}`,
+      message: `Cursor CLI updates are not managed by Studio. Use ${CURSOR_CLI_INSTALL_URL}`,
     }
   }
   try {
@@ -3066,6 +3079,18 @@ export async function deleteCodingAgent(id: string): Promise<CodingAgentMutation
     throw err
   }
 
+  if (tool.id === 'cursor') {
+    const status = await getCodingAgentStatus(tool)
+    const allStatus = await getCodingAgentsStatus()
+    return {
+      success: false,
+      code: 'UNSUPPORTED',
+      tool: status,
+      tools: allStatus.tools,
+      message: 'Cursor CLI removal is not managed by Studio',
+    }
+  }
+
   deletingTools.add(tool.id)
   try {
     if (codingAgentUsesNpm(tool.id)) {
@@ -3144,7 +3169,7 @@ export async function readCodingAgentConfigFile(id: string, key: string, scope: 
     const content = id === 'grok' && key === 'mcp'
       ? mergeGrokConfigWithManagedMcp(
         grokUserMcpConfig(`${globalGrokConfig}\n${sourceContent}`),
-        codexMcpConfigToml(normalizedScope.profile, 'grok'),
+        codexMcpConfigToml(normalizedScope.profile, 'grok', undefined),
       )
       : id === 'grok' && key === 'settings'
         ? grokSettingsConfig(sourceContent)
@@ -3162,7 +3187,7 @@ export async function readCodingAgentConfigFile(id: string, key: string, scope: 
   } catch (err: any) {
     if (err?.code !== 'ENOENT') throw err
     const defaultContent = id === 'grok' && key === 'mcp'
-      ? mergeGrokConfigWithManagedMcp('', codexMcpConfigToml(normalizedScope.profile, 'grok'))
+      ? mergeGrokConfigWithManagedMcp('', codexMcpConfigToml(normalizedScope.profile, 'grok', undefined))
       : id === 'pi'
         ? piLiveConfigDefault(key, normalizedScope.profile) || ''
         : id === 'opencode' && key === 'settings'
@@ -3224,7 +3249,7 @@ export async function writeCodingAgentConfigFile(id: string, key: string, conten
     content: id === 'grok' && key === 'mcp'
       ? mergeGrokConfigWithManagedMcp(
           grokUserMcpConfig(persistedContent),
-          codexMcpConfigToml(normalizedScope.profile, 'grok'),
+          codexMcpConfigToml(normalizedScope.profile, 'grok', undefined),
         )
       : id === 'grok' && key === 'settings'
         ? grokSettingsConfig(persistedContent)
@@ -3274,7 +3299,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       await mkdir(rootDir, { recursive: true })
       await writeFile(studioExtensionPath, piStudioRuntimeExtension(), 'utf-8')
       await writeFile(dynamicPromptPath, '', 'utf-8')
-      const mcp = await prepareGlobalPiMcp(rootDir, scope.profile)
+      const mcp = await prepareGlobalPiMcp(rootDir, scope.profile, input.studioMcpTokenFile)
       const files = [
         { key: 'studio_extension', path: PI_STUDIO_EXTENSION_FILE, absolutePath: studioExtensionPath },
         { key: 'dynamic_prompt', path: PI_DYNAMIC_PROMPT_FILE, absolutePath: dynamicPromptPath },
@@ -3335,7 +3360,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       promptFile = join(rootDir, 'hermes-rules.md')
       await writeManagedPromptFile(promptFile, systemPrompt, '')
       const mcpPath = join(rootDir, 'mcp.json')
-      await writeFile(mcpPath, claudeMcpConfigJson(scope.profile,
+      await writeFile(mcpPath, claudeMcpConfigJson(scope.profile, input.studioMcpTokenFile,
         await safeReadFile(getLiveConfigFileDefinition('claude-code', 'mcp')?.absolutePath || ''),
       ), { mode: 0o600 })
       files = [
@@ -3344,7 +3369,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       ]
       args = ['--append-system-prompt-file', promptFile, '--mcp-config', mcpPath, ...claudeCodePermissionArgs()]
     } else if (tool.id === 'codex') {
-      promptFile = await prepareGlobalCodexShadowHome(rootDir, systemPrompt, scope.profile)
+      promptFile = await prepareGlobalCodexShadowHome(rootDir, systemPrompt, scope.profile, input.studioMcpTokenFile)
       files = [
         { key: 'agents', path: 'AGENTS.md', absolutePath: promptFile },
         { key: 'config', path: 'config.toml', absolutePath: join(rootDir, 'config.toml') },
@@ -3355,7 +3380,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         sourceHome: process.env.GROK_HOME?.trim() || join(getGlobalConfigHome(), '.grok'),
         rootDir,
         systemPrompt,
-        managedMcpToml: codexMcpConfigToml(scope.profile, 'grok'),
+        managedMcpToml: codexMcpConfigToml(scope.profile, 'grok', input.studioMcpTokenFile),
       })
       promptFile = prepared.promptFile
       files = prepared.files
@@ -3365,14 +3390,14 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       const prepared = await prepareDshRuntime({
         ...await dshHost.runtimeInput(),
         sharedSkills: join(getGlobalConfigHome(), '.agents', 'skills'),
-        rootDir, systemPrompt, managedMcp: getCodingAgentManagedMcpServerConfigs('dsh', scope.profile),
+        rootDir, systemPrompt, managedMcp: getCodingAgentManagedMcpServerConfigs('dsh', scope.profile, input.studioMcpTokenFile),
       })
       promptFile = prepared.promptFile
       files = prepared.files
       args = prepared.args
       env = prepared.env
     } else if (tool.id === 'cursor') {
-      const prepared = await prepareCursorMcp(rootDir, scope.profile)
+      const prepared = await prepareCursorMcp(rootDir, scope.profile, input.studioMcpTokenFile)
       files = prepared.files
       args = prepared.args
       env = {}
@@ -3386,7 +3411,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         configDir: prepared.rootDir,
         // Preserve the existing database location so native sessions can resume.
         databasePath: join(prepared.rootDir, OPENCODE_DATABASE_FILE),
-        runtimeConfig: opencodeRuntimeConfig(scope.profile, { systemPrompt: promptFile }),
+        runtimeConfig: opencodeRuntimeConfig(scope.profile, { systemPrompt: promptFile, studioMcpTokenFile: input.studioMcpTokenFile }),
       })
       const launcherFile = await writeLauncherScript({
         rootDir,
@@ -3411,7 +3436,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       files = [{ key: 'prompt', path: 'APPEND_SYSTEM.md', absolutePath: promptFile }]
       args = ['--append-system-prompt', promptFile]
       if (tool.id === 'pi') {
-        const mcp = await prepareGlobalPiMcp(rootDir, scope.profile)
+        const mcp = await prepareGlobalPiMcp(rootDir, scope.profile, input.studioMcpTokenFile)
         files.push(mcp.file)
         args.push(...mcp.args)
         env = { PI_CODING_AGENT_DIR: join(getGlobalConfigHome(), '.pi', 'agent') }
@@ -3548,7 +3573,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     const existingMcpPath = getScopedConfigFileDefinition(tool.id, 'mcp', scope)?.absolutePath
     const globalMcpConfig = globalMcpPath ? await safeReadFile(globalMcpPath) : ''
     const existingMcpConfig = existingMcpPath ? await safeReadFile(existingMcpPath) : ''
-    await writeScopedFile('mcp', claudeMcpConfigJson(scope.profile, globalMcpConfig, existingMcpConfig))
+    await writeScopedFile('mcp', claudeMcpConfigJson(scope.profile, input.studioMcpTokenFile, globalMcpConfig, existingMcpConfig))
     await writeScopedFile('prompt', hermesPromptDocument(scopedSystemPrompt))
 
     const settingsPath = join(rootDir, 'settings.json')
@@ -3632,6 +3657,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       codexMcpConfigToml(
         scope.profile,
         'codex',
+        input.studioMcpTokenFile,
         globalCodexConfig,
         scopedCodexConfig,
       ),
@@ -3714,6 +3740,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     }
     await writeRuntimeFile('mcp', 'mcp.json', piMcpConfig(
       scope.profile,
+      input.studioMcpTokenFile,
       await safeReadFile(getLiveConfigFileDefinition(tool.id, 'mcp')?.absolutePath || ''),
       await safeReadFile(getScopedConfigFileDefinition(tool.id, 'mcp', scope)?.absolutePath || ''),
     ))
@@ -3779,6 +3806,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       managedMcpToml: codexMcpConfigToml(
         scope.profile,
         'grok',
+        input.studioMcpTokenFile,
         globalGrokConfig,
         scopedGrokConfig,
       ),
@@ -3809,13 +3837,13 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       contextPolicy,
       imageInput: capabilities.input.includes('image'),
       reasoningEffort,
-      managedMcp: getCodingAgentManagedMcpServerConfigs('dsh', scope.profile),
+      managedMcp: getCodingAgentManagedMcpServerConfigs('dsh', scope.profile, input.studioMcpTokenFile),
     })
     files.push(...prepared.files)
     args = prepared.args
     env = { ...prepared.env, [DSH_API_KEY_ENV]: proxyTarget.token }
   } else if (tool.id === 'cursor') {
-    const prepared = await prepareCursorMcp(rootDir, scope.profile)
+    const prepared = await prepareCursorMcp(rootDir, scope.profile, input.studioMcpTokenFile)
     files.push(...prepared.files)
     args = prepared.args
     env = {}
@@ -3839,6 +3867,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     const promptPath = join(rootDir, 'AGENTS.md')
     await writeManagedPromptFile(promptPath, scopedSystemPrompt, '')
     const runtimeConfig = opencodeRuntimeConfig(scope.profile, {
+      studioMcpTokenFile: input.studioMcpTokenFile,
       provider,
       model,
       baseUrl: proxyTarget?.baseUrl || baseUrl,
@@ -4007,6 +4036,7 @@ async function startCodingAgentRunInternal(
     state,
     reasoningEffort: launch.reasoningEffort,
     agentPreset,
+    studioMcpTokenFile: input.studioMcpTokenFile,
     sessionSource: sessionSource === 'global_agent' || sessionSource === 'workflow' || sessionSource === 'group_chat'
       ? sessionSource
       : undefined,

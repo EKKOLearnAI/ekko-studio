@@ -444,7 +444,7 @@ export default {
     version: 'Версия',
     codingAgentDescription: 'Studio может установить, проверить обновления и удалить этого агента.',
     cursorDescription: 'Установите Cursor CLI (`agent`) с https://cursor.com/install и обновите список. Studio не устанавливает его через npm.',
-    cursorNoManagedConfig: 'MCP-серверы Cursor хранятся в ~/.cursor/mcp.json. Править их нужно в панели MCP. Studio дописывает управляемые серверы в этот файл, потому что у CLI нет --mcp-config.',
+    cursorNoManagedConfig: 'Запуск не перезаписывает ~/.cursor/mcp.json. Управляемые серверы находятся в рабочей копии этого сеанса.',
     updateToVersion: 'Обновить до {version}',
     deleteConfirm: 'Удалить {name}?',
     installOperation: 'установка',
@@ -553,6 +553,7 @@ export default {
   },
 
   codingAgents: {
+    cursorInstallGuide: 'Руководство по установке',
     installFailedHermesHint: 'Installation failed. Ask Hermes to install it for you.',
     installFailureReason: 'Reason',
     preference: 'Предпочтения',

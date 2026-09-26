@@ -356,4 +356,66 @@ describe('group Agent presets', () => {
       expect.objectContaining({ id: presetId, available: false, validationError: expect.stringContaining('unavailable') }),
     ])
   })
+
+  it('keeps the stashed launch mode on a saved Cursor preset and clears it when the preset leaves Cursor', async () => {
+    const { updateAgentStatus } = await import('../../packages/server/src/modules/studio/public/agent-status-registry')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const controller = await import('../../packages/server/src/modules/studio/controllers/group-agent-presets')
+    initAllStores()
+    modelGroups.value = [{ provider: 'openai', models: ['gpt-test'] }]
+    updateAgentStatus('cursor', {
+      installed: true,
+      source: 'user-cli',
+      path: 'agent',
+    })
+    updateAgentStatus('codex', {
+      installed: true,
+      source: 'user-cli',
+      path: '/usr/local/bin/codex',
+    })
+    const user = { id: 77, role: 'admin', profiles: ['research'] }
+    const createCtx: any = {
+      state: { user },
+      request: { body: {
+        agent: 'cursor',
+        agentMode: 'global',
+        priorAgentMode: 'global',
+        profile: 'research',
+        name: 'Cursor Reviewer',
+        description: '',
+        avatar: '',
+      } },
+    }
+    await controller.create(createCtx)
+    expect(createCtx.status).toBe(201)
+    expect(createCtx.body.preset).toMatchObject({
+      agent: 'cursor',
+      agentMode: 'global',
+      priorAgentMode: 'global',
+    })
+
+    await expect(controller.resolveGroupAgentPresetForApplication(user, createCtx.body.preset.id))
+      .resolves.toMatchObject({ priorAgentMode: 'global' })
+
+    const updateCtx: any = {
+      state: { user },
+      params: { presetId: createCtx.body.preset.id },
+      request: { body: {
+        agent: 'codex',
+        agentMode: 'scoped',
+        profile: 'research',
+        provider: 'openai',
+        model: 'gpt-test',
+        apiMode: 'codex_responses',
+        name: 'Cursor Reviewer',
+        description: '',
+        avatar: '',
+      } },
+    }
+    await controller.update(updateCtx)
+    expect(updateCtx.body.preset).toMatchObject({
+      agent: 'codex',
+      priorAgentMode: '',
+    })
+  })
 })

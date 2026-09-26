@@ -1480,6 +1480,7 @@ export const useChatStore = defineStore('chat', () => {
   const isRunActive = computed(() => isStreaming.value)
   let loadSessionsRequestSequence = 0
   let switchSessionRequestSequence = 0
+  const olderMessageLoads = new WeakMap<Session, object>()
   let activeSelectionSequence = 0
   const reasoningEffortWriteChains = new Map<string, Promise<boolean>>()
   const reasoningEffortWriteTargets = new Map<string, string | undefined>()
@@ -1750,7 +1751,11 @@ export const useChatStore = defineStore('chat', () => {
       if (requestSequence !== loadSessionsRequestSequence) return
       const fresh = list.map(mapHermesSession)
       const selectionChanged = selectionSequence !== activeSelectionSequence
-      const explicitlySelectedSession = selectionChanged && activeSessionId.value
+      // Search can select a session outside the sidebar's first page. Keep
+      // that selection when mounting its route, including title-only hits.
+      const preserveSelection = selectionChanged || focusMessageId.value
+        || (preferredSessionId && preferredSessionId === activeSessionId.value)
+      const explicitlySelectedSession = preserveSelection && activeSessionId.value
         ? sessions.value.find(session => session.id === activeSessionId.value) || activeSession.value
         : null
       // Preserve already-loaded messages for sessions that are still present,
@@ -1806,7 +1811,7 @@ export const useChatStore = defineStore('chat', () => {
             ? storedId
             : sessions.value[0]?.id
       if (targetId) {
-        await switchSession(targetId)
+        await switchSession(targetId, targetId === currentId ? focusMessageId.value : null)
       } else {
         clearActiveSession()
       }
@@ -1909,10 +1914,12 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const target = sessions.value.find(s => s.id === sid)
       if (!target) return false
-      const limit = Math.min(
-        Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE),
-        LIVE_CHAT_MAX_LOADED_MESSAGES,
-      )
+      const limit = focusMessageId.value
+        ? Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE)
+        : Math.min(
+          Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE),
+          LIVE_CHAT_MAX_LOADED_MESSAGES,
+        )
       const detail = await fetchSessionMessagesPage(sid, 0, limit, activeSession.value?.profile)
       if (!detail) return false
       const mapped = mapHermesMessages(detail.messages || [], detail.taskPlans, target.messages)
@@ -2014,6 +2021,9 @@ export const useChatStore = defineStore('chat', () => {
     const generation = runtimeGeneration
     activeSelectionSequence++
     const requestSequence = ++switchSessionRequestSequence
+    const isCurrentSelection = () => generation === runtimeGeneration
+      && activeSessionId.value === sessionId
+      && requestSequence === switchSessionRequestSequence
     clearThinkingObservationFor(sessionId)
     activeSessionId.value = sessionId
     focusMessageId.value = focusId ?? null
@@ -2023,11 +2033,12 @@ export const useChatStore = defineStore('chat', () => {
     activeSession.value = sessions.value.find(s => s.id === sessionId) || null
     clearSessionCompletedUnread(sessionId)
 
-    if (!activeSession.value) return
+    if (!activeSession.value) return false
 
     beginMessageLoad(sessionId, requestSequence)
     let backgroundPendingOnResume = 0
 
+    let loaded = false
     try {
       // Load messages via Socket.IO resume (server loads from DB if not in memory)
       await new Promise<void>((resolve, reject) => {
@@ -2183,8 +2194,20 @@ export const useChatStore = defineStore('chat', () => {
           resolve()
         }, activeSession.value?.profile, runtimeTransport())
       })
+      // A search hit can be older than both the resume page and the live-chat
+      // history cap. Only explicit message navigation may extend that window.
+      while (focusId && isCurrentSelection()) {
+        const target = activeSession.value
+        if (!target || target.messages.some(message => message.id === focusId)) break
+        const offset = target.loadedMessageCount || 0
+        if (!await loadOlderMessages(sessionId, isCurrentSelection)) break
+        if ((target.loadedMessageCount || 0) <= offset) break
+      }
+      loaded = isCurrentSelection() && (!focusId || !!activeSession.value?.messages.some(message => message.id === focusId))
+      if (isCurrentSelection() && !loaded) focusMessageId.value = null
     } catch (err) {
       console.error('Failed to load session messages via resume:', err)
+      if (isCurrentSelection()) focusMessageId.value = null
     } finally {
       endMessageLoad(sessionId, requestSequence)
     }
@@ -2193,19 +2216,28 @@ export const useChatStore = defineStore('chat', () => {
     if (generation === runtimeGeneration && activeSessionId.value === sessionId && requestSequence === switchSessionRequestSequence) {
       resumeServerWorkingRun(sessionId, backgroundPendingOnResume > 0, !serverWorking.value.has(sessionId))
     }
+    return loaded
   }
 
-  async function loadOlderMessages(sessionId = activeSessionId.value): Promise<boolean> {
+  async function loadOlderMessages(sessionId = activeSessionId.value, searchSelection?: () => boolean): Promise<boolean> {
     if (!sessionId) return false
     const target = sessions.value.find(s => s.id === sessionId)
-    if (!target || target.isLoadingOlderMessages || !target.hasMoreBefore) return false
+    if (!target || (!searchSelection && target.isLoadingOlderMessages) || !target.hasMoreBefore) return false
     const offset = target.loadedMessageCount || 0
-    if (offset >= LIVE_CHAT_MAX_LOADED_MESSAGES) return false
-    const limit = Math.min(LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MAX_LOADED_MESSAGES - offset)
+    if (!searchSelection && offset >= LIVE_CHAT_MAX_LOADED_MESSAGES) return false
+    const limit = searchSelection
+      ? LIVE_CHAT_MESSAGE_PAGE_SIZE
+      : Math.min(LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MAX_LOADED_MESSAGES - offset)
+    const loadToken = {}
+    const previousMessages = target.messages
+    olderMessageLoads.set(target, loadToken)
     target.isLoadingOlderMessages = true
     try {
       const page = await fetchSessionMessagesPage(sessionId, offset, limit, target.profile)
-      if (!page || page.messages.length === 0) {
+      if (olderMessageLoads.get(target) !== loadToken || target.messages !== previousMessages
+        || (searchSelection && !searchSelection())) return false
+      if (!page) return false
+      if (page.messages.length === 0) {
         target.hasMoreBefore = false
         return false
       }
@@ -2224,7 +2256,10 @@ export const useChatStore = defineStore('chat', () => {
       console.error('Failed to load older session messages:', err)
       return false
     } finally {
-      target.isLoadingOlderMessages = false
+      if (olderMessageLoads.get(target) === loadToken) {
+        olderMessageLoads.delete(target)
+        target.isLoadingOlderMessages = false
+      }
     }
   }
 

@@ -188,7 +188,8 @@ async function mockInviteApi(page: Page, valid = true, delayMs = 0) {
 
 test.describe('invite-only group chat share page', () => {
   test('folds group tool calls with the same summary used in single chat', async ({ page }) => {
-    await mockInviteSocket(page, null, 'Read the project files.', true)
+    const reply = 'Read the project files. ' + 'The tool summary should fill the existing message bubble. '.repeat(6)
+    await mockInviteSocket(page, null, reply, true)
     await mockInviteApi(page)
     await page.goto('/#/share/group-chat/ROOM1')
     await page.locator('#group-chat-guest-name input').fill('Visitor')
@@ -205,10 +206,24 @@ test.describe('invite-only group chat share page', () => {
     await expect(card.locator('.run-tool-list')).toBeVisible()
     await card.locator('.tool-line').click()
     await expect(card.locator('.tool-details')).toContainText('File contents')
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 })
+      await expect.poll(() => card.locator('.tool-run-card').evaluate(element => {
+        const summary = element.getBoundingClientRect()
+        const bubble = element.closest('.run-card')!.getBoundingClientRect()
+        const header = element.querySelector('.tool-run-header')!.getBoundingClientRect()
+        const list = element.querySelector('.run-tool-list')!.getBoundingClientRect()
+        const style = getComputedStyle(element)
+        const innerWidth = summary.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        return Math.abs(summary.width - bubble.width) < 0.75
+          && Math.abs(header.width - innerWidth) < 0.75 && Math.abs(list.width - innerWidth) < 0.75
+          && element.scrollWidth <= element.clientWidth
+      }), { message: `Tool summary and expanded calls fill the bubble at ${width}px` }).toBe(true)
+    }
     await toggle.press('Enter')
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await expect(card.locator('.run-tool-list')).toHaveCount(0)
-    await expect(page.getByText('Read the project files.', { exact: true })).toBeVisible()
+    await expect(page.getByText(reply.trim(), { exact: true })).toBeVisible()
   })
 
   test('loads an Agent Markdown image through the room invite without filesystem API access', async ({ page }) => {
@@ -335,6 +350,34 @@ test('group task cards survive history reload and live stale updates with tool t
   await page.evaluate(message => (window as any).__PW_SHARED_GROUP_SOCKET__.socket.__trigger('message', message), groupPlan(1, 'reviewer'))
   await expect(cards).toHaveCount(2)
   await expect(page.locator('.group-agent-run').filter({ hasText: 'Task output' }).getByTestId('task-plan-card')).toHaveCount(1)
+  await page.evaluate(() => {
+    const state = (window as any).__PW_SHARED_GROUP_SOCKET__
+    state.socket.__trigger('message', { id: 'short-self', roomId: 'room-shared', senderId: state.options.auth.userId,
+      senderName: 'Visitor', role: 'user', content: 'OK', timestamp: 4 })
+  })
+  await expect(page.locator('.group-message.self .msg-content')).toContainText('OK')
+  for (const width of [1440, 1024, 769, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await expect.poll(() => cards.evaluateAll(elements => elements.every(element => {
+      const card = element.getBoundingClientRect()
+      const container = element.parentElement!.getBoundingClientRect()
+      const run = element.closest('.group-agent-run')!.getBoundingClientRect()
+      const column = element.closest('.run-column')!.getBoundingClientRect()
+      const expectedWidth = window.innerWidth <= 768 ? run.width : Math.min(500, run.width)
+      const gaps = [card.left - container.left, container.right - card.right,
+        card.top - container.top, container.bottom - card.bottom]
+      return gaps.every(gap => Math.abs(gap - 5) < 0.75)
+        && Math.abs(column.width - expectedWidth) < 0.75
+        && element.scrollWidth <= element.clientWidth
+    })), { message: `Task cards retain 5px gaps in 500px desktop or full-width mobile bubbles at ${width}px` }).toBe(true)
+    await expect.poll(() => page.locator('.group-message:not(.embedded) .msg-content').evaluateAll(elements =>
+      elements.every(element => {
+        const bubble = element.getBoundingClientRect()
+        const row = element.closest('.group-message')!.getBoundingClientRect()
+        const expectedWidth = window.innerWidth <= 768 ? row.width : Math.min(500, row.width)
+        return Math.abs(bubble.width - expectedWidth) < 0.75
+      })), { message: `Short user bubbles use 500px on desktop and fill the row on mobile at ${width}px` }).toBe(true)
+  }
   await cards.first().getByRole('button').click()
   await expect(cards.first().locator('ol')).toHaveCount(0)
   await page.reload()

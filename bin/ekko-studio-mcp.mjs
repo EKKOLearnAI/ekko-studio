@@ -117,6 +117,21 @@ function readToken(tokenOverride, allowTokenFile = true, profile = '') {
   }
 }
 
+function readRunCredential(profile) {
+  const file = process.env.HERMES_WEB_UI_RUN_TOKEN_FILE
+  if (!file) return null
+  let credential
+  try { credential = JSON.parse(readFileSync(file, 'utf8')) } catch {
+    throw new Error('The current run credential is unavailable. Start a new Studio run.')
+  }
+  if (!credential || typeof credential.token !== 'string' || !credential.token.startsWith('studio_run_')
+    || typeof credential.context_id !== 'string' || !credential.context_id
+    || typeof credential.profile !== 'string' || credential.profile !== profile) {
+    throw new Error('The MCP request does not match its configured run credential.')
+  }
+  return credential
+}
+
 function defaultProfile() {
   return String(
     process.env.HERMES_WEB_UI_PROFILE ||
@@ -216,7 +231,10 @@ async function requestEnvelope(path, options = {}) {
   const profile = typeof options.profile === 'string' && options.profile.trim()
     ? options.profile.trim()
     : defaultProfile()
-  const token = readToken(options.token, options.allowTokenFile !== false, profile)
+  // A managed group run must never fall back to another run's profile token,
+  // a stale inherited AUTH_TOKEN, or an explicit tool-argument override.
+  const runCredential = readRunCredential(profile)
+  const token = runCredential?.token || readToken(options.token, options.allowTokenFile !== false, profile)
   const method = options.method || 'GET'
   const body = method === 'GET' || method === 'HEAD' ? undefined : options.body
   const headers = {
@@ -224,6 +242,7 @@ async function requestEnvelope(path, options = {}) {
     ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(profile ? { 'X-Hermes-Profile': profile } : {}),
+    ...(runCredential ? { 'X-Studio-Run-Context': runCredential.context_id } : {}),
   }
   const fetchRequest = path === '/api/studio/mobile-calendar/request' || path === '/api/studio/mobile-health/request' || path === '/api/studio/clarifications/request' ? fetchMobileConsent : fetch
   const response = await fetchRequest(`${baseUrl()}${appendQuery(path, options.query)}`, {

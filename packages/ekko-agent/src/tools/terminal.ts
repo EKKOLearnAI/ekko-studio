@@ -356,7 +356,7 @@ function splitCommandLine(command: string): string[] {
       escaped = false
       continue
     }
-    if (char === '\\') {
+    if (char === '\\' && process.platform !== 'win32') {
       escaped = true
       continue
     }

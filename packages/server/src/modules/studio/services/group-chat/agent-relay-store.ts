@@ -7,6 +7,7 @@ export const GROUP_AGENT_PAIRING_TICKET_TTL_MS = 2 * 60_000
 export type RemoteGroupAgentDescriptor = {
   agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
   agentMode: 'scoped' | 'global'
+  priorAgentMode?: 'scoped' | 'global' | ''
   profile: string
   provider: string
   model: string
@@ -66,9 +67,11 @@ export function normalizeRemoteGroupAgentDescriptor(
       && parsed.dataUrl.length <= 1_500_000
     if (!generated && !image) throw new Error('Invalid remote Agent avatar')
   }
+  const priorAgentMode = input.priorAgentMode === 'global' || input.priorAgentMode === 'scoped' ? input.priorAgentMode : undefined
   return {
     agent,
     agentMode,
+    ...(priorAgentMode ? { priorAgentMode } : {}),
     profile,
     provider: agentMode === 'global' ? '' : boundedText(input.provider, 240, 'provider'),
     model: agentMode === 'global' ? '' : boundedText(input.model, 500, 'model'),

@@ -10,6 +10,7 @@ import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/noti
 import { bindRunPushTarget, type PushRunRef, getRunPushTarget } from '../repositories/run-push-store'
 import { ClarificationRuns } from '../services/clarification-runs'
 import { TaskPlanRuns, taskPlanRunInstruction } from '../services/task-plan-runs'
+import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
 import { saveTaskPlan } from '../repositories/task-plan-store'
 import { getSessionTaskPlans } from '../services/task-plans'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
@@ -475,12 +476,14 @@ export class ChatRunSocket {
 
   private beginTaskPlanRun(sessionId: string | undefined, profile: string) {
     if (!sessionId) return undefined
+    runMcpCredentials.revoke(sessionId)
     this.clarificationRuns.finishSession(sessionId)
     return this.taskPlanRuns.begin(sessionId, profile, () => this.sessionMap.get(sessionId))
   }
 
   private finishTaskPlanRun(sessionId: string, event: string, payload?: any, contextId?: string) {
     if (!['run.completed', 'run.failed', 'abort.completed'].includes(event)) return
+    runMcpCredentials.revoke(sessionId, contextId)
     this.clarificationRuns.finishSession(sessionId, contextId)
     const interrupted = event === 'abort.completed' || payload?.interrupted === true || payload?.result?.interrupted === true || this.sessionMap.get(sessionId)?.isAborting
     const executionState = interrupted ? 'interrupted' : event === 'run.failed' ? 'failed' : 'ended'
@@ -1713,7 +1716,9 @@ export class ChatRunSocket {
     }
 
     const isCommand = typeof data.input === 'string' && parseCodingAgentSessionCommand(data.input)
+    const groupRun = source === 'group_chat' || data.session_source === 'group_chat'
     const planContext = isCommand || !mcpCapabilities.interaction ? undefined : this.beginTaskPlanRun(data.session_id, profile)
+    const credentialContext = planContext || (groupRun && !isCommand ? this.beginTaskPlanRun(data.session_id, profile) : undefined)
     const interactionContext = planContext && source !== 'workflow' && data.session_source !== 'workflow'
       && source !== 'global_agent' && data.session_source !== 'global_agent' ? planContext : undefined
     if (interactionContext && data.session_id) {
@@ -1724,10 +1729,21 @@ export class ChatRunSocket {
       : data.instructions
     let started: Awaited<ReturnType<typeof handleCodingAgentRun>>
     try {
-      started = await handleCodingAgentRun(this.nsp, socket, { ...data, task_plan_context_id: planContext, interaction_context_id: interactionContext, instructions, studio_mcp_capabilities: mcpCapabilities }, profile, this.sessionMap)
-      if (!started && planContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, planContext)
+      const studioMcpTokenFile = groupRun && credentialContext && data.session_id
+        ? await runMcpCredentials.issue({
+          sessionId: data.session_id, contextId: credentialContext, profile,
+          roomId: String(data.group_room_id || ''), agentId: String(data.group_agent_id || ''),
+          // Only the internal group coordinator resolves a local requester.
+          // Client-supplied group metadata must not delegate a shared session's execution owner.
+          userId: typeof socket.data?.groupRunIsCurrent === 'function' ? socket.data?.user?.id : undefined,
+          isActive: () => this.taskPlanRuns.isActive(credentialContext, profile)
+            && (socket.data?.groupRunIsCurrent?.() ?? true),
+        })
+        : undefined
+      started = await handleCodingAgentRun(this.nsp, socket, { ...data, studio_mcp_token_file: studioMcpTokenFile, task_plan_context_id: planContext, interaction_context_id: interactionContext, instructions, studio_mcp_capabilities: mcpCapabilities }, profile, this.sessionMap)
+      if (!started && credentialContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, credentialContext)
     } catch (err) {
-      if (planContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.failed', undefined, planContext)
+      if (credentialContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.failed', undefined, credentialContext)
       throw err
     }
     if (!started) return
@@ -2499,6 +2515,7 @@ export class ChatRunSocket {
     options: {
       profile?: string
       user?: AuthenticatedUser
+      groupRunIsCurrent?: () => boolean
       timeoutMs?: number
       approvalChoice?: ChatRunAutoApprovalChoice
       pushRoot?: PushRunRef
@@ -2636,7 +2653,7 @@ export class ChatRunSocket {
       const fakeSocket = {
         id: `workflow-run-${sessionId}`,
         connected: true,
-        data: { user: options.user },
+        data: { user: options.user, groupRunIsCurrent: options.groupRunIsCurrent },
         join: () => {},
         to: (room: string) => ({
           emit: (event: string, payload: any) => {

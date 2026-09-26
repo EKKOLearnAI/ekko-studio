@@ -88,6 +88,7 @@ export interface RoomAgent {
     agentId: string
     agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
     agentMode: 'scoped' | 'global'
+    priorAgentMode?: 'scoped' | 'global' | ''
     profile: string
     provider: string
     model: string
@@ -127,6 +128,7 @@ export interface RoomAgentInput {
     presetId?: string
     agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
     agentMode?: 'scoped' | 'global'
+    priorAgentMode?: 'scoped' | 'global' | ''
     profile: string
     provider?: string
     model?: string
@@ -157,6 +159,7 @@ export function groupAgentPresetToRoomAgentInput(preset: GroupAgentPreset): Room
         presetId: preset.id,
         agent: preset.agent,
         agentMode: preset.agentMode,
+        priorAgentMode: preset.priorAgentMode,
         profile: preset.profile,
         provider: preset.provider,
         model: preset.model,

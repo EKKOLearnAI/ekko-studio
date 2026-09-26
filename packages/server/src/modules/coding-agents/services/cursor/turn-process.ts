@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'child_process'
+import { StringDecoder } from 'node:string_decoder'
 import type { CodingAgentImageInput } from '../../protocol/types'
 import { normalizeWindowsCommandPath, windowsCmdShimExecution, windowsCommandNeedsShell } from '../../../studio/public/windows-command'
 import { parseCursorStreamJsonLine, type CursorStreamEvent } from './stream-json'
@@ -50,6 +51,26 @@ export function buildCursorTurnArgs(
   ]
 }
 
+export function createCursorStdoutReader(): { push(chunk: Buffer): string[]; end(): string[] } {
+  const decoder = new StringDecoder('utf8')
+  let buffer = ''
+  const takeLines = (flush: boolean): string[] => {
+    const lines = buffer.split(/\r?\n/)
+    buffer = flush ? '' : lines.pop() || ''
+    return lines.filter(line => line.length > 0)
+  }
+  return {
+    push(chunk: Buffer) {
+      buffer += decoder.write(chunk)
+      return takeLines(false)
+    },
+    end() {
+      buffer += decoder.end()
+      return takeLines(true)
+    },
+  }
+}
+
 function spawnCursor(command: string, args: string[], input: CursorTurnProcessInput): ChildProcess {
   const normalizedCommand = process.platform === 'win32' ? normalizeWindowsCommandPath(command) : command
   if (process.platform === 'win32' && windowsCommandNeedsShell(command)) {
@@ -74,12 +95,9 @@ export function startCursorTurnProcess(input: CursorTurnProcessInput): ChildProc
   const prompt = cursorPrompt(input.input, input.images)
   const args = buildCursorTurnArgs(input.baseArgs, input.nativeSessionId, input.resume, prompt)
   const child = spawnCursor(input.command, args, input)
-  let stdoutBuffer = ''
+  const stdout = createCursorStdoutReader()
   child.stdout?.on('data', (chunk: Buffer) => {
-    stdoutBuffer += chunk.toString('utf-8')
-    const lines = stdoutBuffer.split(/\r?\n/)
-    stdoutBuffer = lines.pop() || ''
-    for (const line of lines) {
+    for (const line of stdout.push(chunk)) {
       const event = parseCursorStreamJsonLine(line, { streamPartial: true })
       if (event) input.onEvent(event)
     }
@@ -87,8 +105,10 @@ export function startCursorTurnProcess(input: CursorTurnProcessInput): ChildProc
   child.stderr?.on('data', input.onStderr)
   child.on('error', input.onError)
   child.on('close', (code) => {
-    const event = parseCursorStreamJsonLine(stdoutBuffer, { streamPartial: true })
-    if (event) input.onEvent(event)
+    for (const line of stdout.end()) {
+      const event = parseCursorStreamJsonLine(line, { streamPartial: true })
+      if (event) input.onEvent(event)
+    }
     input.onClose(code)
   })
   return child

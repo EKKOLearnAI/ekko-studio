@@ -75,6 +75,22 @@ describe('handleCodingAgentRun', () => {
     })
   })
 
+  it('passes the group credential into native launch without overwriting a shared profile token', async () => {
+    managerMock.runIdForSession.mockReturnValue(undefined)
+    startCodingAgentRunMock.mockResolvedValue({ agentSessionId: 'group-runtime' })
+    sendCodingAgentRunInputMock.mockReturnValue({ runId: 'group-runtime' })
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    await handleCodingAgentRun({} as any, { data: { user: { id: 7, username: 'requester', role: 'user' } }, join: vi.fn(), emit: vi.fn() } as any, {
+      session_id: 'group-session', input: 'Work', coding_agent_id: 'codex', mode: 'global',
+      session_source: 'group_chat', group_room_id: 'room', group_agent_id: 'agent',
+      studio_mcp_token_file: '/fixture/run-credential.json',
+    }, 'research', new Map())
+    expect(startCodingAgentRunMock).toHaveBeenCalledWith('codex', expect.objectContaining({
+      studioMcpTokenFile: '/fixture/run-credential.json', groupRuntimeScope: { roomId: 'room', agentId: 'agent' },
+    }), expect.anything())
+    expect(writeModelRunProfileTokenMock).not.toHaveBeenCalled()
+  })
+
   it('runs global Claude Code without requiring Studio OAuth credentials', async () => {
     resolveAuthorizedProviderRuntimeCredentialsMock.mockRejectedValue(new Error('Studio OAuth is not configured'))
     managerMock.runIdForSession.mockReturnValue('agent-session-1')

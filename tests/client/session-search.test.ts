@@ -16,6 +16,7 @@ vi.mock('@/api/studio/sessions', () => ({
 
 const chatStoreMock = vi.hoisted(() => ({
   sessions: [] as Array<Record<string, any>>,
+  activeSessionId: null as string | null,
   loadSessions: vi.fn(),
   switchSession: vi.fn(),
   newChat: vi.fn(),
@@ -80,7 +81,11 @@ describe('session search modal', () => {
     vi.clearAllMocks()
     chatStoreMock.sessions = []
     chatStoreMock.loadSessions.mockResolvedValue(undefined)
-    chatStoreMock.switchSession.mockResolvedValue(undefined)
+    chatStoreMock.activeSessionId = null
+    chatStoreMock.switchSession.mockImplementation(async (sessionId: string) => {
+      chatStoreMock.activeSessionId = sessionId
+      return true
+    })
     apiMocks.fetchSessionsMock.mockResolvedValue([
       {
         id: 'recent-1',

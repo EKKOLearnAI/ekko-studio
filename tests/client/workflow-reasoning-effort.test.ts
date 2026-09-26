@@ -38,8 +38,9 @@ describe('workflow reasoning effort authoring contract', () => {
     expect(node).toContain("updateField('agentMode'")
     expect(node).toContain('v-if="usesScopedModel"')
     expect(view).toContain('agentMode: node.data.agentMode')
-    expect(view).toContain("nextAgent !== 'cursor' && !['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(nextAgent) ? { agentMode: 'scoped' as const } : {}")
-    expect(view).toContain("nextAgent === 'cursor' ? { agentMode: 'global' as const }")
+    expect(view).toContain('nextCodingAgentMode({')
+    expect(view).toContain('agentMode: switched.agentMode')
+    expect(view).toContain('priorAgentMode: switched.priorAgentMode')
   })
   it('keeps Workflow nodes aligned with upstream defaults instead of exposing execution-policy controls', () => {
     const types = read('packages/client/src/components/hermes/workflow/types.ts')

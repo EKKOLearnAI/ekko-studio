@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -5,10 +6,23 @@ import { spawn } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 
 const wrapper = join(process.cwd(), 'bin', 'start-studio-all.sh')
+const windowsBash = [
+  'C:\\Program Files\\Git\\bin\\bash.exe',
+  'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+].find(candidate => process.platform === 'win32' && existsSync(candidate))
+
+function shellPath(path: string): string {
+  if (!windowsBash) return path
+  const drive = /^([A-Za-z]):[\\/](.*)$/.exec(path)
+  if (!drive) return path.replaceAll('\\', '/')
+  return `/${drive[1].toLowerCase()}/${drive[2].replaceAll('\\', '/')}`
+}
 
 function runWrapper(env: NodeJS.ProcessEnv, args: string[] = []) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(wrapper, args, { env })
+    const child = windowsBash
+      ? spawn(windowsBash, [wrapper, ...args], { env })
+      : spawn(wrapper, args, { env })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', chunk => { stdout += chunk })
@@ -56,7 +70,7 @@ describe('Docker startup wrapper', () => {
     }, ['--port', '6060'])
 
     expect(result.code).toBe(0)
-    expect(result.stdout).toBe(`node-started:${process.cwd()}/bin/../dist/server/index.js --port 6060\n`)
+    expect(result.stdout).toBe(`node-started:${shellPath(process.cwd())}/bin/../dist/server/index.js --port 6060\n`)
     await expect(import('node:fs/promises').then(fs => fs.readFile(marker, 'utf8'))).resolves.toBe('patched')
   })
 })
