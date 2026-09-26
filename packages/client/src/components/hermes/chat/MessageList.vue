@@ -221,13 +221,20 @@ const displayMessages = computed(() => {
   if (isSearchFetching.value) return [];
   const messages = chatStore.messages;
   const currentToolIds = new Set(currentToolCalls.value.map((tool) => tool.id));
+  // Skip leading command messages before first user to avoid init noise
+  const firstUserIdx = chatStore.messages.findIndex(m => m.role === 'user');
+
   const renderedMessages = messages
-    .filter((m) => {
+    .filter((m, index) => {
       if (m.id === chatStore.focusMessageId) return true;
       if (m.role === "tool") {
         return toolTraceVisible.value && !!m.toolName && !(isRunIndicatorActive.value && currentToolIds.has(m.id));
       }
       if (m.role === "assistant" && !hasRenderableAssistantContent(m)) return false;
+      // Skip command messages before the first user message
+      if (m.role === 'command' && firstUserIdx > 0 && index < firstUserIdx) {
+        return false;
+      }
       return true;
     })
     .map((message) => {

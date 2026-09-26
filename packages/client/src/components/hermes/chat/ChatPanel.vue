@@ -357,6 +357,16 @@ async function submitBrowserAnnotations(payload: BrowserAnnotationSubmission): P
   return true;
 }
 
+function onOutlineMessagesLoaded(messages: any[]) {
+  if (chatStore.activeSession) {
+    // Skip leading init messages before first user.
+    // CRON sessions in history don't use this handler.
+    const firstUserIdx = messages.findIndex(m => m.role === 'user');
+    const clean = firstUserIdx > 0 ? messages.slice(firstUserIdx) : messages;
+    chatStore.activeSession.messages = clean;
+  }
+}
+
 async function handleSessionClick(
   sessionId: string,
   options: { preserveCategoryCollapse?: boolean } = {},
@@ -3365,7 +3375,11 @@ async function handleSessionModelCustomSubmit() {
           <OutlinePanel
             v-if="showOutline"
             :messages="chatStore.messages"
+            :session-id="chatStore.activeSessionId || undefined"
+            :session-profile="chatStore.activeSession ? sessionProfile(chatStore.activeSession.id) : null"
+            :show-load-all="true"
             @navigate="handleOutlineNavigate"
+            @messages-loaded="onOutlineMessagesLoaded"
           />
           <Transition
             name="tool-panel"
