@@ -59,6 +59,15 @@ for (const { path, hit, listed, total } of [
     if (listed) await expect(page.locator(`#message-${total}`)).toBeVisible()
     else await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible()
 
+    // Subscribe before the spinner mounts: enabling LayerTree after its layer
+    // has settled does not guarantee an initial layerTreeDidChange snapshot.
+    const cdp = total === 1860 ? await page.context().newCDPSession(page) : null
+    let layers: Array<{ layerId: string; backendNodeId?: number }> = []
+    if (cdp) {
+      cdp.on('LayerTree.layerTreeDidChange', event => { layers = event.layers || [] })
+      await cdp.send('LayerTree.enable')
+    }
+
     const search = async (term: string) => {
       await page.keyboard.press('Control+k')
       await page.locator('.session-search-modal input').fill(term)
@@ -89,13 +98,9 @@ for (const { path, hit, listed, total } of [
         })
         observer.observe(loader.parentElement!, { childList: true })
       })
-      if (total === 1860) {
+      if (cdp) {
         // Verify Chromium actually accelerates this animation, so a busy
         // message-rendering main thread cannot pause the rotation.
-        const cdp = await page.context().newCDPSession(page)
-        let layers: Array<{ layerId: string; backendNodeId?: number }> = []
-        cdp.on('LayerTree.layerTreeDidChange', event => { layers = event.layers || [] })
-        await cdp.send('LayerTree.enable')
         const { root } = await cdp.send('DOM.getDocument')
         const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.message-search-spinner' })
         const { node } = await cdp.send('DOM.describeNode', { nodeId })

@@ -278,6 +278,17 @@ function scrollToItem(index: number, options?: ScrollToOptions) {
   syncViewport();
 }
 
+function hasPendingRowMeasurements(el: HTMLElement): boolean {
+  const scroller = scrollerRef.value;
+  if (!props.virtualized || !scroller) return false;
+  return Array.from(el.querySelectorAll<HTMLElement>(".virtual-row")).some(row => {
+    const index = Number(row.dataset.virtualIndex);
+    const message = props.messages[index];
+    const height = row.getBoundingClientRect().height;
+    return !!message && height > 0 && Math.abs(scroller.getItemSize(message, index) - height) > 1;
+  });
+}
+
 function scheduleAnchorAlignment(token: number) {
   if (anchorFrame != null) return;
 
@@ -290,6 +301,16 @@ function scheduleAnchorAlignment(token: number) {
 
     const targetEl = findTargetElement(target.messageId, target.anchorId);
     const el = getScrollerElement();
+    // A boundary row can leave the recycled window before its ResizeObserver
+    // result reaches the size cache. Re-centering against that stale size can
+    // alternate the window forever. Let visible rows finish measuring first.
+    if (targetEl && el && hasPendingRowMeasurements(el)) {
+      target.layout = null;
+      target.stableSince = performance.now();
+      anchorFrame = requestAnimationFrame(step);
+      return;
+    }
+
     let corrected = false;
     if (targetEl) {
       corrected = alignElement(targetEl, target.align);
@@ -581,7 +602,11 @@ defineExpose({
         <slot v-if="messages.length > 0" name="before" />
       </template>
       <template #default="{ item, index, active }">
+        <!-- Recreate measurement observers when a row is recycled or reactivated,
+             so delayed measurements cannot keep another message's stale size. -->
         <DynamicScrollerItem
+          v-if="active"
+          :key="messageKey(item)"
           :item="item"
           :index="index"
           :active="active"
@@ -589,7 +614,7 @@ defineExpose({
           :data-virtual-index="index"
           :data-message-id="messageKey(item)"
         >
-          <slot v-if="active" name="item" :message="item" />
+          <slot name="item" :message="item" />
         </DynamicScrollerItem>
       </template>
       <template #after>
