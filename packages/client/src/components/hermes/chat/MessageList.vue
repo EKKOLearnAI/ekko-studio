@@ -1103,7 +1103,7 @@ defineExpose({
   box-sizing: border-box;
   border: 3px solid transparent;
   border-top-color: currentColor;
-  border-right-color: currentColor;
+  border-inline-end-color: currentColor;
   border-radius: 50%;
   will-change: transform;
   animation: message-search-spin 0.8s linear infinite;
