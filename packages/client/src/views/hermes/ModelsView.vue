@@ -232,7 +232,9 @@ async function handleRefreshModelCache() {
     </header>
 
     <div class="models-content">
-      <NSpin v-if="profileLoading" class="models-profile-loading" />
+      <div v-if="profileLoading" class="models-profile-loading" role="status" aria-live="polite">
+        <NSpin size="large" :description="t('common.loading')" />
+      </div>
       <NTabs v-else-if="selectedProfile" :key="selectedProfile" v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
         <NTabPane name="general" :tab="t('models.generalTitle')">
           <NSpin :show="modelsStore.loading && modelsStore.providers.length === 0">
@@ -295,8 +297,19 @@ async function handleRefreshModelCache() {
 
 .models-content {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   padding: 20px;
+}
+
+.models-profile-loading {
+  flex: 1;
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .models-profile-select {
