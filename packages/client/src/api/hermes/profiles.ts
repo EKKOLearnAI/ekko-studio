@@ -6,6 +6,8 @@ export interface HermesProfile {
   model: string
   gatewayStatus?: string
   alias: string
+  /** profile.yaml display_name — presentation only; API calls still use `name`. */
+  displayName?: string
   avatar?: ProfileAvatar | null
 }
 
@@ -17,6 +19,7 @@ export interface HermesProfileDetail {
   skills: number
   hasEnv: boolean
   hasSoulMd: boolean
+  displayName?: string
   avatar?: ProfileAvatar | null
 }
 
