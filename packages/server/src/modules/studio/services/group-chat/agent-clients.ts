@@ -4,6 +4,8 @@ import { findPushRunLink, linkPushRun, type PushRunRef } from '../../repositorie
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 import type { TaskPlanSnapshot } from '../../contracts/task-plan'
 import { groupTaskPlanMessage } from './task-plan'
+import { groupRunUser } from './run-user'
+import type { AuthenticatedUser } from '../../public/auth'
 import { io, Socket } from 'socket.io-client'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { getToken } from '../../public/auth'
@@ -318,6 +320,8 @@ export interface GroupChatRunService {
             memory_default_write_scope?: Record<string, string>
         },
         options?: {
+            user?: AuthenticatedUser
+            groupRunIsCurrent?: () => boolean
             pushRoot?: PushRunRef
             profile?: string
             timeoutMs?: number
@@ -1208,6 +1212,7 @@ export class AgentClient implements GroupAgentExecutor {
                                 : 'codex'
             const usesGlobalCodingAgent = this.agentMode === 'global' && codingAgentId !== 'ekko-agent'
             const groupSystemPrompt = this.groupSystemPrompt(roomId, msg)
+            const executionUser = groupRunUser(this.storage, roomId, this.profile, msg)
             const result = await this.chatRunService.runAndWait({
                 input: this.groupRuntimeInput(msg, runtimeContext),
                 session_id: sessionId,
@@ -1260,6 +1265,9 @@ export class AgentClient implements GroupAgentExecutor {
                     : {}),
             }, {
                 profile: this.profile,
+                user: executionUser,
+                groupRunIsCurrent: () => isCurrent() && (!executionUser
+                    || groupRunUser(this.storage, roomId, this.profile, msg)?.id === executionUser.id),
                 ...(pushRoot ? { pushRoot: { kind: pushRoot.kind, profile: pushRoot.profile, runId: pushRoot.run_id } } : {}),
                 onEvent: (event, payload = {}) => {
                     // Keep the terminal card after a user interrupt, while still rejecting an old room session.

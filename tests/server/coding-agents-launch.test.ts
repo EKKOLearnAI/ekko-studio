@@ -34,6 +34,7 @@ import { codingAgentRunManager } from '../../packages/server/src/modules/coding-
 import { configureProfileConfig } from '../../packages/server/src/modules/studio/public/profile-config'
 import * as providerRuntime from '../../packages/server/src/modules/studio/public/provider-runtime'
 import { upsertCodingAgentMcpServer } from '../../packages/server/src/modules/coding-agents/services/mcp-manager'
+import { getCodingAgentManagedMcpServerConfigs } from '../../packages/server/src/modules/coding-agents/services'
 
 // Registry tests verify isolated homes/model injection without requiring a
 // machine-wide DSH install. Real Web composition is covered by dsh-web-real.
@@ -89,6 +90,43 @@ beforeEach(() => {
   mockProcessUid(1000)
 })
 
+it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'])('binds %s managed MCP transports to independent group credentials in scoped and global mode', async agent => {
+  const home = makeHome()
+  const adapter = join(home, 'coding-agent', 'pi-mcp-adapter', 'node_modules', 'pi-mcp-adapter', 'index.ts')
+  mkdirSync(dirname(adapter), { recursive: true })
+  writeFileSync(adapter, 'export default {}')
+  for (const mode of ['scoped', 'global'] as const) {
+    const input = {
+      mode, profile: 'research', provider: 'custom:test', model: 'test-model',
+      baseUrl: 'https://api.example.com/v1', apiKey: 'fixture-upstream-key', apiMode: 'chat_completions',
+      workspace: join(home, 'workspace'), sessionSource: 'group_chat' as const,
+      groupRuntimeScope: { roomId: 'room', agentId: 'worker' },
+      ...(agent === 'pi' ? { piOutputMode: 'rpc' as const } : {}),
+    }
+    const [first, second] = await Promise.all(['one', 'two'].map(session => prepareCodingAgentLaunch(agent, {
+      ...input, sessionId: session, agentSessionId: `runtime-${session}`,
+      studioMcpTokenFile: join(home, `${mode}-${session}.json`),
+    })))
+    expect(first.rootDir).not.toBe(second.rootDir)
+    for (const [index, launch] of [first, second].entries()) {
+      const expectedFile = join(home, `${mode}-${index === 0 ? 'one' : 'two'}.json`)
+      let servers: Record<string, any>
+      if (agent === 'codex' || agent === 'grok') servers = parseToml(readFileSync(join(launch.rootDir, 'config.toml'), 'utf8')).mcp_servers as any
+      else if (agent === 'dsh') servers = Object.fromEntries(readDshMcpServers(readFileSync(join(launch.rootDir, 'cordis.patch.yml'), 'utf8')))
+      else if (agent === 'opencode') servers = JSON.parse(launch.env.OPENCODE_CONFIG_CONTENT).mcp
+      else servers = JSON.parse(readFileSync(join(launch.rootDir, 'mcp.json'), 'utf8')).mcpServers
+      const managed = Object.entries(servers).filter(([name]) => name.startsWith('ekko-studio-'))
+      expect(managed).toHaveLength(5)
+      for (const [, config] of managed) {
+        const env = config.env || config.environment
+        expect(env.HERMES_WEB_UI_RUN_TOKEN_FILE).toBe(expectedFile)
+        expect(env.ELECTRON_RUN_AS_NODE).toBe('1')
+        expect(env.HERMES_WEB_UI_PROFILE).toBe('research')
+      }
+    }
+  }
+})
+
 it.each(['scoped', 'global'] as const)('prepares DSH %s ACP homes independently for simultaneous conversations', async mode => {
   const home = makeHome()
   const input = { mode, profile: 'default', provider: 'custom:test', model: 'test-model',
@@ -113,6 +151,24 @@ it.each(['scoped', 'global'] as const)('prepares DSH %s ACP homes independently 
     expect(launch.env.HERMES_DSH_API_KEY).toBeTruthy()
     expect(launch.env.HERMES_DSH_API_KEY).not.toBe('upstream-test-secret')
   } else expect(acpConfig).toBeUndefined()
+})
+
+it('pins run credentials to the bundled transport while preserving ordinary overrides and disabled tools', async () => {
+  const home = makeHome()
+  await upsertCodingAgentMcpServer('codex', 'ekko-studio-api', {
+    type: 'http', url: 'https://custom.example/mcp', headers: { Authorization: 'fixture-custom-token' }, enabled: true,
+  }, { profile: 'research' })
+  await upsertCodingAgentMcpServer('codex', 'ekko-studio-use', { enabled: false }, { profile: 'research' })
+  const tokenFile = join(home, 'auth.json')
+  const bound = getCodingAgentManagedMcpServerConfigs('codex', 'research', tokenFile)
+  expect(bound['ekko-studio-api']).not.toHaveProperty('url')
+  expect(bound['ekko-studio-api']).not.toHaveProperty('headers')
+  expect(bound['ekko-studio-api'].env).toMatchObject({ HERMES_WEB_UI_RUN_TOKEN_FILE: tokenFile })
+  expect(bound['ekko-studio-api'].command).toBeTruthy()
+  expect(bound['ekko-studio-use'].enabled).toBe(false)
+  const ordinary = getCodingAgentManagedMcpServerConfigs('codex', 'research')
+  expect(ordinary['ekko-studio-api'].url).toBe('https://custom.example/mcp')
+  expect(ordinary['ekko-studio-api'].env).toBeUndefined()
 })
 
 afterEach(() => {
