@@ -2556,6 +2556,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "사용량: 입력 {inputTokens}, 출력 {outputTokens}, 캐시 읽기 {cacheReadTokens}, 캐시 쓰기 {cacheWriteTokens}, 총 {totalTokens} 토큰.",
+    nativeUsageUnknown: "사용량 알 수 없음: 이 세션의 네이티브 토큰 사용량이 아직 보고되지 않았습니다.",
+    nativeContextUnknown: "컨텍스트 알 수 없음: 네이티브 세션의 현재 사용량과 한도를 가져올 수 없습니다.",
+    nativeContextEstimate: "컨텍스트 추정(최근 사용량 / 설정 한도): {contextTokens} / {contextWindow} 토큰({contextPercent}%).",
+    nativeCompactUnavailable: "Studio의 Cursor print 모드 연동은 /compact를 지원하지 않습니다.",
     title: "코딩 에이전트",
     notice: "모든 제공업체와 모델이 호환되는 것은 아닙니다.",
     claudeDescription: "print mode 단발 작업과 대화형 코딩 세션을 위한 Anthropic CLI입니다.",

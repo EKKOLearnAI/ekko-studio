@@ -6,6 +6,7 @@ const updateSessionStatsMock = vi.hoisted(() => vi.fn())
 const getOrCreateSessionMock = vi.hoisted(() => vi.fn(() => ({ messages: [], isWorking: false })))
 const calcAndUpdateUsageMock = vi.hoisted(() => vi.fn())
 const getModelContextLengthMock = vi.hoisted(() => vi.fn(() => 256_000))
+const getUsageMock = vi.hoisted(() => vi.fn())
 const compactMock = vi.hoisted(() => vi.fn())
 const getRunInfoMock = vi.hoisted(() => vi.fn())
 const getPiSessionStatsMock = vi.hoisted(() => vi.fn())
@@ -32,6 +33,8 @@ vi.mock('../../packages/server/src/modules/studio/public/run-state', () => ({
 vi.mock('../../packages/server/src/modules/studio/public/provider-runtime', () => ({
   getModelContextLength: getModelContextLengthMock,
 }))
+
+vi.mock('../../packages/server/src/modules/studio/public/usage', () => ({ getUsage: getUsageMock }))
 
 vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({
   codingAgentRunManager: {
@@ -93,7 +96,8 @@ describe('coding agent session commands', () => {
     expect(parseCodingAgentSessionCommand('hello')).toBeNull()
   })
 
-  it('emits context usage for coding agent sessions', async () => {
+  it('uses latest context values rather than cumulative consumption and labels the estimate', async () => {
+    calcAndUpdateUsageMock.mockResolvedValue({ inputTokens: 10, outputTokens: 20, contextInputTokens: 40_000, contextOutputTokens: 200 })
     const { handleCodingAgentSessionCommand } = await import('../../packages/server/src/modules/coding-agents/services/session-command')
     const { socket, nsp, emitted } = makeSocket()
     await handleCodingAgentSessionCommand(nsp, socket as any, {
@@ -104,8 +108,56 @@ describe('coding agent session commands', () => {
 
     const command = emitted.find(item => item.event === 'session.command')?.payload
     expect(command.action).toBe('context')
-    expect(command.message).toContain('total 30 / 256000 tokens')
-    expect(command.contextPercent).toBe(0)
+    expect(command.message).toContain('Context estimate')
+    expect(command).toMatchObject({ totalTokens: 40_200, contextPercent: 15.7, estimated: true })
+  })
+
+  it.each([
+    { nativeUsageAvailable: false, inputTokens: 0, outputTokens: 0, total: null },
+    { nativeUsageAvailable: true, inputTokens: 0, outputTokens: 0, total: 0 },
+    { nativeUsageAvailable: true, inputTokens: 123, outputTokens: 45, cacheReadTokens: 67, cacheWriteTokens: 8, total: 243 },
+  ])('distinguishes missing Cursor usage from measured values: $total', async usage => {
+    getSessionMock.mockReturnValue({ agent: 'cursor', model: '', provider: 'global' })
+    calcAndUpdateUsageMock.mockResolvedValue(usage)
+    const { handleCodingAgentSessionCommand } = await import('../../packages/server/src/modules/coding-agents/services/session-command')
+    const { socket, nsp, emitted } = makeSocket()
+    await handleCodingAgentSessionCommand(nsp, socket as any, { session_id: 'session-1' }, { name: 'usage', rawName: 'usage', args: '' }, 'default', new Map())
+    const command = emitted.find(item => item.event === 'session.command')?.payload
+    expect(command).toMatchObject({ available: usage.nativeUsageAvailable, totalTokens: usage.total })
+    expect(command.message).toContain(usage.nativeUsageAvailable ? `total ${usage.total} tokens` : 'unknown')
+  })
+
+  it('keeps Cursor context unknown even when turn usage and a native model are available', async () => {
+    getSessionMock.mockReturnValue({ agent: 'cursor', provider: 'global' })
+    calcAndUpdateUsageMock.mockResolvedValue({ nativeUsageAvailable: true, nativeModel: 'native-model', inputTokens: 123, outputTokens: 45, contextInputTokens: 190, contextOutputTokens: 45 })
+    const { handleCodingAgentSessionCommand } = await import('../../packages/server/src/modules/coding-agents/services/session-command')
+    const { socket, nsp, emitted } = makeSocket()
+    await handleCodingAgentSessionCommand(nsp, socket as any, { session_id: 'session-1', model: 'unrelated-studio-model' }, { name: 'context', rawName: 'context', args: '' }, 'default', new Map())
+    expect(emitted.find(item => item.event === 'session.command')?.payload).toMatchObject({
+      available: false, contextTokens: null, contextWindow: null, contextPercent: null, message: expect.stringContaining('unknown'),
+    })
+    expect(getModelContextLengthMock).not.toHaveBeenCalled()
+  })
+
+  it('restores the native Cursor model for status without launching a process', async () => {
+    getSessionMock.mockReturnValue({ agent: 'cursor', provider: 'global', model: '' })
+    getUsageMock.mockReturnValue({ model: 'persisted-native-model' })
+    const { handleCodingAgentSessionCommand } = await import('../../packages/server/src/modules/coding-agents/services/session-command')
+    const { socket, nsp, emitted } = makeSocket()
+    await handleCodingAgentSessionCommand(nsp, socket as any, { session_id: 'session-1', model: 'unrelated' }, { name: 'status', rawName: 'status', args: '' }, 'default', new Map())
+    expect(emitted.find(item => item.event === 'session.command')?.payload).toMatchObject({ model: 'persisted-native-model', agent: 'cursor' })
+    expect(getUsageMock).toHaveBeenCalledWith('session-1', 'coding_agent')
+    expect(startCodingAgentRunMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects Cursor compaction without launching a replacement session', async () => {
+    getSessionMock.mockReturnValue({ agent: 'cursor' })
+    const { handleCodingAgentSessionCommand } = await import('../../packages/server/src/modules/coding-agents/services/session-command')
+    const { socket, nsp, emitted } = makeSocket()
+    await handleCodingAgentSessionCommand(nsp, socket as any, { session_id: 'session-1' }, { name: 'compact', rawName: 'compact', args: '' }, 'default', new Map())
+    expect(emitted.find(item => item.event === 'session.command')?.payload).toMatchObject({ ok: false, compacted: false, messageKey: 'nativeCompactUnavailable' })
+    expect(compactMock).not.toHaveBeenCalled()
+    expect(startCodingAgentRunMock).not.toHaveBeenCalled()
   })
 
   it('uses native Pi RPC stats for context and usage', async () => {
@@ -202,7 +254,7 @@ describe('coding agent session commands', () => {
     const commands = emitted.filter(item => item.event === 'session.command')
     expect(commands).toHaveLength(1)
     expect(commands[0].payload).toMatchObject({ ok: false, terminal: !running, compacted: false,
-      message: expect.stringContaining('Cursor CLI does not expose native compaction') })
+      message: expect.stringContaining('Studio print-mode integration') })
     expect(commands[0].payload.message).not.toContain('Claude')
     expect(commands[0].payload.started).toBeUndefined()
   })

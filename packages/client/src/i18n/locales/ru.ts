@@ -553,6 +553,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "Использование: вход {inputTokens}, выход {outputTokens}, чтение кэша {cacheReadTokens}, запись кэша {cacheWriteTokens}, всего {totalTokens} токенов.",
+    nativeUsageUnknown: "Использование неизвестно. Для этой сессии ещё не получены данные о токенах от CLI.",
+    nativeContextUnknown: "Контекст неизвестен. Текущий размер нативного контекста и его предел недоступны.",
+    nativeContextEstimate: "Оценка контекста (последнее использование / заданный предел): {contextTokens} / {contextWindow} токенов ({contextPercent}%).",
+    nativeCompactUnavailable: "/compact недоступен в интеграции Cursor со Studio через режим print.",
     cursorInstallGuide: 'Руководство по установке',
     installFailedHermesHint: 'Installation failed. Ask Hermes to install it for you.',
     installFailureReason: 'Reason',

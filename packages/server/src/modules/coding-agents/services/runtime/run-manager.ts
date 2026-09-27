@@ -497,6 +497,7 @@ function piAssistantMessageText(message: any): string {
 }
 
 function codingAgentDisplayName(agentId: string): string {
+  if (agentId === 'cursor') return 'Cursor'
   if (agentId === 'codex') return 'Codex'
   if (agentId === 'pi') return 'Pi'
   if (agentId === 'grok') return 'Grok'
@@ -898,7 +899,7 @@ export class CodingAgentRunManager {
         ? run.turnActive === true
         : childIsRunning(run.currentChild) || run.turnActive === true,
       agentId: run.launch.agentId,
-      model: run.launch.model,
+      model: run.launch.agentId === 'cursor' ? run.nativeUsage?.model || '' : run.launch.model,
       provider: run.launch.provider,
       workspaceDir: run.launch.workspaceDir,
       nativeSessionId: String(run.launch.agentNativeSessionId || '').trim(),
@@ -1299,7 +1300,8 @@ export class CodingAgentRunManager {
     const contextTokens = usage.contextInputTokens != null || usage.contextOutputTokens != null
       ? (usage.contextInputTokens || 0) + (usage.contextOutputTokens || 0)
       : undefined
-    if (contextTokens != null && contextTokens > 0) {
+    // Cursor's result usage aggregates a turn, not the current context window.
+    if (run.launch.agentId !== 'cursor' && contextTokens != null && contextTokens > 0) {
       updateContextTokenUsage(run.launch.sessionId, run.state, emitUsage, contextTokens, usage)
     }
   }
@@ -2647,7 +2649,7 @@ export class CodingAgentRunManager {
       onEvent: (event) => {
         this.touch(run)
         applyCursorStreamEvent(event, {
-          text: value => this.appendCodexText(run, value),
+          text: value => this.appendCodexText(run, value, true),
           thought: value => this.appendCodexReasoning(run, value),
           toolStarted: value => this.handleCodexItemStarted(run, {
             type: 'mcp_tool_call',
@@ -2662,7 +2664,13 @@ export class CodingAgentRunManager {
             ...(value.failed ? { error: { message: this.codexToolOutput({ output: value.output }) } } : {}),
           }),
           usage: value => { run.codexPendingUsage = value },
-          session: sessionId => this.recordCursorNativeSessionId(run, sessionId),
+          session: (sessionId, model) => {
+            if (model?.trim()) {
+              run.nativeUsage ||= new NativeTurnUsage()
+              run.nativeUsage.model = model.trim()
+            }
+            this.recordCursorNativeSessionId(run, sessionId)
+          },
           complete: usage => {
             if (!run.printCompleted) this.completeClaudePrintTurn(run, usage || run.codexPendingUsage)
           },
@@ -2684,9 +2692,11 @@ export class CodingAgentRunManager {
         if (!run.printCompleted) this.failCodexExecTurn(run, childProcessErrorMessage(err, run.launch.agentId))
       },
       onClose: (code) => {
+        if (run.currentChildKillTimer) clearTimeout(run.currentChildKillTimer)
+        run.currentChildKillTimer = undefined
         run.currentChild = undefined
         logger.info({ runId: run.id, sessionId: run.launch.sessionId, code }, '[coding-agent-run] cursor exited')
-        if (run.stoppedByUser) return
+        if (run.stoppedByUser || run.exited) return
         if (run.pendingChatCompletionEvent) {
           void this.emitAndMarkPrintChatRunCompletedAfterUsage(run, run.pendingChatCompletionEvent, run.pendingChatCompletionPayload)
           return
@@ -2697,6 +2707,13 @@ export class CodingAgentRunManager {
       },
     })
     run.currentChild = child
+    child.once('exit', () => {
+      // Tools can outlive the CLI (and keep its pipes open). On cancellation,
+      // reap the owned group even if the leader exited before the kill timer.
+      if ((run.exited || run.stoppedByUser) && process.platform !== 'win32' && child.pid) {
+        try { process.kill(-child.pid, 'SIGKILL') } catch {}
+      }
+    })
   }
 
   private recordCursorNativeSessionId(run: ManagedCodingAgentRun, nativeSessionId: string) {

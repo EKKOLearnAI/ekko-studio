@@ -2556,6 +2556,11 @@ jobTriggered: 'Job ejecutado',
   },
 
   codingAgents: {
+    nativeUsage: "Uso: entrada {inputTokens}, salida {outputTokens}, lectura de caché {cacheReadTokens}, escritura de caché {cacheWriteTokens}, total {totalTokens} tokens.",
+    nativeUsageUnknown: "Uso desconocido. Esta sesión aún no ha recibido datos nativos de tokens.",
+    nativeContextUnknown: "Contexto desconocido. No están disponibles el uso actual del contexto nativo ni su límite.",
+    nativeContextEstimate: "Estimación del contexto (último uso / límite configurado): {contextTokens} / {contextWindow} tokens ({contextPercent}%).",
+    nativeCompactUnavailable: "/compact no está disponible en la integración de Cursor en modo print de Studio.",
     title: "Agentes de código",
     notice: "No todos los proveedores y modelos son compatibles.",
     claudeDescription: "CLI de Anthropic para tareas únicas en print mode y sesiones interactivas de código.",

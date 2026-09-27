@@ -91,6 +91,23 @@ describe('chat store session.command fanout', () => {
     setActivePinia(createPinia())
   })
 
+  it('keeps known counters when native usage is unavailable, while retaining the command result', () => {
+    const store = useChatStore()
+    const session = makeSession()
+    store.sessions = [{ ...session, inputTokens: 123, outputTokens: 45 }]
+    store.activeSessionId = 'session-1'
+    store.activeSession = store.sessions[0]
+
+    chatApi.sessionCommandHandlers[0]({
+      event: 'session.command', session_id: 'session-1', command: 'usage', action: 'usage',
+      available: false, inputTokens: null, outputTokens: null,
+      message: 'Usage: unknown.', messageKey: 'nativeUsageUnknown',
+    })
+
+    expect(store.sessions[0]).toMatchObject({ inputTokens: 123, outputTokens: 45 })
+    expect(store.messages.at(-1)).toMatchObject({ role: 'command', commandData: { available: false } })
+  })
+
   it('attaches to a goal resume run started from another window', () => {
     const store = useChatStore()
     const session = makeSession()

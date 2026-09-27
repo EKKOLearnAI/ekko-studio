@@ -2953,7 +2953,7 @@ export const useChatStore = defineStore('chat', () => {
       target.updatedAt = Date.now()
     }
 
-    if (action === 'usage' && target) {
+    if (action === 'usage' && target && (evt as any).available !== false) {
       target.inputTokens = (evt as any).inputTokens
       target.outputTokens = (evt as any).outputTokens
       if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens

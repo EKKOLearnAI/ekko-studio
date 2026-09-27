@@ -281,18 +281,24 @@ async function loadCachedStatus() {
     loadError.value = errorMessage(error)
   } finally {
     loading.value = false
+    void checkExternalCursorInstallation()
   }
 }
 
 let checkingExternalInstallation = false
 let managerMounted = false
+let externalInstallationRefreshPending = false
 
 async function checkExternalCursorInstallation() {
   // Cursor is installed outside Studio. Returning from its guide or a terminal
   // must probe the CLI again instead of reusing the startup inventory.
-  if (!managerMounted || document.visibilityState === 'hidden' || loading.value
-    || installing.value.cursor || checkingExternalInstallation
-    || !toolStatus('cursor') || toolStatus('cursor')?.installed) return
+  if (!managerMounted || document.visibilityState === 'hidden') return
+  if (loading.value || installing.value.cursor || checkingExternalInstallation) {
+    externalInstallationRefreshPending = true
+    return
+  }
+  externalInstallationRefreshPending = false
+  if (!toolStatus('cursor') || toolStatus('cursor')?.installed) return
   checkingExternalInstallation = true
   try {
     const result = await fetchCodingAgentsStatus()
@@ -304,6 +310,7 @@ async function checkExternalCursorInstallation() {
     if (managerMounted) loadError.value = errorMessage(error)
   } finally {
     checkingExternalInstallation = false
+    if (externalInstallationRefreshPending) void checkExternalCursorInstallation()
   }
 }
 
@@ -326,6 +333,7 @@ async function refreshAll() {
   }
   if (errors.length) loadError.value = errors.join('\n')
   loading.value = false
+  if (externalInstallationRefreshPending) void checkExternalCursorInstallation()
 }
 
 async function openHermesCliDetails() {
@@ -410,6 +418,7 @@ async function handleInstall(id: CodingAgentId) {
     handleMutationError(id, 'install', error)
   } finally {
     installing.value[id] = false
+    if (externalInstallationRefreshPending) void checkExternalCursorInstallation()
   }
 }
 
@@ -458,6 +467,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   managerMounted = false
+  externalInstallationRefreshPending = false
   window.removeEventListener('focus', checkExternalCursorInstallation)
   document.removeEventListener('visibilitychange', checkExternalCursorInstallation)
 })

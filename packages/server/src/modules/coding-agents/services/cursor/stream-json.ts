@@ -72,7 +72,11 @@ function toolFailed(payload: any): boolean {
 }
 
 function usageFromResult(event: any): unknown {
-  const usage: Record<string, unknown> = {}
+  // Current CLI versions report disjoint input/cache token counts here.
+  // Older versions only report duration; do not invent zero-token usage.
+  const usage: Record<string, unknown> = event.usage && typeof event.usage === 'object' && !Array.isArray(event.usage)
+    ? { ...event.usage }
+    : {}
   if (event.duration_ms != null) usage.duration_ms = event.duration_ms
   if (event.duration_api_ms != null) usage.duration_api_ms = event.duration_api_ms
   return Object.keys(usage).length > 0 ? usage : undefined

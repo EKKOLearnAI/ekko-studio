@@ -2556,6 +2556,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "使用量：入力 {inputTokens}、出力 {outputTokens}、キャッシュ読取 {cacheReadTokens}、書込 {cacheWriteTokens}、合計 {totalTokens} トークン。",
+    nativeUsageUnknown: "使用量は不明です。このセッションのネイティブトークン使用量はまだ報告されていません。",
+    nativeContextUnknown: "コンテキストは不明です。ネイティブセッションの現在の使用量と上限を取得できません。",
+    nativeContextEstimate: "コンテキスト推定（最新の使用量 / 設定上限）：{contextTokens} / {contextWindow} トークン（{contextPercent}%）。",
+    nativeCompactUnavailable: "Studio の Cursor print モード連携では /compact を使用できません。",
     title: "コーディングエージェント",
     notice: "すべてのプロバイダーとモデルが互換性を持つわけではありません。",
     claudeDescription: "print mode の単発タスクと対話型コーディングセッション向けの Anthropic CLI です。",

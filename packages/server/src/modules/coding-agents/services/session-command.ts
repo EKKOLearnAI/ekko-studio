@@ -2,6 +2,7 @@ import type { Server, Socket } from 'socket.io'
 import { addMessage, getSession, updateSessionStats } from '../../studio/public/sessions'
 import { getModelContextLength } from '../../studio/public/provider-runtime'
 import { calcAndUpdateUsage, getOrCreateSession } from '../../studio/public/run-state'
+import { getUsage } from '../../studio/public/usage'
 import type { SessionState } from '../../studio/contracts/runs/session'
 import { codingAgentRunManager } from './runtime/run-manager'
 import { compactStoredCodingAgentSession, startCodingAgentRun } from './index'
@@ -126,24 +127,50 @@ export async function handleCodingAgentSessionCommand(
       const usage = await calcAndUpdateUsage(sessionId, state, (event: string, payload: any) => {
         emit(event, payload)
       }, { nativeSource: 'coding_agent' })
-      const contextWindow = getModelContextLength({
-        profile,
-        model: data.model || row?.model || undefined,
-        provider: data.provider || row?.provider || undefined,
-      })
-      const totalTokens = usage.inputTokens + usage.outputTokens
-      const percent = contextWindow > 0 ? Math.round((totalTokens / contextWindow) * 1000) / 10 : 0
+      if (command.name === 'usage') {
+        const available = usage.nativeUsageAvailable !== false
+        const cacheReadTokens = usage.cacheReadTokens || 0
+        const cacheWriteTokens = usage.cacheWriteTokens || 0
+        const totalTokens = usage.inputTokens + usage.outputTokens + cacheReadTokens + cacheWriteTokens
+        emitCommand({
+          action: 'usage', terminal: !state.isWorking, available,
+          messageKey: available ? 'nativeUsage' : 'nativeUsageUnknown',
+          message: available
+            ? `Usage: input ${usage.inputTokens}, output ${usage.outputTokens}, cache read ${cacheReadTokens}, cache write ${cacheWriteTokens}, total ${totalTokens} tokens.`
+            : 'Usage: unknown. No native token usage has been reported for this session.',
+          inputTokens: available ? usage.inputTokens : null,
+          outputTokens: available ? usage.outputTokens : null,
+          cacheReadTokens: available ? cacheReadTokens : null,
+          cacheWriteTokens: available ? cacheWriteTokens : null,
+          totalTokens: available ? totalTokens : null,
+          model: usage.nativeModel || runInfo?.model || row?.model || null,
+        })
+        return
+      }
+      // A native turn can contain many model calls. Cursor's aggregate is not
+      // a context snapshot, and it does not report a context limit here.
+      const isCursor = row?.agent === 'cursor' || runInfo?.agentId === 'cursor'
+      const contextInput = usage.contextInputTokens
+      const contextOutput = usage.contextOutputTokens
+      const model = usage.nativeModel || runInfo?.model || row?.model || data.model
+      if (isCursor || usage.nativeUsageAvailable === false || contextInput == null || contextOutput == null || !model) {
+        emitCommand({
+          action: 'context', terminal: !state.isWorking, available: false,
+          messageKey: 'nativeContextUnknown',
+          message: 'Context: unknown. Current native context usage and its limit are not available.',
+          contextTokens: null, totalTokens: null, contextWindow: null, contextPercent: null,
+        })
+        return
+      }
+      const contextWindow = getModelContextLength({ profile, model, provider: data.provider || row?.provider || undefined })
+      const contextTokens = contextInput + contextOutput
+      const percent = contextWindow > 0 ? Math.round((contextTokens / contextWindow) * 1000) / 10 : null
       emitCommand({
-        action: command.name,
-        terminal: !state.isWorking,
-        message: command.name === 'context'
-          ? `Context: input ${usage.inputTokens}, output ${usage.outputTokens}, total ${totalTokens} / ${contextWindow} tokens (${percent}%).`
-          : `Usage: input ${usage.inputTokens}, output ${usage.outputTokens}, total ${totalTokens} tokens.`,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        totalTokens,
-        contextWindow,
-        contextPercent: percent,
+        action: 'context', terminal: !state.isWorking, available: true, estimated: true,
+        messageKey: 'nativeContextEstimate',
+        message: `Context estimate (latest reported usage / configured limit): ${contextTokens} / ${contextWindow} tokens (${percent ?? 'unknown'}%).`,
+        inputTokens: contextInput, outputTokens: contextOutput,
+        totalTokens: contextTokens, contextTokens, contextWindow, contextPercent: percent,
       })
     } catch (err) {
       emitCommand({
@@ -203,7 +230,9 @@ export async function handleCodingAgentSessionCommand(
     }
     const running = Boolean(info?.running)
     const agent = row?.agent || info?.agentId || '-'
-    const model = row?.model || info?.model || data.model || '-'
+    const model = agent === 'cursor'
+      ? info?.model || getUsage(sessionId, 'coding_agent')?.model || '-'
+      : row?.model || info?.model || data.model || '-'
     const provider = row?.provider || info?.provider || data.provider || '-'
     emitCommand({
       action: 'status',
@@ -243,7 +272,8 @@ export async function handleCodingAgentSessionCommand(
         ok: false,
         action: 'compact',
         terminal: !compactInfo?.running && !state.isWorking,
-        message: 'Cursor /compact is not available in Studio. The Cursor CLI does not expose native compaction.',
+        messageKey: 'nativeCompactUnavailable',
+        message: 'Cursor /compact is not available through the Studio print-mode integration.',
         compacted: false,
       })
       return

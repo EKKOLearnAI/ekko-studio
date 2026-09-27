@@ -3099,6 +3099,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "用量：输入 {inputTokens}，输出 {outputTokens}，缓存读取 {cacheReadTokens}，缓存写入 {cacheWriteTokens}，合计 {totalTokens} tokens。",
+    nativeUsageUnknown: "用量未知：此会话尚未收到原生 Token 用量数据。",
+    nativeContextUnknown: "上下文未知：暂时无法获取原生会话的当前占用及上限。",
+    nativeContextEstimate: "上下文估算（最近一次用量 / 配置上限）：{contextTokens} / {contextWindow} tokens（{contextPercent}%）。",
+    nativeCompactUnavailable: "Studio 当前的 Cursor print 模式接入不支持 /compact。",
     title: "编程工具",
     notice: "并非所有提供商和模型都兼容。",
     claudeDescription: "Anthropic CLI，适合 print mode 单次任务和交互式编程会话。",

@@ -87,6 +87,8 @@ function spawnCursor(command: string, args: string[], input: CursorTurnProcessIn
     cwd: input.workspaceDir,
     env: input.env,
     stdio: ['ignore', 'pipe', 'pipe'],
+    // The shared stop path signals -pid to terminate the CLI and its tools.
+    detached: process.platform !== 'win32',
     windowsHide: true,
   })
 }

@@ -23,6 +23,26 @@ afterEach(() => {
 })
 
 describe('workflow Coding Agent skill roots', () => {
+  it('resolves Cursor private and shared skills without consulting the Hermes profile', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'studio-workflow-cursor-skills-'))
+    process.env.HERMES_CODING_AGENT_GLOBAL_HOME = root
+    try {
+      for (const [path, content] of [
+        ['.cursor/skills/category/release/SKILL.md', 'Cursor private'],
+        ['.agents/skills/release/SKILL.md', 'Shared duplicate'],
+        ['.agents/skills/shared-only/SKILL.md', 'Shared only'],
+      ]) {
+        await mkdir(join(root, path, '..'), { recursive: true })
+        await writeFile(join(root, path), content)
+      }
+      const { resolveWorkflowSkillContent } = await import('../../packages/server/src/modules/studio/services/workflow/skill-resolver')
+      await expect(resolveWorkflowSkillContent({ agent: 'cursor', profile: 'default', skillName: 'release' }))
+        .resolves.toMatchObject({ target: 'cursor', content: 'Cursor private' })
+      await expect(resolveWorkflowSkillContent({ agent: 'cursor', profile: 'default', skillName: 'shared-only' }))
+        .resolves.toMatchObject({ target: 'cursor', content: 'Shared only' })
+      await expect(resolveWorkflowSkillContent({ agent: 'cursor', profile: 'default', skillName: 'missing' })).resolves.toBeNull()
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
   it('resolves DSH direct bundles and flat shared skills without falling back to Codex or nested categories', async () => {
     const root = await mkdtemp(join(tmpdir(), 'studio-workflow-dsh-skills-'))
     process.env.HERMES_CODING_AGENT_GLOBAL_HOME = root

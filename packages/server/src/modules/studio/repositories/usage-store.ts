@@ -173,14 +173,14 @@ export function getRecordedUsageTotals(sessionId: string, source: string): {
   }
 }
 
-export function getUsage(sessionId: string): UsageRecord | undefined {
+export function getUsage(sessionId: string, source?: string): UsageRecord | undefined {
   if (isSqliteAvailable()) {
     return getDb()!.prepare(
-      `SELECT session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, model, profile, created_at FROM ${TABLE} WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
-    ).get(sessionId) as UsageRecord | undefined
+      `SELECT session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, model, profile, created_at FROM ${TABLE} WHERE session_id = ?${source ? ' AND source = ?' : ''} ORDER BY id DESC LIMIT 1`,
+    ).get(...(source ? [sessionId, source] : [sessionId])) as UsageRecord | undefined
   }
   const row = jsonGet(TABLE, sessionId)
-  if (!row) return undefined
+  if (!row || (source && row.source !== source)) return undefined
   return {
     input_tokens: row.input_tokens ?? 0,
     output_tokens: row.output_tokens ?? 0,

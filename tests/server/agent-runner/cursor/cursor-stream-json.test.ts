@@ -118,6 +118,14 @@ describe('Cursor stream-json parsing', () => {
       usage: { duration_ms: 12 },
     })
   })
+
+  it('keeps native tokens including measured zero counts on success and failure', () => {
+    for (const is_error of [false, true]) {
+      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 123, cacheWriteTokens: 45 }
+      expect(parseCursorStreamJsonLine(JSON.stringify({ type: 'result', is_error, usage, duration_ms: 5 })))
+        .toMatchObject({ usage: { ...usage, duration_ms: 5 } })
+    }
+  })
 })
 
 describe('Cursor stream-json adaptation', () => {

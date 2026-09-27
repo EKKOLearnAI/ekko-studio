@@ -2556,6 +2556,11 @@ jobTriggered: 'Job ausgelost',
   },
 
   codingAgents: {
+    nativeUsage: "Nutzung: Eingabe {inputTokens}, Ausgabe {outputTokens}, Cache-Lesen {cacheReadTokens}, Cache-Schreiben {cacheWriteTokens}, insgesamt {totalTokens} Tokens.",
+    nativeUsageUnknown: "Nutzung unbekannt. Für diese Sitzung wurden noch keine nativen Token-Daten gemeldet.",
+    nativeContextUnknown: "Kontext unbekannt. Aktuelle native Kontextnutzung und Grenze sind nicht verfügbar.",
+    nativeContextEstimate: "Kontextschätzung (letzte Nutzung / konfigurierte Grenze): {contextTokens} / {contextWindow} Tokens ({contextPercent}%).",
+    nativeCompactUnavailable: "/compact ist in der Cursor-Print-Modus-Integration von Studio nicht verfügbar.",
     title: "Coding Agents",
     notice: "Nicht alle Anbieter und Modelle sind kompatibel.",
     claudeDescription: "Anthropic CLI fur einmalige Print-Mode-Aufgaben und interaktive Coding-Sitzungen.",

@@ -22,6 +22,10 @@ test('detects an external Cursor install on return without duplicate probes', as
   const probeGate = new Promise<void>(resolve => { releaseProbe = resolve })
   await page.route('**/api/coding-agents', async route => {
     probes += 1
+    if (probes === 1) {
+      await route.fulfill({ json: { tools: [cursor()] } })
+      return
+    }
     await probeGate
     await route.fulfill({ json: { tools: [cursor(true)] } })
   })
@@ -31,7 +35,7 @@ test('detects an external Cursor install on return without duplicate probes', as
   await page.goto('/#/studio/agents')
   const card = page.getByTestId('agent-card-cursor')
   await expect(card).toContainText('Not installed')
-  expect(probes).toBe(0)
+  await expect.poll(() => probes).toBe(1)
 
   await page.evaluate(() => { window.open = () => null })
   await card.getByRole('button').last().click()
@@ -40,12 +44,12 @@ test('detects an external Cursor install on return without duplicate probes', as
     window.dispatchEvent(new Event('focus'))
     document.dispatchEvent(new Event('visibilitychange'))
   })
-  await expect.poll(() => probes).toBe(1)
+  await expect.poll(() => probes).toBe(2)
   releaseProbe()
   await expect(card.locator('.agent-version')).toHaveText('v2026.09.26-dd393fe')
   await expect(card).not.toContainText('Not installed')
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  expect(probes).toBe(1)
+  expect(probes).toBe(2)
 })
 
 test('retries after a failed probe and removes listeners when leaving management', async ({ page }) => {
@@ -58,7 +62,6 @@ test('retries after a failed probe and removes listeners when leaving management
   })
   await page.goto('/#/studio/agents')
   await expect(page.getByTestId('agent-card-cursor')).toContainText('Not installed')
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(page.locator('.agent-manager-panel .n-alert')).toContainText('Probe unavailable')
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect.poll(() => probes).toBe(2)
@@ -67,4 +70,24 @@ test('retries after a failed probe and removes listeners when leaving management
   await expect(page.locator('.agent-manager-panel')).toHaveCount(0)
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   expect(probes).toBe(2)
+})
+
+test('detects an installation made before opening management even if focus arrives during loading', async ({ page }) => {
+  let releaseSnapshot!: () => void
+  const snapshotGate = new Promise<void>(resolve => { releaseSnapshot = resolve })
+  await page.route('**/api/agents/status', async route => {
+    await snapshotGate
+    await route.fulfill({ json: { revision: 1, agents: [cursor()] } })
+  })
+  let probes = 0
+  await page.route('**/api/coding-agents', route => {
+    probes += 1
+    return route.fulfill({ json: { tools: [cursor(true)] } })
+  })
+  await page.goto('/#/studio/agents')
+  await expect(page.getByTestId('agent-card-cursor')).toBeVisible()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  releaseSnapshot()
+  await expect(page.getByTestId('agent-card-cursor').locator('.agent-version')).toHaveText('v2026.09.26-dd393fe')
+  expect(probes).toBe(1)
 })

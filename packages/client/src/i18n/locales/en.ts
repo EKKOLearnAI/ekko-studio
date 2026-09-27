@@ -3061,6 +3061,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "Usage: input {inputTokens}, output {outputTokens}, cache read {cacheReadTokens}, cache write {cacheWriteTokens}, total {totalTokens} tokens.",
+    nativeUsageUnknown: "Usage: unknown. No native token usage has been reported for this session.",
+    nativeContextUnknown: "Context: unknown. Current native context usage and its limit are not available.",
+    nativeContextEstimate: "Context estimate (latest reported usage / configured limit): {contextTokens} / {contextWindow} tokens ({contextPercent}%).",
+    nativeCompactUnavailable: "Cursor /compact is not available through the Studio print-mode integration.",
     title: "Coding Agents",
     notice: "Not all providers and models are compatible.",
     claudeDescription: "Anthropic CLI for one-shot print mode and interactive coding sessions.",

@@ -2998,6 +2998,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "用量：輸入 {inputTokens}，輸出 {outputTokens}，快取讀取 {cacheReadTokens}，快取寫入 {cacheWriteTokens}，合計 {totalTokens} tokens。",
+    nativeUsageUnknown: "用量未知：此工作階段尚未收到原生 Token 用量資料。",
+    nativeContextUnknown: "上下文未知：暫時無法取得原生工作階段的目前占用及上限。",
+    nativeContextEstimate: "上下文估算（最近一次用量 / 設定上限）：{contextTokens} / {contextWindow} tokens（{contextPercent}%）。",
+    nativeCompactUnavailable: "Studio 目前的 Cursor print 模式整合不支援 /compact。",
     title: "編程工具",
     notice: "並非所有提供商和模型都相容。",
     claudeDescription: "Anthropic CLI，適合 print mode 單次任務和互動式編程工作階段。",

@@ -9,6 +9,7 @@ describe('workflow skill helpers', () => {
     expect(workflowAgentToSkillTarget('codex')).toBe('codex')
     expect(workflowAgentToSkillTarget('pi')).toBe('pi')
     expect(workflowAgentToSkillTarget('dsh')).toBe('dsh')
+    expect(workflowAgentToSkillTarget('cursor')).toBe('cursor')
     expect(workflowAgentToSkillTarget('unknown-agent')).toBe('hermes')
   })
 

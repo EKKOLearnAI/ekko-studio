@@ -10,6 +10,7 @@ import '../../packages/server/src/bootstrap/coding-agent-adapters'
 import { CodingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
 import { getRecordedUsageTotals, getUsage, getLocalUsageStats } from '../../packages/server/src/modules/studio/repositories/usage-store'
+import { getSessionDetail } from '../../packages/server/src/modules/studio/repositories/session-store'
 import fixtures from '../fixtures/coding-agents/global-native-usage.json'
 
 vi.mock('child_process', async importOriginal => ({
@@ -57,6 +58,45 @@ describe('global native usage accounting', () => {
     child.emit('exit', code)
     child.emit('close', code)
   }
+
+  it('preserves Cursor deltas, records native model/cache usage once, and keeps context unknown', async () => {
+    start('cursor')
+    emit({ type: 'system', subtype: 'init', session_id: 'cursor-native', model: 'Cursor native model' })
+    const text = 'abcdefghijklmnop'
+    for (const timestamp_ms of [1, 2]) {
+      emit({ type: 'assistant', timestamp_ms, message: { content: [{ type: 'text', text }] } })
+    }
+    // Buffered and final flushes must not replay the already appended deltas.
+    emit({ type: 'assistant', timestamp_ms: 3, model_call_id: 'call', message: { content: [{ type: 'text', text: text + text }] } })
+    emit({ type: 'assistant', message: { content: [{ type: 'text', text: text + text }] } })
+    const result = { type: 'result', subtype: 'success', session_id: 'cursor-native', result: text + text,
+      usage: { inputTokens: 123, outputTokens: 45, cacheReadTokens: 67, cacheWriteTokens: 8 } }
+    emit(result)
+    emit(result)
+    close()
+    await vi.waitFor(() => expect(getUsage(sessionId)?.model).toBe('Cursor native model'))
+    expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: 123, outputTokens: 45, cacheReadTokens: 67, cacheWriteTokens: 8 })
+    expect(getSessionDetail(sessionId)?.messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe(text + text)
+    expect(manager.getRunInfo(sessionId)?.model).toBe('Cursor native model')
+    expect(emitted.mock.calls.some(([, event, payload]) => event === 'usage.updated' && payload.contextTokens != null)).toBe(false)
+  })
+
+  it('does not record made-up zero usage for older Cursor results without tokens', async () => {
+    start('cursor')
+    emit({ type: 'result', subtype: 'success', session_id: 'cursor-old', result: '', duration_ms: 10 })
+    close()
+    await new Promise(resolve => setImmediate(resolve))
+    expect(getUsage(sessionId)).toBeUndefined()
+  })
+
+  it('identifies Cursor when its executable is missing', async () => {
+    start('cursor')
+    child.emit('error', Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    close(1)
+    await vi.waitFor(() => expect(emitted).toHaveBeenCalledWith(sessionId, 'run.failed', expect.objectContaining({
+      error: expect.stringContaining('Cursor is not installed'),
+    })))
+  })
 
   it.each(['codex', 'pi', 'claude-code', 'grok'] as const)('records captured %s events with model attribution', async agentId => {
     start(agentId)

@@ -35,6 +35,9 @@ for (const target of [
     await node.locator('.n-select').first().click()
     await page.getByText('Cursor', { exact: true }).last().click()
     await expect(node.locator('.n-select').first()).toContainText('Cursor')
+    await expect.poll(() => api.requests.some(request => (
+      request.pathname === '/api/hermes/skills' && new URLSearchParams(request.search).get('target') === 'cursor'
+    ))).toBe(true)
     await node.locator('.n-select').first().click()
     await page.getByText(target.label, { exact: true }).last().click()
     await expect(node.locator('.n-select').first()).toContainText(target.label)

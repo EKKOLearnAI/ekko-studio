@@ -1285,7 +1285,7 @@ describe('coding agent run state', () => {
     manager.shutdown()
   })
 
-  it('does not reset Codex context tokens when a usage refresh has no context estimate', async () => {
+  it('preserves Codex counters and context when a usage refresh has no native measurements', async () => {
     initAllHermesTables()
     const manager = new CodingAgentRunManager()
     const state: any = {
@@ -1294,6 +1294,8 @@ describe('coding agent run state', () => {
       events: [],
       queue: [],
       contextTokens: 15_000,
+      inputTokens: 12_000,
+      outputTokens: 3_000,
     }
     const emitted: Array<{ event: string; payload: any }> = []
     ;(manager as any).emitToChat = (_sessionId: string, event: string, payload: any) => {
@@ -1319,8 +1321,8 @@ describe('coding agent run state', () => {
 
     await (manager as any).refreshCodingAgentUsage(run)
 
-    expect(state.contextTokens).toBe(15_000)
-    expect(emitted).toContainEqual(expect.objectContaining({
+    expect(state).toMatchObject({ contextTokens: 15_000, inputTokens: 12_000, outputTokens: 3_000 })
+    expect(emitted).not.toContainEqual(expect.objectContaining({
       event: 'usage.updated',
       payload: expect.objectContaining({ inputTokens: 0, outputTokens: 0 }),
     }))

@@ -3048,6 +3048,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "الاستخدام: إدخال {inputTokens}، إخراج {outputTokens}، قراءة ذاكرة مؤقتة {cacheReadTokens}، كتابة ذاكرة مؤقتة {cacheWriteTokens}، الإجمالي {totalTokens} رمزًا.",
+    nativeUsageUnknown: "الاستخدام غير معروف. لم تُبلّغ الأداة الأصلية بعد عن استخدام الرموز لهذه الجلسة.",
+    nativeContextUnknown: "السياق غير معروف. استخدام السياق الأصلي الحالي وحدّه غير متاحين.",
+    nativeContextEstimate: "تقدير السياق (آخر استخدام / الحد المضبوط): {contextTokens} / {contextWindow} رمزًا ({contextPercent}%).",
+    nativeCompactUnavailable: "الأمر /compact غير متاح عبر تكامل وضع print في Cursor مع Studio.",
     title: "وكلاء البرمجة",
     notice: "ليست كل المزوّدات والنماذج متوافقة.",
     claudeDescription: "واجهة Anthropic السطرية لوضع الطباعة الفوري وجلسات البرمجة التفاعلية.",
