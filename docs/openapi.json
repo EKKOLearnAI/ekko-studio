@@ -18295,7 +18295,7 @@
           "Sessions"
         ],
         "summary": "Get session-categories",
-        "description": "GET /api/studio/session-categories",
+        "description": "GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace.",
         "operationId": "listCategories",
         "security": [
           {
@@ -18335,6 +18335,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "A category with this name already exists (strict create only)."
           }
         },
         "requestBody": {
@@ -18343,14 +18346,103 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string"
-                  }
-                },
                 "required": [
                   "name"
-                ]
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "preset": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Credential fields (API keys, tokens, secrets) are rejected with 400.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "agent": {
+                        "type": "string",
+                        "enum": [
+                          "hermes",
+                          "ekko-agent",
+                          "claude-code",
+                          "codex",
+                          "pi",
+                          "grok",
+                          "opencode",
+                          "dsh"
+                        ]
+                      },
+                      "agentMode": {
+                        "type": "string",
+                        "enum": [
+                          "global",
+                          "scoped"
+                        ]
+                      },
+                      "agentPreset": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "DeepSeek Harness session preset id (agent=dsh only)."
+                      },
+                      "profile": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "modelKind": {
+                        "type": "string",
+                        "enum": [
+                          "model",
+                          "moa"
+                        ],
+                        "description": "moa requires agent=hermes."
+                      },
+                      "provider": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "model": {
+                        "type": "string",
+                        "maxLength": 300
+                      },
+                      "apiMode": {
+                        "type": "string",
+                        "enum": [
+                          "chat_completions",
+                          "codex_responses",
+                          "anthropic_messages"
+                        ]
+                      },
+                      "reasoningEffort": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max"
+                        ]
+                      },
+                      "baseUrl": {
+                        "type": "string",
+                        "maxLength": 2048,
+                        "pattern": "^https?://"
+                      },
+                      "workspace": {
+                        "type": "string",
+                        "maxLength": 4096
+                      }
+                    }
+                  },
+                  "unique": {
+                    "type": "boolean",
+                    "description": "Reject an existing case-insensitive name with 409 instead of returning it. Implied when preset is sent."
+                  }
+                }
               }
             }
           }
@@ -18379,6 +18471,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "A category with this name already exists."
           }
         },
         "parameters": [
@@ -18397,14 +18492,97 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "description": "Send name to rename, preset to replace (null clears it), or both. Omitting both is a 400.",
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "preset": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Credential fields (API keys, tokens, secrets) are rejected with 400.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "agent": {
+                        "type": "string",
+                        "enum": [
+                          "hermes",
+                          "ekko-agent",
+                          "claude-code",
+                          "codex",
+                          "pi",
+                          "grok",
+                          "opencode",
+                          "dsh"
+                        ]
+                      },
+                      "agentMode": {
+                        "type": "string",
+                        "enum": [
+                          "global",
+                          "scoped"
+                        ]
+                      },
+                      "agentPreset": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "DeepSeek Harness session preset id (agent=dsh only)."
+                      },
+                      "profile": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "modelKind": {
+                        "type": "string",
+                        "enum": [
+                          "model",
+                          "moa"
+                        ],
+                        "description": "moa requires agent=hermes."
+                      },
+                      "provider": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "model": {
+                        "type": "string",
+                        "maxLength": 300
+                      },
+                      "apiMode": {
+                        "type": "string",
+                        "enum": [
+                          "chat_completions",
+                          "codex_responses",
+                          "anthropic_messages"
+                        ]
+                      },
+                      "reasoningEffort": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max"
+                        ]
+                      },
+                      "baseUrl": {
+                        "type": "string",
+                        "maxLength": 2048,
+                        "pattern": "^https?://"
+                      },
+                      "workspace": {
+                        "type": "string",
+                        "maxLength": 4096
+                      }
+                    }
                   }
-                },
-                "required": [
-                  "name"
-                ]
+                }
               }
             }
           }

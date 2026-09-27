@@ -36,6 +36,7 @@ const findSessionCategoryByNameMock = vi.fn()
 const getSessionCategoryMock = vi.fn()
 const renameSessionCategoryMock = vi.fn()
 const setSessionCategoryMock = vi.fn()
+const setSessionCategoryPresetMock = vi.fn()
 const getGroupChatServerMock = vi.fn()
 const getLocalUsageStatsMock = vi.fn()
 const getRecordedUsageSessionIdsMock = vi.fn()
@@ -126,6 +127,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-category-
     typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '',
   renameSessionCategory: renameSessionCategoryMock,
   setSessionCategory: setSessionCategoryMock,
+  setSessionCategoryPreset: setSessionCategoryPresetMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/repositories/users-store', () => ({
@@ -1537,8 +1539,131 @@ describe('session conversations controller', () => {
 
     const createCtx: any = { request: { body: { name: '  Client   Work ' } }, body: null }
     await mod.createCategory(createCtx)
-    expect(createSessionCategoryMock).toHaveBeenCalledWith('Client Work')
+    expect(createSessionCategoryMock).toHaveBeenCalledWith('Client Work', null)
     expect(createCtx.body).toEqual({ category })
+  })
+
+  it('keeps legacy create-or-return but rejects duplicates for strict preset creates', async () => {
+    const existing = { id: 1, name: 'AI Passport', preset: null, created_at: 1, updated_at: 1 }
+    findSessionCategoryByNameMock.mockReturnValue(existing)
+    createSessionCategoryMock.mockReturnValue(existing)
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+
+    const legacyCtx: any = { request: { body: { name: 'ai passport' } }, body: null }
+    await mod.createCategory(legacyCtx)
+    expect(legacyCtx.status).toBeUndefined()
+    expect(legacyCtx.body).toEqual({ category: existing })
+
+    const strictCtx: any = { request: { body: { name: 'ai passport', unique: true } }, body: null }
+    await mod.createCategory(strictCtx)
+    expect(strictCtx.status).toBe(409)
+    expect(strictCtx.body).toEqual({ error: 'A category with this name already exists' })
+
+    const presetCtx: any = { request: { body: { name: 'AI PASSPORT', preset: { model: 'opus' } } }, body: null }
+    await mod.createCategory(presetCtx)
+    expect(presetCtx.status).toBe(409)
+    expect(createSessionCategoryMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates a category with a normalized preset and reports a missing workspace folder', async () => {
+    findSessionCategoryByNameMock.mockReturnValue(null)
+    createSessionCategoryMock.mockImplementation((name: string, preset: unknown) => ({
+      id: 7, name, preset, created_at: 1, updated_at: 1,
+    }))
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+
+    const ctx: any = {
+      request: {
+        body: {
+          name: 'AI Passport',
+          preset: {
+            agent: 'claude-code',
+            agentMode: 'scoped',
+            provider: ' anthropic ',
+            model: 'claude-opus-5-5',
+            apiMode: 'anthropic_messages',
+            reasoningEffort: 'high',
+            workspace: '/definitely/missing/ekko-preset-folder',
+            baseUrl: '',
+          },
+        },
+      },
+      body: null,
+    }
+    await mod.createCategory(ctx)
+    expect(createSessionCategoryMock).toHaveBeenCalledWith('AI Passport', {
+      agent: 'claude-code',
+      agentMode: 'scoped',
+      provider: 'anthropic',
+      model: 'claude-opus-5-5',
+      apiMode: 'anthropic_messages',
+      reasoningEffort: 'high',
+      workspace: '/definitely/missing/ekko-preset-folder',
+    })
+    expect(ctx.body.category.preset_status).toEqual({ workspace_exists: false })
+  })
+
+  it('never accepts API keys or other credentials in a category preset', async () => {
+    findSessionCategoryByNameMock.mockReturnValue(null)
+    getSessionCategoryMock.mockReturnValue({ id: 1, name: 'Work', preset: null, created_at: 1, updated_at: 1 })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+
+    for (const key of ['apiKey', 'api_key', 'API_KEY', 'accessToken', 'clientSecret']) {
+      const createCtx: any = { request: { body: { name: 'Work', preset: { model: 'm', [key]: 'sk-secret' } } }, body: null }
+      await mod.createCategory(createCtx)
+      expect(createCtx.status).toBe(400)
+      expect(createCtx.body.error).toMatch(/API keys/)
+
+      const patchCtx: any = { params: { id: '1' }, request: { body: { preset: { [key]: 'sk-secret' } } }, body: null }
+      await mod.renameCategory(patchCtx)
+      expect(patchCtx.status).toBe(400)
+    }
+    expect(createSessionCategoryMock).not.toHaveBeenCalled()
+    expect(setSessionCategoryPresetMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid preset values and field combinations', async () => {
+    findSessionCategoryByNameMock.mockReturnValue(null)
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const invalid = [
+      { agent: 'not-an-agent' },
+      { agent: 'codex', modelKind: 'moa' },
+      { agent: 'hermes', agentPreset: 'planner' },
+      { apiMode: 'soap' },
+      { reasoningEffort: 'extreme' },
+      { baseUrl: 'ftp://example.test' },
+      { unknownField: 'x' },
+      'not-an-object',
+    ]
+    for (const preset of invalid) {
+      const ctx: any = { request: { body: { name: 'Work', preset } }, body: null }
+      await mod.createCategory(ctx)
+      expect(ctx.status, JSON.stringify(preset)).toBe(400)
+    }
+    expect(createSessionCategoryMock).not.toHaveBeenCalled()
+  })
+
+  it('sets and clears a category preset without renaming it', async () => {
+    const existing = { id: 1, name: 'Work', preset: null, created_at: 1, updated_at: 1 }
+    getSessionCategoryMock.mockReturnValue(existing)
+    setSessionCategoryPresetMock.mockImplementation((id: number, preset: unknown) => ({ ...existing, id, preset }))
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+
+    const setCtx: any = { params: { id: '1' }, request: { body: { preset: { agent: 'hermes', model: 'opus' } } }, body: null }
+    await mod.renameCategory(setCtx)
+    expect(renameSessionCategoryMock).not.toHaveBeenCalled()
+    expect(setSessionCategoryPresetMock).toHaveBeenCalledWith(1, { agent: 'hermes', model: 'opus' })
+    expect(setCtx.body.category.preset).toEqual({ agent: 'hermes', model: 'opus' })
+
+    const clearCtx: any = { params: { id: '1' }, request: { body: { preset: null } }, body: null }
+    await mod.renameCategory(clearCtx)
+    expect(setSessionCategoryPresetMock).toHaveBeenLastCalledWith(1, null)
+    expect(clearCtx.body.category.preset).toBeNull()
+
+    const emptyCtx: any = { params: { id: '1' }, request: { body: {} }, body: null }
+    await mod.renameCategory(emptyCtx)
+    expect(emptyCtx.status).toBe(400)
+    expect(emptyCtx.body).toEqual({ error: 'Category name is required' })
   })
 
   it('renames and deletes an existing global session category', async () => {

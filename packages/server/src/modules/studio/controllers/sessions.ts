@@ -46,7 +46,16 @@ import {
   normalizeSessionCategoryName,
   renameSessionCategory,
   setSessionCategory,
+  setSessionCategoryPreset,
+  type SessionCategoryRow,
 } from '../public/sessions'
+import {
+  SessionCategoryPresetError,
+  describeSessionCategoryPresetStatus,
+  normalizeSessionCategoryPreset,
+  type SessionCategoryPreset,
+} from '../services/session-category-preset'
+import { statSync } from 'fs'
 import type { UsageStatsAgentRow, UsageStatsModelRow, UsageStatsDailyRow } from '../public/sessions'
 import { deleteWorkspaceRunChangesForSession, getWorkspaceRunChangeFile as getWorkspaceRunChangeFileFromDb, listWorkspaceRunChangesForAssistantMessages, listWorkspaceRunChangesForSession } from '../public/sessions'
 import { getActiveProfileDir, getActiveProfileName, getProfileDir, listProfileNamesFromDisk, readConfigYamlForProfile } from '../public/profile-config'
@@ -530,12 +539,37 @@ export async function list(ctx: any) {
   }
 }
 
+function isExistingDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// Additive response shape: released App clients using the legacy alias only read id/name.
+function presentCategory(category: SessionCategoryRow) {
+  const presetStatus = describeSessionCategoryPresetStatus(category.preset, isExistingDirectory)
+  return presetStatus ? { ...category, preset_status: presetStatus } : category
+}
+
+function readCategoryPreset(ctx: any, value: unknown): { ok: true; preset: SessionCategoryPreset | null } | { ok: false } {
+  try {
+    return { ok: true, preset: normalizeSessionCategoryPreset(value) }
+  } catch (error) {
+    if (!(error instanceof SessionCategoryPresetError)) throw error
+    ctx.status = 400
+    ctx.body = { error: error.message }
+    return { ok: false }
+  }
+}
+
 export async function listCategories(ctx: any) {
-  ctx.body = { categories: listSessionCategories() }
+  ctx.body = { categories: listSessionCategories().map(presentCategory) }
 }
 
 export async function createCategory(ctx: any) {
-  const body = ctx.request.body as { name?: string }
+  const body = (ctx.request.body || {}) as { name?: string; preset?: unknown; unique?: boolean }
   const name = normalizeSessionCategoryName(body?.name)
   if (!name) {
     ctx.status = 400
@@ -547,7 +581,16 @@ export async function createCategory(ctx: any) {
     ctx.body = { error: `Category name must be ${SESSION_CATEGORY_NAME_MAX_LENGTH} characters or fewer` }
     return
   }
-  ctx.body = { category: createSessionCategory(name) }
+  const presetResult = readCategoryPreset(ctx, body.preset)
+  if (!presetResult.ok) return
+  // The "+ New Category" form asks for a strict create; older callers keep create-or-return.
+  const strict = body.unique === true || body.preset !== undefined
+  if (strict && findSessionCategoryByName(name)) {
+    ctx.status = 409
+    ctx.body = { error: 'A category with this name already exists' }
+    return
+  }
+  ctx.body = { category: presentCategory(createSessionCategory(name, presetResult.preset)) }
 }
 
 export async function renameCategory(ctx: any) {
@@ -557,31 +600,44 @@ export async function renameCategory(ctx: any) {
     ctx.body = { error: 'Category not found' }
     return
   }
-  const body = ctx.request.body as { name?: string }
-  const name = normalizeSessionCategoryName(body?.name)
-  if (!name) {
-    ctx.status = 400
-    ctx.body = { error: 'Category name is required' }
-    return
+  const body = (ctx.request.body || {}) as { name?: string; preset?: unknown }
+  const hasPreset = Object.prototype.hasOwnProperty.call(body, 'preset')
+  const hasName = body.name !== undefined || !hasPreset
+  let presetResult: ReturnType<typeof readCategoryPreset> | null = null
+  if (hasPreset) {
+    presetResult = readCategoryPreset(ctx, body.preset)
+    if (!presetResult.ok) return
   }
-  if (name.length > SESSION_CATEGORY_NAME_MAX_LENGTH) {
-    ctx.status = 400
-    ctx.body = { error: `Category name must be ${SESSION_CATEGORY_NAME_MAX_LENGTH} characters or fewer` }
-    return
+  let category: SessionCategoryRow | null = getSessionCategory(categoryId)
+  if (hasName) {
+    const name = normalizeSessionCategoryName(body?.name)
+    if (!name) {
+      ctx.status = 400
+      ctx.body = { error: 'Category name is required' }
+      return
+    }
+    if (name.length > SESSION_CATEGORY_NAME_MAX_LENGTH) {
+      ctx.status = 400
+      ctx.body = { error: `Category name must be ${SESSION_CATEGORY_NAME_MAX_LENGTH} characters or fewer` }
+      return
+    }
+    const duplicate = findSessionCategoryByName(name)
+    if (duplicate && duplicate.id !== categoryId) {
+      ctx.status = 409
+      ctx.body = { error: 'A category with this name already exists' }
+      return
+    }
+    category = renameSessionCategory(categoryId, name)
   }
-  const duplicate = findSessionCategoryByName(name)
-  if (duplicate && duplicate.id !== categoryId) {
-    ctx.status = 409
-    ctx.body = { error: 'A category with this name already exists' }
-    return
+  if (category && presetResult?.ok) {
+    category = setSessionCategoryPreset(categoryId, presetResult.preset)
   }
-  const category = renameSessionCategory(categoryId, name)
   if (!category) {
     ctx.status = 404
     ctx.body = { error: 'Category not found' }
     return
   }
-  ctx.body = { category }
+  ctx.body = { category: presentCategory(category) }
 }
 
 export async function removeCategory(ctx: any) {

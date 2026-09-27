@@ -57,4 +57,83 @@ describe('session category store', () => {
     expect(deleteSessionCategory(category.id)).toBe(true)
     expect(getSession('session-1')?.category_id).toBeNull()
   })
+
+  it('stores, replaces and clears a shared preset without letting create-or-return overwrite it', async () => {
+    const {
+      createSessionCategory,
+      getSessionCategory,
+      listSessionCategories,
+      setSessionCategoryPreset,
+    } = await import('../../packages/server/src/modules/studio/repositories/session-category-store')
+
+    const created = createSessionCategory('AI Passport', { agent: 'claude-code', model: 'claude-opus-5-5', workspace: '/p/a' })
+    expect(created.preset).toEqual({ agent: 'claude-code', model: 'claude-opus-5-5', workspace: '/p/a' })
+
+    // Typing an existing name in the New Chat panel must not replace the stored preset.
+    const again = createSessionCategory('ai passport', { model: 'other' })
+    expect(again.id).toBe(created.id)
+    expect(again.preset).toEqual(created.preset)
+
+    const updated = setSessionCategoryPreset(created.id, { model: 'claude-sonnet-5' })
+    expect(updated?.preset).toEqual({ model: 'claude-sonnet-5' })
+    expect(listSessionCategories()[0].preset).toEqual({ model: 'claude-sonnet-5' })
+
+    expect(setSessionCategoryPreset(created.id, null)?.preset).toBeNull()
+    expect(getSessionCategory(created.id)?.preset).toBeNull()
+    expect(setSessionCategoryPreset(999, { model: 'x' })).toBeNull()
+  })
+
+  it('deletes the preset with its category and never exposes a raw API key column', async () => {
+    const { createSessionCategory, deleteSessionCategory, findSessionCategoryByName } = await import(
+      '../../packages/server/src/modules/studio/repositories/session-category-store'
+    )
+    const category = createSessionCategory('Personal', { agent: 'hermes', model: 'm' })
+    expect(deleteSessionCategory(category.id)).toBe(true)
+    expect(findSessionCategoryByName('Personal')).toBeNull()
+    expect(db.prepare('SELECT COUNT(*) AS count FROM session_categories').get().count).toBe(0)
+    const columns = db.prepare('PRAGMA table_info(session_categories)').all().map((col: any) => col.name)
+    expect(columns).toEqual(['id', 'name', 'preset', 'created_at', 'updated_at'])
+  })
+
+  it('ignores corrupt stored preset JSON instead of failing the category list', async () => {
+    const { createSessionCategory, listSessionCategories } = await import(
+      '../../packages/server/src/modules/studio/repositories/session-category-store'
+    )
+    const category = createSessionCategory('Broken')
+    db.prepare('UPDATE session_categories SET preset = ? WHERE id = ?').run('{not json', category.id)
+    db.prepare('INSERT INTO session_categories (name, preset, created_at, updated_at) VALUES (?, ?, 1, 1)')
+      .run('Leaked', JSON.stringify({ model: 'm', apiKey: 'sk-secret' }))
+    const rows = listSessionCategories()
+    expect(rows.map(row => [row.name, row.preset])).toEqual([['Broken', null], ['Leaked', null]])
+  })
+})
+
+describe('session category preset migration', () => {
+  it('adds the preset column to an existing categories table without losing rows', async () => {
+    vi.resetModules()
+    const { DatabaseSync } = await import('node:sqlite')
+    const legacyDb = new DatabaseSync(':memory:')
+    legacyDb.exec(`CREATE TABLE session_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL COLLATE NOCASE,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`)
+    legacyDb.prepare('INSERT INTO session_categories (name, created_at, updated_at) VALUES (?, 1, 1)').run('Old')
+    vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({
+      getDb: () => legacyDb,
+      getStoragePath: () => ':memory:',
+      isSqliteAvailable: () => true,
+    }))
+    try {
+      const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+      initAllHermesTables()
+      const { listSessionCategories } = await import('../../packages/server/src/modules/studio/repositories/session-category-store')
+      expect(listSessionCategories()).toEqual([expect.objectContaining({ name: 'Old', preset: null })])
+    } finally {
+      legacyDb.close()
+      vi.doUnmock('../../packages/server/src/modules/studio/infrastructure/database/index')
+      vi.resetModules()
+    }
+  })
 })

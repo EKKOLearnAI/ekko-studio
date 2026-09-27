@@ -921,6 +921,48 @@ openapi.paths['/api/studio/sessions/{id}/pin'].post.requestBody = {
   } } },
 }
 
+// Session categories may carry one shared, optional New Chat preset (never an API key).
+const sessionCategoryPresetSchema = {
+  type: ['object', 'null'],
+  description: 'Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Credential fields (API keys, tokens, secrets) are rejected with 400.',
+  additionalProperties: false,
+  properties: {
+    agent: { type: 'string', enum: ['hermes', 'ekko-agent', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] },
+    agentMode: { type: 'string', enum: ['global', 'scoped'] },
+    agentPreset: { type: 'string', maxLength: 200, description: 'DeepSeek Harness session preset id (agent=dsh only).' },
+    profile: { type: 'string', maxLength: 200 },
+    modelKind: { type: 'string', enum: ['model', 'moa'], description: 'moa requires agent=hermes.' },
+    provider: { type: 'string', maxLength: 200 },
+    model: { type: 'string', maxLength: 300 },
+    apiMode: { type: 'string', enum: ['chat_completions', 'codex_responses', 'anthropic_messages'] },
+    reasoningEffort: { type: 'string', enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
+    baseUrl: { type: 'string', maxLength: 2048, pattern: '^https?://' },
+    workspace: { type: 'string', maxLength: 4096 },
+  },
+}
+openapi.paths['/api/studio/session-categories'].post.requestBody = {
+  required: true,
+  content: { 'application/json': { schema: {
+    type: 'object', required: ['name'],
+    properties: {
+      name: { type: 'string', maxLength: 40 },
+      preset: sessionCategoryPresetSchema,
+      unique: { type: 'boolean', description: 'Reject an existing case-insensitive name with 409 instead of returning it. Implied when preset is sent.' },
+    },
+  } } },
+}
+openapi.paths['/api/studio/session-categories'].post.responses[409] = { description: 'A category with this name already exists (strict create only).' }
+openapi.paths['/api/studio/session-categories/{id}'].patch.requestBody = {
+  required: true,
+  content: { 'application/json': { schema: {
+    type: 'object',
+    description: 'Send name to rename, preset to replace (null clears it), or both. Omitting both is a 400.',
+    properties: { name: { type: 'string', maxLength: 40 }, preset: sessionCategoryPresetSchema },
+  } } },
+}
+openapi.paths['/api/studio/session-categories/{id}'].patch.responses[409] = { description: 'A category with this name already exists.' }
+openapi.paths['/api/studio/session-categories'].get.description = 'GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace.'
+
 // Shared task planning is bound to an authenticated, active turn capability.
 openapi.paths['/api/studio/task-plans/update'] = {
   post: {

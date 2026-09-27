@@ -97,6 +97,8 @@ export const SESSION_CATEGORIES_TABLE = 'session_categories'
 export const SESSION_CATEGORIES_SCHEMA: Record<string, string> = {
   id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
   name: 'TEXT NOT NULL COLLATE NOCASE',
+  // JSON New Chat preset shared by everyone who can see categories; '' = no preset. Never stores API keys.
+  preset: "TEXT NOT NULL DEFAULT ''",
   created_at: 'INTEGER NOT NULL',
   updated_at: 'INTEGER NOT NULL',
 }
