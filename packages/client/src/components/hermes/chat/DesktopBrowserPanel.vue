@@ -480,7 +480,7 @@ onUnmounted(() => {
           <i v-if="tab.agentControl !== 'idle'" :title="tab.agentAction">●</i>
           <b @click="closeTab(tab.id, $event)">×</b>
         </button>
-        <button class="new-tab" :disabled="hasAnnotationSession || (state?.tabs.length || 0) >= (state?.maxTabs || 8)" @click="createTab">+</button>
+        <button class="new-tab" :disabled="hasAnnotationSession" @click="createTab">+</button>
       </div>
 
       <div class="toolbar">

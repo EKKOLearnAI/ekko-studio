@@ -17,7 +17,7 @@ describe('Desktop Browser Broker', () => {
     roots.push(root)
     const tabs = [{ id: 'tab-1', agentControl: 'idle' }]
     const manager = {
-      state: () => ({ tabs, activeTabId: 'tab-1', maxTabs: 8, profiles: [{ sessionPath: '/private/profile' }], downloads: [{ savePath: '/private/download' }] }),
+      state: () => ({ tabs, activeTabId: 'tab-1', maxTabs: 12, profiles: [{ sessionPath: '/private/profile' }], downloads: [{ savePath: '/private/download' }] }),
       snapshot: async (tabId: string) => ({ tabId, snapshotId: 'snapshot-1' }),
       setAgentControl: (tabId: string, control: string) => { const tab = tabs.find(item => item.id === tabId); if (tab) tab.agentControl = control },
       revokeAgentControl: (tabId: string) => { const tab = tabs.find(item => item.id === tabId); if (tab) tab.agentControl = 'idle' },

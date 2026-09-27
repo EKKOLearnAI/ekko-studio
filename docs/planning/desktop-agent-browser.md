@@ -407,7 +407,9 @@ interface DesktopBrowserTab {
 }
 ~~~
 
-第一版最多 8 个标签页。关闭标签页时：
+每个 Profile 最多保留 12 个标签页。达到上限后继续创建标签页时，自动关闭
+最早创建的标签页；切换或访问标签页不会改变淘汰顺序。手动创建、MCP 创建
+和页面弹窗共用此规则，保存和恢复也只保留最新的 12 个标签页。关闭标签页时：
 
 - 销毁对应 <code>WebContentsView</code>；
 - 删除内部 Target Record；
@@ -993,7 +995,7 @@ browserSession.setDownloadPath(profile.downloadPath)
 - Preload 只暴露文档中的 Browser API；
 - IPC Sender 校验；
 - 普通 Web UI 无浏览器路由、Store 和 Lazy Import 激活；
-- 标签页创建、切换、关闭、状态保留和 8 个上限；
+- 标签页创建、切换、关闭、状态保留、12 个上限和超限时按创建顺序淘汰（含并发创建）；
 - Profile 创建、重命名、切换、删除和目录冲突校验；
 - 浏览器路由只在完整 Desktop Browser Bridge 存在时动态注册；
 - 普通 Web UI 没有浏览器路由和侧边栏入口；

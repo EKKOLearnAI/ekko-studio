@@ -17,6 +17,7 @@ import {
 import { BrowserAutomation } from './browser-automation'
 import { BrowserProfileStore } from './browser-profile-store'
 import { BrowserSessionCookieStore } from './browser-session-cookie-store'
+import { MAX_BROWSER_TABS } from './browser-types'
 import type {
   BrowserAgentControl,
   BrowserBounds,
@@ -49,7 +50,6 @@ interface BrowserManagerOptions {
   onAnnotationRequest: (tabId: string, mode: 'element' | 'region') => void
 }
 
-const MAX_TABS = 8
 const CONSOLE_LIMIT = 500
 const ANNOTATION_WORLD_ID = 999
 const ANNOTATION_CANCEL_EVENT = '__hermes_browser_cancel_annotation__'
@@ -107,6 +107,7 @@ export class BrowserManager {
   readonly automation = new BrowserAutomation()
   private readonly profileStore: BrowserProfileStore
   private readonly records = new Map<string, TabRecord>()
+  private tabMutationQueue: Promise<void> = Promise.resolve()
   private readonly downloads: DesktopBrowserDownload[] = []
   private readonly downloadItems = new Map<string, DownloadItem>()
   private readonly permissions: BrowserSitePermission[] = []
@@ -155,7 +156,7 @@ export class BrowserManager {
       downloads: this.downloads.map(item => ({ ...item })),
       permissions: this.permissions.map(item => ({ ...item })),
       visible: this.visible,
-      maxTabs: MAX_TABS,
+      maxTabs: MAX_BROWSER_TABS,
     }
   }
 
@@ -190,31 +191,48 @@ export class BrowserManager {
     waitForLoad: boolean,
     htmlPreview?: { dataUrl: string; title: string },
   ): Promise<DesktopBrowserTab> {
-    if (this.records.size >= MAX_TABS) throw new Error(`Browser supports at most ${MAX_TABS} tabs per profile`)
     const normalizedUrl = normalizeBrowserUrl(url, { allowBlank: true })
-    const profile = this.requireProfile(this.activeProfileId)
-    const record = await this.buildTab(profile, normalizedUrl)
-    if (htmlPreview) {
-      record.htmlPreviewTitle = htmlPreview.title
-      record.ephemeral = true
-      record.tab.title = htmlPreview.title
-    }
-    this.records.set(record.tab.id, record)
-    this.window.contentView.addChildView(record.view)
-    if (activate || !this.activeTabId) this.activeTabId = record.tab.id
-    this.syncViews()
-    const loading = record.view.webContents.loadURL(htmlPreview?.dataUrl || normalizedUrl).catch(() => {
-      record.tab.loading = false
-      this.refreshTab(record)
+    const { record, loading } = await this.mutateTabs(async () => {
+      const profile = this.requireProfile(this.activeProfileId)
+      const record = await this.buildTab(profile, normalizedUrl)
+      // Map insertion order is creation order, independent of tab activation.
+      while (this.records.size >= MAX_BROWSER_TABS) {
+        await this.closeTabRecord(this.records.keys().next().value!)
+      }
+      if (htmlPreview) {
+        record.htmlPreviewTitle = htmlPreview.title
+        record.ephemeral = true
+        record.tab.title = htmlPreview.title
+      }
+      this.records.set(record.tab.id, record)
+      this.window.contentView.addChildView(record.view)
+      if (activate || !this.activeTabId) this.activeTabId = record.tab.id
+      this.syncViews()
+      const loading = record.view.webContents.loadURL(htmlPreview?.dataUrl || normalizedUrl).catch(() => {
+        record.tab.loading = false
+        this.refreshTab(record)
+        this.emitState()
+      })
+      await this.persistTabs()
       this.emitState()
+      return { record, loading }
     })
+    // A slow page must not block another tab's creation or closure.
     if (waitForLoad) await loading
-    await this.persistTabs()
-    this.emitState()
     return copyTab(record.tab)
   }
 
+  private mutateTabs<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.tabMutationQueue.then(operation)
+    this.tabMutationQueue = result.then(() => undefined, () => undefined)
+    return result
+  }
+
   async closeTab(tabId: string): Promise<DesktopBrowserState> {
+    return this.mutateTabs(() => this.closeTabRecord(tabId))
+  }
+
+  private async closeTabRecord(tabId: string): Promise<DesktopBrowserState> {
     const record = this.requireTab(tabId)
     await this.clearAnnotations(tabId, false)
     const ids = [...this.records.keys()]
@@ -939,7 +957,7 @@ export class BrowserManager {
   }
 
   private async restoreTabs(profile: DesktopBrowserProfile): Promise<void> {
-    await Promise.all(profile.tabs.slice(0, MAX_TABS).map(url => this.openTab(url, false, false)))
+    await Promise.all(profile.tabs.slice(-MAX_BROWSER_TABS).map(url => this.openTab(url, false, false)))
     this.activeTabId = [...this.records.keys()][0]
     this.syncViews()
   }

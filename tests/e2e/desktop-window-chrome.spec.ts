@@ -4,8 +4,8 @@ import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './
 type DesktopPlatform = 'darwin' | 'linux' | 'win32'
 type DesktopWindowKind = 'main' | 'chat'
 
-async function installDesktopBridge(page: Page, platform: DesktopPlatform, withBrowser = false, windowKind: DesktopWindowKind = 'main') {
-  await page.addInitScript(({ desktopPlatform, includeBrowser, desktopWindowKind }) => {
+async function installDesktopBridge(page: Page, platform: DesktopPlatform, withBrowser = false, windowKind: DesktopWindowKind = 'main', initialTabCount = 1) {
+  await page.addInitScript(({ desktopPlatform, includeBrowser, desktopWindowKind, tabCount }) => {
     const state = {
       actions: [] as string[],
       isMaximized: false,
@@ -16,10 +16,10 @@ async function installDesktopBridge(page: Page, platform: DesktopPlatform, withB
       available: true,
       activeProfileId: 'profile-default',
       activeTabId: 'tab-1',
-      tabs: [{
-        id: 'tab-1', profileId: 'profile-default', title: 'New Tab', url: 'about:blank',
+      tabs: Array.from({ length: tabCount }, (_, index) => ({
+        id: `tab-${index + 1}`, profileId: 'profile-default', title: index ? `New Tab ${index + 1}` : 'New Tab', url: 'about:blank',
         loading: false, canGoBack: false, canGoForward: false, crashed: false, agentControl: 'idle',
-      }],
+      })),
       profiles: [{
         id: 'profile-default', name: 'Default', rootPath: '/tmp/hermes-browser', sessionPath: '/tmp/hermes-browser/data',
         downloadPath: '/tmp/hermes-browser/download', proxyMode: 'direct', proxyRules: '', askBeforeDownload: true,
@@ -35,7 +35,7 @@ async function installDesktopBridge(page: Page, platform: DesktopPlatform, withB
         id: 'download-1', profileId: 'profile-default', fileName: 'report.pdf', sourceUrl: 'https://example.test/report.pdf',
         savePath: '/tmp/hermes-browser/download/report.pdf', receivedBytes: 25, totalBytes: 100,
         state: 'progressing', startedAt: '2026-01-03T00:00:00.000Z',
-      }], permissions: [], visible: false, maxTabs: 8,
+      }], permissions: [], visible: false, maxTabs: 12,
     }
     const browserHarness = {
       viewportCalls: [] as Array<{ bounds: unknown; visible: boolean }>,
@@ -51,6 +51,8 @@ async function installDesktopBridge(page: Page, platform: DesktopPlatform, withB
       requestAnnotation: undefined as undefined | ((request: { tabId: string; mode: 'element' | 'region' }) => void),
     }
     ;(window as typeof window & { __PW_DESKTOP_BROWSER__?: typeof browserHarness }).__PW_DESKTOP_BROWSER__ = browserHarness
+    let nextTabNumber = tabCount
+    let stateListener: ((state: typeof browserState) => void) | undefined
     const browser = includeBrowser ? {
       getState: async () => browserState,
       setViewport: async (bounds: unknown, visible: boolean) => {
@@ -58,7 +60,14 @@ async function installDesktopBridge(page: Page, platform: DesktopPlatform, withB
         browserState.visible = visible
         return browserState
       },
-      createTab: async () => browserState.tabs[0],
+      createTab: async () => {
+        nextTabNumber += 1
+        const tab = { ...browserState.tabs[0], id: `tab-${nextTabNumber}`, title: `New Tab ${nextTabNumber}` }
+        browserState.tabs = [...browserState.tabs, tab].slice(-browserState.maxTabs)
+        browserState.activeTabId = tab.id
+        stateListener?.({ ...browserState })
+        return tab
+      },
       closeTab: async () => browserState,
       activateTab: async () => browserState,
       navigate: async () => browserState.tabs[0],
@@ -111,7 +120,10 @@ async function installDesktopBridge(page: Page, platform: DesktopPlatform, withB
         browserHarness.requestAnnotation = callback
         return () => { if (browserHarness.requestAnnotation === callback) browserHarness.requestAnnotation = undefined }
       },
-      onStateChange: () => () => undefined,
+      onStateChange: (callback: (state: typeof browserState) => void) => {
+        stateListener = callback
+        return () => { stateListener = undefined }
+      },
     } : undefined
     Object.defineProperty(window, 'hermesDesktop', {
       configurable: true,
@@ -131,7 +143,7 @@ async function installDesktopBridge(page: Page, platform: DesktopPlatform, withB
         ...(browser ? { browser } : {}),
       },
     })
-  }, { desktopPlatform: platform, includeBrowser: withBrowser, desktopWindowKind: windowKind })
+  }, { desktopPlatform: platform, includeBrowser: withBrowser, desktopWindowKind: windowKind, tabCount: initialTabCount })
 }
 
 async function openDesktopJobs(page: Page, platform: DesktopPlatform) {
@@ -472,6 +484,28 @@ test('shows the mobile file tree from the inline start edge in LTR and RTL', asy
     const box = await tree.boundingBox()
     return box ? Math.round(box.x + box.width) : null
   }).toBe(600)
+})
+
+test('allows creating a tab at capacity and displays the replacement state', async ({ page }) => {
+  await installDesktopBridge(page, 'darwin', true, 'main', 12)
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockChatSocket(page)
+  await mockHermesApi(page)
+  await page.goto('/#/hermes/chat')
+  await page.locator('.header-tool-toggle').click()
+  const panel = page.locator('.chat-tool-panel')
+  await panel.getByRole('tab', { name: 'Browser' }).click()
+  const tabs = panel.locator('.tab-strip .tab')
+  await expect(tabs).toHaveCount(12)
+  await expect(tabs.first()).toContainText('New Tab')
+  const create = panel.locator('.new-tab')
+  await expect(create).toBeEnabled()
+  await create.click()
+  await expect(tabs).toHaveCount(12)
+  await expect(tabs.first()).toContainText('New Tab 2')
+  await expect(tabs.last()).toContainText('New Tab 13')
+  await expect(tabs.last()).toHaveClass(/active/)
+  await expect(create).toBeEnabled()
 })
 
 test('embeds the desktop browser beside workspace and terminal', async ({ page }) => {

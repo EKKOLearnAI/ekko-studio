@@ -1,3 +1,5 @@
+export const MAX_BROWSER_TABS = 12
+
 export type BrowserAgentControl = 'idle' | 'active' | 'waiting-for-user'
 export type BrowserProxyMode = 'direct' | 'system' | 'fixed_servers'
 
