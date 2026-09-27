@@ -568,4 +568,182 @@ describe('model catalog cache', () => {
       profiles: ['default'],
     })
   })
+
+  describe('startup refresh of providers missing from the cache', () => {
+    const CODEX_BASE = 'https://chatgpt.com/backend-api/codex'
+    const CLAUDE_BASE = 'https://api.anthropic.com'
+    const CODEX_MODELS_URL = 'https://chatgpt.com/backend-api/codex/models?client_version=1.0.0'
+    const CLAUDE_MODELS_URL = 'https://api.anthropic.com/v1/models'
+
+    beforeEach(() => {
+      mockListProfileNamesFromDisk.mockReturnValue(['default'])
+      mockReadConfigYamlForProfile.mockResolvedValue({})
+      mockReadText.mockImplementation(async () => {
+        if (!cacheText) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+        return cacheText
+      })
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path === '/hermes/default/.env') return ''
+        if (path === '/hermes/default/auth.json') {
+          return JSON.stringify({
+            providers: {
+              'openai-codex': { tokens: { access_token: 'codex-token' } },
+              'claude-oauth': { tokens: { access_token: 'claude-access-token' }, base_url: CLAUDE_BASE },
+            },
+          })
+        }
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+      })
+      mockResolveAuthorizedCredentials.mockImplementation(async ({ provider }: { provider: string }) => {
+        if (provider === 'openai-codex') return { provider, apiKey: 'codex-token', baseUrl: CODEX_BASE }
+        if (provider === 'claude-oauth') return { provider, apiKey: 'claude-access-token', baseUrl: CLAUDE_BASE }
+        throw new Error('not authenticated')
+      })
+      mockGlobalFetch.mockImplementation(async (url: string) => {
+        if (url === CLAUDE_MODELS_URL) {
+          return { ok: true, json: async () => ({ data: [{ id: 'claude-opus-5' }, { id: 'claude-sonnet-5' }] }) }
+        }
+        if (url === CODEX_MODELS_URL) {
+          return { ok: true, json: async () => ({ models: [{ slug: 'gpt-6', priority: 1 }] }) }
+        }
+        return { ok: false, status: 404, json: async () => ({}) }
+      })
+    })
+
+    function seedEntry(provider: string, baseUrl: string, models: string[], key: string, source: 'live' | 'fallback' = 'live') {
+      const current = cacheText ? JSON.parse(cacheText) : { version: 1, updated_at: '2026-01-01T00:00:00.000Z', providers: {} }
+      current.providers[key] = {
+        provider,
+        label: provider,
+        base_url: baseUrl,
+        models,
+        source,
+        updated_at: '2026-01-01T00:00:00.000Z',
+        profiles: ['default'],
+      }
+      cacheText = JSON.stringify(current)
+    }
+
+    function fetchedUrls(): string[] {
+      return mockGlobalFetch.mock.calls.map(call => String(call[0]))
+    }
+
+    it('fetches only configured providers that have no cache entry and leaves existing entries untouched', async () => {
+      const { providerModelCatalogKey, refreshConfiguredProviderModelCatalogs } = await import(
+        '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
+      )
+      const codexKey = providerModelCatalogKey('openai-codex', CODEX_BASE)
+      seedEntry('openai-codex', CODEX_BASE, ['gpt-5.5'], codexKey)
+      const codexBefore = JSON.parse(cacheText).providers[codexKey]
+
+      await refreshConfiguredProviderModelCatalogs()
+
+      expect(fetchedUrls()).toEqual([CLAUDE_MODELS_URL])
+      const cache = JSON.parse(cacheText)
+      expect(cache.providers[codexKey]).toEqual(codexBefore)
+      expect(cache.providers[providerModelCatalogKey('claude-oauth', CLAUDE_BASE)]).toMatchObject({
+        provider: 'claude-oauth',
+        models: ['claude-opus-5', 'claude-sonnet-5'],
+        source: 'live',
+        profiles: ['default'],
+      })
+    })
+
+    it('retries a provider whose cached entry is only a fallback from a failed live probe', async () => {
+      const { providerModelCatalogKey, refreshConfiguredProviderModelCatalogs } = await import(
+        '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
+      )
+      seedEntry('openai-codex', CODEX_BASE, ['gpt-5.5'], providerModelCatalogKey('openai-codex', CODEX_BASE))
+      const claudeKey = providerModelCatalogKey('claude-oauth', CLAUDE_BASE)
+      seedEntry('claude-oauth', CLAUDE_BASE, ['claude-sonnet-4-6'], claudeKey, 'fallback')
+
+      await refreshConfiguredProviderModelCatalogs()
+
+      expect(fetchedUrls()).toEqual([CLAUDE_MODELS_URL])
+      expect(JSON.parse(cacheText).providers[claudeKey]).toMatchObject({
+        source: 'live',
+        models: ['claude-opus-5', 'claude-sonnet-5'],
+      })
+    })
+
+    it('treats a profile-scoped entry as cached', async () => {
+      const { providerModelCatalogKey, refreshConfiguredProviderModelCatalogs } = await import(
+        '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
+      )
+      seedEntry('openai-codex', CODEX_BASE, ['gpt-5.5'], providerModelCatalogKey('openai-codex', CODEX_BASE))
+      const scopedClaudeKey = providerModelCatalogKey('claude-oauth', CLAUDE_BASE, false, 'default')
+      seedEntry('claude-oauth', CLAUDE_BASE, ['claude-from-manual-refresh'], scopedClaudeKey)
+      const before = cacheText
+
+      await refreshConfiguredProviderModelCatalogs()
+
+      expect(mockGlobalFetch).not.toHaveBeenCalled()
+      expect(cacheText).toBe(before)
+    })
+
+    it('skips the startup refresh when every configured provider is already cached', async () => {
+      const { providerModelCatalogKey, refreshConfiguredProviderModelCatalogs } = await import(
+        '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
+      )
+      seedEntry('openai-codex', CODEX_BASE, ['gpt-5.5'], providerModelCatalogKey('openai-codex', CODEX_BASE))
+      seedEntry('claude-oauth', CLAUDE_BASE, ['claude-sonnet-4-6'], providerModelCatalogKey('claude-oauth', CLAUDE_BASE))
+      const before = cacheText
+
+      await refreshConfiguredProviderModelCatalogs()
+
+      expect(mockGlobalFetch).not.toHaveBeenCalled()
+      expect(mockUpdateText).not.toHaveBeenCalled()
+      expect(cacheText).toBe(before)
+    })
+
+    it('still refreshes every configured provider when forced', async () => {
+      const { providerModelCatalogKey, refreshConfiguredProviderModelCatalogs } = await import(
+        '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
+      )
+      const codexKey = providerModelCatalogKey('openai-codex', CODEX_BASE)
+      seedEntry('openai-codex', CODEX_BASE, ['gpt-5.5'], codexKey)
+      seedEntry('claude-oauth', CLAUDE_BASE, ['claude-sonnet-4-6'], providerModelCatalogKey('claude-oauth', CLAUDE_BASE))
+
+      await refreshConfiguredProviderModelCatalogs({ force: true })
+
+      expect(fetchedUrls().sort()).toEqual([CLAUDE_MODELS_URL, CODEX_MODELS_URL].sort())
+      const cache = JSON.parse(cacheText)
+      expect(cache.providers[codexKey].models).toEqual(['gpt-6'])
+      expect(cache.providers[providerModelCatalogKey('claude-oauth', CLAUDE_BASE)].models).toEqual(['claude-opus-5', 'claude-sonnet-5'])
+    })
+
+    it('refreshes a single provider for a profile after login', async () => {
+      const { providerModelCatalogKey, refreshProviderModelCatalogForProfile } = await import(
+        '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
+      )
+      const codexKey = providerModelCatalogKey('openai-codex', CODEX_BASE)
+      seedEntry('openai-codex', CODEX_BASE, ['gpt-5.5'], codexKey)
+      const codexBefore = JSON.parse(cacheText).providers[codexKey]
+
+      const entry = await refreshProviderModelCatalogForProfile('default', 'claude-oauth')
+
+      expect(fetchedUrls()).toEqual([CLAUDE_MODELS_URL])
+      expect(entry).toMatchObject({ provider: 'claude-oauth', source: 'live', models: ['claude-opus-5', 'claude-sonnet-5'] })
+      const cache = JSON.parse(cacheText)
+      expect(cache.providers[codexKey]).toEqual(codexBefore)
+      expect(cache.providers[providerModelCatalogKey('claude-oauth', CLAUDE_BASE)]).toMatchObject({ source: 'live' })
+    })
+
+    it('never throws from the background single-provider refresh', async () => {
+      const { refreshProviderModelCatalogForProfileInBackground } = await import(
+        '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
+      )
+      const { logger } = await import('../../packages/server/src/modules/studio/public/logging')
+      mockUpdateText.mockRejectedValue(new Error('disk full'))
+
+      expect(() => refreshProviderModelCatalogForProfileInBackground('default', 'claude-oauth', 'oauth-login')).not.toThrow()
+      await vi.waitFor(() => expect(logger.warn).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.stringContaining('provider catalog refresh failed'),
+        'claude-oauth',
+        'default',
+        'oauth-login',
+      ))
+    })
+  })
 })

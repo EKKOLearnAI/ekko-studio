@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
 import { logger } from '../../studio/public/logging'
 import { resolveAuthorizedProviderRuntimeCredentials } from '../services/providers/authorized-provider-credentials'
+import { refreshProviderModelCatalogForProfileInBackground } from '../services/providers/model-catalog-cache'
 
 // --- OAuth Constants ---
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
@@ -106,6 +107,7 @@ async function codexLoginWorker(session: CodexSession): Promise<void> {
         const refreshToken = tokenData.refresh_token || ''
         session.accessToken = tokenData.access_token; session.refreshToken = refreshToken; session.status = 'approved'
         saveCodexOAuthTokensForProfile(session.profile, tokenData.access_token, refreshToken)
+        refreshProviderModelCatalogForProfileInBackground(session.profile, 'openai-codex', 'oauth-login')
         logger.info('Login successful')
         return
       }
