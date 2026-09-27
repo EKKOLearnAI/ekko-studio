@@ -133,7 +133,7 @@ test('creates a category with a preset and starts pre-filled chats from it (AC 1
   const emptyHeader = categoryHeader(page, 'Empty')
   await expect(emptyHeader).toBeVisible()
   await expect(emptyHeader.locator('.session-group-count')).toHaveText('0')
-  await expect(page.getByRole('button', { name: 'New Chat in Empty' })).toHaveCount(2)
+  await expect(page.getByRole('button', { name: 'New Chat in Empty' })).toHaveCount(1)
   await expect(categoryHeader(page, 'Uncategorized').getByTestId('category-new-chat-plus')).toHaveCount(0)
 
   // "+ New Category" sits after the last category and before Uncategorized.
@@ -186,13 +186,13 @@ test('creates a category with a preset and starts pre-filled chats from it (AC 1
 
   const header = categoryHeader(page, 'AI Passport')
   await expect(header).toBeVisible()
-  const newChatRow = page.getByTestId('category-new-chat-row').and(page.getByRole('button', { name: 'New Chat in AI Passport' }))
-  await expect(newChatRow).toBeVisible()
   await header.hover()
+  const newChatButton = page.getByTestId('category-new-chat-plus').and(page.getByRole('button', { name: 'New Chat in AI Passport' }))
+  await expect(newChatButton).toBeVisible()
   await snap(page, '01-sidebar-category-new-chat')
 
-  // AC 2: [New Chat] opens the existing panel pre-filled, Category = AI Passport.
-  await newChatRow.click()
+  // AC 2: [+] opens the existing panel pre-filled, Category = AI Passport.
+  await newChatButton.click()
   await expect(drawer(page).getByTestId('new-chat-preset-notice')).toContainText('AI Passport')
   await expect(drawerField(page, /^Agent/)).toContainText('Claude')
   await expect(drawerField(page, /^Category/)).toContainText('AI Passport')
@@ -210,7 +210,8 @@ test('creates a category with a preset and starts pre-filled chats from it (AC 1
   })
 
   // AC 4: a per-chat change does not touch the preset.
-  await page.getByTestId('category-new-chat-row').and(page.getByRole('button', { name: 'New Chat in AI Passport' })).click()
+  await header.hover()
+  await page.getByTestId('category-new-chat-plus').and(page.getByRole('button', { name: 'New Chat in AI Passport' })).click()
   await expect(drawerField(page, /^Models/)).toContainText('claude-opus-5-5')
   await chooseOption(page, drawerField(page, /^Models/), 'claude-sonnet-5')
   await drawer(page).getByRole('button', { name: 'Create', exact: true }).click()
@@ -218,9 +219,8 @@ test('creates a category with a preset and starts pre-filled chats from it (AC 1
   expect(changedRun).toMatchObject({ category_id: 2, model: 'claude-sonnet-5' })
   expect(api.requests.some(request => request.method === 'PATCH')).toBe(false)
 
-  // AC 3: collapsed category hides the row; [+] on the header gives the same result.
+  // AC 3: collapsing the category still starts a chat via the header [+] button.
   await header.click()
-  await expect(page.getByTestId('category-new-chat-row').and(page.getByRole('button', { name: 'New Chat in AI Passport' }))).toHaveCount(0)
   await header.hover()
   await header.getByTestId('category-new-chat-plus').click()
   await expect(drawerField(page, /^Models/)).toContainText('claude-opus-5-5')
@@ -271,7 +271,7 @@ test('edits, clears and deletes a category preset from its menu (AC 5)', async (
   // Existing chats keep their own settings: no session was rewritten.
   expect(api.requests.some(request => /\/api\/studio\/sessions\/existing\//.test(request.pathname))).toBe(false)
 
-  await page.getByTestId('category-new-chat-row').first().click()
+  await page.getByTestId('category-new-chat-plus').first().click()
   await expect(drawerField(page, /^Models/)).toContainText('claude-sonnet-5')
   await drawer(page).getByRole('button', { name: 'Cancel', exact: true }).click()
 
@@ -299,7 +299,7 @@ test('warns about stale preset values and uses defaults without changing the pre
   }])
   await page.goto('/#/hermes/chat')
 
-  await page.getByTestId('category-new-chat-row').first().click()
+  await page.getByTestId('category-new-chat-plus').first().click()
   await expect(drawerField(page, /^Models/)).toContainText('claude-opus-5-5')
   await expect(drawer(page)).toContainText('Model “claude-opus-4-8” in the preset is no longer available; using the default.')
   await expect(drawer(page)).toContainText('Profile “finance” in the preset is not available to you; using your default profile.')
@@ -339,7 +339,7 @@ test('warns when the server dropped a stored Base URL (and its API mode) that fa
   }])
   await page.goto('/#/hermes/chat')
 
-  await page.getByTestId('category-new-chat-row').first().click()
+  await page.getByTestId('category-new-chat-plus').first().click()
   await expect(drawer(page).getByTestId('new-chat-base-url-warning'))
     .toHaveText('Base URL “…” in the preset is not used with this provider; using the provider\'s own settings.')
   await expect(drawerField(page, /^Models/)).toContainText('claude-opus-5-5')
@@ -363,7 +363,7 @@ test('does not warn about a dropped Base URL for agents without a Base URL field
   await page.goto('/#/hermes/chat')
 
   for (const name of ['Cursor Dropped', 'Global Dropped']) {
-    await page.getByTestId('category-new-chat-row').and(page.getByRole('button', { name: `New Chat in ${name}` })).click()
+    await page.getByTestId('category-new-chat-plus').and(page.getByRole('button', { name: `New Chat in ${name}` })).click()
     await expect(drawerField(page, /^Category/)).toContainText(name)
     await expect(drawer(page).getByTestId('new-chat-base-url-warning')).toHaveCount(0)
     await expect(drawer(page).locator('.new-chat-preset-warning')).toHaveCount(0)
@@ -376,7 +376,7 @@ test('keeps today\'s install flow when the preset agent is not installed', async
   await setupPage(page, [{ id: 1, name: 'Agents', preset: { agent: 'claude-code', provider: 'anthropic', model: 'claude-opus-5-5' } }], [], [])
   await page.goto('/#/hermes/chat')
 
-  await page.getByTestId('category-new-chat-row').first().click()
+  await page.getByTestId('category-new-chat-plus').first().click()
   await expect(drawerField(page, /^Agent/)).toContainText('Claude')
   await drawer(page).getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.getByText('Claude is not installed', { exact: false })).toBeVisible()
@@ -415,8 +415,8 @@ test('a Cursor preset is set from the form and pre-fills the drawer like a manua
   const patch = api.requests.find(request => request.method === 'PATCH')!
   expect(JSON.parse(patch.postData || '{}')).toEqual({ preset: { agent: 'cursor', workspace: '/workspace/cursor-app' } })
 
-  // [New Chat] pre-fills Cursor: no launch mode, provider or model; Cursor always runs global.
-  await page.getByTestId('category-new-chat-row').and(page.getByRole('button', { name: 'New Chat in Cursor Work' })).click()
+  // [+] pre-fills Cursor: no launch mode, provider or model; Cursor always runs global.
+  await page.getByTestId('category-new-chat-plus').and(page.getByRole('button', { name: 'New Chat in Cursor Work' })).click()
   await expect(drawerField(page, /^Agent/)).toContainText('Cursor')
   await expect(drawerField(page, /^Category/)).toContainText('Cursor Work')
   await expect(drawerField(page, /^Launch mode/)).toHaveCount(0)
@@ -437,7 +437,7 @@ test('a Cursor preset keeps today\'s install flow when Cursor is not installed',
   await setupPage(page, [{ id: 1, name: 'Cursor Work', preset: { agent: 'cursor' } }], [], [])
   await page.goto('/#/hermes/chat')
 
-  await page.getByTestId('category-new-chat-row').first().click()
+  await page.getByTestId('category-new-chat-plus').first().click()
   await expect(drawerField(page, /^Agent/)).toContainText('Cursor')
   await drawer(page).getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.getByText('Cursor is not installed', { exact: false })).toBeVisible()
@@ -593,7 +593,7 @@ test('relative preset workspaces are saved as entered, like the New Chat panel',
   const create = api.requests.find(request => request.method === 'POST' && request.pathname === '/api/studio/session-categories')!
   expect(JSON.parse(create.postData || '{}')).toEqual({ name: 'Relative', preset: { workspace: 'projects/app' }, unique: true })
 
-  await page.getByTestId('category-new-chat-row').first().click()
+  await page.getByTestId('category-new-chat-plus').first().click()
   await expect(drawer(page).locator('.folder-path-input input')).toHaveValue('projects/app')
   await expect(drawer(page).getByTestId('new-chat-workspace-warning')).toHaveCount(0)
 })
