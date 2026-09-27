@@ -85,19 +85,29 @@ async function sendFirstMessage(page: Page, text: string) {
   return (await runs(page)).at(-1)
 }
 
+// Same shape as TEST_ACCESS_KEY, but a profile-bound "admin" (not a super admin).
+const PROFILE_ADMIN_ACCESS_KEY = [
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9',
+  Buffer.from(JSON.stringify({
+    sub: '2', username: 'member', role: 'admin', type: 'access', aud: 'hermes-web-ui', iat: 1760000000, exp: 4102444800,
+  })).toString('base64url'),
+  'playwright-signature',
+].join('.')
+
 async function setupPage(
   page: Page,
   sessionCategories: any[] = [],
   sessions: any[] = [],
   installedCodingAgents: string[] = ['claude-code'],
+  options: { accessKey?: string; modelGroups?: any[] } = {},
 ) {
-  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await authenticate(page, options.accessKey ?? TEST_ACCESS_KEY, 'research')
   await page.addInitScript(() => {
     if (localStorage.getItem('hermes_chat_collapsed_categories') === null) {
       localStorage.setItem('hermes_chat_collapsed_categories', '[]')
     }
   })
-  const api = await mockHermesApi(page, { sessionCategories, sessions, modelGroups: MODEL_GROUPS })
+  const api = await mockHermesApi(page, { sessionCategories, sessions, modelGroups: options.modelGroups ?? MODEL_GROUPS })
   await page.route('**/api/coding-agents', route => route.fulfill({
     json: { tools: installedCodingAgents.map(id => ({ id, name: id === 'claude-code' ? 'Claude' : id, installed: true })) },
   }))
@@ -319,4 +329,226 @@ test('keeps today\'s install flow when the preset agent is not installed', async
   await drawer(page).getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.getByText('Claude is not installed', { exact: false })).toBeVisible()
   await expect(page).not.toHaveURL(/#\/hermes\/session\//)
+})
+
+test('every drawer open starts from the same defaults, so a preset never leaks into the next category (F2)', async ({ page }) => {
+  await setupPage(page, [
+    { id: 1, name: 'Agent Preset', preset: { agent: 'claude-code', provider: 'anthropic', model: 'claude-opus-5-5', workspace: '/w/a' } },
+    { id: 2, name: 'No Preset' },
+    { id: 3, name: 'Model Only', preset: { model: 'claude-sonnet-5' } },
+  ])
+  await page.goto('/#/hermes/chat')
+
+  await page.getByRole('button', { name: 'New Chat in Agent Preset' }).first().click()
+  await expect(drawerField(page, /^Agent/)).toContainText('Claude')
+  await drawer(page).getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(drawer(page)).toBeHidden()
+
+  // B has no preset: today's default agent, not A's.
+  await page.getByRole('button', { name: 'New Chat in No Preset' }).first().click()
+  await expect(drawerField(page, /^Category/)).toContainText('No Preset')
+  await expect(drawerField(page, /^Agent/)).toContainText('Hermes')
+  await expect(drawer(page).locator('.folder-path-input input')).not.toHaveValue('/w/a')
+  await drawer(page).getByRole('button', { name: 'Cancel', exact: true }).click()
+
+  // A again, then B' whose preset has no agent: still today's default agent.
+  await page.getByRole('button', { name: 'New Chat in Agent Preset' }).first().click()
+  await expect(drawerField(page, /^Agent/)).toContainText('Claude')
+  await drawer(page).getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.getByRole('button', { name: 'New Chat in Model Only' }).first().click()
+  await expect(drawerField(page, /^Category/)).toContainText('Model Only')
+  await expect(drawerField(page, /^Agent/)).toContainText('Hermes')
+  await expect(drawerField(page, /^Models/)).toContainText('claude-sonnet-5')
+})
+
+test('a slow preset apply for an earlier open never overwrites the drawer opened for another category (F3)', async ({ page }) => {
+  await setupPage(page, [
+    { id: 1, name: 'Slow DSH', preset: { agent: 'dsh', agentPreset: 'minimal' } },
+    { id: 2, name: 'Plain' },
+  ], [], ['claude-code', 'dsh'])
+  let releaseDsh: () => void = () => {}
+  const dshHeld = new Promise<void>(resolve => { releaseDsh = resolve })
+  let dshRequested = false
+  await page.route('**/api/coding-agents/dsh/session-presets', async (route) => {
+    dshRequested = true
+    await dshHeld
+    await route.fulfill({ json: { presets: [{ id: 'minimal', name: 'Minimal mode', isDefault: false }] } })
+  })
+  await page.goto('/#/hermes/chat')
+
+  await page.getByRole('button', { name: 'New Chat in Slow DSH' }).first().click()
+  await expect.poll(() => dshRequested).toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(drawer(page)).toBeHidden()
+  await page.getByRole('button', { name: 'New Chat in Plain' }).first().click()
+  await expect(drawerField(page, /^Category/)).toContainText('Plain')
+
+  releaseDsh()
+  // Give the stale apply every chance to run, then check it did nothing.
+  await page.waitForTimeout(500)
+  await expect(drawerField(page, /^Agent/)).toContainText('Hermes')
+  await expect(drawerField(page, /^Category/)).toContainText('Plain')
+  // "Plain" has no preset, so there is no "Using the … preset" notice either.
+  await expect(drawer(page).getByTestId('new-chat-preset-notice')).toHaveCount(0)
+})
+
+test('a preset Base URL never receives the provider\'s stored API key (D2)', async ({ page }) => {
+  const groups = [{
+    provider: 'gateway',
+    label: 'Gateway',
+    base_url: '',
+    models: ['gw-model'],
+    available_models: ['gw-model'],
+    api_key: 'stored-provider-key',
+  }]
+  await setupPage(page, [{
+    id: 1,
+    name: 'Foreign URL',
+    preset: { agent: 'claude-code', agentMode: 'scoped', provider: 'gateway', model: 'gw-model', baseUrl: 'https://other.example.test/anthropic' },
+  }], [], ['claude-code'], { modelGroups: groups })
+  await page.goto('/#/hermes/chat')
+
+  // Without a preset, today's behavior: the stored key is used and no key field is shown.
+  await page.locator('.page-sidebar-top').getByRole('button', { name: 'New Chat', exact: true }).click()
+  await chooseOption(page, drawerField(page, /^Agent/), /^Claude$/)
+  await expect(drawerField(page, /^API Key/)).toHaveCount(0)
+  await drawer(page).getByRole('button', { name: 'Cancel', exact: true }).click()
+
+  await page.getByRole('button', { name: 'New Chat in Foreign URL' }).first().click()
+  await expect(drawerField(page, /^Base URL/).locator('input')).toHaveValue('https://other.example.test/anthropic')
+  const keyField = drawerField(page, /^API Key/)
+  await expect(keyField).toBeVisible()
+  await expect(drawer(page).getByTestId('new-chat-preset-key-required')).toBeVisible()
+  await snap(page, '07-drawer-preset-base-url-key')
+  const create = drawer(page).getByRole('button', { name: 'Create', exact: true })
+  await expect(create).toBeDisabled()
+  await keyField.locator('input').fill('user-entered-key')
+  await expect(create).toBeEnabled()
+  await create.click()
+  const run = await sendFirstMessage(page, 'hello gateway')
+  // Base URL set before API mode: inferred from the preset URL like manual entry (F7).
+  expect(run).toMatchObject({
+    category_id: 1,
+    coding_agent_id: 'claude-code',
+    baseUrl: 'https://other.example.test/anthropic',
+    apiKey: 'user-entered-key',
+    apiMode: 'anthropic_messages',
+  })
+  expect(JSON.stringify(run)).not.toContain('stored-provider-key')
+})
+
+test('profile-bound admins use presets but cannot edit them (D1)', async ({ page }) => {
+  const api = await setupPage(page, [
+    { id: 1, name: 'Shared', preset: { provider: 'anthropic', model: 'claude-opus-5-5' } },
+  ], [], ['claude-code'], { accessKey: PROFILE_ADMIN_ACCESS_KEY })
+  await page.goto('/#/hermes/chat')
+
+  // Set preset is hidden; Rename and Delete stay.
+  await categoryHeader(page, 'Shared').getByRole('button', { name: 'More' }).click()
+  await expect(page.locator('.n-dropdown-menu:visible .n-dropdown-option')).toHaveText(['Rename category', 'Delete category'])
+  await page.keyboard.press('Escape')
+
+  // The preset still pre-fills their New Chat panel.
+  await page.getByRole('button', { name: 'New Chat in Shared' }).first().click()
+  await expect(drawerField(page, /^Models/)).toContainText('claude-opus-5-5')
+  await drawer(page).getByRole('button', { name: 'Cancel', exact: true }).click()
+
+  // "+ New Category" shows only the Name field and creates a category without a preset.
+  await page.getByTestId('session-new-category').click()
+  const modal = page.getByTestId('category-preset-modal')
+  await expect(modal.getByTestId('category-preset-name')).toBeVisible()
+  await expect(modal.locator('.category-preset-field')).toHaveCount(1)
+  await expect(modal.getByTestId('category-preset-clear')).toHaveCount(0)
+  await snap(page, '08-new-category-name-only')
+  await modal.getByTestId('category-preset-name').locator('input').fill('Mine')
+  await modal.getByTestId('category-preset-save').click()
+  await expect(modal).toBeHidden()
+  const create = api.requests.find(request => request.method === 'POST' && request.pathname === '/api/studio/session-categories')!
+  expect(JSON.parse(create.postData || '{}')).toEqual({ name: 'Mine', preset: null, unique: true })
+  await expect(categoryHeader(page, 'Mine')).toBeVisible()
+})
+
+test('relative preset workspaces get a translated error instead of a server 400 (F7)', async ({ page }) => {
+  const api = await setupPage(page)
+  await page.goto('/#/hermes/chat')
+  await page.getByTestId('session-new-category').click()
+  const modal = page.getByTestId('category-preset-modal')
+  await modal.getByTestId('category-preset-name').locator('input').fill('Relative')
+  await modal.locator('.folder-path-input input').fill('projects/app')
+  await modal.getByTestId('category-preset-save').click()
+  await expect(modal.getByTestId('category-preset-workspace-error'))
+    .toHaveText('Enter an absolute folder path, for example /home/me/project or C:\\work.')
+  expect(api.requests.some(request => request.method === 'POST' && request.pathname === '/api/studio/session-categories')).toBe(false)
+  // No reasoning effort field any more (CL-016).
+  await expect(modal).not.toContainText('Reasoning effort')
+})
+
+test('Cmd/Ctrl+N keeps today\'s behavior and never uses a preset (AC 8)', async ({ page }) => {
+  await setupPage(page, [
+    { id: 1, name: 'Preset', preset: { agent: 'claude-code', provider: 'anthropic', model: 'claude-opus-5-5', workspace: '/w/preset' } },
+  ])
+  await page.goto('/#/hermes/chat')
+
+  // Use the preset once so its values are the most recent drawer state.
+  await page.getByRole('button', { name: 'New Chat in Preset' }).first().click()
+  await drawer(page).getByRole('button', { name: 'Create', exact: true }).click()
+  const presetRun = await sendFirstMessage(page, 'first')
+  expect(presetRun).toMatchObject({ category_id: 1, coding_agent_id: 'claude-code', workspace: '/w/preset' })
+
+  // The shortcut creates a chat directly (no drawer) with today's defaults.
+  await page.keyboard.press('ControlOrMeta+n')
+  await expect(drawer(page)).toBeHidden()
+  const shortcutRun = await sendFirstMessage(page, 'second')
+  expect(shortcutRun.category_id ?? null).toBeNull()
+  expect(shortcutRun.coding_agent_id).toBeUndefined()
+  expect(shortcutRun.workspace ?? null).toBeNull()
+  expect(shortcutRun.session_id).not.toBe(presetRun.session_id)
+})
+
+test('moving a chat into a category does not apply its preset to that chat', async ({ page }) => {
+  const api = await setupPage(page, [
+    { id: 1, name: 'Work', preset: { agent: 'claude-code', provider: 'anthropic', model: 'claude-opus-5-5', workspace: '/w/work' } },
+  ], [sessionSummary('general-session', 'General Notes', null, 100)])
+  await page.goto('/#/hermes/chat')
+
+  await page.getByRole('link', { name: /General Notes/ }).last().click({ button: 'right' })
+  await page.locator('.n-dropdown-option').filter({ hasText: 'Move to category' }).hover()
+  const workOption = page.locator('.n-dropdown-option:visible')
+    .filter({ hasText: /^Work$/ })
+    .locator(':scope > .n-dropdown-option-body')
+  await expect(workOption).toBeVisible()
+  await workOption.evaluate((element: HTMLElement) => element.click())
+  await expect(page.getByText('Category updated')).toBeVisible()
+
+  const sessionWrites = api.requests.filter(request =>
+    request.method !== 'GET' && request.pathname.startsWith('/api/studio/sessions/general-session/'),
+  )
+  expect(sessionWrites.map(request => [request.pathname, JSON.parse(request.postData || '{}')])).toEqual([
+    ['/api/studio/sessions/general-session/category', { categoryId: 1 }],
+  ])
+  expect(api.requests.some(request => request.method === 'PATCH')).toBe(false)
+})
+
+test.describe('on a touch device', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 1280, height: 900 } })
+
+  test('always shows the category [+] button without hover', async ({ page }) => {
+    await setupPage(page, [{ id: 1, name: 'Touch' }])
+    await page.goto('/#/hermes/chat')
+    const plus = categoryHeader(page, 'Touch').getByTestId('category-new-chat-plus')
+    await expect(plus).toBeVisible()
+    await expect(plus).toHaveCSS('opacity', '1')
+    await plus.tap()
+    await expect(drawerField(page, /^Category/)).toContainText('Touch')
+  })
+})
+
+test('reveals the category [+] button on hover for a pointer device', async ({ page }) => {
+  await setupPage(page, [{ id: 1, name: 'Pointer' }])
+  await page.goto('/#/hermes/chat')
+  const plus = categoryHeader(page, 'Pointer').getByTestId('category-new-chat-plus')
+  await page.mouse.move(0, 0)
+  await expect(plus).toHaveCSS('opacity', '0')
+  await categoryHeader(page, 'Pointer').hover()
+  await expect(plus).toHaveCSS('opacity', '1')
 })
