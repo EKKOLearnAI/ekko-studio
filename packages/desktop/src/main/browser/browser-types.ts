@@ -194,3 +194,18 @@ export type BrowserInteractAction =
   | { action: 'type'; ref: string; snapshot_id: string; text: string }
   | { action: 'press'; key: string }
   | { action: 'scroll'; direction: 'up' | 'down' | 'left' | 'right'; pixels?: number }
+
+export type BrowserBatchAction =
+  | { action: 'click'; ref: string }
+  | { action: 'type'; ref: string; text: string }
+  | { action: 'press'; key: string }
+  | { action: 'scroll'; direction: 'up' | 'down' | 'left' | 'right'; pixels?: number }
+
+export interface BrowserBatchResult {
+  tabId: string
+  completed: number
+  total: number
+  results: Array<{ index: number; action: BrowserBatchAction['action']; status: 'completed' | 'failed' | 'skipped'; error?: string }>
+  snapshot?: BrowserSnapshot
+  snapshotError?: string
+}

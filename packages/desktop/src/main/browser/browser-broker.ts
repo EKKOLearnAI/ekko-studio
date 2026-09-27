@@ -259,6 +259,12 @@ export class BrowserBroker {
           const tab = await this.manager.interact(requiredString(params.tab_id, 'tab_id'), asObject(params.action) as unknown as BrowserInteractAction)
           return this.publicTab(tab)
         }
+        case 'interact.batch':
+          return await this.manager.interactBatch(requiredString(params.tab_id, 'tab_id'), params.actions, params.snapshot_id, () => {
+            if (!this.server || this.leases.get(tabId)?.clientId !== clientId || (this.tabGenerations.get(tabId) || 0) !== tabGeneration) {
+              throw new Error('Browser batch was cancelled or its tab control was revoked')
+            }
+          })
         case 'screenshot':
           return await this.manager.screenshot(requiredString(params.tab_id, 'tab_id'), params.full_page === true)
         case 'console.read':
@@ -279,7 +285,7 @@ export class BrowserBroker {
     } finally {
       if (tabId && (this.tabGenerations.get(tabId) || 0) !== tabGeneration) {
         if (this.manager.state().tabs.some(tab => tab.id === tabId)) this.manager.cancelAgentOperation(tabId)
-        throw new Error('Browser operation was cancelled by user takeover')
+        if (method !== 'interact.batch') throw new Error('Browser operation was cancelled by user takeover')
       }
       void operationId
     }

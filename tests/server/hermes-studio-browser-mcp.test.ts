@@ -78,6 +78,8 @@ describe('hermes-studio browser MCP toolset', () => {
     const clients: string[] = []
     const registeredPids: number[] = []
     let failScreenshot = false
+    let failBatch = false
+    const batches: unknown[] = []
     server = createServer(async (request, response) => {
       const chunks: Buffer[] = []
       for await (const chunk of request) chunks.push(Buffer.from(chunk))
@@ -89,6 +91,17 @@ describe('hermes-studio browser MCP toolset', () => {
         return
       }
       clients.push(String(request.headers['x-hermes-browser-client'] || ''))
+      if (body.method === 'interact.batch') {
+        batches.push(body.params)
+        response.end(JSON.stringify({ operation_id: body.operation_id, result: {
+          tabId: body.params.tab_id, completed: failBatch ? 1 : body.params.actions.length, total: body.params.actions.length,
+          results: body.params.actions.map((action: { action: string }, index: number) => ({
+            index, action: action.action, status: failBatch && index === 1 ? 'failed' : 'completed',
+          })),
+          snapshot: { snapshotId: 'after-batch' },
+        } }))
+        return
+      }
       if (body.method === 'screenshot' && failScreenshot) {
         response.statusCode = 400
         response.end(JSON.stringify({ error: 'capture failed' }))
@@ -133,7 +146,7 @@ describe('hermes-studio browser MCP toolset', () => {
     })
     expect(JSON.parse(catalog.result.content[0].text)).toMatchObject({
       toolset: 'browser',
-      operation_count: 7,
+      operation_count: 8,
     })
     const described = await rpc(4, 'tools/call', {
       name: 'ekko_studio_browser_toolset',
@@ -179,6 +192,26 @@ describe('hermes-studio browser MCP toolset', () => {
     })
     expect(fallback.result.content[0].text).toContain('Accessibility snapshot')
     expect(fallback.result.content[0].text).toContain('snapshot-1')
+
+    const batchSchema = await rpc(10, 'tools/call', {
+      name: 'ekko_studio_browser_toolset',
+      arguments: { action: 'describe', tool: 'ekko_studio_browser_batch' },
+    })
+    expect(JSON.parse(batchSchema.result.content[0].text).inputSchema).toMatchObject({
+      required: ['tab_id', 'actions'], properties: { actions: { minItems: 1, maxItems: 50 } },
+    })
+    const batchArguments = { tab_id: 'tab-1', snapshot_id: 'snapshot-1', actions: [{ action: 'click', ref: '@e1' }, { action: 'press', key: 'Tab' }] }
+    const invokeBatch = (id: number) => rpc(id, 'tools/call', {
+      name: 'ekko_studio_browser_toolset', arguments: { action: 'call', tool: 'ekko_studio_browser_batch', arguments: batchArguments },
+    })
+    const completedBatch = await invokeBatch(11)
+    expect(completedBatch.result.isError).not.toBe(true)
+    expect(JSON.parse(completedBatch.result.content[0].text).result).toMatchObject({ completed: 2, total: 2, snapshot: { snapshotId: 'after-batch' } })
+    expect(batches).toEqual([batchArguments])
+    failBatch = true
+    const stoppedBatch = await invokeBatch(12)
+    expect(stoppedBatch.result.isError).toBe(true)
+    expect(JSON.parse(stoppedBatch.result.content[0].text).result).toMatchObject({ completed: 1, total: 2 })
 
     await rm(join(brokerRoot, 'broker.json'))
     const unavailable = await rpc(9, 'tools/list')
