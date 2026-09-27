@@ -85,7 +85,8 @@ describe('cursor-aware chat usage', () => {
     const { calcAndUpdateUsage } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
     const state: any = { messages: [], events: [], queue: [], isWorking: false }
 
-    const usage = await calcAndUpdateUsage('session-1', state, vi.fn(), {
+    const emit = vi.fn()
+    const usage = await calcAndUpdateUsage('session-1', state, emit, {
       nativeSource: 'coding_agent',
     })
 
@@ -99,6 +100,10 @@ describe('cursor-aware chat usage', () => {
       contextInputTokens: 93,
       contextOutputTokens: 10,
     })
+    expect(state).toMatchObject({ inputTokens: 100, outputTokens: 40, cacheReadTokens: 50, cacheWriteTokens: 5 })
+    expect(emit).toHaveBeenCalledWith('usage.updated', expect.objectContaining({
+      inputTokens: 100, outputTokens: 40, cacheReadTokens: 50, cacheWriteTokens: 5,
+    }))
     expect(getCompressionSnapshotMock).not.toHaveBeenCalled()
     expect(getSessionDetailMock).not.toHaveBeenCalled()
     expect(getSessionContextMessagesMock).not.toHaveBeenCalled()

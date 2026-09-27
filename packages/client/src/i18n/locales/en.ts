@@ -1095,6 +1095,7 @@ export default {
     stopGateway: 'Stop Gateway',
     send: 'Send',
     contextUsed: 'Context used:',
+    sessionUsage: 'Session usage:',
     sessions: 'Sessions',
     webUiSessions: 'Sessions',
     allProfiles: 'All profiles',

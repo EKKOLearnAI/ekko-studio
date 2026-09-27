@@ -1045,6 +1045,7 @@ export default {
     stop: '停止',
     send: '送信',
     contextUsed: 'コンテキスト使用量:',
+    sessionUsage: 'このセッションの累計使用量:',
     sessions: 'セッション',
     webUiSessions: 'セッション',
     allProfiles: 'すべてのプロファイル',

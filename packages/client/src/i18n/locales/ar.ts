@@ -1088,6 +1088,7 @@ export default {
     stopGateway: 'إيقاف البوابة',
     send: 'إرسال',
     contextUsed: 'السياق المستخدم:',
+    sessionUsage: 'استخدام هذه الجلسة:',
     sessions: 'الجلسات',
     webUiSessions: 'الجلسات',
     allProfiles: 'كل البروفايلات',

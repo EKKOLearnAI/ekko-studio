@@ -178,6 +178,8 @@ export interface ResumeSessionPayload {
   events: Array<{ event: string; data: RunEvent }>
   inputTokens?: number
   outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
   contextTokens?: number
   workspace?: string | null
   model?: string

@@ -193,6 +193,21 @@ export function getUsage(sessionId: string, source?: string): UsageRecord | unde
   }
 }
 
+type SessionTokenTotals = Pick<UsageRecord,
+  'input_tokens' | 'output_tokens' | 'cache_read_tokens' | 'cache_write_tokens' | 'reasoning_tokens'>
+
+export function getRecordedSessionTokensBatch(sessionIds: string[], source: string): Record<string, SessionTokenTotals> {
+  if (!sessionIds.length || !isSqliteAvailable()) return {}
+  const placeholders = sessionIds.map(() => '?').join(',')
+  const rows = getDb()!.prepare(`
+    SELECT session_id, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+      SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_write_tokens) AS cache_write_tokens,
+      SUM(reasoning_tokens) AS reasoning_tokens
+    FROM ${TABLE} WHERE source = ? AND session_id IN (${placeholders}) GROUP BY session_id
+  `).all(source, ...sessionIds) as unknown as Array<SessionTokenTotals & { session_id: string }>
+  return Object.fromEntries(rows.map(({ session_id, ...usage }) => [session_id, usage]))
+}
+
 export function getUsageBatch(sessionIds: string[]): Record<string, UsageRecord> {
   if (sessionIds.length === 0) return {}
   if (isSqliteAvailable()) {

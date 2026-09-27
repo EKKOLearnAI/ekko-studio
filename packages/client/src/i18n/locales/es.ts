@@ -1045,6 +1045,7 @@ export default {
     stop: 'Detener',
     send: 'Enviar',
     contextUsed: 'Contexto utilizado:',
+    sessionUsage: 'Uso de esta sesión:',
     sessions: 'Sesiones',
     webUiSessions: 'Sesiones',
     allProfiles: 'Todos los perfiles',

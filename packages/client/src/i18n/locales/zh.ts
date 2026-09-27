@@ -1095,6 +1095,7 @@ export default {
     stopGateway: '停止网关',
     send: '发送',
     contextUsed: '上下文已用:',
+    sessionUsage: '累计用量:',
     sessions: '会话',
     webUiSessions: '会话',
     allProfiles: '全部配置',

@@ -984,6 +984,7 @@ export default {
     stopGateway: 'Остановить шлюз',
     send: 'Отправить',
     contextUsed: 'Контекст использован:',
+    sessionUsage: 'Расход за сеанс:',
     sessions: 'Сеансы',
     webUiSessions: 'Сеансы',
     allProfiles: 'Все профили',

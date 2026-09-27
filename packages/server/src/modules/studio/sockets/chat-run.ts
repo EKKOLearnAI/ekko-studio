@@ -2081,6 +2081,8 @@ export class ChatRunSocket {
         || mobileEventAllowed(entry.data, socket.data.mobileDeviceTarget))),
       inputTokens: state.inputTokens,
       outputTokens: state.outputTokens,
+      cacheReadTokens: state.cacheReadTokens,
+      cacheWriteTokens: state.cacheWriteTokens,
       contextTokens: state.contextTokens,
       queueLength: state.queue?.length || 0,
       queueMessages: this.serializeQueuedMessages(state.queue || []),
@@ -2811,6 +2813,8 @@ export class ChatRunSocket {
       state.hasMoreBefore = false
       state.inputTokens = 0
       state.outputTokens = 0
+      state.cacheReadTokens = 0
+      state.cacheWriteTokens = 0
       state.contextTokens = 0
       state.events = []
       state.queue = []
@@ -2853,6 +2857,8 @@ export class ChatRunSocket {
       events: [],
       inputTokens: 0,
       outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       contextTokens: 0,
       queueLength: 0,
       queueMessages: [],

@@ -79,7 +79,8 @@ export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<strin
     const hasPersistedUsage = !!latestUsage || totals.inputTokens > 0 || totals.outputTokens > 0
     inputTokens = hasPersistedUsage ? totals.inputTokens : pageUsage.inputTokens
     outputTokens = hasPersistedUsage ? totals.outputTokens : pageUsage.outputTokens
-    if (latestUsage) {
+    // Cursor reports aggregate turn usage, not a current context snapshot.
+    if (latestUsage && session?.agent !== 'cursor') {
       contextTokens = Number(latestUsage.input_tokens || 0) + Number(latestUsage.output_tokens || 0)
     }
 
@@ -95,6 +96,8 @@ export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<strin
       events: [],
       inputTokens,
       outputTokens,
+      cacheReadTokens: totals.cacheReadTokens || 0,
+      cacheWriteTokens: totals.cacheWriteTokens || 0,
       contextTokens,
       queue: [],
       backgroundDelegations: restoreBackgroundDelegations(messages),

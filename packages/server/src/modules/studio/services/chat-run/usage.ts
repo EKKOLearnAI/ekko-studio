@@ -102,10 +102,14 @@ export async function calcAndUpdateUsage(
       const usage = {
         inputTokens: totals.inputTokens,
         outputTokens: totals.outputTokens,
+        cacheReadTokens: totals.cacheReadTokens || 0,
+        cacheWriteTokens: totals.cacheWriteTokens || 0,
       }
       if (latest) {
         state.inputTokens = usage.inputTokens
         state.outputTokens = usage.outputTokens
+        state.cacheReadTokens = usage.cacheReadTokens
+        state.cacheWriteTokens = usage.cacheWriteTokens
         emit('usage.updated', {
           event: 'usage.updated',
           session_id: sid,
@@ -116,8 +120,6 @@ export async function calcAndUpdateUsage(
         ...usage,
         nativeUsageAvailable: Boolean(latest),
         nativeModel: latest?.model || '',
-        cacheReadTokens: totals.cacheReadTokens || 0,
-        cacheWriteTokens: totals.cacheWriteTokens || 0,
         ...(latest
           ? {
               // Accounting keeps ordinary and cached input disjoint, but both

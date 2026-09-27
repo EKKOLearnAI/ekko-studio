@@ -1045,6 +1045,7 @@ export default {
     stop: '중지',
     send: '전송',
     contextUsed: '사용된 컨텍스트:',
+    sessionUsage: '이 세션의 누적 사용량:',
     sessions: '세션',
     webUiSessions: '세션',
     allProfiles: '모든 프로필',

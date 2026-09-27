@@ -166,4 +166,20 @@ describe('loadSessionStateFromDb', () => {
       }),
     })
   })
+
+  it('restores Cursor native usage without turning aggregate consumption into context occupancy', async () => {
+    getSessionMock.mockReturnValue({ id: 'session-1', agent: 'cursor', source: 'coding_agent' })
+    getRecordedUsageTotalsMock.mockReturnValue({ inputTokens: 24_003, outputTokens: 474, cacheReadTokens: 20_736, cacheWriteTokens: 0 })
+    getUsageMock.mockReturnValue({ input_tokens: 24_003, output_tokens: 474, cache_read_tokens: 20_736 })
+    const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')
+
+    const state = await loadSessionStateFromDb('session-1', new Map())
+
+    expect(getRecordedUsageTotalsMock).toHaveBeenCalledWith('session-1', 'coding_agent')
+    expect(state.inputTokens).toBe(24_003)
+    expect(state.outputTokens).toBe(474)
+    expect(state.cacheReadTokens).toBe(20_736)
+    expect(state.cacheWriteTokens).toBe(0)
+    expect(state.contextTokens).toBeUndefined()
+  })
 })

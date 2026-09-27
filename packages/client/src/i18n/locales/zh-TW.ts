@@ -1086,6 +1086,7 @@ export default {
     stopGateway: '停止閘道',
     send: '發送',
     contextUsed: '上下文已用:',
+    sessionUsage: '累計用量:',
     sessions: '工作階段',
     webUiSessions: '工作階段',
     allProfiles: '全部設定',
