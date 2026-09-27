@@ -144,24 +144,27 @@ class WorkerProcess:
         with self._lock:
             proc = self.process
             self.process = None
-        if proc is None:
-            return
-        if proc.poll() is None:
-            try:
-                self.request({"action": "shutdown"}, timeout=self.SHUTDOWN_REQUEST_TIMEOUT_SECONDS)
-            except Exception as exc:
-                print(f"[hermes-bridge-worker:{self.key}] graceful shutdown failed: {exc}", file=sys.stderr, flush=True)
-            proc.terminate()
-            try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=3)
-        if self.endpoint.startswith("ipc://"):
-            try:
-                Path(self.endpoint.removeprefix("ipc://")).unlink(missing_ok=True)
-            except OSError:
-                pass
+            if proc is None:
+                return
+            # Serialize endpoint cleanup with start(), including concurrent requests.
+            if proc.poll() is None:
+                try:
+                    # request() would start a replacement after self.process is cleared.
+                    _send_bridge_request(self.endpoint, {"action": "shutdown"}, self.SHUTDOWN_REQUEST_TIMEOUT_SECONDS)
+                except Exception as exc:
+                    print(f"[hermes-bridge-worker:{self.key}] graceful shutdown failed: {exc}", file=sys.stderr, flush=True)
+                if proc.poll() is None:
+                    proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=3)
+            if self.endpoint.startswith("ipc://"):
+                try:
+                    Path(self.endpoint.removeprefix("ipc://")).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def request(self, req: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         self.start()

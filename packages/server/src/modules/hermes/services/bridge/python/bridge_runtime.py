@@ -633,7 +633,9 @@ def _set_worker_profile_env(profile: str | None) -> None:
     profile_home = _profile_home(profile)
     os.environ["HERMES_HOME"] = str(profile_home)
     os.environ["HERMES_AGENT_BRIDGE_WORKER_PROFILE"] = profile or "default"
-    _refresh_worker_profile_env()
+    # Bind the worker's home and credentials before importing any Hermes code.
+    # Terminal config requires Hermes' YAML adapter and is refreshed after bootstrap.
+    _apply_profile_dotenv(profile)
 
 
 def _refresh_worker_profile_env() -> None:

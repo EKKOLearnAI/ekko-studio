@@ -13,7 +13,52 @@ function runPython(script: string, args: string[] = []): any {
 }
 
 describe('agent bridge runtime bootstrap', () => {
-  it.each(['broker', 'worker'])('finishes interpreter re-exec before the %s accepts requests', (mode) => {
+  it('stops the existing worker without starting a replacement', () => {
+    const result = runPython(String.raw`
+import json
+import os
+import socket
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path('packages/server/src/modules/hermes/services/bridge/python').resolve()))
+from bridge_transport import WorkerProcess
+with tempfile.TemporaryDirectory(prefix='bridge-stop-') as temp:
+    root = Path(temp)
+    marker = root / 'starts'
+    (root / 'run_agent.py').write_text('')
+    (root / 'hermes_bootstrap.py').write_text('import os\nfrom pathlib import Path\nwith Path(os.environ["BRIDGE_STOP_MARKER"]).open("a") as f:\n    f.write(str(os.getpid()) + "\\n")\n')
+    for key in list(os.environ):
+        if key.startswith(('HERMES_', 'PYTHON')):
+            os.environ.pop(key)
+    os.environ['BRIDGE_STOP_MARKER'] = str(marker)
+    with socket.socket() as reservation:
+        reservation.bind(('127.0.0.1', 0))
+        port = reservation.getsockname()[1]
+    worker = WorkerProcess('default', 'default', f'tcp://127.0.0.1:{port}', temp, temp)
+    try:
+        worker.start()
+        process = worker.process
+        worker.stop()
+        with socket.socket() as probe:
+            closed = probe.connect_ex(('127.0.0.1', port)) != 0
+        print(json.dumps({'starts': len(marker.read_text().splitlines()),
+                          'exited': process.poll() is not None,
+                          'cleared': worker.process is None, 'closed': closed}))
+    finally:
+        # A regression must not leave a replacement fixture worker behind.
+        import signal
+        for raw_pid in marker.read_text().splitlines() if marker.exists() else []:
+            try:
+                os.kill(int(raw_pid), signal.SIGTERM)
+            except OSError:
+                pass
+`)
+    expect(result).toEqual({ starts: 1, exited: true, cleared: true, closed: true })
+  })
+
+  it.each(['broker', 'worker', 'profile-worker'])('finishes interpreter re-exec before the %s accepts requests', (mode) => {
     const result = runPython(String.raw`
 import json
 import os
@@ -30,13 +75,22 @@ bridge = Path('packages/server/src/modules/hermes/services/bridge/python/hermes_
 with tempfile.TemporaryDirectory(prefix='bridge-bootstrap-') as temp:
     root = Path(temp)
     marker = root / 'bootstrapped'
+    profile_home = root / 'profiles' / 'work'
+    profile_home.mkdir(parents=True)
+    (root / '.env').write_text('BRIDGE_BASE_SECRET=base\n')
+    (profile_home / '.env').write_text('BRIDGE_PROFILE_SECRET=work\n')
     (root / 'run_agent.py').write_text('import hermes_bootstrap\nraise RuntimeError("fixture agent import reached")\n')
     (root / 'hermes_bootstrap.py').write_text('''import os, sys
 from pathlib import Path
 if os.environ.get('BRIDGE_TEST_REEXEC') != '1':
     os.environ['BRIDGE_TEST_REEXEC'] = '1'
     os.execv(sys.executable, [sys.executable, *sys.argv])
-Path(os.environ['BRIDGE_TEST_MARKER']).write_text('ready')
+import json
+Path(os.environ['BRIDGE_TEST_MARKER']).write_text(json.dumps({
+    'home': os.environ['HERMES_HOME'],
+    'base_secret': os.environ.get('BRIDGE_BASE_SECRET'),
+    'profile_secret': os.environ.get('BRIDGE_PROFILE_SECRET'),
+}))
 ''')
     with socket.socket() as reservation:
         reservation.bind(('127.0.0.1', 0))
@@ -44,11 +98,11 @@ Path(os.environ['BRIDGE_TEST_MARKER']).write_text('ready')
     endpoint = f'tcp://127.0.0.1:{port}'
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(('HERMES_', 'BRIDGE_TEST_', 'PYTHON'))}
-    env.update(HERMES_HOME=temp, BRIDGE_TEST_MARKER=str(marker), PYTHONDONTWRITEBYTECODE='1')
+    env.update(HERMES_HOME=temp, BRIDGE_TEST_MARKER=str(marker), PYTHONDONTWRITEBYTECODE='1', BRIDGE_BASE_SECRET='base')
     command = [sys.executable, str(bridge), '--endpoint', endpoint,
                '--agent-root', temp, '--hermes-home', temp]
-    if sys.argv[1] == 'worker':
-        command += ['--worker-profile', 'default']
+    if sys.argv[1] != 'broker':
+        command += ['--worker-profile', 'work' if sys.argv[1] == 'profile-worker' else 'default']
     with (root / 'stderr.log').open('w+') as stderr:
         proc = subprocess.Popen(command, cwd=temp, env=env, stdout=subprocess.PIPE,
                                 stderr=stderr, text=True)
@@ -77,10 +131,13 @@ Path(os.environ['BRIDGE_TEST_MARKER']).write_text('ready')
             else:
                 raise RuntimeError('bridge did not become ready')
             ready_after_bootstrap = marker.exists()
+            bootstrap_env = json.loads(marker.read_text())
+            if sys.argv[1] == 'profile-worker':
+                assert bootstrap_env == {'home': str(profile_home.resolve()), 'base_secret': None, 'profile_secret': 'work'}, bootstrap_env
             # The fixture stops at the real chat import boundary: no model calls,
             # credentials, user sessions or installed Hermes runtime are needed.
             responses = []
-            if sys.argv[1] == 'worker':
+            if sys.argv[1] != 'broker':
                 for action in ('context_estimate', 'chat'):
                     responses.append(request(action)['error'])
             pong = request('ping')['pong']
@@ -99,7 +156,7 @@ Path(os.environ['BRIDGE_TEST_MARKER']).write_text('ready')
 `, [mode])
     expect(result).toEqual({
       bootstrapped_before_ready: true,
-      responses: mode === 'worker' ? ['fixture agent import reached', 'fixture agent import reached'] : [],
+      responses: mode !== 'broker' ? ['fixture agent import reached', 'fixture agent import reached'] : [],
       pong: true,
     })
   })

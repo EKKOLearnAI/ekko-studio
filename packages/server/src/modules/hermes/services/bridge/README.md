@@ -1,9 +1,18 @@
 # Agent Bridge
 
-Optional backend-side bridge for talking to Hermes Agent by instantiating
+Backend-side bridge for talking to Hermes Agent by instantiating
 `run_agent.AIAgent` directly in a Python process.
 
-This is intentionally separate from the current Web UI chat path.
+Hermes chat, context estimation, and MCP management use this bridge. Plugin
+management uses a separate short-lived Python probe with the same interpreter
+resolver.
+
+Workers bind their profile home and environment before importing Hermes or its
+bootstrap. Bootstrap must finish before any socket reports ready, since Hermes
+upgrades can replace the interpreter and dependency environment. Configuration
+reads prefer Hermes' YAML adapter, with PyYAML support for older installations.
+Shutdown sends directly to the existing worker socket: the normal request path
+can start a worker and must not be used while stopping one.
 
 ## Python Service
 

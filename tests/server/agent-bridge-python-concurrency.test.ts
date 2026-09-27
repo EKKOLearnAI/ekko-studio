@@ -2391,11 +2391,18 @@ class FakeProcess:
 worker = bridge.WorkerProcess("default", "default", "tcp://127.0.0.1:1", None, None)
 worker.process = FakeProcess()
 
-def fake_request(req, timeout=None):
+def fake_request(endpoint, req, timeout):
+    assert endpoint == worker.endpoint
     events.append(("request", req, timeout))
-    return {"status": "shutting_down"}
+    return {"ok": True, "status": "shutting_down"}
 
-worker.request = fake_request
+def unexpected_start():
+    events.append("unexpected-start")
+
+# Keep the real request method: it auto-starts workers and must never be used
+# after clearing the current process during shutdown.
+worker.start = unexpected_start
+bridge._transport._send_bridge_request = fake_request
 worker.stop()
 
 assert events == [
