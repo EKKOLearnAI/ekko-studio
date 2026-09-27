@@ -125,4 +125,18 @@ and [CLI parameters](https://cursor.com/docs/cli/reference/parameters). The CLI'
 verify chat's plugin MCP discovery. Test the chat plugin loader when verifying
 this integration, including concurrent profiles and run-specific credentials.
 
-Also outside this release: Windows prompts that exceed the command-line length limit, the native `/compact` command, and Cursor skills. A long Windows prompt, a compact request, or a missing skill is unsupported, not a sign that Cursor is fully managed like Claude, Codex, Pi, or Grok.
+The Cursor settings page edits its native `~/.cursor/cli-config.json`, honoring
+`CURSOR_CONFIG_DIR` and `XDG_CONFIG_HOME` overrides. It validates JSON before
+saving and does not create a separate global memory file. See the native
+[CLI configuration reference](https://cursor.com/docs/cli/reference/configuration).
+
+The Skills page lists, imports, edits, and deletes user skills under
+`~/.cursor/skills`, including category directories. It also displays
+`~/.agents/skills` as read-only, including aliases into that shared directory.
+These actions use the Cursor target and never fall back to Hermes profile
+skills. Workspace skills and native compatibility/plugin skill directories
+remain managed outside this page; Cursor discovers those through its own
+[skill loading rules](https://cursor.com/docs/skills).
+
+Also outside this release: Windows prompts that exceed the command-line length
+limit and the native `/compact` command.

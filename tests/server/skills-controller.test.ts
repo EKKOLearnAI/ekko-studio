@@ -109,7 +109,7 @@ describe('skills controller', () => {
     mockListSkillUsageEventsAfterMessageId.mockResolvedValue({ events: [], cursor: 12, reset: false })
   })
 
-  it.each(['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude'])('exposes shared skills as read-only for %s and rejects writes without touching Hermes', async target => {
+  it.each(['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude', 'cursor'])('exposes shared skills as read-only for %s and rejects writes without touching Hermes', async target => {
     const root = await mkdtemp(join(tmpdir(), 'studio-shared-skill-'))
     const previous = process.env.HERMES_CODING_AGENT_GLOBAL_HOME
     process.env.HERMES_CODING_AGENT_GLOBAL_HOME = root
@@ -139,6 +139,86 @@ describe('skills controller', () => {
       const readCtx = { ...ctx, params: { path: 'misc/shared/SKILL.md' } }
       await controller.readFile_(readCtx)
       expect(readCtx.body.content).toBe(content)
+    } finally {
+      if (previous === undefined) delete process.env.HERMES_CODING_AGENT_GLOBAL_HOME
+      else process.env.HERMES_CODING_AGENT_GLOBAL_HOME = previous
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('lists, edits and deletes Cursor private skills without changing Hermes or shared aliases', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'studio-cursor-skills-'))
+    const previous = process.env.HERMES_CODING_AGENT_GLOBAL_HOME
+    process.env.HERMES_CODING_AGENT_GLOBAL_HOME = root
+    mockGetProfileDir.mockReturnValue(join(root, 'hermes'))
+    const privateDir = join(root, '.cursor/skills/tools/nested/demo')
+    const sharedDir = join(root, '.agents/skills/shared')
+    const hermesDir = join(root, 'hermes/skills/tools/demo')
+    try {
+      for (const directory of [privateDir, sharedDir, hermesDir]) {
+        await mkdir(directory, { recursive: true })
+        await writeFile(join(directory, 'SKILL.md'), '# Original\nDescription\n')
+      }
+      await symlink(sharedDir, join(root, '.cursor/skills/alias'), 'dir')
+      await mkdir(join(root, '.cursor/skills/file-alias'), { recursive: true })
+      await symlink(join(sharedDir, 'SKILL.md'), join(root, '.cursor/skills/file-alias/SKILL.md'))
+      const controller = await loadController()
+      const ctx: any = { query: { target: 'cursor' }, params: { category: 'tools', skill: 'demo' }, request: { body: { content: '# Cursor updated' } } }
+      await controller.list(ctx)
+      const skills = ctx.body.categories.flatMap((c: any) => c.skills)
+      expect(skills).toContainEqual(expect.objectContaining({ name: 'demo', readonly: false }))
+      for (const name of ['shared', 'alias', 'file-alias']) {
+        expect(skills).toContainEqual(expect.objectContaining({ name, readonly: true }))
+        const blocked = { ...ctx, params: { category: 'misc', skill: name } }
+        await controller.updateSkill(blocked)
+        expect(blocked.status).toBe(403)
+        await controller.deleteSkill(blocked)
+        expect(blocked.status).toBe(403)
+      }
+      await controller.updateSkill(ctx)
+      expect(ctx.body).toEqual({ success: true })
+      const readCtx: any = { ...ctx, params: { path: 'tools/demo/SKILL.md' } }
+      await controller.readFile_(readCtx)
+      expect(readCtx.body.content).toBe('# Cursor updated')
+      await controller.deleteSkill(ctx)
+      expect(ctx.body).toEqual({ success: true })
+      await expect(readFile(join(privateDir, 'SKILL.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+      for (const directory of [hermesDir, sharedDir]) {
+        expect(await readFile(join(directory, 'SKILL.md'), 'utf8')).toBe('# Original\nDescription\n')
+      }
+      expect(mockUpdateConfigYamlForProfile).not.toHaveBeenCalled()
+    } finally {
+      if (previous === undefined) delete process.env.HERMES_CODING_AGENT_GLOBAL_HOME
+      else process.env.HERMES_CODING_AGENT_GLOBAL_HOME = previous
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('imports Cursor skill folders into its native category and protects existing skills', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'studio-cursor-import-'))
+    const previous = process.env.HERMES_CODING_AGENT_GLOBAL_HOME
+    process.env.HERMES_CODING_AGENT_GLOBAL_HOME = root
+    const definition = '---\nname: demo\ndescription: Example\n---\nInstructions\n'
+    const context = (): any => ({
+      query: { target: 'cursor' }, state: {},
+      get: () => 'multipart/form-data; boundary=cursor-skill-test',
+      req: Readable.from([multipartBody('cursor-skill-test', [
+        { name: 'file', filename: 'demo/SKILL.md', value: definition },
+        { name: 'file', filename: 'demo/references/example.md', value: 'Reference' },
+        { name: 'category', value: 'tools' },
+      ])]),
+    })
+    try {
+      const { importSkill } = await loadController()
+      const ctx = context()
+      await importSkill(ctx)
+      expect(ctx.body).toEqual({ success: true, name: 'demo' })
+      expect(await readFile(join(root, '.cursor/skills/tools/demo/SKILL.md'), 'utf8')).toBe(definition)
+      expect(await readFile(join(root, '.cursor/skills/tools/demo/references/example.md'), 'utf8')).toBe('Reference')
+      const duplicate = context()
+      await importSkill(duplicate)
+      expect(duplicate.status).toBe(409)
+      expect(mockUpdateConfigYamlForProfile).not.toHaveBeenCalled()
     } finally {
       if (previous === undefined) delete process.env.HERMES_CODING_AGENT_GLOBAL_HOME
       else process.env.HERMES_CODING_AGENT_GLOBAL_HOME = previous

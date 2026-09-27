@@ -50,6 +50,7 @@ const selectedSkillData = computed(() => {
 })
 
 const isHermesTarget = computed(() => skillTarget.value === 'hermes')
+const canManageTarget = computed(() => isHermesTarget.value || skillTarget.value === 'dsh' || skillTarget.value === 'cursor')
 const selectedSkillReadonly = computed(() => {
   if (!selectedSkillData.value) return true
   if (selectedSkillData.value.readonly) return true
@@ -195,7 +196,7 @@ function handleSkillSaved() {
           </span>
         </NButton>
         <NButton
-          v-if="isHermesTarget || skillTarget === 'dsh'"
+          v-if="canManageTarget"
           class="header-action-btn"
           size="small"
           :title="t('skills.import')"
@@ -239,7 +240,7 @@ function handleSkillSaved() {
     <SkillImportModal
       v-if="showImportModal"
       :allow-category="skillTarget !== 'dsh'"
-      :import-handler="skillTarget === 'dsh' ? (files) => importSkill(files, undefined, 'dsh') : undefined"
+      :import-handler="!isHermesTarget ? (files, category) => importSkill(files, category, skillTarget) : undefined"
       @close="showImportModal = false"
       @saved="handleImported"
     />
@@ -270,9 +271,9 @@ function handleSkillSaved() {
               :selected-skill="selectedCategory && selectedSkill ? `${selectedCategory}/${selectedSkill}` : null"
               :search-query="searchQuery"
               :source-filter="sourceFilter"
-              :readonly="!isHermesTarget && skillTarget !== 'dsh'"
+              :readonly="!canManageTarget"
               :toggleable="isHermesTarget"
-              :delete-handler="skillTarget === 'dsh' ? (category, name) => deleteSkillApi(category, name, 'dsh') : undefined"
+              :delete-handler="!isHermesTarget ? (category, name) => deleteSkillApi(category, name, skillTarget) : undefined"
               @select="handleSelect"
               @deleted="handleSkillDeleted"
             />

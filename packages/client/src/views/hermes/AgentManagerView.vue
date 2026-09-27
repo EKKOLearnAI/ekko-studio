@@ -621,7 +621,7 @@ onUnmounted(() => {
                   :data-testid="`agent-settings-${agent.id}`"
                   @click="router.push({
                     name: 'codingAgent.config',
-                    params: { agentId: agent.id, section: agent.id === 'cursor' ? 'mcp' : 'settings' },
+                    params: { agentId: agent.id, section: 'settings' },
                   })"
                 >
                   {{ t('sidebar.settings') }}

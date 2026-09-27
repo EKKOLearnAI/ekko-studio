@@ -8,6 +8,7 @@ import {
 } from '../../../../packages/server/src/modules/coding-agents/services'
 import { codingAgentRunManager } from '../../../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
 import { getAgentUpdateManager } from '../../../../packages/server/src/modules/coding-agents/services/update-manager'
+import { AgentUpdatePolicy } from '../../../../packages/server/src/modules/coding-agents/services/update-policy'
 
 describe('Cursor CLI install policy', () => {
   afterEach(() => {
@@ -25,8 +26,14 @@ describe('Cursor CLI install policy', () => {
     expect(result.success).toBe(false)
     expect(result.updateAvailable).toBe(false)
     expect(result.latestVersion).toBe('')
-    const policy = await getAgentUpdateManager()
-    expect(policy.snapshot().cursor?.autoUpdateSupported).toBe(false)
+    // Inspect the policy without starting background npm checks for other agents.
+    const start = vi.spyOn(AgentUpdatePolicy.prototype, 'start').mockImplementation(() => {})
+    try {
+      const policy = await getAgentUpdateManager()
+      expect(policy.snapshot().cursor?.autoUpdateSupported).toBe(false)
+    } finally {
+      start.mockRestore()
+    }
   })
 
   it('does not stop Cursor sessions when removal is unsupported', async () => {
