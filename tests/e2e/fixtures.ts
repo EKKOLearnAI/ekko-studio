@@ -507,7 +507,9 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       if (request.method() === 'POST') {
         const body = JSON.parse(request.postData() || '{}') as { name?: string; preset?: Record<string, unknown> | null; unique?: boolean }
         const name = String(body.name || '').trim()
-        const existing = sessionCategories.find(item => item.name.toLowerCase() === name.toLowerCase())
+        // Server names are COLLATE NOCASE, which folds ASCII letters only.
+        const fold = (value: string) => value.replace(/[A-Z]/g, char => char.toLowerCase())
+        const existing = sessionCategories.find(item => fold(item.name) === fold(name))
         if (existing && (body.unique || body.preset !== undefined)) {
           await route.fulfill(jsonResponse({ error: 'A category with this name already exists' }, 409))
           return

@@ -17,6 +17,16 @@ const MODEL_GROUPS = [
   },
 ]
 
+// Provider without its own base URL: the panel asks for one.
+const GATEWAY_GROUP = {
+  provider: 'gateway',
+  label: 'Gateway',
+  base_url: '',
+  models: ['gw-model'],
+  available_models: ['gw-model'],
+  api_key: '',
+}
+
 const MESSAGE_PLACEHOLDER = 'Type a message... (Enter to send, Shift+Enter for new line)'
 
 function sessionSummary(id: string, title: string, categoryId: number | null, lastActive: number) {
@@ -468,7 +478,7 @@ test('profile-bound admins use presets but cannot edit them (D1)', async ({ page
   await expect(categoryHeader(page, 'Mine')).toBeVisible()
 })
 
-test('relative preset workspaces get a translated error instead of a server 400 (F7)', async ({ page }) => {
+test('relative preset workspaces are saved as entered, like the New Chat panel', async ({ page }) => {
   const api = await setupPage(page)
   await page.goto('/#/hermes/chat')
   await page.getByTestId('session-new-category').click()
@@ -476,11 +486,85 @@ test('relative preset workspaces get a translated error instead of a server 400 
   await modal.getByTestId('category-preset-name').locator('input').fill('Relative')
   await modal.locator('.folder-path-input input').fill('projects/app')
   await modal.getByTestId('category-preset-save').click()
-  await expect(modal.getByTestId('category-preset-workspace-error'))
-    .toHaveText('Enter an absolute folder path, for example /home/me/project or C:\\work.')
+  await expect(modal).toBeHidden()
+  const create = api.requests.find(request => request.method === 'POST' && request.pathname === '/api/studio/session-categories')!
+  expect(JSON.parse(create.postData || '{}')).toEqual({ name: 'Relative', preset: { workspace: 'projects/app' }, unique: true })
+
+  await page.getByTestId('category-new-chat-row').first().click()
+  await expect(drawer(page).locator('.folder-path-input input')).toHaveValue('projects/app')
+  await expect(drawer(page).getByTestId('new-chat-workspace-warning')).toHaveCount(0)
+})
+
+test('a preset Base URL with credentials gets a translated error and is never sent', async ({ page }) => {
+  const api = await setupPage(page, [], [], ['claude-code'], { modelGroups: [...MODEL_GROUPS, GATEWAY_GROUP] })
+  await page.goto('/#/hermes/chat')
+  await page.getByTestId('session-new-category').click()
+  const modal = page.getByTestId('category-preset-modal')
+  await modal.getByTestId('category-preset-name').locator('input').fill('Gateway')
+  await chooseOption(page, modal.getByTestId('category-preset-agent'), /^Claude$/)
+  await chooseOption(page, modal.getByTestId('category-preset-provider'), /^Gateway$/)
+  const baseUrl = modal.getByTestId('category-preset-base-url').locator('input')
+  await baseUrl.fill('https://user:secret@gateway.example.test/v1')
+  await modal.getByTestId('category-preset-save').click()
+  await expect(modal.getByTestId('category-preset-base-url-error'))
+    .toHaveText('Remove the user name, password or key from the Base URL. Presets are shared and never store credentials.')
+  await baseUrl.fill('https://gateway.example.test/v1?api_key=sk-live')
+  await modal.getByTestId('category-preset-save').click()
+  await expect(modal.getByTestId('category-preset-base-url-error')).toBeVisible()
+  await snap(page, '09-set-preset-base-url-credentials')
   expect(api.requests.some(request => request.method === 'POST' && request.pathname === '/api/studio/session-categories')).toBe(false)
-  // No reasoning effort field any more (CL-016).
-  await expect(modal).not.toContainText('Reasoning effort')
+
+  await baseUrl.fill('https://gateway.example.test/v1')
+  await expect(modal.getByTestId('category-preset-base-url-error')).toHaveCount(0)
+  await modal.getByTestId('category-preset-save').click()
+  await expect(modal).toBeHidden()
+  const create = api.requests.find(request => request.method === 'POST' && request.pathname === '/api/studio/session-categories')!
+  expect(JSON.parse(create.postData || '{}').preset).toMatchObject({ agent: 'claude-code', provider: 'gateway', baseUrl: 'https://gateway.example.test/v1' })
+})
+
+test('a preset Base URL is never applied to another provider: stale provider or provider with its own base URL', async ({ page }) => {
+  await setupPage(page, [
+    {
+      id: 1,
+      name: 'Stale Gateway',
+      preset: {
+        agent: 'claude-code', agentMode: 'scoped', provider: 'removed-gateway', model: 'gw-model',
+        apiMode: 'chat_completions', baseUrl: 'https://old-gateway.example.test/v1',
+      },
+    },
+    {
+      id: 2,
+      name: 'Own URL',
+      preset: {
+        agent: 'claude-code', agentMode: 'scoped', provider: 'anthropic', model: 'claude-opus-5-5',
+        baseUrl: 'https://proxy.example.test/anthropic',
+      },
+    },
+  ], [], ['claude-code'], { modelGroups: [...MODEL_GROUPS, GATEWAY_GROUP] })
+  await page.goto('/#/hermes/chat')
+
+  // Stale provider: the drawer falls back to the default provider and does not carry the URL over.
+  await page.getByRole('button', { name: 'New Chat in Stale Gateway' }).first().click()
+  await expect(drawer(page)).toContainText('Provider “removed-gateway” in the preset is no longer available; using the default.')
+  await expect(drawer(page).getByTestId('new-chat-base-url-warning'))
+    .toHaveText('Base URL “https://old-gateway.example.test/v1” in the preset is not used with this provider; using the provider\'s own settings.')
+  await expect(drawer(page).getByTestId('new-chat-api-mode-warning'))
+    .toHaveText('API mode “chat_completions” in the preset is not used with this provider; using the default.')
+  await snap(page, '10-drawer-stale-provider-base-url')
+  const baseUrlField = drawerField(page, /^Base URL/)
+  if (await baseUrlField.count()) await expect(baseUrlField.locator('input')).toHaveValue('')
+  await drawer(page).getByRole('button', { name: 'Cancel', exact: true }).click()
+
+  // The preset provider now has its own base URL: warn instead of silently skipping.
+  await page.getByRole('button', { name: 'New Chat in Own URL' }).first().click()
+  await expect(drawerField(page, /^Models/)).toContainText('claude-opus-5-5')
+  await expect(drawer(page).getByTestId('new-chat-base-url-warning'))
+    .toHaveText('Base URL “https://proxy.example.test/anthropic” in the preset is not used with this provider; using the provider\'s own settings.')
+  await expect(drawerField(page, /^Base URL/)).toHaveCount(0)
+  await drawer(page).getByRole('button', { name: 'Create', exact: true }).click()
+  const run = await sendFirstMessage(page, 'hello own url')
+  expect(run).toMatchObject({ category_id: 2, coding_agent_id: 'claude-code', baseUrl: 'https://api.anthropic.test' })
+  expect(JSON.stringify(run)).not.toContain('proxy.example.test')
 })
 
 test('Cmd/Ctrl+N keeps today\'s behavior and never uses a preset (AC 8)', async ({ page }) => {
