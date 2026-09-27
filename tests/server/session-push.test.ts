@@ -59,6 +59,9 @@ describe('session push notifications', () => {
     expect(formatSessionPushContent('claude-code', 'clarify.requested', 'zh')).toBe(
       'Claude 有一条待回答消息，请到 Ekko Studio 回答',
     )
+    expect(formatSessionPushContent('cursor', 'run.completed', 'zh')).toBe(
+      'Cursor 有一条已完成消息，请到 Ekko Studio 查看',
+    )
   })
 
   it('does not send when the user has no active target', async () => {

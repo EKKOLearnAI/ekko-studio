@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { join } from 'path'
+import { join, resolve as resolvePath } from 'path'
 
 const HOME = '/tmp/hermes-resolve-home'
 
@@ -28,19 +28,19 @@ describe('resolveProfileFilePath', () => {
 
   it('resolves an ordinary relative path under the profile home', async () => {
     const resolve = await resolveProfileFilePath()
-    expect(resolve('skills/notes.md')).toBe(join(HOME, 'skills/notes.md'))
+    expect(resolve('skills/notes.md')).toBe(resolvePath(HOME, 'skills/notes.md'))
   })
 
   it('resolves under the requested profile rather than the active one', async () => {
     const resolve = await resolveProfileFilePath()
-    expect(resolve('config.yaml', 'work')).toBe(join(HOME, 'profiles/work/config.yaml'))
+    expect(resolve('config.yaml', 'work')).toBe(resolvePath(HOME, 'profiles/work/config.yaml'))
   })
 
   it('accepts names that begin with dots but are not traversal', async () => {
     const resolve = await resolveProfileFilePath()
-    expect(resolve('..hidden')).toBe(join(HOME, '..hidden'))
-    expect(resolve('...')).toBe(join(HOME, '...'))
-    expect(resolve('notes/..archive.md')).toBe(join(HOME, 'notes/..archive.md'))
+    expect(resolve('..hidden')).toBe(resolvePath(HOME, '..hidden'))
+    expect(resolve('...')).toBe(resolvePath(HOME, '...'))
+    expect(resolve('notes/..archive.md')).toBe(resolvePath(HOME, 'notes/..archive.md'))
   })
 
   it('rejects a parent-directory segment wherever it appears', async () => {

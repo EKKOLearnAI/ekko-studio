@@ -1793,3 +1793,13 @@ test.describe('group chat room deep links', () => {
     await expect(page.locator('.room-title-text', { hasText: 'Beta Room' })).toBeVisible()
   })
 })
+
+
+test('group-chat Agent picker follows the single-chat order', async ({ page }) => {
+  await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  await page.locator('.agent-avatar-rail-add').click()
+  const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await drawer.locator('.n-select').first().click()
+  await expect.poll(async () => (await page.locator('.n-base-select-option__content:visible').allTextContents())
+    .map(label => label.split(' · ')[0])).toEqual(['Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor'])
+})

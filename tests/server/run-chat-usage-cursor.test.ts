@@ -80,23 +80,42 @@ describe('cursor-aware chat usage', () => {
   })
 
   it('uses native Coding Agent usage without consulting messages or compression snapshots', async () => {
-    getRecordedUsageTotalsMock.mockReturnValue({ inputTokens: 100, outputTokens: 40 })
-    getUsageMock.mockReturnValue({ input_tokens: 70, output_tokens: 10 })
+    getRecordedUsageTotalsMock.mockReturnValue({ inputTokens: 100, outputTokens: 40, cacheReadTokens: 50, cacheWriteTokens: 5 })
+    getUsageMock.mockReturnValue({ input_tokens: 70, output_tokens: 10, model: 'native-model', cache_read_tokens: 20, cache_write_tokens: 3 })
     const { calcAndUpdateUsage } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
     const state: any = { messages: [], events: [], queue: [], isWorking: false }
 
-    const usage = await calcAndUpdateUsage('session-1', state, vi.fn(), {
+    const emit = vi.fn()
+    const usage = await calcAndUpdateUsage('session-1', state, emit, {
       nativeSource: 'coding_agent',
     })
 
     expect(usage).toEqual({
       inputTokens: 100,
       outputTokens: 40,
-      contextInputTokens: 70,
+      nativeUsageAvailable: true,
+      nativeModel: 'native-model',
+      cacheReadTokens: 50,
+      cacheWriteTokens: 5,
+      contextInputTokens: 93,
       contextOutputTokens: 10,
     })
+    expect(state).toMatchObject({ inputTokens: 100, outputTokens: 40, cacheReadTokens: 50, cacheWriteTokens: 5 })
+    expect(emit).toHaveBeenCalledWith('usage.updated', expect.objectContaining({
+      inputTokens: 100, outputTokens: 40, cacheReadTokens: 50, cacheWriteTokens: 5,
+    }))
     expect(getCompressionSnapshotMock).not.toHaveBeenCalled()
     expect(getSessionDetailMock).not.toHaveBeenCalled()
     expect(getSessionContextMessagesMock).not.toHaveBeenCalled()
+  })
+
+  it('does not emit fake zero usage when the native ledger has no row', async () => {
+    getRecordedUsageTotalsMock.mockReturnValue({ inputTokens: 0, outputTokens: 0 })
+    getUsageMock.mockReturnValue(undefined)
+    const { calcAndUpdateUsage } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    const emit = vi.fn()
+    const result = await calcAndUpdateUsage('session-1', { messages: [], events: [], queue: [], isWorking: false } as any, emit, { nativeSource: 'coding_agent' })
+    expect(result.nativeUsageAvailable).toBe(false)
+    expect(emit).not.toHaveBeenCalled()
   })
 })

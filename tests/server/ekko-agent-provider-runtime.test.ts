@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -61,7 +62,7 @@ describe('resolveEkkoProviderRuntimeConfig', () => {
       apiKey: 'profile-openai-key',
       apiMode: 'codex_responses',
     })
-    expect(mocks.safeReadFile).toHaveBeenCalledWith('/profiles/work/.env')
+    expect(mocks.safeReadFile).toHaveBeenCalledWith(join('/profiles/work', '.env'))
   })
 
   it('resolves custom provider credentials and protocol from profile config', async () => {

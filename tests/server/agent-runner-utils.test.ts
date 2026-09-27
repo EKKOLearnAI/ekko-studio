@@ -263,11 +263,13 @@ describe('coding agent completion errors', () => {
         content: [{ type: 'text', text: 'API Error: stream ended without terminal event' }],
       },
     })
-    writeFileSync(fixturePath, [
-      "const { spawn } = require('child_process')",
-      `spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => process.stdout.write(${JSON.stringify(`${nativeError}\n`)}), 75)`) }], { stdio: ['ignore', 1, 2] })`,
-      'process.exit(0)',
-    ].join('\n'))
+    writeFileSync(fixturePath, process.platform === 'win32'
+      ? `setTimeout(() => { process.stdout.write(${JSON.stringify(`${nativeError}\n`)}); process.exit(0) }, 75)\n`
+      : [
+          "const { spawn } = require('child_process')",
+          `spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => process.stdout.write(${JSON.stringify(`${nativeError}\n`)}), 75)`) }], { stdio: ['ignore', 1, 2] })`,
+          'process.exit(0)',
+        ].join('\n'))
 
     const manager = new CodingAgentRunManager()
     const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -1283,7 +1285,7 @@ describe('coding agent run state', () => {
     manager.shutdown()
   })
 
-  it('does not reset Codex context tokens when a usage refresh has no context estimate', async () => {
+  it('preserves Codex counters and context when a usage refresh has no native measurements', async () => {
     initAllHermesTables()
     const manager = new CodingAgentRunManager()
     const state: any = {
@@ -1292,6 +1294,8 @@ describe('coding agent run state', () => {
       events: [],
       queue: [],
       contextTokens: 15_000,
+      inputTokens: 12_000,
+      outputTokens: 3_000,
     }
     const emitted: Array<{ event: string; payload: any }> = []
     ;(manager as any).emitToChat = (_sessionId: string, event: string, payload: any) => {
@@ -1317,8 +1321,8 @@ describe('coding agent run state', () => {
 
     await (manager as any).refreshCodingAgentUsage(run)
 
-    expect(state.contextTokens).toBe(15_000)
-    expect(emitted).toContainEqual(expect.objectContaining({
+    expect(state).toMatchObject({ contextTokens: 15_000, inputTokens: 12_000, outputTokens: 3_000 })
+    expect(emitted).not.toContainEqual(expect.objectContaining({
       event: 'usage.updated',
       payload: expect.objectContaining({ inputTokens: 0, outputTokens: 0 }),
     }))

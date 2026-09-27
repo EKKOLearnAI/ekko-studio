@@ -76,8 +76,11 @@ describe('JEV settings', () => {
     expect(JSON.stringify(await getJevSettings('research'))).not.toContain('private-key')
     expect(await getJevSettings('default')).toMatchObject({ model: 'jev-latest', hasApiKey: false })
     const [file] = await readdir(directory)
-    expect((await stat(join(directory, file))).mode & 0o777).toBe(0o600)
-    expect((await stat(directory)).mode & 0o777).toBe(0o700)
+    // Windows stat mode bits do not round-trip chmod 0o600/0o700.
+    if (process.platform !== 'win32') {
+      expect((await stat(join(directory, file))).mode & 0o777).toBe(0o600)
+      expect((await stat(directory)).mode & 0o777).toBe(0o700)
+    }
   })
 
   it('persists the memory switch per Profile, maps it to Ekko, and resets it on deletion', async () => {

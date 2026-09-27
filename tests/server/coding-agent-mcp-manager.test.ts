@@ -76,7 +76,7 @@ afterEach(() => {
 })
 
 describe('coding Agent MCP manager', () => {
-  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] as const)('gives %s a shared plan/clarification MCP with enough time for a user answer', async agent => {
+  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'] as const)('gives %s a shared plan/clarification MCP with enough time for a user answer', async agent => {
     makeHome()
     const { servers } = await listCodingAgentMcpServers(agent)
     expect(servers.some(server => server.name === 'ekko-studio-plan')).toBe(false)
@@ -142,6 +142,43 @@ describe('coding Agent MCP manager', () => {
 
     const persisted = JSON.parse(readFileSync(path, 'utf-8'))
     expect(persisted.enabledMcpjsonServers).toEqual(['docs'])
+    expect(persisted.mcpServers).toEqual({
+      search: { command: 'node', args: ['search.mjs'], enabled: true },
+    })
+    expect(persisted.mcpServers['ekko-studio-api']).toBeUndefined()
+  })
+
+  it('manages Cursor JSON MCP at ~/.cursor/mcp.json without persisting Studio-managed entries', async () => {
+    const home = makeHome()
+    const path = join(home, '.cursor', 'mcp.json')
+    mkdirSync(join(home, '.cursor'), { recursive: true })
+    writeFileSync(path, `${JSON.stringify({
+      mcpServers: {
+        docs: { url: 'https://example.com/mcp', enabled: true },
+      },
+    }, null, 2)}\n`)
+
+    const initial = await listCodingAgentMcpServers('cursor')
+    expect(initial.servers.map(server => server.name)).toEqual(expect.arrayContaining([
+      'docs',
+      'ekko-studio-api',
+      'ekko-studio-browser',
+      'ekko-studio-devices',
+      'ekko-studio-use',
+      'ekko-studio-interaction',
+    ]))
+    expect(initial.servers.find(server => server.name === 'ekko-studio-api')).toMatchObject({
+      managed: true,
+    })
+
+    await upsertCodingAgentMcpServer('cursor', 'search', {
+      command: 'node',
+      args: ['search.mjs'],
+      enabled: true,
+    })
+    await removeCodingAgentMcpServer('cursor', 'docs')
+
+    const persisted = JSON.parse(readFileSync(path, 'utf-8'))
     expect(persisted.mcpServers).toEqual({
       search: { command: 'node', args: ['search.mjs'], enabled: true },
     })

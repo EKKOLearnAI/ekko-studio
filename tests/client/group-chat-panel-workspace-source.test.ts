@@ -1,19 +1,33 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { GROUP_AGENT_OPTIONS } from '../../packages/client/src/utils/agent-options'
 
 describe('GroupChatPanel workspace save handling', () => {
   it('offers Pi, Grok, and OpenCode in ordinary and paired group chat and filters each provider target', () => {
     const panel = readFileSync('packages/client/src/components/hermes/group-chat/GroupChatPanel.vue', 'utf8')
     const linkView = readFileSync('packages/client/src/views/hermes/GroupChatLinkView.vue', 'utf8')
 
+    expect(GROUP_AGENT_OPTIONS).toEqual(expect.arrayContaining([
+      { label: 'Pi', value: 'pi' },
+      { label: 'Grok', value: 'grok' },
+      { label: 'OpenCode', value: 'opencode' },
+      { label: 'Cursor', value: 'cursor' },
+    ]))
     for (const source of [panel, linkView]) {
-      expect(source).toContain("{ label: 'Pi', value: 'pi' }")
+      expect(source).toContain('const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS')
       expect(source).toMatch(/selectedAgentType\.value === 'pi'[\s\S]*?\\? 'pi'/)
-      expect(source).toContain("{ label: 'Grok', value: 'grok' }")
       expect(source).toContain("selectedAgentType.value === 'grok'")
-      expect(source).toContain("{ label: 'OpenCode', value: 'opencode' }")
       expect(source).toContain("selectedAgentType.value === 'opencode'")
+      expect(source).toContain("selectedAgentType.value === 'cursor'")
     }
+    expect(panel).toContain('priorAgentMode.value = storedPriorAgentMode(agent.priorAgentMode)')
+    expect(panel).toContain('priorAgentMode: priorAgentMode.value,')
+    expect(panel).toContain('submittedCodingAgentSelection({')
+    expect(linkView).toContain('priorAgentMode.value = storedPriorAgentMode(agent.priorAgentMode)')
+    expect(linkView).toContain('priorAgentMode: priorAgentMode.value,')
+    expect(linkView).toContain('submittedCodingAgentSelection({')
+    const selection = readFileSync('packages/client/src/utils/coding-agent-mode.ts', 'utf8')
+    expect(selection).toContain("priorAgentMode: input.priorAgentMode || ''")
   })
 
   it('keeps free-text input available alongside clarification choices in single and group chat', () => {
@@ -528,9 +542,14 @@ describe('GroupChatPanel workspace save handling', () => {
     expect(source).toContain("const selectedAgentModel = ref('')")
     expect(source).toContain("const selectedAgentApiMode = ref<CodingAgentApiMode>('codex_responses')")
     expect(source).toContain("const selectedAgentReasoningEffort = ref('')")
-    expect(source).toContain("agentMode: usesGlobalAgentMode.value ? 'global' : 'scoped'")
-    expect(source).toContain("provider: usesGlobalAgentMode.value ? '' : selectedAgentProvider.value")
-    expect(source).toContain("model: usesGlobalAgentMode.value ? '' : selectedAgentModel.value")
+    expect(source).toContain('submittedCodingAgentSelection({')
+    expect(source).toContain('usesGlobal: usesGlobalAgentMode.value')
+    expect(linkView).toContain('submittedCodingAgentSelection({')
+    expect(linkView).toContain('usesGlobal: usesGlobalAgentMode.value')
+    const selection = readFileSync('packages/client/src/utils/coding-agent-mode.ts', 'utf8')
+    expect(selection).toContain("agentMode: input.usesGlobal ? 'global' : 'scoped'")
+    expect(selection).toContain("provider: input.usesGlobal ? '' : input.provider")
+    expect(selection).toContain("model: input.usesGlobal ? '' : input.model")
     expect(source).toContain("apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value")
     expect(source).toContain("reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value")
     for (const modelSource of [source, linkView]) {
@@ -542,17 +561,19 @@ describe('GroupChatPanel workspace save handling', () => {
     expect(source).toContain('normalizeCodingAgentApiMode(')
     expect(source).toContain("v-if=\"selectedAgentType !== 'hermes' && !usesGlobalAgentMode\"")
     for (const modelSource of [source, linkView]) {
-      expect(modelSource).toContain("const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(selectedAgentType.value))")
+      expect(modelSource).toContain("const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(selectedAgentType.value))")
       expect(modelSource).toContain("v-if=\"!usesGlobalAgentMode\"")
     }
     expect(source).toContain('@update:value="handleAgentModeChange"')
     expect(source).toContain('selectedAgentPresetId.value = null')
     expect(linkView).toContain('v-model:value="selectedAgentMode"')
     expect(source).toContain('agent: selectedAgentType.value')
-    expect(source).toContain("{ label: 'Hermes', value: 'hermes' }")
-    expect(source).toContain("{ label: 'Claude', value: 'claude' }")
-    expect(source).toContain("{ label: 'Codex', value: 'codex' }")
-    expect(source).toContain("{ label: 'Ekko', value: 'ekko' }")
+    expect(GROUP_AGENT_OPTIONS).toEqual(expect.arrayContaining([
+      { label: 'Hermes', value: 'hermes' },
+      { label: 'Claude', value: 'claude' },
+      { label: 'Codex', value: 'codex' },
+      { label: 'Ekko', value: 'ekko' },
+    ]))
     expect(source).toContain('v-model:value="agentName"')
     expect(source).toContain('v-model:value="agentDescription"')
     expect(source).toContain('avatar: agentAvatar.value ? JSON.stringify(agentAvatar.value)')

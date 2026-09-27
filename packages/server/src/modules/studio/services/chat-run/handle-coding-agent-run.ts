@@ -91,7 +91,7 @@ export async function handleCodingAgentRun(
   }
 
   let runId = codingAgentRunManager.runIdForSession(sessionId)
-  const mode = data.mode === 'global' ? 'global' : 'scoped'
+  const mode = agentId === 'cursor' || data.mode === 'global' ? 'global' : 'scoped'
   const storedSession = getSession(sessionId)
   if (storedSession && !storedSession.user_id && socketUser?.id != null) {
     updateSession(sessionId, { user_id: String(socketUser.id) })
@@ -167,7 +167,7 @@ export async function handleCodingAgentRun(
   try {
     const codingInput = convertContentBlocksForCodingAgent(data.input)
     if (!data.studio_mcp_token_file) await writeModelRunProfileToken(socketUser, profile)
-    const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || (agentId === 'opencode' || agentId === 'dsh')
+    const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || agentId === 'cursor' || (agentId === 'opencode' || agentId === 'dsh')
     const runPrompt = [
       groupSystemPrompt
         ? [groupSystemPrompt, studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')

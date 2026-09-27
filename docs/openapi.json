@@ -15231,6 +15231,9 @@
                   "name": {
                     "type": "string"
                   },
+                  "priorAgentMode": {
+                    "type": "string"
+                  },
                   "profile": {
                     "type": "string"
                   },

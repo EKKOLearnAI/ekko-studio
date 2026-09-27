@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
-for (const agent of ['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude-code']) {
+for (const agent of ['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude-code', 'cursor']) {
   test(`${agent} displays shared skills without editing or deletion`, async ({ page }) => {
     await authenticate(page, TEST_ACCESS_KEY, 'research')
     const api = await mockHermesApi(page)
@@ -13,7 +13,7 @@ for (const agent of ['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude-code']) {
       if (url.pathname === '/api/hermes/skills') {
         return route.fulfill({ json: { categories: [{ name: 'misc', skills: [
           { name: 'shared', description: 'Shared skill', source: 'local', readonly: true },
-          ...(agent === 'dsh' ? [{ name: 'private', description: 'Private skill', source: 'local', readonly: false }] : []),
+          ...(agent === 'dsh' || agent === 'cursor' ? [{ name: 'private', description: 'Private skill', source: 'local', readonly: false }] : []),
         ] }], archived: [] } })
       }
       return route.fulfill({ json: url.pathname.endsWith('/files') ? { files: [] } : { content: '# Skill instructions' } })
@@ -25,7 +25,7 @@ for (const agent of ['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude-code']) {
     await expect(page.locator('.detail-name')).toHaveText('shared')
     await expect(shared.locator('.skill-action-btn')).toHaveCount(0)
     await expect(page.locator('.detail-action')).toHaveCount(0)
-    if (agent === 'dsh') {
+    if (agent === 'dsh' || agent === 'cursor') {
       const privateSkill = page.locator('.skill-item').filter({ hasText: 'private' })
       await privateSkill.click()
       await expect(page.locator('.detail-name')).toHaveText('private')

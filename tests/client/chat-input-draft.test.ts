@@ -314,22 +314,34 @@ describe('ChatInput draft persistence', () => {
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).style.height).not.toBe('180px')
   })
 
-  it('shows coding-agent context usage and keeps the full display for Ekko and Hermes', async () => {
+  it('shows only cumulative native usage including caches while retaining Hermes and Ekko context', async () => {
     const wrapper = mountForSession('session-codex', {
       source: 'coding_agent',
       agent: 'codex',
       codingAgentId: 'codex',
       inputTokens: 1200,
       outputTokens: 800,
+      cacheReadTokens: 3000,
+      cacheWriteTokens: 100,
       contextTokens: 2000,
     })
     await nextTick()
 
-    expect(wrapper.get('.context-info').text()).toBe('chat.contextUsed 2.0k')
+    expect(wrapper.get('.context-info').text()).toBe('chat.sessionUsage 5.1k')
     expect(wrapper.find('.context-limit-editable').exists()).toBe(false)
     expect(wrapper.find('.context-bar').exists()).toBe(false)
 
     const chatStore = useChatStore()
+    Object.assign(chatStore.activeSession!, { agent: 'cursor', codingAgentId: 'cursor' })
+    await nextTick()
+    expect(wrapper.get('.context-info').text()).toBe('chat.sessionUsage 5.1k')
+    Object.assign(chatStore.activeSession!, { inputTokens: 24_003, outputTokens: 474, cacheReadTokens: 20_736, cacheWriteTokens: 0, contextTokens: 0 })
+    await nextTick()
+    expect(wrapper.get('.context-info').text()).toBe('chat.sessionUsage 45.2k')
+    Object.assign(chatStore.activeSession!, { contextTokens: 24_477 })
+    await nextTick()
+    expect(wrapper.get('.context-info').text()).toBe('chat.sessionUsage 45.2k')
+    Object.assign(chatStore.activeSession!, { inputTokens: 1200, outputTokens: 800, contextTokens: 2000 })
     Object.assign(chatStore.activeSession!, { agent: 'ekko-agent', codingAgentId: 'ekko-agent' })
     await flushPromises()
 
@@ -344,6 +356,22 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.get('.context-info').text()).toMatch(/2\.0k\s+\//)
     expect(wrapper.get('.context-limit-editable').text()).toBe('256.0k')
     expect(wrapper.find('.context-bar').exists()).toBe(true)
+  })
+
+  it.each(['cursor', 'codex', 'claude-code', 'pi', 'grok', 'opencode', 'dsh'])('shows only this session cumulative usage for %s', async agent => {
+    const wrapper = mountForSession('session-usage', {
+      source: 'coding_agent', agent, codingAgentId: agent as any,
+      inputTokens: 1_800_000_000, outputTokens: 1_200_000, cacheReadTokens: 56_000_000,
+      cacheWriteTokens: 0, contextTokens: 50_000,
+    })
+    await nextTick()
+    expect(wrapper.get('.context-info').text()).toBe('chat.sessionUsage 1857.2M')
+    expect(wrapper.find('.context-limit-editable').exists()).toBe(false)
+    expect(wrapper.find('.context-bar').exists()).toBe(false)
+    expect(wrapper.get('.context-usage-row').text()).not.toContain('chat.contextUsed')
+    useChatStore().activeSession!.contextTokens = 0
+    await nextTick()
+    expect(wrapper.get('.context-info').text()).toBe('chat.sessionUsage 1857.2M')
   })
 
   it('shows reasoning effort selector for coding-agent sessions', async () => {
@@ -408,15 +436,16 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.get('.n-slider-stub').classes()).not.toContain('reasoning-effort-slider--max')
   })
 
-  it.each(['opencode', 'codex', 'claude', 'pi', 'grok'] as const)('shows the supported commands for %s', async agent => {
+  it.each(['opencode', 'cursor', 'codex', 'claude', 'pi', 'grok'] as const)('shows the supported commands for %s', async agent => {
     const wrapper = mountForSession(`session-commands-${agent}`, { source: 'coding_agent', agent })
     await wrapper.get('textarea').setValue('/')
     await nextTick()
     const commands = wrapper.findAll('.slash-command-item').map(item => item.text())
-    for (const name of ['context', 'usage', 'status']) {
+    for (const name of ['usage', 'status']) {
       expect(commands.some(text => text.includes(`/${name}`))).toBe(true)
     }
-    expect(commands.some(text => text.includes('/compact'))).toBe(agent !== 'opencode')
+    expect(commands.some(text => text.includes('/context'))).toBe(agent !== 'cursor')
+    expect(commands.some(text => text.includes('/compact'))).toBe(agent !== 'opencode' && agent !== 'cursor')
     wrapper.unmount()
   })
 

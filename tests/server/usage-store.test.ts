@@ -72,6 +72,13 @@ describe('Usage Store (JSON fallback)', () => {
     expect(result).toBeUndefined()
   })
 
+  it('filters native command metadata by the requested usage source', () => {
+    mockJsonGet.mockReturnValue({ source: 'hermes', input_tokens: 200, output_tokens: 80, model: 'hermes-model' })
+    expect(getUsage('session-1', 'coding_agent')).toBeUndefined()
+    mockJsonGet.mockReturnValue({ source: 'coding_agent', input_tokens: 0, output_tokens: 0, model: 'native-model' })
+    expect(getUsage('session-1', 'coding_agent')).toMatchObject({ input_tokens: 0, output_tokens: 0, model: 'native-model' })
+  })
+
   it('getUsageBatch returns empty map for empty input', () => {
     const result = getUsageBatch([])
     expect(result).toEqual({})

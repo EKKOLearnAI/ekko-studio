@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '../../packages/server/src/bootstrap/coding-agent-adapters'
 import { CodingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
-import { getRecordedUsageTotals, getUsage, getLocalUsageStats } from '../../packages/server/src/modules/studio/repositories/usage-store'
+import { getRecordedUsageTotals, getUsage, getLocalUsageStats, updateUsage } from '../../packages/server/src/modules/studio/repositories/usage-store'
+import { createSession, getSession, getSessionDetail, getSessionDetailPaginated, listSessions, searchSessions } from '../../packages/server/src/modules/studio/repositories/session-store'
 import fixtures from '../fixtures/coding-agents/global-native-usage.json'
 
 vi.mock('child_process', async importOriginal => ({
@@ -57,6 +58,75 @@ describe('global native usage accounting', () => {
     child.emit('exit', code)
     child.emit('close', code)
   }
+
+  it.each(['cursor', 'codex', 'pi', 'claude-code', 'claude', 'claude_code', 'grok', 'opencode', 'dsh'])('hydrates %s session summaries from cumulative native usage across turns and models', agent => {
+    // Workflow sessions use the same native ledger, despite having a different source.
+    createSession({ id: sessionId, profile: sessionId, source: 'workflow', agent, title: 'Ledger regression' })
+    expect(getSession(sessionId)?.input_tokens).toBe(0)
+    updateUsage(sessionId, { runId: 'one', source: 'coding_agent', agent, inputTokens: 24_003, outputTokens: 474, cacheReadTokens: 20_736, model: 'first' })
+    updateUsage(sessionId, { runId: 'two', source: 'coding_agent', agent, inputTokens: 100, outputTokens: 20, cacheReadTokens: 50, cacheWriteTokens: 5, model: 'second' })
+    // A different accounting source must not inflate native usage.
+    updateUsage(sessionId, { source: 'hermes', inputTokens: 9999, outputTokens: 9999 })
+    const expected = { input_tokens: 24_103, output_tokens: 494, cache_read_tokens: 20_786, cache_write_tokens: 5 }
+    expect(getSession(sessionId)).toMatchObject(expected)
+    expect(getSessionDetail(sessionId)).toMatchObject(expected)
+    expect(getSessionDetailPaginated(sessionId)?.session).toMatchObject(expected)
+    expect(listSessions(sessionId)).toEqual([expect.objectContaining(expected)])
+    expect(searchSessions(sessionId, '')).toEqual([expect.objectContaining(expected)])
+    expect(searchSessions(sessionId, 'Ledger')).toEqual([expect.objectContaining(expected)])
+    const otherId = `${sessionId}-other`
+    createSession({ id: otherId, profile: sessionId, source: 'coding_agent', agent })
+    updateUsage(otherId, { runId: 'one', source: 'coding_agent', agent, inputTokens: 900_000, outputTokens: 10_000, cacheReadTokens: 500_000, model: 'first' })
+    // Batch reads must group by session, even for the same agent, profile and model.
+    const summaries = listSessions(sessionId)
+    expect(summaries.find(row => row.id === sessionId)).toMatchObject(expected)
+    expect(summaries.find(row => row.id === otherId)).toMatchObject({ input_tokens: 900_000, output_tokens: 10_000, cache_read_tokens: 500_000 })
+    // Hermes still owns its existing summary fields.
+    const hermesId = `${sessionId}-hermes`
+    createSession({ id: hermesId, profile: sessionId, source: 'cli', agent: 'hermes' })
+    updateUsage(hermesId, { source: 'hermes', inputTokens: 123, outputTokens: 45 })
+    expect(getSession(hermesId)?.input_tokens).toBe(0)
+  })
+
+  it('preserves Cursor deltas, records native model/cache usage once, and keeps context unknown', async () => {
+    start('cursor')
+    emit({ type: 'system', subtype: 'init', session_id: 'cursor-native', model: 'Cursor native model' })
+    const text = 'abcdefghijklmnop'
+    for (const timestamp_ms of [1, 2]) {
+      emit({ type: 'assistant', timestamp_ms, message: { content: [{ type: 'text', text }] } })
+    }
+    // Buffered and final flushes must not replay the already appended deltas.
+    emit({ type: 'assistant', timestamp_ms: 3, model_call_id: 'call', message: { content: [{ type: 'text', text: text + text }] } })
+    emit({ type: 'assistant', message: { content: [{ type: 'text', text: text + text }] } })
+    const result = { type: 'result', subtype: 'success', session_id: 'cursor-native', result: text + text,
+      usage: { inputTokens: 123, outputTokens: 45, cacheReadTokens: 67, cacheWriteTokens: 8 } }
+    emit(result)
+    emit(result)
+    close()
+    await vi.waitFor(() => expect(getUsage(sessionId)?.model).toBe('Cursor native model'))
+    expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: 123, outputTokens: 45, cacheReadTokens: 67, cacheWriteTokens: 8 })
+    expect(getSession(sessionId)).toMatchObject({ input_tokens: 123, output_tokens: 45, cache_read_tokens: 67, cache_write_tokens: 8 })
+    expect(getSessionDetail(sessionId)?.messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe(text + text)
+    expect(manager.getRunInfo(sessionId)?.model).toBe('Cursor native model')
+    expect(emitted.mock.calls.some(([, event, payload]) => event === 'usage.updated' && payload.contextTokens != null)).toBe(false)
+  })
+
+  it('does not record made-up zero usage for older Cursor results without tokens', async () => {
+    start('cursor')
+    emit({ type: 'result', subtype: 'success', session_id: 'cursor-old', result: '', duration_ms: 10 })
+    close()
+    await new Promise(resolve => setImmediate(resolve))
+    expect(getUsage(sessionId)).toBeUndefined()
+  })
+
+  it('identifies Cursor when its executable is missing', async () => {
+    start('cursor')
+    child.emit('error', Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    close(1)
+    await vi.waitFor(() => expect(emitted).toHaveBeenCalledWith(sessionId, 'run.failed', expect.objectContaining({
+      error: expect.stringContaining('Cursor is not installed'),
+    })))
+  })
 
   it.each(['codex', 'pi', 'claude-code', 'grok'] as const)('records captured %s events with model attribution', async agentId => {
     start(agentId)

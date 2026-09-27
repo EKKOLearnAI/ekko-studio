@@ -67,6 +67,15 @@ const isAgentError = computed(() => props.message.role === "assistant" && props.
 const effectiveHeadingIdPrefix = computed(() => props.headingIdPrefix || `msg-${props.message.id}`);
 const isCommandMessage = computed(() => props.message.role === "command" || props.message.systemType === "command");
 const isCommandError = computed(() => props.message.role === "command" && props.message.systemType === "error");
+const commandResultContent = computed(() => {
+  const data = props.message.commandData || {};
+  const key = String(data.messageKey || "");
+  if (!["nativeUsage", "nativeUsageUnknown", "nativeContextUnknown", "nativeContextEstimate", "nativeCompactUnavailable"].includes(key)) {
+    return props.message.content;
+  }
+  const params = Object.fromEntries(Object.entries(data).filter(([, value]) => typeof value === "string" || typeof value === "number"));
+  return t(`codingAgents.${key}`, params);
+});
 const isStatusCommand = computed(() =>
   isCommandMessage.value
   && props.message.commandAction === "status"
@@ -1252,7 +1261,7 @@ onBeforeUnmount(() => {
             </div>
             <div v-else-if="isCommandMessage && message.content" class="command-result">
               <span class="command-result-icon">/</span>
-              <MarkdownRenderer :content="message.content" />
+              <MarkdownRenderer :content="commandResultContent" />
             </div>
 
             <span v-if="message.isStreaming && !message.content" class="streaming-dots">
