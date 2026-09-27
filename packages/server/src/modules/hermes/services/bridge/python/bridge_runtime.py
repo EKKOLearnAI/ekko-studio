@@ -498,6 +498,15 @@ def _ensure_agent_imports() -> None:
         )
     os.environ.setdefault("HERMES_HOME", str(_hermes_home()))
     os.environ.setdefault("HERMES_AGENT_BRIDGE_BASE_HOME", str(_hermes_home()))
+    # Updated Hermes installs may re-exec into a new Python interpreter here.
+    # Finish that bootstrap before either bridge binds its socket/reports ready;
+    # deferring it to the first run_agent import drops the in-flight chat socket.
+    try:
+        importlib.import_module("hermes_bootstrap")
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_bootstrap":
+            raise
+        # Older Hermes runtimes do not have a bootstrap module.
     _apply_openrouter_attribution_override()
     from bridge_mcp import install_studio_mcp_env
 
