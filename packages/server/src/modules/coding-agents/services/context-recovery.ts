@@ -44,6 +44,10 @@ export function nativeContextRecoveryMessage(agentName: string): string {
   return `${agentName} compaction could not fit inside the model context window. Studio kept the visible conversation and workspace, then detached the oversized native session. Send the next message to continue in a fresh ${agentName} context.`
 }
 
+export function nativeTurnContextRecoveryMessage(agentName: string): string {
+  return `${agentName} exceeded the model context window. Studio kept the visible conversation and workspace, then detached the oversized native session. Send the next message to continue in a fresh ${agentName} context.`
+}
+
 function errorText(error: unknown): string {
   if (error instanceof Error) {
     const cause = 'cause' in error ? error.cause : undefined

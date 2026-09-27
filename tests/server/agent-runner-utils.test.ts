@@ -912,6 +912,71 @@ describe('coding agent run state', () => {
     manager.shutdown()
   })
 
+  it('keeps a native Codex session when a final buffered context error exits zero', async () => {
+    initAllHermesTables()
+    const manager = new CodingAgentRunManager()
+    const emitted = vi.fn()
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const sessionId = `chat-codex-final-buffer-retry-${suffix}`
+    const nativeSessionId = `native-${suffix}`
+    createSession({
+      id: sessionId,
+      profile: 'default',
+      source: 'coding_agent',
+      agent: 'codex',
+      agent_session_id: `agent-${suffix}`,
+      agent_native_session_id: nativeSessionId,
+      model: 'test-model',
+      provider: 'test-provider',
+      api_mode: 'chat_completions',
+      reasoning_effort: '',
+      agent_preset: '',
+      title: '',
+      workspace: process.cwd(),
+    })
+    ;(manager as any).emitToChat = emitted
+    ;(manager as any).refreshCodingAgentUsage = async () => {}
+    manager.start({
+      agentSessionId: `agent-${suffix}`,
+      agentId: 'codex',
+      mode: 'scoped',
+      profile: 'default',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiMode: 'chat_completions',
+      sessionId,
+      command: 'codex',
+      args: [],
+      shellCommand: 'codex',
+      workspaceDir: process.cwd(),
+      agentNativeSessionId: nativeSessionId,
+      nativeResume: true,
+      state: { messages: [], isWorking: true, events: [], queue: [] } as any,
+    })
+    const run = (manager as any).runs.get(`agent-${suffix}`)
+    run.currentChild = { exitCode: 0, signalCode: null, killed: false }
+
+    ;(manager as any).handleCodexExecLine(run, JSON.stringify({
+      type: 'error',
+      message: 'context_length_exceeded: retry recovered before process exit',
+    }))
+    ;(manager as any).appendCodexFinalText(run, 'recovered final answer')
+    run.currentChild = undefined
+    ;(manager as any).finishCodexExecTurn(run, 0)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(getSession(sessionId)?.agent_native_session_id).toBe(nativeSessionId)
+    expect(run.launch.agentNativeSessionId).toBe(nativeSessionId)
+    expect(run.disposeAfterTurn).not.toBe(true)
+    expect(emitted).toHaveBeenCalledWith(sessionId, 'run.completed', expect.objectContaining({
+      output: 'recovered final answer',
+    }))
+    expect(emitted).not.toHaveBeenCalledWith(sessionId, 'session.command', expect.objectContaining({
+      resetNativeThread: true,
+    }))
+    manager.shutdown()
+  })
+
   it('reports a provisional native Codex error when the child exits non-zero', async () => {
     initAllHermesTables()
     const manager = new CodingAgentRunManager()
@@ -951,6 +1016,70 @@ describe('coding agent run state', () => {
     }))
     expect(emitted).not.toHaveBeenCalledWith('chat-session-codex-native-error-exit', 'run.completed', expect.anything())
     expect(emitted.mock.calls.filter(([, event]) => event === 'run.failed')).toHaveLength(1)
+    manager.shutdown()
+  })
+
+  it('detaches an oversized Codex native session after a normal turn overflows', async () => {
+    initAllHermesTables()
+    const manager = new CodingAgentRunManager()
+    const emitted = vi.fn()
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const sessionId = `chat-codex-turn-overflow-${suffix}`
+    const nativeSessionId = `native-${suffix}`
+    createSession({
+      id: sessionId,
+      profile: 'default',
+      source: 'coding_agent',
+      agent: 'codex',
+      agent_session_id: `agent-${suffix}`,
+      agent_native_session_id: nativeSessionId,
+      model: 'test-model',
+      provider: 'test-provider',
+      api_mode: 'chat_completions',
+      reasoning_effort: '',
+      agent_preset: '',
+      title: '',
+      workspace: process.cwd(),
+    })
+    ;(manager as any).emitToChat = emitted
+    ;(manager as any).refreshCodingAgentUsage = async () => {}
+    manager.start({
+      agentSessionId: `agent-${suffix}`,
+      agentId: 'codex',
+      mode: 'scoped',
+      profile: 'default',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiMode: 'chat_completions',
+      sessionId,
+      command: 'codex',
+      args: [],
+      shellCommand: 'codex',
+      workspaceDir: process.cwd(),
+      agentNativeSessionId: nativeSessionId,
+      nativeResume: true,
+      state: { messages: [], isWorking: true, events: [], queue: [] } as any,
+    })
+    const run = (manager as any).runs.get(`agent-${suffix}`)
+    run.currentChild = undefined
+    run.codexPendingError = 'context_length_exceeded: Your input exceeds the context window of this model.'
+
+    ;(manager as any).finishCodexExecTurn(run, 1)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(getSession(sessionId)?.agent_native_session_id).toBe('')
+    expect(run.launch.agentNativeSessionId).toBe('')
+    expect(run.nativeResumeReady).toBe(false)
+    expect(run.disposeAfterTurn).toBe(true)
+    expect(emitted).toHaveBeenCalledWith(sessionId, 'session.command', expect.objectContaining({
+      action: 'recover',
+      ok: true,
+      resetNativeThread: true,
+      message: expect.stringContaining('fresh Codex context'),
+    }))
+    expect(emitted).toHaveBeenCalledWith(sessionId, 'run.failed', expect.objectContaining({
+      error: expect.stringContaining('context_length_exceeded'),
+    }))
     manager.shutdown()
   })
 
