@@ -25,6 +25,7 @@ describe('single chat Agent avatars', () => {
     ['DeepSeek Harness', { codingAgentId: 'dsh' }, '/coding-agents/deepseek.svg'],
     ['Pi', { codingAgentId: 'pi' }, '/coding-agents/pi.svg'],
     ['Grok', { codingAgentId: 'grok' }, '/coding-agents/grok.svg'],
+    ['Cursor', { codingAgentId: 'cursor' }, '/coding-agents/cursor.svg'],
     ['OpenCode', { codingAgentId: 'opencode' }, '/coding-agents/opencode.png'],
   ])('maps session identity to the $label avatar', (label, session, src) => {
     expect(chatSessionAgentAvatar(session)).toEqual({ label, src })

@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -41,14 +42,15 @@ describe('SafeFileStore backup fallback', () => {
     const { SafeFileStore } = await import('../../packages/server/src/modules/studio/public/safe-file-store')
     const store = new SafeFileStore()
 
+    const target = resolve('/tmp/config.yaml')
     await store.writeText('/tmp/config.yaml', 'model:\n  default: new\n', { backup: true })
 
     expect(mockCopyFile).toHaveBeenCalledTimes(2)
-    expect(mockCopyFile).toHaveBeenNthCalledWith(1, '/tmp/config.yaml', '/tmp/config.yaml.bak')
-    expect(mockCopyFile.mock.calls[1][0]).toBe('/tmp/config.yaml')
-    expect(mockCopyFile.mock.calls[1][1]).toMatch(/^\/tmp\/config\.yaml\.bak\.\d+\./)
-    expect(mockWriteFile).toHaveBeenCalledWith(expect.stringContaining('/tmp/config.yaml.tmp.'), 'model:\n  default: new\n', 'utf-8')
-    expect(mockRename).toHaveBeenCalledWith(expect.stringContaining('/tmp/config.yaml.tmp.'), '/tmp/config.yaml')
+    expect(mockCopyFile).toHaveBeenNthCalledWith(1, target, `${target}.bak`)
+    expect(mockCopyFile.mock.calls[1][0]).toBe(target)
+    expect(mockCopyFile.mock.calls[1][1]).toMatch(new RegExp(`^${target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.bak\\.\\d+\\.`))
+    expect(mockWriteFile).toHaveBeenCalledWith(expect.stringContaining(`${target}.tmp.`), 'model:\n  default: new\n', 'utf-8')
+    expect(mockRename).toHaveBeenCalledWith(expect.stringContaining(`${target}.tmp.`), target)
   })
 
   it('preserves explicit backup path failures', async () => {

@@ -173,14 +173,14 @@ export function getRecordedUsageTotals(sessionId: string, source: string): {
   }
 }
 
-export function getUsage(sessionId: string): UsageRecord | undefined {
+export function getUsage(sessionId: string, source?: string): UsageRecord | undefined {
   if (isSqliteAvailable()) {
     return getDb()!.prepare(
-      `SELECT session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, model, profile, created_at FROM ${TABLE} WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
-    ).get(sessionId) as UsageRecord | undefined
+      `SELECT session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, model, profile, created_at FROM ${TABLE} WHERE session_id = ?${source ? ' AND source = ?' : ''} ORDER BY id DESC LIMIT 1`,
+    ).get(...(source ? [sessionId, source] : [sessionId])) as UsageRecord | undefined
   }
   const row = jsonGet(TABLE, sessionId)
-  if (!row) return undefined
+  if (!row || (source && row.source !== source)) return undefined
   return {
     input_tokens: row.input_tokens ?? 0,
     output_tokens: row.output_tokens ?? 0,
@@ -191,6 +191,21 @@ export function getUsage(sessionId: string): UsageRecord | undefined {
     profile: row.profile ?? 'default',
     created_at: row.created_at ?? 0,
   }
+}
+
+type SessionTokenTotals = Pick<UsageRecord,
+  'input_tokens' | 'output_tokens' | 'cache_read_tokens' | 'cache_write_tokens' | 'reasoning_tokens'>
+
+export function getRecordedSessionTokensBatch(sessionIds: string[], source: string): Record<string, SessionTokenTotals> {
+  if (!sessionIds.length || !isSqliteAvailable()) return {}
+  const placeholders = sessionIds.map(() => '?').join(',')
+  const rows = getDb()!.prepare(`
+    SELECT session_id, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+      SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_write_tokens) AS cache_write_tokens,
+      SUM(reasoning_tokens) AS reasoning_tokens
+    FROM ${TABLE} WHERE source = ? AND session_id IN (${placeholders}) GROUP BY session_id
+  `).all(source, ...sessionIds) as unknown as Array<SessionTokenTotals & { session_id: string }>
+  return Object.fromEntries(rows.map(({ session_id, ...usage }) => [session_id, usage]))
 }
 
 export function getUsageBatch(sessionIds: string[]): Record<string, UsageRecord> {

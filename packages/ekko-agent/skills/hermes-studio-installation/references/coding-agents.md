@@ -104,3 +104,39 @@ Studio builds its command PATH from its current Node directory, npm's global bin
 5. reinstall only if the resolved executable or package is genuinely absent.
 
 Do not create Agent model or credential configuration during this installation workflow. Authentication is a separate task after installation succeeds.
+
+## Cursor support boundary
+
+Cursor is a user-installed external CLI, not an npm package Studio installs. The install entry points at https://cursor.com/install. Studio does not install, update, or uninstall it. `deleteCodingAgent('cursor')` returns unsupported and does not stop running Cursor sessions.
+
+Cursor launches in global mode with `agent -p`. It does not receive a Studio provider, base URL, or model API key. `CURSOR_API_KEY` is a Cursor account credential, not a Studio model key. Bring-your-own-key and `agent acp` are outside this release.
+
+Studio supplies its managed MCP servers through a session-local Cursor plugin
+under the Web UI runtime directory, using `--plugin-dir`. This requires a Cursor
+CLI version that supports local plugins (verified with `2026.09.26-dd393fe`).
+The plugin contains only Studio-managed servers and the current profile/run
+credential paths. Native user/project MCP settings, disabled-server preferences,
+login state, and the working directory stay under Cursor's control. Studio does
+not copy or overwrite them. `--add-dir` is not an MCP configuration override.
+
+See [Cursor plugin MCP configuration](https://cursor.com/docs/reference/plugins#mcp-servers)
+and [CLI parameters](https://cursor.com/docs/cli/reference/parameters). The CLI's
+`mcp list` subcommand only enumerates user/project configuration; it does not
+verify chat's plugin MCP discovery. Test the chat plugin loader when verifying
+this integration, including concurrent profiles and run-specific credentials.
+
+The Cursor settings page edits its native `~/.cursor/cli-config.json`, honoring
+`CURSOR_CONFIG_DIR` and `XDG_CONFIG_HOME` overrides. It validates JSON before
+saving and does not create a separate global memory file. See the native
+[CLI configuration reference](https://cursor.com/docs/cli/reference/configuration).
+
+The Skills page lists, imports, edits, and deletes user skills under
+`~/.cursor/skills`, including category directories. It also displays
+`~/.agents/skills` as read-only, including aliases into that shared directory.
+These actions use the Cursor target and never fall back to Hermes profile
+skills. Workspace skills and native compatibility/plugin skill directories
+remain managed outside this page; Cursor discovers those through its own
+[skill loading rules](https://cursor.com/docs/skills).
+
+Also outside this release: Windows prompts that exceed the command-line length
+limit and the native `/compact` command.

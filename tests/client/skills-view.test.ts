@@ -61,7 +61,7 @@ vi.mock('naive-ui', () => ({
 import SkillsView from '@/views/hermes/SkillsView.vue'
 
 describe('SkillsView', () => {
-  it.each(['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude'] as const)('shows shared skills without edit controls for %s', async target => {
+  it.each(['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude', 'cursor'] as const)('shows shared skills without edit controls for %s', async target => {
     mockFetchSkills.mockResolvedValue({ categories: [{ name: 'misc', description: '', skills: [
       { name: 'shared', description: 'Shared', source: 'local', readonly: true },
     ] }], archived: [] })

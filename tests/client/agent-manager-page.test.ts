@@ -276,7 +276,7 @@ describe('Agent Manager page', () => {
     expect(wrapper.findComponent({ name: 'VersionManagementModal' }).exists()).toBe(true)
     expect(api.fetchAgentStatusSnapshot).toHaveBeenCalledOnce()
     expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
-    expect(api.fetchCodingAgentsStatus).not.toHaveBeenCalled()
+    expect(api.fetchCodingAgentsStatus).toHaveBeenCalledOnce()
 
     const ekkoCard = wrapper.get('[data-testid="agent-card-ekko"]')
     expect(ekkoCard.findAll('button').map(button => button.text())).toEqual(['sidebar.settings'])
@@ -288,7 +288,9 @@ describe('Agent Manager page', () => {
     expect(wrapper.get('[data-testid="agent-card-codex"]').text()).toContain('agentManager.codingAgentDescription')
     expect(wrapper.get('[data-testid="agent-card-codex"]').text()).toContain('codingAgents.installNow')
     expect(wrapper.get('.coding-agent-grid').findAll('.agent-card').map(card => card.attributes('data-testid')))
-      .toEqual(['agent-card-ekko', 'agent-card-hermes', 'agent-card-claude-code', 'agent-card-codex', 'agent-card-pi', 'agent-card-grok', 'agent-card-opencode', 'agent-card-dsh'])
+      .toEqual(['agent-card-ekko', 'agent-card-hermes', 'agent-card-claude-code', 'agent-card-codex', 'agent-card-pi', 'agent-card-grok', 'agent-card-opencode', 'agent-card-dsh', 'agent-card-cursor'])
+    expect(wrapper.find('[data-testid="agent-settings-cursor"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="agent-settings-claude-code"]').exists()).toBe(true)
   })
 
   it('detects the CLI before offering Runtime management in the desktop shell', async () => {
@@ -449,7 +451,7 @@ describe('Agent Manager page', () => {
       .toContain('agentManager.updateToVersion:v2.1.0')
   })
 
-  it('only probes installed Agents after the user clicks refresh', async () => {
+  it('rechecks a missing Cursor on entry and still supports an explicit full refresh', async () => {
     const wrapper = mount(AgentManagerView, {
       props: { sidebarCollapsed: false },
       global: { stubs: { VersionManagementModal: true } },
@@ -457,7 +459,7 @@ describe('Agent Manager page', () => {
     await flushPromises()
 
     expect(api.fetchAgentStatusSnapshot).toHaveBeenCalledOnce()
-    expect(api.fetchCodingAgentsStatus).not.toHaveBeenCalled()
+    expect(api.fetchCodingAgentsStatus).toHaveBeenCalledOnce()
     expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
 
     const refreshButton = wrapper.findAll('button')
@@ -466,9 +468,22 @@ describe('Agent Manager page', () => {
     await refreshButton!.trigger('click')
     await flushPromises()
 
-    expect(api.fetchCodingAgentsStatus).toHaveBeenCalledOnce()
+    expect(api.fetchCodingAgentsStatus).toHaveBeenCalledTimes(2)
     expect(api.fetchRuntimeVersionStatus).toHaveBeenCalledWith({ includeRemote: false })
     expect(api.fetchAgentStatusSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps cached loading when Cursor is already installed', async () => {
+    const snapshot = agentStatusSnapshot()
+    snapshot.agents.push({ id: 'cursor', installed: true, source: 'user-cli', path: '/test/agent', version: '1.0.0' })
+    api.fetchAgentStatusSnapshot.mockResolvedValue(snapshot)
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="agent-card-cursor"]').text()).toContain('v1.0.0')
+    expect(api.fetchCodingAgentsStatus).not.toHaveBeenCalled()
+    expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('opens a dedicated Ekko help drawer from the Ask AI button beside refresh', async () => {

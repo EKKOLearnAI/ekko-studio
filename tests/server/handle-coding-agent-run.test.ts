@@ -543,4 +543,30 @@ describe('handleCodingAgentRun', () => {
     expect(startCodingAgentRunMock).not.toHaveBeenCalled()
   })
 
+  it('keeps an active Cursor run when a follow-up still sends scoped', async () => {
+    managerMock.runIdForSession.mockReturnValue('cursor-run-1')
+    managerMock.isSessionLaunchCompatible.mockReturnValue(true)
+    sendCodingAgentRunInputMock.mockResolvedValue({ runId: 'cursor-run-1' })
+
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    const state = { messages: [], isWorking: false, isAborting: false, events: [], queue: [] }
+    const sessionMap = new Map([['session-1', state]])
+    const socket = { join: vi.fn(), emit: vi.fn() }
+
+    await handleCodingAgentRun({} as any, socket as any, {
+      session_id: 'session-1',
+      input: 'continue',
+      coding_agent_id: 'cursor',
+      mode: 'scoped',
+    }, 'default', sessionMap as any)
+
+    expect(managerMock.isSessionLaunchCompatible).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      agentId: 'cursor',
+      mode: 'global',
+    }))
+    expect(managerMock.stop).not.toHaveBeenCalled()
+    expect(startCodingAgentRunMock).not.toHaveBeenCalled()
+    expect(sendCodingAgentRunInputMock).toHaveBeenCalledWith('session-1', 'continue', 'system prompt')
+  })
+
 })

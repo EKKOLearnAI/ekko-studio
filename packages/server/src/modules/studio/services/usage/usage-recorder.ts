@@ -13,7 +13,7 @@ export interface RecordSessionUsageInput {
   sessionId: string
   runId?: string | null
   source: 'hermes' | 'coding_agent' | 'ekko_agent'
-  agent: 'hermes' | 'claude_code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'ekko_agent'
+  agent: 'hermes' | 'claude_code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'ekko_agent'
   profile?: string | null
   model?: string | null
   provider?: string | null

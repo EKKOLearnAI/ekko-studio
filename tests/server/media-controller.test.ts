@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const originalWebUiHome = process.env.HERMES_WEB_UI_HOME
@@ -24,11 +24,12 @@ describe('media controller', () => {
   it('uses Hermes Web UI media directory as the default generated video output path', async () => {
     process.env.HERMES_WEB_UI_HOME = '/tmp/hermes-web-ui-test-home'
     const { defaultImageOutputPath, defaultMediaOutputPath } = await import('../../packages/server/src/modules/studio/controllers/media')
+    const home = resolve('/tmp/hermes-web-ui-test-home')
 
-    expect(defaultMediaOutputPath('req_123')).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'req_123.mp4'))
-    expect(defaultMediaOutputPath('bad/request:id')).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'bad_request_id.mp4'))
-    expect(defaultImageOutputPath('img_123')).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'img_123.png'))
-    expect(defaultImageOutputPath('bad/request:id', 1)).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'bad_request_id-2.png'))
+    expect(defaultMediaOutputPath('req_123')).toBe(join(home, 'media', 'req_123.mp4'))
+    expect(defaultMediaOutputPath('bad/request:id')).toBe(join(home, 'media', 'bad_request_id.mp4'))
+    expect(defaultImageOutputPath('img_123')).toBe(join(home, 'media', 'img_123.png'))
+    expect(defaultImageOutputPath('bad/request:id', 1)).toBe(join(home, 'media', 'bad_request_id-2.png'))
   })
 
   it('generates images through the requested configured custom provider', async () => {

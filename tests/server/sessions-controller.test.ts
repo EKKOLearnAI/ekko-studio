@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { basename, join } from 'path'
+import { basename, join, resolve } from 'path'
 
 const listConversationSummariesFromDbMock = vi.fn()
 const getConversationDetailFromDbMock = vi.fn()
@@ -526,7 +526,7 @@ describe('session conversations controller', () => {
 
       expect(listCtx.status).toBeUndefined()
       expect(listCtx.body.path).toBe('project')
-      expect(listCtx.body.absolutePath).toBe(join(workspace, 'project'))
+      expect(listCtx.body.absolutePath).toBe(resolve(workspace, 'project'))
       expect(listCtx.body.entries).toEqual([
         expect.objectContaining({ name: 'notes.md', path: 'project/notes.md', isDir: false }),
       ])
@@ -2092,7 +2092,7 @@ describe('session conversations controller', () => {
       model: 'grok-4',
       provider: 'xai',
       reasoning_effort: '',
-      workspace: '/tmp/hermes-test/default/workspace',
+      workspace: join('/tmp/hermes-test/default', 'workspace'),
     })
     expect(emitSessionSettingsUpdatedMock).toHaveBeenCalledWith('session-1', {
       model: 'grok-4',
@@ -2128,7 +2128,7 @@ describe('session conversations controller', () => {
       model: 'claude-sonnet-4-6',
       provider: 'claude-oauth',
       reasoning_effort: '',
-      workspace: '/tmp/hermes-test/travel/workspace',
+      workspace: join('/tmp/hermes-test/travel', 'workspace'),
     })
     expect(bridgeSwitchSessionModelMock).toHaveBeenCalledWith(
       'session-1',

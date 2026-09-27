@@ -104,8 +104,9 @@ function contentPreview(content: unknown): string {
 
 type AgentInput = {
     presetId?: string
-    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
     agentMode?: 'scoped' | 'global'
+    priorAgentMode?: 'scoped' | 'global' | ''
     profile: string
     provider?: string
     model?: string
@@ -133,9 +134,9 @@ type RoomSummaryInput = {
 }
 
 const GROUP_AGENT_REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-const GROUP_AGENT_TYPES = new Set(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh'])
+const GROUP_AGENT_TYPES = new Set(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor'])
 const GROUP_AGENT_API_MODES = new Set(['chat_completions', 'codex_responses', 'anthropic_messages'])
-const GLOBAL_MODE_GROUP_AGENTS = new Set(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh'])
+const GLOBAL_MODE_GROUP_AGENTS = new Set(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor'])
 const GROUP_AGENT_AVATAR_MAX_LENGTH = 1_500_000
 
 function normalizeRoomAgentAvatar(value: unknown): string {
@@ -310,9 +311,9 @@ async function connectAndPersistRoomAgent(server: GroupChatServer, roomId: strin
         throw new Error('Invalid agentMode')
     }
     const profile = input.profile.trim()
-    const agentMode = input.agentMode === 'global' ? 'global' : 'scoped'
+    const agentMode = agent === 'cursor' ? 'global' : input.agentMode === 'global' ? 'global' : 'scoped'
     if (agentMode === 'global' && !GLOBAL_MODE_GROUP_AGENTS.has(agent || '')) {
-        throw new Error('Global mode is only available for Claude, Codex, Pi, and Grok')
+        throw new Error('Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor')
     }
     const provider = agentMode === 'global' ? '' : String(input.provider || '').trim()
     const model = agentMode === 'global' ? '' : String(input.model || '').trim()
@@ -339,6 +340,7 @@ async function connectAndPersistRoomAgent(server: GroupChatServer, roomId: strin
         persisted = storage.addRoomAgent(roomId, agentId, profile, name, description, invited, {
             agent: agent || 'hermes',
             agentMode,
+            priorAgentMode: input.priorAgentMode === 'global' || input.priorAgentMode === 'scoped' ? input.priorAgentMode : '',
             provider,
             model,
             apiMode,
@@ -369,7 +371,7 @@ export async function createRoom(ctx: any) {
         inviteCode?: string
         agents?: {
             presetId?: string
-            agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+            agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
             agentMode?: 'scoped' | 'global'
             profile: string
             provider?: string
@@ -450,7 +452,7 @@ export async function createRoom(ctx: any) {
         ctx.status = 400
         ctx.body = {
             error: invalidAgentMode.agentMode === 'global'
-                ? 'Global mode is only available for Claude, Codex, Pi, and Grok'
+                ? 'Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor'
                 : 'Invalid agentMode',
         }
         return
@@ -503,6 +505,7 @@ export async function createRoom(ctx: any) {
             const agent = await connectAndPersistRoomAgent(chatServer, roomId, {
                 agent: a.agent,
                 agentMode: a.agentMode,
+                priorAgentMode: a.priorAgentMode,
                 profile: a.profile,
                 provider: a.provider,
                 model: a.model,
@@ -575,6 +578,7 @@ export async function cloneRoom(ctx: any) {
             const agent = await connectAndPersistRoomAgent(chatServer, roomId, {
                 agent: sourceAgent.agent,
                 agentMode: sourceAgent.agentMode,
+                priorAgentMode: sourceAgent.priorAgentMode,
                 profile: sourceAgent.profile,
                 provider: sourceAgent.provider,
                 model: sourceAgent.model,
@@ -739,9 +743,10 @@ export async function addRoomAgent(ctx: any) {
         ctx.body = { code: err?.code, error: err?.message || 'Agent preset is unavailable' }
         return
     }
-    const { agent, agentMode, profile, provider, model, apiMode, reasoningEffort, agentPreset, name, description, avatar, invited } = body as {
+    const { agent, agentMode, priorAgentMode, profile, provider, model, apiMode, reasoningEffort, agentPreset, name, description, avatar, invited } = body as {
         agent?: string
         agentMode?: string
+        priorAgentMode?: string
         profile?: string
         provider?: string
         model?: string
@@ -755,7 +760,7 @@ export async function addRoomAgent(ctx: any) {
     }
     const normalizedProfile = typeof profile === 'string' ? profile.trim() : ''
     const normalizedAgent = typeof agent === 'string' ? agent.trim() : 'hermes'
-    const normalizedAgentMode = agentMode === 'global' ? 'global' : 'scoped'
+    const normalizedAgentMode = normalizedAgent === 'cursor' || agentMode === 'global' ? 'global' : 'scoped'
     const normalizedProvider = normalizedAgentMode === 'global' ? '' : typeof provider === 'string' ? provider.trim() : ''
     const normalizedModel = normalizedAgentMode === 'global' ? '' : typeof model === 'string' ? model.trim() : ''
     const normalizedApiMode = normalizedAgent === 'hermes' || normalizedAgentMode === 'global'
@@ -789,7 +794,7 @@ export async function addRoomAgent(ctx: any) {
     }
     if (normalizedAgentMode === 'global' && !GLOBAL_MODE_GROUP_AGENTS.has(normalizedAgent)) {
         ctx.status = 400
-        ctx.body = { error: 'Global mode is only available for Claude, Codex, Pi, and Grok' }
+        ctx.body = { error: 'Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor' }
         return
     }
     if (Boolean(normalizedProvider) !== Boolean(normalizedModel)) {
@@ -829,6 +834,7 @@ export async function addRoomAgent(ctx: any) {
         const agent = await connectAndPersistRoomAgent(chatServer, ctx.params.roomId, {
             agent: normalizedAgent as AgentInput['agent'],
             agentMode: normalizedAgentMode,
+            priorAgentMode: priorAgentMode === 'global' || priorAgentMode === 'scoped' ? priorAgentMode : '',
             profile: normalizedProfile,
             provider: normalizedProvider,
             model: normalizedModel,
@@ -859,9 +865,10 @@ export async function updateRoomAgent(ctx: any) {
         return
     }
 
-    const { agent, agentMode, profile, provider, model, apiMode, reasoningEffort, agentPreset, name, description, avatar } = ctx.request.body as {
+    const { agent, agentMode, priorAgentMode, profile, provider, model, apiMode, reasoningEffort, agentPreset, name, description, avatar } = ctx.request.body as {
         agent?: string
         agentMode?: string
+        priorAgentMode?: string
         profile?: string
         provider?: string
         model?: string
@@ -874,7 +881,7 @@ export async function updateRoomAgent(ctx: any) {
     }
     const normalizedProfile = typeof profile === 'string' ? profile.trim() : ''
     const normalizedAgent = typeof agent === 'string' ? agent.trim() : 'hermes'
-    const normalizedAgentMode = agentMode === 'global' ? 'global' : 'scoped'
+    const normalizedAgentMode = normalizedAgent === 'cursor' || agentMode === 'global' ? 'global' : 'scoped'
     const normalizedProvider = normalizedAgentMode === 'global' ? '' : typeof provider === 'string' ? provider.trim() : ''
     const normalizedModel = normalizedAgentMode === 'global' ? '' : typeof model === 'string' ? model.trim() : ''
     const normalizedApiMode = normalizedAgent === 'hermes' || normalizedAgentMode === 'global'
@@ -910,7 +917,7 @@ export async function updateRoomAgent(ctx: any) {
     }
     if (normalizedAgentMode === 'global' && !GLOBAL_MODE_GROUP_AGENTS.has(normalizedAgent)) {
         ctx.status = 400
-        ctx.body = { error: 'Global mode is only available for Claude, Codex, Pi, and Grok' }
+        ctx.body = { error: 'Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor' }
         return
     }
     if (Boolean(normalizedProvider) !== Boolean(normalizedModel)) {
@@ -967,6 +974,7 @@ export async function updateRoomAgent(ctx: any) {
     const nextInput: AgentInput = {
         agent: normalizedAgent as AgentInput['agent'],
         agentMode: normalizedAgentMode,
+        priorAgentMode: priorAgentMode === 'global' || priorAgentMode === 'scoped' ? priorAgentMode : '',
         profile: normalizedProfile,
         provider: normalizedProvider,
         model: normalizedModel,
@@ -1012,6 +1020,7 @@ export async function updateRoomAgent(ctx: any) {
             {
                 agent: nextInput.agent,
                 agentMode: nextInput.agentMode,
+                priorAgentMode: nextInput.priorAgentMode === 'global' || nextInput.priorAgentMode === 'scoped' ? nextInput.priorAgentMode : '',
                 provider: nextInput.provider,
                 model: nextInput.model,
                 apiMode: nextInput.apiMode,

@@ -4,6 +4,7 @@ import hashlib
 import json
 import locale
 import os
+import posixpath
 import queue
 import socket
 import subprocess
@@ -181,8 +182,14 @@ def _worker_endpoint(key: str, namespace: str | None = None) -> str:
     forced_ipc = transport in {"ipc", "unix"}
     use_tcp = transport == "tcp" or (transport not in {"ipc", "unix"} and os.name == "nt")
     if not use_tcp:
-        root = Path(tempfile.gettempdir()) / "hermes-agent-bridge-workers"
-        sock_path = root / f"{safe}.sock"
+        # Join as text when the process is not Windows. pathlib.Path follows the
+        # host flavour, and Python 3.13+ refuses to build a PosixPath on Windows
+        # even when a caller is simulating a posix temp directory.
+        sock_path = (
+            str(Path(tempfile.gettempdir()) / "hermes-agent-bridge-workers" / f"{safe}.sock")
+            if os.name == "nt"
+            else posixpath.join(tempfile.gettempdir(), "hermes-agent-bridge-workers", f"{safe}.sock")
+        )
         # A deep temp dir can push the socket path past the platform's sun_path
         # limit; the worker then fails to bind and exits before it can report
         # ready (surfaced as "profile worker ... exited before ready"). Fall

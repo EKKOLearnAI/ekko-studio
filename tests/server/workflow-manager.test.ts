@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -135,6 +135,8 @@ describe('workflow manager', () => {
 
   it('maps workflow node agents to the existing run backends', async () => {
     const { resolveWorkflowNodeRunTarget } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    expect(readFileSync('packages/server/src/modules/studio/services/workflow/manager.ts', 'utf8'))
+      .toContain("agent: 'hermes' | 'ekko-agent' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'")
 
     expect(resolveWorkflowNodeRunTarget('dsh')).toEqual({ type: 'workflow', source: 'workflow', agent: 'dsh', codingAgentId: 'dsh' })
     expect(resolveWorkflowNodeRunTarget('hermes')).toEqual({
@@ -166,6 +168,12 @@ describe('workflow manager', () => {
       agent: 'pi',
       codingAgentId: 'pi',
     })
+    expect(resolveWorkflowNodeRunTarget('cursor')).toEqual({
+      type: 'workflow',
+      source: 'workflow',
+      agent: 'cursor',
+      codingAgentId: 'cursor',
+    })
     expect(() => resolveWorkflowNodeRunTarget('unknown')).toThrow('unsupported workflow Agent runtime: unknown')
     expect(() => resolveWorkflowNodeRunTarget()).toThrow('unsupported workflow Agent runtime')
   })
@@ -186,7 +194,8 @@ describe('workflow manager', () => {
     expect(normalizeWorkflowNode({ id: 'ekko', type: 'agent', data: { agent: 'ekko-agent' } })?.data.agent).toBe('ekko-agent')
     expect(normalizeWorkflowNode({ id: 'claude', type: 'agent', data: { agent: 'claude-code' } })?.data.agent).toBe('claude-code')
     expect(normalizeWorkflowNode({ id: 'codex', type: 'agent', data: { agent: 'codex' } })?.data.agent).toBe('codex')
-    expect(normalizeWorkflowNode({ id: 'pi', type: 'agent', data: { agent: 'pi' } })?.data.agent).toBe('pi')
+    expect(normalizeWorkflowNode({ id: 'cursor', type: 'agent', data: { agent: 'cursor' } })?.data.agent).toBe('cursor')
+    expect(normalizeWorkflowNode({ id: 'cursor-global', type: 'agent', data: { agent: 'cursor', agentMode: 'scoped' } })?.data.agentMode).toBe('global')
     expect(normalizeWorkflowNode({ id: 'legacy-mode', type: 'agent', data: { agent: 'codex' } })?.data.agentMode).toBe('scoped')
     expect(normalizeWorkflowNode({ id: 'global-mode', type: 'agent', data: { agent: 'codex', agentMode: 'global' } })?.data.agentMode).toBe('global')
     expect(() => normalizeWorkflowNode({ id: 'bad-global', type: 'agent', data: { agent: 'ekko-agent', agentMode: 'global' } }))

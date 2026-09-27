@@ -6,7 +6,7 @@ export const CHAT_WEBHOOK_SCHEMA_VERSION = 1
 export const MAX_WEBHOOK_CONTENT_BYTES = 64 * 1024
 
 export type ChatRunWebhookSource = 'chat' | 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
-export type ChatRunWebhookAgent = 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
+export type ChatRunWebhookAgent = 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
 export type ChatWebhookLifecycleStatus = 'created' | 'queued' | 'started' | 'requested' | 'resolved' | 'completed' | 'failed' | 'updated'
 export type ChatWebhookMessageRole = 'user' | 'command' | 'assistant'
 

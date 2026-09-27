@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const allMock = vi.fn()
@@ -71,7 +72,7 @@ describe('session DB summaries', () => {
     const mod = await import('../../packages/server/src/modules/hermes/services/history/sessions-db')
     const rows = await mod.listSessionSummaries(undefined, 50)
 
-    expect(databaseSyncMock).toHaveBeenCalledWith('/tmp/hermes-profile/state.db', { open: true, readOnly: true })
+    expect(databaseSyncMock).toHaveBeenCalledWith(join('/tmp/hermes-profile', 'state.db'), { open: true, readOnly: true })
     expect(prepareMock).toHaveBeenCalledWith(expect.stringContaining("s.source != 'tool'"))
     expect(indexAllMock).toHaveBeenCalledWith()
     expect(closeMock).toHaveBeenCalled()
