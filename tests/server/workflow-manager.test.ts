@@ -299,6 +299,34 @@ describe('workflow manager', () => {
     } finally { await manager.delete(workflow.id) }
   })
 
+  it('schedules quality observation for completion-driven node execution', async () => {
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    const { saveJevSettings } = await import('../../packages/server/src/modules/studio/services/jev/settings')
+    const { listWorkflowRunQualityEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    initAllStores()
+    await saveJevSettings('default', { apiKey: 'quality-key', workflowQualityEnabled: true })
+    const response = { model: 'jev-test', usage: {}, answers: { exact: { type: 'choice', choice: 'pass', confidence: .95, probabilities: { pass: .95, needs_improvement: .02, unknown: .03 } } } }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(response))
+    chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string }) => {
+      chatRunMock.sessionOutputs.set(request.session_id, 'WORKFLOW_BASELINE_OK')
+      return { ok: true, output: 'WORKFLOW_BASELINE_OK' }
+    })
+    const manager = new WorkflowManager()
+    const workflow = manager.create({ name: `Quality runtime ${Date.now()}`, profile: 'default', nodes: [{ id: 'agent', type: 'agent', position: { x: 0, y: 0 }, data: {
+      title: 'Agent', agent: 'hermes', input: 'Return WORKFLOW_BASELINE_OK', qualityReview: { mode: 'observe', criteria: [{ id: 'exact', text: 'Output is exact', evidence: 'output' }] },
+    } }], edges: [] })
+    try {
+      const result = await manager.runNow(workflow.id)
+      for (let index = 0; index < 100 && listWorkflowRunQualityEvaluations(result.run.id).length === 0; index += 1) await new Promise(resolve => setTimeout(resolve, 5))
+      expect(listWorkflowRunQualityEvaluations(result.run.id)).toEqual([expect.objectContaining({ node_id: 'agent', decision: 'pass' })])
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      fetchMock.mockRestore()
+      await manager.delete(workflow.id)
+    }
+  })
+
   it('preserves authored visual graph fields in an immutable run snapshot', async () => {
     const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
