@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest'
 import {
   compactCategoryPreset,
   hasCategoryPreset,
-  isAbsoluteWorkspacePath,
+  foldAsciiCase,
   isNewChatProviderAllowedFor,
+  presetBaseUrlCarriesCredentials,
   presetWarningMessageKey,
   resolveCategoryPreset,
   validateCategoryName,
@@ -160,7 +161,7 @@ describe('category New Chat preset resolution', () => {
     expect(keepAgent.provider).toBe('anthropic')
   })
 
-  it('ignores a leftover reasoningEffort from presets saved by an earlier build (CL-016)', () => {
+  it('ignores fields that are not preset fields, such as reasoningEffort (CL-016)', () => {
     const legacy = { model: 'claude-opus-5-5', reasoningEffort: 'high' } as any
     expect(resolveCategoryPreset(legacy, context())).toEqual({
       profile: 'default',
@@ -169,6 +170,92 @@ describe('category New Chat preset resolution', () => {
       model: 'claude-opus-5-5',
       warnings: [],
     })
+  })
+
+  it('drops a preset Base URL and API mode when the preset provider is stale, with warnings', () => {
+    const resolved = resolveCategoryPreset({
+      agent: 'claude-code',
+      agentMode: 'scoped',
+      provider: 'gone-gateway',
+      model: 'gw-model',
+      apiMode: 'anthropic_messages',
+      baseUrl: 'https://gateway.example.test/anthropic',
+    }, context())
+    expect(resolved.provider).toBeUndefined()
+    expect(resolved.baseUrl).toBeUndefined()
+    expect(resolved.apiMode).toBeUndefined()
+    expect(resolved.warnings).toEqual([
+      { field: 'provider', value: 'gone-gateway' },
+      { field: 'model', value: 'gw-model' },
+      { field: 'baseUrl', value: 'https://gateway.example.test/anthropic' },
+      { field: 'apiMode', value: 'anthropic_messages' },
+    ])
+    expect(presetWarningMessageKey('baseUrl')).toBe('chat.presetWarningBaseUrl')
+    expect(presetWarningMessageKey('apiMode')).toBe('chat.presetWarningApiMode')
+  })
+
+  it('warns instead of silently skipping a preset Base URL once the provider has its own base_url', () => {
+    const withOwnUrl = context({
+      selectableGroups: () => [group('anthropic', ['claude-opus-5-5'], { base_url: 'https://api.anthropic.test' })],
+    })
+    const resolved = resolveCategoryPreset({
+      agent: 'claude-code',
+      agentMode: 'scoped',
+      provider: 'anthropic',
+      model: 'claude-opus-5-5',
+      apiMode: 'chat_completions',
+      baseUrl: 'https://proxy.example.test/v1',
+    }, withOwnUrl)
+    expect(resolved).toMatchObject({ provider: 'anthropic', model: 'claude-opus-5-5' })
+    expect(resolved.baseUrl).toBeUndefined()
+    expect(resolved.apiMode).toBeUndefined()
+    expect(resolved.warnings).toEqual([
+      { field: 'baseUrl', value: 'https://proxy.example.test/v1' },
+      { field: 'apiMode', value: 'chat_completions' },
+    ])
+
+    // An API mode saved without a Base URL for that same provider still applies.
+    const apiModeOnly = resolveCategoryPreset(
+      { agent: 'claude-code', agentMode: 'scoped', provider: 'anthropic', model: 'claude-opus-5-5', apiMode: 'chat_completions' },
+      withOwnUrl,
+    )
+    expect(apiModeOnly).toMatchObject({ apiMode: 'chat_completions', warnings: [] })
+  })
+
+  it('never applies a preset Base URL to a provider inferred from the model instead of the preset provider', () => {
+    const resolved = resolveCategoryPreset(
+      { agent: 'claude-code', agentMode: 'scoped', model: 'claude-opus-5-5', baseUrl: 'https://proxy.example.test/v1' },
+      context(),
+    )
+    expect(resolved.provider).toBe('anthropic')
+    expect(resolved.baseUrl).toBeUndefined()
+    expect(resolved.warnings).toEqual([{ field: 'baseUrl', value: 'https://proxy.example.test/v1' }])
+  })
+
+  it('validates a "Default" agent preset against the agent in effect when the drawer opens', () => {
+    // Saved with Agent = Default: no agent, so no agent-specific rule applies at save time.
+    const preset = { provider: 'openai-codex', model: 'gpt-5.5' }
+    // Last agent used was Hermes: the OAuth provider is fine.
+    expect(resolveCategoryPreset(preset, context({ currentAgent: 'hermes' }))).toMatchObject({
+      provider: 'openai-codex', model: 'gpt-5.5', warnings: [],
+    })
+    // Last agent used was a scoped Claude: the same preset gets the per-field stale warnings.
+    const scoped = resolveCategoryPreset(preset, context({ currentAgent: 'claude-code', currentAgentMode: 'scoped' }))
+    expect(scoped.agent).toBeUndefined()
+    expect(scoped.provider).toBeUndefined()
+    expect(scoped.warnings.map((warning) => warning.field)).toEqual(['provider', 'model'])
+    // Last agent used was a global Claude: provider/model are not used at all, nothing to warn about.
+    expect(resolveCategoryPreset(preset, context({ currentAgent: 'claude-code', currentAgentMode: 'global' })).warnings).toEqual([])
+    // MoA saved with Default agent only applies while Hermes is in effect.
+    expect(resolveCategoryPreset({ modelKind: 'moa', model: 'team' }, context({ currentAgent: 'codex', currentAgentMode: 'scoped' })).warnings)
+      .toEqual([{ field: 'modelKind', value: 'moa' }])
+  })
+
+  it('keeps a relative workspace as entered and only drops it when the server says it is missing', () => {
+    expect(resolveCategoryPreset({ workspace: 'projects/app' }, context({ workspaceExists: true })).workspace).toBe('projects/app')
+    expect(resolveCategoryPreset({ workspace: 'projects/app' }, context()).workspace).toBe('projects/app')
+    expect(resolveCategoryPreset({ workspace: 'projects/app' }, context({ workspaceExists: false })).warnings)
+      .toEqual([{ field: 'workspace', value: 'projects/app' }])
   })
 
   it('never mutates the stored preset', () => {
@@ -186,9 +273,17 @@ describe('category preset helpers', () => {
     expect(hasCategoryPreset({ model: 'm' })).toBe(true)
   })
 
-  it('accepts only absolute workspace folders, POSIX or Windows, like FolderPicker produces', () => {
-    for (const path of ['/home/me/app', 'C:\\work', 'd:/work', '\\\\server\\share']) expect(isAbsoluteWorkspacePath(path), path).toBe(true)
-    for (const path of ['relative/dir', './here', '~/app', 'C:work']) expect(isAbsoluteWorkspacePath(path), path).toBe(false)
+  it('detects credentials in a Base URL exactly like the server rule', () => {
+    for (const url of [
+      'https://user:pass@gateway.test/v1',
+      'user:pass@localhost:11434/v1',
+      'https://gateway.test/v1?api_key=sk-1',
+      'https://gateway.test/v1?KEY=abc',
+      'https://gateway.test/v1?Access_Token=abc',
+      'https://gateway.test/v1?sig=abc',
+    ]) expect(presetBaseUrlCarriesCredentials(url), url).toBe(true)
+    for (const url of ['https://gateway.test/v1', 'localhost:11434/v1', 'https://gateway.test/v1?keyboard=1&region=eu'])
+      expect(presetBaseUrlCarriesCredentials(url), url).toBe(false)
   })
 
   it('validates category names: required, max 40 characters, unique case-insensitively', () => {
@@ -197,5 +292,15 @@ describe('category preset helpers', () => {
     expect(validateCategoryName('x'.repeat(40), [])).toBeNull()
     expect(validateCategoryName(' ai   PASSPORT ', ['AI Passport'])).toBe('duplicate')
     expect(validateCategoryName('Personal', ['AI Passport'])).toBeNull()
+  })
+
+  it('folds case like SQLite NOCASE (ASCII only), so the server 409 and the form agree', () => {
+    expect(foldAsciiCase('AI Été')).toBe('ai Été')
+    expect(validateCategoryName('Été', ['été'])).toBeNull()
+    expect(validateCategoryName('ÉTÉ', ['été'])).toBeNull()
+    expect(validateCategoryName('Été Plans', ['été plans'])).toBeNull()
+    expect(validateCategoryName('Été', ['Été'])).toBe('duplicate')
+    expect(validateCategoryName('ÉtÉ WORK', ['Été work'])).toBeNull()
+    expect(validateCategoryName('Été WORK', ['Été work'])).toBe('duplicate')
   })
 })

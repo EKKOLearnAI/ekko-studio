@@ -21,7 +21,7 @@ const keys = [
   'confirmDeleteCategoryWithPreset', 'presetWarningAgent', 'presetWarningProfile',
   'presetWarningModelKind', 'presetWarningProvider', 'presetWarningModel', 'presetWarningAgentPreset',
   'presetWarningWorkspace', 'presetValueUnavailable', 'presetBaseUrlKeyRequired', 'categoryPresetForbidden',
-  'categoryPresetWorkspaceAbsolute',
+  'presetWarningBaseUrl', 'presetWarningApiMode', 'categoryPresetBaseUrlCredentials',
 ]
 
 const placeholders: Record<string, string> = {
@@ -35,12 +35,18 @@ const placeholders: Record<string, string> = {
   presetWarningModel: '{value}',
   presetWarningAgentPreset: '{value}',
   presetWarningWorkspace: '{value}',
+  presetWarningBaseUrl: '{value}',
+  presetWarningApiMode: '{value}',
   presetValueUnavailable: '{value}',
 }
 
 describe('category New Chat preset locales', () => {
-  it('drops the reasoning effort field that was removed from presets', () => {
+  it('has no reasoning effort preset field (CL-016)', () => {
     for (const locale of Object.keys(locales)) expect(locales[locale].chat.reasoningEffortField, locale).toBeUndefined()
+  })
+
+  it('has no absolute-workspace error: relative preset workspaces are accepted like the New Chat panel', () => {
+    for (const locale of Object.keys(locales)) expect(locales[locale].chat.categoryPresetWorkspaceAbsolute, locale).toBeUndefined()
   })
 
   it.each(Object.keys(locales))('%s has every category preset string with its placeholders', (locale) => {

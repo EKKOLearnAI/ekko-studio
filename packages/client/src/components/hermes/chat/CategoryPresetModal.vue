@@ -17,10 +17,10 @@ import {
   NEW_CHAT_AGENT_OPTIONS,
   compactCategoryPreset,
   effectiveNewChatMode,
-  isAbsoluteWorkspacePath,
   isExternalCodingAgent,
   isNewChatProviderAllowedFor,
   normalizeCategoryName,
+  presetBaseUrlCarriesCredentials,
   presetWarningMessageKey,
   resolveCategoryPreset,
   usesProviderModel,
@@ -60,7 +60,7 @@ const model = ref("");
 const apiMode = ref("");
 const baseUrl = ref("");
 const workspace = ref<string | null>(null);
-const workspaceError = ref(false);
+const baseUrlError = ref(false);
 const saving = ref(false);
 const loading = ref(false);
 const dshPresets = ref<DshSessionPresetChoice[] | null>(null);
@@ -79,7 +79,7 @@ function resetFromPreset(preset: SessionCategoryPreset | null) {
   apiMode.value = preset?.apiMode || "";
   baseUrl.value = preset?.baseUrl || "";
   workspace.value = preset?.workspace || null;
-  workspaceError.value = false;
+  baseUrlError.value = false;
 }
 
 async function loadDshPresets() {
@@ -106,6 +106,12 @@ watch(show, async (visible) => {
   }
 }, { immediate: true });
 
+// Agent "Default" means whatever agent the New Chat panel has when it opens (the last
+// one used), which the form cannot know. So "Default" applies no agent-specific rule
+// here: every provider of the profile is offered and no agent-specific warning is
+// shown. The panel validates against the agent actually in effect and shows the
+// per-field stale warnings then. Only field visibility follows Hermes (the panel's
+// first-run default).
 const effectiveAgent = computed<NewChatAgentId>(() => agent.value || "hermes");
 const effectiveMode = computed<NewChatAgentMode>(() =>
   effectiveNewChatMode(effectiveAgent.value, agentMode.value || "scoped"),
@@ -123,12 +129,20 @@ const effectiveProfile = computed(() =>
   profile.value && profileNames.value.includes(profile.value) ? profile.value : defaultProfile.value,
 );
 
-function selectableGroups(profileName: string, agentId: NewChatAgentId, mode: NewChatAgentMode) {
-  const groups = appStore.profileModelGroups.find((entry) => entry.profile === profileName)?.groups || [];
-  return groups.filter((group) => isNewChatProviderAllowedFor(group, agentId, mode));
+function profileGroups(profileName: string) {
+  return appStore.profileModelGroups.find((entry) => entry.profile === profileName)?.groups || [];
 }
 
-const groups = computed(() => selectableGroups(effectiveProfile.value, effectiveAgent.value, effectiveMode.value));
+function selectableGroups(profileName: string, agentId: NewChatAgentId, mode: NewChatAgentMode) {
+  return profileGroups(profileName).filter((group) => isNewChatProviderAllowedFor(group, agentId, mode));
+}
+
+/** Groups the form offers: unfiltered for agent "Default", else the panel's rule for that agent/mode. */
+function formGroups(profileName: string, agentId: NewChatAgentId | "", mode: NewChatAgentMode) {
+  return agentId ? selectableGroups(profileName, agentId, mode) : profileGroups(profileName);
+}
+
+const groups = computed(() => formGroups(effectiveProfile.value, agent.value, effectiveMode.value));
 const moaGroup = computed(() => groups.value.find((group) => group.provider === "moa"));
 const showModelKind = computed(() =>
   effectiveAgent.value === "hermes" && (Boolean(moaGroup.value?.models.length) || modelKind.value === "moa"),
@@ -202,7 +216,7 @@ function handleAgentChange(value: NewChatAgentId | "") {
     provider.value = "";
     model.value = "";
   }
-  const stillAllowed = !provider.value || selectableGroups(effectiveProfile.value, nextAgent, effectiveNewChatMode(nextAgent, agentMode.value || "scoped"))
+  const stillAllowed = !provider.value || formGroups(effectiveProfile.value, value, effectiveNewChatMode(nextAgent, agentMode.value || "scoped"))
     .some((group) => group.provider === provider.value);
   if (!stillAllowed) {
     provider.value = "";
@@ -219,12 +233,14 @@ function handleModelKindChange(value: "model" | "moa") {
   provider.value = value === "moa" ? "moa" : "";
   model.value = "";
   baseUrl.value = "";
+  baseUrlError.value = false;
 }
 
 function handleProviderChange(value: string) {
   provider.value = value;
   model.value = "";
   baseUrl.value = "";
+  baseUrlError.value = false;
 }
 
 function handleProfileChange(value: string) {
@@ -252,14 +268,19 @@ const currentPreset = computed<SessionCategoryPreset | null>(() => {
 // Same stale-value rules as the New Chat panel; only computed for display, never written back.
 const warnings = computed<CategoryPresetWarning[]>(() => {
   if (loading.value) return [];
-  const preset = currentPreset.value;
+  const current = currentPreset.value;
+  // A stored Base URL the form no longer shows (the provider now has its own base_url)
+  // still gets the panel's warning; saving drops it, like any hidden field.
+  const hiddenBaseUrl = isScopedCodingAgent.value && !showBaseUrl.value && baseUrl.value ? baseUrl.value : undefined;
+  const preset = current && hiddenBaseUrl ? { ...current, baseUrl: hiddenBaseUrl } : current;
   const storedWorkspace = storedPreset.value?.workspace;
   return resolveCategoryPreset(preset, {
+    // Only reached with agent "Default" (no preset agent); formGroups then applies no agent rule.
     currentAgent: "hermes",
     currentAgentMode: "scoped",
     profiles: profileNames.value,
     defaultProfile: defaultProfile.value,
-    selectableGroups,
+    selectableGroups: (profileName, agentId, mode) => formGroups(profileName, agent.value ? agentId : "", mode),
     dshPresetIds: dshPresets.value ? dshPresets.value.filter((item) => !item.unavailable).map((item) => item.id) : undefined,
     workspaceExists: preset?.workspace && preset.workspace === storedWorkspace
       ? props.category?.preset_status?.workspace_exists
@@ -290,10 +311,11 @@ function saveErrorText(error: any): string {
 }
 
 async function save() {
-  if (saving.value) return;
-  // Same shape FolderPicker produces; checked here so the user gets a translated message, not a server 400.
-  workspaceError.value = editsPreset.value && Boolean(workspace.value) && !isAbsoluteWorkspacePath(workspace.value || "");
-  if (workspaceError.value) return;
+  // Enter in a field submits the form too: never while the form is still loading or saving.
+  if (saving.value || loading.value) return;
+  // Shared presets never hold keys; checked here so the user gets a translated message, not a server 400.
+  baseUrlError.value = Boolean(currentPreset.value?.baseUrl && presetBaseUrlCarriesCredentials(currentPreset.value.baseUrl));
+  if (baseUrlError.value) return;
   let category: SessionCategory;
   saving.value = true;
   try {
@@ -452,22 +474,31 @@ async function clearPreset() {
         <label v-if="isScopedCodingAgent" class="category-preset-field">
           <span class="category-preset-label">{{ t("codingAgents.protocolScope") }}</span>
           <NSelect v-model:value="apiMode" :options="apiModeOptions" :disabled="saving" />
+          <span v-if="warningFor('apiMode')" class="category-preset-warning">{{ warningFor("apiMode") }}</span>
         </label>
 
         <label v-if="showBaseUrl" class="category-preset-field">
           <span class="category-preset-label">{{ t("models.baseUrl") }}</span>
-          <NInput v-model:value="baseUrl" :placeholder="t('models.baseUrlPlaceholder')" :disabled="saving" />
+          <NInput
+            v-model:value="baseUrl"
+            :placeholder="t('models.baseUrlPlaceholder')"
+            :status="baseUrlError ? 'error' : undefined"
+            :disabled="saving"
+            data-testid="category-preset-base-url"
+            @update:value="baseUrlError = false"
+          />
+          <span v-if="baseUrlError" class="category-preset-error" role="alert" data-testid="category-preset-base-url-error">
+            {{ t("chat.categoryPresetBaseUrlCredentials") }}
+          </span>
         </label>
+        <span v-if="warningFor('baseUrl')" class="category-preset-warning" data-testid="category-preset-base-url-warning">{{ warningFor("baseUrl") }}</span>
 
         <div class="category-preset-field">
           <span class="category-preset-label">{{ t("chat.workspace") }}</span>
           <NAlert v-if="warningFor('workspace')" type="warning" :show-icon="false" class="category-preset-alert">
             {{ warningFor("workspace") }}
           </NAlert>
-          <FolderPicker v-model="workspace" @update:model-value="workspaceError = false" />
-          <span v-if="workspaceError" class="category-preset-error" role="alert" data-testid="category-preset-workspace-error">
-            {{ t("chat.categoryPresetWorkspaceAbsolute") }}
-          </span>
+          <FolderPicker v-model="workspace" />
         </div>
       </template>
     </form>

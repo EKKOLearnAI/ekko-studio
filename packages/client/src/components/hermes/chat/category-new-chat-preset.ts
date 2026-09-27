@@ -23,14 +23,29 @@ export const CODING_AGENT_API_MODE_VALUES: readonly CodingAgentApiMode[] = [
   "anthropic_messages",
 ];
 
+const SECRET_QUERY_PARAMS = new Set(["key", "api_key", "apikey", "token", "access_token", "secret", "password", "sig"]);
+
 /**
- * Absolute folder path as FolderPicker produces it: POSIX (`/home/me/app`),
- * Windows drive (`C:\\work`, `C:/work`) or UNC (`\\\\server\\share`). Mirrors the
- * server-side preset rule so the form can show a translated message.
+ * True when a Base URL embeds credentials: URL userinfo (`https://user:pass@host`)
+ * or a query parameter named like a secret (`?api_key=…`, case-insensitive).
+ * Presets are shared, so the form refuses these with a translated message. This is
+ * the one preset rule the New Chat panel does not have; it mirrors the server rule
+ * (`presetBaseUrlCarriesCredentials` in session-category-preset.ts).
  */
-export function isAbsoluteWorkspacePath(value: string): boolean {
-  const path = value.trim();
-  return path.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\");
+export function presetBaseUrlCarriesCredentials(value: string): boolean {
+  const raw = value.trim();
+  let url: URL;
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`);
+  } catch {
+    return /^(?:[a-z][a-z0-9+.-]*:\/\/)?[^/?#]*@/i.test(raw)
+      || /[?&](?:key|api[_-]?key|token|access[_-]token|secret|password|sig)=/i.test(raw);
+  }
+  if (url.username || url.password) return true;
+  for (const name of url.searchParams.keys()) {
+    if (SECRET_QUERY_PARAMS.has(name.toLowerCase().replace(/-/g, "_"))) return true;
+  }
+  return false;
 }
 
 const KNOWN_AGENTS = new Set<string>(NEW_CHAT_AGENT_OPTIONS.map((option) => option.value));
@@ -64,6 +79,8 @@ export type CategoryPresetWarningField =
   | "provider"
   | "model"
   | "agentPreset"
+  | "apiMode"
+  | "baseUrl"
   | "workspace";
 
 export interface CategoryPresetWarning {
@@ -79,6 +96,8 @@ const WARNING_MESSAGE_KEYS: Record<CategoryPresetWarningField, string> = {
   provider: "chat.presetWarningProvider",
   model: "chat.presetWarningModel",
   agentPreset: "chat.presetWarningAgentPreset",
+  apiMode: "chat.presetWarningApiMode",
+  baseUrl: "chat.presetWarningBaseUrl",
   workspace: "chat.presetWarningWorkspace",
 };
 
@@ -88,7 +107,7 @@ export function presetWarningMessageKey(field: CategoryPresetWarningField): stri
 }
 
 export interface CategoryPresetResolveContext {
-  /** Drawer agent/mode before the preset is applied (today's default). */
+  /** Drawer agent/mode before the preset is applied (today's default: the last agent used). */
   currentAgent: NewChatAgentId;
   currentAgentMode: NewChatAgentMode;
   /** Profiles the current user can use. */
@@ -163,6 +182,8 @@ export function resolveCategoryPreset(
   if (usesProviderModel(agent, effectiveMode)) {
     const groups = context.selectableGroups(profile, agent, effectiveMode);
     const profileDefault = context.profileDefaultModel?.(profile);
+    // The preset provider's own group, when that provider is still usable here.
+    let presetProviderGroup: AvailableModelGroup | undefined;
     if (preset.modelKind === "moa") {
       const moa = agent === "hermes" ? groups.find((group) => group.provider === "moa" && group.models.length > 0) : undefined;
       if (!moa) {
@@ -183,6 +204,7 @@ export function resolveCategoryPreset(
           warnings.push({ field: "provider", value: preset.provider });
           if (preset.model) warnings.push({ field: "model", value: preset.model });
         } else {
+          presetProviderGroup = group;
           result.modelKind = "model";
           result.provider = group.provider;
           if (preset.model && !group.models.includes(preset.model)) {
@@ -204,8 +226,22 @@ export function resolveCategoryPreset(
       }
     }
     if (agent !== "hermes" && effectiveMode === "scoped") {
-      if (preset.apiMode && CODING_AGENT_API_MODE_VALUES.includes(preset.apiMode)) result.apiMode = preset.apiMode;
-      if (preset.baseUrl) result.baseUrl = preset.baseUrl;
+      // The Base URL was entered for the preset provider while it had none of its own.
+      // Anywhere else (stale provider, or the provider now has its own base_url) it
+      // would point another provider at the wrong endpoint, so drop it and warn.
+      const baseUrlUsable = Boolean(presetProviderGroup && !presetProviderGroup.base_url);
+      if (preset.baseUrl) {
+        if (baseUrlUsable) result.baseUrl = preset.baseUrl;
+        else warnings.push({ field: "baseUrl", value: preset.baseUrl });
+      }
+      // The API mode belongs to the preset provider (and to its Base URL when it had one).
+      if (preset.apiMode && CODING_AGENT_API_MODE_VALUES.includes(preset.apiMode)) {
+        const apiModeUsable = preset.baseUrl
+          ? baseUrlUsable
+          : !preset.provider || Boolean(presetProviderGroup);
+        if (apiModeUsable) result.apiMode = preset.apiMode;
+        else warnings.push({ field: "apiMode", value: preset.apiMode });
+      }
     }
   }
 
@@ -247,6 +283,15 @@ export function normalizeCategoryName(value: string): string {
 
 export type CategoryNameError = "required" | "tooLong" | "duplicate";
 
+/**
+ * Case folding of SQLite `COLLATE NOCASE`, which the category name column uses:
+ * only ASCII A-Z fold, so "Été" and "été" are different names there. The
+ * server's 409 stays the source of truth; this only avoids a false "duplicate".
+ */
+export function foldAsciiCase(value: string): string {
+  return value.replace(/[A-Z]/g, (char) => char.toLowerCase());
+}
+
 export function validateCategoryName(
   value: string,
   existingNames: readonly string[],
@@ -254,7 +299,7 @@ export function validateCategoryName(
   const name = normalizeCategoryName(value);
   if (!name) return "required";
   if (name.length > CATEGORY_NAME_MAX_LENGTH) return "tooLong";
-  const lower = name.toLocaleLowerCase();
-  if (existingNames.some((existing) => existing.toLocaleLowerCase() === lower)) return "duplicate";
+  const folded = foldAsciiCase(name);
+  if (existingNames.some((existing) => foldAsciiCase(existing) === folded)) return "duplicate";
   return null;
 }

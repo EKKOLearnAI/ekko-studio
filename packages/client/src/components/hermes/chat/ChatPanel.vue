@@ -1431,11 +1431,16 @@ async function applyCategoryPresetToNewChat(category: SessionCategory, generatio
     newChatApiKey.value = "";
   }
   // Base URL first, then infer the API mode from it exactly like manual entry;
-  // an explicit preset API mode still wins. The Base URL only applies where the
-  // panel shows the field (provider without its own base URL).
-  if (resolved.baseUrl && newChatNeedsBaseUrl.value) {
-    newChatBaseUrl.value = resolved.baseUrl;
-    newChatBaseUrlFromPreset.value = true;
+  // an explicit preset API mode still wins. resolveCategoryPreset only returns a
+  // Base URL for the preset's own provider while it has no base URL of its own
+  // (otherwise it warns); the field check keeps the drawer consistent with that.
+  if (resolved.baseUrl) {
+    if (newChatNeedsBaseUrl.value) {
+      newChatBaseUrl.value = resolved.baseUrl;
+      newChatBaseUrlFromPreset.value = true;
+    } else {
+      newChatPresetWarnings.value = [...newChatPresetWarnings.value, { field: "baseUrl", value: resolved.baseUrl }];
+    }
   }
   syncNewChatApiMode();
   if (resolved.apiMode) newChatApiMode.value = resolved.apiMode;
@@ -3316,6 +3321,7 @@ async function handleSessionModelCustomSubmit() {
               :options="newChatApiModeOptions"
               :disabled="newChatLoading || newChatUsesKeylessProvider"
             />
+            <span v-if="newChatPresetWarning('apiMode')" class="new-chat-preset-warning" role="status" data-testid="new-chat-api-mode-warning">{{ newChatPresetWarning("apiMode") }}</span>
           </label>
           <label v-if="newChatNeedsBaseUrl" class="new-chat-field">
             <span class="new-chat-label">{{ t("models.baseUrl") }}</span>
@@ -3324,6 +3330,7 @@ async function handleSessionModelCustomSubmit() {
               :placeholder="t('models.baseUrlPlaceholder')"
             />
           </label>
+          <span v-if="newChatPresetWarning('baseUrl')" class="new-chat-preset-warning" role="status" data-testid="new-chat-base-url-warning">{{ newChatPresetWarning("baseUrl") }}</span>
           <div v-if="newChatUsesProviderModel && newChatUsesKeylessProvider" class="new-chat-field">
             {{ t("models.opencodeFreeHint") }}
           </div>
