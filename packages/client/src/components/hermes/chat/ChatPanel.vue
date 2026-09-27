@@ -47,7 +47,6 @@ import { copyToClipboard } from "@/utils/clipboard";
 import FolderPicker from "./FolderPicker.vue";
 import CategoryPresetModal from "./CategoryPresetModal.vue";
 import {
-  REASONING_EFFORT_VALUES,
   hasCategoryPreset,
   isNewChatProviderAllowedFor,
   presetWarningMessageKey,
@@ -875,16 +874,18 @@ const newChatLoading = ref(false);
 // Category whose preset pre-filled the panel ([+] / [New Chat]); null for the top New Chat button.
 const newChatPresetCategoryId = ref<number | null>(null);
 const newChatPresetWarnings = ref<CategoryPresetWarning[]>([]);
-const newChatReasoningEffort = ref("");
-// Agent/mode the user had before a preset drawer; restored for the top New Chat button so presets never leak into it.
+// Agent/mode the user had before a preset was applied. Every drawer open restores it
+// first, so a preset (or its absence) never leaks from one category into the next open.
 let newChatAgentBeforePreset: { agent: NewChatAgentId; mode: NewChatAgentMode } | null = null;
-const newChatPresetCategoryName = computed(() =>
-  sessionCategories.value.find((category) => category.id === newChatPresetCategoryId.value)?.name || "",
-);
-const newChatReasoningEffortOptions = computed(() => [
-  { label: t("chat.categoryPresetDefault"), value: "" },
-  ...REASONING_EFFORT_VALUES.map((value) => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
-]);
+// Bumped on every open; a slow preset apply for an older open must not touch the drawer.
+let newChatOpenGeneration = 0;
+// True while the Base URL field holds a value that came from a category preset.
+const newChatBaseUrlFromPreset = ref(false);
+// Name for the "Using the … preset" notice; empty when the category has no preset to use.
+const newChatPresetCategoryName = computed(() => {
+  const category = sessionCategories.value.find((item) => item.id === newChatPresetCategoryId.value);
+  return category && hasCategoryPreset(category.preset) ? category.name : "";
+});
 
 function newChatPresetWarning(field: CategoryPresetWarningField): string {
   const warning = newChatPresetWarnings.value.find((item) => item.field === field);
@@ -1176,12 +1177,23 @@ const newChatUsesServerAuth = computed(() =>
   usesServerManagedProviderAuth(newChatAgent.value as ChatCodingAgentId, selectedNewChatProviderGroup.value?.provider),
 );
 const newChatUsesKeylessProvider = computed(() => isKeylessModelProvider(newChatProvider.value));
+// A shared preset can point a provider at another Base URL. The provider's stored key
+// is never sent there; the user enters a key, as for a provider without one.
+const newChatPresetBaseUrlBlocksStoredKey = computed(() => {
+  if (!newChatBaseUrlFromPreset.value) return false;
+  const group = selectedNewChatProviderGroup.value;
+  const effectiveBaseUrl = String(group?.base_url || newChatBaseUrl.value || "").trim();
+  return effectiveBaseUrl !== String(group?.base_url || "").trim();
+});
+const newChatCanUseStoredApiKey = computed(() =>
+  Boolean(selectedNewChatProviderGroup.value?.api_key) && !newChatPresetBaseUrlBlocksStoredKey.value,
+);
 const newChatNeedsApiKey = computed(() =>
   isNewChatCodingAgent.value &&
   effectiveNewChatAgentMode.value === "scoped" &&
   !newChatUsesServerAuth.value &&
   !newChatUsesKeylessProvider.value &&
-  !selectedNewChatProviderGroup.value?.api_key,
+  !newChatCanUseStoredApiKey.value,
 );
 const canConfirmNewChat = computed(() => {
   if (newChatCategoryCreating.value || newChatLoading.value) return false;
@@ -1222,6 +1234,7 @@ function syncNewChatModelSelection() {
   newChatProvider.value = defaults.provider;
   newChatModel.value = defaults.model;
   newChatBaseUrl.value = "";
+  newChatBaseUrlFromPreset.value = false;
   newChatApiKey.value = "";
   syncNewChatApiMode();
 }
@@ -1248,6 +1261,7 @@ function handleNewChatModelKindChange(value: "model" | "moa") {
       : group?.models[0] || "";
   }
   newChatBaseUrl.value = "";
+  newChatBaseUrlFromPreset.value = false;
   newChatApiKey.value = "";
   syncNewChatApiMode();
 }
@@ -1301,6 +1315,7 @@ watch(showNewChatModal, (visible) => {
 onUnmounted(() => { if (newChatCatalogPoll) clearInterval(newChatCatalogPoll); });
 
 async function openNewChatModal(options: { categoryId?: number } = {}) {
+  const generation = ++newChatOpenGeneration;
   isBatchMode.value = false;
   selectedSessionKeys.value.clear();
   showBatchDeleteConfirm.value = false;
@@ -1311,8 +1326,9 @@ async function openNewChatModal(options: { categoryId?: number } = {}) {
   newChatCategoryId.value = null;
   newChatPresetCategoryId.value = options.categoryId ?? null;
   newChatPresetWarnings.value = [];
-  newChatReasoningEffort.value = "";
-  if (options.categoryId == null && newChatAgentBeforePreset) {
+  newChatBaseUrlFromPreset.value = false;
+  // Same baseline for every open: undo whatever a previous preset applied.
+  if (newChatAgentBeforePreset) {
     newChatAgent.value = newChatAgentBeforePreset.agent;
     newChatAgentMode.value = newChatAgentBeforePreset.mode;
     newChatAgentBeforePreset = null;
@@ -1323,6 +1339,7 @@ async function openNewChatModal(options: { categoryId?: number } = {}) {
     if (appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0) {
       await appStore.loadModels();
     }
+    if (!isCurrentNewChatOpen(generation)) return;
     newChatProfile.value =
       profilesStore.activeProfileName ||
       profilesStore.profiles.find((profile) => profile.active)?.name ||
@@ -1344,18 +1361,29 @@ async function openNewChatModal(options: { categoryId?: number } = {}) {
     if (options.categoryId != null) {
       const category = sessionCategories.value.find((item) => item.id === options.categoryId);
       newChatCategoryId.value = category ? category.id : null;
-      if (category) await applyCategoryPresetToNewChat(category);
+      if (category) await applyCategoryPresetToNewChat(category, generation);
     }
   } finally {
-    newChatLoading.value = false;
+    // Leave loading alone only when a newer open owns the drawer.
+    if (generation === newChatOpenGeneration || !showNewChatModal.value) newChatLoading.value = false;
   }
 }
+
+/** False once the drawer was closed, or reopened (for this or another target), after `generation` started. */
+function isCurrentNewChatOpen(generation: number): boolean {
+  return generation === newChatOpenGeneration && showNewChatModal.value;
+}
+
+watch(showNewChatModal, (visible) => {
+  // Closing invalidates any preset apply still waiting on a request.
+  if (!visible) newChatOpenGeneration += 1;
+});
 
 /**
  * Pre-fills the panel from a category preset. Unusable values fall back to
  * today's default for that field with a warning; the stored preset is never changed.
  */
-async function applyCategoryPresetToNewChat(category: SessionCategory) {
+async function applyCategoryPresetToNewChat(category: SessionCategory, generation: number) {
   const preset = category.preset || null;
   if (!hasCategoryPreset(preset)) return;
   let dshPresetIds: string[] | undefined;
@@ -1367,6 +1395,7 @@ async function applyCategoryPresetToNewChat(category: SessionCategory) {
     } catch {
       dshPresetIds = undefined;
     }
+    if (!isCurrentNewChatOpen(generation)) return;
   }
   const resolved = resolveCategoryPreset(preset, {
     currentAgent: newChatAgent.value,
@@ -1381,15 +1410,14 @@ async function applyCategoryPresetToNewChat(category: SessionCategory) {
   });
   newChatPresetWarnings.value = resolved.warnings;
 
-  if (!newChatAgentBeforePreset) {
-    newChatAgentBeforePreset = { agent: newChatAgent.value, mode: newChatAgentMode.value };
-  }
+  newChatAgentBeforePreset = { agent: newChatAgent.value, mode: newChatAgentMode.value };
   const profileChanged = resolved.profile !== newChatProfile.value;
   if (resolved.agent) newChatAgent.value = resolved.agent;
   if (resolved.agentMode) newChatAgentMode.value = resolved.agentMode;
   newChatProfile.value = resolved.profile;
   // Let the agent/profile watcher settle today's defaults before applying preset values on top.
   await nextTick();
+  if (!isCurrentNewChatOpen(generation)) return;
   if (profileChanged) {
     initWorkspaceComposable(newChatProfile.value);
     newChatWorkspace.value = mostRecentDefaultWorkspace.value || "";
@@ -1401,13 +1429,18 @@ async function applyCategoryPresetToNewChat(category: SessionCategory) {
     newChatModel.value = resolved.model;
     newChatBaseUrl.value = "";
     newChatApiKey.value = "";
-    syncNewChatApiMode();
   }
+  // Base URL first, then infer the API mode from it exactly like manual entry;
+  // an explicit preset API mode still wins. The Base URL only applies where the
+  // panel shows the field (provider without its own base URL).
+  if (resolved.baseUrl && newChatNeedsBaseUrl.value) {
+    newChatBaseUrl.value = resolved.baseUrl;
+    newChatBaseUrlFromPreset.value = true;
+  }
+  syncNewChatApiMode();
   if (resolved.apiMode) newChatApiMode.value = resolved.apiMode;
-  if (resolved.baseUrl) newChatBaseUrl.value = resolved.baseUrl;
   if (resolved.agentPreset) newChatAgentPreset.value = resolved.agentPreset;
   if (resolved.workspace) newChatWorkspace.value = resolved.workspace;
-  if (resolved.reasoningEffort) newChatReasoningEffort.value = resolved.reasoningEffort;
 }
 
 function openCategoryNewChat(categoryId: number) {
@@ -1423,6 +1456,7 @@ function handleNewChatProviderChange(value: string) {
   newChatProvider.value = value;
   newChatModel.value = newChatModelOptions.value[0]?.value || "";
   newChatBaseUrl.value = "";
+  newChatBaseUrlFromPreset.value = false;
   newChatApiKey.value = "";
   syncNewChatApiMode();
 }
@@ -1499,9 +1533,10 @@ async function confirmNewChat() {
     workspace: newChatWorkspace.value || null,
     categoryId: newChatCategoryId.value,
     baseUrl: source === "coding_agent" && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
-    apiKey: source === "coding_agent" && !isGlobalCodingAgent && !newChatUsesKeylessProvider.value ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
+    apiKey: source === "coding_agent" && !isGlobalCodingAgent && !newChatUsesKeylessProvider.value
+      ? (newChatCanUseStoredApiKey.value ? group?.api_key : undefined) || newChatApiKey.value.trim() || undefined
+      : undefined,
     apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined,
-    reasoningEffort: !isGlobalCodingAgent ? newChatReasoningEffort.value || undefined : undefined,
   });
   // Record workspace to recent list
   if (newChatWorkspace.value && workspaceComposable) {
@@ -1829,9 +1864,11 @@ const categoryContextName = computed(() =>
 const categoryContextCategory = computed(() =>
   sessionCategories.value.find((item) => item.id === categoryContextId.value) || null,
 );
+// Presets are shared by every user, so only super admins edit them (the server enforces this too).
+const canManageCategoryPresets = computed(() => isSuperAdmin.value);
 const categoryContextMenuOptions = computed<DropdownOption[]>(() => [
   { label: t("chat.renameCategory"), key: "rename" },
-  { label: t("chat.setCategoryPreset"), key: "preset" },
+  ...(canManageCategoryPresets.value ? [{ label: t("chat.setCategoryPreset"), key: "preset" }] : []),
   { label: t("chat.deleteCategory"), key: "delete" },
 ]);
 const deleteCategoryConfirmText = computed(() =>
@@ -1907,7 +1944,7 @@ function handleCategoryContextMenuSelect(key: string) {
   if (key === "rename") {
     renameCategoryValue.value = category.name;
     showRenameCategoryModal.value = true;
-  } else if (key === "preset") {
+  } else if (key === "preset" && canManageCategoryPresets.value) {
     categoryPresetModalMode.value = "edit";
     categoryPresetModalCategory.value = category;
     showCategoryPresetModal.value = true;
@@ -2960,6 +2997,7 @@ async function handleSessionModelCustomSubmit() {
       :mode="categoryPresetModalMode"
       :category="categoryPresetModalCategory"
       :existing-names="sessionCategoryNameList"
+      :can-edit-preset="canManageCategoryPresets"
       @saved="handleCategoryPresetSaved"
     />
 
@@ -3286,14 +3324,6 @@ async function handleSessionModelCustomSubmit() {
               :placeholder="t('models.baseUrlPlaceholder')"
             />
           </label>
-          <label v-if="newChatPresetCategoryId != null && !isNewChatGlobalCodingAgent" class="new-chat-field">
-            <span class="new-chat-label">{{ t("chat.reasoningEffortField") }}</span>
-            <NSelect
-              v-model:value="newChatReasoningEffort"
-              :options="newChatReasoningEffortOptions"
-              :disabled="newChatLoading"
-            />
-          </label>
           <div v-if="newChatUsesProviderModel && newChatUsesKeylessProvider" class="new-chat-field">
             {{ t("models.opencodeFreeHint") }}
           </div>
@@ -3305,6 +3335,12 @@ async function handleSessionModelCustomSubmit() {
               show-password-on="click"
               :placeholder="t('models.apiKeyPlaceholder')"
             />
+            <span
+              v-if="newChatPresetBaseUrlBlocksStoredKey && selectedNewChatProviderGroup?.api_key"
+              class="new-chat-preset-warning"
+              role="status"
+              data-testid="new-chat-preset-key-required"
+            >{{ t("chat.presetBaseUrlKeyRequired") }}</span>
           </label>
           <div class="new-chat-field">
             <span class="new-chat-label">

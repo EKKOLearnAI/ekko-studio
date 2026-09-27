@@ -18,9 +18,10 @@ const keys = [
   'categoryNameTooLong', 'categoryNameDuplicate', 'setCategoryPreset', 'categoryPresetTitle',
   'clearCategoryPreset', 'categoryPresetHint', 'categoryPresetDefault', 'categoryPresetSaved',
   'categoryPresetCleared', 'categoryPresetSaveFailed', 'categoryPresetApplied',
-  'confirmDeleteCategoryWithPreset', 'reasoningEffortField', 'presetWarningAgent', 'presetWarningProfile',
+  'confirmDeleteCategoryWithPreset', 'presetWarningAgent', 'presetWarningProfile',
   'presetWarningModelKind', 'presetWarningProvider', 'presetWarningModel', 'presetWarningAgentPreset',
-  'presetWarningWorkspace', 'presetValueUnavailable',
+  'presetWarningWorkspace', 'presetValueUnavailable', 'presetBaseUrlKeyRequired', 'categoryPresetForbidden',
+  'categoryPresetWorkspaceAbsolute',
 ]
 
 const placeholders: Record<string, string> = {
@@ -38,6 +39,10 @@ const placeholders: Record<string, string> = {
 }
 
 describe('category New Chat preset locales', () => {
+  it('drops the reasoning effort field that was removed from presets', () => {
+    for (const locale of Object.keys(locales)) expect(locales[locale].chat.reasoningEffortField, locale).toBeUndefined()
+  })
+
   it.each(Object.keys(locales))('%s has every category preset string with its placeholders', (locale) => {
     for (const key of keys) {
       const value = locales[locale].chat[key]

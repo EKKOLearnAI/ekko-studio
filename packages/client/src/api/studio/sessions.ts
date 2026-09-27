@@ -57,7 +57,6 @@ export interface SessionCategoryPreset {
   provider?: string
   model?: string
   apiMode?: 'chat_completions' | 'codex_responses' | 'anthropic_messages'
-  reasoningEffort?: string
   baseUrl?: string
   workspace?: string
 }

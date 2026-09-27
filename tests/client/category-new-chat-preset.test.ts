@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   compactCategoryPreset,
   hasCategoryPreset,
+  isAbsoluteWorkspacePath,
   isNewChatProviderAllowedFor,
   presetWarningMessageKey,
   resolveCategoryPreset,
@@ -58,7 +59,6 @@ describe('category New Chat preset resolution', () => {
       model: 'claude-opus-5-5',
       apiMode: 'anthropic_messages',
       baseUrl: 'https://api.example.test',
-      reasoningEffort: 'high',
       workspace: '/projects/ai-passport',
     }, context({ workspaceExists: true }))
 
@@ -71,7 +71,6 @@ describe('category New Chat preset resolution', () => {
       model: 'claude-opus-5-5',
       apiMode: 'anthropic_messages',
       baseUrl: 'https://api.example.test',
-      reasoningEffort: 'high',
       workspace: '/projects/ai-passport',
       warnings: [],
     })
@@ -161,6 +160,17 @@ describe('category New Chat preset resolution', () => {
     expect(keepAgent.provider).toBe('anthropic')
   })
 
+  it('ignores a leftover reasoningEffort from presets saved by an earlier build (CL-016)', () => {
+    const legacy = { model: 'claude-opus-5-5', reasoningEffort: 'high' } as any
+    expect(resolveCategoryPreset(legacy, context())).toEqual({
+      profile: 'default',
+      modelKind: 'model',
+      provider: 'anthropic',
+      model: 'claude-opus-5-5',
+      warnings: [],
+    })
+  })
+
   it('never mutates the stored preset', () => {
     const preset = Object.freeze({ provider: 'gone', model: 'x', workspace: '/w' })
     expect(() => resolveCategoryPreset(preset, context({ workspaceExists: false }))).not.toThrow()
@@ -174,6 +184,11 @@ describe('category preset helpers', () => {
     expect(compactCategoryPreset({ model: '' })).toBeNull()
     expect(hasCategoryPreset(null)).toBe(false)
     expect(hasCategoryPreset({ model: 'm' })).toBe(true)
+  })
+
+  it('accepts only absolute workspace folders, POSIX or Windows, like FolderPicker produces', () => {
+    for (const path of ['/home/me/app', 'C:\\work', 'd:/work', '\\\\server\\share']) expect(isAbsoluteWorkspacePath(path), path).toBe(true)
+    for (const path of ['relative/dir', './here', '~/app', 'C:work']) expect(isAbsoluteWorkspacePath(path), path).toBe(false)
   })
 
   it('validates category names: required, max 40 characters, unique case-insensitively', () => {

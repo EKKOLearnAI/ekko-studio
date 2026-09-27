@@ -15,9 +15,9 @@ import FolderPicker from "./FolderPicker.vue";
 import {
   CATEGORY_NAME_MAX_LENGTH,
   NEW_CHAT_AGENT_OPTIONS,
-  REASONING_EFFORT_VALUES,
   compactCategoryPreset,
   effectiveNewChatMode,
+  isAbsoluteWorkspacePath,
   isExternalCodingAgent,
   isNewChatProviderAllowedFor,
   normalizeCategoryName,
@@ -37,6 +37,8 @@ const props = defineProps<{
   mode: "create" | "edit";
   category?: SessionCategory | null;
   existingNames: readonly string[];
+  /** false for users who may not write shared presets: "create" then shows only the Name field. */
+  canEditPreset?: boolean;
 }>();
 const show = defineModel<boolean>("show", { required: true });
 const emit = defineEmits<{ saved: [category: SessionCategory] }>();
@@ -56,13 +58,14 @@ const modelKind = ref<"model" | "moa">("model");
 const provider = ref("");
 const model = ref("");
 const apiMode = ref("");
-const reasoningEffort = ref("");
 const baseUrl = ref("");
 const workspace = ref<string | null>(null);
+const workspaceError = ref(false);
 const saving = ref(false);
 const loading = ref(false);
 const dshPresets = ref<DshSessionPresetChoice[] | null>(null);
 
+const editsPreset = computed(() => props.canEditPreset !== false);
 const storedPreset = computed(() => (props.mode === "edit" ? props.category?.preset || null : null));
 
 function resetFromPreset(preset: SessionCategoryPreset | null) {
@@ -74,9 +77,9 @@ function resetFromPreset(preset: SessionCategoryPreset | null) {
   provider.value = preset?.modelKind === "moa" ? "moa" : preset?.provider || "";
   model.value = preset?.model || "";
   apiMode.value = preset?.apiMode || "";
-  reasoningEffort.value = preset?.reasoningEffort || "";
   baseUrl.value = preset?.baseUrl || "";
   workspace.value = preset?.workspace || null;
+  workspaceError.value = false;
 }
 
 async function loadDshPresets() {
@@ -180,10 +183,6 @@ const apiModeOptions = computed(() => [
   { label: t("codingAgents.protocolOpenAiResponses"), value: "codex_responses" },
   { label: t("codingAgents.protocolAnthropicMessages"), value: "anthropic_messages" },
 ]);
-const reasoningEffortOptions = computed(() => [
-  defaultOption.value,
-  ...REASONING_EFFORT_VALUES.map((value) => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
-]);
 const dshPresetOptions = computed(() => withStaleOption(
   [
     defaultOption.value,
@@ -233,6 +232,7 @@ function handleProfileChange(value: string) {
 }
 
 const currentPreset = computed<SessionCategoryPreset | null>(() => {
+  if (!editsPreset.value) return null;
   const agentId = effectiveAgent.value;
   const usesModel = showProviderModel.value;
   return compactCategoryPreset({
@@ -244,7 +244,6 @@ const currentPreset = computed<SessionCategoryPreset | null>(() => {
     provider: usesModel && modelKind.value !== "moa" ? provider.value : undefined,
     model: usesModel && (modelKind.value === "moa" || provider.value) ? model.value : undefined,
     apiMode: isScopedCodingAgent.value && apiMode.value ? (apiMode.value as SessionCategoryPreset["apiMode"]) : undefined,
-    reasoningEffort: reasoningEffort.value || undefined,
     baseUrl: showBaseUrl.value ? baseUrl.value : undefined,
     workspace: workspace.value || undefined,
   });
@@ -286,8 +285,15 @@ const title = computed(() =>
     : t("chat.categoryPresetTitle", { name: props.category?.name || "" }),
 );
 
+function saveErrorText(error: any): string {
+  return error?.status === 403 ? t("chat.categoryPresetForbidden") : t("chat.categoryPresetSaveFailed");
+}
+
 async function save() {
   if (saving.value) return;
+  // Same shape FolderPicker produces; checked here so the user gets a translated message, not a server 400.
+  workspaceError.value = editsPreset.value && Boolean(workspace.value) && !isAbsoluteWorkspacePath(workspace.value || "");
+  if (workspaceError.value) return;
   let category: SessionCategory;
   saving.value = true;
   try {
@@ -312,7 +318,7 @@ async function save() {
     emit("saved", category);
     show.value = false;
   } catch (error: any) {
-    message.error(error?.message || t("chat.categoryPresetSaveFailed"));
+    message.error(saveErrorText(error));
   } finally {
     saving.value = false;
   }
@@ -330,7 +336,7 @@ async function clearPreset() {
     emit("saved", category);
     show.value = false;
   } catch (error: any) {
-    message.error(error?.message || t("chat.categoryPresetSaveFailed"));
+    message.error(saveErrorText(error));
   } finally {
     saving.value = false;
   }
@@ -366,109 +372,110 @@ async function clearPreset() {
         <span v-if="nameErrorText" class="category-preset-error" role="alert">{{ nameErrorText }}</span>
       </label>
 
-      <p class="category-preset-hint">{{ t("chat.categoryPresetHint") }}</p>
+      <template v-if="editsPreset">
+        <p class="category-preset-hint">{{ t("chat.categoryPresetHint") }}</p>
 
-      <label class="category-preset-field">
-        <span class="category-preset-label">{{ t("chat.agent") }}</span>
-        <NSelect
-          :value="agent"
-          :options="agentOptions"
-          :disabled="saving"
-          data-testid="category-preset-agent"
-          @update:value="handleAgentChange"
-        />
-        <span v-if="warningFor('agent')" class="category-preset-warning">{{ warningFor("agent") }}</span>
-      </label>
+        <label class="category-preset-field">
+          <span class="category-preset-label">{{ t("chat.agent") }}</span>
+          <NSelect
+            :value="agent"
+            :options="agentOptions"
+            :disabled="saving"
+            data-testid="category-preset-agent"
+            @update:value="handleAgentChange"
+          />
+          <span v-if="warningFor('agent')" class="category-preset-warning">{{ warningFor("agent") }}</span>
+        </label>
 
-      <label v-if="effectiveAgent === 'dsh'" class="category-preset-field">
-        <span class="category-preset-label">{{ t("dshPresets.sessionMode") }}</span>
-        <NSelect v-model:value="agentPreset" :options="dshPresetOptions" :disabled="saving" />
-        <span v-if="warningFor('agentPreset')" class="category-preset-warning">{{ warningFor("agentPreset") }}</span>
-      </label>
+        <label v-if="effectiveAgent === 'dsh'" class="category-preset-field">
+          <span class="category-preset-label">{{ t("dshPresets.sessionMode") }}</span>
+          <NSelect v-model:value="agentPreset" :options="dshPresetOptions" :disabled="saving" />
+          <span v-if="warningFor('agentPreset')" class="category-preset-warning">{{ warningFor("agentPreset") }}</span>
+        </label>
 
-      <label v-if="isExternalCodingAgent(effectiveAgent)" class="category-preset-field">
-        <span class="category-preset-label">{{ t("codingAgents.launchModeScope") }}</span>
-        <NRadioGroup v-model:value="agentMode" name="category-preset-agent-mode" :disabled="saving">
-          <NRadioButton v-for="option in agentModeOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </NRadioButton>
-        </NRadioGroup>
-      </label>
+        <label v-if="isExternalCodingAgent(effectiveAgent)" class="category-preset-field">
+          <span class="category-preset-label">{{ t("codingAgents.launchModeScope") }}</span>
+          <NRadioGroup v-model:value="agentMode" name="category-preset-agent-mode" :disabled="saving">
+            <NRadioButton v-for="option in agentModeOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </NRadioButton>
+          </NRadioGroup>
+        </label>
 
-      <label class="category-preset-field">
-        <span class="category-preset-label">{{ t("sidebar.profiles") }}</span>
-        <NSelect
-          :value="profile"
-          :options="profileOptions"
-          :loading="loading || profilesStore.loading"
-          :disabled="saving"
-          data-testid="category-preset-profile"
-          @update:value="handleProfileChange"
-        />
-        <span v-if="warningFor('profile')" class="category-preset-warning">{{ warningFor("profile") }}</span>
-      </label>
+        <label class="category-preset-field">
+          <span class="category-preset-label">{{ t("sidebar.profiles") }}</span>
+          <NSelect
+            :value="profile"
+            :options="profileOptions"
+            :loading="loading || profilesStore.loading"
+            :disabled="saving"
+            data-testid="category-preset-profile"
+            @update:value="handleProfileChange"
+          />
+          <span v-if="warningFor('profile')" class="category-preset-warning">{{ warningFor("profile") }}</span>
+        </label>
 
-      <label v-if="showProviderModel && showModelKind" class="category-preset-field">
-        <span class="category-preset-label">{{ t("chat.modelType") }}</span>
-        <NRadioGroup :value="modelKind" name="category-preset-model-kind" :disabled="saving" @update:value="handleModelKindChange">
-          <NRadioButton value="model">{{ t("chat.standardModels") }}</NRadioButton>
-          <NRadioButton value="moa">{{ t("chat.moaPresets") }}</NRadioButton>
-        </NRadioGroup>
-        <span v-if="warningFor('modelKind')" class="category-preset-warning">{{ warningFor("modelKind") }}</span>
-      </label>
+        <label v-if="showProviderModel && showModelKind" class="category-preset-field">
+          <span class="category-preset-label">{{ t("chat.modelType") }}</span>
+          <NRadioGroup :value="modelKind" name="category-preset-model-kind" :disabled="saving" @update:value="handleModelKindChange">
+            <NRadioButton value="model">{{ t("chat.standardModels") }}</NRadioButton>
+            <NRadioButton value="moa">{{ t("chat.moaPresets") }}</NRadioButton>
+          </NRadioGroup>
+          <span v-if="warningFor('modelKind')" class="category-preset-warning">{{ warningFor("modelKind") }}</span>
+        </label>
 
-      <label v-if="showProviderModel && modelKind === 'model'" class="category-preset-field">
-        <span class="category-preset-label">{{ t("models.provider") }}</span>
-        <NSelect
-          :value="provider"
-          :options="providerOptions"
-          :disabled="saving"
-          filterable
-          data-testid="category-preset-provider"
-          @update:value="handleProviderChange"
-        />
-        <span v-if="warningFor('provider')" class="category-preset-warning">{{ warningFor("provider") }}</span>
-      </label>
+        <label v-if="showProviderModel && modelKind === 'model'" class="category-preset-field">
+          <span class="category-preset-label">{{ t("models.provider") }}</span>
+          <NSelect
+            :value="provider"
+            :options="providerOptions"
+            :disabled="saving"
+            filterable
+            data-testid="category-preset-provider"
+            @update:value="handleProviderChange"
+          />
+          <span v-if="warningFor('provider')" class="category-preset-warning">{{ warningFor("provider") }}</span>
+        </label>
 
-      <label v-if="showProviderModel" class="category-preset-field">
-        <span class="category-preset-label">{{ modelKind === "moa" ? t("chat.moaPresets") : t("models.models") }}</span>
-        <NSelect
-          v-model:value="model"
-          :options="modelOptions"
-          :disabled="saving || (modelKind === 'model' && !provider)"
-          filterable
-          data-testid="category-preset-model"
-        />
-        <span v-if="warningFor('model')" class="category-preset-warning">{{ warningFor("model") }}</span>
-      </label>
+        <label v-if="showProviderModel" class="category-preset-field">
+          <span class="category-preset-label">{{ modelKind === "moa" ? t("chat.moaPresets") : t("models.models") }}</span>
+          <NSelect
+            v-model:value="model"
+            :options="modelOptions"
+            :disabled="saving || (modelKind === 'model' && !provider)"
+            filterable
+            data-testid="category-preset-model"
+          />
+          <span v-if="warningFor('model')" class="category-preset-warning">{{ warningFor("model") }}</span>
+        </label>
 
-      <label v-if="isScopedCodingAgent" class="category-preset-field">
-        <span class="category-preset-label">{{ t("codingAgents.protocolScope") }}</span>
-        <NSelect v-model:value="apiMode" :options="apiModeOptions" :disabled="saving" />
-      </label>
+        <label v-if="isScopedCodingAgent" class="category-preset-field">
+          <span class="category-preset-label">{{ t("codingAgents.protocolScope") }}</span>
+          <NSelect v-model:value="apiMode" :options="apiModeOptions" :disabled="saving" />
+        </label>
 
-      <label v-if="showBaseUrl" class="category-preset-field">
-        <span class="category-preset-label">{{ t("models.baseUrl") }}</span>
-        <NInput v-model:value="baseUrl" :placeholder="t('models.baseUrlPlaceholder')" :disabled="saving" />
-      </label>
+        <label v-if="showBaseUrl" class="category-preset-field">
+          <span class="category-preset-label">{{ t("models.baseUrl") }}</span>
+          <NInput v-model:value="baseUrl" :placeholder="t('models.baseUrlPlaceholder')" :disabled="saving" />
+        </label>
 
-      <label class="category-preset-field">
-        <span class="category-preset-label">{{ t("chat.reasoningEffortField") }}</span>
-        <NSelect v-model:value="reasoningEffort" :options="reasoningEffortOptions" :disabled="saving" />
-      </label>
-
-      <div class="category-preset-field">
-        <span class="category-preset-label">{{ t("chat.workspace") }}</span>
-        <NAlert v-if="warningFor('workspace')" type="warning" :show-icon="false" class="category-preset-alert">
-          {{ warningFor("workspace") }}
-        </NAlert>
-        <FolderPicker v-model="workspace" />
-      </div>
+        <div class="category-preset-field">
+          <span class="category-preset-label">{{ t("chat.workspace") }}</span>
+          <NAlert v-if="warningFor('workspace')" type="warning" :show-icon="false" class="category-preset-alert">
+            {{ warningFor("workspace") }}
+          </NAlert>
+          <FolderPicker v-model="workspace" @update:model-value="workspaceError = false" />
+          <span v-if="workspaceError" class="category-preset-error" role="alert" data-testid="category-preset-workspace-error">
+            {{ t("chat.categoryPresetWorkspaceAbsolute") }}
+          </span>
+        </div>
+      </template>
     </form>
 
     <template #footer>
       <div class="category-preset-actions">
         <NButton
+          v-if="editsPreset"
           quaternary
           type="error"
           :disabled="saving || (mode === 'edit' && !storedPreset)"

@@ -23,7 +23,15 @@ export const CODING_AGENT_API_MODE_VALUES: readonly CodingAgentApiMode[] = [
   "anthropic_messages",
 ];
 
-export const REASONING_EFFORT_VALUES = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+/**
+ * Absolute folder path as FolderPicker produces it: POSIX (`/home/me/app`),
+ * Windows drive (`C:\\work`, `C:/work`) or UNC (`\\\\server\\share`). Mirrors the
+ * server-side preset rule so the form can show a translated message.
+ */
+export function isAbsoluteWorkspacePath(value: string): boolean {
+  const path = value.trim();
+  return path.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
 
 const KNOWN_AGENTS = new Set<string>(NEW_CHAT_AGENT_OPTIONS.map((option) => option.value));
 
@@ -110,7 +118,6 @@ export interface ResolvedCategoryPreset {
   model?: string;
   apiMode?: CodingAgentApiMode;
   baseUrl?: string;
-  reasoningEffort?: string;
   agentPreset?: string;
   workspace?: string;
   warnings: CategoryPresetWarning[];
@@ -200,10 +207,6 @@ export function resolveCategoryPreset(
       if (preset.apiMode && CODING_AGENT_API_MODE_VALUES.includes(preset.apiMode)) result.apiMode = preset.apiMode;
       if (preset.baseUrl) result.baseUrl = preset.baseUrl;
     }
-  }
-
-  if (preset.reasoningEffort && (REASONING_EFFORT_VALUES as readonly string[]).includes(preset.reasoningEffort)) {
-    result.reasoningEffort = preset.reasoningEffort;
   }
 
   if (agent === "dsh" && preset.agentPreset) {
