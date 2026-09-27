@@ -330,6 +330,31 @@ test('warns about stale preset values and uses defaults without changing the pre
     .toContainText('Its New Chat preset will be removed')
 })
 
+test('warns when the server dropped a stored Base URL (and its API mode) that failed the credential filter', async ({ page }) => {
+  const api = await setupPage(page, [{
+    id: 1,
+    name: 'Dropped',
+    preset: { model: 'claude-opus-5-5' },
+    preset_status: { base_url_dropped: true },
+  }])
+  await page.goto('/#/hermes/chat')
+
+  await page.getByTestId('category-new-chat-row').first().click()
+  await expect(drawer(page).getByTestId('new-chat-base-url-warning'))
+    .toHaveText('Base URL “…” in the preset is not used with this provider; using the provider\'s own settings.')
+  await expect(drawerField(page, /^Models/)).toContainText('claude-opus-5-5')
+  await snap(page, '11-drawer-dropped-base-url')
+  await page.keyboard.press('Escape')
+
+  await categoryHeader(page, 'Dropped').getByRole('button', { name: 'More' }).click()
+  await page.locator('.n-dropdown-menu:visible').getByText('Set preset', { exact: true }).click()
+  const modal = page.getByTestId('category-preset-modal')
+  await expect(modal.getByTestId('category-preset-base-url-warning'))
+    .toHaveText('Base URL “…” in the preset is not used with this provider; using the provider\'s own settings.')
+  await page.keyboard.press('Escape')
+  expect(api.requests.some(request => request.method === 'PATCH')).toBe(false)
+})
+
 test('keeps today\'s install flow when the preset agent is not installed', async ({ page }) => {
   await setupPage(page, [{ id: 1, name: 'Agents', preset: { agent: 'claude-code', provider: 'anthropic', model: 'claude-opus-5-5' } }], [], [])
   await page.goto('/#/hermes/chat')
@@ -613,6 +638,20 @@ test('moving a chat into a category does not apply its preset to that chat', asy
   expect(api.requests.some(request => request.method === 'PATCH')).toBe(false)
 })
 
+/** Header order is Name … [...][+]: [+] is rightmost, right after [...], and Tab follows that order. */
+async function expectMenuThenPlus(page: Page, name: string) {
+  const header = categoryHeader(page, name)
+  const menu = header.getByRole('button', { name: 'More' })
+  const plus = header.getByTestId('category-new-chat-plus')
+  const [menuBox, plusBox, headerBox] = await Promise.all([menu.boundingBox(), plus.boundingBox(), header.boundingBox()])
+  expect(menuBox && plusBox && headerBox).toBeTruthy()
+  expect(plusBox!.x).toBeGreaterThan(menuBox!.x + menuBox!.width - 1)
+  expect(headerBox!.x + headerBox!.width - (plusBox!.x + plusBox!.width)).toBeLessThan(menuBox!.width)
+  await menu.focus()
+  await page.keyboard.press('Tab')
+  await expect(plus).toBeFocused()
+}
+
 test.describe('on a touch device', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 1280, height: 900 } })
 
@@ -622,6 +661,7 @@ test.describe('on a touch device', () => {
     const plus = categoryHeader(page, 'Touch').getByTestId('category-new-chat-plus')
     await expect(plus).toBeVisible()
     await expect(plus).toHaveCSS('opacity', '1')
+    await expectMenuThenPlus(page, 'Touch')
     await plus.tap()
     await expect(drawerField(page, /^Category/)).toContainText('Touch')
   })
@@ -635,4 +675,5 @@ test('reveals the category [+] button on hover for a pointer device', async ({ p
   await expect(plus).toHaveCSS('opacity', '0')
   await categoryHeader(page, 'Pointer').hover()
   await expect(plus).toHaveCSS('opacity', '1')
+  await expectMenuThenPlus(page, 'Pointer')
 })

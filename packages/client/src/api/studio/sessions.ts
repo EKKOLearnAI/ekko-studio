@@ -64,6 +64,8 @@ export interface SessionCategoryPreset {
 export interface SessionCategoryPresetStatus {
   /** false when the preset workspace folder no longer exists on the server. */
   workspace_exists?: boolean
+  /** true when the stored Base URL failed the credential filter and was dropped with its API mode. */
+  base_url_dropped?: true
 }
 
 export interface SessionCategory {

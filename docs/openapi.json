@@ -18295,7 +18295,7 @@
           "Sessions"
         ],
         "summary": "Get session-categories",
-        "description": "GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace and the folder check finished in time.",
+        "description": "GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace and the folder check finished in time, and preset_status.base_url_dropped (true) when the stored Base URL failed the credential filter and was dropped on read together with its API mode.",
         "operationId": "listCategories",
         "security": [
           {

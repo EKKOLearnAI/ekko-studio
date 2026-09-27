@@ -962,7 +962,7 @@ openapi.paths['/api/studio/session-categories/{id}'].patch.requestBody = {
 }
 openapi.paths['/api/studio/session-categories/{id}'].patch.responses[409] = { description: 'A category with this name already exists.' }
 openapi.paths['/api/studio/session-categories/{id}'].patch.responses[403] = { description: 'preset was sent (including null to clear) by a user who is not a super admin.' }
-openapi.paths['/api/studio/session-categories'].get.description = 'GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace and the folder check finished in time.'
+openapi.paths['/api/studio/session-categories'].get.description = 'GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace and the folder check finished in time, and preset_status.base_url_dropped (true) when the stored Base URL failed the credential filter and was dropped on read together with its API mode.'
 
 // Shared task planning is bound to an authenticated, active turn capability.
 openapi.paths['/api/studio/task-plans/update'] = {

@@ -2,14 +2,21 @@ import { resolve } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT,
+  PRESET_WORKSPACE_PROBE_MAX_THREADS,
   createDirectoryProbe,
   describeSessionCategoryPresetStatus,
   normalizeSessionCategoryPreset,
   parseStoredSessionCategoryPreset,
+  readStoredSessionCategoryPreset,
   isSecretLikeParamName,
   presetBaseUrlCarriesCredentials,
 } from '../../packages/server/src/modules/studio/services/session-category-preset'
-import { PRESET_BASE_URLS_WITH_CREDENTIALS, PRESET_BASE_URLS_WITHOUT_CREDENTIALS } from '../fixtures/preset-base-url-cases'
+import {
+  PRESET_BASE_URLS_WITH_CREDENTIALS,
+  PRESET_BASE_URLS_WITHOUT_CREDENTIALS,
+  SAFE_PARAM_NAMES,
+  SECRET_LIKE_PARAM_NAMES,
+} from '../fixtures/preset-base-url-cases'
 
 const directory = { isDirectory: () => true }
 const file = { isDirectory: () => false }
@@ -130,9 +137,11 @@ describe('session category preset workspace probe', () => {
     const pool = Number(process.env.UV_THREADPOOL_SIZE) || 4
     expect(PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT).toBeLessThan(pool)
     expect(PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT).toBeGreaterThanOrEqual(1)
+    expect(PRESET_WORKSPACE_PROBE_MAX_THREADS).toBeGreaterThanOrEqual(PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT)
+    if (pool > 1) expect(PRESET_WORKSPACE_PROBE_MAX_THREADS).toBeLessThan(pool)
   })
 
-  it('marks a stat hung past the stale limit as stale-busy: logged once, answered unknown at once, still counted, never restarted', async () => {
+  it('marks a stat hung past the stale limit as stale-busy: logged once, answered unknown at once, never restarted, and off the in-flight cap', async () => {
     vi.useFakeTimers()
     let finish!: (value: typeof directory) => void
     const statFn = vi.fn((path: string) => path === resolve('/mnt/hung')
@@ -152,19 +161,64 @@ describe('session category preset workspace probe', () => {
     await expect(probe('/mnt/hung')).resolves.toBeUndefined()
     expect(onStale).toHaveBeenCalledTimes(1)
     expect(onStale).toHaveBeenCalledWith(resolve('/mnt/hung'), 30_000)
-    // The stale stat still holds its slot, so a new path is not stacked on the threadpool.
-    const queued = probe('/work/app')
-    await vi.advanceTimersByTimeAsync(100)
-    await expect(queued).resolves.toBeUndefined()
-    expect(statFn).toHaveBeenCalledTimes(1)
+    // The stale stat leaves the in-flight slot (it keeps its thread), so another path is checked at once.
+    await expect(probe('/work/app')).resolves.toBe(true)
+    expect(statFn).toHaveBeenCalledTimes(2)
 
-    // Once the old stat settles its answer is used and the slot frees up.
+    // Once the old stat settles its answer is used; nothing is restarted.
     finish(directory)
     await vi.advanceTimersByTimeAsync(0)
     await expect(probe('/mnt/hung')).resolves.toBe(true)
     await expect(probe('/work/app')).resolves.toBe(true)
     expect(statFn).toHaveBeenCalledTimes(2)
     expect(onStale).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps checking healthy paths while two mounts are stale-busy: no queue wait, answer cached', async () => {
+    vi.useFakeTimers()
+    const hung = new Set([resolve('/mnt/hung-a'), resolve('/mnt/hung-b')])
+    const statFn = vi.fn((path: string) => hung.has(path) ? new Promise<typeof directory>(() => {}) : Promise.resolve(directory))
+    let clock = 0
+    const probe = createDirectoryProbe({ statFn, timeoutMs: 500, maxInFlight: 2, maxThreads: 3, staleMs: 30_000, now: () => clock, onStale: vi.fn() })
+
+    const hungChecks = Promise.all([probe('/mnt/hung-a'), probe('/mnt/hung-b')])
+    await vi.advanceTimersByTimeAsync(500)
+    await expect(hungChecks).resolves.toEqual([undefined, undefined])
+    clock = 30_000
+
+    // Answered without any timer advancing: the healthy path did not queue behind the hung ones.
+    let answer: boolean | undefined | 'pending' = 'pending'
+    void probe('/work/app').then((value) => { answer = value })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(answer).toBe(true)
+    expect(statFn).toHaveBeenCalledTimes(3)
+    // Cached: no second stat.
+    await expect(probe('/work/app')).resolves.toBe(true)
+    expect(statFn).toHaveBeenCalledTimes(3)
+  })
+
+  it('answers new paths "unknown" at once, without a stat, once stale-busy stats hold every allowed thread', async () => {
+    vi.useFakeTimers()
+    const statFn = vi.fn((path: string) => path.startsWith(resolve('/mnt')) ? new Promise<typeof directory>(() => {}) : Promise.resolve(directory))
+    let clock = 0
+    const probe = createDirectoryProbe({ statFn, timeoutMs: 500, maxInFlight: 2, maxThreads: 2, staleMs: 30_000, now: () => clock, onStale: vi.fn() })
+
+    const hungChecks = Promise.all([probe('/mnt/a'), probe('/mnt/b')])
+    // A third path queues behind the two running stats.
+    const queued = probe('/work/queued')
+    await vi.advanceTimersByTimeAsync(100)
+    clock = 30_000
+    // The stale marking settles the queued caller at once instead of leaving it to time out.
+    let fresh: boolean | undefined | 'pending' = 'pending'
+    void probe('/work/app').then((value) => { fresh = value })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fresh).toBeUndefined()
+    await expect(queued).resolves.toBeUndefined()
+    expect(statFn).toHaveBeenCalledTimes(2)
+    expect(probe.waiting()).toBe(2)
+    await vi.advanceTimersByTimeAsync(400)
+    await expect(hungChecks).resolves.toEqual([undefined, undefined])
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('keeps waiters bounded while a mount hangs: each timed-out caller is removed', async () => {
@@ -217,11 +271,9 @@ describe('session category preset validation', () => {
     for (const url of PRESET_BASE_URLS_WITHOUT_CREDENTIALS) expect(presetBaseUrlCarriesCredentials(url), url).toBe(false)
   })
 
-  it('matches secret-like parameter names case-, dash- and underscore-insensitively by substring', () => {
-    for (const name of ['x-api-key', 'Subscription-Key', 'client_secret', 'AUTH', 'api_key[]', '%61pi_key', 'access-token', 'passwd', 'signature', 'keyboard'])
-      expect(isSecretLikeParamName(name), name).toBe(true)
-    for (const name of ['api-version', 'version', 'region', 'format', 'deployment', 'model'])
-      expect(isSecretLikeParamName(name), name).toBe(false)
+  it('matches secret-like parameter names by whole word (split on non-alphanumerics and camelCase) or known compound', () => {
+    for (const name of SECRET_LIKE_PARAM_NAMES) expect(isSecretLikeParamName(name), name).toBe(true)
+    for (const name of SAFE_PARAM_NAMES) expect(isSecretLikeParamName(name), name).toBe(false)
   })
 
   it('refuses a Base URL with credentials on write and drops it on read', () => {
@@ -235,5 +287,25 @@ describe('session category preset validation', () => {
       .toEqual({ agent: 'claude-code', baseUrl: 'https://x.openai.azure.com/openai/deployments/d?api-version=2024-10-21' })
     expect(parseStoredSessionCategoryPreset(JSON.stringify({ model: 'm', baseUrl: 'https://gw.test/?token=t' })))
       .toEqual({ model: 'm' })
+  })
+
+  it('drops the API mode with a stored Base URL that fails the filter, and reports the drop', async () => {
+    const stored = JSON.stringify({ agent: 'claude-code', provider: 'p', apiMode: 'anthropic_messages', baseUrl: 'https://gw.test/v1?api_key=sk' })
+    expect(readStoredSessionCategoryPreset(stored)).toEqual({ preset: { agent: 'claude-code', provider: 'p' }, baseUrlDropped: true })
+    // A Base URL that passes keeps its API mode; a preset without one reports nothing.
+    const kept = JSON.stringify({ agent: 'claude-code', apiMode: 'anthropic_messages', baseUrl: 'https://gw.test/v1' })
+    expect(readStoredSessionCategoryPreset(kept)).toEqual({
+      preset: { agent: 'claude-code', apiMode: 'anthropic_messages', baseUrl: 'https://gw.test/v1' },
+      baseUrlDropped: false,
+    })
+    expect(readStoredSessionCategoryPreset(JSON.stringify({ apiMode: 'chat_completions' })).baseUrlDropped).toBe(false)
+    // Only the flag reaches the client, never the dropped value.
+    const probe = vi.fn()
+    await expect(describeSessionCategoryPresetStatus({ agent: 'claude-code' }, probe, { baseUrlDropped: true }))
+      .resolves.toEqual({ base_url_dropped: true })
+    await expect(describeSessionCategoryPresetStatus(null, probe, { baseUrlDropped: true }))
+      .resolves.toEqual({ base_url_dropped: true })
+    await expect(describeSessionCategoryPresetStatus({ agent: 'claude-code' }, probe)).resolves.toBeUndefined()
+    expect(probe).not.toHaveBeenCalled()
   })
 })

@@ -1385,7 +1385,7 @@ watch(showNewChatModal, (visible) => {
  */
 async function applyCategoryPresetToNewChat(category: SessionCategory, generation: number) {
   const preset = category.preset || null;
-  if (!hasCategoryPreset(preset)) return;
+  if (!hasCategoryPreset(preset) && !category.preset_status?.base_url_dropped) return;
   let dshPresetIds: string[] | undefined;
   if (preset?.agent === "dsh" && preset.agentPreset) {
     try {
@@ -1407,6 +1407,7 @@ async function applyCategoryPresetToNewChat(category: SessionCategory, generatio
       appStore.profileModelGroups.find((entry) => entry.profile === profile)?.default || undefined,
     dshPresetIds,
     workspaceExists: category.preset_status?.workspace_exists,
+    storedBaseUrlDropped: category.preset_status?.base_url_dropped,
   });
   newChatPresetWarnings.value = resolved.warnings;
 
@@ -2826,23 +2827,7 @@ async function handleSessionModelCustomSubmit() {
             </svg>
             <span class="session-group-label">{{ group.label }}</span>
             <span class="session-group-count">{{ group.sessions.length }}</span>
-            <NTooltip v-if="group.categoryId != null" placement="top">
-              <template #trigger>
-                <button
-                  class="session-category-new-chat-button"
-                  type="button"
-                  :aria-label="t('chat.newChatInCategory', { name: group.label })"
-                  data-testid="category-new-chat-plus"
-                  @click.stop="openCategoryNewChat(group.categoryId)"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                </button>
-              </template>
-              {{ t("chat.newChatInCategory", { name: group.label }) }}
-            </NTooltip>
+            <!-- Header order: Name … [...][+] ([+] rightmost, like ChatGPT); tab order follows it. -->
             <button
               v-if="group.key !== 'category-none'"
               class="session-category-menu-button"
@@ -2863,6 +2848,23 @@ async function handleSessionModelCustomSubmit() {
                 <circle cx="19" cy="12" r="1.6" />
               </svg>
             </button>
+            <NTooltip v-if="group.categoryId != null" placement="top">
+              <template #trigger>
+                <button
+                  class="session-category-new-chat-button"
+                  type="button"
+                  :aria-label="t('chat.newChatInCategory', { name: group.label })"
+                  data-testid="category-new-chat-plus"
+                  @click.stop="openCategoryNewChat(group.categoryId)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
+              </template>
+              {{ t("chat.newChatInCategory", { name: group.label }) }}
+            </NTooltip>
           </div>
           <template v-if="!collapsedCategories.has(group.key)">
             <button
@@ -4363,10 +4365,11 @@ async function handleSessionModelCustomSubmit() {
     background: $bg-secondary;
     color: $text-primary;
   }
+}
 
-  & + .session-category-menu-button {
-    margin-inline-start: 0;
-  }
+// [...] comes first and takes the free space; [+] sits right after it.
+.session-category-menu-button + .session-category-new-chat-button {
+  margin-inline-start: 0;
 }
 
 // Pointer devices reveal [+] on header hover; touch devices always show it.

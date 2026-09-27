@@ -97,10 +97,28 @@ function isEnumField(key: string): key is EnumField {
 }
 
 const URL_SCHEME_PREFIX = /^[a-z][a-z0-9+.-]*:/i
-// Normalized (lowercase, only a-z0-9) parameter names containing one of these are
-// treated as secrets: x-api-key, subscription-key, client_secret, auth, api_key[],
-// signature. Harmless names such as api-version or version do not match.
-const SECRET_PARAM_NAME = /key|token|secret|passw(?:or)?d|sig|auth|credential/
+// A parameter name is secret-like when one of its words is a secret word, or the
+// whole name run together is a known compound. Words split on anything but a-z0-9
+// and on camelCase boundaries, so x-api-key, subscription-key, client_secret, auth,
+// api_key[], signature and accessToken match, while design, author, keyspace,
+// monkey, authuser, max_tokens, api-version and version do not.
+const SECRET_PARAM_WORDS = new Set([
+  'key', 'apikey', 'token', 'secret', 'password', 'passwd', 'pwd', 'sig', 'signature',
+  'auth', 'authorization', 'credential', 'credentials', 'accesstoken', 'sessiontoken',
+])
+const SECRET_PARAM_COMPOUNDS = new Set([
+  'apikey', 'xapikey', 'subscriptionkey', 'clientsecret', 'accesstoken', 'authtoken', 'sessiontoken',
+])
+
+/** Lowercase words of a parameter name, split on non-alphanumerics and camelCase boundaries. */
+function paramNameWords(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+}
 
 /** True when a query/fragment parameter name looks like it carries a secret. */
 export function isSecretLikeParamName(name: string): boolean {
@@ -110,7 +128,8 @@ export function isSecretLikeParamName(name: string): boolean {
   } catch {
     // Malformed escapes: match the raw spelling.
   }
-  return SECRET_PARAM_NAME.test(decoded.toLowerCase().replace(/[^a-z0-9]/g, ''))
+  const words = paramNameWords(decoded)
+  return words.some((word) => SECRET_PARAM_WORDS.has(word)) || SECRET_PARAM_COMPOUNDS.has(words.join(''))
 }
 
 /** The text before the first path, query or fragment separator, after an optional scheme. */
@@ -236,35 +255,52 @@ export function normalizeSessionCategoryPreset(input: unknown): SessionCategoryP
   return compact(typed)
 }
 
+export interface StoredSessionCategoryPreset {
+  preset: SessionCategoryPreset | null
+  /** The stored Base URL failed the filter and was dropped (with its API mode). */
+  baseUrlDropped: boolean
+}
+
 /**
  * Lenient read of a stored preset column. Unknown, credential, or invalid
  * fields (for example an enum value a newer build wrote) are dropped one by
- * one; the rest of the preset is kept. Only unparseable JSON yields null.
+ * one; the rest of the preset is kept. A dropped Base URL takes its API mode
+ * with it (the mode was chosen for that endpoint) and is reported so the UI can
+ * warn. Only unparseable JSON yields a null preset.
  */
-export function parseStoredSessionCategoryPreset(raw: unknown): SessionCategoryPreset | null {
-  if (typeof raw !== 'string' || !raw.trim()) return null
+export function readStoredSessionCategoryPreset(raw: unknown): StoredSessionCategoryPreset {
+  const none = { preset: null, baseUrlDropped: false }
+  if (typeof raw !== 'string' || !raw.trim()) return none
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
-    return null
+    return none
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return none
   const record = parsed as Record<string, unknown>
   const preset: Record<string, string | undefined> = {}
+  const dropped = new Set<keyof SessionCategoryPreset>()
   for (const key of FIELD_ORDER) {
     try {
       preset[key] = readField(key, record[key])
     } catch {
       preset[key] = undefined
+      dropped.add(key)
     }
   }
+  const baseUrlDropped = dropped.has('baseUrl')
+  if (baseUrlDropped) preset.apiMode = undefined
   const typed = preset as SessionCategoryPreset
   // Drop the field a combination rule points at, then re-check (at most a couple of passes).
   for (let invalid = combinationError(typed); invalid; invalid = combinationError(typed)) {
     delete typed[invalid.field]
   }
-  return compact(typed)
+  return { preset: compact(typed), baseUrlDropped }
+}
+
+export function parseStoredSessionCategoryPreset(raw: unknown): SessionCategoryPreset | null {
+  return readStoredSessionCategoryPreset(raw).preset
 }
 
 export function serializeSessionCategoryPreset(preset: SessionCategoryPreset | null): string {
@@ -274,6 +310,8 @@ export function serializeSessionCategoryPreset(preset: SessionCategoryPreset | n
 export interface SessionCategoryPresetStatus {
   /** false when the preset workspace folder no longer exists; omitted when the preset has no workspace or the check was inconclusive. */
   workspace_exists?: boolean
+  /** true when the stored Base URL (and its API mode) was dropped on read; its value is never sent. */
+  base_url_dropped?: true
 }
 
 /** true = directory, false = missing / not a directory, undefined = unknown (timeout or other error). */
@@ -281,9 +319,13 @@ export type DirectoryProbe = (path: string) => Promise<boolean | undefined>
 
 export const PRESET_WORKSPACE_STAT_TIMEOUT_MS = 500
 export const PRESET_WORKSPACE_PROBE_TTL_MS = 30_000
-// Stays below the libuv threadpool size (4 by default): hung stats on a stale
-// mount hold a worker each, and must never take every worker from other fs/dns/crypto work.
-export const PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT = Math.max(1, (Number(process.env.UV_THREADPOOL_SIZE) || 4) - 2)
+const LIBUV_THREADPOOL_SIZE = Number(process.env.UV_THREADPOOL_SIZE) || 4
+// Healthy stats at once; stays below the libuv threadpool size (4 by default).
+export const PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT = Math.max(1, LIBUV_THREADPOOL_SIZE - 2)
+// Worker threads the probe may hold at all, stale-busy stats included (3 by default):
+// hung stats on a stale mount hold a worker each, and must never take every worker
+// from other fs/dns/crypto work.
+export const PRESET_WORKSPACE_PROBE_MAX_THREADS = Math.max(1, LIBUV_THREADPOOL_SIZE - 1)
 export const PRESET_WORKSPACE_PROBE_STALE_MS = 30_000
 const PRESET_WORKSPACE_PROBE_CACHE_LIMIT = 256
 
@@ -292,6 +334,8 @@ export interface DirectoryProbeOptions {
   timeoutMs?: number
   ttlMs?: number
   maxInFlight?: number
+  /** Stats (running plus stale-busy) that may hold a worker thread at once. */
+  maxThreads?: number
   /** A stat still running after this long is "stale-busy" (see createDirectoryProbe). */
   staleMs?: number
   now?: () => number
@@ -318,10 +362,13 @@ function logStaleProbe(path: string, runningMs: number) {
  * - the caller never waits more than `timeoutMs`; a slow check is "unknown";
  * - at most one stat per path runs at a time; callers join it through one
  *   shared settle handler and a waiter set (no listener per caller);
- * - at most `maxInFlight` stats run at once; other paths queue for a free slot
- *   within their callers' timeout, and leave the queue when no caller waits any more;
+ * - at most `maxInFlight` healthy stats run at once; other paths queue for a free
+ *   slot within their callers' timeout, and leave the queue when no caller waits any more;
  * - a stat running longer than `staleMs` is stale-busy: logged once, answered
- *   "unknown" at once, still counted toward the cap, and never restarted until it settles;
+ *   "unknown" at once, and never restarted until it settles. It leaves the
+ *   `maxInFlight` slots (one hung mount must not block every other path) but keeps
+ *   its thread, and at most `maxThreads` stats hold a thread in total: once
+ *   stale-busy stats use them all, new paths answer "unknown" at once instead of queueing;
  * - settled answers are cached for `ttlMs`, so reopening the drawer does not stat again.
  * Paths are resolved the way a chat run resolves them (resolveRunWorkspacePath).
  */
@@ -335,13 +382,20 @@ export function createDirectoryProbe(options: DirectoryProbeOptions = {}): Share
   const timeoutMs = options.timeoutMs ?? PRESET_WORKSPACE_STAT_TIMEOUT_MS
   const ttlMs = options.ttlMs ?? PRESET_WORKSPACE_PROBE_TTL_MS
   const maxInFlight = options.maxInFlight ?? PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT
+  const maxThreads = Math.max(1, options.maxThreads ?? PRESET_WORKSPACE_PROBE_MAX_THREADS)
   const staleMs = options.staleMs ?? PRESET_WORKSPACE_PROBE_STALE_MS
   const now = options.now ?? Date.now
   const onStale = options.onStale ?? logStaleProbe
   const cache = new Map<string, { value: boolean | undefined; expiresAt: number }>()
   /** Running and queued checks by path; Map order keeps the queue first-in, first-out. */
   const entries = new Map<string, ProbeEntry>()
+  /** Healthy stats in progress (count toward maxInFlight). */
   let running = 0
+  /** Stats past staleMs that still hold a thread (count toward maxThreads only). */
+  let staleBusy = 0
+
+  const canStart = () => running < maxInFlight && running + staleBusy < maxThreads
+  const threadsExhausted = () => staleBusy >= maxThreads
 
   function remember(key: string, value: boolean | undefined) {
     cache.delete(key)
@@ -351,11 +405,16 @@ export function createDirectoryProbe(options: DirectoryProbeOptions = {}): Share
 
   function markStale() {
     const time = now()
+    let marked = false
     for (const [key, entry] of entries) {
       if (entry.startedAt === undefined || entry.stale || time - entry.startedAt < staleMs) continue
       entry.stale = true
+      running -= 1
+      staleBusy += 1
+      marked = true
       onStale(key, time - entry.startedAt)
     }
+    if (marked) drain()
   }
 
   function start(key: string, entry: ProbeEntry) {
@@ -368,7 +427,8 @@ export function createDirectoryProbe(options: DirectoryProbeOptions = {}): Share
       )
       .catch(() => undefined)
       .then((value) => {
-        running -= 1
+        if (entry.stale) staleBusy -= 1
+        else running -= 1
         entries.delete(key)
         remember(key, value)
         for (const settle of entry.waiters) settle(value)
@@ -378,8 +438,15 @@ export function createDirectoryProbe(options: DirectoryProbeOptions = {}): Share
 
   function drain() {
     for (const [key, entry] of entries) {
-      if (running >= maxInFlight) return
-      if (entry.startedAt === undefined) start(key, entry)
+      if (entry.startedAt !== undefined) continue
+      if (threadsExhausted()) {
+        // No stat can start until a hung one settles: answer queued callers now.
+        entries.delete(key)
+        for (const settle of [...entry.waiters]) settle(undefined)
+        continue
+      }
+      if (!canStart()) return
+      start(key, entry)
     }
   }
 
@@ -392,9 +459,10 @@ export function createDirectoryProbe(options: DirectoryProbeOptions = {}): Share
     let entry = entries.get(key)
     if (entry?.stale) return Promise.resolve(undefined)
     if (!entry) {
+      if (threadsExhausted()) return Promise.resolve(undefined)
       entry = { stale: false, waiters: new Set() }
       entries.set(key, entry)
-      if (running < maxInFlight) start(key, entry)
+      if (canStart()) start(key, entry)
     }
 
     const joined = entry
@@ -428,8 +496,13 @@ export const probeDirectory: DirectoryProbe = createDirectoryProbe()
 export async function describeSessionCategoryPresetStatus(
   preset: SessionCategoryPreset | null,
   isDirectory: DirectoryProbe,
+  stored: { baseUrlDropped?: boolean } = {},
 ): Promise<SessionCategoryPresetStatus | undefined> {
-  if (!preset?.workspace) return undefined
-  const exists = await isDirectory(preset.workspace)
-  return exists === undefined ? undefined : { workspace_exists: exists }
+  const status: SessionCategoryPresetStatus = {}
+  if (preset?.workspace) {
+    const exists = await isDirectory(preset.workspace)
+    if (exists !== undefined) status.workspace_exists = exists
+  }
+  if (stored.baseUrlDropped) status.base_url_dropped = true
+  return Object.keys(status).length > 0 ? status : undefined
 }

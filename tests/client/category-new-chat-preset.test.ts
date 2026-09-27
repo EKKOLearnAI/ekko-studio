@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  DROPPED_BASE_URL_PLACEHOLDER,
   compactCategoryPreset,
   hasCategoryPreset,
   foldAsciiCase,
@@ -14,7 +15,12 @@ import {
   type NewChatAgentId,
   type NewChatAgentMode,
 } from '../../packages/client/src/components/hermes/chat/category-new-chat-preset'
-import { PRESET_BASE_URLS_WITH_CREDENTIALS, PRESET_BASE_URLS_WITHOUT_CREDENTIALS } from '../fixtures/preset-base-url-cases'
+import {
+  PRESET_BASE_URLS_WITH_CREDENTIALS,
+  PRESET_BASE_URLS_WITHOUT_CREDENTIALS,
+  SAFE_PARAM_NAMES,
+  SECRET_LIKE_PARAM_NAMES,
+} from '../fixtures/preset-base-url-cases'
 
 const group = (provider: string, models: string[], extra: Record<string, unknown> = {}) => ({
   provider,
@@ -294,6 +300,25 @@ describe('category New Chat preset resolution', () => {
   })
 })
 
+describe('category preset whose stored Base URL the server dropped', () => {
+  it('warns on the Base URL field without the value, unless a new Base URL replaces it', () => {
+    const preset = { agent: 'claude-code', agentMode: 'scoped', provider: 'anthropic', model: 'claude-opus-5-5' } as const
+    const resolved = resolveCategoryPreset(preset, context({ storedBaseUrlDropped: true }))
+    expect(resolved.baseUrl).toBeUndefined()
+    expect(resolved.apiMode).toBeUndefined()
+    expect(resolved.warnings).toEqual([{ field: 'baseUrl', value: DROPPED_BASE_URL_PLACEHOLDER }])
+    // Every other stored field was kept and still applies.
+    expect(resolved).toMatchObject({ agent: 'claude-code', provider: 'anthropic', model: 'claude-opus-5-5' })
+    // Nothing else left in the preset: still warned.
+    expect(resolveCategoryPreset(null, context({ storedBaseUrlDropped: true })).warnings)
+      .toEqual([{ field: 'baseUrl', value: DROPPED_BASE_URL_PLACEHOLDER }])
+    // The form typed a new Base URL: the old drop no longer matters.
+    expect(resolveCategoryPreset({ ...preset, baseUrl: 'https://gw.test/v1' }, context({ storedBaseUrlDropped: true })).warnings)
+      .toEqual([])
+    expect(resolveCategoryPreset(preset, context()).warnings).toEqual([])
+  })
+})
+
 describe('category preset helpers', () => {
   it('compacts empty fields so Default selections are not stored', () => {
     expect(compactCategoryPreset({ agent: undefined, model: '  ', provider: ' anthropic ' })).toEqual({ provider: 'anthropic' })
@@ -307,11 +332,9 @@ describe('category preset helpers', () => {
     for (const url of PRESET_BASE_URLS_WITHOUT_CREDENTIALS) expect(presetBaseUrlCarriesCredentials(url), url).toBe(false)
   })
 
-  it('matches secret-like parameter names like the server rule', () => {
-    for (const name of ['x-api-key', 'Subscription-Key', 'client_secret', 'AUTH', 'api_key[]', '%61pi_key', 'access-token', 'passwd', 'signature', 'keyboard'])
-      expect(isSecretLikeParamName(name), name).toBe(true)
-    for (const name of ['api-version', 'version', 'region', 'format', 'deployment', 'model'])
-      expect(isSecretLikeParamName(name), name).toBe(false)
+  it('matches secret-like parameter names by whole word or known compound, like the server rule (same corpus)', () => {
+    for (const name of SECRET_LIKE_PARAM_NAMES) expect(isSecretLikeParamName(name), name).toBe(true)
+    for (const name of SAFE_PARAM_NAMES) expect(isSecretLikeParamName(name), name).toBe(false)
   })
 
   it('validates category names: required, max 40 characters, unique case-insensitively', () => {

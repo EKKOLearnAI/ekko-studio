@@ -544,8 +544,9 @@ export async function list(ctx: any) {
 
 // Additive response shape: released App clients using the legacy alias only read id/name.
 async function presentCategory(category: SessionCategoryRow, isDirectory: DirectoryProbe = probeDirectory) {
-  const presetStatus = await describeSessionCategoryPresetStatus(category.preset, isDirectory)
-  return presetStatus ? { ...category, preset_status: presetStatus } : category
+  const { presetBaseUrlDropped, ...row } = category
+  const presetStatus = await describeSessionCategoryPresetStatus(row.preset, isDirectory, { baseUrlDropped: presetBaseUrlDropped })
+  return presetStatus ? { ...row, preset_status: presetStatus } : row
 }
 
 /**

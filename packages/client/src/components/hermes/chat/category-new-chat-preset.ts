@@ -24,10 +24,28 @@ export const CODING_AGENT_API_MODE_VALUES: readonly CodingAgentApiMode[] = [
 ];
 
 const URL_SCHEME_PREFIX = /^[a-z][a-z0-9+.-]*:/i;
-// Normalized (lowercase, only a-z0-9) parameter names containing one of these are
-// treated as secrets: x-api-key, subscription-key, client_secret, auth, api_key[],
-// signature. Harmless names such as api-version or version do not match.
-const SECRET_PARAM_NAME = /key|token|secret|passw(?:or)?d|sig|auth|credential/;
+// A parameter name is secret-like when one of its words is a secret word, or the
+// whole name run together is a known compound. Words split on anything but a-z0-9
+// and on camelCase boundaries, so x-api-key, subscription-key, client_secret, auth,
+// api_key[], signature and accessToken match, while design, author, keyspace,
+// monkey, authuser, max_tokens, api-version and version do not.
+const SECRET_PARAM_WORDS = new Set([
+  "key", "apikey", "token", "secret", "password", "passwd", "pwd", "sig", "signature",
+  "auth", "authorization", "credential", "credentials", "accesstoken", "sessiontoken",
+]);
+const SECRET_PARAM_COMPOUNDS = new Set([
+  "apikey", "xapikey", "subscriptionkey", "clientsecret", "accesstoken", "authtoken", "sessiontoken",
+]);
+
+/** Lowercase words of a parameter name, split on non-alphanumerics and camelCase boundaries. */
+function paramNameWords(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
 
 /** True when a query/fragment parameter name looks like it carries a secret. */
 export function isSecretLikeParamName(name: string): boolean {
@@ -37,7 +55,8 @@ export function isSecretLikeParamName(name: string): boolean {
   } catch {
     // Malformed escapes: match the raw spelling.
   }
-  return SECRET_PARAM_NAME.test(decoded.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  const words = paramNameWords(decoded);
+  return words.some((word) => SECRET_PARAM_WORDS.has(word)) || SECRET_PARAM_COMPOUNDS.has(words.join(""));
 }
 
 /** The text before the first path, query or fragment separator, after an optional scheme. */
@@ -161,7 +180,12 @@ export interface CategoryPresetResolveContext {
   dshPresetIds?: readonly string[];
   /** Server-side workspace check; undefined when unknown. */
   workspaceExists?: boolean;
+  /** The server dropped the stored Base URL (and its API mode) on read (`preset_status.base_url_dropped`). */
+  storedBaseUrlDropped?: boolean;
 }
+
+/** Stands in for a dropped stored Base URL in its warning; the server never sends the value. */
+export const DROPPED_BASE_URL_PLACEHOLDER = "…";
 
 /**
  * Values to apply to the New Chat panel. Undefined fields keep today's default.
@@ -191,6 +215,10 @@ export function resolveCategoryPreset(
 ): ResolvedCategoryPreset {
   const warnings: CategoryPresetWarning[] = [];
   const result: ResolvedCategoryPreset = { profile: context.defaultProfile, warnings };
+  // Stale like any unusable value: the stored Base URL is gone, unless a new one replaces it.
+  if (context.storedBaseUrlDropped && !preset?.baseUrl) {
+    warnings.push({ field: "baseUrl", value: DROPPED_BASE_URL_PLACEHOLDER });
+  }
   if (!preset) return result;
 
   let agent = context.currentAgent;

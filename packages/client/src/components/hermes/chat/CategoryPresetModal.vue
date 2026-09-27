@@ -285,6 +285,7 @@ const warnings = computed<CategoryPresetWarning[]>(() => {
     workspaceExists: preset?.workspace && preset.workspace === storedWorkspace
       ? props.category?.preset_status?.workspace_exists
       : undefined,
+    storedBaseUrlDropped: props.mode === "edit" ? props.category?.preset_status?.base_url_dropped : undefined,
   }).warnings;
 });
 

@@ -53,7 +53,7 @@ interface MockHermesApiOptions {
     id: number
     name: string
     preset?: Record<string, unknown> | null
-    preset_status?: { workspace_exists?: boolean }
+    preset_status?: { workspace_exists?: boolean; base_url_dropped?: true }
     created_at?: number
     updated_at?: number
   }>

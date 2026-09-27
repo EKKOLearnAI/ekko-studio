@@ -141,8 +141,11 @@ describe('session category store', () => {
     }))
     insert.run('Combo', JSON.stringify({ agent: 'codex', modelKind: 'moa', agentPreset: 'planner', provider: 'openai' }))
     insert.run('Relative', JSON.stringify({ workspace: 'relative/dir', model: 'm' }))
-    insert.run('UrlSecret', JSON.stringify({ agent: 'claude-code', baseUrl: 'https://u:p@gw.test/v1', model: 'm' }))
-    const rows = Object.fromEntries(listSessionCategories().map(row => [row.name, row.preset]))
+    insert.run('UrlSecret', JSON.stringify({ agent: 'claude-code', baseUrl: 'https://u:p@gw.test/v1', apiMode: 'anthropic_messages', model: 'm' }))
+    const listed = listSessionCategories()
+    const rows = Object.fromEntries(listed.map(row => [row.name, row.preset]))
+    // The dropped Base URL takes its API mode with it and is flagged for a stale warning.
+    expect(listed.filter(row => row.presetBaseUrlDropped).map(row => row.name)).toEqual(['UrlSecret'])
     expect(rows).toEqual({
       Broken: null,
       Combo: { agent: 'codex', provider: 'openai' },

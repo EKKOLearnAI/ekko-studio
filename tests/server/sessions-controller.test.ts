@@ -1625,6 +1625,7 @@ describe('session conversations controller', () => {
         { id: 3, name: 'C', preset: { workspace: join(dir, 'missing') }, created_at: 1, updated_at: 1 },
         { id: 4, name: 'D', preset: { model: 'm' }, created_at: 1, updated_at: 1 },
         { id: 5, name: 'E', preset: null, created_at: 1, updated_at: 1 },
+        { id: 6, name: 'F', preset: { model: 'm' }, presetBaseUrlDropped: true, created_at: 1, updated_at: 1 },
       ])
       const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
       const ctx: any = { body: null }
@@ -1635,7 +1636,10 @@ describe('session conversations controller', () => {
         ['C', { workspace_exists: false }],
         ['D', undefined],
         ['E', undefined],
+        ['F', { base_url_dropped: true }],
       ])
+      // The internal marker is surfaced only as preset_status, never as its own field.
+      expect(ctx.body.categories.some((category: any) => 'presetBaseUrlDropped' in category)).toBe(false)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

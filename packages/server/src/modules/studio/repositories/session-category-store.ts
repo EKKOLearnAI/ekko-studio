@@ -1,7 +1,7 @@
 import { getDb, isSqliteAvailable } from '../infrastructure/database'
 import { SESSION_CATEGORIES_TABLE, SESSIONS_TABLE } from '../infrastructure/database/schemas'
 import {
-  parseStoredSessionCategoryPreset,
+  readStoredSessionCategoryPreset,
   serializeSessionCategoryPreset,
   type SessionCategoryPreset,
 } from '../services/session-category-preset'
@@ -13,6 +13,8 @@ export interface SessionCategoryRow {
   name: string
   /** Shared New Chat preset; null when the category has none. */
   preset: SessionCategoryPreset | null
+  /** Set (never serialized as is) when the stored Base URL failed the filter on read. */
+  presetBaseUrlDropped?: true
   created_at: number
   updated_at: number
 }
@@ -20,10 +22,12 @@ export interface SessionCategoryRow {
 const CATEGORY_COLUMNS = 'id, name, preset, created_at, updated_at'
 
 function mapCategoryRow(row: Record<string, unknown>): SessionCategoryRow {
+  const stored = readStoredSessionCategoryPreset(row.preset)
   return {
     id: Number(row.id),
     name: String(row.name || ''),
-    preset: parseStoredSessionCategoryPreset(row.preset),
+    preset: stored.preset,
+    ...(stored.baseUrlDropped ? { presetBaseUrlDropped: true as const } : {}),
     created_at: Number(row.created_at || 0),
     updated_at: Number(row.updated_at || 0),
   }

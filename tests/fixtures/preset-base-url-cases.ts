@@ -35,6 +35,10 @@ export const PRESET_BASE_URLS_WITH_CREDENTIALS: readonly string[] = [
   'https://gateway.test/v1?token=abc',
   'https://gateway.test/v1?apikey=abc',
   'https://gateway.test/v1?credential=abc',
+  'https://gateway.test/v1?accessToken=abc',
+  'https://gateway.test/v1?XApiKey=abc',
+  'https://gateway.test/v1?session_token=abc',
+  'https://gateway.test/v1?authorization=abc',
   'localhost:11434/v1?api_key=abc',
   // Any non-empty fragment: never sent over HTTP, so it can only carry data.
   'https://gateway.test/v1#api_key=x',
@@ -54,5 +58,22 @@ export const PRESET_BASE_URLS_WITHOUT_CREDENTIALS: readonly string[] = [
   'https://gateway.test/tokens/v1',
   'https://gateway.test/@org/v1',
   'https://gateway.test/v1?email=a@b.test',
+  // Token-boundary matching: a secret word inside a longer word is not a secret.
+  'https://gateway.test/v1?design=a&author=b&keyspace=c',
+  'https://gateway.test/v1?monkey=1&authuser=0&max_tokens=512',
   '',
+]
+
+/** Parameter names the rule must treat as secrets (server and client). */
+export const SECRET_LIKE_PARAM_NAMES: readonly string[] = [
+  'api_key', 'x-api-key', 'X-API-Key', 'XApiKey', 'Subscription-Key', 'subscription_key', 'client_secret', 'clientsecret',
+  'auth', 'AUTH', 'api_key[]', '%61pi_key', '%2561pi_key', 'apikey', 'APIKEY', 'key', 'signature', 'sig',
+  'token', 'access_token', 'access-token', 'accessToken', 'accesstoken', 'authtoken', 'session_token', 'sessiontoken',
+  'password', 'passwd', 'pwd', 'secret', 'credential', 'credentials', 'authorization', 'user_pwd',
+]
+
+/** Parameter names that only contain a secret word inside a longer word, or none at all. */
+export const SAFE_PARAM_NAMES: readonly string[] = [
+  'design', 'author', 'keyspace', 'monkey', 'authuser', 'max_tokens', 'api-version', 'version',
+  'keyboard', 'region', 'format', 'deployment', 'model', 'signal', 'tokenizer', 'passage',
 ]
