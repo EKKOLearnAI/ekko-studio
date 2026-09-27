@@ -1106,7 +1106,7 @@ export default {
     presetValueUnavailable: "{value} (no disponible)",
     presetBaseUrlKeyRequired: "La clave API guardada del proveedor no se envía a la Base URL del preajuste. Introduce una clave para este chat.",
     categoryPresetForbidden: "Solo los superadministradores pueden cambiar los preajustes de categoría.",
-    categoryPresetBaseUrlCredentials: "Quita el usuario, la contraseña o la clave de la Base URL. Los preajustes se comparten y nunca guardan credenciales.",
+    categoryPresetBaseUrlCredentials: "Quita el usuario, la contraseña, la clave o el #fragmento de la Base URL. Los preajustes se comparten y nunca guardan credenciales.",
     agent: 'Agent',
     approvalKicker: 'Permiso de herramienta',
     toolResultUnavailable: 'Ejecución interrumpida; no se recibió resultado',

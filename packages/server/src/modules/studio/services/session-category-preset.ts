@@ -1,4 +1,5 @@
 import { stat } from 'fs/promises'
+import { logger } from '../public/logging'
 import { resolveRunWorkspacePath } from './workspace/manager'
 
 /**
@@ -95,27 +96,69 @@ function isEnumField(key: string): key is EnumField {
   return Object.prototype.hasOwnProperty.call(ENUM_FIELD_VALUES, key)
 }
 
-const SECRET_QUERY_PARAMS = new Set(['key', 'api_key', 'apikey', 'token', 'access_token', 'secret', 'password', 'sig'])
+const URL_SCHEME_PREFIX = /^[a-z][a-z0-9+.-]*:/i
+// Normalized (lowercase, only a-z0-9) parameter names containing one of these are
+// treated as secrets: x-api-key, subscription-key, client_secret, auth, api_key[],
+// signature. Harmless names such as api-version or version do not match.
+const SECRET_PARAM_NAME = /key|token|secret|passw(?:or)?d|sig|auth|credential/
+
+/** True when a query/fragment parameter name looks like it carries a secret. */
+export function isSecretLikeParamName(name: string): boolean {
+  let decoded = name
+  try {
+    decoded = decodeURIComponent(name.replace(/\+/g, ' '))
+  } catch {
+    // Malformed escapes: match the raw spelling.
+  }
+  return SECRET_PARAM_NAME.test(decoded.toLowerCase().replace(/[^a-z0-9]/g, ''))
+}
+
+/** The text before the first path, query or fragment separator, after an optional scheme. */
+function textualAuthorities(raw: string): string[] {
+  const authority = (text: string) => text.replace(/^[/\\]+/, '').split(/[/\\?#]/, 1)[0]
+  const withoutScheme = raw.replace(URL_SCHEME_PREFIX, '')
+  return withoutScheme === raw ? [authority(raw)] : [authority(withoutScheme), authority(raw)]
+}
+
+/** Parameter names in the query string, read textually so no URL parser quirk hides one. */
+function textualQueryParamNames(raw: string): string[] {
+  const queryStart = raw.indexOf('?')
+  if (queryStart < 0) return []
+  return raw.slice(queryStart + 1).split('#', 1)[0].split(/[&;]/).map(part => part.split('=', 1)[0])
+}
 
 /**
- * True when a Base URL embeds credentials: URL userinfo (`https://user:pass@host`)
- * or a query parameter named like a secret (`?api_key=…`, case-insensitive).
- * Scheme-less values (`localhost:11434/v1`), which the New Chat panel accepts,
- * are parsed as http URLs.
+ * True when a Base URL embeds credentials or anything that could smuggle one.
+ * Presets are shared, so the value is refused when ANY of these hold:
+ * - a textual `@` in the authority (`https://u:p@h`, `https:u:p@h`, `http:\\u:p@h`, `u:p@h`);
+ * - URL userinfo in either reading: the raw value when it starts with a scheme
+ *   (WHATWG URL accepts `https:u:p@h`, `https:/u:p@h`, `http:\\u:p@h`), and the
+ *   `http://`-prefixed value (the New Chat panel accepts scheme-less `localhost:11434/v1`);
+ * - a query parameter whose name looks secret (see isSecretLikeParamName), in either
+ *   reading or in the raw text, percent-decoded and case/`-`/`_` insensitive;
+ * - any non-empty `#fragment`. HTTP clients never send a fragment, so it has no
+ *   function in an API Base URL; one can only be a mistake or data (`#api_key=…`)
+ *   stored in a preset everyone sees. Real API base URLs never carry one.
+ * Keep this identical to the client copy (category-new-chat-preset.ts).
  */
 export function presetBaseUrlCarriesCredentials(value: string): boolean {
   const raw = value.trim()
-  let url: URL
-  try {
-    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`)
-  } catch {
-    // Unparseable: fall back to the textual shapes.
-    return /^(?:[a-z][a-z0-9+.-]*:\/\/)?[^/?#]*@/i.test(raw)
-      || /[?&](?:key|api[_-]?key|token|access[_-]token|secret|password|sig)=/i.test(raw)
-  }
-  if (url.username || url.password) return true
-  for (const name of url.searchParams.keys()) {
-    if (SECRET_QUERY_PARAMS.has(name.toLowerCase().replace(/-/g, '_'))) return true
+  if (!raw) return false
+  if (/#./s.test(raw)) return true
+  if (textualAuthorities(raw).some(authority => authority.includes('@'))) return true
+  if (textualQueryParamNames(raw).some(isSecretLikeParamName)) return true
+  const readings = URL_SCHEME_PREFIX.test(raw) ? [raw, `http://${raw}`] : [`http://${raw}`]
+  for (const reading of readings) {
+    let url: URL
+    try {
+      url = new URL(reading)
+    } catch {
+      continue
+    }
+    if (url.username || url.password) return true
+    for (const name of url.searchParams.keys()) {
+      if (isSecretLikeParamName(name)) return true
+    }
   }
   return false
 }
@@ -141,7 +184,7 @@ function readField(key: keyof SessionCategoryPreset, value: unknown): string | u
   }
   if (trimmed.includes('\0')) throw new SessionCategoryPresetError(`Preset field ${key} is invalid`)
   if (key === 'baseUrl' && presetBaseUrlCarriesCredentials(trimmed)) {
-    throw new SessionCategoryPresetError('Preset Base URL cannot contain credentials (user:password@ or key/token query parameters)')
+    throw new SessionCategoryPresetError('Preset Base URL cannot contain credentials (user:password@, key/token query parameters or a #fragment)')
   }
   return trimmed
 }
@@ -238,7 +281,10 @@ export type DirectoryProbe = (path: string) => Promise<boolean | undefined>
 
 export const PRESET_WORKSPACE_STAT_TIMEOUT_MS = 500
 export const PRESET_WORKSPACE_PROBE_TTL_MS = 30_000
-export const PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT = 4
+// Stays below the libuv threadpool size (4 by default): hung stats on a stale
+// mount hold a worker each, and must never take every worker from other fs/dns/crypto work.
+export const PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT = Math.max(1, (Number(process.env.UV_THREADPOOL_SIZE) || 4) - 2)
+export const PRESET_WORKSPACE_PROBE_STALE_MS = 30_000
 const PRESET_WORKSPACE_PROBE_CACHE_LIMIT = 256
 
 export interface DirectoryProbeOptions {
@@ -246,7 +292,22 @@ export interface DirectoryProbeOptions {
   timeoutMs?: number
   ttlMs?: number
   maxInFlight?: number
+  /** A stat still running after this long is "stale-busy" (see createDirectoryProbe). */
+  staleMs?: number
   now?: () => number
+  onStale?: (path: string, runningMs: number) => void
+}
+
+interface ProbeEntry {
+  /** Set once the stat has started; a queued entry waits for a free slot. */
+  startedAt?: number
+  stale: boolean
+  /** Callers still waiting; each removes itself on its own timeout, so a hang keeps this bounded. */
+  waiters: Set<(value: boolean | undefined) => void>
+}
+
+function logStaleProbe(path: string, runningMs: number) {
+  logger.warn({ path, runningMs }, '[session-category-preset] workspace check still running; treating the folder as unknown until it finishes')
 }
 
 /**
@@ -255,19 +316,32 @@ export interface DirectoryProbeOptions {
  * A stat on a stale network mount can hang and keep a libuv worker thread busy
  * long after we stop waiting, so:
  * - the caller never waits more than `timeoutMs`; a slow check is "unknown";
- * - at most one stat per path runs at a time (callers join the pending one);
- * - at most `maxInFlight` stats run at once; beyond that the answer is "unknown";
+ * - at most one stat per path runs at a time; callers join it through one
+ *   shared settle handler and a waiter set (no listener per caller);
+ * - at most `maxInFlight` stats run at once; other paths queue for a free slot
+ *   within their callers' timeout, and leave the queue when no caller waits any more;
+ * - a stat running longer than `staleMs` is stale-busy: logged once, answered
+ *   "unknown" at once, still counted toward the cap, and never restarted until it settles;
  * - settled answers are cached for `ttlMs`, so reopening the drawer does not stat again.
  * Paths are resolved the way a chat run resolves them (resolveRunWorkspacePath).
  */
-export function createDirectoryProbe(options: DirectoryProbeOptions = {}): DirectoryProbe {
+export interface SharedDirectoryProbe extends DirectoryProbe {
+  /** Callers currently waiting on any check (diagnostics and tests). */
+  waiting(): number
+}
+
+export function createDirectoryProbe(options: DirectoryProbeOptions = {}): SharedDirectoryProbe {
   const statFn = options.statFn ?? stat
   const timeoutMs = options.timeoutMs ?? PRESET_WORKSPACE_STAT_TIMEOUT_MS
   const ttlMs = options.ttlMs ?? PRESET_WORKSPACE_PROBE_TTL_MS
   const maxInFlight = options.maxInFlight ?? PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT
+  const staleMs = options.staleMs ?? PRESET_WORKSPACE_PROBE_STALE_MS
   const now = options.now ?? Date.now
+  const onStale = options.onStale ?? logStaleProbe
   const cache = new Map<string, { value: boolean | undefined; expiresAt: number }>()
-  const inFlight = new Map<string, Promise<boolean | undefined>>()
+  /** Running and queued checks by path; Map order keeps the queue first-in, first-out. */
+  const entries = new Map<string, ProbeEntry>()
+  let running = 0
 
   function remember(key: string, value: boolean | undefined) {
     cache.delete(key)
@@ -275,31 +349,74 @@ export function createDirectoryProbe(options: DirectoryProbeOptions = {}): Direc
     if (cache.size > PRESET_WORKSPACE_PROBE_CACHE_LIMIT) cache.delete(cache.keys().next().value as string)
   }
 
-  return (path) => {
+  function markStale() {
+    const time = now()
+    for (const [key, entry] of entries) {
+      if (entry.startedAt === undefined || entry.stale || time - entry.startedAt < staleMs) continue
+      entry.stale = true
+      onStale(key, time - entry.startedAt)
+    }
+  }
+
+  function start(key: string, entry: ProbeEntry) {
+    entry.startedAt = now()
+    running += 1
+    new Promise<{ isDirectory(): boolean }>(done => done(statFn(key)))
+      .then(
+        info => info.isDirectory(),
+        (error: NodeJS.ErrnoException) => (error?.code === 'ENOENT' || error?.code === 'ENOTDIR' ? false : undefined),
+      )
+      .catch(() => undefined)
+      .then((value) => {
+        running -= 1
+        entries.delete(key)
+        remember(key, value)
+        for (const settle of entry.waiters) settle(value)
+        drain()
+      })
+  }
+
+  function drain() {
+    for (const [key, entry] of entries) {
+      if (running >= maxInFlight) return
+      if (entry.startedAt === undefined) start(key, entry)
+    }
+  }
+
+  const probe: DirectoryProbe = (path) => {
     const key = resolveRunWorkspacePath(path)
     const cached = cache.get(key)
     if (cached && cached.expiresAt > now()) return Promise.resolve(cached.value)
 
-    let pending = inFlight.get(key)
-    if (!pending) {
-      if (inFlight.size >= maxInFlight) return Promise.resolve(undefined)
-      pending = statFn(key).then(
-        info => info.isDirectory(),
-        (error: NodeJS.ErrnoException) => (error?.code === 'ENOENT' || error?.code === 'ENOTDIR' ? false : undefined),
-      ).then((value) => {
-        inFlight.delete(key)
-        remember(key, value)
-        return value
-      })
-      inFlight.set(key, pending)
+    markStale()
+    let entry = entries.get(key)
+    if (entry?.stale) return Promise.resolve(undefined)
+    if (!entry) {
+      entry = { stale: false, waiters: new Set() }
+      entries.set(key, entry)
+      if (running < maxInFlight) start(key, entry)
     }
 
+    const joined = entry
     return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(undefined), timeoutMs)
+      const settle = (value: boolean | undefined) => {
+        clearTimeout(timer)
+        joined.waiters.delete(settle)
+        resolve(value)
+      }
+      const timer = setTimeout(() => {
+        settle(undefined)
+        // Nobody waits for a queued check any more: drop it instead of keeping it around.
+        if (joined.startedAt === undefined && joined.waiters.size === 0) entries.delete(key)
+      }, timeoutMs)
       timer.unref?.()
-      pending!.then((value) => { clearTimeout(timer); resolve(value) })
+      joined.waiters.add(settle)
     })
   }
+
+  return Object.assign(probe, {
+    waiting: () => [...entries.values()].reduce((total, entry) => total + entry.waiters.size, 0),
+  })
 }
 
 export const probeDirectory: DirectoryProbe = createDirectoryProbe()

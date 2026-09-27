@@ -1106,7 +1106,7 @@ export default {
     presetValueUnavailable: "{value} (사용 불가)",
     presetBaseUrlKeyRequired: "공급자에 저장된 API 키는 프리셋의 Base URL로 전송되지 않습니다. 이 채팅에 사용할 키를 입력하세요.",
     categoryPresetForbidden: "카테고리 프리셋은 최고 관리자만 변경할 수 있습니다.",
-    categoryPresetBaseUrlCredentials: "Base URL에서 사용자 이름, 비밀번호 또는 키를 제거하세요. 프리셋은 공유되며 자격 증명을 저장하지 않습니다.",
+    categoryPresetBaseUrlCredentials: "Base URL에서 사용자 이름, 비밀번호, 키 또는 #프래그먼트를 제거하세요. 프리셋은 공유되며 자격 증명을 저장하지 않습니다.",
     agent: 'Agent',
     approvalKicker: '도구 권한',
     toolResultUnavailable: '실행이 중단되어 도구 결과를 받지 못했습니다',

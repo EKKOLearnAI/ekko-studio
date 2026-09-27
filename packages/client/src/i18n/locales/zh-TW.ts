@@ -1158,7 +1158,7 @@ export default {
     presetValueUnavailable: "{value}（無法使用）",
     presetBaseUrlKeyRequired: "供應商已儲存的 API 金鑰不會傳送到預設的 Base URL。請為此對話輸入金鑰。",
     categoryPresetForbidden: "只有超級管理員可以變更分類預設。",
-    categoryPresetBaseUrlCredentials: "請從 Base URL 移除使用者名稱、密碼或金鑰。預設為共用，永不儲存憑證。",
+    categoryPresetBaseUrlCredentials: "請從 Base URL 移除使用者名稱、密碼、金鑰或 #片段。預設為共用，永不儲存憑證。",
     agent: 'Agent',
     approvalKicker: '工具呼叫授權',
     toolResultUnavailable: '執行已中斷，未收到工具結果',

@@ -1106,7 +1106,7 @@ export default {
     presetValueUnavailable: "{value} (indisponible)",
     presetBaseUrlKeyRequired: "La clé API enregistrée du fournisseur n’est pas envoyée à la Base URL du préréglage. Saisissez une clé pour ce chat.",
     categoryPresetForbidden: "Seuls les super-administrateurs peuvent modifier les préréglages de catégorie.",
-    categoryPresetBaseUrlCredentials: "Retirez le nom d’utilisateur, le mot de passe ou la clé de la Base URL. Les préréglages sont partagés et ne stockent jamais d’identifiants.",
+    categoryPresetBaseUrlCredentials: "Retirez le nom d’utilisateur, le mot de passe, la clé ou le #fragment de la Base URL. Les préréglages sont partagés et ne stockent jamais d’identifiants.",
     agent: 'Agent',
     approvalKicker: 'Permission d’outil',
     toolResultUnavailable: 'Exécution interrompue ; aucun résultat reçu',

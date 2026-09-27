@@ -935,7 +935,7 @@ const sessionCategoryPresetSchema = {
     provider: { type: 'string', maxLength: 200 },
     model: { type: 'string', maxLength: 300 },
     apiMode: { type: 'string', enum: ['chat_completions', 'codex_responses', 'anthropic_messages'] },
-    baseUrl: { type: 'string', maxLength: 2048, description: 'Used only by scoped coding agents, and only with the preset provider while it has no base URL of its own. A URL with userinfo (user:password@) or a secret-like query parameter (key, api_key, apikey, token, access_token, secret, password, sig) is rejected with 400.' },
+    baseUrl: { type: 'string', maxLength: 2048, description: 'Used only by scoped coding agents, and only with the preset provider while it has no base URL of its own. Rejected with 400 when it carries credentials: userinfo (user:password@, also without //), a query parameter whose name contains key, token, secret, password, passwd, sig, auth or credential (case-, dash- and underscore-insensitive, percent-decoded; api-version is fine), or any non-empty #fragment.' },
     workspace: { type: 'string', maxLength: 4096, description: 'Folder path stored as entered, like the New Chat panel. A relative path resolves where a chat run resolves it (the server working directory).' },
   },
 }

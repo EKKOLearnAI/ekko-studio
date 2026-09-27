@@ -1167,7 +1167,7 @@ export default {
     presetValueUnavailable: "{value}（不可用）",
     presetBaseUrlKeyRequired: "服务商已保存的 API 密钥不会发送到预设的 Base URL。请为此对话输入密钥。",
     categoryPresetForbidden: "只有超级管理员可以更改分类预设。",
-    categoryPresetBaseUrlCredentials: "请从 Base URL 中移除用户名、密码或密钥。预设是共享的，从不存储凭据。",
+    categoryPresetBaseUrlCredentials: "请从 Base URL 中移除用户名、密码、密钥或 #片段。预设是共享的，从不存储凭据。",
     agent: 'Agent',
     approvalKicker: '工具调用授权',
     toolResultUnavailable: '执行已中断，未收到工具结果',

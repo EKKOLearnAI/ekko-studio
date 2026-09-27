@@ -507,7 +507,7 @@ test('a preset Base URL with credentials gets a translated error and is never se
   await baseUrl.fill('https://user:secret@gateway.example.test/v1')
   await modal.getByTestId('category-preset-save').click()
   await expect(modal.getByTestId('category-preset-base-url-error'))
-    .toHaveText('Remove the user name, password or key from the Base URL. Presets are shared and never store credentials.')
+    .toHaveText('Remove the user name, password, key or #fragment from the Base URL. Presets are shared and never store credentials.')
   await baseUrl.fill('https://gateway.example.test/v1?api_key=sk-live')
   await modal.getByTestId('category-preset-save').click()
   await expect(modal.getByTestId('category-preset-base-url-error')).toBeVisible()

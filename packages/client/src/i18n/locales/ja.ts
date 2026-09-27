@@ -1106,7 +1106,7 @@ export default {
     presetValueUnavailable: "{value}（利用不可）",
     presetBaseUrlKeyRequired: "プロバイダーに保存された API キーはプリセットの Base URL には送信されません。このチャット用のキーを入力してください。",
     categoryPresetForbidden: "カテゴリのプリセットを変更できるのはスーパー管理者のみです。",
-    categoryPresetBaseUrlCredentials: "Base URL からユーザー名、パスワード、キーを削除してください。プリセットは共有され、認証情報は保存されません。",
+    categoryPresetBaseUrlCredentials: "Base URL からユーザー名、パスワード、キー、#フラグメントを削除してください。プリセットは共有され、認証情報は保存されません。",
     agent: 'Agent',
     approvalKicker: 'ツール権限',
     toolResultUnavailable: '実行が中断され、ツール結果を受信できませんでした',

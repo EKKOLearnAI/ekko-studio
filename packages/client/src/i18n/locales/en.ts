@@ -1167,7 +1167,7 @@ export default {
     presetValueUnavailable: "{value} (unavailable)",
     presetBaseUrlKeyRequired: "The provider's saved API key is not sent to the preset Base URL. Enter a key for this chat.",
     categoryPresetForbidden: "Only super admins can change category presets.",
-    categoryPresetBaseUrlCredentials: "Remove the user name, password or key from the Base URL. Presets are shared and never store credentials.",
+    categoryPresetBaseUrlCredentials: "Remove the user name, password, key or #fragment from the Base URL. Presets are shared and never store credentials.",
     agent: 'Agent',
     approvalKicker: 'Tool permission',
     toolResultUnavailable: 'Execution interrupted; no tool result received',

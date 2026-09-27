@@ -1423,6 +1423,11 @@ async function applyCategoryPresetToNewChat(category: SessionCategory, generatio
     newChatWorkspace.value = mostRecentDefaultWorkspace.value || "";
     syncNewChatModelSelection();
   }
+  // The preset Base URL / API mode belong to the preset provider: they apply only when
+  // that provider is what the drawer now selects, never to whatever provider is left over.
+  const presetProviderApplied = Boolean(
+    preset?.provider && resolved.provider === preset.provider && resolved.model,
+  );
   if (resolved.provider && resolved.model) {
     newChatModelKind.value = resolved.modelKind || "model";
     newChatProvider.value = resolved.provider;
@@ -1430,20 +1435,25 @@ async function applyCategoryPresetToNewChat(category: SessionCategory, generatio
     newChatBaseUrl.value = "";
     newChatApiKey.value = "";
   }
+  const staleWarnings: CategoryPresetWarning[] = [];
   // Base URL first, then infer the API mode from it exactly like manual entry;
   // an explicit preset API mode still wins. resolveCategoryPreset only returns a
   // Base URL for the preset's own provider while it has no base URL of its own
-  // (otherwise it warns); the field check keeps the drawer consistent with that.
+  // (otherwise it warns); the checks keep the drawer consistent with that.
   if (resolved.baseUrl) {
-    if (newChatNeedsBaseUrl.value) {
+    if (presetProviderApplied && newChatNeedsBaseUrl.value) {
       newChatBaseUrl.value = resolved.baseUrl;
       newChatBaseUrlFromPreset.value = true;
     } else {
-      newChatPresetWarnings.value = [...newChatPresetWarnings.value, { field: "baseUrl", value: resolved.baseUrl }];
+      staleWarnings.push({ field: "baseUrl", value: resolved.baseUrl });
     }
   }
   syncNewChatApiMode();
-  if (resolved.apiMode) newChatApiMode.value = resolved.apiMode;
+  if (resolved.apiMode) {
+    if (!preset?.provider || presetProviderApplied) newChatApiMode.value = resolved.apiMode;
+    else staleWarnings.push({ field: "apiMode", value: resolved.apiMode });
+  }
+  if (staleWarnings.length) newChatPresetWarnings.value = [...newChatPresetWarnings.value, ...staleWarnings];
   if (resolved.agentPreset) newChatAgentPreset.value = resolved.agentPreset;
   if (resolved.workspace) newChatWorkspace.value = resolved.workspace;
 }

@@ -1106,7 +1106,7 @@ export default {
     presetValueUnavailable: "{value} (nicht verfügbar)",
     presetBaseUrlKeyRequired: "Der gespeicherte API-Schlüssel des Anbieters wird nicht an die Base URL der Vorlage gesendet. Gib einen Schlüssel für diesen Chat ein.",
     categoryPresetForbidden: "Nur Super-Admins können Kategorie-Vorlagen ändern.",
-    categoryPresetBaseUrlCredentials: "Entferne Benutzername, Passwort oder Schlüssel aus der Base URL. Vorgaben werden geteilt und speichern nie Zugangsdaten.",
+    categoryPresetBaseUrlCredentials: "Entferne Benutzername, Passwort, Schlüssel oder #Fragment aus der Base URL. Vorgaben werden geteilt und speichern nie Zugangsdaten.",
     agent: 'Agent',
     approvalKicker: 'Tool-Berechtigung',
     toolResultUnavailable: 'Ausführung unterbrochen; kein Tool-Ergebnis empfangen',

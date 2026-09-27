@@ -1050,7 +1050,7 @@ export default {
     presetValueUnavailable: "{value} (недоступно)",
     presetBaseUrlKeyRequired: "Сохранённый API-ключ провайдера не отправляется на Base URL из пресета. Введите ключ для этого чата.",
     categoryPresetForbidden: "Изменять пресеты категорий могут только суперадминистраторы.",
-    categoryPresetBaseUrlCredentials: "Удалите имя пользователя, пароль или ключ из Base URL. Пресеты общие и никогда не хранят учетные данные.",
+    categoryPresetBaseUrlCredentials: "Удалите имя пользователя, пароль, ключ или #фрагмент из Base URL. Пресеты общие и никогда не хранят учетные данные.",
     agent: 'Agent',
     approvalKicker: 'Разрешение инструмента',
     toolResultUnavailable: 'Выполнение прервано; результат инструмента не получен',

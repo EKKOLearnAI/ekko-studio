@@ -1106,7 +1106,7 @@ export default {
     presetValueUnavailable: "{value} (indisponível)",
     presetBaseUrlKeyRequired: "A chave de API salva do provedor não é enviada para a Base URL da predefinição. Informe uma chave para este chat.",
     categoryPresetForbidden: "Somente superadministradores podem alterar predefinições de categoria.",
-    categoryPresetBaseUrlCredentials: "Remova o usuário, a senha ou a chave da Base URL. Predefinições são compartilhadas e nunca armazenam credenciais.",
+    categoryPresetBaseUrlCredentials: "Remova o usuário, a senha, a chave ou o #fragmento da Base URL. Predefinições são compartilhadas e nunca armazenam credenciais.",
     agent: 'Agent',
     approvalKicker: 'Permissão da ferramenta',
     toolResultUnavailable: 'Execução interrompida; nenhum resultado recebido',

@@ -23,27 +23,66 @@ export const CODING_AGENT_API_MODE_VALUES: readonly CodingAgentApiMode[] = [
   "anthropic_messages",
 ];
 
-const SECRET_QUERY_PARAMS = new Set(["key", "api_key", "apikey", "token", "access_token", "secret", "password", "sig"]);
+const URL_SCHEME_PREFIX = /^[a-z][a-z0-9+.-]*:/i;
+// Normalized (lowercase, only a-z0-9) parameter names containing one of these are
+// treated as secrets: x-api-key, subscription-key, client_secret, auth, api_key[],
+// signature. Harmless names such as api-version or version do not match.
+const SECRET_PARAM_NAME = /key|token|secret|passw(?:or)?d|sig|auth|credential/;
+
+/** True when a query/fragment parameter name looks like it carries a secret. */
+export function isSecretLikeParamName(name: string): boolean {
+  let decoded = name;
+  try {
+    decoded = decodeURIComponent(name.replace(/\+/g, " "));
+  } catch {
+    // Malformed escapes: match the raw spelling.
+  }
+  return SECRET_PARAM_NAME.test(decoded.toLowerCase().replace(/[^a-z0-9]/g, ""));
+}
+
+/** The text before the first path, query or fragment separator, after an optional scheme. */
+function textualAuthorities(raw: string): string[] {
+  const authority = (text: string) => text.replace(/^[/\\]+/, "").split(/[/\\?#]/, 1)[0];
+  const withoutScheme = raw.replace(URL_SCHEME_PREFIX, "");
+  return withoutScheme === raw ? [authority(raw)] : [authority(withoutScheme), authority(raw)];
+}
+
+/** Parameter names in the query string, read textually so no URL parser quirk hides one. */
+function textualQueryParamNames(raw: string): string[] {
+  const queryStart = raw.indexOf("?");
+  if (queryStart < 0) return [];
+  return raw.slice(queryStart + 1).split("#", 1)[0].split(/[&;]/).map((part) => part.split("=", 1)[0]);
+}
 
 /**
- * True when a Base URL embeds credentials: URL userinfo (`https://user:pass@host`)
- * or a query parameter named like a secret (`?api_key=…`, case-insensitive).
- * Presets are shared, so the form refuses these with a translated message. This is
- * the one preset rule the New Chat panel does not have; it mirrors the server rule
+ * True when a Base URL embeds credentials or anything that could smuggle one:
+ * a textual `@` in the authority, URL userinfo in either reading (the raw value
+ * when it starts with a scheme, which WHATWG URL parses for `https:u:p@h`,
+ * `https:/u:p@h`, `http:\\u:p@h`; and the `http://`-prefixed value), a query
+ * parameter whose name looks secret, or any non-empty `#fragment` (never sent
+ * over HTTP, so a real API Base URL has none). Presets are shared, so the form
+ * refuses these with a translated message. This is the one preset rule the New
+ * Chat panel does not have; it is identical to the server rule
  * (`presetBaseUrlCarriesCredentials` in session-category-preset.ts).
  */
 export function presetBaseUrlCarriesCredentials(value: string): boolean {
   const raw = value.trim();
-  let url: URL;
-  try {
-    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`);
-  } catch {
-    return /^(?:[a-z][a-z0-9+.-]*:\/\/)?[^/?#]*@/i.test(raw)
-      || /[?&](?:key|api[_-]?key|token|access[_-]token|secret|password|sig)=/i.test(raw);
-  }
-  if (url.username || url.password) return true;
-  for (const name of url.searchParams.keys()) {
-    if (SECRET_QUERY_PARAMS.has(name.toLowerCase().replace(/-/g, "_"))) return true;
+  if (!raw) return false;
+  if (/#./s.test(raw)) return true;
+  if (textualAuthorities(raw).some((authority) => authority.includes("@"))) return true;
+  if (textualQueryParamNames(raw).some(isSecretLikeParamName)) return true;
+  const readings = URL_SCHEME_PREFIX.test(raw) ? [raw, `http://${raw}`] : [`http://${raw}`];
+  for (const reading of readings) {
+    let url: URL;
+    try {
+      url = new URL(reading);
+    } catch {
+      continue;
+    }
+    if (url.username || url.password) return true;
+    for (const name of url.searchParams.keys()) {
+      if (isSecretLikeParamName(name)) return true;
+    }
   }
   return false;
 }
@@ -204,7 +243,6 @@ export function resolveCategoryPreset(
           warnings.push({ field: "provider", value: preset.provider });
           if (preset.model) warnings.push({ field: "model", value: preset.model });
         } else {
-          presetProviderGroup = group;
           result.modelKind = "model";
           result.provider = group.provider;
           if (preset.model && !group.models.includes(preset.model)) {
@@ -213,6 +251,9 @@ export function resolveCategoryPreset(
           result.model = preset.model && group.models.includes(preset.model)
             ? preset.model
             : fallbackModel(group, profileDefault);
+          // Only a provider the panel will actually select (it needs a model) owns the
+          // preset Base URL / API mode; a provider with no models is not applied.
+          if (result.provider === preset.provider && result.model) presetProviderGroup = group;
         }
       } else if (preset.model) {
         const group = standardGroups.find((item) => item.models.includes(preset.model!));

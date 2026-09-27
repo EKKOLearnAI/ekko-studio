@@ -5,6 +5,7 @@ import {
   hasCategoryPreset,
   foldAsciiCase,
   isNewChatProviderAllowedFor,
+  isSecretLikeParamName,
   presetBaseUrlCarriesCredentials,
   presetWarningMessageKey,
   resolveCategoryPreset,
@@ -13,6 +14,7 @@ import {
   type NewChatAgentId,
   type NewChatAgentMode,
 } from '../../packages/client/src/components/hermes/chat/category-new-chat-preset'
+import { PRESET_BASE_URLS_WITH_CREDENTIALS, PRESET_BASE_URLS_WITHOUT_CREDENTIALS } from '../fixtures/preset-base-url-cases'
 
 const group = (provider: string, models: string[], extra: Record<string, unknown> = {}) => ({
   provider,
@@ -232,6 +234,33 @@ describe('category New Chat preset resolution', () => {
     expect(resolved.warnings).toEqual([{ field: 'baseUrl', value: 'https://proxy.example.test/v1' }])
   })
 
+  it('drops a preset Base URL and API mode when the preset provider has no models, instead of leaving them for another provider', () => {
+    const noModels = context({
+      selectableGroups: () => [group('gateway', []), group('anthropic', ['claude-opus-5-5'])],
+    })
+    const resolved = resolveCategoryPreset({
+      agent: 'claude-code',
+      agentMode: 'scoped',
+      provider: 'gateway',
+      apiMode: 'anthropic_messages',
+      baseUrl: 'https://gateway.example.test/anthropic',
+    }, noModels)
+    expect(resolved.model || undefined).toBeUndefined()
+    expect(resolved.baseUrl).toBeUndefined()
+    expect(resolved.apiMode).toBeUndefined()
+    expect(resolved.warnings).toEqual([
+      { field: 'baseUrl', value: 'https://gateway.example.test/anthropic' },
+      { field: 'apiMode', value: 'anthropic_messages' },
+    ])
+    // An API mode alone for that provider is dropped too: the provider is not applied.
+    const apiModeOnly = resolveCategoryPreset(
+      { agent: 'claude-code', agentMode: 'scoped', provider: 'gateway', apiMode: 'chat_completions' },
+      noModels,
+    )
+    expect(apiModeOnly.apiMode).toBeUndefined()
+    expect(apiModeOnly.warnings).toEqual([{ field: 'apiMode', value: 'chat_completions' }])
+  })
+
   it('validates a "Default" agent preset against the agent in effect when the drawer opens', () => {
     // Saved with Agent = Default: no agent, so no agent-specific rule applies at save time.
     const preset = { provider: 'openai-codex', model: 'gpt-5.5' }
@@ -273,17 +302,16 @@ describe('category preset helpers', () => {
     expect(hasCategoryPreset({ model: 'm' })).toBe(true)
   })
 
-  it('detects credentials in a Base URL exactly like the server rule', () => {
-    for (const url of [
-      'https://user:pass@gateway.test/v1',
-      'user:pass@localhost:11434/v1',
-      'https://gateway.test/v1?api_key=sk-1',
-      'https://gateway.test/v1?KEY=abc',
-      'https://gateway.test/v1?Access_Token=abc',
-      'https://gateway.test/v1?sig=abc',
-    ]) expect(presetBaseUrlCarriesCredentials(url), url).toBe(true)
-    for (const url of ['https://gateway.test/v1', 'localhost:11434/v1', 'https://gateway.test/v1?keyboard=1&region=eu'])
-      expect(presetBaseUrlCarriesCredentials(url), url).toBe(false)
+  it('detects credentials in a Base URL exactly like the server rule (same corpus)', () => {
+    for (const url of PRESET_BASE_URLS_WITH_CREDENTIALS) expect(presetBaseUrlCarriesCredentials(url), url).toBe(true)
+    for (const url of PRESET_BASE_URLS_WITHOUT_CREDENTIALS) expect(presetBaseUrlCarriesCredentials(url), url).toBe(false)
+  })
+
+  it('matches secret-like parameter names like the server rule', () => {
+    for (const name of ['x-api-key', 'Subscription-Key', 'client_secret', 'AUTH', 'api_key[]', '%61pi_key', 'access-token', 'passwd', 'signature', 'keyboard'])
+      expect(isSecretLikeParamName(name), name).toBe(true)
+    for (const name of ['api-version', 'version', 'region', 'format', 'deployment', 'model'])
+      expect(isSecretLikeParamName(name), name).toBe(false)
   })
 
   it('validates category names: required, max 40 characters, unique case-insensitively', () => {

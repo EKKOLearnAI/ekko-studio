@@ -1160,7 +1160,7 @@ export default {
     presetValueUnavailable: "{value} (غير متاح)",
     presetBaseUrlKeyRequired: "لا يُرسَل مفتاح API المحفوظ للمزوّد إلى Base URL الخاص بالإعداد المسبق. أدخل مفتاحًا لهذه المحادثة.",
     categoryPresetForbidden: "يمكن للمشرفين الرئيسيين فقط تغيير الإعدادات المسبقة للفئات.",
-    categoryPresetBaseUrlCredentials: "أزل اسم المستخدم أو كلمة المرور أو المفتاح من Base URL. الإعدادات المسبقة مشتركة ولا تخزّن بيانات الاعتماد أبدًا.",
+    categoryPresetBaseUrlCredentials: "أزل اسم المستخدم أو كلمة المرور أو المفتاح أو #الجزء من Base URL. الإعدادات المسبقة مشتركة ولا تخزّن بيانات الاعتماد أبدًا.",
     agent: 'وكيل',
     approvalKicker: 'صلاحية الأداة',
     toolResultUnavailable: 'توقف التنفيذ ولم يتم استلام نتيجة الأداة',
