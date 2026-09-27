@@ -2259,7 +2259,12 @@ async function handle(message) {
 }
 
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity })
-rl.on('close', () => { for (const pending of pendingInteractions.values()) pending.abort() })
+// stdin EOF = parent transport is gone. Abort pending interactions, then exit: without the
+// exit this server process outlives its parent (leaking one node process per MCP reconnect).
+rl.on('close', () => {
+  for (const pending of pendingInteractions.values()) pending.abort()
+  setTimeout(() => process.exit(0), 250).unref()
+})
 rl.on('line', async line => {
   const text = line.trim()
   if (!text) return
