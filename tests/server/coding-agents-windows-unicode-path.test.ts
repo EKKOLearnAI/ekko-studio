@@ -75,9 +75,6 @@ describe('coding agent Unicode Windows PATH resolution', () => {
       version: '1.2.3',
       path: unicodeCommand,
     })
-    expect(execState.calls).not.toContainEqual(expect.objectContaining({
-      command: 'where',
-      args: ['codex'],
-    }))
+    expect(execState.calls).not.toContainEqual(expect.objectContaining({ command: 'where' }))
   })
 })
