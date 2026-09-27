@@ -1,19 +1,23 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { GROUP_AGENT_OPTIONS } from '../../packages/client/src/utils/agent-options'
 
 describe('GroupChatPanel workspace save handling', () => {
   it('offers Pi, Grok, and OpenCode in ordinary and paired group chat and filters each provider target', () => {
     const panel = readFileSync('packages/client/src/components/hermes/group-chat/GroupChatPanel.vue', 'utf8')
     const linkView = readFileSync('packages/client/src/views/hermes/GroupChatLinkView.vue', 'utf8')
 
+    expect(GROUP_AGENT_OPTIONS).toEqual(expect.arrayContaining([
+      { label: 'Pi', value: 'pi' },
+      { label: 'Grok', value: 'grok' },
+      { label: 'OpenCode', value: 'opencode' },
+      { label: 'Cursor', value: 'cursor' },
+    ]))
     for (const source of [panel, linkView]) {
-      expect(source).toContain("{ label: 'Pi', value: 'pi' }")
+      expect(source).toContain('const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS')
       expect(source).toMatch(/selectedAgentType\.value === 'pi'[\s\S]*?\\? 'pi'/)
-      expect(source).toContain("{ label: 'Grok', value: 'grok' }")
       expect(source).toContain("selectedAgentType.value === 'grok'")
-      expect(source).toContain("{ label: 'OpenCode', value: 'opencode' }")
       expect(source).toContain("selectedAgentType.value === 'opencode'")
-      expect(source).toContain("{ label: 'Cursor', value: 'cursor' }")
       expect(source).toContain("selectedAgentType.value === 'cursor'")
     }
     expect(panel).toContain('priorAgentMode.value = storedPriorAgentMode(agent.priorAgentMode)')
@@ -564,10 +568,12 @@ describe('GroupChatPanel workspace save handling', () => {
     expect(source).toContain('selectedAgentPresetId.value = null')
     expect(linkView).toContain('v-model:value="selectedAgentMode"')
     expect(source).toContain('agent: selectedAgentType.value')
-    expect(source).toContain("{ label: 'Hermes', value: 'hermes' }")
-    expect(source).toContain("{ label: 'Claude', value: 'claude' }")
-    expect(source).toContain("{ label: 'Codex', value: 'codex' }")
-    expect(source).toContain("{ label: 'Ekko', value: 'ekko' }")
+    expect(GROUP_AGENT_OPTIONS).toEqual(expect.arrayContaining([
+      { label: 'Hermes', value: 'hermes' },
+      { label: 'Claude', value: 'claude' },
+      { label: 'Codex', value: 'codex' },
+      { label: 'Ekko', value: 'ekko' },
+    ]))
     expect(source).toContain('v-model:value="agentName"')
     expect(source).toContain('v-model:value="agentDescription"')
     expect(source).toContain('avatar: agentAvatar.value ? JSON.stringify(agentAvatar.value)')
