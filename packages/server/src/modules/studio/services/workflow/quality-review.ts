@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { choice, createJevSidecar, type JevSidecarAdapter, type JevSidecarTaskSpec } from '../../public/jev'
 import { hashJevCanonical } from '../jev/sidecar-payload'
 import type { JevSettings } from '../jev/settings'
+import { logger } from '../../public/logging'
 import { getWorkflowRun, getWorkflowRunNodeSession, saveWorkflowRunQualityEvaluation, type WorkflowRunNodeSessionRecord, type WorkflowRunQualityEvaluationRecord, type WorkflowRunRecord } from '../../repositories/workflow-run-store'
 
 type QualityNode = { id: string; data: { qualityReview?: { mode: 'off' | 'observe'; criteria: Array<{ id: string; text: string; evidence: 'output' | 'execution' }> } } }
@@ -16,7 +17,9 @@ const adapter: JevSidecarAdapter<WorkflowRunQualityEvaluationRecord, boolean> = 
     return { allowed: true }
   }, apply: (_ref, _expected, record) => saveWorkflowRunQualityEvaluation(record),
 }
-const sidecar = createJevSidecar({ adapters: [adapter] })
+const sidecar = createJevSidecar({ adapters: [adapter], observe: diagnostic => {
+  if (diagnostic.reason) logger.warn({ diagnostic }, '[workflow-quality] JEV observation skipped')
+} })
 
 export function scheduleWorkflowQualityReview(input: { run: WorkflowRunRecord; node: QualityNode; nodeSession: WorkflowRunNodeSessionRecord; input: unknown; output: string }): void {
   const quality = input.node.data.qualityReview
