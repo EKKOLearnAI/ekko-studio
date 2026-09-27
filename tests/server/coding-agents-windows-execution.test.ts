@@ -13,7 +13,7 @@ const execState = vi.hoisted(() => {
     if (command === 'where' && args[0] === 'codex') {
       return { stdout: requiredVersionPath ? 'C:\\Users\\�\\AppData\\Roaming\\npm\\codex.cmd\r\n' : '"C:\\nvm4w\\nodejs\\codex.cmd"\r\n', stderr: '' }
     }
-    if (command === (process.env.comspec || 'cmd.exe')) {
+    if (command === 'cmd.exe') {
       if (requiredVersionPath && !args.some(arg => arg.includes(requiredVersionPath))) {
         throw new Error('The system cannot find the path specified.')
       }
@@ -82,7 +82,7 @@ describe('coding agent Windows command execution', () => {
     expect(status.installed).toBe(true)
     expect(status.version).toBe('1.2.3')
 
-    const versionCall = execState.calls.find(call => call.command === (process.env.comspec || 'cmd.exe'))
+    const versionCall = execState.calls.find(call => call.command === 'cmd.exe')
     expect(versionCall).toBeTruthy()
     expect(versionCall?.args).toEqual([
       '/d',
