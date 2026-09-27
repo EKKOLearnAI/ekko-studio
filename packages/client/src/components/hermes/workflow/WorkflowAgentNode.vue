@@ -259,8 +259,8 @@ async function uploadImages(files: File[]) {
       </label>
       <div v-if="data.qualityReview?.mode === 'observe'" class="quality-criteria">
         <div v-for="(criterion, index) in data.qualityReview.criteria" :key="criterion.id" class="quality-criterion">
-          <NInput :value="criterion.text" size="small" :disabled="data.readonly" :placeholder="t('workflow.node.qualityCriterion')" @update:value="value => updateQualityCriterion(index, value)" />
           <NSelect
+            class="quality-evidence-select"
             :value="criterion.evidence"
             :options="qualityEvidenceOptions"
             size="small"
@@ -269,7 +269,10 @@ async function uploadImages(files: File[]) {
             :aria-label="t('workflow.node.qualityEvidence')"
             @update:value="value => updateQualityEvidence(index, value as 'output' | 'execution')"
           />
-          <button type="button" :aria-label="t('workflow.node.removeQualityCriterion')" :disabled="data.readonly" @click="removeQualityCriterion(index)">×</button>
+          <div class="quality-criterion-input-row">
+            <NInput :value="criterion.text" size="small" :disabled="data.readonly" :placeholder="t('workflow.node.qualityCriterion')" @update:value="value => updateQualityCriterion(index, value)" />
+            <button type="button" :aria-label="t('workflow.node.removeQualityCriterion')" :disabled="data.readonly" @click="removeQualityCriterion(index)">×</button>
+          </div>
         </div>
         <NButton v-if="data.qualityReview.criteria.length < 10" class="quality-add-button" size="small" secondary type="primary" :disabled="data.readonly" @click="addQualityCriterion">
           <template #icon>
@@ -824,4 +827,4 @@ async function uploadImages(files: File[]) {
 }
 </style>
 
-<style scoped>.quality-criteria{display:grid;gap:8px}.quality-criterion{display:grid;grid-template-columns:minmax(0,1fr) 138px auto;gap:6px;align-items:center}.quality-criterion button{border:0;background:transparent;color:var(--text-color-2);cursor:pointer}.quality-add-button{justify-self:start}</style>
+<style scoped>.quality-criteria{display:grid;gap:8px}.quality-criterion{display:grid;gap:6px}.quality-evidence-select{width:138px;max-width:100%}.quality-criterion-input-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}.quality-criterion button{border:0;background:transparent;color:var(--text-color-2);cursor:pointer}.quality-add-button{justify-self:start;width:auto;max-width:100%;padding-inline:10px}</style>
