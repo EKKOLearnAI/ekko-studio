@@ -70,7 +70,10 @@ test('groups sessions by category and persists collapsed groups', async ({ page 
   await expect(workHeader).toBeVisible()
   await expect(workHeader.locator('.session-group-count')).toHaveText('2')
   await expect(page.locator('.session-group-header').filter({ hasText: 'Uncategorized' })).toBeVisible()
-  await expect(page.locator('.session-group-header').filter({ hasText: 'Empty' })).toHaveCount(0)
+  // Empty categories stay visible so their New Chat entry is reachable.
+  const emptyHeader = page.locator('.session-group-header').filter({ hasText: 'Empty' })
+  await expect(emptyHeader).toBeVisible()
+  await expect(emptyHeader.locator('.session-group-count')).toHaveText('0')
   await expect(page.getByRole('link', { name: /Project Alpha/ }).first()).toBeVisible()
   await expect(page.getByRole('link', { name: /Project Beta/ }).first()).toBeVisible()
   await expect(page.getByRole('link', { name: /Project Alpha/ }).first().locator('.session-item-category-tag')).toHaveText('Work')

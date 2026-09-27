@@ -16,6 +16,8 @@ export interface VisibleSessionCategoryGroup<T> {
   key: string;
   label: string;
   sessions: T[];
+  /** Real category id; undefined for Uncategorized and Recent. */
+  categoryId?: number;
 }
 
 export interface RecentSessionPartition<T> {
@@ -29,13 +31,13 @@ export function buildVisibleSessionCategoryGroups<T extends SessionCategoryAssig
   uncategorizedLabel: string,
 ): VisibleSessionCategoryGroup<T>[] {
   const knownCategoryIds = new Set(categories.map((category) => category.id));
-  const groups = categories
-    .map((category) => ({
-      key: `category-${category.id}`,
-      label: category.name,
-      sessions: sessions.filter((session) => session.categoryId === category.id),
-    }))
-    .filter((group) => group.sessions.length > 0);
+  // Every category stays visible, even without chats, so its New Chat entry is reachable.
+  const groups: VisibleSessionCategoryGroup<T>[] = categories.map((category) => ({
+    key: `category-${category.id}`,
+    label: category.name,
+    sessions: sessions.filter((session) => session.categoryId === category.id),
+    categoryId: category.id,
+  }));
   const uncategorized = sessions.filter(
     (session) => session.categoryId == null || !knownCategoryIds.has(session.categoryId),
   );

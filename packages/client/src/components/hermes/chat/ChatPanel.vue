@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { setSessionPinned } from "@/api/studio/sessions";
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue";
+import { loadDshSessionPresetChoices } from "@/components/coding-agents/dsh/session-preset-catalog";
 import {
   batchDeleteSessions,
   createSessionCategory,
@@ -44,6 +45,18 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { copyToClipboard } from "@/utils/clipboard";
 import FolderPicker from "./FolderPicker.vue";
+import CategoryPresetModal from "./CategoryPresetModal.vue";
+import {
+  REASONING_EFFORT_VALUES,
+  hasCategoryPreset,
+  isNewChatProviderAllowedFor,
+  presetWarningMessageKey,
+  resolveCategoryPreset,
+  type CategoryPresetWarning,
+  type CategoryPresetWarningField,
+  type NewChatAgentId,
+  type NewChatAgentMode,
+} from "./category-new-chat-preset";
 import ChatInput from "./ChatInput.vue";
 import RealtimeVoiceStage from "./RealtimeVoiceStage.vue";
 import ConversationMonitorPane from "./ConversationMonitorPane.vue";
@@ -767,7 +780,8 @@ watch(
     activeSessionCategoryKey,
   ],
   ([loaded, , sessionId, activeKey], [previousLoaded, , previousSessionId, previousActiveKey]) => {
-    if (!sessionCategoriesLoaded.value || categorizedSessions.value.length === 0) return;
+    // Empty categories are always listed now; wait for real sessions before seeding collapse defaults.
+    if (!sessionCategoriesLoaded.value || !categorizedSessions.value.some((group) => group.sessions.length > 0)) return;
     const activeSession = chatStore.sessions.find((session) => session.id === chatStore.activeSessionId);
     if (categoryRevealSuppressedSessionId.value === activeSession?.id) return;
     setCategoryRevealSuppressedSessionId(null);
@@ -785,7 +799,7 @@ watch(
     if (localStorage.getItem(COLLAPSED_CATEGORIES_STORAGE_KEY) !== null) return;
     const expandedKey = categorizedSessions.value.some((group) => group.key === activeKey)
       ? activeKey
-      : categorizedSessions.value[0]?.key;
+      : categorizedSessions.value.find((group) => group.sessions.length > 0)?.key;
     collapsedCategories.value = new Set(
       categorizedSessions.value.map((group) => group.key).filter((key) => key !== expandedKey),
     );
@@ -858,6 +872,24 @@ const newChatCategoryId = ref<number | null>(null);
 const newChatCategoryCreating = ref(false);
 const newChatCategorySelectRevision = ref(0);
 const newChatLoading = ref(false);
+// Category whose preset pre-filled the panel ([+] / [New Chat]); null for the top New Chat button.
+const newChatPresetCategoryId = ref<number | null>(null);
+const newChatPresetWarnings = ref<CategoryPresetWarning[]>([]);
+const newChatReasoningEffort = ref("");
+// Agent/mode the user had before a preset drawer; restored for the top New Chat button so presets never leak into it.
+let newChatAgentBeforePreset: { agent: NewChatAgentId; mode: NewChatAgentMode } | null = null;
+const newChatPresetCategoryName = computed(() =>
+  sessionCategories.value.find((category) => category.id === newChatPresetCategoryId.value)?.name || "",
+);
+const newChatReasoningEffortOptions = computed(() => [
+  { label: t("chat.categoryPresetDefault"), value: "" },
+  ...REASONING_EFFORT_VALUES.map((value) => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
+]);
+
+function newChatPresetWarning(field: CategoryPresetWarningField): string {
+  const warning = newChatPresetWarnings.value.find((item) => item.field === field);
+  return warning ? t(presetWarningMessageKey(warning.field), { value: warning.value }) : "";
+}
 
 const newChatCategoryOptions = computed(() => [
   { label: t("chat.uncategorized"), value: 0 },
@@ -1045,6 +1077,10 @@ function isNewChatProviderAllowed(group: AvailableModelGroup) {
 
 function getSelectableModelGroupsForProfile(profile: string) {
   return getModelGroupsForProfile(profile).filter(isNewChatProviderAllowed);
+}
+
+function getSelectableModelGroupsFor(profile: string, agent: NewChatAgentId, mode: NewChatAgentMode) {
+  return getModelGroupsForProfile(profile).filter((group) => isNewChatProviderAllowedFor(group, agent, mode));
 }
 
 function getDefaultModelForProfile(profile: string) {
@@ -1264,7 +1300,7 @@ watch(showNewChatModal, (visible) => {
 });
 onUnmounted(() => { if (newChatCatalogPoll) clearInterval(newChatCatalogPoll); });
 
-async function openNewChatModal() {
+async function openNewChatModal(options: { categoryId?: number } = {}) {
   isBatchMode.value = false;
   selectedSessionKeys.value.clear();
   showBatchDeleteConfirm.value = false;
@@ -1273,6 +1309,14 @@ async function openNewChatModal() {
   showNewChatModal.value = true;
   newChatLoading.value = true;
   newChatCategoryId.value = null;
+  newChatPresetCategoryId.value = options.categoryId ?? null;
+  newChatPresetWarnings.value = [];
+  newChatReasoningEffort.value = "";
+  if (options.categoryId == null && newChatAgentBeforePreset) {
+    newChatAgent.value = newChatAgentBeforePreset.agent;
+    newChatAgentMode.value = newChatAgentBeforePreset.mode;
+    newChatAgentBeforePreset = null;
+  }
   try {
     await loadSessionCategories();
     if (profilesStore.profiles.length === 0) await profilesStore.fetchProfiles();
@@ -1296,9 +1340,78 @@ async function openNewChatModal() {
     }
     
     syncNewChatModelSelection();
+
+    if (options.categoryId != null) {
+      const category = sessionCategories.value.find((item) => item.id === options.categoryId);
+      newChatCategoryId.value = category ? category.id : null;
+      if (category) await applyCategoryPresetToNewChat(category);
+    }
   } finally {
     newChatLoading.value = false;
   }
+}
+
+/**
+ * Pre-fills the panel from a category preset. Unusable values fall back to
+ * today's default for that field with a warning; the stored preset is never changed.
+ */
+async function applyCategoryPresetToNewChat(category: SessionCategory) {
+  const preset = category.preset || null;
+  if (!hasCategoryPreset(preset)) return;
+  let dshPresetIds: string[] | undefined;
+  if (preset?.agent === "dsh" && preset.agentPreset) {
+    try {
+      dshPresetIds = (await loadDshSessionPresetChoices())
+        .filter((item) => !item.unavailable)
+        .map((item) => item.id);
+    } catch {
+      dshPresetIds = undefined;
+    }
+  }
+  const resolved = resolveCategoryPreset(preset, {
+    currentAgent: newChatAgent.value,
+    currentAgentMode: newChatAgentMode.value,
+    profiles: newChatProfileOptions.value.map((option) => option.value),
+    defaultProfile: newChatProfile.value,
+    selectableGroups: getSelectableModelGroupsFor,
+    profileDefaultModel: (profile) =>
+      appStore.profileModelGroups.find((entry) => entry.profile === profile)?.default || undefined,
+    dshPresetIds,
+    workspaceExists: category.preset_status?.workspace_exists,
+  });
+  newChatPresetWarnings.value = resolved.warnings;
+
+  if (!newChatAgentBeforePreset) {
+    newChatAgentBeforePreset = { agent: newChatAgent.value, mode: newChatAgentMode.value };
+  }
+  const profileChanged = resolved.profile !== newChatProfile.value;
+  if (resolved.agent) newChatAgent.value = resolved.agent;
+  if (resolved.agentMode) newChatAgentMode.value = resolved.agentMode;
+  newChatProfile.value = resolved.profile;
+  // Let the agent/profile watcher settle today's defaults before applying preset values on top.
+  await nextTick();
+  if (profileChanged) {
+    initWorkspaceComposable(newChatProfile.value);
+    newChatWorkspace.value = mostRecentDefaultWorkspace.value || "";
+    syncNewChatModelSelection();
+  }
+  if (resolved.provider && resolved.model) {
+    newChatModelKind.value = resolved.modelKind || "model";
+    newChatProvider.value = resolved.provider;
+    newChatModel.value = resolved.model;
+    newChatBaseUrl.value = "";
+    newChatApiKey.value = "";
+    syncNewChatApiMode();
+  }
+  if (resolved.apiMode) newChatApiMode.value = resolved.apiMode;
+  if (resolved.baseUrl) newChatBaseUrl.value = resolved.baseUrl;
+  if (resolved.agentPreset) newChatAgentPreset.value = resolved.agentPreset;
+  if (resolved.workspace) newChatWorkspace.value = resolved.workspace;
+  if (resolved.reasoningEffort) newChatReasoningEffort.value = resolved.reasoningEffort;
+}
+
+function openCategoryNewChat(categoryId: number) {
+  void openNewChatModal({ categoryId });
 }
 
 function handleNewChatProfileChange(value: string) {
@@ -1388,6 +1501,7 @@ async function confirmNewChat() {
     baseUrl: source === "coding_agent" && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
     apiKey: source === "coding_agent" && !isGlobalCodingAgent && !newChatUsesKeylessProvider.value ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
     apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined,
+    reasoningEffort: !isGlobalCodingAgent ? newChatReasoningEffort.value || undefined : undefined,
   });
   // Record workspace to recent list
   if (newChatWorkspace.value && workspaceComposable) {
@@ -1712,10 +1826,48 @@ const categoryContextId = ref<number | null>(null);
 const categoryContextName = computed(() =>
   sessionCategories.value.find((item) => item.id === categoryContextId.value)?.name || "",
 );
+const categoryContextCategory = computed(() =>
+  sessionCategories.value.find((item) => item.id === categoryContextId.value) || null,
+);
 const categoryContextMenuOptions = computed<DropdownOption[]>(() => [
   { label: t("chat.renameCategory"), key: "rename" },
+  { label: t("chat.setCategoryPreset"), key: "preset" },
   { label: t("chat.deleteCategory"), key: "delete" },
 ]);
+const deleteCategoryConfirmText = computed(() =>
+  hasCategoryPreset(categoryContextCategory.value?.preset)
+    ? t("chat.confirmDeleteCategoryWithPreset", { name: categoryContextName.value })
+    : t("chat.confirmDeleteCategory", { name: categoryContextName.value }),
+);
+const showCategoryPresetModal = ref(false);
+const categoryPresetModalMode = ref<"create" | "edit">("edit");
+const categoryPresetModalCategory = ref<SessionCategory | null>(null);
+const sessionCategoryNameList = computed(() => sessionCategories.value.map((category) => category.name));
+
+function openNewCategoryModal() {
+  categoryPresetModalMode.value = "create";
+  categoryPresetModalCategory.value = null;
+  showCategoryPresetModal.value = true;
+}
+
+function upsertSessionCategory(category: SessionCategory) {
+  sessionCategories.value = [
+    ...sessionCategories.value.filter((item) => item.id !== category.id),
+    category,
+  ].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function handleCategoryPresetSaved(category: SessionCategory) {
+  upsertSessionCategory(category);
+  if (categoryPresetModalMode.value === "create") {
+    // A new category appears expanded with its [New Chat] row.
+    const key = `category-${category.id}`;
+    if (collapsedCategories.value.has(key) || localStorage.getItem(COLLAPSED_CATEGORIES_STORAGE_KEY) === null) {
+      collapsedCategories.value = new Set([...collapsedCategories.value].filter((item) => item !== key));
+      persistCollapsedCategories();
+    }
+  }
+}
 const showRenameCategoryModal = ref(false);
 const renameCategoryValue = ref("");
 const showDeleteCategoryModal = ref(false);
@@ -1755,6 +1907,10 @@ function handleCategoryContextMenuSelect(key: string) {
   if (key === "rename") {
     renameCategoryValue.value = category.name;
     showRenameCategoryModal.value = true;
+  } else if (key === "preset") {
+    categoryPresetModalMode.value = "edit";
+    categoryPresetModalCategory.value = category;
+    showCategoryPresetModal.value = true;
   } else if (key === "delete") {
     showDeleteCategoryModal.value = true;
   }
@@ -2357,7 +2513,7 @@ async function handleSessionModelCustomSubmit() {
         <PageSidebarNav
           :active="contentMode === 'connections' ? 'connections' : contentMode === 'agents' ? 'agents' : contentMode === 'models' ? 'models' : chatStore.runtimeMode === 'global_agent' ? 'global' : 'chat'"
           :primary-label="t('chat.newChat')"
-          @primary="openNewChatModal"
+          @primary="openNewChatModal()"
         />
         <div class="session-list-toolbar">
           <NSelect
@@ -2588,8 +2744,19 @@ async function handleSessionModelCustomSubmit() {
         </div>
 
         <template v-for="group in categorizedSessions" :key="group.key">
+          <button
+            v-if="group.key === 'category-none' && !sessionCategoriesLoadFailed"
+            class="session-new-category-button"
+            type="button"
+            data-testid="session-new-category"
+            @click="openNewCategoryModal"
+          >
+            <span aria-hidden="true">+</span>
+            <span>{{ t("chat.newCategory") }}</span>
+          </button>
           <div
             class="session-group-header"
+            :data-category-group="group.key"
             @click="toggleCategoryGroup(group.key)"
             @contextmenu="handleCategoryContextMenu($event, group.key)"
           >
@@ -2607,6 +2774,23 @@ async function handleSessionModelCustomSubmit() {
             </svg>
             <span class="session-group-label">{{ group.label }}</span>
             <span class="session-group-count">{{ group.sessions.length }}</span>
+            <NTooltip v-if="group.categoryId != null" placement="top">
+              <template #trigger>
+                <button
+                  class="session-category-new-chat-button"
+                  type="button"
+                  :aria-label="t('chat.newChatInCategory', { name: group.label })"
+                  data-testid="category-new-chat-plus"
+                  @click.stop="openCategoryNewChat(group.categoryId)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
+              </template>
+              {{ t("chat.newChatInCategory", { name: group.label }) }}
+            </NTooltip>
             <button
               v-if="group.key !== 'category-none'"
               class="session-category-menu-button"
@@ -2629,6 +2813,20 @@ async function handleSessionModelCustomSubmit() {
             </button>
           </div>
           <template v-if="!collapsedCategories.has(group.key)">
+            <button
+              v-if="group.categoryId != null"
+              class="session-category-new-chat-row"
+              type="button"
+              data-testid="category-new-chat-row"
+              :aria-label="t('chat.newChatInCategory', { name: group.label })"
+              @click="openCategoryNewChat(group.categoryId)"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              <span>{{ t("chat.newChat") }}</span>
+            </button>
             <SessionListItem
               v-for="s in group.sessions"
               :key="s.id"
@@ -2654,6 +2852,16 @@ async function handleSessionModelCustomSubmit() {
             />
           </template>
         </template>
+        <button
+          v-if="sessionCategoriesLoaded && !sessionCategoriesLoadFailed && !categorizedSessions.some((group) => group.key === 'category-none')"
+          class="session-new-category-button"
+          type="button"
+          data-testid="session-new-category"
+          @click="openNewCategoryModal"
+        >
+          <span aria-hidden="true">+</span>
+          <span>{{ t("chat.newCategory") }}</span>
+        </button>
       </div>
       <PageSidebarFooter v-if="showSessions" />
     </aside>
@@ -2744,8 +2952,16 @@ async function handleSessionModelCustomSubmit() {
       :negative-text="t('common.cancel')"
       @positive-click="handleDeleteCategoryConfirm"
     >
-      {{ t('chat.confirmDeleteCategory', { name: categoryContextName }) }}
+      {{ deleteCategoryConfirmText }}
     </NModal>
+
+    <CategoryPresetModal
+      v-model:show="showCategoryPresetModal"
+      :mode="categoryPresetModalMode"
+      :category="categoryPresetModalCategory"
+      :existing-names="sessionCategoryNameList"
+      @saved="handleCategoryPresetSaved"
+    />
 
     <NModal
       v-model:show="showRenameModal"
@@ -2963,6 +3179,13 @@ async function handleSessionModelCustomSubmit() {
     >
       <NDrawerContent :title="t('chat.newChat')" closable>
         <div class="new-chat-form">
+          <div
+            v-if="newChatPresetCategoryId != null && newChatPresetCategoryName"
+            class="new-chat-preset-notice"
+            data-testid="new-chat-preset-notice"
+          >
+            {{ t("chat.categoryPresetApplied", { name: newChatPresetCategoryName }) }}
+          </div>
           <label class="new-chat-field">
             <span class="new-chat-label">{{ t("chat.agent") }}</span>
             <NSelect
@@ -2970,11 +3193,13 @@ async function handleSessionModelCustomSubmit() {
               :options="newChatAgentOptions"
               :disabled="newChatLoading"
             />
+            <span v-if="newChatPresetWarning('agent')" class="new-chat-preset-warning" role="status">{{ newChatPresetWarning("agent") }}</span>
           </label>
           <DshSessionPresetSelect
             v-if="showNewChatModal && newChatAgent === 'dsh'"
             v-model="newChatAgentPreset" :disabled="newChatLoading" @valid="newChatPresetReady = $event"
           />
+          <span v-if="newChatAgent === 'dsh' && newChatPresetWarning('agentPreset')" class="new-chat-preset-warning" role="status">{{ newChatPresetWarning("agentPreset") }}</span>
           <label v-if="isNewChatExternalCodingAgent" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.launchModeScope") }}</span>
             <NRadioGroup v-model:value="newChatAgentMode" name="new-chat-coding-agent-mode">
@@ -2995,6 +3220,7 @@ async function handleSessionModelCustomSubmit() {
               :loading="newChatLoading || profilesStore.loading"
               @update:value="handleNewChatProfileChange"
             />
+            <span v-if="newChatPresetWarning('profile')" class="new-chat-preset-warning" role="status">{{ newChatPresetWarning("profile") }}</span>
           </label>
           <label class="new-chat-field">
             <span class="new-chat-label">{{ t("chat.category") }}</span>
@@ -3022,6 +3248,7 @@ async function handleSessionModelCustomSubmit() {
               <NRadioButton value="moa">{{ t('chat.moaPresets') }}</NRadioButton>
             </NRadioGroup>
           </label>
+          <span v-if="newChatPresetWarning('modelKind')" class="new-chat-preset-warning" role="status">{{ newChatPresetWarning("modelKind") }}</span>
           <label v-if="newChatUsesProviderModel && newChatModelKind === 'model'" class="new-chat-field">
             <span class="new-chat-label">{{ t("models.provider") }}</span>
             <NSelect
@@ -3030,6 +3257,7 @@ async function handleSessionModelCustomSubmit() {
               :disabled="newChatLoading"
               @update:value="handleNewChatProviderChange"
             />
+            <span v-if="newChatPresetWarning('provider')" class="new-chat-preset-warning" role="status">{{ newChatPresetWarning("provider") }}</span>
           </label>
           <label v-if="newChatUsesProviderModel" class="new-chat-field">
             <span class="new-chat-label">
@@ -3041,6 +3269,7 @@ async function handleSessionModelCustomSubmit() {
               :disabled="newChatLoading || !newChatProvider"
               filterable
             />
+            <span v-if="newChatPresetWarning('model')" class="new-chat-preset-warning" role="status">{{ newChatPresetWarning("model") }}</span>
           </label>
           <label v-if="isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped'" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.protocolScope") }}</span>
@@ -3055,6 +3284,14 @@ async function handleSessionModelCustomSubmit() {
             <NInput
               v-model:value="newChatBaseUrl"
               :placeholder="t('models.baseUrlPlaceholder')"
+            />
+          </label>
+          <label v-if="newChatPresetCategoryId != null && !isNewChatGlobalCodingAgent" class="new-chat-field">
+            <span class="new-chat-label">{{ t("chat.reasoningEffortField") }}</span>
+            <NSelect
+              v-model:value="newChatReasoningEffort"
+              :options="newChatReasoningEffortOptions"
+              :disabled="newChatLoading"
             />
           </label>
           <div v-if="newChatUsesProviderModel && newChatUsesKeylessProvider" class="new-chat-field">
@@ -3079,6 +3316,7 @@ async function handleSessionModelCustomSubmit() {
                 {{ t("chat.workspaceDefaultTooltip") }}
               </NTooltip>
             </span>
+            <span v-if="newChatPresetWarning('workspace')" class="new-chat-preset-warning" role="status" data-testid="new-chat-workspace-warning">{{ newChatPresetWarning("workspace") }}</span>
             <!-- Default workspace chips -->
             <div v-if="defaultWorkspaces.length > 0" class="default-workspace-chips">
               <span class="default-workspace-label">{{ t("chat.defaultWorkspace") }}:</span>
@@ -4050,6 +4288,92 @@ async function handleSessionModelCustomSubmit() {
     background: $bg-secondary;
     color: $text-primary;
   }
+}
+
+.session-category-new-chat-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-inline-start: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: $text-muted;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    background: $bg-secondary;
+    color: $text-primary;
+  }
+
+  & + .session-category-menu-button {
+    margin-inline-start: 0;
+  }
+}
+
+// Pointer devices reveal [+] on header hover; touch devices always show it.
+@media (hover: hover) and (pointer: fine) {
+  .session-category-new-chat-button {
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+
+  .session-group-header:hover .session-category-new-chat-button,
+  .session-category-new-chat-button:focus-visible {
+    opacity: 1;
+  }
+}
+
+.session-category-new-chat-row,
+.session-new-category-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 12px);
+  margin: 1px 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: $text-muted;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+
+  &:hover,
+  &:focus-visible {
+    background: $bg-secondary;
+    color: $text-primary;
+  }
+}
+
+.session-new-category-button {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  border: 1px dashed $border-color;
+}
+
+.new-chat-preset-notice {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(var(--accent-primary-rgb), 0.08);
+  color: $text-secondary;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.new-chat-preset-warning {
+  font-size: 12px;
+  line-height: 1.4;
+  color: $warning;
+  overflow-wrap: anywhere;
 }
 
 .session-category-load-error {

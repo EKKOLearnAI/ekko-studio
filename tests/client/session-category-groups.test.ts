@@ -7,7 +7,7 @@ import {
 } from '../../packages/client/src/components/hermes/chat/session-category-groups'
 
 describe('session category groups', () => {
-  it('hides categories that have no visible sessions', () => {
+  it('keeps categories that have no visible sessions', () => {
     const groups = buildVisibleSessionCategoryGroups(
       [
         { id: 1, name: 'Work' },
@@ -20,18 +20,20 @@ describe('session category groups', () => {
       'Uncategorized',
     )
 
-    expect(groups.map((group) => [group.key, group.sessions.length])).toEqual([
-      ['category-1', 1],
-      ['category-none', 1],
+    expect(groups.map((group) => [group.key, group.sessions.length, group.categoryId])).toEqual([
+      ['category-1', 1, 1],
+      ['category-2', 0, 2],
+      ['category-none', 1, undefined],
     ])
   })
 
-  it('returns no groups when the session list is empty', () => {
+  it('shows every category but no Uncategorized group when the session list is empty', () => {
     expect(buildVisibleSessionCategoryGroups(
       [{ id: 1, name: 'Work' }],
       [],
       'Uncategorized',
-    )).toEqual([])
+    )).toEqual([{ key: 'category-1', label: 'Work', sessions: [], categoryId: 1 }])
+    expect(buildVisibleSessionCategoryGroups([], [], 'Uncategorized')).toEqual([])
   })
 
   it('shows sessions with deleted or unknown categories as uncategorized', () => {
@@ -41,7 +43,7 @@ describe('session category groups', () => {
       'Uncategorized',
     )
 
-    expect(groups).toEqual([{
+    expect(groups).toEqual([{ key: 'category-1', label: 'Work', sessions: [], categoryId: 1 }, {
       key: 'category-none',
       label: 'Uncategorized',
       sessions: [{ id: 'session-1', categoryId: 999 }],
