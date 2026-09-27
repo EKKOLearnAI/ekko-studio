@@ -2739,22 +2739,7 @@ async function findCommandPaths(command: string, env: NodeJS.ProcessEnv): Promis
         paths.push(candidate)
       }
     }
-    if (paths.length > 0) return paths
-
-    // Keep the legacy fallback for environments where PATH entries cannot be
-    // inspected directly (for example, mocked or virtual command shims). Real
-    // files found above never pass through the console code-page decoding path.
-    try {
-      const { stdout } = await execFileAsync('where', [command], {
-        encoding: 'utf-8',
-        timeout: 5000,
-        windowsHide: true,
-        env,
-      })
-      return stdout.split(/\r?\n/).map(line => normalizeWindowsCommandPath(line.trim())).filter(Boolean)
-    } catch {
-      return []
-    }
+    return paths
   }
 
   try {
