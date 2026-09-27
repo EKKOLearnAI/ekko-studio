@@ -54,6 +54,7 @@ import {
   isNewChatProviderAllowedFor,
   presetWarningMessageKey,
   resolveCategoryPreset,
+  usesBaseUrl,
   type CategoryPresetWarning,
   type CategoryPresetWarningField,
   type NewChatAgentId,
@@ -1158,7 +1159,7 @@ const isNewChatGlobalCodingAgent = computed(() =>
 );
 const newChatUsesProviderModel = computed(() => !isNewChatGlobalCodingAgent.value);
 const newChatNeedsBaseUrl = computed(() =>
-  isNewChatCodingAgent.value && effectiveNewChatAgentMode.value === "scoped" && !selectedNewChatProviderGroup.value?.base_url,
+  usesBaseUrl(newChatAgent.value, newChatAgentMode.value) && !selectedNewChatProviderGroup.value?.base_url,
 );
 const newChatUsesServerAuth = computed(() =>
   usesServerManagedProviderAuth(newChatAgent.value as ChatCodingAgentId, selectedNewChatProviderGroup.value?.provider),

@@ -7,6 +7,7 @@ import {
   effectiveNewChatMode,
   hasCategoryPreset,
   hasLaunchModeChoice,
+  usesBaseUrl,
   usesProviderModel,
   foldAsciiCase,
   isNewChatProviderAllowedFor,
@@ -344,13 +345,54 @@ describe('category preset whose stored Base URL the server dropped', () => {
     expect(resolved.warnings).toEqual([{ field: 'baseUrl', value: DROPPED_BASE_URL_PLACEHOLDER }])
     // Every other stored field was kept and still applies.
     expect(resolved).toMatchObject({ agent: 'claude-code', provider: 'anthropic', model: 'claude-opus-5-5' })
-    // Nothing else left in the preset: still warned.
-    expect(resolveCategoryPreset(null, context({ storedBaseUrlDropped: true })).warnings)
-      .toEqual([{ field: 'baseUrl', value: DROPPED_BASE_URL_PLACEHOLDER }])
+    // Nothing else left in the preset: still warned while the drawer agent uses a Base URL.
+    expect(resolveCategoryPreset(null, context({
+      storedBaseUrlDropped: true,
+      currentAgent: 'claude-code',
+      currentAgentMode: 'scoped',
+    })).warnings).toEqual([{ field: 'baseUrl', value: DROPPED_BASE_URL_PLACEHOLDER }])
     // The form typed a new Base URL: the old drop no longer matters.
     expect(resolveCategoryPreset({ ...preset, baseUrl: 'https://gw.test/v1' }, context({ storedBaseUrlDropped: true })).warnings)
       .toEqual([])
     expect(resolveCategoryPreset(preset, context()).warnings).toEqual([])
+  })
+
+  it('warns only when the resolved agent/mode uses a Base URL, like the drawer Base URL field', () => {
+    const dropped = context({ storedBaseUrlDropped: true })
+    // Cursor is always global: no Base URL field, so no warning.
+    expect(resolveCategoryPreset({ agent: 'cursor' }, dropped).warnings).toEqual([])
+    // A stored scoped mode is ignored for Cursor too.
+    expect(resolveCategoryPreset({ agent: 'cursor', agentMode: 'scoped' }, dropped).warnings).toEqual([])
+    // claude-code in global mode: no Base URL field.
+    expect(resolveCategoryPreset({ agent: 'claude-code', agentMode: 'global' }, dropped).warnings).toEqual([])
+    // A global drawer agent with no preset agent: no warning either.
+    expect(resolveCategoryPreset({ model: 'claude-opus-5-5' }, context({
+      storedBaseUrlDropped: true,
+      currentAgent: 'claude-code',
+      currentAgentMode: 'global',
+    })).warnings).toEqual([])
+    // Hermes has no Base URL field.
+    expect(resolveCategoryPreset({ model: 'claude-opus-5-5' }, dropped).warnings).toEqual([])
+    // Scoped external agents use one: warned.
+    for (const agent of ['claude-code', 'codex', 'opencode'] as const) {
+      expect(resolveCategoryPreset({ agent, agentMode: 'scoped' }, dropped).warnings)
+        .toEqual([{ field: 'baseUrl', value: DROPPED_BASE_URL_PLACEHOLDER }])
+    }
+    // The drawer agent is scoped and the preset names no agent: warned.
+    expect(resolveCategoryPreset({ model: 'claude-opus-5-5' }, context({
+      storedBaseUrlDropped: true,
+      currentAgent: 'claude-code',
+      currentAgentMode: 'scoped',
+    })).warnings).toEqual([{ field: 'baseUrl', value: DROPPED_BASE_URL_PLACEHOLDER }])
+  })
+
+  it('shares the Base URL condition with the drawer field', () => {
+    expect(usesBaseUrl('hermes', 'scoped')).toBe(false)
+    expect(usesBaseUrl('cursor', 'scoped')).toBe(false)
+    expect(usesBaseUrl('cursor', 'global')).toBe(false)
+    expect(usesBaseUrl('claude-code', 'global')).toBe(false)
+    expect(usesBaseUrl('claude-code', 'scoped')).toBe(true)
+    expect(usesBaseUrl('ekko-agent', 'global')).toBe(true)
   })
 })
 

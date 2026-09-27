@@ -23,6 +23,7 @@ import {
   presetBaseUrlCarriesCredentials,
   presetWarningMessageKey,
   resolveCategoryPreset,
+  usesBaseUrl,
   usesProviderModel,
   validateCategoryName,
   type CategoryNameError,
@@ -148,7 +149,7 @@ const showModelKind = computed(() =>
   effectiveAgent.value === "hermes" && (Boolean(moaGroup.value?.models.length) || modelKind.value === "moa"),
 );
 const showProviderModel = computed(() => usesProviderModel(effectiveAgent.value, effectiveMode.value));
-const isScopedCodingAgent = computed(() => effectiveAgent.value !== "hermes" && effectiveMode.value === "scoped");
+const isScopedCodingAgent = computed(() => usesBaseUrl(effectiveAgent.value, effectiveMode.value));
 const selectedGroup = computed(() =>
   modelKind.value === "moa" ? moaGroup.value : groups.value.find((group) => group.provider === provider.value),
 );

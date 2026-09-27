@@ -334,7 +334,7 @@ test('warns when the server dropped a stored Base URL (and its API mode) that fa
   const api = await setupPage(page, [{
     id: 1,
     name: 'Dropped',
-    preset: { model: 'claude-opus-5-5' },
+    preset: { agent: 'claude-code', agentMode: 'scoped', provider: 'anthropic', model: 'claude-opus-5-5' },
     preset_status: { base_url_dropped: true },
   }])
   await page.goto('/#/hermes/chat')
@@ -353,6 +353,23 @@ test('warns when the server dropped a stored Base URL (and its API mode) that fa
     .toHaveText('Base URL “…” in the preset is not used with this provider; using the provider\'s own settings.')
   await page.keyboard.press('Escape')
   expect(api.requests.some(request => request.method === 'PATCH')).toBe(false)
+})
+
+test('does not warn about a dropped Base URL for agents without a Base URL field (Cursor, global claude-code)', async ({ page }) => {
+  await setupPage(page, [
+    { id: 1, name: 'Cursor Dropped', preset: { agent: 'cursor' }, preset_status: { base_url_dropped: true } },
+    { id: 2, name: 'Global Dropped', preset: { agent: 'claude-code', agentMode: 'global' }, preset_status: { base_url_dropped: true } },
+  ], [], ['claude-code', 'cursor'])
+  await page.goto('/#/hermes/chat')
+
+  for (const name of ['Cursor Dropped', 'Global Dropped']) {
+    await page.getByTestId('category-new-chat-row').and(page.getByRole('button', { name: `New Chat in ${name}` })).click()
+    await expect(drawerField(page, /^Category/)).toContainText(name)
+    await expect(drawer(page).getByTestId('new-chat-base-url-warning')).toHaveCount(0)
+    await expect(drawer(page).locator('.new-chat-preset-warning')).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(drawer(page)).toBeHidden()
+  }
 })
 
 test('keeps today\'s install flow when the preset agent is not installed', async ({ page }) => {

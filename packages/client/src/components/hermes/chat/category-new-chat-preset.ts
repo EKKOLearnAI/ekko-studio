@@ -120,6 +120,16 @@ export function hasLaunchModeChoice(agent: NewChatAgentId): boolean {
   return isExternalCodingAgent(agent) && FIXED_NEW_CHAT_MODES[agent] === undefined;
 }
 
+/**
+ * True when the panel can use a Base URL for this agent/mode: a scoped coding agent.
+ * The panel shows its Base URL field in that case while the selected provider has
+ * no base_url of its own. Global agents (Cursor, or claude-code in global mode) and
+ * Hermes never use one.
+ */
+export function usesBaseUrl(agent: NewChatAgentId, mode: NewChatAgentMode): boolean {
+  return agent !== "hermes" && effectiveNewChatMode(agent, mode) === "scoped";
+}
+
 export function usesProviderModel(agent: NewChatAgentId, mode: NewChatAgentMode): boolean {
   return !(agent !== "hermes" && effectiveNewChatMode(agent, mode) === "global");
 }
@@ -219,14 +229,9 @@ export function resolveCategoryPreset(
 ): ResolvedCategoryPreset {
   const warnings: CategoryPresetWarning[] = [];
   const result: ResolvedCategoryPreset = { profile: context.defaultProfile, warnings };
-  // Stale like any unusable value: the stored Base URL is gone, unless a new one replaces it.
-  if (context.storedBaseUrlDropped && !preset?.baseUrl) {
-    warnings.push({ field: "baseUrl", value: DROPPED_BASE_URL_PLACEHOLDER });
-  }
-  if (!preset) return result;
 
   let agent = context.currentAgent;
-  if (preset.agent) {
+  if (preset?.agent) {
     if (KNOWN_AGENTS.has(preset.agent)) {
       agent = preset.agent as NewChatAgentId;
       result.agent = agent;
@@ -236,11 +241,17 @@ export function resolveCategoryPreset(
   }
   let mode = context.currentAgentMode;
   // Like the panel, an agent with a fixed mode (Cursor: global) ignores a stored launch mode.
-  if (preset.agentMode && hasLaunchModeChoice(agent)) {
+  if (preset?.agentMode && hasLaunchModeChoice(agent)) {
     mode = preset.agentMode;
     result.agentMode = mode;
   }
   const effectiveMode = effectiveNewChatMode(agent, mode);
+  // Stale like any unusable value: the stored Base URL is gone, unless a new one replaces it.
+  // Only an agent/mode that uses a Base URL warns; the others have no Base URL field.
+  if (context.storedBaseUrlDropped && !preset?.baseUrl && usesBaseUrl(agent, effectiveMode)) {
+    warnings.push({ field: "baseUrl", value: DROPPED_BASE_URL_PLACEHOLDER });
+  }
+  if (!preset) return result;
 
   if (preset.profile) {
     if (context.profiles.includes(preset.profile)) {
@@ -299,7 +310,7 @@ export function resolveCategoryPreset(
         }
       }
     }
-    if (agent !== "hermes" && effectiveMode === "scoped") {
+    if (usesBaseUrl(agent, effectiveMode)) {
       // The Base URL was entered for the preset provider while it had none of its own.
       // Anywhere else (stale provider, or the provider now has its own base_url) it
       // would point another provider at the wrong endpoint, so drop it and warn.
