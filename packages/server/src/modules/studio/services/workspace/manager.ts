@@ -105,6 +105,18 @@ export function isAbsoluteWorkspacePath(value: unknown): boolean {
   return !!path && pathOperations(path).isAbsolute(path)
 }
 
+/**
+ * Absolute folder a chat run uses for a session `workspace` value. Runs hand
+ * the stored value straight to mkdir / the child process cwd
+ * (ensureHermesRunWorkspace, coding-agent launches), so a relative value
+ * resolves against the server's working directory. WORKSPACE_BASE only anchors
+ * folder-picker and group-chat selections (resolveWorkspaceDirectory).
+ */
+export function resolveRunWorkspacePath(workspace: string): string {
+  const raw = workspace.trim()
+  return pathOperations(raw).resolve(raw)
+}
+
 export function workspaceRelativePath(workspace: string, fullPath: string): string {
   return pathOperations(workspace, fullPath).relative(workspace, fullPath).replace(/\\/g, '/')
 }

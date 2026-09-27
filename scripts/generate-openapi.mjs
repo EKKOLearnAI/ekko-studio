@@ -935,8 +935,8 @@ const sessionCategoryPresetSchema = {
     provider: { type: 'string', maxLength: 200 },
     model: { type: 'string', maxLength: 300 },
     apiMode: { type: 'string', enum: ['chat_completions', 'codex_responses', 'anthropic_messages'] },
-    baseUrl: { type: 'string', maxLength: 2048, description: 'Used only by scoped coding agents whose provider has no base URL of its own.' },
-    workspace: { type: 'string', maxLength: 4096, description: 'Absolute folder path (POSIX, Windows drive or UNC).' },
+    baseUrl: { type: 'string', maxLength: 2048, description: 'Used only by scoped coding agents, and only with the preset provider while it has no base URL of its own. A URL with userinfo (user:password@) or a secret-like query parameter (key, api_key, apikey, token, access_token, secret, password, sig) is rejected with 400.' },
+    workspace: { type: 'string', maxLength: 4096, description: 'Folder path stored as entered, like the New Chat panel. A relative path resolves where a chat run resolves it (the server working directory).' },
   },
 }
 openapi.paths['/api/studio/session-categories'].post.requestBody = {

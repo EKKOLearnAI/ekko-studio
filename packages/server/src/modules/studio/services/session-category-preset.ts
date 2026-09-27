@@ -1,5 +1,5 @@
 import { stat } from 'fs/promises'
-import { isAbsolute, win32 as pathWin32 } from 'path'
+import { resolveRunWorkspacePath } from './workspace/manager'
 
 /**
  * New Chat preset stored on a session category.
@@ -10,8 +10,10 @@ import { isAbsolute, win32 as pathWin32 } from 'path'
  *
  * Validation mirrors the New Chat panel: only rules the panel itself has
  * (MoA only with Hermes, a DSH preset only with DeepSeek Harness), plus
- * storage sanity limits and an absolute workspace path (what FolderPicker
- * produces).
+ * storage sanity limits. The workspace is stored as entered, relative paths
+ * included, exactly like the panel. One deliberate exception: a Base URL that
+ * carries credentials (URL userinfo or a secret-looking query parameter) is
+ * refused, because presets are shared and must never hold keys.
  */
 export const SESSION_CATEGORY_PRESET_AGENTS = [
   'hermes',
@@ -93,9 +95,29 @@ function isEnumField(key: string): key is EnumField {
   return Object.prototype.hasOwnProperty.call(ENUM_FIELD_VALUES, key)
 }
 
-/** POSIX (`/home/me/app`) or Windows (`C:\\work`, `\\\\server\\share`) absolute path, as FolderPicker produces. */
-export function isAbsolutePresetWorkspace(value: string): boolean {
-  return isAbsolute(value) || pathWin32.isAbsolute(value)
+const SECRET_QUERY_PARAMS = new Set(['key', 'api_key', 'apikey', 'token', 'access_token', 'secret', 'password', 'sig'])
+
+/**
+ * True when a Base URL embeds credentials: URL userinfo (`https://user:pass@host`)
+ * or a query parameter named like a secret (`?api_key=…`, case-insensitive).
+ * Scheme-less values (`localhost:11434/v1`), which the New Chat panel accepts,
+ * are parsed as http URLs.
+ */
+export function presetBaseUrlCarriesCredentials(value: string): boolean {
+  const raw = value.trim()
+  let url: URL
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`)
+  } catch {
+    // Unparseable: fall back to the textual shapes.
+    return /^(?:[a-z][a-z0-9+.-]*:\/\/)?[^/?#]*@/i.test(raw)
+      || /[?&](?:key|api[_-]?key|token|access[_-]token|secret|password|sig)=/i.test(raw)
+  }
+  if (url.username || url.password) return true
+  for (const name of url.searchParams.keys()) {
+    if (SECRET_QUERY_PARAMS.has(name.toLowerCase().replace(/-/g, '_'))) return true
+  }
+  return false
 }
 
 /**
@@ -118,8 +140,8 @@ function readField(key: keyof SessionCategoryPreset, value: unknown): string | u
     throw new SessionCategoryPresetError(`Preset field ${key} is too long`)
   }
   if (trimmed.includes('\0')) throw new SessionCategoryPresetError(`Preset field ${key} is invalid`)
-  if (key === 'workspace' && !isAbsolutePresetWorkspace(trimmed)) {
-    throw new SessionCategoryPresetError('Preset workspace must be an absolute folder path')
+  if (key === 'baseUrl' && presetBaseUrlCarriesCredentials(trimmed)) {
+    throw new SessionCategoryPresetError('Preset Base URL cannot contain credentials (user:password@ or key/token query parameters)')
   }
   return trimmed
 }
@@ -173,9 +195,8 @@ export function normalizeSessionCategoryPreset(input: unknown): SessionCategoryP
 
 /**
  * Lenient read of a stored preset column. Unknown, credential, or invalid
- * fields (for example `reasoningEffort` from an earlier build, or an enum
- * value a newer build wrote) are dropped one by one; the rest of the preset
- * is kept. Only unparseable JSON yields null.
+ * fields (for example an enum value a newer build wrote) are dropped one by
+ * one; the rest of the preset is kept. Only unparseable JSON yields null.
  */
 export function parseStoredSessionCategoryPreset(raw: unknown): SessionCategoryPreset | null {
   if (typeof raw !== 'string' || !raw.trim()) return null
@@ -216,25 +237,72 @@ export interface SessionCategoryPresetStatus {
 export type DirectoryProbe = (path: string) => Promise<boolean | undefined>
 
 export const PRESET_WORKSPACE_STAT_TIMEOUT_MS = 500
+export const PRESET_WORKSPACE_PROBE_TTL_MS = 30_000
+export const PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT = 4
+const PRESET_WORKSPACE_PROBE_CACHE_LIMIT = 256
+
+export interface DirectoryProbeOptions {
+  statFn?: (path: string) => Promise<{ isDirectory(): boolean }>
+  timeoutMs?: number
+  ttlMs?: number
+  maxInFlight?: number
+  now?: () => number
+}
 
 /**
- * Non-blocking directory probe with a per-path timeout. A slow or hung
- * filesystem (network mount, sleeping disk) resolves as "unknown" instead of
- * blocking the category list or being reported as missing.
+ * Directory probe for preset workspaces, shared by the whole process.
+ *
+ * A stat on a stale network mount can hang and keep a libuv worker thread busy
+ * long after we stop waiting, so:
+ * - the caller never waits more than `timeoutMs`; a slow check is "unknown";
+ * - at most one stat per path runs at a time (callers join the pending one);
+ * - at most `maxInFlight` stats run at once; beyond that the answer is "unknown";
+ * - settled answers are cached for `ttlMs`, so reopening the drawer does not stat again.
+ * Paths are resolved the way a chat run resolves them (resolveRunWorkspacePath).
  */
-export function probeDirectory(path: string, timeoutMs = PRESET_WORKSPACE_STAT_TIMEOUT_MS): Promise<boolean | undefined> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(undefined), timeoutMs)
-    timer.unref?.()
-    stat(path).then(
-      (info) => { clearTimeout(timer); resolve(info.isDirectory()) },
-      (error: NodeJS.ErrnoException) => {
-        clearTimeout(timer)
-        resolve(error?.code === 'ENOENT' || error?.code === 'ENOTDIR' ? false : undefined)
-      },
-    )
-  })
+export function createDirectoryProbe(options: DirectoryProbeOptions = {}): DirectoryProbe {
+  const statFn = options.statFn ?? stat
+  const timeoutMs = options.timeoutMs ?? PRESET_WORKSPACE_STAT_TIMEOUT_MS
+  const ttlMs = options.ttlMs ?? PRESET_WORKSPACE_PROBE_TTL_MS
+  const maxInFlight = options.maxInFlight ?? PRESET_WORKSPACE_PROBE_MAX_IN_FLIGHT
+  const now = options.now ?? Date.now
+  const cache = new Map<string, { value: boolean | undefined; expiresAt: number }>()
+  const inFlight = new Map<string, Promise<boolean | undefined>>()
+
+  function remember(key: string, value: boolean | undefined) {
+    cache.delete(key)
+    cache.set(key, { value, expiresAt: now() + ttlMs })
+    if (cache.size > PRESET_WORKSPACE_PROBE_CACHE_LIMIT) cache.delete(cache.keys().next().value as string)
+  }
+
+  return (path) => {
+    const key = resolveRunWorkspacePath(path)
+    const cached = cache.get(key)
+    if (cached && cached.expiresAt > now()) return Promise.resolve(cached.value)
+
+    let pending = inFlight.get(key)
+    if (!pending) {
+      if (inFlight.size >= maxInFlight) return Promise.resolve(undefined)
+      pending = statFn(key).then(
+        info => info.isDirectory(),
+        (error: NodeJS.ErrnoException) => (error?.code === 'ENOENT' || error?.code === 'ENOTDIR' ? false : undefined),
+      ).then((value) => {
+        inFlight.delete(key)
+        remember(key, value)
+        return value
+      })
+      inFlight.set(key, pending)
+    }
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(undefined), timeoutMs)
+      timer.unref?.()
+      pending!.then((value) => { clearTimeout(timer); resolve(value) })
+    })
+  }
 }
+
+export const probeDirectory: DirectoryProbe = createDirectoryProbe()
 
 /**
  * Read-only availability check for preset values that only the server can see.

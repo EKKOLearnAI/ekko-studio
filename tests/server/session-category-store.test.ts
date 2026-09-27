@@ -101,6 +101,16 @@ describe('session category store', () => {
     expect(listSessionCategories().map(row => [row.id, row.name, row.preset])).toEqual([[first.id, 'Client Work', { model: 'a' }]])
   })
 
+  it('folds only ASCII case in names (SQLite NOCASE), which the client duplicate check mirrors', async () => {
+    const { SessionCategoryNameConflictError, insertSessionCategory } = await import(
+      '../../packages/server/src/modules/studio/repositories/session-category-store'
+    )
+    insertSessionCategory('Été', null)
+    expect(insertSessionCategory('été', null).name).toBe('été')
+    expect(() => insertSessionCategory('ÉTÉ', null)).not.toThrow()
+    expect(() => insertSessionCategory('éTé', null)).toThrow(SessionCategoryNameConflictError)
+  })
+
   it('deletes the preset with its category and never exposes a raw API key column', async () => {
     const { deleteSessionCategory, findSessionCategoryByName, insertSessionCategory } = await import(
       '../../packages/server/src/modules/studio/repositories/session-category-store'
@@ -131,13 +141,16 @@ describe('session category store', () => {
     }))
     insert.run('Combo', JSON.stringify({ agent: 'codex', modelKind: 'moa', agentPreset: 'planner', provider: 'openai' }))
     insert.run('Relative', JSON.stringify({ workspace: 'relative/dir', model: 'm' }))
+    insert.run('UrlSecret', JSON.stringify({ agent: 'claude-code', baseUrl: 'https://u:p@gw.test/v1', model: 'm' }))
     const rows = Object.fromEntries(listSessionCategories().map(row => [row.name, row.preset]))
     expect(rows).toEqual({
       Broken: null,
       Combo: { agent: 'codex', provider: 'openai' },
       Leaked: { model: 'm' },
       Mixed: { agent: 'claude-code', model: 'claude-opus-5-5', workspace: '/work/app' },
-      Relative: { model: 'm' },
+      // Relative workspaces are kept as entered, like the New Chat panel.
+      Relative: { model: 'm', workspace: 'relative/dir' },
+      UrlSecret: { agent: 'claude-code', model: 'm' },
     })
   })
 })

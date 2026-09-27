@@ -212,6 +212,35 @@ describe('user auth tables and middleware', () => {
   })
 
   it.each([
+    ['GET', '/api/studio/session-categories'],
+    ['POST', '/api/studio/session-categories'],
+    ['PATCH', '/api/studio/session-categories/1'],
+    ['PATCH', '/api/hermes/session-categories/1'],
+  ])('never lets the loopback server token reach category routes (%s %s)', async (method, path) => {
+    vi.stubEnv('AUTH_TOKEN', 'server-token')
+    const { auth } = await initUsers()
+    const ctx = {
+      method,
+      path,
+      headers: { authorization: 'Bearer server-token' },
+      query: {},
+      ip: '127.0.0.1',
+      request: { ip: '127.0.0.1', body: { preset: { model: 'm' } } },
+      req: { socket: { remoteAddress: '127.0.0.1' } },
+      state: {},
+      status: 200,
+      body: null,
+    } as any
+    const next = vi.fn(async () => {})
+
+    await auth.requireUserJwt(ctx, next)
+
+    expect(next).not.toHaveBeenCalled()
+    expect(ctx.status).toBe(401)
+    expect(ctx.state.serverTokenAuth).toBeUndefined()
+  })
+
+  it.each([
     '/api/studio/media/apikey-image-generate',
     '/api/studio/media/grok-image-to-video',
     '/api/studio/voice/proxy/default/v1/tts',

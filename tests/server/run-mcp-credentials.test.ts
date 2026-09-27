@@ -109,6 +109,30 @@ it.each([
   expect(next).not.toHaveBeenCalled()
 })
 
+it.each([
+  ['GET', '/api/studio/session-categories'],
+  ['POST', '/api/studio/session-categories'],
+  ['PATCH', '/api/studio/session-categories/1'],
+])('a run credential without a requester cannot reach category routes (%s %s)', async (method, path) => {
+  const credential = await issue('categories')
+  const ctx = context(credential, path, { method, request: { body: { context_id: credential.context_id, preset: { model: 'm' } } } })
+  const next = vi.fn()
+  await requireUserJwt(ctx, next)
+  expect(ctx.status).toBe(403)
+  expect(next).not.toHaveBeenCalled()
+  expect(ctx.state.user).toBeUndefined()
+})
+
+it('a run credential with a requester acts as that user on category routes (no super admin, no preset writes)', async () => {
+  const credential = await issue('categories-user', { userId: 7 })
+  const ctx = context(credential, '/api/studio/session-categories/1', { method: 'PATCH' })
+  const next = vi.fn(async () => {})
+  await requireUserJwt(ctx, next)
+  expect(next).toHaveBeenCalledOnce()
+  // The controller only lets super_admin write presets (sessions-controller tests cover the 403).
+  expect(ctx.state.user).toMatchObject({ id: 7, role: 'user' })
+})
+
 it('delegates only the local requester permissions and rechecks disabled users and revoked profiles', async () => {
   const credential = await issue('account', { userId: 7 })
   const ctx = context(credential, '/api/studio/sessions')

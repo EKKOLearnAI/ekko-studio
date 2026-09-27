@@ -548,29 +548,19 @@ async function presentCategory(category: SessionCategoryRow, isDirectory: Direct
   return presetStatus ? { ...category, preset_status: presetStatus } : category
 }
 
-/** One probe per distinct path per request, so categories sharing a workspace stat it once. */
-function memoizedDirectoryProbe(): DirectoryProbe {
-  const cache = new Map<string, Promise<boolean | undefined>>()
-  return (path) => {
-    let pending = cache.get(path)
-    if (!pending) {
-      pending = probeDirectory(path)
-      cache.set(path, pending)
-    }
-    return pending
-  }
-}
-
 /**
  * Category presets are shared by every user, so writing one is limited to
- * super admins (the unrestricted owner role; single-user installs run as the
- * default super admin). Profile-bound admins can still use presets and can
- * create, rename and delete categories as before. A request without a user
- * (no auth layer in front) is the local owner, matching allowedProfileSet().
+ * super admins, the unrestricted owner role. There is no unauthenticated
+ * single-user mode: requireUserJwt runs on every /api route and a single-user
+ * install signs in as the default super admin. The only requests that reach a
+ * controller without `ctx.state.user` are the loopback server token (limited
+ * to SERVER_TOKEN_EXACT_PATHS) and a run credential with no requester (limited
+ * to task-plan/clarification interactions); neither can reach category routes,
+ * and a request without a user is refused here as well (fail closed). A run
+ * credential bound to a requester carries that user and is checked like them.
  */
 function canManageCategoryPresets(ctx: any): boolean {
-  const user = ctx.state?.user
-  return !user || user.role === 'super_admin'
+  return ctx.state?.user?.role === 'super_admin'
 }
 
 function rejectPresetWrite(ctx: any): void {
@@ -590,8 +580,8 @@ function readCategoryPreset(ctx: any, value: unknown): { ok: true; preset: Sessi
 }
 
 export async function listCategories(ctx: any) {
-  const probe = memoizedDirectoryProbe()
-  ctx.body = { categories: await Promise.all(listSessionCategories().map(category => presentCategory(category, probe))) }
+  // probeDirectory caches per path process-wide, so categories sharing a folder stat it once.
+  ctx.body = { categories: await Promise.all(listSessionCategories().map(category => presentCategory(category))) }
 }
 
 export async function createCategory(ctx: any) {

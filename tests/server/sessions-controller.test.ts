@@ -1571,7 +1571,7 @@ describe('session conversations controller', () => {
     expect(strictCtx.status).toBe(409)
     expect(strictCtx.body).toEqual({ error: 'A category with this name already exists' })
 
-    const presetCtx: any = { request: { body: { name: 'AI PASSPORT', preset: { model: 'opus' } } }, body: null }
+    const presetCtx: any = { request: { body: { name: 'AI PASSPORT', preset: { model: 'opus' } } }, state: { user: { id: 1, username: 'owner', role: 'super_admin' } }, body: null }
     await mod.createCategory(presetCtx)
     expect(presetCtx.status).toBe(409)
     expect(insertSessionCategoryMock).toHaveBeenCalledTimes(2)
@@ -1645,13 +1645,14 @@ describe('session conversations controller', () => {
     getSessionCategoryMock.mockReturnValue({ id: 1, name: 'Work', preset: null, created_at: 1, updated_at: 1 })
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
 
+    const state = { user: { id: 1, username: 'owner', role: 'super_admin' } }
     for (const key of ['apiKey', 'api_key', 'API_KEY', 'accessToken', 'clientSecret']) {
-      const createCtx: any = { request: { body: { name: 'Work', preset: { model: 'm', [key]: 'sk-secret' } } }, body: null }
+      const createCtx: any = { request: { body: { name: 'Work', preset: { model: 'm', [key]: 'sk-secret' } } }, state, body: null }
       await mod.createCategory(createCtx)
       expect(createCtx.status).toBe(400)
       expect(createCtx.body.error).toMatch(/API keys/)
 
-      const patchCtx: any = { params: { id: '1' }, request: { body: { preset: { [key]: 'sk-secret' } } }, body: null }
+      const patchCtx: any = { params: { id: '1' }, request: { body: { preset: { [key]: 'sk-secret' } } }, state, body: null }
       await mod.renameCategory(patchCtx)
       expect(patchCtx.status).toBe(400)
     }
@@ -1666,22 +1667,24 @@ describe('session conversations controller', () => {
       { agent: 'codex', modelKind: 'moa' },
       { agent: 'hermes', agentPreset: 'planner' },
       { apiMode: 'soap' },
-      { workspace: 'relative/folder' },
-      { workspace: './here' },
+      // Deliberate exception to "mirror the panel": shared presets never hold credentials.
+      { agent: 'claude-code', baseUrl: 'https://user:pass@gateway.test/v1' },
+      { agent: 'claude-code', baseUrl: 'https://gateway.test/v1?api_key=sk-1' },
       // Removed from presets (CL-016): now an unknown field on write.
       { reasoningEffort: 'high' },
       { unknownField: 'x' },
       'not-an-object',
     ]
+    const state = { user: { id: 1, username: 'owner', role: 'super_admin' } }
     for (const preset of invalid) {
-      const ctx: any = { request: { body: { name: 'Work', preset } }, body: null }
+      const ctx: any = { request: { body: { name: 'Work', preset } }, state, body: null }
       await mod.createCategory(ctx)
       expect(ctx.status, JSON.stringify(preset)).toBe(400)
     }
     expect(insertSessionCategoryMock).not.toHaveBeenCalled()
   })
 
-  it('accepts any Base URL and absolute POSIX/Windows workspaces, like the New Chat panel', async () => {
+  it('accepts any credential-free Base URL and absolute or relative workspaces, like the New Chat panel', async () => {
     insertSessionCategoryMock.mockImplementation((name: string, preset: unknown) => ({ id: 9, name, preset, created_at: 1, updated_at: 1 }))
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
     const valid = [
@@ -1690,9 +1693,12 @@ describe('session conversations controller', () => {
       { workspace: 'C:\\work\\app' },
       { workspace: 'D:/work/app' },
       { workspace: '\\\\server\\share\\app' },
+      { workspace: 'relative/folder' },
+      { workspace: './here' },
     ]
+    const state = { user: { id: 1, username: 'owner', role: 'super_admin' } }
     for (const preset of valid) {
-      const ctx: any = { request: { body: { name: 'Work', preset } }, body: null }
+      const ctx: any = { request: { body: { name: 'Work', preset } }, state, body: null }
       await mod.createCategory(ctx)
       expect(ctx.status, JSON.stringify(preset)).toBeUndefined()
       expect(insertSessionCategoryMock).toHaveBeenLastCalledWith('Work', preset)
@@ -1743,8 +1749,20 @@ describe('session conversations controller', () => {
     await mod.removeCategory(remove)
     expect(remove.body).toEqual({ ok: true })
 
-    // Super admin, and the single-user local owner (no auth user on the request), may write presets.
-    for (const state of [{ user: superAdmin }, {}]) {
+    // A request without a user (server token, requester-less run credential) never writes a preset.
+    for (const state of [{}, { serverTokenAuth: true }, { profile: { name: 'research' } }]) {
+      const patch: any = { params: { id: '1' }, request: { body: { preset: { model: 'sonnet' } } }, state, body: null }
+      await mod.renameCategory(patch)
+      expect(patch.status, JSON.stringify(state)).toBe(403)
+      const create: any = { request: { body: { name: 'Shared', preset: { model: 'opus' } } }, state, body: null }
+      await mod.createCategory(create)
+      expect(create.status, JSON.stringify(state)).toBe(403)
+    }
+    expect(setSessionCategoryPresetMock).not.toHaveBeenCalled()
+    expect(insertSessionCategoryMock).toHaveBeenCalledTimes(1)
+
+    // Super admin (a single-user install signs in as the default super admin) may write presets.
+    for (const state of [{ user: superAdmin }]) {
       const patch: any = { params: { id: '1' }, request: { body: { preset: { model: 'sonnet' } } }, state, body: null }
       await mod.renameCategory(patch)
       expect(patch.status).toBeUndefined()
@@ -1765,13 +1783,14 @@ describe('session conversations controller', () => {
     setSessionCategoryPresetMock.mockImplementation((id: number, preset: unknown) => ({ ...existing, id, preset }))
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
 
-    const setCtx: any = { params: { id: '1' }, request: { body: { preset: { agent: 'hermes', model: 'opus' } } }, body: null }
+    const state = { user: { id: 1, username: 'owner', role: 'super_admin' } }
+    const setCtx: any = { params: { id: '1' }, request: { body: { preset: { agent: 'hermes', model: 'opus' } } }, state, body: null }
     await mod.renameCategory(setCtx)
     expect(renameSessionCategoryMock).not.toHaveBeenCalled()
     expect(setSessionCategoryPresetMock).toHaveBeenCalledWith(1, { agent: 'hermes', model: 'opus' })
     expect(setCtx.body.category.preset).toEqual({ agent: 'hermes', model: 'opus' })
 
-    const clearCtx: any = { params: { id: '1' }, request: { body: { preset: null } }, body: null }
+    const clearCtx: any = { params: { id: '1' }, request: { body: { preset: null } }, state, body: null }
     await mod.renameCategory(clearCtx)
     expect(setSessionCategoryPresetMock).toHaveBeenLastCalledWith(1, null)
     expect(clearCtx.body.category.preset).toBeNull()
