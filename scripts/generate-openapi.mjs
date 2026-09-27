@@ -924,7 +924,7 @@ openapi.paths['/api/studio/sessions/{id}/pin'].post.requestBody = {
 // Session categories may carry one shared, optional New Chat preset (never an API key).
 const sessionCategoryPresetSchema = {
   type: ['object', 'null'],
-  description: 'Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Credential fields (API keys, tokens, secrets) are rejected with 400.',
+  description: 'Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Validation mirrors the New Chat panel. Credential fields (API keys, tokens, secrets) are rejected with 400. Only super admins may write a preset (403 otherwise). Stored presets are read leniently: unknown or invalid fields are dropped.',
   additionalProperties: false,
   properties: {
     agent: { type: 'string', enum: ['hermes', 'ekko-agent', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] },
@@ -935,9 +935,8 @@ const sessionCategoryPresetSchema = {
     provider: { type: 'string', maxLength: 200 },
     model: { type: 'string', maxLength: 300 },
     apiMode: { type: 'string', enum: ['chat_completions', 'codex_responses', 'anthropic_messages'] },
-    reasoningEffort: { type: 'string', enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
-    baseUrl: { type: 'string', maxLength: 2048, pattern: '^https?://' },
-    workspace: { type: 'string', maxLength: 4096 },
+    baseUrl: { type: 'string', maxLength: 2048, description: 'Used only by scoped coding agents whose provider has no base URL of its own.' },
+    workspace: { type: 'string', maxLength: 4096, description: 'Absolute folder path (POSIX, Windows drive or UNC).' },
   },
 }
 openapi.paths['/api/studio/session-categories'].post.requestBody = {
@@ -952,6 +951,7 @@ openapi.paths['/api/studio/session-categories'].post.requestBody = {
   } } },
 }
 openapi.paths['/api/studio/session-categories'].post.responses[409] = { description: 'A category with this name already exists (strict create only).' }
+openapi.paths['/api/studio/session-categories'].post.responses[403] = { description: 'A non-null preset was sent by a user who is not a super admin.' }
 openapi.paths['/api/studio/session-categories/{id}'].patch.requestBody = {
   required: true,
   content: { 'application/json': { schema: {
@@ -961,7 +961,8 @@ openapi.paths['/api/studio/session-categories/{id}'].patch.requestBody = {
   } } },
 }
 openapi.paths['/api/studio/session-categories/{id}'].patch.responses[409] = { description: 'A category with this name already exists.' }
-openapi.paths['/api/studio/session-categories'].get.description = 'GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace.'
+openapi.paths['/api/studio/session-categories/{id}'].patch.responses[403] = { description: 'preset was sent (including null to clear) by a user who is not a super admin.' }
+openapi.paths['/api/studio/session-categories'].get.description = 'GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace and the folder check finished in time.'
 
 // Shared task planning is bound to an authenticated, active turn capability.
 openapi.paths['/api/studio/task-plans/update'] = {

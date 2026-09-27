@@ -42,20 +42,23 @@ import {
   deleteSessionCategory,
   findSessionCategoryByName,
   getSessionCategory,
+  insertSessionCategory,
   listSessionCategories,
   normalizeSessionCategoryName,
   renameSessionCategory,
   setSessionCategory,
   setSessionCategoryPreset,
+  SessionCategoryNameConflictError,
   type SessionCategoryRow,
 } from '../public/sessions'
 import {
   SessionCategoryPresetError,
   describeSessionCategoryPresetStatus,
   normalizeSessionCategoryPreset,
+  probeDirectory,
+  type DirectoryProbe,
   type SessionCategoryPreset,
 } from '../services/session-category-preset'
-import { statSync } from 'fs'
 import type { UsageStatsAgentRow, UsageStatsModelRow, UsageStatsDailyRow } from '../public/sessions'
 import { deleteWorkspaceRunChangesForSession, getWorkspaceRunChangeFile as getWorkspaceRunChangeFileFromDb, listWorkspaceRunChangesForAssistantMessages, listWorkspaceRunChangesForSession } from '../public/sessions'
 import { getActiveProfileDir, getActiveProfileName, getProfileDir, listProfileNamesFromDisk, readConfigYamlForProfile } from '../public/profile-config'
@@ -539,18 +542,40 @@ export async function list(ctx: any) {
   }
 }
 
-function isExistingDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory()
-  } catch {
-    return false
+// Additive response shape: released App clients using the legacy alias only read id/name.
+async function presentCategory(category: SessionCategoryRow, isDirectory: DirectoryProbe = probeDirectory) {
+  const presetStatus = await describeSessionCategoryPresetStatus(category.preset, isDirectory)
+  return presetStatus ? { ...category, preset_status: presetStatus } : category
+}
+
+/** One probe per distinct path per request, so categories sharing a workspace stat it once. */
+function memoizedDirectoryProbe(): DirectoryProbe {
+  const cache = new Map<string, Promise<boolean | undefined>>()
+  return (path) => {
+    let pending = cache.get(path)
+    if (!pending) {
+      pending = probeDirectory(path)
+      cache.set(path, pending)
+    }
+    return pending
   }
 }
 
-// Additive response shape: released App clients using the legacy alias only read id/name.
-function presentCategory(category: SessionCategoryRow) {
-  const presetStatus = describeSessionCategoryPresetStatus(category.preset, isExistingDirectory)
-  return presetStatus ? { ...category, preset_status: presetStatus } : category
+/**
+ * Category presets are shared by every user, so writing one is limited to
+ * super admins (the unrestricted owner role; single-user installs run as the
+ * default super admin). Profile-bound admins can still use presets and can
+ * create, rename and delete categories as before. A request without a user
+ * (no auth layer in front) is the local owner, matching allowedProfileSet().
+ */
+function canManageCategoryPresets(ctx: any): boolean {
+  const user = ctx.state?.user
+  return !user || user.role === 'super_admin'
+}
+
+function rejectPresetWrite(ctx: any): void {
+  ctx.status = 403
+  ctx.body = { error: 'Only super administrators can change category presets' }
 }
 
 function readCategoryPreset(ctx: any, value: unknown): { ok: true; preset: SessionCategoryPreset | null } | { ok: false } {
@@ -565,7 +590,8 @@ function readCategoryPreset(ctx: any, value: unknown): { ok: true; preset: Sessi
 }
 
 export async function listCategories(ctx: any) {
-  ctx.body = { categories: listSessionCategories().map(presentCategory) }
+  const probe = memoizedDirectoryProbe()
+  ctx.body = { categories: await Promise.all(listSessionCategories().map(category => presentCategory(category, probe))) }
 }
 
 export async function createCategory(ctx: any) {
@@ -581,16 +607,26 @@ export async function createCategory(ctx: any) {
     ctx.body = { error: `Category name must be ${SESSION_CATEGORY_NAME_MAX_LENGTH} characters or fewer` }
     return
   }
+  // A preset sent by someone who may not write presets is refused, never silently dropped.
+  if (body.preset !== undefined && body.preset !== null && !canManageCategoryPresets(ctx)) {
+    rejectPresetWrite(ctx)
+    return
+  }
   const presetResult = readCategoryPreset(ctx, body.preset)
   if (!presetResult.ok) return
   // The "+ New Category" form asks for a strict create; older callers keep create-or-return.
   const strict = body.unique === true || body.preset !== undefined
-  if (strict && findSessionCategoryByName(name)) {
-    ctx.status = 409
-    ctx.body = { error: 'A category with this name already exists' }
+  if (!strict) {
+    ctx.body = { category: await presentCategory(createSessionCategory(name)) }
     return
   }
-  ctx.body = { category: presentCategory(createSessionCategory(name, presetResult.preset)) }
+  try {
+    ctx.body = { category: await presentCategory(insertSessionCategory(name, presetResult.preset)) }
+  } catch (error) {
+    if (!(error instanceof SessionCategoryNameConflictError)) throw error
+    ctx.status = 409
+    ctx.body = { error: error.message }
+  }
 }
 
 export async function renameCategory(ctx: any) {
@@ -604,6 +640,10 @@ export async function renameCategory(ctx: any) {
   const hasPreset = Object.prototype.hasOwnProperty.call(body, 'preset')
   const hasName = body.name !== undefined || !hasPreset
   let presetResult: ReturnType<typeof readCategoryPreset> | null = null
+  if (hasPreset && !canManageCategoryPresets(ctx)) {
+    rejectPresetWrite(ctx)
+    return
+  }
   if (hasPreset) {
     presetResult = readCategoryPreset(ctx, body.preset)
     if (!presetResult.ok) return
@@ -637,7 +677,7 @@ export async function renameCategory(ctx: any) {
     ctx.body = { error: 'Category not found' }
     return
   }
-  ctx.body = { category: presentCategory(category) }
+  ctx.body = { category: await presentCategory(category) }
 }
 
 export async function removeCategory(ctx: any) {

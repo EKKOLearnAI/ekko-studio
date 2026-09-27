@@ -18295,7 +18295,7 @@
           "Sessions"
         ],
         "summary": "Get session-categories",
-        "description": "GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace.",
+        "description": "GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace and the folder check finished in time.",
         "operationId": "listCategories",
         "security": [
           {
@@ -18336,6 +18336,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "description": "A non-null preset was sent by a user who is not a super admin."
+          },
           "409": {
             "description": "A category with this name already exists (strict create only)."
           }
@@ -18359,7 +18362,7 @@
                       "object",
                       "null"
                     ],
-                    "description": "Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Credential fields (API keys, tokens, secrets) are rejected with 400.",
+                    "description": "Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Validation mirrors the New Chat panel. Credential fields (API keys, tokens, secrets) are rejected with 400. Only super admins may write a preset (403 otherwise). Stored presets are read leniently: unknown or invalid fields are dropped.",
                     "additionalProperties": false,
                     "properties": {
                       "agent": {
@@ -18415,26 +18418,15 @@
                           "anthropic_messages"
                         ]
                       },
-                      "reasoningEffort": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "minimal",
-                          "low",
-                          "medium",
-                          "high",
-                          "xhigh",
-                          "max"
-                        ]
-                      },
                       "baseUrl": {
                         "type": "string",
                         "maxLength": 2048,
-                        "pattern": "^https?://"
+                        "description": "Used only by scoped coding agents whose provider has no base URL of its own."
                       },
                       "workspace": {
                         "type": "string",
-                        "maxLength": 4096
+                        "maxLength": 4096,
+                        "description": "Absolute folder path (POSIX, Windows drive or UNC)."
                       }
                     }
                   },
@@ -18472,6 +18464,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "description": "preset was sent (including null to clear) by a user who is not a super admin."
+          },
           "409": {
             "description": "A category with this name already exists."
           }
@@ -18503,7 +18498,7 @@
                       "object",
                       "null"
                     ],
-                    "description": "Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Credential fields (API keys, tokens, secrets) are rejected with 400.",
+                    "description": "Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Validation mirrors the New Chat panel. Credential fields (API keys, tokens, secrets) are rejected with 400. Only super admins may write a preset (403 otherwise). Stored presets are read leniently: unknown or invalid fields are dropped.",
                     "additionalProperties": false,
                     "properties": {
                       "agent": {
@@ -18559,26 +18554,15 @@
                           "anthropic_messages"
                         ]
                       },
-                      "reasoningEffort": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "minimal",
-                          "low",
-                          "medium",
-                          "high",
-                          "xhigh",
-                          "max"
-                        ]
-                      },
                       "baseUrl": {
                         "type": "string",
                         "maxLength": 2048,
-                        "pattern": "^https?://"
+                        "description": "Used only by scoped coding agents whose provider has no base URL of its own."
                       },
                       "workspace": {
                         "type": "string",
-                        "maxLength": 4096
+                        "maxLength": 4096,
+                        "description": "Absolute folder path (POSIX, Windows drive or UNC)."
                       }
                     }
                   }

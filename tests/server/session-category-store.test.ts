@@ -62,15 +62,16 @@ describe('session category store', () => {
     const {
       createSessionCategory,
       getSessionCategory,
+      insertSessionCategory,
       listSessionCategories,
       setSessionCategoryPreset,
     } = await import('../../packages/server/src/modules/studio/repositories/session-category-store')
 
-    const created = createSessionCategory('AI Passport', { agent: 'claude-code', model: 'claude-opus-5-5', workspace: '/p/a' })
+    const created = insertSessionCategory('AI Passport', { agent: 'claude-code', model: 'claude-opus-5-5', workspace: '/p/a' })
     expect(created.preset).toEqual({ agent: 'claude-code', model: 'claude-opus-5-5', workspace: '/p/a' })
 
-    // Typing an existing name in the New Chat panel must not replace the stored preset.
-    const again = createSessionCategory('ai passport', { model: 'other' })
+    // Typing an existing name in the New Chat panel returns the category and keeps its preset.
+    const again = createSessionCategory('ai passport')
     expect(again.id).toBe(created.id)
     expect(again.preset).toEqual(created.preset)
 
@@ -83,11 +84,28 @@ describe('session category store', () => {
     expect(setSessionCategoryPreset(999, { model: 'x' })).toBeNull()
   })
 
-  it('deletes the preset with its category and never exposes a raw API key column', async () => {
-    const { createSessionCategory, deleteSessionCategory, findSessionCategoryByName } = await import(
+  it('lets the unique index reject a duplicate strict create instead of returning the other category', async () => {
+    const { SessionCategoryNameConflictError, insertSessionCategory, listSessionCategories } = await import(
       '../../packages/server/src/modules/studio/repositories/session-category-store'
     )
-    const category = createSessionCategory('Personal', { agent: 'hermes', model: 'm' })
+    // Two "+ New Category" saves racing for the same name: the first wins, the second gets a conflict.
+    const first = insertSessionCategory('Client Work', { model: 'a' })
+    let conflict: unknown
+    try {
+      insertSessionCategory('client   WORK', { model: 'b' })
+    } catch (error) {
+      conflict = error
+    }
+    expect(conflict).toBeInstanceOf(SessionCategoryNameConflictError)
+    expect((conflict as any).status).toBe(409)
+    expect(listSessionCategories().map(row => [row.id, row.name, row.preset])).toEqual([[first.id, 'Client Work', { model: 'a' }]])
+  })
+
+  it('deletes the preset with its category and never exposes a raw API key column', async () => {
+    const { deleteSessionCategory, findSessionCategoryByName, insertSessionCategory } = await import(
+      '../../packages/server/src/modules/studio/repositories/session-category-store'
+    )
+    const category = insertSessionCategory('Personal', { agent: 'hermes', model: 'm' })
     expect(deleteSessionCategory(category.id)).toBe(true)
     expect(findSessionCategoryByName('Personal')).toBeNull()
     expect(db.prepare('SELECT COUNT(*) AS count FROM session_categories').get().count).toBe(0)
@@ -95,16 +113,32 @@ describe('session category store', () => {
     expect(columns).toEqual(['id', 'name', 'preset', 'created_at', 'updated_at'])
   })
 
-  it('ignores corrupt stored preset JSON instead of failing the category list', async () => {
+  it('reads stored presets leniently: drops only unknown, credential or invalid fields', async () => {
     const { createSessionCategory, listSessionCategories } = await import(
       '../../packages/server/src/modules/studio/repositories/session-category-store'
     )
     const category = createSessionCategory('Broken')
     db.prepare('UPDATE session_categories SET preset = ? WHERE id = ?').run('{not json', category.id)
-    db.prepare('INSERT INTO session_categories (name, preset, created_at, updated_at) VALUES (?, ?, 1, 1)')
-      .run('Leaked', JSON.stringify({ model: 'm', apiKey: 'sk-secret' }))
-    const rows = listSessionCategories()
-    expect(rows.map(row => [row.name, row.preset])).toEqual([['Broken', null], ['Leaked', null]])
+    const insert = db.prepare('INSERT INTO session_categories (name, preset, created_at, updated_at) VALUES (?, ?, 1, 1)')
+    insert.run('Leaked', JSON.stringify({ model: 'm', apiKey: 'sk-secret' }))
+    insert.run('Mixed', JSON.stringify({
+      agent: 'claude-code',
+      model: 'claude-opus-5-5',
+      apiMode: 'soap',
+      reasoningEffort: 'high',
+      futureField: { nested: true },
+      workspace: '/work/app',
+    }))
+    insert.run('Combo', JSON.stringify({ agent: 'codex', modelKind: 'moa', agentPreset: 'planner', provider: 'openai' }))
+    insert.run('Relative', JSON.stringify({ workspace: 'relative/dir', model: 'm' }))
+    const rows = Object.fromEntries(listSessionCategories().map(row => [row.name, row.preset]))
+    expect(rows).toEqual({
+      Broken: null,
+      Combo: { agent: 'codex', provider: 'openai' },
+      Leaked: { model: 'm' },
+      Mixed: { agent: 'claude-code', model: 'claude-opus-5-5', workspace: '/work/app' },
+      Relative: { model: 'm' },
+    })
   })
 })
 

@@ -1961,7 +1961,6 @@ export const useChatStore = defineStore('chat', () => {
     baseUrl?: string
     apiKey?: string
     apiMode?: ProviderApiMode
-    reasoningEffort?: string
   } = {}): Session {
     const source = runtimeMode.value === 'global_agent' ? 'global_agent' : options.source || 'cli'
     const codingAgentId = options.codingAgentId || agentToCodingAgentId(options.agent)
@@ -1986,7 +1985,6 @@ export const useChatStore = defineStore('chat', () => {
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
       apiMode: options.apiMode,
-      reasoningEffort: options.reasoningEffort || undefined,
     }
     sessions.value.unshift(session)
     return session
@@ -2277,7 +2275,6 @@ export const useChatStore = defineStore('chat', () => {
     baseUrl?: string
     apiKey?: string
     apiMode?: ProviderApiMode
-    reasoningEffort?: string
   } = {}): Session {
     const appStore = useAppStore()
     const storageSource = runtimeMode.value === 'global_agent' ? 'global_agent' : options.source || 'cli'
@@ -2297,7 +2294,6 @@ export const useChatStore = defineStore('chat', () => {
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
       apiMode: options.apiMode,
-      reasoningEffort: options.reasoningEffort,
     })
     void switchSession(session.id)
     return session

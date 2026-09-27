@@ -61,27 +61,76 @@ export function findSessionCategoryByName(name: string): SessionCategoryRow | nu
   return row ? mapCategoryRow(row) : null
 }
 
-export function createSessionCategory(name: string, preset: SessionCategoryPreset | null = null): SessionCategoryRow {
+function requireCategoryName(name: string): string {
   const normalizedName = normalizeSessionCategoryName(name)
   if (!normalizedName) throw new Error('Category name is required')
   if (normalizedName.length > SESSION_CATEGORY_NAME_MAX_LENGTH) {
     throw new Error(`Category name must be ${SESSION_CATEGORY_NAME_MAX_LENGTH} characters or fewer`)
   }
+  return normalizedName
+}
+
+/**
+ * Create-or-return by case-insensitive name. Existing callers (New Chat category
+ * tag, "Move to category -> Create") rely on this; an existing category's preset
+ * is never touched here.
+ */
+export function createSessionCategory(name: string): SessionCategoryRow {
+  const normalizedName = requireCategoryName(name)
   if (!isSqliteAvailable()) {
     const now = Math.floor(Date.now() / 1000)
-    return { id: 0, name: normalizedName, preset, created_at: now, updated_at: now }
+    return { id: 0, name: normalizedName, preset: null, created_at: now, updated_at: now }
   }
-  // Existing callers (New Chat category tag, "Move to category -> Create") rely on
-  // create-or-return semantics; an existing category's preset is never overwritten here.
   const existing = findSessionCategoryByName(normalizedName)
   if (existing) return existing
 
   const db = getDb()!
   const now = Math.floor(Date.now() / 1000)
   db.prepare(
-    `INSERT OR IGNORE INTO ${SESSION_CATEGORIES_TABLE} (name, preset, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-  ).run(normalizedName, serializeSessionCategoryPreset(preset), now, now)
+    `INSERT OR IGNORE INTO ${SESSION_CATEGORIES_TABLE} (name, created_at, updated_at) VALUES (?, ?, ?)`,
+  ).run(normalizedName, now, now)
   const category = findSessionCategoryByName(normalizedName)
+  if (!category) throw new Error('Failed to create category')
+  return category
+}
+
+export class SessionCategoryNameConflictError extends Error {
+  status = 409
+  constructor() {
+    super('A category with this name already exists')
+  }
+}
+
+function isCategoryNameUniqueViolation(error: any): boolean {
+  const message = String(error?.message || '')
+  return (error?.code === 'SQLITE_CONSTRAINT_UNIQUE' || error?.code === 'ERR_SQLITE_ERROR' || /constraint/i.test(message))
+    && message.includes(`UNIQUE constraint failed: ${SESSION_CATEGORIES_TABLE}.name`)
+}
+
+/**
+ * Strict create for the "+ New Category" form. The unique index on
+ * name COLLATE NOCASE decides, so two concurrent creates of the same name give
+ * one row and one SessionCategoryNameConflictError (never someone else's row).
+ */
+export function insertSessionCategory(name: string, preset: SessionCategoryPreset | null = null): SessionCategoryRow {
+  const normalizedName = requireCategoryName(name)
+  if (!isSqliteAvailable()) {
+    const now = Math.floor(Date.now() / 1000)
+    return { id: 0, name: normalizedName, preset, created_at: now, updated_at: now }
+  }
+  const db = getDb()!
+  const now = Math.floor(Date.now() / 1000)
+  let insertedId: number
+  try {
+    const result = db.prepare(
+      `INSERT INTO ${SESSION_CATEGORIES_TABLE} (name, preset, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+    ).run(normalizedName, serializeSessionCategoryPreset(preset), now, now)
+    insertedId = Number(result.lastInsertRowid)
+  } catch (error) {
+    if (isCategoryNameUniqueViolation(error)) throw new SessionCategoryNameConflictError()
+    throw error
+  }
+  const category = getSessionCategory(insertedId)
   if (!category) throw new Error('Failed to create category')
   return category
 }
