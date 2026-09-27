@@ -53,10 +53,10 @@ async function perform(action: 'save' | 'delete' | 'test') {
       const result = await testJevConnection(profile)
       if (!disposed) testResult.value = { model: result.model, durationMs: result.durationMs }
     } else {
-      const { baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+      const { browserMatchEnabled, browserMatchCandidateLimit, browserMatchMinConfidence, browserMatchTimeoutMs, browserVerifyEnabled, browserVerifyMinConfidence, browserVerifyTimeoutMs, baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
         ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs } = settings.value
       const result = action === 'delete' ? await deleteJevSettings(profile)
-        : await saveJevSettings(profile, { baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+        : await saveJevSettings(profile, { browserMatchEnabled, browserMatchCandidateLimit, browserMatchMinConfidence, browserMatchTimeoutMs, browserVerifyEnabled, browserVerifyMinConfidence, browserVerifyTimeoutMs, baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
           ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs,
           ...(apiKey.value.trim() ? { apiKey: apiKey.value.trim() } : {}) })
       if (!disposed) { settings.value = result; apiKey.value = ''; message.success(t(action === 'delete' ? 'jev.deleted' : 'common.saved')) }
@@ -155,6 +155,43 @@ async function perform(action: 'save' | 'delete' | 'test') {
             </SettingRow>
           </div>
         </details>
+        <h4 class="group-title">{{ t('jev.browserAutomation') }}</h4>
+        <p class="section-hint">{{ t('jev.browserAutomationHint') }}</p>
+        <div class="settings-rows">
+          <SettingRow :label="t('jev.browserMatchEnabled')" :hint="t('jev.browserMatchHint')">
+            <NSwitch v-model:value="settings.browserMatchEnabled" :aria-label="t('jev.browserMatchEnabled')" />
+          </SettingRow>
+        </div>
+        <details class="browser-options" :open="settings.browserMatchEnabled">
+          <summary>{{ t('jev.browserMatchOptions') }}</summary>
+          <div class="settings-rows">
+            <SettingRow :label="t('jev.browserMatchCandidateLimit')">
+              <NInputNumber :value="settings.browserMatchCandidateLimit" @update:value="value => { if (value !== null) settings!.browserMatchCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': t('jev.browserMatchCandidateLimit') }" />
+            </SettingRow>
+            <SettingRow :label="t('jev.browserMatchMinConfidence')">
+              <NInputNumber :value="settings.browserMatchMinConfidence" @update:value="value => { if (value !== null) settings!.browserMatchMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.browserMatchMinConfidence') }" />
+            </SettingRow>
+            <SettingRow :label="t('jev.browserMatchTimeoutMs')">
+              <NInputNumber :value="settings.browserMatchTimeoutMs" @update:value="value => { if (value !== null) settings!.browserMatchTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.browserMatchTimeoutMs') }" />
+            </SettingRow>
+          </div>
+        </details>
+        <div class="settings-rows">
+          <SettingRow :label="t('jev.browserVerifyEnabled')" :hint="t('jev.browserVerifyHint')">
+            <NSwitch v-model:value="settings.browserVerifyEnabled" :aria-label="t('jev.browserVerifyEnabled')" />
+          </SettingRow>
+        </div>
+        <details class="browser-options" :open="settings.browserVerifyEnabled">
+          <summary>{{ t('jev.browserVerifyOptions') }}</summary>
+          <div class="settings-rows">
+            <SettingRow :label="t('jev.browserVerifyMinConfidence')">
+              <NInputNumber :value="settings.browserVerifyMinConfidence" @update:value="value => { if (value !== null) settings!.browserVerifyMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.browserVerifyMinConfidence') }" />
+            </SettingRow>
+            <SettingRow :label="t('jev.browserVerifyTimeoutMs')">
+              <NInputNumber :value="settings.browserVerifyTimeoutMs" @update:value="value => { if (value !== null) settings!.browserVerifyTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.browserVerifyTimeoutMs') }" />
+            </SettingRow>
+          </div>
+        </details>
         <div class="settings-actions">
           <NButton type="primary" :loading="busy" :disabled="busy" @click="perform('save')">{{ t('common.save') }}</NButton>
           <NButton :disabled="busy || !settings.hasApiKey" @click="perform('test')">{{ t('jev.testSaved') }}</NButton>
@@ -208,7 +245,7 @@ async function perform(action: 'save' | 'delete' | 'test') {
 
 .feedback { margin-bottom: 16px; }
 .group-title { margin: 20px 0 8px; color: $text-primary; font-size: 14px; }
-.memory-options, .memory-advanced, .skills-options {
+.memory-options, .memory-advanced, .skills-options, .browser-options {
   margin-top: 12px;
   summary { cursor: pointer; padding: 8px 0; color: $text-primary; font-size: 13px; }
 }

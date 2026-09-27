@@ -2,6 +2,20 @@ import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
   jev: {
+    browserAutomation: "内蔵ブラウザーの自動化",
+    browserAutomationHint: "このプロファイルに保存した JEV 接続を使用し、次の判定から適用します。画面上のラベルを JEV に送信しますが、入力値は含みません。無効時、利用不可時、判定が不確かな場合は従来の処理を維持します。",
+    browserMatchEnabled: "JEV による要素の照合",
+    browserMatchHint: "対象の説明から実在するスナップショット参照を提案します。候補数の上限まで先頭の有効な要素を調べ、曖昧な場合は提案しません。",
+    browserMatchOptions: "要素照合の設定",
+    browserMatchCandidateLimit: "要素候補数の上限",
+    browserMatchMinConfidence: "要素照合の最低信頼度",
+    browserMatchTimeoutMs: "要素照合のタイムアウト（ミリ秒）",
+    browserVerifyEnabled: "JEV による結果の確認",
+    browserVerifyHint: "期待する結果と操作または完了したバッチ後の表示内容を照合します。達成・未達成・不明を返し、操作の再試行や入力値の確認は行いません。",
+    browserVerifyOptions: "結果確認の設定",
+    browserVerifyMinConfidence: "結果確認の最低信頼度",
+    browserVerifyTimeoutMs: "結果確認のタイムアウト（ミリ秒）",
+
     ekkoSkillsEnabled: "Ekko スキルに JEV を使用",
     skillsDisabled: "無効。既存のスキル照合と学習を使用します。",
     skillsReady: "意味による照合と学習の事前判定が有効です。",

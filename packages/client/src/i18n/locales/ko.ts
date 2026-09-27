@@ -2,6 +2,20 @@ import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
   jev: {
+    browserAutomation: "내장 브라우저 자동화",
+    browserAutomationHint: "이 프로필에 저장된 JEV 연결을 사용하며 다음 판단부터 적용됩니다. 화면의 레이블을 JEV에 보내지만 입력값은 제외합니다. 비활성화, 서비스 오류 또는 불확실한 판단 시 기존 흐름을 유지합니다.",
+    browserMatchEnabled: "JEV 요소 매칭",
+    browserMatchHint: "대상 설명을 바탕으로 실제 스냅샷 참조를 추천합니다. 후보 한도 내의 처음 몇 개 유효 요소만 확인하며 모호한 경우 추천하지 않습니다.",
+    browserMatchOptions: "요소 매칭 옵션",
+    browserMatchCandidateLimit: "최대 요소 후보 수",
+    browserMatchMinConfidence: "요소 매칭 최소 신뢰도",
+    browserMatchTimeoutMs: "요소 매칭 제한 시간(ms)",
+    browserVerifyEnabled: "JEV 결과 확인",
+    browserVerifyHint: "단일 작업 또는 완료된 일괄 작업 후 화면의 증거로 예상 결과를 판단합니다. 달성, 미달성, 불확실을 반환하며 작업을 재시도하거나 입력값을 확인하지 않습니다.",
+    browserVerifyOptions: "결과 확인 옵션",
+    browserVerifyMinConfidence: "결과 확인 최소 신뢰도",
+    browserVerifyTimeoutMs: "결과 확인 제한 시간(ms)",
+
     ekkoSkillsEnabled: "Ekko 스킬에 JEV 사용",
     skillsDisabled: "비활성화됨. 기존 스킬 매칭과 학습을 사용합니다.",
     skillsReady: "의미 기반 매칭과 학습 사전 판단이 활성화되었습니다.",

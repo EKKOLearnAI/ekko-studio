@@ -2,6 +2,20 @@ import { socialMessagesZhTw } from '../social-messages'
 
 export default {
   jev: {
+    browserAutomation: "內建瀏覽器自動化",
+    browserAutomationHint: "選用判斷沿用目前 Profile 儲存的 JEV 連線，下次判斷生效。頁面可見標籤會傳送給 JEV，不包含輸入欄位的值。關閉、服務無法使用或判斷不確定時保留原有流程。",
+    browserMatchEnabled: "JEV 元素比對",
+    browserMatchHint: "依目標描述推薦快照中的真實元素參照。僅檢查候選上限內的前幾個可用元素；有歧義時不推薦。",
+    browserMatchOptions: "元素比對選項",
+    browserMatchCandidateLimit: "元素候選上限",
+    browserMatchMinConfidence: "元素比對最低信賴度",
+    browserMatchTimeoutMs: "元素比對逾時（毫秒）",
+    browserVerifyEnabled: "JEV 操作結果判斷",
+    browserVerifyHint: "依預期結果，判斷單步或完整批次操作後的可見證據。回傳已達成、未達成或無法確定，不自動重試操作，也不驗證輸入欄位的值。",
+    browserVerifyOptions: "結果判斷選項",
+    browserVerifyMinConfidence: "結果判斷最低信賴度",
+    browserVerifyTimeoutMs: "結果判斷逾時（毫秒）",
+
     ekkoSkillsEnabled: "啟用 Ekko 技能 JEV 增強",
     skillsDisabled: "未啟用；繼續使用原有技能匹配與學習流程。",
     skillsReady: "已啟用技能語意匹配與學習預篩選。",

@@ -14,7 +14,7 @@ function fixture() {
   const manifest = structuredClone(registered)
   const { server, client, form } = manifest.settings
   const integration = manifest.integrations[0]
-  const files = [server, client, form, manifest.settings.host, ...manifest.integrations.flatMap((item: typeof integration) => [item.runtimeConfig.file, ...item.sources, ...item.tests])]
+  const files = [server, client, form, manifest.settings.host, ...manifest.integrations.flatMap((item: typeof integration) => [...(item.runtimeConfig ? [item.runtimeConfig.file] : []), ...item.sources, ...item.tests])]
   const sources = new Map<string, string>(files.map(file => [file, readFileSync(resolve(root, file), 'utf8')]))
   const labels = Object.values(manifest.settings.fields).map((field: any) => field.label as string)
   sources.set('packages/client/src/i18n/locales/en.ts', `export default ${JSON.stringify({
@@ -29,7 +29,7 @@ function fixture() {
 }
 
 describe('JEV integration harness', () => {
-  it('accepts the registered memory and unified skills integrations', () => {
+  it('accepts the registered memory, skills and browser integrations', () => {
     const { sources, manifest } = fixture()
     expect(jevHarnessViolations(sources, manifest)).toEqual([])
   })
@@ -44,6 +44,7 @@ describe('JEV integration harness', () => {
     }
     try {
       await write('scripts/jev-integrations.json', JSON.stringify(manifest))
+      await mkdir(join(directory, 'packages/desktop/src'), { recursive: true })
       await Promise.all([...sources].map(([file, source]) => write(file, source)))
       expect(await checkJevIntegrations(directory)).toEqual([])
 
@@ -51,6 +52,8 @@ describe('JEV integration harness', () => {
         'packages/server/src/nested/consumer.ts',
         'packages/client/src/nested/Consumer.vue',
         'packages/ekko-agent/src/nested/consumer.ts',
+        'packages/desktop/src/nested/consumer.ts',
+        'bin/nested/consumer.mjs',
       ]
       await Promise.all(consumers.map(file => write(file, file.endsWith('.vue')
         ? '<script setup lang="ts">runtime.jev.tryEvaluate(request)</script>'
@@ -72,6 +75,8 @@ describe('JEV integration harness', () => {
     `const { jev: evaluator } = runtime; evaluator.evaluate(request)`,
     `const module = await import('../../studio/public/jev')`,
     `fetch('/api/studio/jev/evaluate', options)`,
+    `fetch('/api/studio/jev/browser/match', options)`,
+    `fetch('/api/studio/jev/browser/verify', options)`,
   ])('rejects an unregistered business integration: %s', source => {
     const { sources, manifest } = fixture()
     sources.set(consumer, source)

@@ -47,6 +47,15 @@ must still be enabled before its configured child features can use JEV.
 | `ekko-memory-write-review` | Active: `memory/jev-write-review.ts` | `ekkoMemoryWriteReviewEnabled` | `jev.memoryWriteReviewEnabled` | Memory options → Review memory writes |
 | `ekko-skills` | Active: `skills/jev.ts`, routing and learning preflight | `ekkoSkillsEnabled` | `jev.skillsEnabled` | Models → JEV → Use JEV for Ekko skills |
 
+Browser integrations `browser-match` and `browser-verify` are registered independently
+with default-off switches `browserMatchEnabled` and `browserVerifyEnabled` at
+Models → JEV → Built-in browser automation. They share the provider connection,
+with separate confidence and timeout controls plus a matching candidate limit.
+Studio MCP orchestration lives in `bin/browser/jev.mjs`; server assessments use
+`modules/studio/services/browser/jev.ts` and the public facade. No standalone
+mapping is needed. Settings are read on every assessment, not at agent startup.
+See [browser JEV behavior](../jev.md#built-in-browser-automation).
+
 Agent source paths above are relative to `packages/ekko-agent/src`. Studio's memory
 master defaults to false; its four child switches default to true. Existing saved
 values, including explicit false, take precedence. Standalone Ekko retains false
@@ -84,7 +93,7 @@ new evaluation call there must be registered as a business integration as well.
 It reads TypeScript and Vue syntax, including real template bindings, and checks:
 
 1. JEV imports/calls, runtime evaluator access and known HTTP entry points in
-   server, client and standalone agent source have a registered owner.
+   server, client, standalone agent, Desktop and MCP `bin/` source have a registered owner.
 2. Each integration declares its own boolean switch, matching Studio default and
    concrete source/test paths; a configuration-only integration cannot directly evaluate.
 3. Settings declared by defaults and server/client interfaces are registered,

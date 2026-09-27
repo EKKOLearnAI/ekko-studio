@@ -16516,6 +16516,453 @@
         ]
       }
     },
+    "/api/studio/jev/browser/match": {
+      "post": {
+        "tags": [
+          "JEV"
+        ],
+        "summary": "Create match",
+        "description": "POST /api/studio/jev/browser/match",
+        "operationId": "matchBrowser",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Advisory, Profile-gated assessment of supplied snapshot evidence. Never executes actions or changes their completion status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "tabId",
+                    "snapshotId",
+                    "status"
+                  ],
+                  "properties": {
+                    "tabId": {
+                      "type": "string"
+                    },
+                    "snapshotId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "matched",
+                        "no_match",
+                        "skipped",
+                        "unavailable"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "ref": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "considered": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Profile access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "API key not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "Request cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Settings operation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Provider request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Provider request timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "target",
+                  "snapshot"
+                ],
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "snapshot": {
+                    "type": "object",
+                    "required": [
+                      "tabId",
+                      "snapshotId",
+                      "nodes"
+                    ],
+                    "properties": {
+                      "tabId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "snapshotId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      "nodes": {
+                        "type": "array",
+                        "maxItems": 500,
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "ref",
+                            "role",
+                            "name"
+                          ],
+                          "properties": {
+                            "ref": {
+                              "type": "string",
+                              "pattern": "^@e[1-9][0-9]*$",
+                              "maxLength": 32
+                            },
+                            "role": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "name": {
+                              "type": "string",
+                              "maxLength": 1000
+                            },
+                            "disabled": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/jev/browser/verify": {
+      "post": {
+        "tags": [
+          "JEV"
+        ],
+        "summary": "Create verify",
+        "description": "POST /api/studio/jev/browser/verify",
+        "operationId": "verifyBrowser",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Advisory, Profile-gated assessment of supplied snapshot evidence. Never executes actions or changes their completion status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "tabId",
+                    "snapshotId",
+                    "status"
+                  ],
+                  "properties": {
+                    "tabId": {
+                      "type": "string"
+                    },
+                    "snapshotId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "met",
+                        "not_met",
+                        "unknown",
+                        "skipped",
+                        "unavailable"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "ref": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "considered": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Profile access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "API key not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "Request cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Settings operation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Provider request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Provider request timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "expectation",
+                  "snapshot"
+                ],
+                "properties": {
+                  "expectation": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "snapshot": {
+                    "type": "object",
+                    "required": [
+                      "tabId",
+                      "snapshotId",
+                      "nodes"
+                    ],
+                    "properties": {
+                      "tabId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "snapshotId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      "nodes": {
+                        "type": "array",
+                        "maxItems": 500,
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "ref",
+                            "role",
+                            "name"
+                          ],
+                          "properties": {
+                            "ref": {
+                              "type": "string",
+                              "pattern": "^@e[1-9][0-9]*$",
+                              "maxLength": 32
+                            },
+                            "role": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "name": {
+                              "type": "string",
+                              "maxLength": 1000
+                            },
+                            "disabled": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/jev/evaluate": {
       "post": {
         "tags": [
@@ -16699,6 +17146,44 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "browserMatchEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "browserVerifyEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "browserMatchCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "browserMatchMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "browserVerifyMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "browserMatchTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
+                    "browserVerifyTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
                     "baseUrl": {
                       "type": "string",
                       "format": "uri",
@@ -16838,6 +17323,44 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "browserMatchEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "browserVerifyEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "browserMatchCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "browserMatchMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "browserVerifyMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "browserMatchTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
+                    "browserVerifyTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
                     "baseUrl": {
                       "type": "string",
                       "format": "uri",
@@ -16950,6 +17473,44 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "browserMatchEnabled": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "browserVerifyEnabled": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "browserMatchCandidateLimit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  "browserMatchMinConfidence": {
+                    "type": "number",
+                    "default": 0.8,
+                    "minimum": 0.5,
+                    "maximum": 1
+                  },
+                  "browserVerifyMinConfidence": {
+                    "type": "number",
+                    "default": 0.8,
+                    "minimum": 0.5,
+                    "maximum": 1
+                  },
+                  "browserMatchTimeoutMs": {
+                    "type": "integer",
+                    "default": 3000,
+                    "minimum": 100,
+                    "maximum": 30000
+                  },
+                  "browserVerifyTimeoutMs": {
+                    "type": "integer",
+                    "default": 3000,
+                    "minimum": 100,
+                    "maximum": 30000
+                  },
                   "baseUrl": {
                     "type": "string",
                     "format": "uri",
@@ -17008,6 +17569,44 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "browserMatchEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "browserVerifyEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "browserMatchCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "browserMatchMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "browserVerifyMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "browserMatchTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
+                    "browserVerifyTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
                     "baseUrl": {
                       "type": "string",
                       "format": "uri",

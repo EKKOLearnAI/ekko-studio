@@ -2,6 +2,20 @@ import { socialMessagesDe } from '../social-messages-locales'
 
 export default {
   jev: {
+    browserAutomation: "Automatisierung des integrierten Browsers",
+    browserAutomationHint: "Optionale Bewertungen verwenden die gespeicherte JEV-Verbindung dieses Profils ab der nächsten Bewertung. Sichtbare Beschriftungen werden an JEV gesendet, Eingabewerte nicht. Bei deaktivierter, nicht verfügbarer oder unsicherer Bewertung bleibt der bisherige Ablauf erhalten.",
+    browserMatchEnabled: "Elementabgleich mit JEV",
+    browserMatchHint: "Schlägt anhand der Zielbeschreibung eine echte Snapshot-Referenz vor. Nur die ersten geeigneten Elemente bis zum Kandidatenlimit werden geprüft; mehrdeutige Treffer werden abgelehnt.",
+    browserMatchOptions: "Optionen zum Elementabgleich",
+    browserMatchCandidateLimit: "Maximale Elementkandidaten",
+    browserMatchMinConfidence: "Mindestkonfidenz beim Elementabgleich",
+    browserMatchTimeoutMs: "Zeitlimit für Elementabgleich (ms)",
+    browserVerifyEnabled: "Ergebnisprüfung mit JEV",
+    browserVerifyHint: "Prüft sichtbare Belege nach einer Aktion oder einem abgeschlossenen Stapel anhand des erwarteten Ergebnisses. Meldet erfüllt, nicht erfüllt oder unbekannt; wiederholt keine Aktionen und prüft keine Eingabewerte.",
+    browserVerifyOptions: "Optionen zur Ergebnisprüfung",
+    browserVerifyMinConfidence: "Mindestkonfidenz der Ergebnisprüfung",
+    browserVerifyTimeoutMs: "Zeitlimit für Ergebnisprüfung (ms)",
+
     ekkoSkillsEnabled: "JEV für Ekko-Skills verwenden",
     skillsDisabled: "Deaktiviert; bestehende Skill-Auswahl und Lernen bleiben aktiv.",
     skillsReady: "Semantische Auswahl und Lernvorprüfung sind aktiviert.",

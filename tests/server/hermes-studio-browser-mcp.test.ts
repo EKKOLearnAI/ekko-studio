@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 let child: ChildProcessWithoutNullStreams | null = null
 let server: Server | null = null
@@ -80,11 +80,28 @@ describe('hermes-studio browser MCP toolset', () => {
     let failScreenshot = false
     let failBatch = false
     const batches: unknown[] = []
+    const assessments: Array<{ path: string; body: any; profile: string }> = []
+    let assessmentEnabled = true
+    let holdAssessment = false
+    let assessmentCancelled = false
+    const browserSnapshot = { tabId: 'tab-1', snapshotId: 'snapshot-1', title: 'Example', text: '@e1 button name="Example"', nodes: [{ ref: '@e1', role: 'button', name: 'Example' }] }
     server = createServer(async (request, response) => {
       const chunks: Buffer[] = []
       for await (const chunk of request) chunks.push(Buffer.from(chunk))
-      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
       response.setHeader('Content-Type', 'application/json')
+      if (request.url === '/api/studio/jev/settings') {
+        response.end(JSON.stringify({ browserMatchEnabled: assessmentEnabled, browserVerifyEnabled: assessmentEnabled,
+          hasApiKey: true, browserMatchTimeoutMs: 100, browserVerifyTimeoutMs: 100 }))
+        return
+      }
+      if (request.url?.startsWith('/api/studio/jev/browser/')) {
+        assessments.push({ path: request.url, body, profile: String(request.headers['x-hermes-profile']) })
+        if (holdAssessment) { response.on('close', () => { assessmentCancelled = true }); return }
+        response.end(JSON.stringify({ tabId: body.snapshot.tabId, snapshotId: body.snapshot.snapshotId,
+          ...(request.url.endsWith('/match') ? { status: 'matched', ref: '@e1', confidence: 0.95 } : { status: 'met', confidence: 0.95 }) }))
+        return
+      }
       if (request.url === '/v1/session') {
         registeredPids.push(body.client_pid)
         response.end(JSON.stringify({ client_id: 'broker-client-1', session_token: 'session-token' }))
@@ -98,7 +115,7 @@ describe('hermes-studio browser MCP toolset', () => {
           results: body.params.actions.map((action: { action: string }, index: number) => ({
             index, action: action.action, status: failBatch && index === 1 ? 'failed' : 'completed',
           })),
-          snapshot: { snapshotId: 'after-batch' },
+          snapshot: { ...browserSnapshot, snapshotId: 'after-batch' },
         } }))
         return
       }
@@ -110,7 +127,7 @@ describe('hermes-studio browser MCP toolset', () => {
       const result = body.method === 'screenshot'
         ? { tabId: 'tab-1', url: 'https://example.com/', title: 'Example', mediaType: 'image/png', data: 'AA==', width: 1, height: 1 }
         : body.method === 'snapshot'
-          ? { tabId: 'tab-1', snapshotId: 'snapshot-1', text: '@e1 button name="Example"' }
+          ? browserSnapshot
           : body.method === 'text.read'
             ? { tabId: 'tab-1', snapshotId: 'snapshot-1', ref: '@e1', text: 'Complete text', totalLength: 13, returnedLength: 13, hasMore: false }
         : { tabs: [{ id: 'tab-1' }] }
@@ -129,7 +146,7 @@ describe('hermes-studio browser MCP toolset', () => {
     }), { mode: 0o600 })
 
     child = spawn(process.execPath, [join(process.cwd(), 'bin/ekko-studio-mcp.mjs'), 'browser'], {
-      env: { ...process.env, HERMES_WEB_UI_HOME: root },
+      env: { ...process.env, HERMES_WEB_UI_HOME: root, HERMES_WEB_UI_URL: `http://127.0.0.1:${address.port}`, HERMES_WEB_UI_PROFILE: 'research' },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     const rpc = rpcClient(child)
@@ -212,6 +229,34 @@ describe('hermes-studio browser MCP toolset', () => {
     const stoppedBatch = await invokeBatch(12)
     expect(stoppedBatch.result.isError).toBe(true)
     expect(JSON.parse(stoppedBatch.result.content[0].text).result).toMatchObject({ completed: 1, total: 2 })
+
+    const invoke = async (id: number, tool: string, args: Record<string, unknown>) => {
+      const output = await rpc(id, 'tools/call', { name: 'ekko_studio_browser_toolset', arguments: { action: 'call', tool, arguments: args } })
+      expect(output.result.isError).not.toBe(true)
+      return JSON.parse(output.result.content[0].text).result
+    }
+    expect((await invoke(20, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1', target: 'Example' })).elementMatch).toMatchObject({ status: 'matched', ref: '@e1' })
+    expect((await invoke(21, 'ekko_studio_browser_interact', { tab_id: 'tab-1', action: 'press', key: 'Tab', expectation: 'Example is visible' })).verification.status).toBe('met')
+    failBatch = false
+    expect((await invoke(22, 'ekko_studio_browser_batch', { ...batchArguments, expectation: 'Example is visible' })).verification.status).toBe('met')
+    expect(assessments.map(item => item.path)).toEqual(['/api/studio/jev/browser/match', '/api/studio/jev/browser/verify', '/api/studio/jev/browser/verify'])
+    expect(assessments.every(item => item.profile === 'research')).toBe(true)
+    expect(assessments[2].body.snapshot.snapshotId).toBe('after-batch')
+    // Optional JEV arguments never enter the deterministic Broker batch parser.
+    expect(batches.at(-1)).toEqual(batchArguments)
+    assessmentEnabled = false
+    expect((await invoke(23, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1', target: 'Example' })).elementMatch.reason).toBe('disabled')
+    expect(assessments).toHaveLength(3)
+
+    assessmentEnabled = true
+    holdAssessment = true
+    const cancelled = rpc(24, 'tools/call', { name: 'ekko_studio_browser_toolset', arguments: {
+      action: 'call', tool: 'ekko_studio_browser_snapshot', arguments: { tab_id: 'tab-1', target: 'Example' },
+    } })
+    await vi.waitFor(() => expect(assessments).toHaveLength(4))
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 24 } })}\n`)
+    expect((await cancelled).result.isError).toBe(true)
+    await vi.waitFor(() => expect(assessmentCancelled).toBe(true))
 
     await rm(join(brokerRoot, 'broker.json'))
     const unavailable = await rpc(9, 'tools/list')

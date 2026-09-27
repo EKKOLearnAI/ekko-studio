@@ -4,7 +4,7 @@ import ts from 'typescript'
 import { parse as parseVue } from 'vue/compiler-sfc'
 
 const manifestPath = 'scripts/jev-integrations.json'
-const sourceRoots = ['packages/server/src', 'packages/client/src', 'packages/ekko-agent/src']
+const sourceRoots = ['packages/server/src', 'packages/client/src', 'packages/ekko-agent/src', 'packages/desktop/src', 'bin']
 const sharedFields = new Set(['baseUrl', 'model', 'apiKey', 'timeoutMs'])
 // These implement transport/configuration, or explicit manual API/connection tests.
 // Business integrations must be registered instead of extending this allowlist.
@@ -103,7 +103,7 @@ export function jevUsage(file, source) {
       if (specifier === '@typesafe-ai/sdk') { used = true; directSdk = true }
     }
     if (member(node) === 'jev' || ts.isBindingElement(node) && name(node.propertyName ?? node.name) === 'jev') used = true
-    if (ts.isStringLiteralLike(node) && /\/api\/studio\/jev\/(?:evaluate|test)/.test(node.text)) used = true
+    if (ts.isStringLiteralLike(node) && /\/api\/studio\/jev\/(?:evaluate|test|browser\/(?:match|verify))/.test(node.text)) used = true
     if (ts.isCallExpression(node)) {
       if ((node.expression.kind === ts.SyntaxKind.ImportKeyword || name(node.expression) === 'require')
         && node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])) {

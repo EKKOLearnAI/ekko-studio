@@ -3,7 +3,11 @@ import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 import en from '../../packages/client/src/i18n/locales/en'
 import zh from '../../packages/client/src/i18n/locales/zh'
 
-const memoryDefaults = { ekkoSkillsEnabled: false, ekkoSkillsCandidateLimit: 20, ekkoSkillsMinConfidence: 0.8, ekkoSkillsTimeoutMs: 3000, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true,
+const browserDefaults = { browserMatchEnabled: false, browserMatchCandidateLimit: 20, browserMatchMinConfidence: 0.8,
+  browserMatchTimeoutMs: 3000, browserVerifyEnabled: false, browserVerifyMinConfidence: 0.8, browserVerifyTimeoutMs: 3000 }
+const browserOptions = { browserMatchEnabled: true, browserMatchCandidateLimit: 12, browserMatchMinConfidence: 0.9,
+  browserMatchTimeoutMs: 1100, browserVerifyEnabled: true, browserVerifyMinConfidence: 0.95, browserVerifyTimeoutMs: 1400 }
+const memoryDefaults = { ...browserDefaults, ekkoSkillsEnabled: false, ekkoSkillsCandidateLimit: 20, ekkoSkillsMinConfidence: 0.8, ekkoSkillsTimeoutMs: 3000, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true,
   ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 }
 
 for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
@@ -61,7 +65,7 @@ for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
 }
 
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
-test(`configures JEV memory and skills per Profile at ${viewport.width}px`, async ({ page }, testInfo) => {
+test(`configures JEV memory, skills and browser per Profile at ${viewport.width}px`, async ({ page }, testInfo) => {
   await page.setViewportSize(viewport)
   await authenticate(page, TEST_ACCESS_KEY, 'default')
   const api = await mockHermesApi(page, { initialProfileName: 'default' })
@@ -113,11 +117,20 @@ test(`configures JEV memory and skills per Profile at ${viewport.width}px`, asyn
   await page.getByLabel(en.jev.memoryFilterMinConfidence, { exact: true }).fill('0.85')
   await page.getByLabel(en.jev.memoryMinConfidence, { exact: true }).fill('0.9')
   await page.getByLabel(en.jev.memoryTimeout, { exact: true }).fill('1200')
+  const matchSwitch = page.getByRole('switch', { name: en.jev.browserMatchEnabled, exact: true })
+  const verifySwitch = page.getByRole('switch', { name: en.jev.browserVerifyEnabled, exact: true })
+  await expect(matchSwitch).not.toBeChecked()
+  await expect(verifySwitch).not.toBeChecked()
+  await matchSwitch.click()
+  await verifySwitch.click()
+  for (const key of ['browserMatchCandidateLimit', 'browserMatchMinConfidence', 'browserMatchTimeoutMs', 'browserVerifyMinConfidence', 'browserVerifyTimeoutMs'] as const) {
+    await page.getByLabel(en.jev[key], { exact: true }).fill(String(browserOptions[key]))
+  }
   await page.getByLabel('JEV API Key', { exact: true }).fill('new-research-key')
   await page.getByLabel('JEV Model', { exact: true }).fill('jev-research')
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByLabel('JEV API Key', { exact: true })).toHaveValue('')
-  expect(requests.find(r => r.method === 'PUT')).toMatchObject({ profile: 'research', body: { ekkoSkillsEnabled: true, ekkoSkillsCandidateLimit: 12, ekkoSkillsMinConfidence: 0.9, ekkoSkillsTimeoutMs: 1500, apiKey: 'new-research-key', model: 'jev-research', ekkoMemoryEnabled: true, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 7, ekkoMemoryRecallMinConfidence: 0.65, ekkoMemoryFilterMinConfidence: 0.85, ekkoMemoryMinConfidence: 0.9, ekkoMemoryTimeoutMs: 1200 } })
+  expect(requests.find(r => r.method === 'PUT')).toMatchObject({ profile: 'research', body: { ...browserOptions, ekkoSkillsEnabled: true, ekkoSkillsCandidateLimit: 12, ekkoSkillsMinConfidence: 0.9, ekkoSkillsTimeoutMs: 1500, apiKey: 'new-research-key', model: 'jev-research', ekkoMemoryEnabled: true, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 7, ekkoMemoryRecallMinConfidence: 0.65, ekkoMemoryFilterMinConfidence: 0.85, ekkoMemoryMinConfidence: 0.9, ekkoMemoryTimeoutMs: 1200 } })
   await expect(memorySwitch).toBeChecked()
   await expect(skillsSwitch).toBeChecked()
   await expect(page.locator('.jev-settings')).toContainText(en.jev.skillsReady)
@@ -134,12 +147,19 @@ test(`configures JEV memory and skills per Profile at ${viewport.width}px`, asyn
   await page.getByTestId('models-profile-select').click()
   await page.locator('.n-base-select-option').filter({ hasText: /^default$/ }).click()
   await expect(skillsSwitch).not.toBeChecked()
+  await expect(matchSwitch).not.toBeChecked()
+  await expect(verifySwitch).not.toBeChecked()
   await expect(page.getByLabel('JEV Model', { exact: true })).toHaveValue('jev-default')
   await expect(memorySwitch).not.toBeChecked()
   await expect(page.getByTestId('jev-test-result')).toHaveCount(0)
   await page.getByTestId('models-profile-select').click()
   await page.locator('.n-base-select-option').filter({ hasText: /^research$/ }).click()
   await expect(skillsSwitch).toBeChecked()
+  await expect(matchSwitch).toBeChecked()
+  await expect(verifySwitch).toBeChecked()
+  for (const key of ['browserMatchCandidateLimit', 'browserMatchMinConfidence', 'browserMatchTimeoutMs', 'browserVerifyMinConfidence', 'browserVerifyTimeoutMs'] as const) {
+    await expect(page.getByLabel(en.jev[key], { exact: true })).toHaveValue(String(browserOptions[key]))
+  }
   await expect(page.getByLabel(en.jev.skillsCandidateLimit, { exact: true })).toHaveValue('12')
   await expect(page.getByLabel(en.jev.skillsMinConfidence, { exact: true })).toHaveValue('0.9')
   await expect(page.getByLabel(en.jev.skillsTimeout, { exact: true })).toHaveValue('1500')
@@ -159,9 +179,15 @@ test(`configures JEV memory and skills per Profile at ${viewport.width}px`, asyn
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => settings.research.ekkoMemoryEnabled).toBe(false)
   await skillsSwitch.click()
+  await matchSwitch.click()
+  await verifySwitch.click()
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => settings.research.ekkoSkillsEnabled).toBe(false)
   await page.reload()
+  await expect(matchSwitch).not.toBeChecked()
+  await expect(verifySwitch).not.toBeChecked()
+  expect(settings.research.browserMatchCandidateLimit).toBe(12)
+  expect(settings.research.browserVerifyMinConfidence).toBe(0.95)
   await expect(memorySwitch).not.toBeChecked()
   await expect(skillsSwitch).not.toBeChecked()
   expect(settings.research.ekkoSkillsCandidateLimit).toBe(12)
@@ -174,6 +200,7 @@ test(`configures JEV memory and skills per Profile at ${viewport.width}px`, asyn
   await expect(memorySwitch).not.toBeChecked()
   await expect(page.getByRole('button', { name: 'Test saved configuration', exact: true })).toBeDisabled()
   expect(settings.research.ekkoSkillsEnabled).toBe(false)
+  expect(settings.research).toMatchObject(browserDefaults)
   expect(settings.research.ekkoSkillsCandidateLimit).toBe(20)
   expect(settings.default.model).toBe('jev-default')
   expect(await page.evaluate(() => localStorage.getItem('hermes_active_profile_name'))).toBe('default')

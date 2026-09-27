@@ -2,6 +2,20 @@ import { socialMessagesPt } from '../social-messages-locales'
 
 export default {
   jev: {
+    browserAutomation: "Automação do navegador integrado",
+    browserAutomationHint: "As avaliações opcionais usam a conexão JEV salva neste perfil a partir da próxima avaliação. Os rótulos visíveis são enviados ao JEV, sem os valores digitados. Quando desativado, indisponível ou incerto, o fluxo original é mantido.",
+    browserMatchEnabled: "Correspondência de elementos com JEV",
+    browserMatchHint: "Sugere uma referência real da captura conforme a descrição do alvo. Apenas os primeiros elementos elegíveis até o limite configurado são analisados; correspondências ambíguas são recusadas.",
+    browserMatchOptions: "Opções de correspondência",
+    browserMatchCandidateLimit: "Máximo de elementos candidatos",
+    browserMatchMinConfidence: "Confiança mínima da correspondência",
+    browserMatchTimeoutMs: "Tempo limite da correspondência (ms)",
+    browserVerifyEnabled: "Verificação de resultados com JEV",
+    browserVerifyHint: "Avalia evidências visíveis após uma ação ou um lote concluído conforme o resultado esperado. Retorna atingido, não atingido ou desconhecido; não repete ações nem verifica valores digitados.",
+    browserVerifyOptions: "Opções de verificação",
+    browserVerifyMinConfidence: "Confiança mínima da verificação",
+    browserVerifyTimeoutMs: "Tempo limite da verificação (ms)",
+
     ekkoSkillsEnabled: "Usar JEV nas habilidades do Ekko",
     skillsDisabled: "Desativado; a seleção e a aprendizagem existentes continuam ativas.",
     skillsReady: "Seleção semântica e avaliação prévia da aprendizagem ativadas.",

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { browserIntent, matchBrowserSnapshot, verifyBrowserResult } from './browser/jev.mjs'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { createInterface } from 'node:readline'
@@ -656,7 +657,8 @@ function browserDescriptor() {
   return { endpoint, token, instanceId: String(descriptor.instanceId || '') }
 }
 
-async function browserSession(descriptor) {
+async function browserSession(descriptor, signal) {
+  signal?.throwIfAborted()
   if (cachedBrowserSession?.instanceId === descriptor.instanceId) return cachedBrowserSession
   const sessionUrl = new URL(descriptor.endpoint)
   sessionUrl.pathname = '/v1/session'
@@ -664,7 +666,7 @@ async function browserSession(descriptor) {
     method: 'POST',
     headers: { Authorization: `Bearer ${descriptor.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ client: BROWSER_CLIENT_ID, client_pid: process.pid }),
-    signal: AbortSignal.timeout(10_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok || !payload?.client_id || !payload?.session_token) throw new Error(payload?.error || 'Desktop Browser Broker session failed')
@@ -672,9 +674,10 @@ async function browserSession(descriptor) {
   return cachedBrowserSession
 }
 
-async function browserRequest(method, params = {}) {
+async function browserRequest(method, params = {}, signal) {
   const descriptor = browserDescriptor()
-  const session = await browserSession(descriptor)
+  const session = await browserSession(descriptor, signal)
+  signal?.throwIfAborted()
   const operationId = randomUUID()
   const response = await fetch(descriptor.endpoint, {
     method: 'POST',
@@ -684,7 +687,7 @@ async function browserRequest(method, params = {}) {
       'X-Hermes-Browser-Client': session.clientId,
     },
     body: JSON.stringify({ method, params, operation_id: operationId }),
-    signal: AbortSignal.timeout(45_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000),
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok) throw new Error(payload?.error || `Browser Broker HTTP ${response.status}`)
@@ -933,8 +936,8 @@ const tools = [
   {
     name: 'ekko_studio_browser_snapshot',
     toolset: 'browser',
-    description: 'Return a bounded accessibility snapshot with stable element refs. Pass its snapshot_id to read text, click, or type; stale snapshots are rejected.',
-    inputSchema: browserInputSchema({ tab_id: { type: 'string' } }, ['tab_id']),
+    description: 'Return a bounded accessibility snapshot with stable element refs. Pass its snapshot_id to read text, click, or type; stale snapshots are rejected. Supply target to request optional JEV element matching when enabled in Models > JEV; inspect elementMatch alongside the unchanged snapshot. A match is advisory and still requires snapshot_id/ref for interaction.',
+    inputSchema: browserInputSchema({ tab_id: { type: 'string' }, target: { type: 'string', minLength: 1, maxLength: 2000, description: 'Describe the unique element to find in the snapshot.' } }, ['tab_id']),
   },
   {
     name: 'ekko_studio_browser_read_text',
@@ -952,9 +955,10 @@ const tools = [
   {
     name: 'ekko_studio_browser_interact',
     toolset: 'browser',
-    description: 'Click, type, press a key, or scroll in one Desktop browser tab. Click/type require a ref and snapshot_id from the latest snapshot.',
+    description: 'Click, type, press a key, or scroll in one Desktop browser tab. Click/type require a ref and snapshot_id from the latest snapshot. Supply expectation for optional JEV judgment of visible evidence after execution; verification is advisory and never retries the action.',
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
+      expectation: { type: 'string', minLength: 1, maxLength: 2000, description: 'Expected visible outcome to judge after the action, when enabled in Models > JEV.' },
       action: { type: 'string', enum: ['click', 'type', 'press', 'scroll'] },
       ref: { type: 'string' }, snapshot_id: { type: 'string' }, text: { type: 'string' }, key: { type: 'string' },
       direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, pixels: { type: 'number' },
@@ -963,10 +967,11 @@ const tools = [
   {
     name: 'ekko_studio_browser_batch',
     toolset: 'browser',
-    description: 'Execute 1-50 click/type/press/scroll actions sequentially in one tab in a single call. For click/type, pass one current snapshot_id and refs from that snapshot; original DOM targets are revalidated before each step. Stops on the first failure, navigation, user takeover, or the 30-second execution budget. Returns zero-based per-step completed/failed/skipped results and a fresh snapshot when available. Completed actions are not rolled back. Existing high-risk action confirmations still apply.',
+    description: 'Execute 1-50 click/type/press/scroll actions sequentially in one tab in a single call. For click/type, pass one current snapshot_id and refs from that snapshot; original DOM targets are revalidated before each step. Stops on the first failure, navigation, user takeover, or the 30-second execution budget. Returns zero-based per-step completed/failed/skipped results and a fresh snapshot when available. Completed actions are not rolled back. Existing high-risk action confirmations still apply. Supply expectation for optional JEV verification of the final snapshot after a fully completed batch; verification does not change completion status or retry actions.',
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
       snapshot_id: { type: 'string', description: 'Current snapshot used by all click/type refs; optional for a batch containing only press/scroll.' },
+      expectation: { type: 'string', minLength: 1, maxLength: 2000, description: 'Expected visible outcome after all actions finish.' },
       actions: {
         type: 'array', minItems: 1, maxItems: 50,
         items: {
@@ -1891,7 +1896,7 @@ function isToolCallable(name) {
   return activeToolsetTools().some(tool => tool.name === resolved)
 }
 
-async function callCategoryToolset(args = {}) {
+async function callCategoryToolset(args = {}, signal) {
   const category = CATEGORY_TOOLSETS[ACTIVE_TOOLSET]
   if (!category) return errorText(`No compact category toolset is available for '${ACTIVE_TOOLSET}'.`)
   if (args.action === 'list') {
@@ -1916,7 +1921,7 @@ async function callCategoryToolset(args = {}) {
   }
   if (args.action === 'call') {
     if (!isRecord(args.arguments)) return errorText('arguments must be an object when action=call.')
-    return await callTool(target.name, args.arguments)
+    return await callTool(target.name, args.arguments, signal)
   }
   return errorText('Invalid category toolset action. Allowed: list, describe, call.')
 }
@@ -1927,7 +1932,7 @@ async function callTool(name, args = {}, signal) {
   }
   const resolvedName = resolveToolName(name)
   const categoryToolset = categoryToolsetDefinition(ACTIVE_TOOLSET)
-  if (resolvedName === categoryToolset?.name) return await callCategoryToolset(args)
+  if (resolvedName === categoryToolset?.name) return await callCategoryToolset(args, signal)
   switch (resolvedName) {
     case 'ekko_studio_browser_tabs': {
       if (args.action === 'list') return jsonText(await browserRequest('tabs.list'))
@@ -1945,8 +1950,11 @@ async function callTool(name, args = {}, signal) {
       }
       return jsonText(await browserRequest('navigation.action', { tab_id: args.tab_id, action }))
     }
-    case 'ekko_studio_browser_snapshot':
-      return jsonText(await browserRequest('snapshot', { tab_id: args.tab_id }))
+    case 'ekko_studio_browser_snapshot': {
+      const target = browserIntent(args.target, 'target')
+      const envelope = await browserRequest('snapshot', { tab_id: args.tab_id }, signal)
+      return jsonText(await matchBrowserSnapshot(request, envelope, target, signal))
+    }
     case 'ekko_studio_browser_read_text':
       return jsonText(await browserRequest('text.read', {
         tab_id: args.tab_id,
@@ -1957,14 +1965,18 @@ async function callTool(name, args = {}, signal) {
         limit: args.limit,
       }))
     case 'ekko_studio_browser_interact': {
+      const expectation = browserIntent(args.expectation, 'expectation')
       const action = { action: args.action }
       for (const key of ['ref', 'snapshot_id', 'text', 'key', 'direction', 'pixels']) {
         if (args[key] !== undefined) action[key] = args[key]
       }
-      return jsonText(await browserRequest('interact', { tab_id: args.tab_id, action }))
+      const envelope = await browserRequest('interact', { tab_id: args.tab_id, action }, signal)
+      return jsonText(await verifyBrowserResult(request, envelope, expectation, () => browserRequest('snapshot', { tab_id: args.tab_id }, signal), signal))
     }
     case 'ekko_studio_browser_batch': {
-      const envelope = await browserRequest('interact.batch', { tab_id: args.tab_id, snapshot_id: args.snapshot_id, actions: args.actions })
+      const expectation = browserIntent(args.expectation, 'expectation')
+      const executed = await browserRequest('interact.batch', { tab_id: args.tab_id, snapshot_id: args.snapshot_id, actions: args.actions }, signal)
+      const envelope = await verifyBrowserResult(request, executed, expectation, () => browserRequest('snapshot', { tab_id: args.tab_id }, signal), signal)
       return { ...jsonText(envelope), ...(envelope.result?.completed < envelope.result?.total ? { isError: true } : {}) }
     }
     case 'ekko_studio_browser_screenshot': {
@@ -2261,7 +2273,8 @@ async function handle(message) {
       case 'tools/list':
         return { jsonrpc: '2.0', id: message.id, result: { tools: visibleTools() } }
       case 'tools/call': {
-        const abort = resolveToolName(message.params?.name) === 'ekko_studio_clarify' ? new AbortController() : undefined
+        const resolvedName = resolveToolName(message.params?.name)
+        const abort = resolvedName === 'ekko_studio_clarify' || resolvedName?.startsWith('ekko_studio_browser_') ? new AbortController() : undefined
         if (abort) pendingInteractions.set(message.id, abort)
         try {
           return {

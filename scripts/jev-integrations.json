@@ -96,6 +96,41 @@
         "control": "NInputNumber",
         "binding": "settings.ekkoSkillsTimeoutMs",
         "label": "jev.skillsTimeout"
+      },
+      "browserMatchEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.browserMatchEnabled",
+        "label": "jev.browserMatchEnabled"
+      },
+      "browserMatchCandidateLimit": {
+        "control": "NInputNumber",
+        "binding": "settings.browserMatchCandidateLimit",
+        "label": "jev.browserMatchCandidateLimit"
+      },
+      "browserMatchMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.browserMatchMinConfidence",
+        "label": "jev.browserMatchMinConfidence"
+      },
+      "browserMatchTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.browserMatchTimeoutMs",
+        "label": "jev.browserMatchTimeoutMs"
+      },
+      "browserVerifyEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.browserVerifyEnabled",
+        "label": "jev.browserVerifyEnabled"
+      },
+      "browserVerifyMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.browserVerifyMinConfidence",
+        "label": "jev.browserVerifyMinConfidence"
+      },
+      "browserVerifyTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.browserVerifyTimeoutMs",
+        "label": "jev.browserVerifyTimeoutMs"
       }
     }
   },
@@ -255,6 +290,53 @@
         "tests/ekko-agent/jev.test.ts",
         "tests/server/jev.test.ts",
         "tests/server/ekko-agent-manager.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "browser-match",
+      "purpose": "Suggest existing browser snapshot refs from a target description.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/modules/studio/services/browser/jev.ts",
+        "bin/browser/jev.mjs",
+        "bin/ekko-studio-mcp.mjs"
+      ],
+      "enabledKey": "browserMatchEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "browserMatchCandidateLimit",
+        "browserMatchMinConfidence",
+        "browserMatchTimeoutMs"
+      ],
+      "tests": [
+        "tests/server/browser-jev.test.ts",
+        "tests/server/browser-jev-mcp.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/server/hermes-studio-browser-mcp.test.ts",
+        "tests/e2e/jev-settings.spec.ts"
+      ]
+    },
+    {
+      "id": "browser-verify",
+      "purpose": "Assess visible evidence after successful browser interactions without retrying or altering execution status.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/modules/studio/services/browser/jev.ts",
+        "bin/browser/jev.mjs",
+        "bin/ekko-studio-mcp.mjs"
+      ],
+      "enabledKey": "browserVerifyEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "browserVerifyMinConfidence",
+        "browserVerifyTimeoutMs"
+      ],
+      "tests": [
+        "tests/server/browser-jev.test.ts",
+        "tests/server/browser-jev-mcp.test.ts",
+        "tests/server/jev.test.ts",
+        "tests/server/hermes-studio-browser-mcp.test.ts",
         "tests/e2e/jev-settings.spec.ts"
       ]
     }

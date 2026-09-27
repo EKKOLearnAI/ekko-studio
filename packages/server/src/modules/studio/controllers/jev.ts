@@ -1,3 +1,4 @@
+import { matchBrowserElement, verifyBrowserOutcome } from '../services/browser/jev'
 import type { Context } from 'koa'
 import { evaluateJev, parseJevRequest, testJev } from '../services/jev/client'
 import { deleteJevSettings, getJevSettings, JevError, saveJevSettings } from '../services/jev/settings'
@@ -21,3 +22,15 @@ export async function saveSettings(ctx: Context) { await respond(ctx, profile =>
 export async function deleteSettings(ctx: Context) { await respond(ctx, deleteJevSettings) }
 export async function testConnection(ctx: Context) { await respond(ctx, testJev) }
 export async function evaluate(ctx: Context) { await respond(ctx, profile => evaluateJev(profile, parseJevRequest(ctx.request.body))) }
+
+async function browserAssessment(ctx: Context, assess: typeof matchBrowserElement) {
+  const abort = new AbortController()
+  const onClose = () => { if (!ctx.res.writableEnded) abort.abort() }
+  ctx.res.once('close', onClose)
+  try {
+    await respond(ctx, profile => assess(profile, ctx.request.body, abort.signal))
+  } finally { ctx.res.off('close', onClose) }
+}
+
+export async function matchBrowser(ctx: Context) { await browserAssessment(ctx, matchBrowserElement) }
+export async function verifyBrowser(ctx: Context) { await browserAssessment(ctx, verifyBrowserOutcome) }

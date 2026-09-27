@@ -2,6 +2,20 @@ import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
   jev: {
+    browserAutomation: "أتمتة المتصفح المدمج",
+    browserAutomationHint: "تستخدم التقييمات الاختيارية اتصال JEV المحفوظ لهذا الملف الشخصي بدءًا من التقييم التالي. تُرسل التسميات المرئية دون قيم الإدخال. يستمر المسار المعتاد عند التعطيل أو عدم التوفر أو عدم اليقين.",
+    browserMatchEnabled: "مطابقة العناصر عبر JEV",
+    browserMatchHint: "يقترح مرجعًا فعليًا من اللقطة وفق وصف الهدف. تُفحص العناصر المؤهلة الأولى حتى الحد المحدد، وتُرفض المطابقات الملتبسة.",
+    browserMatchOptions: "خيارات مطابقة العناصر",
+    browserMatchCandidateLimit: "الحد الأقصى للعناصر المرشحة",
+    browserMatchMinConfidence: "الحد الأدنى لثقة المطابقة",
+    browserMatchTimeoutMs: "مهلة المطابقة (مللي ثانية)",
+    browserVerifyEnabled: "التحقق من النتائج عبر JEV",
+    browserVerifyHint: "يقيّم الأدلة المرئية بعد إجراء أو دفعة مكتملة وفق النتيجة المتوقعة. يعيد تحقق أو لم يتحقق أو غير معروف، دون إعادة الإجراءات أو التحقق من قيم الإدخال.",
+    browserVerifyOptions: "خيارات التحقق من النتائج",
+    browserVerifyMinConfidence: "الحد الأدنى لثقة التحقق",
+    browserVerifyTimeoutMs: "مهلة التحقق (مللي ثانية)",
+
     ekkoSkillsEnabled: "استخدام JEV لمهارات Ekko",
     skillsDisabled: "معطّل؛ يستمر اختيار المهارات والتعلّم بالطريقة الحالية.",
     skillsReady: "تم تفعيل المطابقة الدلالية والتقييم المسبق للتعلّم.",
