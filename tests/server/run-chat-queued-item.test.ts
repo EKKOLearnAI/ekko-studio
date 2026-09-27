@@ -615,6 +615,29 @@ describe('ChatRunSocket queued bridge runs', () => {
     expect(call[6]).toBe(false)
   })
 
+  it('carries the New Chat workspace and category into dequeued command runs (#2800)', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+
+    ;(server as any).runQueuedItem(socket, 'session-1', {
+      queue_id: 'queue-plan-category',
+      input: '[IMPORTANT: expanded plan skill prompt]',
+      displayInput: '/plan build the feature',
+      displayRole: 'command',
+      source: 'cli',
+      profile: 'default',
+      workspace: '/projects/ai-passport',
+      categoryId: 4,
+    }, 'default')
+
+    await vi.waitFor(() => expect(handleBridgeRunMock).toHaveBeenCalled())
+    expect(handleBridgeRunMock.mock.calls.at(-1)![2]).toEqual(expect.objectContaining({
+      workspace: '/projects/ai-passport',
+      category_id: 4,
+    }))
+  })
+
   it('queues coding-agent messages while a coding-agent turn is active', async () => {
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const { handlers, io, namespace, socket } = makeServerHarness()

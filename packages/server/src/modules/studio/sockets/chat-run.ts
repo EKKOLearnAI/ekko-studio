@@ -937,6 +937,8 @@ export class ChatRunSocket {
               model_groups: data.model_groups,
               instructions: data.instructions,
               queueId: data.queue_id,
+              workspace: data.workspace,
+              categoryId: data.category_id,
               runQueuedItem: this.runQueuedItem.bind(this),
             })
             if (handled !== false) return
@@ -2440,6 +2442,7 @@ export class ChatRunSocket {
       workflow_id: next.workflowId,
       workflow_node_id: next.workflowNodeId,
       workspace: next.workspace,
+      ...(next.categoryId !== undefined ? { category_id: next.categoryId } : {}),
       source: next.source,
       session_source: next.sessionSource,
       queue_id: next.queue_id,

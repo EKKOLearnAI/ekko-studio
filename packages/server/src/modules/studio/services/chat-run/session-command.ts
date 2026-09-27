@@ -51,6 +51,9 @@ interface SessionCommandContext {
   model_groups?: Array<{ provider: string; models: string[] }>
   instructions?: string
   queueId?: string
+  /** New Chat selections from the first run; commands must not drop them (#2800). */
+  workspace?: string | null
+  categoryId?: number | null
   runQueuedItem: (socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void
 }
 
@@ -221,6 +224,7 @@ export async function handleSessionCommand(
         profile: ctx.profile,
         source: 'cli',
         originSocketId: ctx.socket.id,
+        ...commandRunSessionFields(ctx),
       }
 
       if (state.isWorking) {
@@ -300,6 +304,7 @@ export async function handleSessionCommand(
         profile: ctx.profile,
         source: 'cli',
         originSocketId: ctx.socket.id,
+        ...commandRunSessionFields(ctx),
       }
 
       if (state.isWorking) {
@@ -363,6 +368,7 @@ export async function handleSessionCommand(
       profile: ctx.profile,
       source: 'cli',
       originSocketId: ctx.socket.id,
+      ...commandRunSessionFields(ctx),
       oneShotModel: true,
     }
 
@@ -515,6 +521,7 @@ export async function handleSessionCommand(
         profile: ctx.profile,
         source: 'cli',
         originSocketId: ctx.socket.id,
+        ...commandRunSessionFields(ctx),
       })
       emitToSession(ctx.nsp, ctx.socket, sessionId, 'run.queued', {
         event: 'run.queued',
@@ -571,6 +578,7 @@ export async function handleSessionCommand(
         profile: ctx.profile,
         source: 'cli',
         originSocketId: ctx.socket.id,
+        ...commandRunSessionFields(ctx),
       }
 
       if (state.isWorking) {
@@ -663,6 +671,7 @@ export async function handleSessionCommand(
         profile: ctx.profile,
         source: 'cli',
         originSocketId: ctx.socket.id,
+        ...commandRunSessionFields(ctx),
       }
 
       if (state.isWorking) {
@@ -1160,13 +1169,24 @@ function formatReloadSkillItem(item: unknown): string {
 
 function ensureCommandSession(sessionId: string, command: ParsedSessionCommand, ctx: SessionCommandContext) {
   if (getSession(sessionId)) return
+  const workspace = typeof ctx.workspace === 'string' ? ctx.workspace.trim() : ''
   createSession({
     id: sessionId,
     profile: ctx.profile,
     source: 'cli',
     model: ctx.model,
     title: buildCommandSessionTitle(command),
+    // A brand-new chat whose first message is a command keeps its New Chat workspace/category (#2800).
+    ...(workspace ? { workspace } : {}),
+    ...(ctx.categoryId != null ? { category_id: ctx.categoryId } : {}),
   })
+}
+
+function commandRunSessionFields(ctx: SessionCommandContext): Pick<QueuedRun, 'workspace' | 'categoryId'> {
+  return {
+    ...(ctx.workspace ? { workspace: ctx.workspace } : {}),
+    ...(ctx.categoryId !== undefined ? { categoryId: ctx.categoryId } : {}),
+  }
 }
 
 function buildCommandSessionTitle(command: ParsedSessionCommand): string {

@@ -79,6 +79,7 @@ export interface QueuedRun {
   workflowNodeId?: string
   profile: string
   workspace?: string | null
+  categoryId?: number | null
   source?: ChatRunSource
   sessionSource?: 'global_agent' | 'workflow' | 'group_chat'
   codingAgentId?: ChatCodingAgentId
