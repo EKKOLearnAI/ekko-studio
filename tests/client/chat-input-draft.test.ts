@@ -413,9 +413,10 @@ describe('ChatInput draft persistence', () => {
     await wrapper.get('textarea').setValue('/')
     await nextTick()
     const commands = wrapper.findAll('.slash-command-item').map(item => item.text())
-    for (const name of ['context', 'usage', 'status']) {
+    for (const name of ['usage', 'status']) {
       expect(commands.some(text => text.includes(`/${name}`))).toBe(true)
     }
+    expect(commands.some(text => text.includes('/context'))).toBe(agent !== 'cursor')
     expect(commands.some(text => text.includes('/compact'))).toBe(agent !== 'opencode' && agent !== 'cursor')
     wrapper.unmount()
   })

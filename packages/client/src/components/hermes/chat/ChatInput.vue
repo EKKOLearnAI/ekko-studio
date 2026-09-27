@@ -267,15 +267,16 @@ const skillPickerItems = computed(() => {
 })
 const filteredBridgeCommands = computed(() => {
   const query = slashQuery.value.trim().toLowerCase()
+  const isCursor = chatStore.activeSession?.codingAgentId === 'cursor' || chatStore.activeSession?.agent === 'cursor'
   const commands = isBridgeSession.value
     ? bridgeCommands.value
     : isCodingAgentSession.value
       ? bridgeCommands.value.filter(command => CODING_AGENT_SLASH_COMMANDS.includes(command.name)
+        && !(command.name === 'context' && isCursor)
         && !(command.name === 'compact' && (
           chatStore.activeSession?.codingAgentId === 'opencode'
           || chatStore.activeSession?.agent === 'opencode'
-          || chatStore.activeSession?.codingAgentId === 'cursor'
-          || chatStore.activeSession?.agent === 'cursor'
+          || isCursor
         )))
       : isForkCommandSession.value
         ? bridgeCommands.value.filter(command => command.name === 'fork')

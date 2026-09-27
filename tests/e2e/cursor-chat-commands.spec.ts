@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
-test('Cursor chat renders unknown context and native usage including caches', async ({ page }) => {
+test('Cursor chat hides unsupported context suggestions and renders native usage including caches', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const sessionId = 'cursor-commands'
   const api = await mockHermesApi(page, { sessions: [{
@@ -17,6 +17,12 @@ test('Cursor chat renders unknown context and native usage including caches', as
   await mockChatSocket(page)
   await page.goto(`/#/hermes/session/${sessionId}`)
   await expect(page.getByText('Cursor session ready')).toBeVisible()
+
+  const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')
+  await input.fill('/')
+  await expect(page.locator('.slash-command-name')).toHaveText(['/usage', '/status'])
+  await input.fill('/con')
+  await expect(page.locator('.slash-command-dropdown')).toHaveCount(0)
 
   const results = [
     { command: 'context', available: false, messageKey: 'nativeContextUnknown',
