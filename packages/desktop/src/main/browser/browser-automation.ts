@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { WebContents } from 'electron'
 import type {
+  BrowserBatchAction,
   BrowserInteractAction,
   BrowserReadTextOptions,
   BrowserReadTextResult,
@@ -25,6 +26,11 @@ interface AxNode {
 interface StoredSnapshot {
   id: string
   refs: Map<string, { backendDOMNodeId: number; role: string; name: string }>
+}
+
+interface PreparedBatchAction {
+  action: BrowserBatchAction
+  backendDOMNodeId?: number
 }
 
 const MAX_SNAPSHOT_NODES = 300
@@ -198,15 +204,37 @@ export class BrowserAutomation {
     }
   }
 
-  async interact(tabId: string, contents: WebContents, action: BrowserInteractAction): Promise<void> {
+  prepareBatch(tabId: string, snapshotId: unknown, actions: BrowserBatchAction[]): PreparedBatchAction[] {
+    return actions.map(action => {
+      if (action.action !== 'click' && action.action !== 'type') return { action }
+      if (typeof snapshotId !== 'string') throw new Error('snapshot_id is required for batch click/type actions')
+      const target = this.resolveRef(tabId, snapshotId, action.ref)
+      return { action, backendDOMNodeId: target.backendDOMNodeId }
+    })
+  }
+
+  async resolveBatchAction(tabId: string, contents: WebContents, prepared: PreparedBatchAction): Promise<BrowserInteractAction> {
+    const { action } = prepared
+    if (action.action !== 'click' && action.action !== 'type') return action
+    const snapshot = await this.snapshot(tabId, contents)
+    // Ref numbers can shift after each interaction; preserve the original DOM identity.
+    const current = this.snapshots.get(tabId)
+    const match = [...(current?.refs || [])].find(([, target]) => target.backendDOMNodeId === prepared.backendDOMNodeId)
+    if (!match) throw new Error(`Browser batch target ${action.ref} is no longer available; take a new snapshot`)
+    return { ...action, ref: match[0], snapshot_id: snapshot.snapshotId }
+  }
+
+  async interact(tabId: string, contents: WebContents, action: BrowserInteractAction, assertActive: () => void = () => {}): Promise<void> {
     if (!action || !['click', 'type', 'press', 'scroll'].includes(action.action)) throw new Error('Invalid browser interaction action')
     await this.ensureAttached(contents)
+    assertActive()
     if (action.action === 'click' || action.action === 'type') {
       if (typeof action.snapshot_id !== 'string' || typeof action.ref !== 'string') throw new Error('snapshot_id and ref are required')
       if (action.action === 'type' && typeof action.text !== 'string') throw new Error('text is required for browser typing')
       const backendNodeId = this.resolveRef(tabId, action.snapshot_id, action.ref).backendDOMNodeId
       const objectId = await this.resolveObject(contents, backendNodeId)
       try {
+        assertActive()
         if (action.action === 'click') {
           const response = await contents.debugger.sendCommand('Runtime.callFunctionOn', {
             objectId,
@@ -218,6 +246,7 @@ export class BrowserAutomation {
               const target = typeof element.closest === 'function'
                 ? element.closest(${JSON.stringify(CLICKABLE_ANCESTOR_SELECTOR)}) || element
                 : element;
+              if (!target.isConnected || target.disabled || target.getAttribute('aria-disabled') === 'true') throw new Error('Browser element is unavailable or disabled');
               const rect = target.getBoundingClientRect();
               if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error('Element is not visible');
               target.scrollIntoView({ block: 'center', inline: 'center' });
@@ -230,10 +259,11 @@ export class BrowserAutomation {
           }) as { result?: { value?: unknown }; exceptionDetails?: unknown }
           if (response.exceptionDetails || response.result?.value !== true) throw new Error('Unable to click browser element')
         } else {
-          await contents.debugger.sendCommand('Runtime.callFunctionOn', {
+          const response = await contents.debugger.sendCommand('Runtime.callFunctionOn', {
             objectId,
             returnByValue: true,
             functionDeclaration: `function () {
+              if (!this.isConnected || this.disabled || this.readOnly || this.getAttribute?.('aria-disabled') === 'true') throw new Error('Browser input is unavailable or disabled');
               this.scrollIntoView({ block: 'center', inline: 'center' });
               this.focus();
               if ('value' in this) {
@@ -245,7 +275,9 @@ export class BrowserAutomation {
               }
               return true;
             }`,
-          })
+          }) as { result?: { value?: unknown }; exceptionDetails?: unknown }
+          if (response.exceptionDetails || response.result?.value !== true) throw new Error('Unable to focus browser input')
+          assertActive()
           await contents.debugger.sendCommand('Input.insertText', { text: String(action.text).slice(0, 100_000) })
         }
       } finally {

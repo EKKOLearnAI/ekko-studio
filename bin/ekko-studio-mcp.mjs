@@ -961,6 +961,26 @@ const tools = [
     }, ['tab_id', 'action']),
   },
   {
+    name: 'ekko_studio_browser_batch',
+    toolset: 'browser',
+    description: 'Execute 1-50 click/type/press/scroll actions sequentially in one tab in a single call. For click/type, pass one current snapshot_id and refs from that snapshot; original DOM targets are revalidated before each step. Stops on the first failure, navigation, user takeover, or the 30-second execution budget. Returns zero-based per-step completed/failed/skipped results and a fresh snapshot when available. Completed actions are not rolled back. Existing high-risk action confirmations still apply.',
+    inputSchema: browserInputSchema({
+      tab_id: { type: 'string' },
+      snapshot_id: { type: 'string', description: 'Current snapshot used by all click/type refs; optional for a batch containing only press/scroll.' },
+      actions: {
+        type: 'array', minItems: 1, maxItems: 50,
+        items: {
+          oneOf: [
+            browserInputSchema({ action: { type: 'string', const: 'click' }, ref: { type: 'string' } }, ['action', 'ref']),
+            browserInputSchema({ action: { type: 'string', const: 'type' }, ref: { type: 'string' }, text: { type: 'string', maxLength: 100000 } }, ['action', 'ref', 'text']),
+            browserInputSchema({ action: { type: 'string', const: 'press' }, key: { type: 'string', minLength: 1, maxLength: 64 } }, ['action', 'key']),
+            browserInputSchema({ action: { type: 'string', const: 'scroll' }, direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, pixels: { type: 'number', minimum: 1, maximum: 10000 } }, ['action', 'direction']),
+          ],
+        },
+      },
+    }, ['tab_id', 'actions']),
+  },
+  {
     name: 'ekko_studio_browser_screenshot',
     toolset: 'browser',
     description: 'Capture the visible viewport or bounded full page as a real MCP image content block for visual reasoning.',
@@ -1766,8 +1786,8 @@ const TOOL_ALIASES = new Map([
 const CATEGORY_TOOLSETS = {
   browser: {
     name: 'ekko_studio_browser_toolset',
-    coverage: 'Ekko Studio Desktop browser tabs and leases; HTTP/HTTPS navigation; accessibility snapshots with stable refs; click, type, key press, and scroll interaction; viewport or full-page screenshots; bounded console log read and clear.',
-    description: 'Discover and invoke Ekko Studio Desktop browser operations without loading every browser tool schema into the model context. Covers tab list/create/activate/close/release, navigation back/forward/reload/stop/open, accessibility snapshots, click/type/key/scroll interaction, screenshots, and console logs. Use action=list for the compact operation catalog, action=describe for one full input schema, then action=call with that exact tool name and arguments.',
+    coverage: 'Ekko Studio Desktop browser tabs and leases; HTTP/HTTPS navigation; accessibility snapshots with stable refs; single or sequential batch click, type, key press, and scroll interaction; viewport or full-page screenshots; bounded console log read and clear.',
+    description: 'Discover and invoke Ekko Studio Desktop browser operations without loading every browser tool schema into the model context. Covers tab list/create/activate/close/release, navigation back/forward/reload/stop/open, accessibility snapshots, single or batch click/type/key/scroll interaction, screenshots, and console logs. Use action=list for the compact operation catalog, action=describe for one full input schema, then action=call with that exact tool name and arguments.',
   },
   devices: {
     name: 'ekko_studio_devices_toolset',
@@ -1942,6 +1962,10 @@ async function callTool(name, args = {}, signal) {
         if (args[key] !== undefined) action[key] = args[key]
       }
       return jsonText(await browserRequest('interact', { tab_id: args.tab_id, action }))
+    }
+    case 'ekko_studio_browser_batch': {
+      const envelope = await browserRequest('interact.batch', { tab_id: args.tab_id, snapshot_id: args.snapshot_id, actions: args.actions })
+      return { ...jsonText(envelope), ...(envelope.result?.completed < envelope.result?.total ? { isError: true } : {}) }
     }
     case 'ekko_studio_browser_screenshot': {
       try {

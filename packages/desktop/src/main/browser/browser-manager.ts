@@ -18,8 +18,10 @@ import { BrowserAutomation } from './browser-automation'
 import { BrowserProfileStore } from './browser-profile-store'
 import { BrowserSessionCookieStore } from './browser-session-cookie-store'
 import { MAX_BROWSER_TABS } from './browser-types'
+import { BROWSER_BATCH_TIMEOUT_MS, parseBrowserBatchActions } from './browser-batch'
 import type {
   BrowserAgentControl,
+  BrowserBatchResult,
   BrowserBounds,
   BrowserConsoleEntry,
   BrowserInteractAction,
@@ -42,6 +44,7 @@ interface TabRecord {
   console: BrowserConsoleEntry[]
   htmlPreviewTitle?: string
   ephemeral?: boolean
+  documentGeneration?: number
 }
 
 interface BrowserManagerOptions {
@@ -406,7 +409,8 @@ export class BrowserManager {
     return this.automation.readText(tabId, record.view.webContents, options)
   }
 
-  async interact(tabId: string, action: BrowserInteractAction): Promise<DesktopBrowserTab> {
+  async interact(tabId: string, action: BrowserInteractAction, assertActive: () => void = () => {}): Promise<DesktopBrowserTab> {
+    assertActive()
     const record = this.requireTab(tabId)
     const risk = this.automation.interactionRisk(tabId, action)
     if (risk) {
@@ -432,8 +436,11 @@ export class BrowserManager {
             confirmationTimer.unref?.()
           }),
         ])
+        assertActive()
       } catch (error) {
-        this.setAgentControl(tabId, 'idle')
+        if (this.records.get(tabId) === record && record.tab.agentControl === 'waiting-for-user' && record.tab.agentLabel === previousLabel) {
+          this.setAgentControl(tabId, 'idle')
+        }
         throw error
       } finally {
         if (confirmationTimer) clearTimeout(confirmationTimer)
@@ -444,8 +451,53 @@ export class BrowserManager {
       }
       this.setAgentControl(tabId, 'active', previousLabel, action.action)
     }
-    await this.withAutomationView(record, () => this.automation.interact(tabId, record.view.webContents, action))
+    await this.withAutomationView(record, () => this.automation.interact(tabId, record.view.webContents, action, assertActive))
     return copyTab(record.tab)
+  }
+
+  async interactBatch(tabId: string, input: unknown, snapshotId: unknown, assertControl: () => void): Promise<BrowserBatchResult> {
+    const actions = parseBrowserBatchActions(input)
+    const record = this.requireTab(tabId)
+    const prepared = this.automation.prepareBatch(tabId, snapshotId, actions)
+    const generation = record.documentGeneration || 0
+    const originalUrl = record.view.webContents.getURL()
+    const deadline = Date.now() + BROWSER_BATCH_TIMEOUT_MS
+    const assertActive = () => {
+      assertControl()
+      if (Date.now() >= deadline) throw new Error('Browser batch timed out; remaining actions were skipped')
+      if (this.records.get(tabId) !== record || record.view.webContents.isDestroyed()) throw new Error('Browser tab is closed')
+      if ((record.documentGeneration || 0) !== generation || record.view.webContents.getURL() !== originalUrl) {
+        throw new Error('Browser page navigated; take a new snapshot before continuing')
+      }
+    }
+    const result: BrowserBatchResult = { tabId, completed: 0, total: actions.length, results: [] }
+    for (let index = 0; index < prepared.length; index += 1) {
+      const action = actions[index].action
+      if (result.completed !== index) {
+        result.results.push({ index, action, status: 'skipped' })
+        continue
+      }
+      try {
+        assertActive()
+        const resolved = await this.automation.resolveBatchAction(tabId, record.view.webContents, prepared[index])
+        assertActive()
+        await this.interact(tabId, resolved, assertActive)
+        result.completed += 1
+        result.results.push({ index, action, status: 'completed' })
+      } catch (error) {
+        result.results.push({ index, action, status: 'failed', error: redactBrowserText(error instanceof Error ? error.message : String(error), 500) })
+      }
+    }
+    try {
+      assertControl()
+      if (Date.now() >= deadline) throw new Error('Browser batch timed out')
+      result.snapshot = await this.snapshot(tabId)
+      assertControl()
+    } catch (error) {
+      delete result.snapshot
+      result.snapshotError = redactBrowserText(error instanceof Error ? error.message : String(error), 500)
+    }
+    return result
   }
 
   async screenshot(tabId: string, fullPage = false) {
@@ -761,22 +813,26 @@ export class BrowserManager {
       if (record.htmlPreviewTitle && details.url.startsWith('data:text/html')) return
       if (!isAllowedBrowserRequest(details.url)) details.preventDefault()
     })
-    contents.on('did-start-loading', () => { tab.loading = true; this.automation.invalidate(id); this.emitState() })
+    const invalidateDocument = () => {
+      record.documentGeneration = (record.documentGeneration || 0) + 1
+      this.automation.invalidate(id)
+    }
+    contents.on('did-start-loading', () => { tab.loading = true; invalidateDocument(); this.emitState() })
     contents.on('did-stop-loading', () => { tab.loading = false; this.refreshTab(record); this.emitState() })
     contents.on('did-fail-load', () => { tab.loading = false; this.refreshTab(record); this.emitState() })
     const persistNavigation = () => { void this.persistTabs().catch(error => console.warn('[desktop-browser] failed to persist tabs:', error)) }
-    contents.on('did-navigate', () => { this.refreshTab(record); this.automation.invalidate(id); persistNavigation(); this.emitState() })
-    contents.on('did-navigate-in-page', () => { this.refreshTab(record); this.automation.invalidate(id); persistNavigation(); this.emitState() })
+    contents.on('did-navigate', () => { this.refreshTab(record); invalidateDocument(); persistNavigation(); this.emitState() })
+    contents.on('did-navigate-in-page', () => { this.refreshTab(record); invalidateDocument(); persistNavigation(); this.emitState() })
     contents.on('page-title-updated', (_event, title) => {
       const isHtmlPreview = !!record.htmlPreviewTitle && contents.getURL().startsWith('data:text/html')
       tab.title = title || (isHtmlPreview ? record.htmlPreviewTitle || 'HTML Preview' : tab.url)
       this.emitState()
     })
     contents.on('page-favicon-updated', (_event, favicons) => { tab.faviconUrl = favicons[0]; this.emitState() })
-    contents.on('render-process-gone', () => { tab.crashed = true; tab.loading = false; this.emitState() })
+    contents.on('render-process-gone', () => { tab.crashed = true; tab.loading = false; invalidateDocument(); this.emitState() })
     if (!contents.isDestroyed()) {
       contents.debugger.on('detach', () => {
-        this.automation.invalidate(id)
+        invalidateDocument()
         tab.agentControl = 'idle'
         tab.agentLabel = undefined
         tab.agentAction = undefined

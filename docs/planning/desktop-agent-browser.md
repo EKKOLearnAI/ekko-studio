@@ -155,7 +155,7 @@ describe  按名称返回一个操作的完整 Input Schema
 call      按名称和 arguments 调用该操作
 ~~~
 
-类目内部保留 6 个聚合操作：
+类目内部保留 8 个聚合操作：
 
 ~~~text
 browser_tabs
@@ -167,8 +167,14 @@ browser_navigate
 browser_snapshot
   返回紧凑的可访问性树和稳定元素引用
 
+browser_read_text
+  从当前快照的元素分页读取文本
+
 browser_interact
   action: click | type | press | scroll
+
+browser_batch
+  actions: 1–50 条 click | type | press | scroll，按顺序执行
 
 browser_screenshot
   返回视口或整页截图
@@ -177,11 +183,11 @@ browser_console
   action: read | clear
 ~~~
 
-选择 1 个类目入口和 6 个内部聚合操作的原因：
+选择 1 个类目入口和 8 个内部聚合操作的原因：
 
 - 常驻上下文只有类目说明和入口 Schema；
 - 模型只在需要时读取一个具体操作的完整 Schema；
-- 6 个语义操作仍比十几个按钮级操作更稳定；
+- 8 个语义操作仍比十几个按钮级操作更稳定；
 - Action 枚举较小，参数校验更明确；
 - 后续容易单独限制高风险操作。
 
@@ -189,6 +195,28 @@ browser_console
 <code>tab_id</code>。创建标签页只能通过 <code>browser_tabs</code>，其他操作不会
 隐式跟随用户当前标签页。Snapshot 返回 <code>snapshot_id</code>，click/type 必须
 回传该 ID；页面变化后旧引用立即失效。
+
+批量调用使用 `ekko_studio_browser_batch`，一次提交同一标签页的多条指令：
+
+~~~json
+{
+  "tab_id": "tab-id",
+  "snapshot_id": "current-snapshot-id",
+  "actions": [
+    { "action": "type", "ref": "@e2", "text": "example" },
+    { "action": "click", "ref": "@e4" },
+    { "action": "click", "ref": "@e7" },
+    { "action": "scroll", "direction": "down", "pixels": 400 }
+  ]
+}
+~~~
+
+- click/type 的所有 ref 都来自提交时的同一份最新快照。只有按键/滚动时可以省略 snapshot_id。
+- 执行前验证全部参数和初始引用；每步重新获取快照并按原始 DOM 节点身份定位，不复用可能已变号的 ref，也不猜测替代元素。
+- 整批占用同一标签页的操作队列；其他标签页仍可并发。单步工具保持兼容。
+- 首次失败、目标消失、页面导航/刷新、用户接管或 30 秒执行预算耗尽时，停止后续动作。已有的高风险操作确认逐步生效，确认等待结束后再次检查取消状态与预算。
+- 返回 `completed`、`total` 和 `results`；每项带从 0 开始的 `index`、动作类型及 `completed` / `failed` / `skipped` 状态。成功的步骤不会回滚，失败步骤也可能已产生部分效果，请根据结果决定是否重试。
+- 能读取时返回执行后的 `snapshot`；无法读取时返回 `snapshotError`。部分执行会在 MCP 结果标记 `isError: true`，仍保留逐步结果。页面跳转后的操作需要根据新快照再次提交。
 
 ### 6.3 MCP 配置统一注入，能力由桌面 Broker 决定
 
@@ -313,7 +341,7 @@ bin/hermes-studio-mcp.mjs
   现有 MCP stdio 入口；识别新的 browser toolset。
 
 bin/mcp/browser-tools.mjs
-  1 个类目入口、6 个内部操作 Schema、参数规范化、Broker 描述文件读取、
+  1 个类目入口、8 个内部操作 Schema、参数规范化、Broker 描述文件读取、
   Broker RPC Client 和 MCP 图片结果转换。
   这里不包含 Electron 或 CDP 权限。
 ~~~
@@ -963,7 +991,7 @@ browserSession.setDownloadPath(profile.downloadPath)
   Clipboard、屏幕捕获和文件权限。
 - 显式处理 Popup、新窗口、协议处理和下载。
 - Browser Broker 不支持 CORS，拒绝网页 Origin，所有请求必须认证。
-- MCP 类目入口只能发现和调用固定 6 个浏览器语义操作。
+- MCP 类目入口只能发现和调用固定 8 个浏览器语义操作。
 - MCP 和模型不能看到 Broker Token、CDP URL、Cookie、Storage、IndexedDB、
   Authorization Header 或密码。
 - 注入脚本固定在 Desktop 代码中，IPC 只允许 element/region 枚举。
@@ -1009,7 +1037,7 @@ browserSession.setDownloadPath(profile.downloadPath)
 - Broker 文件 PID、Token、地址、过期时间和权限校验；
 - Broker 拒绝非法 Origin 和未认证请求；
 - MCP 仅在有效 Desktop Broker 存在时暴露 1 个 browser 类目入口；
-- browser 类目只能列出、描述和调用固定 6 个内部操作；
+- browser 类目只能列出、描述和调用固定 8 个内部操作；
 - 模型参数不能覆盖 Launcher 注入的 Caller ID；
 - MCP 结果不包含 Token 和 CDP 地址；
 - 同一标签页并发租约冲突；
@@ -1092,7 +1120,7 @@ browserSession.setDownloadPath(profile.downloadPath)
 
 - 实现 Browser Broker；
 - 实现 Broker 描述文件和认证；
-- 实现 1 个 Browser MCP 类目入口和 6 个内部操作；
+- 实现 1 个 Browser MCP 类目入口和 8 个内部操作；
 - 向 Web UI、Ekko、Hermes、Codex、Claude Code 统一注入 browser MCP 配置；
 - 没有有效 Desktop Browser Broker 时返回空工具列表；
 - 实现 Caller ID、Tab Binding、Lease、Abort 和 Action Status；
