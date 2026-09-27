@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NCheckbox, NDrawer, NDrawerContent, NDropdown, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace, NTooltip, useMessage, type DropdownOption } from 'naive-ui'
 import {
@@ -414,17 +415,7 @@ const workflowSchedulePendingIds = ref<Set<string>>(new Set())
 let edgePreviewTimer: number | null = null
 let workflowBudgetClock: number | null = null
 
-const workflowAgentDefinitions: WorkflowSelectOption[] = [
-  { label: 'Hermes', value: 'hermes' },
-  { label: 'Ekko', value: 'ekko-agent' },
-  { label: 'Claude', value: 'claude-code' },
-  { label: 'Codex', value: 'codex' },
-  { label: 'Pi', value: 'pi' },
-  { label: 'Grok', value: 'grok' },
-  { label: 'Cursor', value: 'cursor' },
-  { label: 'OpenCode', value: 'opencode' },
-  { label: 'DeepSeek Harness', value: 'dsh' },
-]
+const workflowAgentDefinitions = AGENT_OPTIONS
 
 const agentOptions = computed<WorkflowSelectOption[]>(() => workflowAgentDefinitions.map((option) => {
   const disabled = !isAgentStatusAvailable(agentStatusSnapshot.value, option.value)

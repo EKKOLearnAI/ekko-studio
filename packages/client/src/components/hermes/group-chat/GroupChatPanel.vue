@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
 import { ref, computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, provide, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -240,17 +241,7 @@ const profileOptions = computed(() =>
 
 type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
 
-const groupAgentTypeDefinitions: Array<{ label: string; value: GroupAgentType }> = [
-    { label: 'Hermes', value: 'hermes' },
-    { label: 'Ekko', value: 'ekko' },
-    { label: 'Claude', value: 'claude' },
-    { label: 'Codex', value: 'codex' },
-    { label: 'Pi', value: 'pi' },
-    { label: 'Grok', value: 'grok' },
-    { label: 'Cursor', value: 'cursor' },
-    { label: 'OpenCode', value: 'opencode' },
-  { label: 'DeepSeek Harness', value: 'dsh' },
-]
+const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
 
 const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.map((option) => {
     const disabled = !isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
