@@ -10,7 +10,9 @@ import {
   readStoredSessionCategoryPreset,
   isSecretLikeParamName,
   presetBaseUrlCarriesCredentials,
+  SESSION_CATEGORY_PRESET_AGENTS,
 } from '../../packages/server/src/modules/studio/services/session-category-preset'
+import { AGENT_RUNTIMES } from '../../packages/server/src/modules/studio/contracts/agents/runtime'
 import {
   PRESET_BASE_URLS_WITH_CREDENTIALS,
   PRESET_BASE_URLS_WITHOUT_CREDENTIALS,
@@ -307,5 +309,29 @@ describe('session category preset validation', () => {
       .resolves.toEqual({ base_url_dropped: true })
     await expect(describeSessionCategoryPresetStatus({ agent: 'claude-code' }, probe)).resolves.toBeUndefined()
     expect(probe).not.toHaveBeenCalled()
+  })
+
+  it('accepts every New Chat agent from the runtime registry, including Cursor', () => {
+    // Derived, not hand-listed: a runtime added later is a valid preset agent at once.
+    expect(SESSION_CATEGORY_PRESET_AGENTS).toEqual(AGENT_RUNTIMES.map(runtime => (runtime === 'ekko' ? 'ekko-agent' : runtime)))
+    expect(SESSION_CATEGORY_PRESET_AGENTS).toContain('cursor')
+    expect(SESSION_CATEGORY_PRESET_AGENTS).not.toContain('ekko')
+    for (const agent of SESSION_CATEGORY_PRESET_AGENTS) {
+      expect(normalizeSessionCategoryPreset({ agent }), agent).toEqual({ agent })
+    }
+    expect(() => normalizeSessionCategoryPreset({ agent: 'ekko' })).toThrow(/Preset field agent is invalid/)
+  })
+
+  it('stores a Cursor preset with the same rules as the New Chat panel', () => {
+    expect(normalizeSessionCategoryPreset({ agent: 'cursor', profile: 'default', workspace: '/p/app' }))
+      .toEqual({ agent: 'cursor', profile: 'default', workspace: '/p/app' })
+    // The panel offers MoA only to Hermes and a session preset only to DeepSeek Harness.
+    expect(() => normalizeSessionCategoryPreset({ agent: 'cursor', modelKind: 'moa' })).toThrow(/MoA presets/)
+    expect(() => normalizeSessionCategoryPreset({ agent: 'cursor', agentPreset: 'planner' })).toThrow(/Agent preset/)
+    // A stored launch mode is kept as written (the panel ignores it: Cursor always runs global), and a
+    // stored invalid combination drops only the offending field on read.
+    expect(normalizeSessionCategoryPreset({ agent: 'cursor', agentMode: 'scoped' })).toEqual({ agent: 'cursor', agentMode: 'scoped' })
+    expect(parseStoredSessionCategoryPreset(JSON.stringify({ agent: 'cursor', modelKind: 'moa', agentPreset: 'x', workspace: '/w' })))
+      .toEqual({ agent: 'cursor', workspace: '/w' })
   })
 })

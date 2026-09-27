@@ -1,4 +1,5 @@
 import { stat } from 'fs/promises'
+import { AGENT_RUNTIMES, type AgentRuntime } from '../contracts/agents/runtime'
 import { logger } from '../public/logging'
 import { resolveRunWorkspacePath } from './workspace/manager'
 
@@ -14,19 +15,19 @@ import { resolveRunWorkspacePath } from './workspace/manager'
  * storage sanity limits. The workspace is stored as entered, relative paths
  * included, exactly like the panel. One deliberate exception: a Base URL that
  * carries credentials (URL userinfo or a secret-looking query parameter) is
- * refused, because presets are shared and must never hold keys.
+ * refused, because presets are shared and must never hold keys. Like the
+ * panel, a launch mode stored for an agent with a fixed mode (Ekko: scoped,
+ * Cursor: global) is not an error; the panel ignores it.
  */
-export const SESSION_CATEGORY_PRESET_AGENTS = [
-  'hermes',
-  'ekko-agent',
-  'claude-code',
-  'codex',
-  'pi',
-  'grok',
-  'opencode',
-  'dsh',
-] as const
-export type SessionCategoryPresetAgent = typeof SESSION_CATEGORY_PRESET_AGENTS[number]
+/**
+ * New Chat agent ids, derived from the runtime registry so a new agent is
+ * accepted as soon as it exists. The New Chat panel names the Ekko runtime
+ * `ekko-agent`; every other runtime id is the panel's agent id as is.
+ */
+export type SessionCategoryPresetAgent = Exclude<AgentRuntime, 'ekko'> | 'ekko-agent'
+export const SESSION_CATEGORY_PRESET_AGENTS: readonly SessionCategoryPresetAgent[] = AGENT_RUNTIMES.map(
+  (runtime): SessionCategoryPresetAgent => (runtime === 'ekko' ? 'ekko-agent' : runtime),
+)
 
 export const SESSION_CATEGORY_PRESET_API_MODES = ['chat_completions', 'codex_responses', 'anthropic_messages'] as const
 

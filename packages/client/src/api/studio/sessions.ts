@@ -1,6 +1,7 @@
 import { request, getApiKey, getBaseUrlValue } from '../client'
 import type { ProviderApiMode } from './provider-api-mode'
 import { fetchAuthenticatedBlob, saveBlob } from './binary-content'
+import type { ChatCodingAgentId } from '../coding-agents'
 
 export interface SessionSummary {
   id: string
@@ -49,7 +50,7 @@ export interface SessionSummary {
  * empty field means "use today's New Chat default". Never carries an API key.
  */
 export interface SessionCategoryPreset {
-  agent?: 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
+  agent?: 'hermes' | ChatCodingAgentId
   agentMode?: 'global' | 'scoped'
   agentPreset?: string
   profile?: string

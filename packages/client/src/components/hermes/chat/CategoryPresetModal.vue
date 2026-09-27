@@ -17,7 +17,7 @@ import {
   NEW_CHAT_AGENT_OPTIONS,
   compactCategoryPreset,
   effectiveNewChatMode,
-  isExternalCodingAgent,
+  hasLaunchModeChoice,
   isNewChatProviderAllowedFor,
   normalizeCategoryName,
   presetBaseUrlCarriesCredentials,
@@ -208,7 +208,7 @@ const dshPresetOptions = computed(() => withStaleOption(
 function handleAgentChange(value: NewChatAgentId | "") {
   agent.value = value;
   const nextAgent = value || "hermes";
-  if (!isExternalCodingAgent(nextAgent)) agentMode.value = "";
+  if (!hasLaunchModeChoice(nextAgent)) agentMode.value = "";
   if (nextAgent !== "dsh") agentPreset.value = "";
   else void loadDshPresets();
   if (nextAgent !== "hermes" && modelKind.value === "moa") {
@@ -253,7 +253,7 @@ const currentPreset = computed<SessionCategoryPreset | null>(() => {
   const usesModel = showProviderModel.value;
   return compactCategoryPreset({
     agent: agent.value || undefined,
-    agentMode: isExternalCodingAgent(agentId) && agentMode.value ? agentMode.value : undefined,
+    agentMode: hasLaunchModeChoice(agentId) && agentMode.value ? agentMode.value : undefined,
     agentPreset: agentId === "dsh" ? agentPreset.value : undefined,
     profile: profile.value || undefined,
     modelKind: usesModel && modelKind.value === "moa" ? "moa" : undefined,
@@ -416,7 +416,7 @@ async function clearPreset() {
           <span v-if="warningFor('agentPreset')" class="category-preset-warning">{{ warningFor("agentPreset") }}</span>
         </label>
 
-        <label v-if="isExternalCodingAgent(effectiveAgent)" class="category-preset-field">
+        <label v-if="hasLaunchModeChoice(effectiveAgent)" class="category-preset-field">
           <span class="category-preset-label">{{ t("codingAgents.launchModeScope") }}</span>
           <NRadioGroup v-model:value="agentMode" name="category-preset-agent-mode" :disabled="saving">
             <NRadioButton v-for="option in agentModeOptions" :key="option.value" :value="option.value">

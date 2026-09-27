@@ -49,6 +49,7 @@ import FolderPicker from "./FolderPicker.vue";
 import StarIcon from "@/components/common/StarIcon.vue";
 import CategoryPresetModal from "./CategoryPresetModal.vue";
 import {
+  effectiveNewChatMode,
   hasCategoryPreset,
   isNewChatProviderAllowedFor,
   presetWarningMessageKey,
@@ -1047,15 +1048,6 @@ const newChatAgentModeOptions = computed(() => [
   { label: t("codingAgents.launchModeGlobal"), value: "global" },
   { label: t("codingAgents.launchModeScoped"), value: "scoped" },
 ]);
-
-function effectiveNewChatMode(
-  agent: typeof newChatAgent.value,
-  requestedMode: typeof newChatAgentMode.value,
-) {
-  if (agent === "ekko-agent") return "scoped";
-  if (agent === "cursor") return "global";
-  return requestedMode;
-}
 
 function getModelGroupsForProfile(profile: string) {
   const profileModels = appStore.profileModelGroups.find(

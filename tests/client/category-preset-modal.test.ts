@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CategoryPresetModal from '@/components/hermes/chat/CategoryPresetModal.vue'
+import { AGENT_OPTIONS } from '@/utils/agent-options'
 
 const apiMock = vi.hoisted(() => ({
   createSessionCategoryWithPreset: vi.fn(),
@@ -239,5 +240,56 @@ describe('CategoryPresetModal', () => {
     })
     await flushPromises()
     expect(withCodex.text()).toContain('chat.presetWarningProvider:openai-codex')
+  })
+
+  it('lists agents in the New Chat panel order, Cursor included, after "Default"', async () => {
+    const wrapper = mount(CategoryPresetModal, {
+      props: { mode: 'edit', category: category(null), existingNames: ['Work'], canEditPreset: true, show: true },
+    })
+    await flushPromises()
+    const values = wrapper.find('[data-testid="category-preset-agent"]').findAll('option').map(option => option.attributes('value'))
+    expect(values).toEqual(['', ...AGENT_OPTIONS.map(option => option.value)])
+    expect(values).toContain('cursor')
+  })
+
+  it('handles Cursor like the New Chat panel: no launch mode, provider, model, API mode or Base URL', async () => {
+    const wrapper = mount(CategoryPresetModal, {
+      props: {
+        mode: 'edit',
+        category: category({ agent: 'claude-code', agentMode: 'scoped', provider: 'gateway', model: 'gw-model', apiMode: 'chat_completions', baseUrl: 'https://gw.test/v1', workspace: '/p/app' }),
+        existingNames: ['Work'],
+        canEditPreset: true,
+        show: true,
+      },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('codingAgents.launchModeScope')
+    expect(wrapper.find('[data-testid="category-preset-provider"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="category-preset-agent"]').setValue('cursor')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('codingAgents.launchModeScope')
+    expect(wrapper.text()).not.toContain('codingAgents.protocolScope')
+    expect(wrapper.find('[data-testid="category-preset-provider"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="category-preset-model"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="category-preset-base-url"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="category-preset-profile"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('chat.presetWarning')
+
+    await wrapper.find('[data-testid="category-preset-save"]').trigger('click')
+    await flushPromises()
+    // Hidden fields are not stored, exactly like a global coding agent.
+    expect(apiMock.updateSessionCategoryPreset).toHaveBeenCalledWith(1, { agent: 'cursor', workspace: '/p/app' })
+  })
+
+  it('does not store a launch mode for a stored Cursor preset that carries one', async () => {
+    const wrapper = mount(CategoryPresetModal, {
+      props: { mode: 'edit', category: category({ agent: 'cursor', agentMode: 'scoped' }), existingNames: ['Work'], canEditPreset: true, show: true },
+    })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('codingAgents.launchModeScope')
+    await wrapper.find('[data-testid="category-preset-save"]').trigger('click')
+    await flushPromises()
+    expect(apiMock.updateSessionCategoryPreset).toHaveBeenCalledWith(1, { agent: 'cursor' })
   })
 })

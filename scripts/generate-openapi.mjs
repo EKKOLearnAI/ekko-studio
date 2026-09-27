@@ -921,14 +921,24 @@ openapi.paths['/api/studio/sessions/{id}/pin'].post.requestBody = {
   } } },
 }
 
+// Preset agent ids follow the runtime registry (SESSION_CATEGORY_PRESET_AGENTS in
+// session-category-preset.ts): every AGENT_RUNTIMES id, with `ekko` named `ekko-agent`.
+function sessionCategoryPresetAgents() {
+  const source = readFileSync(join(serverSourceDir, 'modules/studio/contracts/agents/runtime.ts'), 'utf-8')
+  const list = source.match(/export const AGENT_RUNTIMES = \[([^\]]*)\] as const/)
+  if (!list) throw new Error('AGENT_RUNTIMES not found in contracts/agents/runtime.ts')
+  const runtimes = [...list[1].matchAll(/'([^']+)'/g)].map(match => match[1])
+  return runtimes.map(runtime => (runtime === 'ekko' ? 'ekko-agent' : runtime))
+}
+
 // Session categories may carry one shared, optional New Chat preset (never an API key).
 const sessionCategoryPresetSchema = {
   type: ['object', 'null'],
   description: 'Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Validation mirrors the New Chat panel. Credential fields (API keys, tokens, secrets) are rejected with 400. Only super admins may write a preset (403 otherwise). Stored presets are read leniently: unknown or invalid fields are dropped.',
   additionalProperties: false,
   properties: {
-    agent: { type: 'string', enum: ['hermes', 'ekko-agent', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] },
-    agentMode: { type: 'string', enum: ['global', 'scoped'] },
+    agent: { type: 'string', enum: sessionCategoryPresetAgents() },
+    agentMode: { type: 'string', enum: ['global', 'scoped'], description: 'Launch mode for external coding agents. Ignored like in the New Chat panel for agents with a fixed mode: ekko-agent always runs scoped, cursor always runs global.' },
     agentPreset: { type: 'string', maxLength: 200, description: 'DeepSeek Harness session preset id (agent=dsh only).' },
     profile: { type: 'string', maxLength: 200 },
     modelKind: { type: 'string', enum: ['model', 'moa'], description: 'moa requires agent=hermes.' },

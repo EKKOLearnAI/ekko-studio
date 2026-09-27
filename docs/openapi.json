@@ -18378,7 +18378,8 @@
                           "pi",
                           "grok",
                           "opencode",
-                          "dsh"
+                          "dsh",
+                          "cursor"
                         ]
                       },
                       "agentMode": {
@@ -18386,7 +18387,8 @@
                         "enum": [
                           "global",
                           "scoped"
-                        ]
+                        ],
+                        "description": "Launch mode for external coding agents. Ignored like in the New Chat panel for agents with a fixed mode: ekko-agent always runs scoped, cursor always runs global."
                       },
                       "agentPreset": {
                         "type": "string",
@@ -18514,7 +18516,8 @@
                           "pi",
                           "grok",
                           "opencode",
-                          "dsh"
+                          "dsh",
+                          "cursor"
                         ]
                       },
                       "agentMode": {
@@ -18522,7 +18525,8 @@
                         "enum": [
                           "global",
                           "scoped"
-                        ]
+                        ],
+                        "description": "Launch mode for external coding agents. Ignored like in the New Chat panel for agents with a fixed mode: ekko-agent always runs scoped, cursor always runs global."
                       },
                       "agentPreset": {
                         "type": "string",

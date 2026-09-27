@@ -1,21 +1,14 @@
 import type { AvailableModelGroup } from "@/api/hermes/system";
 import type { ChatCodingAgentId, CodingAgentApiMode } from "@/api/coding-agents";
 import type { SessionCategoryPreset } from "@/api/studio/sessions";
+import { AGENT_OPTIONS } from "@/utils/agent-options";
 import { canScopedCodingAgentUseProvider } from "@/utils/codingAgentProviders";
 
 export type NewChatAgentId = "hermes" | ChatCodingAgentId;
 export type NewChatAgentMode = "global" | "scoped";
 
-export const NEW_CHAT_AGENT_OPTIONS: ReadonlyArray<{ label: string; value: NewChatAgentId }> = [
-  { label: "Hermes", value: "hermes" },
-  { label: "Ekko", value: "ekko-agent" },
-  { label: "Claude", value: "claude-code" },
-  { label: "Codex", value: "codex" },
-  { label: "Pi", value: "pi" },
-  { label: "Grok", value: "grok" },
-  { label: "OpenCode", value: "opencode" },
-  { label: "DeepSeek Harness", value: "dsh" },
-];
+/** The New Chat panel's agent picker, in the shared picker order (#3199). */
+export const NEW_CHAT_AGENT_OPTIONS: ReadonlyArray<{ label: string; value: NewChatAgentId }> = AGENT_OPTIONS;
 
 export const CODING_AGENT_API_MODE_VALUES: readonly CodingAgentApiMode[] = [
   "chat_completions",
@@ -112,8 +105,19 @@ export function isExternalCodingAgent(agent: NewChatAgentId): boolean {
   return agent !== "hermes" && agent !== "ekko-agent";
 }
 
+/** Agents whose launch mode is fixed: the panel hides the launch-mode choice and uses this mode. */
+const FIXED_NEW_CHAT_MODES: Partial<Record<NewChatAgentId, NewChatAgentMode>> = {
+  "ekko-agent": "scoped",
+  cursor: "global",
+};
+
 export function effectiveNewChatMode(agent: NewChatAgentId, requestedMode: NewChatAgentMode): NewChatAgentMode {
-  return agent === "ekko-agent" ? "scoped" : requestedMode;
+  return FIXED_NEW_CHAT_MODES[agent] ?? requestedMode;
+}
+
+/** True when the panel shows the launch-mode (global/scoped) choice for this agent. */
+export function hasLaunchModeChoice(agent: NewChatAgentId): boolean {
+  return isExternalCodingAgent(agent) && FIXED_NEW_CHAT_MODES[agent] === undefined;
 }
 
 export function usesProviderModel(agent: NewChatAgentId, mode: NewChatAgentMode): boolean {
@@ -231,7 +235,8 @@ export function resolveCategoryPreset(
     }
   }
   let mode = context.currentAgentMode;
-  if (preset.agentMode && isExternalCodingAgent(agent)) {
+  // Like the panel, an agent with a fixed mode (Cursor: global) ignores a stored launch mode.
+  if (preset.agentMode && hasLaunchModeChoice(agent)) {
     mode = preset.agentMode;
     result.agentMode = mode;
   }

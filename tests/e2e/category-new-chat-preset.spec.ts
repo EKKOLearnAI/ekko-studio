@@ -366,6 +366,67 @@ test('keeps today\'s install flow when the preset agent is not installed', async
   await expect(page).not.toHaveURL(/#\/hermes\/session\//)
 })
 
+test('a Cursor preset is set from the form and pre-fills the drawer like a manual Cursor pick (#3110)', async ({ page }) => {
+  const api = await setupPage(page, [
+    { id: 1, name: 'Cursor Work', preset: { agent: 'claude-code', agentMode: 'scoped', provider: 'anthropic', model: 'claude-opus-5-5', workspace: '/workspace/cursor-app' } },
+  ], [], ['cursor'])
+  await page.goto('/#/hermes/chat')
+
+  // Set preset: the agent picker follows the drawer order (#3199) and Cursor hides the
+  // launch-mode, provider and model fields, exactly like the drawer.
+  const header = categoryHeader(page, 'Cursor Work')
+  await header.getByRole('button', { name: 'More' }).click()
+  await page.locator('.n-dropdown-menu:visible').getByText('Set preset', { exact: true }).click()
+  const modal = page.getByTestId('category-preset-modal')
+  await expect(modal.locator('.category-preset-field').filter({ hasText: /^Launch mode/ })).toHaveCount(1)
+  const agentField = modal.locator('.category-preset-field').filter({ hasText: /^Agent/ })
+  await agentField.locator('.n-base-selection').first().click()
+  await expect(page.locator('.n-base-select-option:visible')).toHaveText([
+    'Default', 'Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor',
+  ])
+  const cursorOption = page.locator('.n-base-select-option:visible').filter({ hasText: /^Cursor$/ })
+  await cursorOption.scrollIntoViewIfNeeded()
+  await snap(page, '12-set-preset-agent-cursor-option')
+  await cursorOption.click()
+  await expect(modal.locator('.category-preset-field').filter({ hasText: /^Launch mode/ })).toHaveCount(0)
+  await expect(modal.locator('.category-preset-field').filter({ hasText: /^Provider/ })).toHaveCount(0)
+  await expect(modal.locator('.category-preset-field').filter({ hasText: /^Models/ })).toHaveCount(0)
+  await expect(modal.locator('.category-preset-warning')).toHaveCount(0)
+  await snap(page, '13-set-preset-cursor')
+  await modal.getByTestId('category-preset-save').click()
+  await expect(modal).toBeHidden()
+  const patch = api.requests.find(request => request.method === 'PATCH')!
+  expect(JSON.parse(patch.postData || '{}')).toEqual({ preset: { agent: 'cursor', workspace: '/workspace/cursor-app' } })
+
+  // [New Chat] pre-fills Cursor: no launch mode, provider or model; Cursor always runs global.
+  await page.getByTestId('category-new-chat-row').and(page.getByRole('button', { name: 'New Chat in Cursor Work' })).click()
+  await expect(drawerField(page, /^Agent/)).toContainText('Cursor')
+  await expect(drawerField(page, /^Category/)).toContainText('Cursor Work')
+  await expect(drawerField(page, /^Launch mode/)).toHaveCount(0)
+  await expect(drawerField(page, /^Models/)).toHaveCount(0)
+  await expect(drawer(page).locator('.new-chat-preset-warning')).toHaveCount(0)
+  await expect(drawer(page).locator('.folder-path-input input')).toHaveValue('/workspace/cursor-app')
+  await snap(page, '14-drawer-prefilled-cursor')
+  await drawer(page).getByRole('button', { name: 'Create', exact: true }).click()
+  const run = await sendFirstMessage(page, 'Refactor the parser')
+  expect(run).toMatchObject({ category_id: 1, coding_agent_id: 'cursor', mode: 'global', workspace: '/workspace/cursor-app' })
+  expect(run.model).toBeUndefined()
+  expect(run.provider).toBeUndefined()
+  expect(run.apiKey).toBeUndefined()
+  expect(api.unexpectedRequests).toEqual([])
+})
+
+test('a Cursor preset keeps today\'s install flow when Cursor is not installed', async ({ page }) => {
+  await setupPage(page, [{ id: 1, name: 'Cursor Work', preset: { agent: 'cursor' } }], [], [])
+  await page.goto('/#/hermes/chat')
+
+  await page.getByTestId('category-new-chat-row').first().click()
+  await expect(drawerField(page, /^Agent/)).toContainText('Cursor')
+  await drawer(page).getByRole('button', { name: 'Create', exact: true }).click()
+  await expect(page.getByText('Cursor is not installed', { exact: false })).toBeVisible()
+  await expect(page).not.toHaveURL(/#\/hermes\/session\//)
+})
+
 test('every drawer open starts from the same defaults, so a preset never leaks into the next category (F2)', async ({ page }) => {
   await setupPage(page, [
     { id: 1, name: 'Agent Preset', preset: { agent: 'claude-code', provider: 'anthropic', model: 'claude-opus-5-5', workspace: '/w/a' } },

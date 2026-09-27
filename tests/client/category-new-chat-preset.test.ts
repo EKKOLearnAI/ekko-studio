@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import {
   DROPPED_BASE_URL_PLACEHOLDER,
+  NEW_CHAT_AGENT_OPTIONS,
   compactCategoryPreset,
+  effectiveNewChatMode,
   hasCategoryPreset,
+  hasLaunchModeChoice,
+  usesProviderModel,
   foldAsciiCase,
   isNewChatProviderAllowedFor,
   isSecretLikeParamName,
@@ -21,6 +25,7 @@ import {
   SAFE_PARAM_NAMES,
   SECRET_LIKE_PARAM_NAMES,
 } from '../fixtures/preset-base-url-cases'
+import { AGENT_OPTIONS } from '../../packages/client/src/utils/agent-options'
 
 const group = (provider: string, models: string[], extra: Record<string, unknown> = {}) => ({
   provider,
@@ -167,6 +172,36 @@ describe('category New Chat preset resolution', () => {
     const keepAgent = resolveCategoryPreset({ model: 'claude-opus-5-5' }, context({ currentAgent: 'ekko-agent' }))
     expect(keepAgent.agent).toBeUndefined()
     expect(keepAgent.provider).toBe('anthropic')
+  })
+
+  it('treats Cursor like the panel: always global, no launch-mode choice, no provider/model', () => {
+    const cursor = resolveCategoryPreset(
+      { agent: 'cursor', agentMode: 'scoped', provider: 'anthropic', model: 'claude-opus-5-5', apiMode: 'anthropic_messages', baseUrl: 'https://gw.test/v1', workspace: '/p/app' },
+      context({ currentAgent: 'claude-code', currentAgentMode: 'scoped' }),
+    )
+    // The stored launch mode, provider, model, API mode and Base URL are unused (not stale): no warnings.
+    expect(cursor).toEqual({ agent: 'cursor', profile: 'default', workspace: '/p/app', warnings: [] })
+    expect(effectiveNewChatMode('cursor', 'scoped')).toBe('global')
+    expect(usesProviderModel('cursor', 'scoped')).toBe(false)
+    expect(hasLaunchModeChoice('cursor')).toBe(false)
+    // MoA and DSH presets never apply to Cursor.
+    expect(resolveCategoryPreset({ agent: 'cursor', modelKind: 'moa', agentPreset: 'planner' }, context()))
+      .toEqual({ agent: 'cursor', profile: 'default', warnings: [] })
+  })
+
+  it('offers a launch-mode choice only to external coding agents without a fixed mode', () => {
+    expect(hasLaunchModeChoice('hermes')).toBe(false)
+    expect(hasLaunchModeChoice('ekko-agent')).toBe(false)
+    expect(hasLaunchModeChoice('cursor')).toBe(false)
+    for (const agent of ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] as const) {
+      expect(hasLaunchModeChoice(agent), agent).toBe(true)
+    }
+    expect(effectiveNewChatMode('ekko-agent', 'global')).toBe('scoped')
+  })
+
+  it('lists the same agents in the same order as the New Chat panel picker (#3199)', () => {
+    expect(NEW_CHAT_AGENT_OPTIONS.map((option) => option.value)).toEqual(AGENT_OPTIONS.map((option) => option.value))
+    expect(NEW_CHAT_AGENT_OPTIONS.map((option) => option.value)).toContain('cursor')
   })
 
   it('ignores fields that are not preset fields, such as reasoningEffort (CL-016)', () => {
