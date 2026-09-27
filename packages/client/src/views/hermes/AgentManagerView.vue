@@ -284,6 +284,29 @@ async function loadCachedStatus() {
   }
 }
 
+let checkingExternalInstallation = false
+let managerMounted = false
+
+async function checkExternalCursorInstallation() {
+  // Cursor is installed outside Studio. Returning from its guide or a terminal
+  // must probe the CLI again instead of reusing the startup inventory.
+  if (!managerMounted || document.visibilityState === 'hidden' || loading.value
+    || installing.value.cursor || checkingExternalInstallation
+    || !toolStatus('cursor') || toolStatus('cursor')?.installed) return
+  checkingExternalInstallation = true
+  try {
+    const result = await fetchCodingAgentsStatus()
+    if (managerMounted) {
+      tools.value = result.tools
+      loadError.value = ''
+    }
+  } catch (error) {
+    if (managerMounted) loadError.value = errorMessage(error)
+  } finally {
+    checkingExternalInstallation = false
+  }
+}
+
 async function refreshAll() {
   loading.value = true
   loadError.value = ''
@@ -420,6 +443,9 @@ async function handleCheckUpdate(id: CodingAgentId) {
 }
 
 onMounted(() => {
+  managerMounted = true
+  window.addEventListener('focus', checkExternalCursorInstallation)
+  document.addEventListener('visibilitychange', checkExternalCursorInstallation)
   if (route.query.runtime === 'install') {
     runtimeManagerVisible.value = true
     const query = { ...route.query }
@@ -428,6 +454,12 @@ onMounted(() => {
   }
   void loadCachedStatus()
   void maybePromptLegacyWindowsDataMigration()
+})
+
+onUnmounted(() => {
+  managerMounted = false
+  window.removeEventListener('focus', checkExternalCursorInstallation)
+  document.removeEventListener('visibilitychange', checkExternalCursorInstallation)
 })
 </script>
 
