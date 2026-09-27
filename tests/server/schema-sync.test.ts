@@ -219,6 +219,28 @@ describe('Database Schema Synchronization', () => {
   })
 
   describe('Safe additive schema changes', () => {
+    it('adds the workflow quality table when upgrading an already-current node session schema', async () => {
+      const {
+        initAllHermesTables,
+        WORKFLOW_RUN_NODE_SESSIONS_SCHEMA,
+        WORKFLOW_RUN_NODE_SESSIONS_TABLE,
+        WORKFLOW_RUN_NODE_SESSIONS_INDEXES,
+        WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE,
+      } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+      const db = getTestDb()
+      const columns = Object.entries(WORKFLOW_RUN_NODE_SESSIONS_SCHEMA)
+        .map(([name, definition]) => `"${name}" ${definition}`)
+        .join(', ')
+      db.exec(`CREATE TABLE "${WORKFLOW_RUN_NODE_SESSIONS_TABLE}" (${columns})`)
+      for (const sql of Object.values(WORKFLOW_RUN_NODE_SESSIONS_INDEXES)) db.exec(sql)
+      expect(tableExists(db, WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE)).toBe(false)
+
+      expect(() => initAllHermesTables()).not.toThrow()
+      expect(tableExists(db, WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE)).toBe(true)
+      expect(db.prepare(`SELECT name FROM sqlite_master WHERE type='index' AND name='uniq_workflow_quality_attempt'`).get()).toBeTruthy()
+      expect(() => initAllHermesTables()).not.toThrow()
+    })
+
     it('migrates legacy workflow node sessions before creating the execution identity index', async () => {
       const {
         initAllHermesTables,

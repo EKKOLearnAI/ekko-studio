@@ -1310,6 +1310,9 @@ function syncWorkflowRunNodeSessions(
 
   if (!needsMigration) {
     syncTable(WORKFLOW_RUN_NODE_SESSIONS_TABLE, WORKFLOW_RUN_NODE_SESSIONS_SCHEMA)
+    syncTable(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA, {
+      indexes: WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES,
+    })
     return
   }
 
@@ -1322,6 +1325,9 @@ function syncWorkflowRunNodeSessions(
     ).run()
     db.exec('DROP INDEX IF EXISTS uniq_workflow_run_node_sessions_run_node')
     createIndexes(db, WORKFLOW_RUN_NODE_SESSIONS_INDEXES)
+    syncTable(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA, {
+      indexes: WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES,
+    })
     db.exec('COMMIT')
   } catch (error) {
     db.exec('ROLLBACK')
