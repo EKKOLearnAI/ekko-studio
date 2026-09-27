@@ -538,6 +538,16 @@ def _apply_openrouter_attribution_override() -> None:
         pass
 
 
+def _load_yaml_module():
+    """Use Hermes' YAML policy, with PyYAML support for older runtimes."""
+    try:
+        return importlib.import_module("hermes_yaml")
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_yaml":
+            raise
+        return importlib.import_module("yaml")
+
+
 def _load_cfg(profile: str | None = None) -> dict[str, Any]:
     _ensure_agent_imports()
     try:
@@ -547,7 +557,7 @@ def _load_cfg(profile: str | None = None) -> dict[str, Any]:
         return cfg if isinstance(cfg, dict) else {}
     except Exception:
         try:
-            import yaml
+            yaml = _load_yaml_module()
 
             path = _hermes_home() / "config.yaml"
             if not path.exists():
@@ -666,7 +676,7 @@ def _refresh_terminal_env() -> None:
     if not config_path.exists():
         return
     try:
-        import yaml
+        yaml = _load_yaml_module()
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
         terminal_cfg = cfg.get("terminal", {})
