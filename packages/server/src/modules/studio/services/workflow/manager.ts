@@ -2169,7 +2169,8 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
             runId: run.id,
             nodeStatuses: { ...nodeStatuses },
           })
-          updateWorkflowRunNodeSession(nodeSession.id, { status: 'completed', finished_at: Date.now(), error: null })
+          const completedNodeSession = updateWorkflowRunNodeSession(nodeSession.id, { status: 'completed', finished_at: Date.now(), error: null })
+          if (completedNodeSession) scheduleWorkflowQualityReview({ run, node, nodeSession: completedNodeSession, input: assembledInput, output })
           return { node, ok: true }
           })()
           inFlight.set(node.id, execution)
