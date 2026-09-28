@@ -31,6 +31,35 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('JEV settings', () => {
+  it('round-trips all group and workflow fields, explicit false and partial saves per Profile', async () => {
+    const options = { groupSummaryReviewEnabled: true, groupSummaryReviewMinConfidence: .9,
+      groupSummaryRevisionEnabled: true, groupSummaryReviewTimeoutMs: 1200,
+      workflowQualityEnabled: true, workflowQualityMinConfidence: .95, workflowQualityTimeoutMs: 1400,
+      groupMessageRoutingEnabled: true, groupMessageRoutingMinConfidence: .85, groupMessageRoutingMode: 'auto',
+      groupMessageRoutingTimeoutMs: 1600, groupHandoffReviewEnabled: false, groupLoopDetectionEnabled: false }
+    const saved = await saveJevSettings('research', options)
+    expect(saved).toMatchObject({ ...options, hasApiKey: false })
+    await saveJevSettings('research', { model: 'edited', groupSummaryReviewEnabled: false,
+      groupSummaryRevisionEnabled: false, workflowQualityEnabled: false, groupMessageRoutingEnabled: false })
+    expect(await getJevSettings('research')).toMatchObject({ ...options, model: 'edited', groupSummaryReviewEnabled: false,
+      groupSummaryRevisionEnabled: false, workflowQualityEnabled: false, groupMessageRoutingEnabled: false })
+    const defaults = { groupSummaryReviewEnabled: false, groupSummaryRevisionEnabled: false, workflowQualityEnabled: false,
+      groupMessageRoutingEnabled: false, groupHandoffReviewEnabled: true, groupLoopDetectionEnabled: true,
+      groupMessageRoutingMode: 'suggest', groupSummaryReviewTimeoutMs: 3000, workflowQualityTimeoutMs: 5000, groupMessageRoutingTimeoutMs: 1500 }
+    expect(await getJevSettings('default')).toMatchObject(defaults)
+    expect(await deleteJevSettings('research')).toMatchObject(defaults)
+  })
+
+  it.each([
+    { groupSummaryReviewEnabled: 'true' }, { groupSummaryRevisionEnabled: 1 }, { workflowQualityEnabled: null },
+    { groupMessageRoutingEnabled: 1 }, { groupHandoffReviewEnabled: 'false' }, { groupLoopDetectionEnabled: null },
+    { groupMessageRoutingMode: 'invalid' }, { groupSummaryReviewMinConfidence: .49 },
+    { workflowQualityMinConfidence: 1.01 }, { groupMessageRoutingMinConfidence: '0.9' },
+    { groupSummaryReviewTimeoutMs: 99 }, { workflowQualityTimeoutMs: 30001 }, { groupMessageRoutingTimeoutMs: 100.5 },
+  ])('rejects invalid group/workflow configuration %j', async input => {
+    await expect(saveJevSettings('research', input)).rejects.toMatchObject({ code: 'jev_invalid_request' })
+  })
+
   it('round-trips browser switches and options per Profile without leaking them into standalone config', async () => {
     const defaults = { browserMatchEnabled: false, browserMatchCandidateLimit: 20, browserMatchMinConfidence: 0.8,
       browserMatchTimeoutMs: 3000, browserVerifyEnabled: false, browserVerifyMinConfidence: 0.8, browserVerifyTimeoutMs: 3000 }

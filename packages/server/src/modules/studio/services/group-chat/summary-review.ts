@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { noul, createJevSidecar, hashJevCanonical, type JevSettings, type JevSidecarAdapter, type JevSidecarTaskSpec } from '../../public/jev'
+import { noul, createJevSidecar, hashJevCanonical, type JevSettings, type JevSidecarAdapter, type JevSidecarTaskSpec, type JevGenerationContext } from '../../public/jev'
 import type { CleanGroupMessage, GroupRoomSummary } from './room-summary'
 
 export type GroupSummaryReviewDecision = 'pass' | 'needs_improvement' | 'unknown'
@@ -36,7 +36,7 @@ export class GroupSummaryReviewService {
   private readonly sidecar
   constructor(
     private readonly storage: GroupSummaryReviewStorage,
-    private readonly revise?: (input: CommittedGroupSummary) => Promise<string>,
+    private readonly revise?: (input: CommittedGroupSummary, context: JevGenerationContext) => Promise<string>,
     private readonly notify?: (roomId: string) => void,
   ) {
     const adapter: JevSidecarAdapter<{ record: GroupSummaryReviewRecord; revision?: { expected: { roomId: string; generation: number; version: number; summaryHash: string; anchor: string; turnCount: number }; nextText: string } }, boolean> = {
@@ -44,11 +44,14 @@ export class GroupSummaryReviewService {
       maxJevCalls: 2, maxGenerationCalls: 1,
       parsePolicy: (settings: JevSettings) => ({ enabled: settings.groupSummaryReviewEnabled,
         budgetMs: settings.groupSummaryReviewTimeoutMs, policy: { minConfidence: settings.groupSummaryReviewMinConfidence, revisionEnabled: settings.groupSummaryRevisionEnabled } }),
+      isStageEnabled: (settings, stage, request) => !(stage === 'revision_generate' || stage === 'reevaluate' || request?.revision)
+        || settings.groupSummaryRevisionEnabled,
       eligibility: () => ({ eligible: true }),
       readAuthority: async (ref, expected) => {
         const room = this.storage.getRoom(ref.object.id)
         const summary = this.storage.getRoomSummary(ref.object.id)
         if (!room || !summary) return { allowed: false, reason: 'object_deleted' }
+        if (String(room.summaryProfile || 'default') !== ref.profile) return { allowed: false, reason: 'profile_access_revoked' }
         const currentHash = summary.version === Number(expected.sourceKey.split(':').at(-1)) ? hashJevCanonical(summary.summary) : ''
         if (currentHash !== expected.sourceHash) return { allowed: false, reason: 'source_changed' }
         return { allowed: true }
@@ -58,6 +61,9 @@ export class GroupSummaryReviewService {
     this.sidecar = createJevSidecar({ adapters: [adapter], observe: () => undefined })
   }
 
+  cancelRoom(roomId: string): void { this.sidecar.cancel({ sourceKey: roomId }) }
+  close(): void { this.sidecar.close() }
+
   schedule(input: CommittedGroupSummary): void {
     const room = this.storage.getRoom(input.summary.roomId)
     if (!room) return
@@ -66,7 +72,7 @@ export class GroupSummaryReviewService {
     const inputHash = hashJevCanonical({ version: 1, roomId: input.summary.roomId, sourceVersion: input.summary.version, state })
     const sourceKey = `group-summary:${input.summary.roomId}:${input.summary.version}`
     const task: JevSidecarTaskSpec<{ record: GroupSummaryReviewRecord; revision?: { expected: { roomId: string; generation: number; version: number; summaryHash: string; anchor: string; turnCount: number }; nextText: string } }, boolean> = {
-      integrationId: 'group-summary-review', sourceKey, attemptId: inputHash, createdAt: Date.now(), input: state,
+      integrationId: 'group-summary-review', sourceKey: input.summary.roomId, attemptId: inputHash, createdAt: Date.now(), input: state,
       identity: { actor: { type: 'room-owner', id: String(room.ownerAuthUserId || 'local') },
         authority: { type: 'room-profile', id: String(room.summaryProfile || input.profile) },
         profile: String(room.summaryProfile || input.profile), object: { type: 'group-room', id: input.summary.roomId } },
@@ -87,7 +93,9 @@ export class GroupSummaryReviewService {
         let revision: { expected: { roomId: string; generation: number; version: number; summaryHash: string; anchor: string; turnCount: number }; nextText: string } | undefined
         if (decision === 'needs_improvement' && snapshot.value.policy.revisionEnabled === true && this.revise) {
           try {
-            const revised = (await this.revise(input)).trim()
+            const generated = await ctx.generate(snapshot.value, task.expected, context => this.revise!(input, context))
+            if (generated.kind !== 'completed') return
+            const revised = generated.value.trim()
             if (revised && revised !== input.summary.summary.trim()) {
               const reevaluated = await ctx.evaluate(snapshot.value, { state: { ...state, candidate_summary: revised }, questions }, task.expected, 'reevaluate')
               if (reevaluated.kind === 'completed') {

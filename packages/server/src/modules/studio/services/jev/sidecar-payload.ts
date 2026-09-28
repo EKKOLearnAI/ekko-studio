@@ -82,3 +82,24 @@ export function prepareTrustedJevRequest<Q extends Questions>(
   if (bytes > JEV_SIDECAR_REQUEST_BYTES) throw new JevSidecarInputError('input_too_large')
   return { request: parsed, serialized, bytes }
 }
+
+/** The SDK transport parses JSON; business side effects require complete, finite answers. */
+export function validJevAnswers(result: unknown, questions: Questions): boolean {
+  if (!result || typeof result !== 'object' || !('answers' in result)) return false
+  const answers = result.answers as Record<string, any> | null
+  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return false
+  const probability = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
+  return Object.entries(questions).every(([id, question]) => {
+    const answer = answers[id]
+    if (!answer || answer.type !== question.type) return false
+    if (question.type === 'noul') return probability(answer.noul)
+    if (!probability(answer.confidence)) return false
+    const labels = Object.keys(question.criteria)
+    if (!answer.probabilities || typeof answer.probabilities !== 'object'
+      || labels.some(label => !probability(answer.probabilities[label]))
+      || Object.keys(answer.probabilities).some(label => !labels.includes(label))) return false
+    if (question.type === 'choice') return typeof answer.choice === 'string' && Object.hasOwn(question.criteria, answer.choice)
+    return typeof answer.score === 'number' && Number.isFinite(answer.score)
+      && answer.score >= 0 && answer.score <= question.criteria.length - 1
+  })
+}

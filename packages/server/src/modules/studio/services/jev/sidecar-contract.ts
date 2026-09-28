@@ -51,7 +51,8 @@ export type JevAuthorityDecision =
   | { allowed: true }
   | { allowed: false; reason: Extract<JevSidecarReason,
       'disabled' | 'settings_unavailable' | 'authorization_unavailable' | 'profile_access_revoked'
-      | 'requester_access_revoked' | 'requester_unverifiable' | 'object_deleted' | 'source_changed' | 'superseded'> }
+      | 'requester_access_revoked' | 'requester_unverifiable' | 'object_deleted' | 'source_changed' | 'superseded'
+      | 'caller_cancelled' | 'deadline_exceeded'> }
 
 export interface JevSidecarPolicySnapshot {
   enabled: boolean
@@ -66,6 +67,7 @@ export interface JevSidecarAdapter<ApplyRequest = unknown, ApplyResult = unknown
   maxJevCalls: number
   maxGenerationCalls: number
   parsePolicy(settings: Readonly<JevSettings>): JevSidecarPolicySnapshot
+  isStageEnabled?(settings: Readonly<JevSettings>, stage: JevSidecarStage, request?: ApplyRequest): boolean
   eligibility(input: unknown): { eligible: true } | { eligible: false; reason: JevSidecarReason }
   readAuthority(
     ref: JevSidecarIdentityRef,
@@ -86,6 +88,12 @@ export interface JevSnapshotHandle {
 export type TrustedJevRequest<Q extends Questions = Questions> = SystemOneRequest<Q>
 export type ValidatedJevResult<Q extends Questions = Questions> = SystemOneResult<Q>
 
+export interface JevGenerationContext {
+  signal: AbortSignal
+  /** Recheck immediately before each physical model request, after provider setup. */
+  beforeDispatch(): Promise<void>
+}
+
 export interface JevSidecarTaskContext<ApplyRequest = unknown, ApplyResult = unknown> {
   snapshot(): Promise<JevSidecarOutcome<JevSnapshotHandle>>
   evaluate<Q extends Questions>(
@@ -94,6 +102,11 @@ export interface JevSidecarTaskContext<ApplyRequest = unknown, ApplyResult = unk
     expected: JevAuthorityExpectation,
     stage?: 'evaluate' | 'reevaluate',
   ): Promise<JevSidecarOutcome<ValidatedJevResult<Q>>>
+  generate<T>(
+    handle: JevSnapshotHandle,
+    expected: JevAuthorityExpectation,
+    operation: (context: JevGenerationContext) => Promise<T>,
+  ): Promise<JevSidecarOutcome<T>>
   apply(
     expected: JevAuthorityExpectation,
     request: ApplyRequest,
@@ -123,5 +136,6 @@ export interface JevSidecarStatus {
   logicalActive: number
   physicalReads: number
   physicalRequests: number
+  physicalGenerations: number
   closed: boolean
 }

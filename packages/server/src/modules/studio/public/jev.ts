@@ -9,6 +9,6 @@ export type {
   JevAuthorityDecision, JevAuthorityExpectation, JevScheduleReceipt, JevSidecarAdapter,
   JevSidecarDiagnostic, JevSidecarIdentityRef, JevSidecarOutcome, JevSidecarPolicySnapshot,
   JevSidecarReason, JevSidecarStatus, JevSidecarTaskContext, JevSidecarTaskSpec,
-  JevSnapshotHandle, TrustedJevRequest, ValidatedJevResult,
+  JevSnapshotHandle, TrustedJevRequest, ValidatedJevResult, JevGenerationContext,
 } from '../services/jev/sidecar-contract'
 export { hashJevCanonical } from '../services/jev/sidecar-payload'

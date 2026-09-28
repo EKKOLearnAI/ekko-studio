@@ -18,12 +18,24 @@ export class JevSidecarBudget {
     private readonly signal: AbortSignal,
     private readonly clock: MonotonicClock = systemMonotonicClock,
     acceptedAt?: number,
+    private readonly hardDeadline = Infinity,
   ) {
     this.acceptedAt = acceptedAt ?? clock.now()
-    this.deadline = this.acceptedAt + Math.max(0, budgetMs)
+    this.deadline = Math.min(this.acceptedAt + Math.max(0, budgetMs), hardDeadline)
   }
   tighten(budgetMs: number): void { this.deadline = Math.min(this.deadline, this.acceptedAt + Math.max(0, budgetMs)) }
   remaining(): number { return Math.max(0, this.deadline - this.clock.now()) }
+  /** Only the separately bounded generation stage may pause the JEV allowance. */
+  pause(): () => void {
+    this.check()
+    const started = this.clock.now()
+    let resumed = false
+    return () => {
+      if (resumed) return
+      resumed = true
+      this.deadline = Math.min(this.hardDeadline, this.deadline + Math.max(0, this.clock.now() - started))
+    }
+  }
   check(): void {
     if (this.signal.aborted) throw new JevSidecarDeadlineError('caller_cancelled')
     if (this.remaining() <= 0) throw new JevSidecarDeadlineError('deadline_exceeded')

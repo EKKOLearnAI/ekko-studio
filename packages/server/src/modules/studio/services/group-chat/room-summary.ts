@@ -9,6 +9,7 @@ import {
 import { logger } from '../../public/logging'
 import { countTokens } from '../context-compressor'
 import { sortGroupMessagesCanonical } from './group-message-ordering'
+import type { JevGenerationContext } from '../../public/jev'
 
 export type GroupRoomSummaryStatus = 'idle' | 'summarizing' | 'success' | 'failed'
 
@@ -587,16 +588,20 @@ export class GroupRoomSummaryService {
     this.onStatus?.(summary)
   }
 
-  async reviseCommittedSummary(input: { profile: string; provider: string; model: string; apiMode: string; previousSummary: string; candidateSummary: string; messages: CleanGroupMessage[]; roomId: string }): Promise<string> {
+  async reviseCommittedSummary(input: { profile: string; provider: string; model: string; apiMode: string; previousSummary: string; candidateSummary: string; messages: CleanGroupMessage[]; roomId: string }, context: JevGenerationContext): Promise<string> {
     const runtimeConfig = await resolveGroupEkkoProviderRuntimeConfig({ profile: input.profile, provider: input.provider, model: input.model, apiMode: input.apiMode || undefined })
     const { providerConfig } = resolveGroupEkkoModelProviderConfigs({ provider: runtimeConfig.provider, baseUrl: runtimeConfig.baseUrl,
       apiKey: runtimeConfig.apiKey, model: input.model, apiMode: runtimeConfig.apiMode, timeoutMs: 30_000 })
+    const authorizedFetch = createGroupEkkoAuthorizedProviderFetch({
+      profile: input.profile, provider: input.provider, model: input.model, accessToken: runtimeConfig.apiKey })
     const result = await getGroupEkkoAgent(input.profile).runIsolated({
-      modelClient: createGroupEkkoModelClient(providerConfig, { fetch: createGroupEkkoAuthorizedProviderFetch({
-        profile: input.profile, provider: input.provider, model: input.model, accessToken: runtimeConfig.apiKey }) }),
+      modelClient: createGroupEkkoModelClient(providerConfig, { fetch: async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        await context.beforeDispatch()
+        return authorizedFetch(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, context.signal]) : context.signal })
+      } }),
       toolsEnabled: false, skillsEnabled: false, systemPrompt: GROUP_SUMMARY_REVISION_SYSTEM_PROMPT,
       maxSteps: 1, maxModelRetries: 0, modelDefaults: { model: input.model },
-    }, { messages: [{ role: 'user', content: buildGroupSummaryRevisionPrompt(input) }], memoryEnabled: false,
+    }, { messages: [{ role: 'user', content: buildGroupSummaryRevisionPrompt(input) }], memoryEnabled: false, signal: context.signal,
       metadata: { purpose: 'group-chat-summary-revision', room_id: input.roomId, profile: input.profile,
         session_id: `gc_summary_revision_${randomUUID()}` }, logContext: { profile: input.profile, sessionId: `gc-summary-revision:${input.roomId}` } })
     const output = String(result.output.content || '').trim()

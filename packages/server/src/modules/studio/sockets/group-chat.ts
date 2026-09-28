@@ -2407,6 +2407,7 @@ class ChatStorage {
           const member = db.prepare('SELECT 1 FROM gc_room_members WHERE roomId = ? AND userId = ?').get(decision.roomId, requesterMemberId)
           const agent = db.prepare('SELECT 1 FROM gc_room_agents WHERE roomId = ? AND agentId = ? AND removedAt = 0').get(decision.roomId, decision.targetAgentId)
           if (!context || !message || !member || !agent || message.senderId !== requesterMemberId || context.messageHash !== decision.messageHash) return null
+          if (message.roomId !== decision.roomId || hashGroupRoutingMessage({ ...message, mentions: JSON.parse(message.mentions || '[]') }) !== decision.messageHash) return null
           const sequence=Number((db.prepare('SELECT COALESCE(MAX(sequence),0)+1 sequence FROM gc_execution_queue WHERE roomId=?').get(decision.roomId) as any).sequence);const queueId=randomUUID();const now=Date.now()
           db.prepare(`INSERT INTO gc_execution_queue (id,roomId,messageId,targetAgentId,targetAgentName,requesterMemberId,cancelCapabilityHash,textSummary,sequence,status,createdAt) VALUES (?,?,?,?,?,?,?,?,?,'queued',?)`).run(queueId,decision.roomId,decision.messageId,decision.targetAgentId,decision.targetAgentName,requesterMemberId,'',text.replace(/\s+/g,' ').slice(0,160),sequence,now)
           db.prepare(`INSERT INTO gc_message_routing_claims (messageId,roomId,targetAgentId,queueId,status,createdAt,updatedAt) VALUES (?,?,?,?,'queued',?,?)`).run(decision.messageId,decision.roomId,decision.targetAgentId,queueId,now,now)
@@ -3252,6 +3253,7 @@ export class GroupChatServer {
     private socketAuthUserIdMap = new Map<string, number>()
     readonly agentClients = new AgentClients()
     private roomSummaryService: GroupRoomSummaryService
+    private summaryReviewService: GroupSummaryReviewService
     private messageRoutingService: GroupMessageRoutingService
     private _restoreScheduled = false
     private handoffDispatcherTimer: ReturnType<typeof setInterval> | null = null
@@ -3460,17 +3462,16 @@ export class GroupChatServer {
 
         logger.info('[GroupChat] Socket.IO ready at /group-chat')
 
-        let summaryReviewService: GroupSummaryReviewService
         this.roomSummaryService = new GroupRoomSummaryService(this.storage, (summary) => {
             this.nsp.to(summary.roomId).emit('room_summary_updated', summary)
-        }, undefined, committed => summaryReviewService.schedule(committed))
-        summaryReviewService = new GroupSummaryReviewService(this.storage, async committed => {
+        }, undefined, committed => this.summaryReviewService.schedule(committed))
+        this.summaryReviewService = new GroupSummaryReviewService(this.storage, async (committed, context) => {
             const room = this.storage.getRoom(committed.summary.roomId)
             if (!room) throw new Error('Room not found')
             return this.roomSummaryService.reviseCommittedSummary({ profile: String(room.summaryProfile),
                 provider: room.summaryProvider, model: room.summaryModel, apiMode: room.summaryApiMode,
                 previousSummary: committed.previous.summary, candidateSummary: committed.summary.summary,
-                messages: committed.messages, roomId: committed.summary.roomId })
+                messages: committed.messages, roomId: committed.summary.roomId }, context)
         }, roomId => {
             const review = this.storage.getLatestSummaryReview(roomId)
             this.nsp.to(roomId).emit('room_summary_review_updated', review)
@@ -3490,6 +3491,10 @@ export class GroupChatServer {
             }
         })
         this.messageRoutingService = messageRoutingService
+        for (const server of servers) server.once('close', () => {
+            this.summaryReviewService.close()
+            this.messageRoutingService.close()
+        })
         this.agentClients.setStorage(this.storage)
         this.storage.setRoomAgentOnlineProvider((roomId, agentId) =>
             this.agentClients.getAgent(roomId, agentId)?.connected === true
@@ -3975,6 +3980,8 @@ export class GroupChatServer {
     }
 
     async clearRoomRuntimeState(roomId: string): Promise<void> {
+        this.summaryReviewService?.cancelRoom(roomId)
+        this.messageRoutingService?.cancelRoom(roomId)
         const roomTyping = this.typingState.get(roomId)
         if (roomTyping) {
             for (const entry of roomTyping.values()) clearTimeout(entry.timer)
@@ -3997,6 +4004,8 @@ export class GroupChatServer {
     }
 
     async deleteRoomRuntimeState(roomId: string): Promise<void> {
+        this.summaryReviewService?.cancelRoom(roomId)
+        this.messageRoutingService?.cancelRoom(roomId)
         const roomTyping = this.typingState.get(roomId)
         if (roomTyping) {
             for (const entry of roomTyping.values()) clearTimeout(entry.timer)

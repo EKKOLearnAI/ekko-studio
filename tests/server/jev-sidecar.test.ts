@@ -42,6 +42,109 @@ async function waitFor(check: () => boolean, timeout = 2000) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('JEV sidecar', () => {
+  it.each(['disabled', 'removed-key', 'rotated-key', 'provider-changed', 'settings-error'])('blocks apply after %s and keeps the task terminal', async change => {
+    let current = settings({ groupSummaryReviewEnabled: true })
+    let settingsError = false
+    const apply = vi.fn(() => true)
+    const sidecar = createJevSidecar({ adapters: [adapter({
+      parsePolicy: value => ({ enabled: value.groupSummaryReviewEnabled, budgetMs: 1000, policy: {} }), apply,
+    })], readSettings: async () => { if (settingsError) throw Error('unavailable'); return current } })
+    const outcomes: JevSidecarOutcome<any>[] = []
+    sidecar.trySchedule({ integrationId: 'test-review', identity, expected: expectation, sourceKey: 'source', attemptId: change,
+      createdAt: Date.now(), input: {}, async run(ctx) {
+        const snapshot = await ctx.snapshot(); if (snapshot.kind !== 'completed') return
+        if (change === 'disabled') current = { ...current, groupSummaryReviewEnabled: false }
+        if (change === 'removed-key') current = { ...current, apiKey: '' }
+        if (change === 'rotated-key') current = { ...current, apiKey: 'new-key' }
+        if (change === 'provider-changed') current = { ...current, baseUrl: 'https://other.example.test' }
+        if (change === 'settings-error') settingsError = true
+        outcomes.push(await ctx.apply(expectation, {}))
+        settingsError = false; current = settings({ groupSummaryReviewEnabled: true })
+        outcomes.push(await ctx.apply(expectation, {}))
+      } })
+    await waitFor(() => outcomes.length === 2)
+    expect(outcomes[0]).toMatchObject({ kind: 'skipped', terminal: true })
+    expect(outcomes[1]).toEqual(outcomes[0])
+    expect(apply).not.toHaveBeenCalled()
+    sidecar.close()
+  })
+
+  it('keeps the remaining JEV allowance across a separately bounded generation', async () => {
+    let mono = 0
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(response)))
+    const apply = vi.fn(() => true)
+    const sidecar = createJevSidecar({ adapters: [adapter({ maxGenerationCalls: 1, apply })],
+      readSettings: async () => settings(), clock: { now: () => mono } })
+    let outcome: JevSidecarOutcome<any> | undefined
+    sidecar.trySchedule({ integrationId: 'test-review', identity, expected: expectation, sourceKey: 'source', attemptId: 'generation',
+      createdAt: Date.now(), input: {}, async run(ctx) {
+        const snapshot = await ctx.snapshot(); if (snapshot.kind !== 'completed') return
+        mono = 200
+        await ctx.evaluate(snapshot.value, { state: {}, questions: question }, expectation)
+        await ctx.generate(snapshot.value, expectation, async context => {
+          mono += 20_000; await context.beforeDispatch(); return 'revision'
+        })
+        mono += 100
+        await ctx.evaluate(snapshot.value, { state: {}, questions: question }, expectation, 'reevaluate')
+        outcome = await ctx.apply(expectation, {})
+      } })
+    await waitFor(() => outcome !== undefined)
+    expect(outcome).toMatchObject({ kind: 'completed', value: true })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(apply).toHaveBeenCalledTimes(1)
+    sidecar.close()
+  })
+
+  it.each(['cancel', 'timeout'])('bounds a hung generation on %s while retaining its physical slot', async event => {
+    vi.useFakeTimers()
+    const apply = vi.fn()
+    const sidecar = createJevSidecar({ adapters: [adapter({ maxGenerationCalls: 1, apply })], readSettings: async () => settings() })
+    let finishGeneration!: (value: string) => void
+    let generationSignal: AbortSignal | undefined
+    let outcome: JevSidecarOutcome<any> | undefined
+    try {
+      sidecar.trySchedule({ integrationId: 'test-review', identity, expected: expectation, sourceKey: 'source', attemptId: event,
+        createdAt: Date.now(), input: {}, async run(ctx) {
+          const snapshot = await ctx.snapshot(); if (snapshot.kind !== 'completed') return
+          outcome = await ctx.generate(snapshot.value, expectation, context => {
+            generationSignal = context.signal
+            return new Promise<string>(resolve => { finishGeneration = resolve })
+          })
+          await ctx.apply(expectation, {})
+        } })
+      await vi.waitFor(() => expect(generationSignal).toBeDefined())
+      if (event === 'cancel') sidecar.cancel({ sourceKey: 'source' })
+      else await vi.advanceTimersByTimeAsync(30_001)
+      await vi.waitFor(() => expect(outcome).toBeDefined())
+      expect(outcome).toMatchObject({ kind: event === 'cancel' ? 'cancelled' : 'skipped',
+        reason: event === 'cancel' ? 'caller_cancelled' : 'deadline_exceeded' })
+      expect(generationSignal?.aborted).toBe(true)
+      expect(sidecar.status().physicalGenerations).toBe(1)
+      expect(apply).not.toHaveBeenCalled()
+      finishGeneration('late revision')
+      await vi.waitFor(() => expect(sidecar.status().physicalGenerations).toBe(0))
+      expect(apply).not.toHaveBeenCalled()
+    } finally { finishGeneration?.('cleanup'); sidecar.close(); vi.useRealTimers() }
+  })
+
+  it('does not extend the parent deadline during generation', async () => {
+    let mono = 0
+    const apply = vi.fn()
+    const sidecar = createJevSidecar({ adapters: [adapter({ maxGenerationCalls: 1, apply })],
+      readSettings: async () => settings(), clock: { now: () => mono }, wallNow: () => 0 })
+    let outcome: JevSidecarOutcome<any> | undefined
+    sidecar.trySchedule({ integrationId: 'test-review', identity, expected: expectation, sourceKey: 'source', attemptId: 'parent-generation',
+      createdAt: 0, parentDeadlineAt: 500, input: {}, async run(ctx) {
+        const snapshot = await ctx.snapshot(); if (snapshot.kind !== 'completed') return
+        await ctx.generate(snapshot.value, expectation, async () => { mono = 501; return 'late' })
+        outcome = await ctx.apply(expectation, {})
+      } })
+    await waitFor(() => outcome !== undefined)
+    expect(outcome).toMatchObject({ kind: 'skipped', reason: 'deadline_exceeded' })
+    expect(apply).not.toHaveBeenCalled()
+    sidecar.close()
+  })
+
   it('snapshots policy without serializing credentials and applies through the typed adapter port', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json(response)))
     let captured: JevSnapshotHandle | undefined

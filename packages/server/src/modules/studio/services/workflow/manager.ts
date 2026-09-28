@@ -32,7 +32,7 @@ import {
   type WorkflowRunNodeStatus,
   type WorkflowRunRecord,
 } from '../../repositories/workflow-run-store'
-import { scheduleWorkflowQualityReview } from './quality-review'
+import { cancelWorkflowQualityReviews, scheduleWorkflowQualityReview } from './quality-review'
 import { createSession, deleteSession, getSession, getSessionDetail } from '../../repositories/session-store'
 import type { ContentBlock } from '../../contracts/runs/session'
 import type { AuthenticatedUser } from '../../public/auth'
@@ -1182,6 +1182,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
     if (!run || run.workflow_id !== workflowId) return null
     if (run.status !== 'queued' && run.status !== 'running') return run
     this.canceledRunIds.add(runId)
+    cancelWorkflowQualityReviews(runId)
     this.cancelPendingNodeApprovals(runId)
     const finishedAt = Date.now()
     const nodeStatuses: Record<string, WorkflowRuntimeState> = {}

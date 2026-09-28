@@ -9,7 +9,7 @@ import {
   type JevSidecarStatus, type JevSidecarTaskContext, type JevSidecarTaskSpec,
   type JevSnapshotHandle, type TrustedJevRequest,
 } from './sidecar-contract'
-import { boundedQueueInput, JevSidecarInputError, prepareTrustedJevRequest } from './sidecar-payload'
+import { boundedQueueInput, JevSidecarInputError, prepareTrustedJevRequest, validJevAnswers } from './sidecar-payload'
 import { JevPhysicalSlots, JevSidecarQueue } from './sidecar-queue'
 import { createSidecarSnapshot, destroySidecarSnapshot, sidecarSnapshotSecret, snapshotMatchesCurrent } from './snapshot'
 
@@ -33,7 +33,12 @@ const fatalReasons = new Set<JevSidecarReason>([
   'provider_auth_failed', 'provider_error', 'invalid_result', 'cas_conflict', 'record_write_failed',
 ])
 
+// Revision generation has its own process-wide physical limit, separate from JEV.
+const generationSlots = new JevPhysicalSlots(1, 1)
+const GENERATION_BUDGET_MS = 30_000
+
 function providerReason(error: unknown): JevSidecarReason {
+  if (error && typeof error === 'object' && 'sidecarReason' in error) return error.sidecarReason as JevSidecarReason
   if (error instanceof JevSidecarDeadlineError) return error.reason
   if (error instanceof JevSidecarInputError) return error.reason
   if (error instanceof JevError) {
@@ -102,10 +107,12 @@ export function createJevSidecar(options: CreateJevSidecarOptions) {
     const signal = spec.signal ? AbortSignal.any([spec.signal, controller.signal]) : controller.signal
     let ceiling = adapter.admissionCeilingMs
     if (parentRemainingMs !== undefined) ceiling = Math.min(ceiling, parentRemainingMs)
-    const budget = new JevSidecarBudget(ceiling, signal, clock, acceptedMono)
+    const parentDeadline = parentRemainingMs === undefined ? Infinity : acceptedMono + parentRemainingMs
+    const budget = new JevSidecarBudget(ceiling, signal, clock, acceptedMono, parentDeadline)
     let handle: JevSnapshotHandle | undefined
     let terminal: JevSidecarOutcome<any> | undefined
     let jevCalls = 0
+    let generationCalls = 0
     let applied = false
     const started = clock.now()
     const diagnostic = (stage: JevSidecarDiagnostic['stage'], reason?: JevSidecarReason, inputBytes?: number): JevSidecarDiagnostic => ({
@@ -124,13 +131,13 @@ export function createJevSidecar(options: CreateJevSidecarOptions) {
       finish({ kind: 'cancelled', reason: 'caller_cancelled', terminal: true, diagnostic: diagnostic(stage, 'caller_cancelled') })
     const guard = <T>(): JevSidecarOutcome<T> | undefined => terminal as JevSidecarOutcome<T> | undefined
 
-    const boundedRead = async <T>(operation: (readSignal: AbortSignal) => Promise<T>): Promise<T> => {
-      budget.check()
+    const boundedRead = async <T>(operation: (readSignal: AbortSignal) => Promise<T>, activeBudget = budget): Promise<T> => {
+      activeBudget.check()
       const release = readSlots.tryAcquire(spec.identity.profile)
       if (!release) throw Object.assign(new Error('queue_full'), { sidecarReason: 'queue_full' as JevSidecarReason })
       let handedToPhysical = false
       try {
-        const raced = await budget.race(operation)
+        const raced = await activeBudget.race(operation)
         handedToPhysical = true
         void raced.physical.finally(release)
         return await raced.logical
@@ -143,9 +150,41 @@ export function createJevSidecar(options: CreateJevSidecarOptions) {
       boundedRead(readSignal => adapter.readAuthority(spec.identity, expected, stage, readSignal))
     const readCurrentSettings = () => boundedRead(() => readSettings(spec.identity.profile))
 
+    const gate = async (expected: JevAuthorityExpectation, stage: JevSidecarDiagnostic['stage'],
+      activeBudget = budget, requestSignal = signal, request?: unknown): Promise<JevCredentialSettings> => {
+      const fail = (reason: JevSidecarReason): never => { throw Object.assign(new Error(reason), { sidecarReason: reason }) }
+      activeBudget.check()
+      requestSignal.throwIfAborted()
+      if (terminal || !handle) fail('invalid_input')
+      let current: JevCredentialSettings
+      try { current = await boundedRead(() => readSettings(spec.identity.profile), activeBudget) } catch (error) {
+        if (providerReason(error) !== 'provider_error') throw error
+        return fail('settings_unavailable')
+      }
+      const { apiKey: _apiKey, ...nonSecret } = current
+      const settings = { ...nonSecret, hasApiKey: Boolean(current.apiKey) }
+      let enabled: boolean
+      try { enabled = adapter.parsePolicy(settings).enabled && (adapter.isStageEnabled?.(settings, stage, request) ?? true) } catch {
+        return fail('settings_unavailable')
+      }
+      if (!enabled) fail('disabled')
+      if (!snapshotMatchesCurrent(handle!, adapter.integrationId, current)) fail('configuration_changed')
+      let authority
+      try { authority = await boundedRead(readSignal => adapter.readAuthority(spec.identity, expected, stage, readSignal), activeBudget) } catch (error) {
+        if (providerReason(error) !== 'provider_error') throw error
+        return fail('authorization_unavailable')
+      }
+      if (!authority.allowed) fail(authority.reason)
+      activeBudget.check()
+      requestSignal.throwIfAborted()
+      if (terminal) fail('invalid_input')
+      return current
+    }
+
     const context: JevSidecarTaskContext<any, any> = {
       async snapshot() {
         const done = guard<JevSnapshotHandle>(); if (done) return done
+        if (handle) return { kind: 'completed', value: handle, diagnostic: diagnostic('evaluate') }
         try {
           const authority = await readAuthority(spec.expected, 'evaluate')
           if (!authority.allowed) return skip('evaluate', authority.reason)
@@ -176,39 +215,17 @@ export function createJevSidecar(options: CreateJevSidecarOptions) {
         let handedToPhysical = false
         try {
           const raced = await budget.race(async requestSignal => {
-            const gate = async () => {
-              budget.check()
-              let current: JevCredentialSettings
-              try { current = await readSettings(spec.identity.profile) } catch {
-                throw Object.assign(new Error('settings_unavailable'), { sidecarReason: 'settings_unavailable' as JevSidecarReason })
-              }
-              const { apiKey: _apiKey, ...nonSecret } = current
-              let currentPolicy
-              try { currentPolicy = adapter.parsePolicy({ ...nonSecret, hasApiKey: Boolean(current.apiKey) }) } catch {
-                throw Object.assign(new Error('settings_unavailable'), { sidecarReason: 'settings_unavailable' as JevSidecarReason })
-              }
-              if (!currentPolicy.enabled) throw Object.assign(new Error('disabled'), { sidecarReason: 'disabled' as JevSidecarReason })
-              if (!snapshotMatchesCurrent(requestedHandle, adapter.integrationId, current)) {
-                throw Object.assign(new Error('configuration_changed'), { sidecarReason: 'configuration_changed' as JevSidecarReason })
-              }
-              let authority
-              try { authority = await adapter.readAuthority(spec.identity, expected, stage, requestSignal) } catch {
-                throw Object.assign(new Error('authorization_unavailable'), { sidecarReason: 'authorization_unavailable' as JevSidecarReason })
-              }
-              if (!authority.allowed) throw Object.assign(new Error(authority.reason), { sidecarReason: authority.reason })
-              budget.check()
-              return current
-            }
-            const current = await gate()
+            const current = await gate(expected, stage, budget, requestSignal)
             return evaluateJevWithCredentials({ ...current, apiKey: secret.apiKey, baseUrl: secret.baseUrl, model: secret.model }, prepared.request, {
               signal: requestSignal,
               timeoutMs: Math.min(secret.providerTimeoutMs, current.timeoutMs, Math.max(1, budget.remaining())),
-              beforeFetch: async () => { await gate() },
+              beforeFetch: async () => { await gate(expected, stage, budget, requestSignal) },
             })
           })
           handedToPhysical = true
           void raced.physical.finally(release)
           const value = await raced.logical
+          if (!validJevAnswers(value, prepared.request.questions)) return skip(stage, 'invalid_result', prepared.bytes)
           const completed = { kind: 'completed' as const, value, diagnostic: diagnostic(stage, undefined, prepared.bytes) }
           observe(completed.diagnostic)
           return completed
@@ -218,12 +235,42 @@ export function createJevSidecar(options: CreateJevSidecarOptions) {
           return reason === 'caller_cancelled' ? cancelled(stage) : skip(stage, reason, prepared.bytes)
         }
       },
+      async generate<T>(requestedHandle: JevSnapshotHandle, expected: JevAuthorityExpectation,
+        operation: (context: import('./sidecar-contract').JevGenerationContext) => Promise<T>) {
+        const stage = 'revision_generate' as const
+        const done = guard<T>(); if (done) return done
+        if (requestedHandle !== handle || !sidecarSnapshotSecret(requestedHandle, adapter.integrationId)
+          || generationCalls >= Math.min(1, adapter.maxGenerationCalls)) return skip<T>(stage, 'invalid_input')
+        const release = generationSlots.tryAcquire(spec.identity.profile)
+        if (!release) return skip<T>(stage, 'queue_full')
+        let resume: (() => void) | undefined
+        let handedToPhysical = false
+        try {
+          resume = budget.pause()
+          generationCalls += 1
+          const generationBudget = new JevSidecarBudget(GENERATION_BUDGET_MS, signal, clock, undefined, parentDeadline)
+          const raced = await generationBudget.race(async generationSignal => {
+            const beforeDispatch = async () => { await gate(expected, stage, generationBudget, generationSignal) }
+            await beforeDispatch()
+            return operation({ signal: generationSignal, beforeDispatch })
+          })
+          handedToPhysical = true
+          void raced.physical.finally(release)
+          const value = await raced.logical
+          return finish({ kind: 'completed', value, diagnostic: diagnostic(stage) })
+        } catch (error) {
+          const reason = providerReason(error)
+          return reason === 'caller_cancelled' ? cancelled<T>(stage) : skip<T>(stage, reason)
+        } finally {
+          resume?.()
+          if (!handedToPhysical) release()
+        }
+      },
       async apply(expected: JevAuthorityExpectation, request: unknown) {
         const done = guard<any>(); if (done) return done
         if (applied || !adapter.apply) return skip('apply', 'invalid_input')
         try {
-          const authority = await readAuthority(expected, 'apply')
-          if (!authority.allowed) return skip('apply', authority.reason)
+          await gate(expected, 'apply', budget, signal, request)
           budget.check()
           const value = adapter.apply(spec.identity, expected, request)
           if (value && typeof (value as any).then === 'function') return skip('apply', 'record_write_failed')
@@ -260,7 +307,7 @@ export function createJevSidecar(options: CreateJevSidecarOptions) {
     },
     close() { queue.close(); for (const controller of controllers.values()) controller.abort() },
     status(): JevSidecarStatus { const state = queue.status(); return { queued: state.queued, logicalActive,
-      physicalReads: readSlots.active, physicalRequests: requestSlots.active, closed: state.closed } },
+      physicalReads: readSlots.active, physicalRequests: requestSlots.active, physicalGenerations: generationSlots.active, closed: state.closed } },
     instanceId: options.instanceId ?? randomUUID(),
   }
 }

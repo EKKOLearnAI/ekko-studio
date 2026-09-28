@@ -171,6 +171,20 @@ Sidecar consumers must preserve these constraints:
 - Result application uses the registered adapter's synchronous typed apply port.
   It must perform its domain CAS/claim in a short transaction; thenables are
   rejected. A fatal skip, cancellation or successful apply cannot be resumed.
+- Every evaluation, revision generation and apply rechecks the current feature
+  switch and credentials. Stage-specific switches (revision and auto routing)
+  are checked separately; disabling them prevents late results from applying.
+  Auto routing must use `ctx.apply`, including a fresh message hash check inside
+  the queue/claim transaction. Incomplete or non-finite JEV answers are terminal
+  skips, never permission to execute.
+- Revision generation uses `ctx.generate` with its own 30-second budget and a
+  process-wide physical slot. Its elapsed time preserves the remaining JEV
+  allowance, but cannot extend a parent deadline. Pass the generation signal
+  into the model runtime and call `beforeDispatch` at the provider fetch boundary.
+  A hung generation retains its physical slot after logical timeout/cancellation.
+- Workflow observations carry the run deadline, recheck persisted cancellation
+  before dispatch/application, and cancel locally when the run is stopped.
+  Completed nodes in completed/failed runs remain eligible; canceled runs do not.
 - Sidecar diagnostics contain only stable IDs, hashes, counts, durations and
   reason codes. Secrets, source text and provider bodies are excluded.
 

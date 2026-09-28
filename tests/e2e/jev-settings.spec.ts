@@ -3,11 +3,18 @@ import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 import en from '../../packages/client/src/i18n/locales/en'
 import zh from '../../packages/client/src/i18n/locales/zh'
 
+const collaborationDefaults = {
+  groupSummaryReviewEnabled: false, groupSummaryReviewMinConfidence: .8, groupSummaryRevisionEnabled: false, groupSummaryReviewTimeoutMs: 3000,
+  workflowQualityEnabled: false, workflowQualityMinConfidence: .8, workflowQualityTimeoutMs: 5000,
+  groupMessageRoutingEnabled: false, groupHandoffReviewEnabled: true, groupLoopDetectionEnabled: true,
+  groupMessageRoutingMinConfidence: .9, groupMessageRoutingMode: 'suggest', groupMessageRoutingTimeoutMs: 1500,
+}
+
 const browserDefaults = { browserMatchEnabled: false, browserMatchCandidateLimit: 20, browserMatchMinConfidence: 0.8,
   browserMatchTimeoutMs: 3000, browserVerifyEnabled: false, browserVerifyMinConfidence: 0.8, browserVerifyTimeoutMs: 3000 }
 const browserOptions = { browserMatchEnabled: true, browserMatchCandidateLimit: 12, browserMatchMinConfidence: 0.9,
   browserMatchTimeoutMs: 1100, browserVerifyEnabled: true, browserVerifyMinConfidence: 0.95, browserVerifyTimeoutMs: 1400 }
-const memoryDefaults = { ...browserDefaults, ekkoSkillsEnabled: false, ekkoSkillsCandidateLimit: 20, ekkoSkillsMinConfidence: 0.8, ekkoSkillsTimeoutMs: 3000, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true,
+const memoryDefaults = { ...collaborationDefaults, ...browserDefaults, ekkoSkillsEnabled: false, ekkoSkillsCandidateLimit: 20, ekkoSkillsMinConfidence: 0.8, ekkoSkillsTimeoutMs: 3000, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true,
   ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 }
 
 for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
@@ -207,4 +214,79 @@ test(`configures JEV memory, skills and browser per Profile at ${viewport.width}
   expect(api.requests.filter(r => r.pathname.includes('/profiles/') && r.method !== 'GET')).toEqual([])
   expect(api.unexpectedRequests).toEqual([])
 })
+}
+
+for (const [locale, messages] of [['en', en], ['zh', zh]] as const) {
+for (const width of [1280, 390]) {
+  test(`saves group and workflow JEV settings per Profile in ${locale} at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await authenticate(page, TEST_ACCESS_KEY, 'default')
+    await page.addInitScript(value => localStorage.setItem('hermes_locale', value), locale)
+    await mockHermesApi(page, { initialProfileName: 'default' })
+    const defaults = { ...memoryDefaults, baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10000, hasApiKey: false, ekkoMemoryEnabled: false }
+    const settings: Record<string, typeof defaults> = { default: { ...defaults }, research: { ...defaults } }
+    const saves: Array<{ profile: string; body: any }> = []
+    await page.route('**/api/studio/jev/settings', async route => {
+      const profile = route.request().headers()['x-hermes-profile']
+      if (route.request().method() === 'PUT') {
+        const body = route.request().postDataJSON()
+        saves.push({ profile, body })
+        settings[profile] = { ...settings[profile], ...body }
+      }
+      await route.fulfill({ json: settings[profile] })
+    })
+    await page.goto('/#/hermes/models?tab=jev&modelProfile=research')
+    const switches = ['groupSummaryReviewEnabled', 'groupSummaryRevisionEnabled', 'workflowQualityEnabled',
+      'groupMessageRoutingEnabled', 'groupHandoffReviewEnabled', 'groupLoopDetectionEnabled'] as const
+    const numbers = [
+      ['groupSummaryReviewMinConfidence', 'groupSummaryReviewMinConfidence', .9],
+      ['groupSummaryReviewTimeoutMs', 'groupSummaryReviewTimeout', 1200],
+      ['workflowQualityMinConfidence', 'workflowQualityMinConfidence', .95],
+      ['workflowQualityTimeoutMs', 'workflowQualityTimeout', 1400],
+      ['groupMessageRoutingMinConfidence', 'groupMessageRoutingMinConfidence', .85],
+      ['groupMessageRoutingTimeoutMs', 'groupMessageRoutingTimeout', 1600],
+    ] as const
+    const expected = { ...collaborationDefaults, groupMessageRoutingMode: 'auto' }
+    for (const key of switches) {
+      const control = page.getByRole('switch', { name: messages.jev[key], exact: true })
+      await expect(control).toBeChecked({ checked: collaborationDefaults[key] })
+      await control.click()
+      expected[key] = !collaborationDefaults[key]
+    }
+    for (const [key, label, value] of numbers) {
+      await page.getByLabel(messages.jev[label], { exact: true }).fill(String(value))
+      expected[key] = value
+    }
+    await page.getByTestId('jev-routing-mode').click()
+    await page.locator('.n-base-select-option').filter({ hasText: messages.jev.groupRoutingAuto }).click()
+    await page.getByRole('button', { name: messages.common.save, exact: true }).click()
+    await expect.poll(() => saves.length).toBe(1)
+    expect(saves[0]).toMatchObject({ profile: 'research', body: expected })
+    await page.reload()
+    for (const key of switches) await expect(page.getByRole('switch', { name: messages.jev[key], exact: true })).toBeChecked({ checked: expected[key] })
+    for (const [key, label] of numbers) await expect(page.getByLabel(messages.jev[label], { exact: true })).toHaveValue(String(expected[key]))
+    await expect(page.getByTestId('jev-routing-mode')).toContainText(messages.jev.groupRoutingAuto)
+    await page.getByTestId('models-profile-select').click()
+    await page.locator('.n-base-select-option').filter({ hasText: /^default$/ }).click()
+    for (const key of switches) await expect(page.getByRole('switch', { name: messages.jev[key], exact: true })).toBeChecked({ checked: collaborationDefaults[key] })
+    for (const [key, label] of numbers) await expect(page.getByLabel(messages.jev[label], { exact: true })).toHaveValue(String(collaborationDefaults[key]))
+    await expect(page.getByTestId('jev-routing-mode')).toContainText(messages.jev.groupRoutingSuggest)
+    await page.getByTestId('models-profile-select').click()
+    await page.locator('.n-base-select-option').filter({ hasText: /^research$/ }).click()
+    for (const key of ['groupSummaryReviewEnabled', 'groupSummaryRevisionEnabled', 'workflowQualityEnabled', 'groupMessageRoutingEnabled'] as const) {
+      const control = page.getByRole('switch', { name: messages.jev[key], exact: true })
+      await expect(control).toBeChecked()
+      await control.click()
+      expected[key] = false
+    }
+    await page.getByRole('button', { name: messages.common.save, exact: true }).click()
+    await expect.poll(() => saves.length).toBe(2)
+    expect(saves[1]).toMatchObject({ profile: 'research', body: expected })
+    await page.reload()
+    for (const key of switches) await expect(page.getByRole('switch', { name: messages.jev[key], exact: true })).not.toBeChecked()
+    for (const [key, label] of numbers) await expect(page.getByLabel(messages.jev[label], { exact: true })).toHaveValue(String(expected[key]))
+    expect(settings.default).toMatchObject(collaborationDefaults)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  })
+}
 }
