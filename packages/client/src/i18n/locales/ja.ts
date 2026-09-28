@@ -5,7 +5,7 @@ export default {
     browserAutomation: "内蔵ブラウザーの自動化",
     browserAutomationHint: "このプロファイルに保存した JEV 接続を使用し、次の判定から適用します。画面上のラベルを JEV に送信しますが、入力値は含みません。無効時、利用不可時、判定が不確かな場合は従来の処理を維持します。",
     browserMatchEnabled: "JEV による要素の照合",
-    browserMatchHint: "対象の説明から実在するスナップショット参照を提案します。候補数の上限まで先頭の有効な要素を調べ、曖昧な場合は提案しません。",
+    browserMatchHint: "対象の説明から実在するスナップショット参照を提案します。スナップショット全体の操作可能な要素を関連度順に並べてから候補数の上限を適用し、曖昧な場合は提案しません。",
     browserMatchOptions: "要素照合の設定",
     browserMatchCandidateLimit: "要素候補数の上限",
     browserMatchMinConfidence: "要素照合の最低信頼度",

@@ -10,6 +10,7 @@ import { requireUserJwt, resolveUserProfile } from '../../packages/server/src/mo
 import { TaskPlanRuns } from '../../packages/server/src/modules/studio/services/task-plan-runs'
 import { groupRunUser } from '../../packages/server/src/modules/studio/services/group-chat/run-user'
 import { isSensitivePath } from '../../packages/server/src/modules/studio/services/files/file-policy'
+import { leaseEkkoMcpServers } from '../../packages/server/src/modules/studio/services/chat-run/ekko-mcp-lease'
 
 const users = vi.hoisted(() => ({
   findUserById: vi.fn(), userCanAccessProfile: vi.fn(() => true),
@@ -75,6 +76,33 @@ it('revokes an aborted preparation without leaving a usable credential or file',
   const pending = issue('preparing')
   runMcpCredentials.revoke('preparing')
   await expect(pending).rejects.toThrow('ended while preparing')
+})
+
+it('leases authenticated direct-chat MCP credentials without replacing a running background context', async () => {
+  const controller = new AbortController()
+  const servers = { 'ekko-studio-browser': { command: 'node', env: {
+    HERMES_WEB_UI_MANAGED_MCP: '1', AUTH_TOKEN: 'stale-static-token',
+  } }, custom: { command: 'custom' } }
+  const a = await leaseEkkoMcpServers(servers, { sessionId: 'direct', profile: 'research', userId: 7, signal: controller.signal })
+  const b = await leaseEkkoMcpServers(servers, { sessionId: 'direct', profile: 'research', userId: 7, signal: new AbortController().signal })
+  const file = (lease: typeof a) => (lease.servers!['ekko-studio-browser'] as any).env.HERMES_WEB_UI_RUN_TOKEN_FILE
+  try {
+    const credential = JSON.parse(readFileSync(file(a), 'utf8'))
+    expect(runMcpCredentials.authenticate(credential.token)).toMatchObject({ sessionId: 'direct', userId: 7, profile: 'research' })
+    const ctx = context(credential, '/api/studio/jev/settings', { method: 'GET', request: { body: {} } })
+    const next = vi.fn(async () => {})
+    await requireUserJwt(ctx, next)
+    expect(next).toHaveBeenCalledOnce()
+    expect((a.servers!['ekko-studio-browser'] as any).env.AUTH_TOKEN).toBe('')
+    expect(a.servers!.custom).toBe(servers.custom)
+    expect(servers['ekko-studio-browser'].env.AUTH_TOKEN).toBe('stale-static-token')
+    controller.abort()
+    expect(a.signal.aborted).toBe(true)
+    expect(existsSync(file(a))).toBe(false)
+    expect(runMcpCredentials.authenticate(credential.token)).toBeUndefined()
+    expect(existsSync(file(b))).toBe(true)
+  } finally { a.dispose(); b.dispose() }
+  expect(existsSync(file(b))).toBe(false)
 })
 
 it.each(['/api/studio/task-plans/update', '/api/studio/clarifications/request'])('authorizes only the current anonymous interaction: %s', async path => {

@@ -43,6 +43,37 @@ function fakeContents(options: {
 }
 
 describe('desktop browser automation safety', () => {
+  it('waits for a temporarily hidden target and dispatches exactly one click', async () => {
+    const automation = new BrowserAutomation()
+    let probes = 0, clicks = 0
+    const contents = fakeContents({ runtimeCall: params => {
+      if (params.functionDeclaration.includes('target.click')) { clicks++; return { result: { value: true } } }
+      return { result: { value: ++probes < 3 ? 'not visible' : true } }
+    } })
+    const snapshot = await automation.snapshot('tab', contents)
+    await automation.interact('tab', contents, { action: 'click', ref: '@e1', snapshot_id: snapshot.snapshotId })
+    expect(probes).toBe(3)
+    expect(clicks).toBe(1)
+  })
+
+  it('does not dispatch after takeover while waiting or retry a failed dispatch', async () => {
+    for (const takeover of [true, false]) {
+      const automation = new BrowserAutomation()
+      let cancelled = false, clicks = 0
+      const contents = fakeContents({ runtimeCall: params => {
+        if (params.functionDeclaration.includes('target.click')) {
+          clicks++
+          return { exceptionDetails: { exception: { description: 'Error: Element is not visible\nstack' } } }
+        }
+        cancelled = takeover
+        return { result: { value: true } }
+      } })
+      const snapshot = await automation.snapshot('tab', contents)
+      await expect(automation.interact('tab', contents, { action: 'click', ref: '@e1', snapshot_id: snapshot.snapshotId },
+        () => { if (cancelled) throw new Error('takeover') })).rejects.toThrow(takeover ? 'takeover' : 'Element is not visible')
+      expect(clicks).toBe(takeover ? 0 : 1)
+    }
+  })
   it('redacts protected accessibility values and rejects stale refs', async () => {
     const automation = new BrowserAutomation()
     const contents = fakeContents({ protectedValue: true })

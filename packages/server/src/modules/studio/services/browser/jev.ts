@@ -4,6 +4,26 @@ type Node = { ref: string; role: string; name: string; disabled?: boolean }
 type Snapshot = { tabId: string; snapshotId: string; title: string; nodes: Node[] }
 type Feature = 'match' | 'verify'
 
+const INTERACTIVE_ROLES = new Set(['button', 'link', 'tab', 'checkbox', 'radio', 'switch', 'textbox',
+  'searchbox', 'combobox', 'listbox', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+  'slider', 'spinbutton', 'treeitem'])
+const normalizeLabel = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
+/** Scan the whole bounded snapshot before applying the provider budget. Keep semantic fallbacks. */
+function rankCandidates(nodes: Node[], target: string): Node[] {
+  const intent = normalizeLabel(target)
+  const words = intent.split(/\s+/).filter(Boolean)
+  return nodes.filter(node => !node.disabled && INTERACTIVE_ROLES.has(node.role.toLowerCase()))
+    .map((node, index) => {
+      const name = normalizeLabel(node.name)
+      const score = !name ? 0 : name === intent ? 1000
+        : intent.includes(name) ? 500 + Math.min(name.length, 100)
+        : name.includes(intent) ? 400
+        : words.filter(word => name.includes(word)).reduce((sum, word) => sum + word.length, 0)
+      return { node, index, score }
+    }).sort((a, b) => b.score - a.score || a.index - b.index).map(item => item.node)
+}
+
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new JevError('Invalid browser assessment')
   return value as Record<string, unknown>
@@ -68,8 +88,8 @@ async function assess(profile: string, feature: Feature, input: unknown, signal?
       return { ...identity, status: 'skipped', reason: 'disabled' }
     }
     if (!settings.hasApiKey) return { ...identity, status: 'skipped', reason: 'not_configured' }
-    const candidates = page.nodes.filter(node => !node.disabled && !['RootWebArea', 'StaticText', 'InlineTextBox'].includes(node.role))
-      .slice(0, settings.browserMatchCandidateLimit)
+    const eligible = rankCandidates(page.nodes, intent)
+    const candidates = eligible.slice(0, settings.browserMatchCandidateLimit)
     if (feature === 'match' && !candidates.length) return { ...identity, status: 'no_match', considered: 0 }
     // Opaque choices prevent page content from inventing refs or actions.
     const criteria = feature === 'match'
@@ -93,7 +113,9 @@ async function assess(profile: string, feature: Feature, input: unknown, signal?
     return { ...identity, status: 'matched', ref: candidates[Number(answer.choice.slice('candidate_'.length))].ref, confidence, considered }
   } catch (error) {
     if (signal?.aborted) throw new JevError('Browser assessment cancelled', 499, 'jev_cancelled')
-    return fallback(error instanceof JevError && error.code === 'jev_timeout' ? 'timeout' : 'provider_unavailable')
+    const reason = error instanceof JevError ? ({ jev_timeout: 'timeout', jev_auth_failed: 'provider_auth_failed',
+      jev_rate_limited: 'rate_limited' } as Record<string, string>)[error.code] : undefined
+    return fallback(reason || 'provider_unavailable')
   }
 }
 

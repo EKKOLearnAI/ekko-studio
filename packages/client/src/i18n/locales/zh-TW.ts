@@ -5,7 +5,7 @@ export default {
     browserAutomation: "內建瀏覽器自動化",
     browserAutomationHint: "選用判斷沿用目前 Profile 儲存的 JEV 連線，下次判斷生效。頁面可見標籤會傳送給 JEV，不包含輸入欄位的值。關閉、服務無法使用或判斷不確定時保留原有流程。",
     browserMatchEnabled: "JEV 元素比對",
-    browserMatchHint: "依目標描述推薦快照中的真實元素參照。僅檢查候選上限內的前幾個可用元素；有歧義時不推薦。",
+    browserMatchHint: "依目標描述推薦快照中的真實元素參照。先掃描整份快照中的可互動元素，按目標相關性排序後套用候選上限；有歧義時不推薦。",
     browserMatchOptions: "元素比對選項",
     browserMatchCandidateLimit: "元素候選上限",
     browserMatchMinConfidence: "元素比對最低信賴度",

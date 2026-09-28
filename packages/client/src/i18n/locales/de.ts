@@ -5,7 +5,7 @@ export default {
     browserAutomation: "Automatisierung des integrierten Browsers",
     browserAutomationHint: "Optionale Bewertungen verwenden die gespeicherte JEV-Verbindung dieses Profils ab der nächsten Bewertung. Sichtbare Beschriftungen werden an JEV gesendet, Eingabewerte nicht. Bei deaktivierter, nicht verfügbarer oder unsicherer Bewertung bleibt der bisherige Ablauf erhalten.",
     browserMatchEnabled: "Elementabgleich mit JEV",
-    browserMatchHint: "Schlägt anhand der Zielbeschreibung eine echte Snapshot-Referenz vor. Nur die ersten geeigneten Elemente bis zum Kandidatenlimit werden geprüft; mehrdeutige Treffer werden abgelehnt.",
+    browserMatchHint: "Schlägt anhand der Zielbeschreibung eine echte Snapshot-Referenz vor. Interaktive Elemente des gesamten Snapshots werden vor Anwendung des Kandidatenlimits nach Relevanz sortiert; mehrdeutige Treffer werden abgelehnt.",
     browserMatchOptions: "Optionen zum Elementabgleich",
     browserMatchCandidateLimit: "Maximale Elementkandidaten",
     browserMatchMinConfidence: "Mindestkonfidenz beim Elementabgleich",

@@ -5,7 +5,7 @@ export default {
     browserAutomation: "Built-in browser automation",
     browserAutomationHint: "Optional assessments use this Profile’s saved JEV connection and take effect on the next assessment. Rendered page labels are sent to JEV; input values are excluded. Disabled, unavailable or uncertain assessments preserve the original flow.",
     browserMatchEnabled: "JEV element matching",
-    browserMatchHint: "With a target description, suggest a real snapshot ref. Only the first configured number of eligible elements are considered; ambiguous matches are declined.",
+    browserMatchHint: "Suggests a real snapshot ref from the target description. Interactive elements across the snapshot are ranked by relevance before applying the candidate limit; ambiguous matches are declined.",
     browserMatchOptions: "Element matching options",
     browserMatchCandidateLimit: "Maximum element candidates",
     browserMatchMinConfidence: "Element matching minimum confidence",

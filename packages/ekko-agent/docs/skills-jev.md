@@ -56,6 +56,14 @@ captures its originating run's JEV snapshot and diagnostics, even if another
 Profile's review delays execution. Cancellation does not start or authorize
 learning writes, and propagates through reviewer model/tool requests.
 
+Browser evidence is compacted before applying the byte limit: repeated node
+descriptions share a `browserNodes` dictionary and snapshots carry `[ref, index]`
+pairs. The redundant snapshot text rendering is omitted. Snapshot identity, all
+node fields, changed state, action results, errors, user corrections and tool
+arguments remain available. Other tool output stays verbatim; evidence is never
+truncated to obtain a negative decision. The full reviewer still receives the
+original messages when preflight falls back or recommends review.
+
 ## Bounds, fallback and diagnostics
 
 Each routing or learning decision has one total deadline and at most one provider

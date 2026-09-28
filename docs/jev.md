@@ -191,8 +191,9 @@ The existing browser toolset remains list → describe → call:
 - `ekko_studio_browser_snapshot({ tab_id, target? })` accepts a natural-language
   target, e.g. `"the Continue button"`. If enabled and configured, `result.elementMatch`
   returns `matched` with an existing ref and snapshot identity, `no_match`,
-  `skipped`, or `unavailable`. Candidates are the first eligible, non-disabled
-  snapshot elements up to the configured limit, excluding document/text nodes.
+  `skipped`, or `unavailable`. Non-disabled interactive elements across the entire
+  bounded snapshot are ranked by target-label relevance before applying the
+  candidate limit. Document, heading and text nodes do not consume that budget.
   Low-confidence or ambiguous choices never invent refs. The full original
   snapshot is preserved, including elements outside that candidate window.
 - `ekko_studio_browser_interact({ ..., expectation? })` accepts an expected visible
@@ -211,15 +212,34 @@ switch is enabled. Explicit refs and snapshot freshness, DOM checks, control
 leases, and existing high-risk confirmations remain enforced by the Desktop Broker.
 A match is a recommendation, not permission to act.
 
+Browser snapshot, interact and batch responses retain all snapshot nodes and use
+compact JSON. The duplicate `text` rendering is omitted by default; pass
+`include_text: true` when needed. Invalid arguments are rejected before dispatch
+with their field path and a schema-discovery hint. Clicks wait up to 1.5 seconds
+for the original target to become visible/enabled, within the existing batch
+budget and control lease. Only readiness is polled; dispatched clicks are never
+retried. CDP execution failures retain a bounded, redacted error description.
+For a sequence with known refs, prefer one batch and one final `expectation`;
+use `target` for semantic help when a target is ambiguous.
+
 The MCP transport uses the run's configured, authorized Studio Profile. There is
 no browser-tool Profile/key override or fallback to another Profile. The browser's
-cookie-storage Profile is independent of this Studio settings Profile. MCP checks
+cookie-storage Profile is independent of this Studio settings Profile. Direct Ekko
+runs receive revocable credentials bound to the authenticated user, Profile and
+turn, ahead of any inherited static server token. MCP connections are isolated by
+run; background tasks retain their originating lease until they finish. A completed
+or aborted lease cannot reconnect. MCP checks
 non-secret settings before an assessment; the server independently rechecks the
 switch on every request. Disabled features or absent credentials make zero provider
 requests. Unavailable/old Studio servers, provider failures, timeouts, malformed
 answers, and low confidence preserve the original snapshot/action result. Cancellation
 propagates through the compact MCP toolset and aborts assessment transport. It cannot
 undo actions already dispatched to the browser.
+Failed assessments report their stage (`settings`, `snapshot`, `assessment`) and
+safe reasons such as `auth_required`, `access_denied` and `timeout`; HTTP failures
+include the status code. The surrounding `operation_id` correlates these results
+with browser execution. Provider authentication failures and rate limits remain
+distinct from generic provider unavailability, without exposing response bodies.
 
 Assessment endpoints are authenticated `POST /api/studio/jev/browser/match`
 (`{ target, snapshot }`) and `/api/studio/jev/browser/verify`

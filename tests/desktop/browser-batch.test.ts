@@ -30,7 +30,7 @@ async function setup() {
         }
         if (method === 'DOM.resolveNode') return { object: { objectId: `node-${params.backendNodeId}` } }
         let effect = ''
-        if (method === 'Runtime.callFunctionOn') effect = `${params.functionDeclaration.includes('target.click') ? 'click' : 'focus'}:${params.objectId}`
+        if (method === 'Runtime.callFunctionOn' && !params.functionDeclaration.includes("return 'not visible'")) effect = `${params.functionDeclaration.includes('target.click') ? 'click' : 'focus'}:${params.objectId}`
         if (method === 'Input.insertText') effect = `type:${params.text}`
         if (method === 'Input.dispatchKeyEvent') effect = `${params.type}:${params.key}`
         if (method === 'Runtime.evaluate') effect = 'scroll'

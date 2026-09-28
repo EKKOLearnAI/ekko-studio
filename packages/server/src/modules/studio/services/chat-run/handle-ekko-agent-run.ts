@@ -1,4 +1,5 @@
 import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
+import { leaseEkkoMcpServers } from './ekko-mcp-lease'
 import { studioMcpCapabilities } from '../../public/runs/mcp-capabilities'
 import { saveTaskPlan } from '../../repositories/task-plan-store'
 import type { TaskPlanSnapshot } from '../../contracts/task-plan'
@@ -894,7 +895,16 @@ export async function handleEkkoAgentRun(
     group.results.set(toolCallId, { toolName, result })
     persistCompletedToolGroup(group)
   }
+  let releaseMcp = () => {}
+  let foregroundEnded = false
+  const mcpBackgroundTasks = new Set<string>()
+  const releaseIdleMcp = () => { if (foregroundEnded && !mcpBackgroundTasks.size) releaseMcp() }
   const handleRuntimeEvent = (event: AgentRuntimeEvent) => {
+    if (event.type === 'subagent.start' && event.background) mcpBackgroundTasks.add(event.subagentId)
+    if (event.type === 'subagent.complete' && event.background) {
+      mcpBackgroundTasks.delete(event.subagentId)
+      releaseIdleMcp()
+    }
     if ('runId' in event) runId = event.runId
     if (event.type === 'run.started') {
       startWorkspaceRunDiff(event.runId)
@@ -1232,6 +1242,9 @@ export async function handleEkkoAgentRun(
   }
 
   try {
+    const mcpLease = await leaseEkkoMcpServers(mcpServers, { sessionId, profile,
+      userId: socket.data?.user?.id, signal: abortController.signal })
+    releaseMcp = mcpLease.dispose
     logger.info('[chat-run-socket] starting ekko-agent run for session %s', sessionId)
     const toolContext = {
       cwd: workspace,
@@ -1241,7 +1254,8 @@ export async function handleEkkoAgentRun(
       sessionId,
       profileId: profile,
       browserSessionId: sessionId,
-      mcpServers,
+      mcpServers: mcpLease.servers,
+      mcpSessionSignal: mcpLease.signal,
       timeoutMs: 120_000,
       signal: abortController.signal,
       requestToolApproval: (request: AgentToolApprovalRequest) => waitForEkkoToolApproval(request, {
@@ -1626,6 +1640,8 @@ export async function handleEkkoAgentRun(
       workspace_run_change: completeWorkspaceRunDiff(),
     })
   } finally {
+    foregroundEnded = true
+    releaseIdleMcp()
     if (!abortController.signal.aborted || state.abortController === abortController) {
       state.isWorking = false
       state.isAborting = false

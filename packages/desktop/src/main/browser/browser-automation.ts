@@ -47,12 +47,26 @@ const CLICKABLE_ANCESTOR_SELECTOR = [
   'label',
   '[role="button"]',
   '[role="link"]',
+  '[role="tab"]',
   '[role="menuitem"]',
   '[role="menuitemcheckbox"]',
   '[role="menuitemradio"]',
   '[onclick]',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
+
+const CLICK_TARGET = `
+  const node = this;
+  const element = node && node.nodeType === 3 ? node.parentElement : node;
+  if (!element || typeof element.getBoundingClientRect !== 'function') throw new Error('Browser node has no clickable element');
+  const target = typeof element.closest === 'function'
+    ? element.closest(${JSON.stringify(CLICKABLE_ANCESTOR_SELECTOR)}) || element : element;
+`
+
+function clickFailure(response: { exceptionDetails?: { exception?: { description?: string }; text?: string } }): Error {
+  const detail = response.exceptionDetails?.exception?.description || response.exceptionDetails?.text || ''
+  return new Error(`Unable to click browser element${detail ? `: ${redactBrowserText(detail.split('\n')[0], 200)}` : ''}`)
+}
 
 function textValue(value: unknown, limit = 500): string {
   return redactBrowserText(value, limit)
@@ -236,28 +250,44 @@ export class BrowserAutomation {
       try {
         assertActive()
         if (action.action === 'click') {
+          // Only readiness is polled. Once dispatch starts, a click is never retried.
+          const deadline = Date.now() + 1500
+          while (true) {
+            assertActive()
+            const ready = await contents.debugger.sendCommand('Runtime.callFunctionOn', {
+              objectId, returnByValue: true,
+              functionDeclaration: `function () { ${CLICK_TARGET}
+                if (!target.isConnected) throw new Error('Browser element was removed');
+                if (target.disabled || target.getAttribute('aria-disabled') === 'true') return 'disabled';
+                target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+                const rect = target.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0 || getComputedStyle(target).visibility === 'hidden') return 'not visible';
+                if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) return 'outside the viewport';
+                return true;
+              }`,
+            }) as { result?: { value?: unknown }; exceptionDetails?: { exception?: { description?: string }; text?: string } }
+            if (ready.exceptionDetails) throw clickFailure(ready)
+            if (ready.result?.value === true) break
+            if (Date.now() >= deadline) throw new Error(`Browser element did not become clickable: ${String(ready.result?.value || 'unavailable')}`)
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+          assertActive()
           const response = await contents.debugger.sendCommand('Runtime.callFunctionOn', {
             objectId,
             returnByValue: true,
-            functionDeclaration: `function () {
-              const node = this;
-              const element = node && node.nodeType === 3 ? node.parentElement : node;
-              if (!element || typeof element.getBoundingClientRect !== 'function') throw new Error('Browser node has no clickable element');
-              const target = typeof element.closest === 'function'
-                ? element.closest(${JSON.stringify(CLICKABLE_ANCESTOR_SELECTOR)}) || element
-                : element;
+            functionDeclaration: `function () { ${CLICK_TARGET}
               if (!target.isConnected || target.disabled || target.getAttribute('aria-disabled') === 'true') throw new Error('Browser element is unavailable or disabled');
               const rect = target.getBoundingClientRect();
               if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error('Element is not visible');
-              target.scrollIntoView({ block: 'center', inline: 'center' });
+              target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
               const next = target.getBoundingClientRect();
               if (next.bottom <= 0 || next.right <= 0 || next.top >= innerHeight || next.left >= innerWidth) throw new Error('Element is outside the viewport');
               if (typeof target.click === 'function') target.click();
               else target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
               return true;
             }`,
-          }) as { result?: { value?: unknown }; exceptionDetails?: unknown }
-          if (response.exceptionDetails || response.result?.value !== true) throw new Error('Unable to click browser element')
+          }) as { result?: { value?: unknown }; exceptionDetails?: { exception?: { description?: string }; text?: string } }
+          if (response.exceptionDetails || response.result?.value !== true) throw clickFailure(response)
         } else {
           const response = await contents.debugger.sendCommand('Runtime.callFunctionOn', {
             objectId,

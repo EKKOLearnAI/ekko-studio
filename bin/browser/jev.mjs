@@ -18,6 +18,17 @@ function transportSignal(signal, timeoutMs) {
   return signal ? AbortSignal.any([signal, timeout]) : timeout
 }
 
+// Only fixed diagnostic codes cross the tool boundary; provider bodies and credentials never do.
+function unavailable(error, stage) {
+  const httpStatus = Number.isInteger(error?.status) ? error.status : undefined
+  const reason = httpStatus === 401 ? 'auth_required' : httpStatus === 403 ? 'access_denied'
+    : httpStatus === 429 ? 'rate_limited' : error?.name === 'TimeoutError' ? 'timeout'
+    : error?.code === 'invalid_assessment' ? 'invalid_result'
+    : error?.name === 'TypeError' ? 'transport_unavailable'
+    : stage === 'snapshot' ? 'snapshot_unavailable' : 'assessment_unavailable'
+  return { status: 'unavailable', reason, stage, ...(httpStatus ? { httpStatus } : {}) }
+}
+
 async function settingsFor(request, feature, signal) {
   signal?.throwIfAborted()
   const settings = await request('/api/studio/jev/settings', { signal: transportSignal(signal, 5000) })
@@ -33,21 +44,25 @@ async function assess(request, path, snapshot, intent, timeout, signal) {
     method: 'POST', body: { snapshot: evidence(snapshot), ...intent }, signal: transportSignal(signal, timeout + 1000),
   })
   signal?.throwIfAborted()
-  if (result?.snapshotId !== snapshot.snapshotId || result?.tabId !== snapshot.tabId) throw new Error('Assessment snapshot mismatch')
-  if (result.status === 'matched' && !snapshot.nodes.some(node => node.ref === result.ref && !node.disabled)) throw new Error('Unknown assessment ref')
+  if (result?.snapshotId !== snapshot.snapshotId || result?.tabId !== snapshot.tabId
+    || result.status === 'matched' && !snapshot.nodes.some(node => node.ref === result.ref && !node.disabled)) {
+    throw Object.assign(new Error('Invalid assessment identity or ref'), { code: 'invalid_assessment' })
+  }
   return result
 }
 
 export async function matchBrowserSnapshot(request, envelope, target, signal) {
   if (target === undefined) return envelope
   let elementMatch
+  let stage = 'settings'
   try {
     const config = await settingsFor(request, 'match', signal)
+    stage = 'assessment'
     elementMatch = config.skip ? { status: 'skipped', reason: config.skip }
       : await assess(request, '/api/studio/jev/browser/match', envelope.result, { target }, config.timeout, signal)
-  } catch {
+  } catch (error) {
     signal?.throwIfAborted()
-    elementMatch = { status: 'unavailable', reason: 'assessment_unavailable' }
+    elementMatch = unavailable(error, stage)
   }
   return { ...envelope, result: { ...envelope.result, elementMatch } }
 }
@@ -56,6 +71,7 @@ export async function verifyBrowserResult(request, envelope, expectation, readSn
   if (expectation === undefined) return envelope
   let verification
   let snapshot = envelope.result?.snapshot
+  let stage = 'settings'
   try {
     const config = await settingsFor(request, 'verify', signal)
     if (config.skip) verification = { status: 'skipped', reason: config.skip }
@@ -65,12 +81,14 @@ export async function verifyBrowserResult(request, envelope, expectation, readSn
     } else if (envelope.result?.snapshotError) verification = { status: 'unavailable', reason: 'snapshot_unavailable' }
     else {
       signal?.throwIfAborted()
+      stage = 'snapshot'
       snapshot ??= (await readSnapshot()).result
+      stage = 'assessment'
       verification = await assess(request, '/api/studio/jev/browser/verify', snapshot, { expectation }, config.timeout, signal)
     }
-  } catch {
+  } catch (error) {
     signal?.throwIfAborted()
-    verification = { status: 'unavailable', reason: 'assessment_unavailable' }
+    verification = unavailable(error, stage)
   }
   // Outcome judgment is advisory: never change the action's completion/error, or retry it.
   return { ...envelope, result: { ...envelope.result, ...(snapshot ? { snapshot } : {}), verification } }

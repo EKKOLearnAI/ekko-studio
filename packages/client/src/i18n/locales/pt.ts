@@ -5,7 +5,7 @@ export default {
     browserAutomation: "Automação do navegador integrado",
     browserAutomationHint: "As avaliações opcionais usam a conexão JEV salva neste perfil a partir da próxima avaliação. Os rótulos visíveis são enviados ao JEV, sem os valores digitados. Quando desativado, indisponível ou incerto, o fluxo original é mantido.",
     browserMatchEnabled: "Correspondência de elementos com JEV",
-    browserMatchHint: "Sugere uma referência real da captura conforme a descrição do alvo. Apenas os primeiros elementos elegíveis até o limite configurado são analisados; correspondências ambíguas são recusadas.",
+    browserMatchHint: "Sugere uma referência real da captura conforme a descrição do alvo. Os elementos interativos de toda a captura são ordenados por relevância antes de aplicar o limite de candidatos; correspondências ambíguas são recusadas.",
     browserMatchOptions: "Opções de correspondência",
     browserMatchCandidateLimit: "Máximo de elementos candidatos",
     browserMatchMinConfidence: "Confiança mínima da correspondência",

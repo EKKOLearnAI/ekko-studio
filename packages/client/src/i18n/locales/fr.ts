@@ -5,7 +5,7 @@ export default {
     browserAutomation: "Automatisation du navigateur intégré",
     browserAutomationHint: "Les évaluations facultatives utilisent la connexion JEV enregistrée pour ce profil dès la prochaine évaluation. Les libellés visibles sont envoyés à JEV, sans les valeurs saisies. Le fonctionnement habituel est conservé si le service est désactivé, indisponible ou incertain.",
     browserMatchEnabled: "Correspondance des éléments avec JEV",
-    browserMatchHint: "Propose une référence réelle de l’instantané selon la description de la cible. Seuls les premiers éléments admissibles dans la limite configurée sont examinés ; les correspondances ambiguës sont refusées.",
+    browserMatchHint: "Propose une référence réelle de l’instantané selon la description de la cible. Les éléments interactifs de tout l’instantané sont classés par pertinence avant application de la limite ; les correspondances ambiguës sont refusées.",
     browserMatchOptions: "Options de correspondance",
     browserMatchCandidateLimit: "Nombre maximal d’éléments candidats",
     browserMatchMinConfidence: "Confiance minimale de correspondance",

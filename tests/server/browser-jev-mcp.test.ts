@@ -8,6 +8,12 @@ const envelope = { operation_id: 'op', result: snapshot }
 const enabled = { browserMatchEnabled: true, browserVerifyEnabled: true, hasApiKey: true, browserMatchTimeoutMs: 100, browserVerifyTimeoutMs: 100 }
 
 describe('browser MCP JEV orchestration', () => {
+  it.each([[401, 'auth_required'], [403, 'access_denied'], [429, 'rate_limited']])('diagnoses HTTP %s without exposing the response body', async (status, reason) => {
+    const request = vi.fn().mockRejectedValue(Object.assign(new Error('private credential/body'), { status }))
+    const result = await matchBrowserSnapshot(request, envelope, 'Next')
+    expect(result.result.elementMatch).toEqual({ status: 'unavailable', reason, stage: 'settings', httpStatus: status })
+    expect(JSON.stringify(result)).not.toContain('private credential')
+  })
   it('leaves legacy calls unchanged without settings requests or extra snapshots', async () => {
     const request = vi.fn(), read = vi.fn()
     expect(await matchBrowserSnapshot(request, envelope)).toBe(envelope)
@@ -39,7 +45,7 @@ describe('browser MCP JEV orchestration', () => {
     { tabId: 'tab', snapshotId: 'old', status: 'matched', ref: '@e1' },
     { tabId: 'tab', snapshotId: 'snapshot', status: 'matched', ref: '@e999' }])('declines mismatched or fabricated assessments', async assessment => {
     const request = vi.fn().mockResolvedValueOnce(enabled).mockResolvedValueOnce(assessment)
-    expect((await matchBrowserSnapshot(request, envelope, 'next')).result.elementMatch.status).toBe('unavailable')
+    expect((await matchBrowserSnapshot(request, envelope, 'next')).result.elementMatch).toMatchObject({ status: 'unavailable', reason: 'invalid_result', stage: 'assessment' })
   })
 
   it('reuses the completed batch snapshot and never changes completion or retries on a negative judgment', async () => {

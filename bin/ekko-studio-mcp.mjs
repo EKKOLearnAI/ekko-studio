@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { browserIntent, matchBrowserSnapshot, verifyBrowserResult } from './browser/jev.mjs'
+import { validateBrowserArguments } from './browser/arguments.mjs'
+import { browserOutput } from './browser/output.mjs'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { createInterface } from 'node:readline'
@@ -166,10 +168,9 @@ function errorText(message) {
 async function request(path, options = {}) {
   const envelope = await requestEnvelope(path, options)
   if (envelope.status < 200 || envelope.status >= 300) {
-    if (envelope.status === 401) {
-      throw new Error(`${envelope.body?.error || 'Unauthorized'}. ${authHint()}`)
-    }
-    throw new Error(envelope.body?.error || envelope.bodyText || `HTTP ${envelope.status}`)
+    const message = envelope.status === 401 ? `${envelope.body?.error || 'Unauthorized'}. ${authHint()}`
+      : envelope.body?.error || envelope.bodyText || `HTTP ${envelope.status}`
+    throw Object.assign(new Error(message), { status: envelope.status })
   }
   return envelope.body
 }
@@ -937,7 +938,7 @@ const tools = [
     name: 'ekko_studio_browser_snapshot',
     toolset: 'browser',
     description: 'Return a bounded accessibility snapshot with stable element refs. Pass its snapshot_id to read text, click, or type; stale snapshots are rejected. Supply target to request optional JEV element matching when enabled in Models > JEV; inspect elementMatch alongside the unchanged snapshot. A match is advisory and still requires snapshot_id/ref for interaction.',
-    inputSchema: browserInputSchema({ tab_id: { type: 'string' }, target: { type: 'string', minLength: 1, maxLength: 2000, description: 'Describe the unique element to find in the snapshot.' } }, ['tab_id']),
+    inputSchema: browserInputSchema({ tab_id: { type: 'string' }, include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside nodes. Defaults to false.' }, target: { type: 'string', minLength: 1, maxLength: 2000, description: 'Optional semantic help for an ambiguous target; omit when its ref is already clear.' } }, ['tab_id']),
   },
   {
     name: 'ekko_studio_browser_read_text',
@@ -959,6 +960,7 @@ const tools = [
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
       expectation: { type: 'string', minLength: 1, maxLength: 2000, description: 'Expected visible outcome to judge after the action, when enabled in Models > JEV.' },
+      include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside snapshot nodes. Defaults to false.' },
       action: { type: 'string', enum: ['click', 'type', 'press', 'scroll'] },
       ref: { type: 'string' }, snapshot_id: { type: 'string' }, text: { type: 'string' }, key: { type: 'string' },
       direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, pixels: { type: 'number' },
@@ -971,7 +973,8 @@ const tools = [
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
       snapshot_id: { type: 'string', description: 'Current snapshot used by all click/type refs; optional for a batch containing only press/scroll.' },
-      expectation: { type: 'string', minLength: 1, maxLength: 2000, description: 'Expected visible outcome after all actions finish.' },
+      include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside final snapshot nodes. Defaults to false.' },
+      expectation: { type: 'string', minLength: 1, maxLength: 2000, description: 'Expected visible outcome after all actions finish. Prefer one batch assessment over assessing every intermediate click.' },
       actions: {
         type: 'array', minItems: 1, maxItems: 50,
         items: {
@@ -1933,6 +1936,11 @@ async function callTool(name, args = {}, signal) {
   const resolvedName = resolveToolName(name)
   const categoryToolset = categoryToolsetDefinition(ACTIVE_TOOLSET)
   if (resolvedName === categoryToolset?.name) return await callCategoryToolset(args, signal)
+  const browserTool = tools.find(tool => tool.name === resolvedName && tool.toolset === 'browser')
+  if (browserTool) {
+    const error = validateBrowserArguments(browserTool, args)
+    if (error) return errorText(`${error}. Use ekko_studio_browser_toolset action=describe tool=${resolvedName} for the schema.`)
+  }
   switch (resolvedName) {
     case 'ekko_studio_browser_tabs': {
       if (args.action === 'list') return jsonText(await browserRequest('tabs.list'))
@@ -1953,7 +1961,7 @@ async function callTool(name, args = {}, signal) {
     case 'ekko_studio_browser_snapshot': {
       const target = browserIntent(args.target, 'target')
       const envelope = await browserRequest('snapshot', { tab_id: args.tab_id }, signal)
-      return jsonText(await matchBrowserSnapshot(request, envelope, target, signal))
+      return browserOutput(await matchBrowserSnapshot(request, envelope, target, signal), args.include_text)
     }
     case 'ekko_studio_browser_read_text':
       return jsonText(await browserRequest('text.read', {
@@ -1971,13 +1979,13 @@ async function callTool(name, args = {}, signal) {
         if (args[key] !== undefined) action[key] = args[key]
       }
       const envelope = await browserRequest('interact', { tab_id: args.tab_id, action }, signal)
-      return jsonText(await verifyBrowserResult(request, envelope, expectation, () => browserRequest('snapshot', { tab_id: args.tab_id }, signal), signal))
+      return browserOutput(await verifyBrowserResult(request, envelope, expectation, () => browserRequest('snapshot', { tab_id: args.tab_id }, signal), signal), args.include_text)
     }
     case 'ekko_studio_browser_batch': {
       const expectation = browserIntent(args.expectation, 'expectation')
       const executed = await browserRequest('interact.batch', { tab_id: args.tab_id, snapshot_id: args.snapshot_id, actions: args.actions }, signal)
       const envelope = await verifyBrowserResult(request, executed, expectation, () => browserRequest('snapshot', { tab_id: args.tab_id }, signal), signal)
-      return { ...jsonText(envelope), ...(envelope.result?.completed < envelope.result?.total ? { isError: true } : {}) }
+      return { ...browserOutput(envelope, args.include_text), ...(envelope.result?.completed < envelope.result?.total ? { isError: true } : {}) }
     }
     case 'ekko_studio_browser_screenshot': {
       try {

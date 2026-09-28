@@ -5,7 +5,7 @@ export default {
     browserAutomation: "내장 브라우저 자동화",
     browserAutomationHint: "이 프로필에 저장된 JEV 연결을 사용하며 다음 판단부터 적용됩니다. 화면의 레이블을 JEV에 보내지만 입력값은 제외합니다. 비활성화, 서비스 오류 또는 불확실한 판단 시 기존 흐름을 유지합니다.",
     browserMatchEnabled: "JEV 요소 매칭",
-    browserMatchHint: "대상 설명을 바탕으로 실제 스냅샷 참조를 추천합니다. 후보 한도 내의 처음 몇 개 유효 요소만 확인하며 모호한 경우 추천하지 않습니다.",
+    browserMatchHint: "대상 설명을 바탕으로 실제 스냅샷 참조를 추천합니다. 전체 스냅샷의 상호작용 가능한 요소를 관련성순으로 정렬한 후 후보 한도를 적용하며, 모호한 경우 추천하지 않습니다.",
     browserMatchOptions: "요소 매칭 옵션",
     browserMatchCandidateLimit: "최대 요소 후보 수",
     browserMatchMinConfidence: "요소 매칭 최소 신뢰도",

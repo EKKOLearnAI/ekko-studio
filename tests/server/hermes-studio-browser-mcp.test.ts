@@ -90,6 +90,12 @@ describe('hermes-studio browser MCP toolset', () => {
       for await (const chunk of request) chunks.push(Buffer.from(chunk))
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
       response.setHeader('Content-Type', 'application/json')
+      if (request.url?.startsWith('/api/studio/jev/') && (request.headers.authorization !== 'Bearer studio_run_fixture'
+        || request.headers['x-studio-run-context'] !== 'browser-run')) {
+        response.statusCode = 401
+        response.end(JSON.stringify({ error: 'Run credential required' }))
+        return
+      }
       if (request.url === '/api/studio/jev/settings') {
         response.end(JSON.stringify({ browserMatchEnabled: assessmentEnabled, browserVerifyEnabled: assessmentEnabled,
           hasApiKey: true, browserMatchTimeoutMs: 100, browserVerifyTimeoutMs: 100 }))
@@ -145,8 +151,11 @@ describe('hermes-studio browser MCP toolset', () => {
       schema: 1, desktopPid: process.pid, endpoint: `http://127.0.0.1:${address.port}/v1`, token: 'test-token', instanceId: 'test', createdAt: new Date().toISOString(),
     }), { mode: 0o600 })
 
+    const credentialFile = join(root, 'auth.json')
+    await writeFile(credentialFile, JSON.stringify({ token: 'studio_run_fixture', context_id: 'browser-run', profile: 'research' }))
     child = spawn(process.execPath, [join(process.cwd(), 'bin/ekko-studio-mcp.mjs'), 'browser'], {
-      env: { ...process.env, HERMES_WEB_UI_HOME: root, HERMES_WEB_UI_URL: `http://127.0.0.1:${address.port}`, HERMES_WEB_UI_PROFILE: 'research' },
+      env: { ...process.env, HERMES_WEB_UI_HOME: root, HERMES_WEB_UI_URL: `http://127.0.0.1:${address.port}`, HERMES_WEB_UI_PROFILE: 'research',
+        AUTH_TOKEN: 'old-static-token', HERMES_WEB_UI_TOKEN: 'old-profile-token', HERMES_WEB_UI_RUN_TOKEN_FILE: credentialFile },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     const rpc = rpcClient(child)
@@ -218,6 +227,18 @@ describe('hermes-studio browser MCP toolset', () => {
       required: ['tab_id', 'actions'], properties: { actions: { minItems: 1, maxItems: 50 } },
     })
     const batchArguments = { tab_id: 'tab-1', snapshot_id: 'snapshot-1', actions: [{ action: 'click', ref: '@e1' }, { action: 'press', key: 'Tab' }] }
+    const beforeInvalid = clients.length
+    for (const [id, tool, args, field] of [
+      [40, 'ekko_studio_browser_batch', { actions: [{ action: 'press', key: 'Tab' }] }, 'arguments.tab_id'],
+      [41, 'ekko_studio_browser_batch', { ...batchArguments, actions: [{ type: 'click', ref: '@e1' }] }, 'arguments.actions[0].action'],
+      [42, 'ekko_studio_browser_interact', { tab_id: 'tab-1' }, 'arguments.action'],
+      [43, 'ekko_studio_browser_interact', { tab_id: 'tab-1', action: 'click', ref: '@e1' }, 'arguments.snapshot_id'],
+    ] as const) {
+      const invalid = await rpc(id, 'tools/call', { name: 'ekko_studio_browser_toolset', arguments: { action: 'call', tool, arguments: args } })
+      expect(invalid.result.isError).toBe(true)
+      expect(invalid.result.content[0].text).toContain(field)
+    }
+    expect(clients).toHaveLength(beforeInvalid)
     const invokeBatch = (id: number) => rpc(id, 'tools/call', {
       name: 'ekko_studio_browser_toolset', arguments: { action: 'call', tool: 'ekko_studio_browser_batch', arguments: batchArguments },
     })
@@ -236,6 +257,10 @@ describe('hermes-studio browser MCP toolset', () => {
       return JSON.parse(output.result.content[0].text).result
     }
     expect((await invoke(20, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1', target: 'Example' })).elementMatch).toMatchObject({ status: 'matched', ref: '@e1' })
+    const compact = await invoke(44, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1' })
+    expect(compact.nodes).toEqual(browserSnapshot.nodes)
+    expect(compact).not.toHaveProperty('text')
+    expect((await invoke(45, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1', include_text: true })).text).toBe(browserSnapshot.text)
     expect((await invoke(21, 'ekko_studio_browser_interact', { tab_id: 'tab-1', action: 'press', key: 'Tab', expectation: 'Example is visible' })).verification.status).toBe('met')
     failBatch = false
     expect((await invoke(22, 'ekko_studio_browser_batch', { ...batchArguments, expectation: 'Example is visible' })).verification.status).toBe('met')
