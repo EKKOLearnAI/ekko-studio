@@ -3681,6 +3681,16 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_25_1: 'Added Cursor CLI support for chat, group chats, and workflows, with native settings, skills management, and isolated Studio MCP (#3110)',
+    new_0_7_25_2: 'Added configurable JEV memory recall, relevance filtering, write review, skill matching, and learning preflight (#3159, #3161, #3169)',
+    new_0_7_25_3: 'Added optional JEV browser target matching and action verification, group summary review and message routing, and workflow quality checks (#3208, #3211)',
+    new_0_7_25_4: 'Improved browser automation with sequential action batches, up to 12 tabs, large-page support, and clearer action feedback (#3206, #3207, #3212, #3215)',
+    new_0_7_25_5: 'Added desktop update download progress and isolated update test builds for macOS, Windows, and Linux (#3176, #3177)',
+    new_0_7_25_6: 'Fixed long-chat search navigation, attachments in new chats, session pin refresh, and workspace favorites (#3182, #3168, #3193)',
+    new_0_7_25_7: 'Added a sidebar account menu, unified Agent picker ordering, and improved Agent Manager and group chat layouts (#3191, #3199, #3201, #3188)',
+    new_0_7_25_8: 'Fixed Hermes upgrade compatibility, bridge worker lifecycle, MCP routing across Studio instances, and group Coding Agent credentials (#3202, #3157, #3187)',
+    new_0_7_25_9: 'Fixed DSH startup dependencies and ACP bundle resolution, and removed duplicate keys from scoped Codex configuration (#3156, #3190, #3163)',
+    new_0_7_25_10: 'Improved iOS Live Activity cleanup by retiring stale notification destinations (#3167)',
     new_0_7_24_1: 'Added iOS Live Activities orchestration with locale-aware updates and per-user notification routing (#3102, #3111, #3152)',
     new_0_7_24_2: 'Improved notification defaults and previews, ignored legacy session opt-outs, and hid unsupported social push entries (#3131, #3133, #3146, #3151)',
     new_0_7_24_3: 'Fixed shared session uploads and attachment access across session sharing flows (#3144)',
