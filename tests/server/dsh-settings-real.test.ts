@@ -44,6 +44,13 @@ it.skipIf(!process.env.DSH_WEB_COMMAND)('renders native plugin slots and submits
     const loop = page.getByRole('button', { name: /Agent loop/ })
     await loop.waitFor({ timeout: 15_000 }).catch(async error => { console.error(await page.locator('body').innerText()); throw error });
     if (release.registry) {
+      const expectFilled = async () => {
+        await expect.poll(() => page.locator('[data-rightbar-col]').evaluate(element => {
+          const bounds = element.parentElement!.getBoundingClientRect()
+          return Math.max(Math.abs(bounds.top), Math.abs(bounds.left), Math.abs(bounds.right - innerWidth), Math.abs(bounds.bottom - innerHeight))
+        })).toBeLessThanOrEqual(1)
+      }
+      await expectFilled()
       // Current DSH owns a native Plugins panel and persists settings as profile
       // patches, rather than the legacy accordion and settings.yaml storage.
       await loop.click()
@@ -58,8 +65,14 @@ it.skipIf(!process.env.DSH_WEB_COMMAND)('renders native plugin slots and submits
       expect(await page.locator('[data-rightbar-col]').evaluate(element => getComputedStyle(element.parentElement!).gridTemplateColumns.split(' ')[0])).toBe('0px')
       await page.screenshot({ path: '/tmp/dsh-registry-settings-desktop.png' })
       await page.setViewportSize({ width: 390, height: 844 })
+      await expectFilled()
       await page.screenshot({ path: '/tmp/dsh-registry-settings-mobile.png' })
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      await page.setViewportSize({ width: 740, height: 390 })
+      await expectFilled()
+      const save = page.getByRole('button', { name: 'Save', exact: true })
+      await save.scrollIntoViewIfNeeded()
+      expect(await save.evaluate(element => { const bounds = element.getBoundingClientRect(); return bounds.top >= 0 && bounds.bottom <= innerHeight })).toBe(true)
       const presets = new DshAgentPresetService(management)
       expect(await presets.list()).toMatchObject({ authorable: false, presets: expect.arrayContaining([expect.objectContaining({ id: 'standard', isDefault: true })]) })
       expect((await presets.read('standard')).content).toContain('name:')

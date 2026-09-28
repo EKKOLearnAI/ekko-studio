@@ -55,11 +55,11 @@ export function dshUiDocument(html: string, mount: string) {
   const bootstrap = `(${frameTransport.toString()})(${JSON.stringify(mount)});`
   return html.replace(/\b(src|href)=(['"])\/(?!\/)([^'"]*)\2/g, (_, attr, quote, path) => `${attr}=${quote}${mount}${path}${quote}`).replace(/<head([^>]*)>/i, `<head$1><base href="${mount}"><script>${bootstrap}</script>`)
     .replace('</head>', `<style>
-html,body,#root{height:auto!important;min-height:100%;background:transparent!important;overflow:auto!important}
+html,body,#root{height:100%!important;min-height:0;margin:0;background:transparent!important;overflow:hidden!important}
 /* The native panel retains slot ownership; collapse only its unused shell tracks. */
 .studio-dsh-native-panel :has(>[data-rightbar-col]){grid-template-columns:0 minmax(0,1fr) 0!important}
 .studio-dsh-native-panel [data-side=sidebar],.studio-dsh-native-panel [data-side=rightbar]{display:none!important}
-.studio-dsh-slot{padding:0 0 16px;color:var(--dsw-alias-label-primary)}
+.studio-dsh-slot{box-sizing:border-box;height:100%;overflow:auto;padding:0 0 16px;color:var(--dsw-alias-label-primary)}
 .studio-dsh-slot button[aria-expanded]:not([aria-haspopup])::after{content:var(--studio-dsh-expand);font-size:12px;white-space:nowrap;margin-inline-start:8px}
 .studio-dsh-slot button[aria-expanded=true]:not([aria-haspopup])::after{content:var(--studio-dsh-collapse)}
 </style></head>`)

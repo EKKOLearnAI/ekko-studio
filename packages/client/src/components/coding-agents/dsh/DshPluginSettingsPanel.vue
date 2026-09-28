@@ -51,7 +51,7 @@ defineExpose({ refresh })
   </div>
 </template>
 <style scoped>
-.native-settings { position: relative; min-height: 360px; height: 100%; }
-.native-slot { display: block; width: 100%; height: 100%; min-height: 480px; border: 0; }
+.native-settings { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.native-slot { display: block; flex: 1; width: 100%; height: 100%; min-height: 0; border: 0; }
 .loading { position: absolute; inset-block-start: 12px; inset-inline-end: 12px; }
 </style>
