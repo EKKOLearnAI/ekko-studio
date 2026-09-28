@@ -13,6 +13,14 @@ export interface JevSettings {
   groupMessageRoutingEnabled: boolean
   groupMessageRoutingMinConfidence: number
   groupMessageRoutingTimeoutMs: number
+  browserMatchEnabled: boolean
+  browserMatchCandidateLimit: number
+  browserMatchMinConfidence: number
+  browserMatchTimeoutMs: number
+  browserVerifyEnabled: boolean
+  browserVerifyMinConfidence: number
+  browserVerifyTimeoutMs: number
+
   ekkoSkillsEnabled: boolean
   ekkoSkillsCandidateLimit: number
   ekkoSkillsMinConfidence: number

@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto'
-import { choice, createJevSidecar, type JevSidecarAdapter, type JevSidecarTaskSpec } from '../../public/jev'
-import { hashJevCanonical } from '../jev/sidecar-payload'
-import type { JevSettings } from '../jev/settings'
+import { choice, createJevSidecar, hashJevCanonical, type JevSettings, type JevSidecarAdapter, type JevSidecarTaskSpec } from '../../public/jev'
 
 export interface GroupRoutingCandidate { id: string; name: string; description: string }
 export interface GroupRoutingMessage { id: string; roomId: string; senderId: string; senderName: string; content: string; timestamp: number; mentions?: unknown[] }
