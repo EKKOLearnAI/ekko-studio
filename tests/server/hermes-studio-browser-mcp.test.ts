@@ -80,7 +80,9 @@ describe('hermes-studio browser MCP toolset', () => {
     let failScreenshot = false
     let failBatch = false
     const batches: unknown[] = []
+    const snapshots: unknown[] = []
     const assessments: Array<{ path: string; body: any; profile: string }> = []
+    let settingsRequests = 0
     let assessmentEnabled = true
     let holdAssessment = false
     let assessmentCancelled = false
@@ -97,6 +99,7 @@ describe('hermes-studio browser MCP toolset', () => {
         return
       }
       if (request.url === '/api/studio/jev/settings') {
+        settingsRequests++
         response.end(JSON.stringify({ browserMatchEnabled: assessmentEnabled, browserVerifyEnabled: assessmentEnabled,
           hasApiKey: true, browserMatchTimeoutMs: 100, browserVerifyTimeoutMs: 100 }))
         return
@@ -130,6 +133,7 @@ describe('hermes-studio browser MCP toolset', () => {
         response.end(JSON.stringify({ error: 'capture failed' }))
         return
       }
+      if (body.method === 'snapshot') snapshots.push(body.params)
       const result = body.method === 'screenshot'
         ? { tabId: 'tab-1', url: 'https://example.com/', title: 'Example', mediaType: 'image/png', data: 'AA==', width: 1, height: 1 }
         : body.method === 'snapshot'
@@ -272,6 +276,21 @@ describe('hermes-studio browser MCP toolset', () => {
     assessmentEnabled = false
     expect((await invoke(23, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1', target: 'Example' })).elementMatch.reason).toBe('disabled')
     expect(assessments).toHaveLength(3)
+
+    const settingsBeforeLocalSearch = settingsRequests
+    const localSearch = { tab_id: 'tab-1', selector: '#form-demo-layout', query: 'Field', interactive_only: true, limit: 30 }
+    await invoke(46, 'ekko_studio_browser_snapshot', localSearch)
+    expect(snapshots.at(-1)).toEqual(localSearch)
+    await invoke(47, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1', snapshot_id: 'snapshot-1', offset: 30, limit: 30 })
+    expect(settingsRequests).toBe(settingsBeforeLocalSearch)
+    expect(snapshots.at(-1)).toEqual({ tab_id: 'tab-1', snapshot_id: 'snapshot-1', offset: 30, limit: 30 })
+    expect(assessments).toHaveLength(3)
+    for (const [id, args] of [[48, { limit: 1.5 }], [49, { snapshot_id: 'snapshot-1', query: 'Field' }]] as const) {
+      const invalid = await rpc(id, 'tools/call', { name: 'ekko_studio_browser_toolset', arguments: {
+        action: 'call', tool: 'ekko_studio_browser_snapshot', arguments: { tab_id: 'tab-1', ...args },
+      } })
+      expect(invalid.result.isError).toBe(true)
+    }
 
     assessmentEnabled = true
     holdAssessment = true

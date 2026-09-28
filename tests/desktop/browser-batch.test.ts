@@ -126,33 +126,19 @@ describe('desktop browser batch interactions', () => {
     expect(page.effects).toEqual(['click:node-1'])
   })
 
-  it('uses current target labels for confirmation and stops when the user declines', async () => {
+  it('executes every batch step without keyword classification or a confirmation dialog', async () => {
     const { page, batch } = await setup()
     page.onEffect = () => { page.nodes[1].name = 'Delete account' }
-    vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 0, checkboxChecked: false })
     const result = await batch([{ action: 'click', ref: '@e1' }, { action: 'click', ref: '@e2' }, { action: 'press', key: 'Tab' }])
-    expect(dialog.showMessageBox).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ detail: 'Delete account' }))
-    expect(result.completed).toBe(1)
-    expect(result.results[1].error).toContain('declined')
-    expect(page.effects).toEqual(['click:node-1'])
+    expect(dialog.showMessageBox).not.toHaveBeenCalled()
+    expect(result.completed).toBe(3)
+    expect(page.effects).toEqual(['click:node-1', 'click:node-2', 'keyDown:Tab', 'keyUp:Tab'])
   })
 
-  it('does not resume a batch after takeover while confirmation is open', async () => {
+  it('stops the remaining batch steps after user takeover', async () => {
     const { page, batch, manager } = await setup()
-    page.onEffect = () => { page.nodes[1].name = 'Delete account' }
-    let shown!: () => void
-    const opened = new Promise<void>(resolve => { shown = resolve })
-    let confirm!: (value: any) => void
-    vi.mocked(dialog.showMessageBox).mockImplementationOnce(() => {
-      shown()
-      return new Promise(resolve => { confirm = resolve })
-    })
-    const pending = batch([{ action: 'click', ref: '@e1' }, { action: 'click', ref: '@e2' }, { action: 'press', key: 'Enter' }])
-    await opened
-    page.cancelled = true
-    manager.cancelAgentOperation('tab')
-    confirm({ response: 1, checkboxChecked: false })
-    const result = await pending
+    page.onEffect = () => { page.cancelled = true; manager.cancelAgentOperation('tab') }
+    const result = await batch([{ action: 'click', ref: '@e1' }, { action: 'click', ref: '@e2' }])
     expect(result.completed).toBe(1)
     expect(result.results[1].error).toContain('takeover')
     expect(result.snapshot).toBeUndefined()
@@ -160,20 +146,17 @@ describe('desktop browser batch interactions', () => {
     expect(manager.state().tabs[0].agentControl).toBe('idle')
   })
 
-  it('does not execute a confirmation accepted after the batch budget expires', async () => {
-    const { page, batch, manager } = await setup()
-    page.onEffect = () => { page.nodes[1].name = 'Delete account' }
-    let now = Date.now()
-    vi.spyOn(Date, 'now').mockImplementation(() => now)
-    vi.mocked(dialog.showMessageBox).mockImplementationOnce(async () => {
-      now += 30_001
-      return { response: 1, checkboxChecked: false }
-    })
-    const result = await batch([{ action: 'click', ref: '@e1' }, { action: 'click', ref: '@e2' }])
-    expect(result.completed).toBe(1)
-    expect(result.results[1].error).toContain('timed out')
-    expect(page.effects).toEqual(['click:node-1'])
-    expect(manager.state().tabs[0].agentControl).toBe('idle')
+  it('uses the configured download preferences for Agent downloads', async () => {
+    const { internal, manager, record, contents } = await setup()
+    record.tab.profileId = 'profile'
+    manager.setAgentControl('tab', 'active', 'Agent', 'click')
+    const item = { getFilename: () => 'example.zip', getURL: () => 'https://example.com/example.zip',
+      getTotalBytes: () => 100, setSaveDialogOptions: vi.fn(), setSavePath: vi.fn(), on: vi.fn(), once: vi.fn() }
+    internal.handleDownload({ id: 'profile', downloadPath: '/tmp/studio-browser-batch-unused/downloads', askBeforeDownload: false, downloadConflictPolicy: 'ask' }, item, contents)
+    expect(item.setSavePath).toHaveBeenCalledWith('/tmp/studio-browser-batch-unused/downloads/example.zip')
+    expect(item.setSaveDialogOptions).not.toHaveBeenCalled()
+    internal.handleDownload({ id: 'profile', downloadPath: '/tmp/studio-browser-batch-unused/downloads', askBeforeDownload: true, downloadConflictPolicy: 'ask' }, item, contents)
+    expect(item.setSaveDialogOptions).toHaveBeenCalledWith({ defaultPath: '/tmp/studio-browser-batch-unused/downloads/example.zip' })
   })
 
   it('checks for cancellation after DOM resolution and before page side effects', async () => {

@@ -209,11 +209,14 @@ The existing browser toolset remains list → describe → call:
 Omitting `target`/`expectation` preserves the exact legacy call path with no JEV
 settings request or extra snapshot. A described intent is required even when a
 switch is enabled. Explicit refs and snapshot freshness, DOM checks, control
-leases, and existing high-risk confirmations remain enforced by the Desktop Broker.
+and leases remain enforced by the Desktop Broker. Browser actions execute without
+label-based risk classification or additional Agent confirmation dialogs; downloads
+use the configured browser Profile preferences.
 A match is a recommendation, not permission to act.
 
-Browser snapshot, interact and batch responses retain all snapshot nodes and use
-compact JSON. The duplicate `text` rendering is omitted by default; pass
+Browser snapshot, interact and batch responses retain the nodes of their selected
+page and use compact JSON. Large-page local search and pagination work independently
+of JEV; see [browser snapshot usage](browser-snapshots.md). The duplicate `text` rendering is omitted by default; pass
 `include_text: true` when needed. Invalid arguments are rejected before dispatch
 with their field path and a schema-discovery hint. Clicks wait up to 1.5 seconds
 for the original target to become visible/enabled, within the existing batch

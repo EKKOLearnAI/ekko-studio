@@ -8,8 +8,10 @@ import type {
   BrowserScreenshot,
   BrowserSnapshot,
   BrowserSnapshotNode,
+  BrowserSnapshotOptions,
 } from './browser-types'
 import { MAX_BROWSER_TEXT_READ_LIMIT } from './browser-types'
+import { filterSnapshotNodes, snapshotOptions, DEFAULT_SNAPSHOT_LIMIT } from './browser-snapshot'
 import { publicBrowserUrl, redactBrowserContent, redactBrowserText } from './browser-url'
 
 interface AxNode {
@@ -26,17 +28,21 @@ interface AxNode {
 interface StoredSnapshot {
   id: string
   refs: Map<string, { backendDOMNodeId: number; role: string; name: string }>
+  nodes: BrowserSnapshotNode[]
+  totalNodes: number
+  url: string
+  title: string
+  options: BrowserSnapshotOptions
 }
 
 interface PreparedBatchAction {
   action: BrowserBatchAction
   backendDOMNodeId?: number
+  snapshotOptions?: BrowserSnapshotOptions
 }
 
-const MAX_SNAPSHOT_NODES = 300
 const MAX_SNAPSHOT_TEXT = 24_000
 const MAX_SCREENSHOT_BYTES = 12 * 1024 * 1024
-const HIGH_RISK_ACTIVATION = /(?:\b(?:buy(?: now)?|purchase|checkout|place order|pay(?: now)?|delete|remove account|publish|post|send|transfer|withdraw|submit order|grant (?:access|permission)|allow access)\b|购买|下单|付款|支付|删除|注销|发布|发送|转账|提现|提交订单|購入|注文|支払|削除|公開|投稿|送信|振込|구매|주문|결제|삭제|게시|전송|송금)/i
 const CLICKABLE_ANCESTOR_SELECTOR = [
   'button',
   'a[href]',
@@ -105,14 +111,41 @@ export class BrowserAutomation {
     }
   }
 
-  async snapshot(tabId: string, contents: WebContents): Promise<BrowserSnapshot> {
+  snapshotSelection(tabId: string): BrowserSnapshotOptions {
+    return { ...this.snapshots.get(tabId)?.options, snapshotId: undefined }
+  }
+
+  async snapshot(tabId: string, contents: WebContents, input: BrowserSnapshotOptions = {}): Promise<BrowserSnapshot> {
+    const options = snapshotOptions(input)
+    if (options.snapshotId) {
+      const current = this.snapshots.get(tabId)
+      if (!current || current.id !== options.snapshotId) throw new Error('Browser snapshot is stale; take a new snapshot')
+      current.options = { ...current.options, offset: options.offset, limit: options.limit }
+      return this.snapshotPage(tabId, current)
+    }
     await this.ensureAttached(contents)
     await contents.debugger.sendCommand('Accessibility.enable')
     const response = await contents.debugger.sendCommand('Accessibility.getFullAXTree') as { nodes?: AxNode[] }
+    let scope: Set<number> | undefined
+    if (options.selector) {
+      const document = await contents.debugger.sendCommand('DOM.getDocument')
+      const selected = await contents.debugger.sendCommand('DOM.querySelector', { nodeId: document.root.nodeId, selector: options.selector })
+      if (!selected.nodeId) throw new Error('Snapshot selector did not match an element; choose another selector or omit it for the whole document')
+      const subtree = await contents.debugger.sendCommand('DOM.describeNode', { nodeId: selected.nodeId, depth: -1, pierce: true })
+      scope = new Set<number>()
+      const pending = [subtree.node]
+      while (pending.length) {
+        const node = pending.pop()
+        if (!node) continue
+        if (node.backendNodeId) scope.add(node.backendNodeId)
+        pending.push(...(node.children || []), ...(node.shadowRoots || []), node.contentDocument)
+      }
+    }
     const refs = new Map<string, { backendDOMNodeId: number; role: string; name: string }>()
     const nodes: BrowserSnapshotNode[] = []
+    const inScope = new Set<string>()
     for (const node of response.nodes || []) {
-      if (nodes.length >= MAX_SNAPSHOT_NODES || node.ignored || !node.backendDOMNodeId) continue
+      if (node.ignored || !node.backendDOMNodeId) continue
       const role = textValue(node.role?.value, 80)
       const name = textValue(node.name?.value)
       const protectedValue = property(node, 'protected') === true
@@ -120,29 +153,45 @@ export class BrowserAutomation {
       if (!role || role === 'none' || role === 'generic' && !name && !value) continue
       const ref = `@e${nodes.length + 1}`
       refs.set(ref, { backendDOMNodeId: node.backendDOMNodeId, role, name })
+      if (!scope || scope.has(node.backendDOMNodeId)) inScope.add(ref)
+      const checked = property(node, 'checked')
+      const selected = property(node, 'selected')
+      const expanded = property(node, 'expanded')
       nodes.push({
-        ref,
-        role,
-        name,
+        ref, role, name,
         ...(value ? { value } : {}),
         ...(node.description?.value ? { description: textValue(node.description.value) } : {}),
         ...(property(node, 'disabled') === true ? { disabled: true } : {}),
         ...(property(node, 'focused') === true ? { focused: true } : {}),
+        ...(checked === 'mixed' ? { checked } : checked === true || checked === 'true' ? { checked: true }
+          : checked === false || checked === 'false' ? { checked: false } : {}),
+        ...(typeof selected === 'boolean' ? { selected } : {}),
+        ...(typeof expanded === 'boolean' ? { expanded } : {}),
       })
     }
-    const snapshotId = randomUUID()
-    this.snapshots.set(tabId, { id: snapshotId, refs })
+    const current: StoredSnapshot = { id: randomUUID(), refs, totalNodes: nodes.length,
+      nodes: filterSnapshotNodes(nodes.filter(node => inScope.has(node.ref)), options), options,
+      url: publicBrowserUrl(contents.getURL()), title: redactBrowserText(contents.getTitle()) }
+    this.snapshots.set(tabId, current)
+    return this.snapshotPage(tabId, current)
+  }
+
+  private snapshotPage(tabId: string, current: StoredSnapshot): BrowserSnapshot {
+    const { selector, query, interactiveOnly, offset = 0, limit = DEFAULT_SNAPSHOT_LIMIT } = current.options
+    const nodes = current.nodes.slice(offset, offset + limit)
+    const hasMore = offset + nodes.length < current.nodes.length
     const lines = nodes.map(node => {
       const details = [node.name && `name=${JSON.stringify(node.name)}`, node.value && `value=${JSON.stringify(node.value)}`].filter(Boolean)
       return `${node.ref} ${node.role}${details.length ? ` ${details.join(' ')}` : ''}`
     })
     return {
-      tabId,
-      snapshotId,
-      url: publicBrowserUrl(contents.getURL()),
-      title: redactBrowserText(contents.getTitle()),
-      nodes,
-      text: lines.join('\n').slice(0, MAX_SNAPSHOT_TEXT),
+      tabId, snapshotId: current.id, url: current.url, title: current.title,
+      nodes, text: lines.join('\n').slice(0, MAX_SNAPSHOT_TEXT),
+      totalNodes: current.totalNodes, matchedNodes: current.nodes.length, offset, limit, hasMore,
+      truncated: nodes.length < current.nodes.length,
+      ...(hasMore ? { nextOffset: offset + nodes.length } : {}),
+      scope: { ...(selector ? { selector } : {}), ...(query ? { query } : {}), ...(interactiveOnly ? { interactiveOnly } : {}) },
+      ...(hasMore ? { hint: 'Continue with this snapshot_id and offset=nextOffset. For focused results start a new snapshot with selector, query or interactive_only. Scrolling alone does not page this tree. These options work without JEV.' } : {}),
     }
   }
 
@@ -223,14 +272,14 @@ export class BrowserAutomation {
       if (action.action !== 'click' && action.action !== 'type') return { action }
       if (typeof snapshotId !== 'string') throw new Error('snapshot_id is required for batch click/type actions')
       const target = this.resolveRef(tabId, snapshotId, action.ref)
-      return { action, backendDOMNodeId: target.backendDOMNodeId }
+      return { action, backendDOMNodeId: target.backendDOMNodeId, snapshotOptions: this.snapshotSelection(tabId) }
     })
   }
 
   async resolveBatchAction(tabId: string, contents: WebContents, prepared: PreparedBatchAction): Promise<BrowserInteractAction> {
     const { action } = prepared
     if (action.action !== 'click' && action.action !== 'type') return action
-    const snapshot = await this.snapshot(tabId, contents)
+    const snapshot = await this.snapshot(tabId, contents, prepared.snapshotOptions)
     // Ref numbers can shift after each interaction; preserve the original DOM identity.
     const current = this.snapshots.get(tabId)
     const match = [...(current?.refs || [])].find(([, target]) => target.backendDOMNodeId === prepared.backendDOMNodeId)
@@ -338,14 +387,6 @@ export class BrowserAutomation {
     await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', modifiers, ...descriptor, windowsVirtualKeyCode: descriptor.keyCode })
     await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', modifiers, ...descriptor, windowsVirtualKeyCode: descriptor.keyCode })
     this.invalidate(tabId)
-  }
-
-  interactionRisk(tabId: string, action: BrowserInteractAction): { kind: 'high-risk-activation'; label: string } | null {
-    if (action.action !== 'click' || typeof action.snapshot_id !== 'string' || typeof action.ref !== 'string') return null
-    const target = this.resolveRef(tabId, action.snapshot_id, action.ref)
-    if (!['button', 'link', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'statictext', 'text', 'inlinetextbox'].includes(target.role.toLowerCase())) return null
-    const label = textValue(target.name, 160)
-    return label && HIGH_RISK_ACTIVATION.test(label) ? { kind: 'high-risk-activation', label } : null
   }
 
   async screenshot(tabId: string, contents: WebContents, fullPage = false): Promise<BrowserScreenshot> {

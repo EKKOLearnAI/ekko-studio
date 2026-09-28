@@ -33,6 +33,12 @@ function validate(schema, value, path) {
 export function validateBrowserArguments(tool, args) {
   const error = validate(tool.inputSchema, args, 'arguments')
   if (error) return error
+  if (tool.name.endsWith('_snapshot')) {
+    for (const key of ['offset', 'limit']) if (args[key] !== undefined && !Number.isSafeInteger(args[key])) return `arguments.${key} must be an integer`
+    if (args.snapshot_id && ['selector', 'query', 'interactive_only'].some(key => args[key] !== undefined)) {
+      return 'arguments.snapshot_id cannot be combined with selector/query/interactive_only; omit it for a new search'
+    }
+  }
   if (tool.name.endsWith('_interact') || tool.name.endsWith('_batch')) {
     const actions = tool.name.endsWith('_batch') ? args.actions : [args]
     for (const [index, action] of actions.entries()) {

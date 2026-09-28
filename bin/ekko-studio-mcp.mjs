@@ -937,8 +937,18 @@ const tools = [
   {
     name: 'ekko_studio_browser_snapshot',
     toolset: 'browser',
-    description: 'Return a bounded accessibility snapshot with stable element refs. Pass its snapshot_id to read text, click, or type; stale snapshots are rejected. Supply target to request optional JEV element matching when enabled in Models > JEV; inspect elementMatch alongside the unchanged snapshot. A match is advisory and still requires snapshot_id/ref for interaction.',
-    inputSchema: browserInputSchema({ tab_id: { type: 'string' }, include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside nodes. Defaults to false.' }, target: { type: 'string', minLength: 1, maxLength: 2000, description: 'Optional semantic help for an ambiguous target; omit when its ref is already clear.' } }, ['tab_id']),
+    description: 'Read an accessibility snapshot in bounded pages. Large pages: use selector for a CSS region (e.g. #form-demo-layout), query for local label/text search, or interactive_only for controls. These search the full document before paging and require no JEV. When hasMore is true, continue with snapshot_id and offset=nextOffset instead of repeating or scrolling the same tree. Refs stay stable across pages of that snapshot; use snapshot_id/ref for click/type. Optional target adds JEV advice only when configured.',
+    inputSchema: browserInputSchema({
+      tab_id: { type: 'string' },
+      selector: { type: 'string', minLength: 1, maxLength: 2000, description: 'CSS selector for one region in the main document. A URL #anchor often identifies the intended demo/form. Omit to inspect the whole document.' },
+      query: { type: 'string', minLength: 1, maxLength: 2000, description: 'Local case-insensitive substring search of rendered names, roles and descriptions across the full selected region. Works without JEV.' },
+      interactive_only: { type: 'boolean', description: 'Return controls and links, excluding static text and layout containers. Works without JEV.' },
+      snapshot_id: { type: 'string', minLength: 1, maxLength: 2000, description: 'Continue the latest cached snapshot without re-reading the page. Do not combine with selector/query/interactive_only; omit for a fresh snapshot.' },
+      offset: { type: 'number', minimum: 0, description: 'Zero-based node offset, normally the previous nextOffset. Defaults to 0.' },
+      limit: { type: 'number', minimum: 1, maximum: 300, description: 'Nodes per response, default 100. Use pagination rather than increasing the limit for large documents.' },
+      include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside nodes. Defaults to false.' },
+      target: { type: 'string', minLength: 1, maxLength: 2000, description: 'Optional JEV semantic advice within the returned page; use local selector/query/interactive_only to locate missing controls first.' },
+    }, ['tab_id']),
   },
   {
     name: 'ekko_studio_browser_read_text',
@@ -969,7 +979,7 @@ const tools = [
   {
     name: 'ekko_studio_browser_batch',
     toolset: 'browser',
-    description: 'Execute 1-50 click/type/press/scroll actions sequentially in one tab in a single call. For click/type, pass one current snapshot_id and refs from that snapshot; original DOM targets are revalidated before each step. Stops on the first failure, navigation, user takeover, or the 30-second execution budget. Returns zero-based per-step completed/failed/skipped results and a fresh snapshot when available. Completed actions are not rolled back. Existing high-risk action confirmations still apply. Supply expectation for optional JEV verification of the final snapshot after a fully completed batch; verification does not change completion status or retry actions.',
+    description: 'Execute 1-50 click/type/press/scroll actions sequentially in one tab in a single call. For click/type, pass one current snapshot_id and refs from that snapshot; original DOM targets are revalidated before each step. Stops on the first failure, navigation, user takeover, or the 30-second execution budget. Returns zero-based per-step completed/failed/skipped results and a fresh snapshot when available. Completed actions are not rolled back. Supply expectation for optional JEV verification of the final snapshot after a fully completed batch; verification does not change completion status or retry actions.',
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
       snapshot_id: { type: 'string', description: 'Current snapshot used by all click/type refs; optional for a batch containing only press/scroll.' },
@@ -1960,7 +1970,11 @@ async function callTool(name, args = {}, signal) {
     }
     case 'ekko_studio_browser_snapshot': {
       const target = browserIntent(args.target, 'target')
-      const envelope = await browserRequest('snapshot', { tab_id: args.tab_id }, signal)
+      const params = { tab_id: args.tab_id }
+      for (const key of ['selector', 'query', 'interactive_only', 'snapshot_id', 'offset', 'limit']) {
+        if (args[key] !== undefined) params[key] = args[key]
+      }
+      const envelope = await browserRequest('snapshot', params, signal)
       return browserOutput(await matchBrowserSnapshot(request, envelope, target, signal), args.include_text)
     }
     case 'ekko_studio_browser_read_text':

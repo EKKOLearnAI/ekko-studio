@@ -11,6 +11,7 @@ import {
   type BrowserTextMode,
 } from './browser-types'
 import { publicBrowserUrl, redactBrowserText } from './browser-url'
+import { snapshotOptions } from './browser-snapshot'
 
 interface BrokerRequest {
   method?: unknown
@@ -243,7 +244,11 @@ export class BrowserBroker {
           return this.publicTab(tab)
         }
         case 'snapshot':
-          return await this.manager.snapshot(requiredString(params.tab_id, 'tab_id'))
+          return await this.manager.snapshot(requiredString(params.tab_id, 'tab_id'), snapshotOptions({
+            snapshotId: params.snapshot_id as string | undefined, selector: params.selector as string | undefined,
+            query: params.query as string | undefined, interactiveOnly: params.interactive_only as boolean | undefined,
+            offset: params.offset as number | undefined, limit: params.limit as number | undefined,
+          }))
         case 'text.read': {
           const mode = params.mode === undefined ? 'innerText' : requiredString(params.mode, 'mode')
           if (mode !== 'innerText' && mode !== 'textContent') throw new Error('mode must be innerText or textContent')

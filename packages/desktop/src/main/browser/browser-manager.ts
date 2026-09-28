@@ -29,6 +29,7 @@ import type {
   BrowserProfileSwitchImpact,
   BrowserProfileUpdateInput,
   BrowserReadTextOptions,
+  BrowserSnapshotOptions,
   BrowserSelection,
   BrowserSitePermission,
   DesktopBrowserDownload,
@@ -60,26 +61,6 @@ const ANNOTATION_STATE_KEY = '__hermes_browser_annotation_state__'
 const SESSION_COOKIE_PERSIST_DELAY_MS = 750
 const SESSION_SHUTDOWN_TIMEOUT_MS = 2_000
 const HTML_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
-
-const RISK_DIALOG_COPY = {
-  de: ['Agent-Aktion bestätigen', 'Diese Browser-Aktion kann eine wichtige Änderung ausführen:', 'Abbrechen', 'Einmal erlauben'],
-  en: ['Confirm Agent action', 'This browser action may perform an important change:', 'Cancel', 'Allow once'],
-  es: ['Confirmar acción del Agent', 'Esta acción del navegador puede realizar un cambio importante:', 'Cancelar', 'Permitir una vez'],
-  fr: ["Confirmer l’action de l’Agent", 'Cette action du navigateur peut effectuer une modification importante :', 'Annuler', 'Autoriser une fois'],
-  ja: ['Agent 操作を確認', 'このブラウザ操作は重要な変更を実行する可能性があります：', 'キャンセル', '今回のみ許可'],
-  ko: ['Agent 작업 확인', '이 브라우저 작업은 중요한 변경을 수행할 수 있습니다:', '취소', '한 번 허용'],
-  pt: ['Confirmar ação do Agent', 'Esta ação do navegador pode fazer uma alteração importante:', 'Cancelar', 'Permitir uma vez'],
-  ru: ['Подтвердите действие Agent', 'Это действие браузера может внести важное изменение:', 'Отмена', 'Разрешить один раз'],
-  'zh-TW': ['確認 Agent 操作', '此瀏覽器操作可能會執行重要變更：', '取消', '僅允許這一次'],
-  zh: ['确认 Agent 操作', '此浏览器操作可能会执行重要变更：', '取消', '仅允许这一次'],
-} as const
-
-function riskDialogCopy(): readonly [string, string, string, string] {
-  const locale = app.getLocale().toLowerCase()
-  if (locale.startsWith('zh-tw') || locale.startsWith('zh-hk')) return RISK_DIALOG_COPY['zh-TW']
-  const language = locale.split('-')[0] as keyof typeof RISK_DIALOG_COPY
-  return RISK_DIALOG_COPY[language] || RISK_DIALOG_COPY.en
-}
 
 function copyTab(tab: DesktopBrowserTab): DesktopBrowserTab {
   return { ...tab }
@@ -125,7 +106,6 @@ export class BrowserManager {
   private readonly automationVisibleTabs = new Set<string>()
   private readonly activeAnnotationTabs = new Set<string>()
   private readonly annotationMarkerCounts = new Map<string, number>()
-  private readonly agentDownloadGuardUntil = new Map<string, number>()
   private readonly stateListeners = new Set<(state: DesktopBrowserState) => void>()
   private activeProfileId = ''
   private activeTabId: string | undefined
@@ -244,7 +224,6 @@ export class BrowserManager {
     this.window.contentView.removeChildView(record.view)
     this.automation.detach(tabId, contents)
     this.automationVisibleTabs.delete(tabId)
-    this.agentDownloadGuardUntil.delete(tabId)
     if (contents && !contents.isDestroyed()) contents.close()
     this.records.delete(tabId)
     if (this.activeTabId === tabId) this.activeTabId = [...this.records.keys()][Math.max(0, index - 1)]
@@ -399,9 +378,9 @@ export class BrowserManager {
     return this.state()
   }
 
-  async snapshot(tabId: string) {
+  async snapshot(tabId: string, options: BrowserSnapshotOptions = {}) {
     const record = this.requireTab(tabId)
-    return this.automation.snapshot(tabId, record.view.webContents)
+    return this.automation.snapshot(tabId, record.view.webContents, options)
   }
 
   async readText(tabId: string, options: BrowserReadTextOptions) {
@@ -412,45 +391,6 @@ export class BrowserManager {
   async interact(tabId: string, action: BrowserInteractAction, assertActive: () => void = () => {}): Promise<DesktopBrowserTab> {
     assertActive()
     const record = this.requireTab(tabId)
-    const risk = this.automation.interactionRisk(tabId, action)
-    if (risk) {
-      const [title, message, cancel, allow] = riskDialogCopy()
-      const previousLabel = record.tab.agentLabel
-      this.setAgentControl(tabId, 'waiting-for-user', previousLabel, risk.kind)
-      let confirmationTimer: NodeJS.Timeout | undefined
-      let result: Awaited<ReturnType<typeof dialog.showMessageBox>>
-      try {
-        result = await Promise.race([
-          dialog.showMessageBox(this.window, {
-            type: 'warning',
-            title,
-            message,
-            detail: risk.label,
-            buttons: [cancel, allow],
-            defaultId: 0,
-            cancelId: 0,
-            noLink: true,
-          }),
-          new Promise<never>((_resolve, reject) => {
-            confirmationTimer = setTimeout(() => reject(new Error('High-risk browser confirmation timed out')), 25_000)
-            confirmationTimer.unref?.()
-          }),
-        ])
-        assertActive()
-      } catch (error) {
-        if (this.records.get(tabId) === record && record.tab.agentControl === 'waiting-for-user' && record.tab.agentLabel === previousLabel) {
-          this.setAgentControl(tabId, 'idle')
-        }
-        throw error
-      } finally {
-        if (confirmationTimer) clearTimeout(confirmationTimer)
-      }
-      if (result.response !== 1) {
-        this.setAgentControl(tabId, 'idle')
-        throw new Error('High-risk browser action was declined by the user')
-      }
-      this.setAgentControl(tabId, 'active', previousLabel, action.action)
-    }
     await this.withAutomationView(record, () => this.automation.interact(tabId, record.view.webContents, action, assertActive))
     return copyTab(record.tab)
   }
@@ -458,6 +398,7 @@ export class BrowserManager {
   async interactBatch(tabId: string, input: unknown, snapshotId: unknown, assertControl: () => void): Promise<BrowserBatchResult> {
     const actions = parseBrowserBatchActions(input)
     const record = this.requireTab(tabId)
+    const snapshotOptions = this.automation.snapshotSelection(tabId)
     const prepared = this.automation.prepareBatch(tabId, snapshotId, actions)
     const generation = record.documentGeneration || 0
     const originalUrl = record.view.webContents.getURL()
@@ -491,7 +432,7 @@ export class BrowserManager {
     try {
       assertControl()
       if (Date.now() >= deadline) throw new Error('Browser batch timed out')
-      result.snapshot = await this.snapshot(tabId)
+      result.snapshot = await this.snapshot(tabId, snapshotOptions)
       assertControl()
     } catch (error) {
       delete result.snapshot
@@ -515,7 +456,6 @@ export class BrowserManager {
 
   setAgentControl(tabId: string, control: BrowserAgentControl, label?: string, action?: string): void {
     const tab = this.requireTab(tabId).tab
-    if (control !== 'idle') this.agentDownloadGuardUntil.set(tabId, Date.now() + 5 * 60 * 1000)
     tab.agentControl = control
     tab.agentLabel = label
     tab.agentAction = action
@@ -975,8 +915,7 @@ export class BrowserManager {
     const safeFileName = basename(item.getFilename()).replace(/[\u0000-\u001f]/g, '_') || 'download'
     const basePath = join(profile.downloadPath, safeFileName)
     const savePath = profile.downloadConflictPolicy === 'uniquify' ? nextDownloadPath(profile.downloadPath, safeFileName) : basePath
-    const askForPath = (this.agentDownloadGuardUntil.get(record.tab.id) || 0) > Date.now()
-      || profile.askBeforeDownload
+    const askForPath = profile.askBeforeDownload
       || (profile.downloadConflictPolicy === 'ask' && existsSync(basePath))
     // Electron only supports configuring the destination while will-download is
     // running. Its own dialog must handle prompted downloads; awaiting a separate
@@ -1090,7 +1029,6 @@ export class BrowserManager {
     this.automationVisibleTabs.clear()
     this.activeAnnotationTabs.clear()
     this.annotationMarkerCounts.clear()
-    this.agentDownloadGuardUntil.clear()
     this.activeTabId = undefined
   }
 

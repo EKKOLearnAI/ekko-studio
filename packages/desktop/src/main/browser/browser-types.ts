@@ -96,6 +96,18 @@ export interface BrowserSnapshotNode {
   description?: string
   disabled?: boolean
   focused?: boolean
+  checked?: boolean | 'mixed'
+  selected?: boolean
+  expanded?: boolean
+}
+
+export interface BrowserSnapshotOptions {
+  snapshotId?: string
+  selector?: string
+  query?: string
+  interactiveOnly?: boolean
+  offset?: number
+  limit?: number
 }
 
 export interface BrowserSnapshot {
@@ -105,6 +117,15 @@ export interface BrowserSnapshot {
   title: string
   nodes: BrowserSnapshotNode[]
   text: string
+  totalNodes?: number
+  matchedNodes?: number
+  offset?: number
+  limit?: number
+  hasMore?: boolean
+  nextOffset?: number
+  truncated?: boolean
+  scope?: { selector?: string; query?: string; interactiveOnly?: boolean }
+  hint?: string
 }
 
 export type BrowserTextMode = 'innerText' | 'textContent'
