@@ -10,6 +10,7 @@ import { deleteCompressionSnapshot, getCompressionSnapshot } from '../../reposit
 import { getRecordedUsageTotals, getUsage } from '../../repositories/usage-store'
 import { countTokens, SUMMARY_PREFIX } from '../context-compressor'
 import { truncateToolResultForContext } from './tool-result-context'
+import { projectChatBrowserHistory } from '../../public/chat-agent-runtime'
 import { logger } from '../../public/logging'
 import { assembleCursorSnapshotHistory, readCursorSnapshotParts } from './context-history'
 import type { SessionState } from './types'
@@ -194,9 +195,7 @@ export async function calcAndUpdateUsage(
     }
     const usage = estimateSnapshotUsage(storedMessages)
     const contextUsage = options.truncateToolResultsForContext
-      ? estimateSnapshotUsage(storedMessages.map(message => message.role === 'tool'
-        ? { ...message, content: truncateToolResultForContext(message.content || '') }
-        : message))
+      ? estimateSnapshotUsage(projectChatBrowserHistory(storedMessages, { truncateOtherTools: truncateToolResultForContext }))
       : undefined
     state.inputTokens = usage.inputTokens
     state.outputTokens = usage.outputTokens

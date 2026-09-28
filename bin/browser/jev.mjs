@@ -5,11 +5,20 @@ export function browserIntent(value, name) {
   return value.trim()
 }
 
-function evidence(snapshot) {
+function evidence(snapshot, observation) {
   if (!snapshot?.snapshotId || !snapshot.tabId || !Array.isArray(snapshot.nodes)) throw new Error('Snapshot unavailable')
+  const relevant = observation?.tabId === snapshot.tabId && observation.status === 'observed' ? observation : undefined
+  const targets = (relevant?.targets || []).flatMap(target => target.after ? [{ ...target.after,
+    actionTarget: true, valueMatches: target.valueMatches }] : [])
+  const changes = (relevant?.changes || []).flatMap(change => change.after ? [change.after] : [])
+  // Prioritize post-action targets outside the selected page, without mixing tabs or old refs.
+  const byRef = new Map()
+  for (const node of [...targets, ...changes, ...snapshot.nodes]) if (!byRef.has(node.ref)) byRef.set(node.ref, node)
+  const nodes = [...byRef.values()].slice(0, 500)
   return {
     tabId: snapshot.tabId, snapshotId: snapshot.snapshotId, title: snapshot.title,
-    nodes: snapshot.nodes.map(({ ref, role, name, disabled }) => ({ ref, role, name, disabled })),
+    nodes: nodes.map(({ ref, role, name, disabled, checked, selected, pressed, expanded, actionTarget, valueMatches }) =>
+      ({ ref, role, name, disabled, checked, selected, pressed, expanded, actionTarget, valueMatches })),
   }
 }
 
@@ -38,10 +47,10 @@ async function settingsFor(request, feature, signal) {
   return { timeout: Number.isInteger(timeout) ? Math.max(100, Math.min(30000, timeout)) : 3000 }
 }
 
-async function assess(request, path, snapshot, intent, timeout, signal) {
+async function assess(request, path, snapshot, intent, timeout, signal, observation) {
   signal?.throwIfAborted()
   const result = await request(path, {
-    method: 'POST', body: { snapshot: evidence(snapshot), ...intent }, signal: transportSignal(signal, timeout + 1000),
+    method: 'POST', body: { snapshot: evidence(snapshot, observation), ...intent }, signal: transportSignal(signal, timeout + 1000),
   })
   signal?.throwIfAborted()
   if (result?.snapshotId !== snapshot.snapshotId || result?.tabId !== snapshot.tabId
@@ -84,7 +93,7 @@ export async function verifyBrowserResult(request, envelope, expectation, readSn
       stage = 'snapshot'
       snapshot ??= (await readSnapshot()).result
       stage = 'assessment'
-      verification = await assess(request, '/api/studio/jev/browser/verify', snapshot, { expectation }, config.timeout, signal)
+      verification = await assess(request, '/api/studio/jev/browser/verify', snapshot, { expectation }, config.timeout, signal, envelope.result?.observation)
     }
   } catch (error) {
     signal?.throwIfAborted()

@@ -1359,6 +1359,8 @@ export * from './model/manager'
 
 export * from './model/messages'
 
+export * from './model/browser-context'
+
 export * from './model/provider-presets'
 
 export * from './model/provider-config'
@@ -2275,6 +2277,11 @@ export interface AuthorizedModelProviderPreset {
 export function authorizedModelProviderId(provider: string): AuthorizedModelProviderId | undefined
 
 export function authorizedModelProviderPreset( provider: string, accessToken?: string, ): AuthorizedModelProviderPreset | undefined
+```
+### `src/model/browser-context.ts`
+
+```ts
+export function projectBrowserHistory<T extends BrowserHistoryMessage>(messages: T[], options: { truncateOtherTools?: (content: string) => string } = {}): T[]
 ```
 ### `src/model/errors.ts`
 
@@ -3576,6 +3583,7 @@ export interface ToolResultSanitizerOptions {
   maxTextBytes?: number
   maxTextArtifactBytes?: number
   now?: number
+  compactJson?: boolean
 }
 
 export async function sanitizeAgentToolResult( result: AgentToolResult, options: ToolResultSanitizerOptions = {}, ): Promise<AgentToolResult>

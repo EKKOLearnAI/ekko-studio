@@ -23,6 +23,8 @@ The result reports `totalNodes`, `matchedNodes`, `offset`, `limit`, `hasMore`,
 tree. Refs and snapshot identity stay stable across cached pages; interaction or
 navigation invalidates the snapshot, so subsequent work needs a fresh one.
 Repeating an unfiltered snapshot or scrolling does not advance its offset.
+Offsets count filtered results, not ref numbers or positions in the full tree.
+An out-of-range page explains this and suggests restarting at offset zero.
 
 For a form at the end of a large documentation page:
 
@@ -44,13 +46,47 @@ For the next page of a snapshot whose result has `nextOffset: 100`:
 
 Use returned refs with that snapshot ID for click/type or a sequential batch.
 Batch steps keep the original DOM identity, including targets beyond the first
-page. The final batch snapshot preserves the initial selection and page options.
-`checked`, `selected` and `expanded` state is included when provided by the
+page. Same-document SKU/query/hash changes can continue; a new document or reload
+stops remaining actions. The final snapshot preserves the initial selection and
+page options when that region still exists, and falls back to the new document
+after navigation or removal of the region.
+`checked`, `selected`, `pressed` and `expanded` state is included when provided by the
 accessibility tree, so ordinary agents can inspect control state without JEV.
+
+Single actions and batches return `observation` with bounded before/after target
+states and changes, including `valueMatches` when the final input can be compared
+locally without redacted/protected values. Only completed batch targets are
+observed. Input values preserve spaces and line breaks for exact comparison;
+redacted, protected or truncated values do not produce `valueMatches`.
+A short read-only settling window catches asynchronous updates; it
+never replays an action. Background timer throttling is temporarily disabled
+during execution and observation, then restored. Pages slower than the observation
+window may still need a fresh snapshot.
+
+`completed` means dispatched, not semantic success. No observed change means the
+agent should inspect the relevant region or screenshot and choose a new strategy.
+It does not prove failure. When an action opens a new tab, `openedTabs` identifies
+the destination and the returned `snapshot.tabId` can differ from the original tab.
+The observation remains bound to its originating `tabId`.
 
 `target` remains a separate optional JEV recommendation within the returned page.
 Use the local filters to expose missing controls before requesting semantic advice.
 `include_text` defaults to false to avoid duplicating node labels.
+Optional JEV verification also receives control states, operated targets and
+locally computed value matches. It still receives no raw input values, URLs or
+descriptions, and its independent switch and credential requirements remain in
+effect. A low-confidence judgment never retries an action.
+
+Ekko model requests summarize superseded browser snapshots into bounded facts,
+retaining all pages of the newest snapshot per tab and action/error metadata.
+Studio applies the same projection before context budgeting; current structured
+snapshots bypass generic character truncation so refs remain usable. Original
+tool events and stored session history stay complete. This projection does not
+control history owned by external coding agents. Browser JSON remains compact
+through the tool-result sanitizer.
+
+Requests naming the built-in/Studio browser prefer `ekko_studio_browser_toolset`.
+The separate Agent browser has its own environment and login state.
 
 The tree is the current document's accessibility tree. CSS scope does not switch
 into a separate iframe, and cached pages do not refresh after asynchronous DOM

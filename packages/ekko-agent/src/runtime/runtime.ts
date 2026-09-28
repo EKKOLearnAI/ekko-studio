@@ -13,6 +13,7 @@ import {
   normalizeAgentMessages,
 } from '../model/messages'
 import { countTextTokens } from '../model/tokens'
+import { projectBrowserHistory } from '../model/browser-context'
 import type { AgentMessageInput, AgentOutputMessage } from '../model/messages'
 import type { AgentMessage, AgentToolCall, AgentToolDefinition, ModelRequest, ModelResponse } from '../model/types'
 import type { AgentSkill } from '../skills/types'
@@ -1096,7 +1097,7 @@ export class AgentRuntime {
       reasoningEffort: input.reasoningEffort ?? modelDefaults?.reasoningEffort,
       reasoningSummary: input.reasoningSummary ?? modelDefaults?.reasoningSummary,
       metadata: input.metadata ?? modelDefaults?.metadata,
-      messages,
+      messages: projectBrowserHistory(messages),
       signal,
       tools,
       toolChoice: tools ? modelDefaults?.toolChoice : undefined,
@@ -1260,6 +1261,7 @@ export class AgentRuntime {
       )
       const result = await sanitizeAgentToolResult(validatedResult, {
         tempRoot: workspaceToolAssetDirectory(context),
+        compactJson: /(?:ekko|hermes)_studio_browser_/.test(toolCall.name),
       })
       throwIfAborted(signal)
       emit({

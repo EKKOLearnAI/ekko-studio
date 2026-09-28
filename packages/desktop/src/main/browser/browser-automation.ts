@@ -13,6 +13,7 @@ import type {
 import { MAX_BROWSER_TEXT_READ_LIMIT } from './browser-types'
 import { filterSnapshotNodes, snapshotOptions, DEFAULT_SNAPSHOT_LIMIT } from './browser-snapshot'
 import { publicBrowserUrl, redactBrowserContent, redactBrowserText } from './browser-url'
+import type { BrowserObservedState, BrowserObservedTarget } from './browser-observation'
 
 interface AxNode {
   nodeId?: string
@@ -29,6 +30,7 @@ interface StoredSnapshot {
   id: string
   refs: Map<string, { backendDOMNodeId: number; role: string; name: string }>
   nodes: BrowserSnapshotNode[]
+  allNodes: BrowserSnapshotNode[]
   totalNodes: number
   url: string
   title: string
@@ -115,6 +117,18 @@ export class BrowserAutomation {
     return { ...this.snapshots.get(tabId)?.options, snapshotId: undefined }
   }
 
+  observedState(tabId: string): BrowserObservedState | undefined {
+    const current = this.snapshots.get(tabId)
+    if (!current) return undefined
+    return { url: current.url, nodes: new Map(current.allNodes.map(node => [current.refs.get(node.ref)!.backendDOMNodeId, node])) }
+  }
+
+  observedTargets(tabId: string, snapshotId: unknown, actions: BrowserBatchAction[]): BrowserObservedTarget[] {
+    return actions.flatMap((action, actionIndex) => action.action === 'click' || action.action === 'type'
+      ? [{ nodeId: this.resolveRef(tabId, String(snapshotId), action.ref).backendDOMNodeId, actionIndex,
+        ...(action.action === 'type' ? { text: action.text } : {}) }] : [])
+  }
+
   async snapshot(tabId: string, contents: WebContents, input: BrowserSnapshotOptions = {}): Promise<BrowserSnapshot> {
     const options = snapshotOptions(input)
     if (options.snapshotId) {
@@ -149,7 +163,8 @@ export class BrowserAutomation {
       const role = textValue(node.role?.value, 80)
       const name = textValue(node.name?.value)
       const protectedValue = property(node, 'protected') === true
-      const value = protectedValue ? '' : textValue(node.value?.value)
+      // Input whitespace is significant for local value comparisons.
+      const value = protectedValue ? '' : redactBrowserContent(node.value?.value, 500)
       if (!role || role === 'none' || role === 'generic' && !name && !value) continue
       const ref = `@e${nodes.length + 1}`
       refs.set(ref, { backendDOMNodeId: node.backendDOMNodeId, role, name })
@@ -157,9 +172,10 @@ export class BrowserAutomation {
       const checked = property(node, 'checked')
       const selected = property(node, 'selected')
       const expanded = property(node, 'expanded')
+      const pressed = property(node, 'pressed')
       nodes.push({
         ref, role, name,
-        ...(value ? { value } : {}),
+        ...(!protectedValue && node.value?.value !== undefined ? { value } : {}),
         ...(node.description?.value ? { description: textValue(node.description.value) } : {}),
         ...(property(node, 'disabled') === true ? { disabled: true } : {}),
         ...(property(node, 'focused') === true ? { focused: true } : {}),
@@ -167,9 +183,11 @@ export class BrowserAutomation {
           : checked === false || checked === 'false' ? { checked: false } : {}),
         ...(typeof selected === 'boolean' ? { selected } : {}),
         ...(typeof expanded === 'boolean' ? { expanded } : {}),
+        ...(pressed === 'mixed' ? { pressed } : pressed === true || pressed === 'true' ? { pressed: true }
+          : pressed === false || pressed === 'false' ? { pressed: false } : {}),
       })
     }
-    const current: StoredSnapshot = { id: randomUUID(), refs, totalNodes: nodes.length,
+    const current: StoredSnapshot = { id: randomUUID(), refs, allNodes: nodes, totalNodes: nodes.length,
       nodes: filterSnapshotNodes(nodes.filter(node => inScope.has(node.ref)), options), options,
       url: publicBrowserUrl(contents.getURL()), title: redactBrowserText(contents.getTitle()) }
     this.snapshots.set(tabId, current)
@@ -191,7 +209,8 @@ export class BrowserAutomation {
       truncated: nodes.length < current.nodes.length,
       ...(hasMore ? { nextOffset: offset + nodes.length } : {}),
       scope: { ...(selector ? { selector } : {}), ...(query ? { query } : {}), ...(interactiveOnly ? { interactiveOnly } : {}) },
-      ...(hasMore ? { hint: 'Continue with this snapshot_id and offset=nextOffset. For focused results start a new snapshot with selector, query or interactive_only. Scrolling alone does not page this tree. These options work without JEV.' } : {}),
+      ...(offset > 0 && !nodes.length ? { hint: `Offset ${offset} is outside the ${current.nodes.length} matched nodes. Offsets refer to the filtered results, not @e ref numbers or the full document. Restart at offset=0 with this snapshot_id, or omit snapshot_id to change filters.` }
+        : hasMore ? { hint: 'Continue with this snapshot_id and offset=nextOffset. Offsets are relative to filtered results, not @e ref numbers. For focused results start a new snapshot with selector, query or interactive_only. Scrolling alone does not page this tree. These options work without JEV.' } : {}),
     }
   }
 

@@ -93,6 +93,18 @@ describe('optional browser JEV assessments', () => {
     expect(JSON.stringify(upstream.mock.calls[0][1]?.body)).not.toMatch(/input-secret|secret-description|raw secret|https:/)
   })
 
+  it('preserves boolean and mixed control states while rejecting unrelated evidence fields', async () => {
+    await saveJevSettings('work', { apiKey: 'key', browserVerifyEnabled: true })
+    upstream.mockImplementation(async () => reply('met'))
+    await verifyBrowserOutcome('work', { ...input, snapshot: { ...snapshot, nodes: [{ ref: '@e1', role: 'radio', name: 'Gold',
+      checked: true, selected: false, pressed: 'mixed', expanded: false, actionTarget: true, valueMatches: false,
+      value: 'input-secret', description: 'private', focused: 'untrusted' }] } })
+    const body = JSON.parse(String(upstream.mock.calls[0][1]?.body))
+    expect(body.state.nodes).toEqual([{ ref: '@e1', role: 'radio', name: 'Gold', checked: true,
+      selected: false, pressed: 'mixed', expanded: false, actionTarget: true, valueMatches: false }])
+    expect(JSON.stringify(body)).not.toMatch(/input-secret|private|https:/)
+  })
+
   it.each([matchBrowserElement, verifyBrowserOutcome])('falls back on provider, malformed and low-confidence responses', async assess => {
     await saveJevSettings('work', { apiKey: 'key', browserMatchEnabled: true, browserVerifyEnabled: true })
     upstream.mockRejectedValueOnce(new Error('private provider body'))

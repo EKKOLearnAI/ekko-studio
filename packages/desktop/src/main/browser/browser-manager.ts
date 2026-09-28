@@ -19,12 +19,14 @@ import { BrowserProfileStore } from './browser-profile-store'
 import { BrowserSessionCookieStore } from './browser-session-cookie-store'
 import { MAX_BROWSER_TABS } from './browser-types'
 import { BROWSER_BATCH_TIMEOUT_MS, parseBrowserBatchActions } from './browser-batch'
+import { observeBrowserState, type BrowserObservedState, type BrowserObservedTarget } from './browser-observation'
 import type {
   BrowserAgentControl,
   BrowserBatchResult,
   BrowserBounds,
   BrowserConsoleEntry,
   BrowserInteractAction,
+  BrowserInteractionResult,
   BrowserProfileCreateInput,
   BrowserProfileSwitchImpact,
   BrowserProfileUpdateInput,
@@ -46,6 +48,7 @@ interface TabRecord {
   htmlPreviewTitle?: string
   ephemeral?: boolean
   documentGeneration?: number
+  openerTabId?: string
 }
 
 interface BrowserManagerOptions {
@@ -173,11 +176,13 @@ export class BrowserManager {
     activate: boolean,
     waitForLoad: boolean,
     htmlPreview?: { dataUrl: string; title: string },
+    openerTabId?: string,
   ): Promise<DesktopBrowserTab> {
     const normalizedUrl = normalizeBrowserUrl(url, { allowBlank: true })
     const { record, loading } = await this.mutateTabs(async () => {
       const profile = this.requireProfile(this.activeProfileId)
       const record = await this.buildTab(profile, normalizedUrl)
+      record.openerTabId = openerTabId
       // Map insertion order is creation order, independent of tab activation.
       while (this.records.size >= MAX_BROWSER_TABS) {
         await this.closeTabRecord(this.records.keys().next().value!)
@@ -380,7 +385,13 @@ export class BrowserManager {
 
   async snapshot(tabId: string, options: BrowserSnapshotOptions = {}) {
     const record = this.requireTab(tabId)
-    return this.automation.snapshot(tabId, record.view.webContents, options)
+    let snapshot = await this.automation.snapshot(tabId, record.view.webContents, options)
+    // Loading tabs can expose only the document root for a short time. Never retry an action.
+    for (let attempt = 0; !options.snapshotId && snapshot.totalNodes! <= 1 && attempt < 3; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 100))
+      snapshot = await this.automation.snapshot(tabId, record.view.webContents, options)
+    }
+    return snapshot
   }
 
   async readText(tabId: string, options: BrowserReadTextOptions) {
@@ -388,26 +399,92 @@ export class BrowserManager {
     return this.automation.readText(tabId, record.view.webContents, options)
   }
 
-  async interact(tabId: string, action: BrowserInteractAction, assertActive: () => void = () => {}): Promise<DesktopBrowserTab> {
+  async interact(tabId: string, action: BrowserInteractAction, assertActive: () => void = () => {}): Promise<BrowserInteractionResult> {
     assertActive()
     const record = this.requireTab(tabId)
-    await this.withAutomationView(record, () => this.automation.interact(tabId, record.view.webContents, action, assertActive))
-    return copyTab(record.tab)
+    const before = this.automation.observedState(tabId)
+    const options = this.automation.snapshotSelection(tabId)
+    const targets = this.automation.observedTargets(tabId, 'snapshot_id' in action ? action.snapshot_id : undefined, [action])
+    const generation = record.documentGeneration || 0
+    const tabs = new Set(this.records.keys())
+    return this.withAutomationView(record, async () => {
+      await this.automation.interact(tabId, record.view.webContents, action, assertActive)
+      const evidence = await this.observeOperation(record, before, targets, options, generation, tabs, assertActive)
+      return { ...copyTab(record.tab), ...evidence }
+    })
+  }
+
+  private async observeOperation(
+    record: TabRecord, before: BrowserObservedState | undefined, targets: BrowserObservedTarget[],
+    options: BrowserSnapshotOptions, generation: number, tabs: Set<string>, assertActive: () => void,
+  ): Promise<Pick<BrowserInteractionResult, 'snapshot' | 'snapshotError' | 'observation'>> {
+    const tabId = record.tab.id
+    try {
+      assertActive()
+      const newDocument = () => (record.documentGeneration || 0) !== generation
+      const read = async () => {
+        try { return await this.snapshot(tabId, newDocument() ? {} : options) }
+        catch (error) {
+          // A clicked control may remove its own scoped region.
+          if (!options.selector) throw error
+          assertActive()
+          return this.snapshot(tabId)
+        }
+      }
+      const observe = () => observeBrowserState(newDocument() ? undefined : before,
+        this.automation.observedState(tabId)!, newDocument() ? [] : targets)
+      let snapshot = await read()
+      let observation = observe()
+      // Read-only settling catches async rendering and popup creation; dispatched actions are never replayed.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        assertActive()
+        snapshot = await read()
+        observation = observe()
+        if (observation.changed && !record.view.webContents.isLoading()) break
+      }
+      const openedTabs = [...this.records.values()].filter(item => !tabs.has(item.tab.id) && item.openerTabId === tabId)
+        .map(item => ({ id: item.tab.id, title: redactBrowserText(item.tab.title), url: publicBrowserUrl(item.tab.url) }))
+      observation.tabId = tabId
+      observation.navigation = newDocument() ? 'new_document' : before && before.url !== snapshot.url ? 'same_document' : undefined
+      if (newDocument()) observation.changed = true
+      if (openedTabs.length) {
+        observation.openedTabs = openedTabs
+        observation.changed = true
+        observation.hint = 'A new tab opened. Use its tab_id and snapshot to inspect the destination; the originating tab is not destination evidence.'
+        if (openedTabs.length === 1) snapshot = await this.snapshot(openedTabs[0].id)
+      }
+      assertActive()
+      return { snapshot, observation }
+    } catch (error) {
+      assertActive()
+      const message = redactBrowserText(error instanceof Error ? error.message : String(error), 500)
+      return { snapshotError: message, observation: { status: 'unavailable',
+        hint: 'The action was already dispatched, but follow-up evidence is unavailable. Read a fresh snapshot before deciding what to do; do not replay the action automatically.' } }
+    }
   }
 
   async interactBatch(tabId: string, input: unknown, snapshotId: unknown, assertControl: () => void): Promise<BrowserBatchResult> {
+    assertControl()
+    const record = this.requireTab(tabId)
+    return this.withAutomationView(record, () => this.runBatch(tabId, input, snapshotId, assertControl))
+  }
+
+  private async runBatch(tabId: string, input: unknown, snapshotId: unknown, assertControl: () => void): Promise<BrowserBatchResult> {
     const actions = parseBrowserBatchActions(input)
     const record = this.requireTab(tabId)
     const snapshotOptions = this.automation.snapshotSelection(tabId)
     const prepared = this.automation.prepareBatch(tabId, snapshotId, actions)
+    const before = this.automation.observedState(tabId)
+    const targets = this.automation.observedTargets(tabId, snapshotId, actions)
+    const tabs = new Set(this.records.keys())
     const generation = record.documentGeneration || 0
-    const originalUrl = record.view.webContents.getURL()
     const deadline = Date.now() + BROWSER_BATCH_TIMEOUT_MS
     const assertActive = () => {
       assertControl()
       if (Date.now() >= deadline) throw new Error('Browser batch timed out; remaining actions were skipped')
       if (this.records.get(tabId) !== record || record.view.webContents.isDestroyed()) throw new Error('Browser tab is closed')
-      if ((record.documentGeneration || 0) !== generation || record.view.webContents.getURL() !== originalUrl) {
+      if ((record.documentGeneration || 0) !== generation) {
         throw new Error('Browser page navigated; take a new snapshot before continuing')
       }
     }
@@ -422,7 +499,7 @@ export class BrowserManager {
         assertActive()
         const resolved = await this.automation.resolveBatchAction(tabId, record.view.webContents, prepared[index])
         assertActive()
-        await this.interact(tabId, resolved, assertActive)
+        await this.automation.interact(tabId, record.view.webContents, resolved, assertActive)
         result.completed += 1
         result.results.push({ index, action, status: 'completed' })
       } catch (error) {
@@ -432,7 +509,10 @@ export class BrowserManager {
     try {
       assertControl()
       if (Date.now() >= deadline) throw new Error('Browser batch timed out')
-      result.snapshot = await this.snapshot(tabId, snapshotOptions)
+      Object.assign(result, await this.observeOperation(record, before, targets.filter(target => target.actionIndex < result.completed), snapshotOptions, generation, tabs, () => {
+        assertControl()
+        if (Date.now() >= deadline) throw new Error('Browser batch timed out')
+      }))
       assertControl()
     } catch (error) {
       delete result.snapshot
@@ -736,7 +816,7 @@ export class BrowserManager {
     const contents = view.webContents
     contents.setWindowOpenHandler(details => {
       if (!isAllowedBrowserRequest(details.url)) return { action: 'deny' }
-      void this.createTab(details.url, true).catch(error => {
+      void this.openTab(details.url, true, false, undefined, id).catch(error => {
         console.warn('[desktop-browser] failed to open popup:', error)
       })
       return { action: 'deny' }
@@ -757,12 +837,15 @@ export class BrowserManager {
       record.documentGeneration = (record.documentGeneration || 0) + 1
       this.automation.invalidate(id)
     }
-    contents.on('did-start-loading', () => { tab.loading = true; invalidateDocument(); this.emitState() })
+    contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) invalidateDocument()
+    })
+    contents.on('did-start-loading', () => { tab.loading = true; this.emitState() })
     contents.on('did-stop-loading', () => { tab.loading = false; this.refreshTab(record); this.emitState() })
     contents.on('did-fail-load', () => { tab.loading = false; this.refreshTab(record); this.emitState() })
     const persistNavigation = () => { void this.persistTabs().catch(error => console.warn('[desktop-browser] failed to persist tabs:', error)) }
     contents.on('did-navigate', () => { this.refreshTab(record); invalidateDocument(); persistNavigation(); this.emitState() })
-    contents.on('did-navigate-in-page', () => { this.refreshTab(record); invalidateDocument(); persistNavigation(); this.emitState() })
+    contents.on('did-navigate-in-page', () => { this.refreshTab(record); this.automation.invalidate(id); persistNavigation(); this.emitState() })
     contents.on('page-title-updated', (_event, title) => {
       const isHtmlPreview = !!record.htmlPreviewTitle && contents.getURL().startsWith('data:text/html')
       tab.title = title || (isHtmlPreview ? record.htmlPreviewTitle || 'HTML Preview' : tab.url)
@@ -1001,16 +1084,21 @@ export class BrowserManager {
 
   private async withAutomationView<T>(record: TabRecord, operation: () => Promise<T>): Promise<T> {
     const tabId = record.tab.id
+    const contents = record.view.webContents
+    const throttled = contents.getBackgroundThrottling()
+    // Background/occluded windows otherwise delay page timers past the observation window.
+    contents.setBackgroundThrottling(false)
     const alreadyRendering = this.visible && this.activeTabId === tabId
-    if (!alreadyRendering) {
-      this.automationVisibleTabs.add(tabId)
-      this.syncViews()
-      await new Promise(resolve => setTimeout(resolve, 16))
-    }
-    record.view.webContents.focus()
     try {
+      if (!alreadyRendering) {
+        this.automationVisibleTabs.add(tabId)
+        this.syncViews()
+        await new Promise(resolve => setTimeout(resolve, 16))
+      }
+      contents.focus()
       return await operation()
     } finally {
+      if (!contents.isDestroyed()) contents.setBackgroundThrottling(throttled)
       if (!alreadyRendering) {
         this.automationVisibleTabs.delete(tabId)
         this.syncViews()

@@ -99,6 +99,26 @@ export interface BrowserSnapshotNode {
   checked?: boolean | 'mixed'
   selected?: boolean
   expanded?: boolean
+  pressed?: boolean | 'mixed'
+}
+
+/** Observations are evidence, not a semantic assertion that the user's goal was met. */
+export interface BrowserObservation {
+  tabId?: string
+  status: 'observed' | 'unavailable'
+  changed?: boolean
+  changeCount?: number
+  changes?: Array<{ before?: BrowserSnapshotNode; after?: BrowserSnapshotNode }>
+  targets?: Array<{ before?: BrowserSnapshotNode; after?: BrowserSnapshotNode; valueMatches?: boolean }>
+  navigation?: 'same_document' | 'new_document'
+  openedTabs?: Array<Pick<DesktopBrowserTab, 'id' | 'title' | 'url'>>
+  hint: string
+}
+
+export interface BrowserInteractionResult extends DesktopBrowserTab {
+  snapshot?: BrowserSnapshot
+  snapshotError?: string
+  observation?: BrowserObservation
 }
 
 export interface BrowserSnapshotOptions {
@@ -231,4 +251,5 @@ export interface BrowserBatchResult {
   results: Array<{ index: number; action: BrowserBatchAction['action']; status: 'completed' | 'failed' | 'skipped'; error?: string }>
   snapshot?: BrowserSnapshot
   snapshotError?: string
+  observation?: BrowserObservation
 }

@@ -14,7 +14,7 @@ afterEach(() => vi.restoreAllMocks())
 
 async function setup() {
   const page = {
-    nodes: [{ id: 1, role: 'button', name: 'First' }, { id: 2, role: 'button', name: 'Second' }, { id: 3, role: 'textbox', name: 'Name' }],
+    nodes: [{ id: 1, role: 'button', name: 'First' }, { id: 2, role: 'button', name: 'Second' }, { id: 3, role: 'textbox', name: 'Name' }] as Array<{ id: number; role: string; name: string; value?: string; checked?: boolean }>,
     effects: [] as string[],
     url: 'https://example.com/',
     cancelled: false,
@@ -26,7 +26,9 @@ async function setup() {
       isAttached: () => true,
       sendCommand: vi.fn(async (method: string, params: any = {}) => {
         if (method === 'Accessibility.getFullAXTree') return {
-          nodes: page.nodes.map(node => ({ backendDOMNodeId: node.id, role: { value: node.role }, name: { value: node.name } })),
+          nodes: page.nodes.map(node => ({ backendDOMNodeId: node.id, role: { value: node.role }, name: { value: node.name },
+            ...(node.value !== undefined ? { value: { value: node.value } } : {}),
+            properties: node.checked !== undefined ? [{ name: 'checked', value: { value: String(node.checked) } }] : [] })),
         }
         if (method === 'DOM.resolveNode') return { object: { objectId: `node-${params.backendNodeId}` } }
         let effect = ''
@@ -105,7 +107,7 @@ describe('desktop browser batch interactions', () => {
   it.each(['navigation', 'same-url reload', 'closed tab'])('stops later actions after %s', async mode => {
     const { page, batch, internal, record } = await setup()
     page.onEffect = () => {
-      if (mode === 'navigation') page.url = 'https://example.com/next'
+      if (mode === 'navigation') { page.url = 'https://example.com/next'; Object.assign(record, { documentGeneration: 1 }) }
       if (mode === 'same-url reload') Object.assign(record, { documentGeneration: 1 })
       if (mode === 'closed tab') internal.records.delete('tab')
     }
@@ -124,6 +126,47 @@ describe('desktop browser batch interactions', () => {
     expect(result.completed).toBe(1)
     expect(result.results[1].error).toContain('timed out')
     expect(page.effects).toEqual(['click:node-1'])
+  })
+
+  it('continues same-document SKU URL changes using the original DOM targets', async () => {
+    const { page, batch, manager } = await setup()
+    page.onEffect = effect => {
+      if (effect === 'click:node-1') { page.url += '?sku=gold'; (manager as any).automation.invalidate('tab') }
+      if (effect === 'click:node-2') page.nodes[1].checked = true
+    }
+    const result = await batch([{ action: 'click', ref: '@e1' }, { action: 'click', ref: '@e2' }])
+    expect(result.completed).toBe(2)
+    expect(result.observation).toMatchObject({ changed: true, navigation: 'same_document',
+      targets: [{ after: { name: 'First' } }, { after: { checked: true } }] })
+    expect(page.effects).toEqual(['click:node-1', 'click:node-2'])
+  })
+
+  it('reports no observed change after a no-op click without replaying it', async () => {
+    const { manager, snapshot, page } = await setup()
+    const result = await manager.interact('tab', { action: 'click', ref: '@e1', snapshot_id: snapshot.snapshotId })
+    expect(result.observation).toMatchObject({ status: 'observed', changed: false, changeCount: 0 })
+    expect(result.snapshot?.snapshotId).not.toBe(snapshot.snapshotId)
+    expect(page.effects).toEqual(['click:node-1'])
+  })
+
+  it('observes asynchronous form updates locally without JEV', async () => {
+    const { manager, snapshot, page } = await setup()
+    page.onEffect = effect => { if (effect === 'type:Alice') setTimeout(() => { page.nodes[2].value = 'Alice' }, 30) }
+    const result = await manager.interact('tab', { action: 'type', ref: '@e3', text: 'Alice', snapshot_id: snapshot.snapshotId })
+    expect(result.observation).toMatchObject({ changed: true, targets: [{ valueMatches: true, after: { value: 'Alice' } }] })
+    expect(page.effects.filter(effect => effect.startsWith('type:'))).toEqual(['type:Alice'])
+  })
+
+  it('returns the popup destination and ignores unrelated new tabs', async () => {
+    const { manager, snapshot, page, internal, record } = await setup()
+    page.onEffect = () => {
+      internal.records.set('other', { ...record, tab: { ...record.tab, id: 'other' } })
+      internal.records.set('popup', { ...record, openerTabId: 'tab', tab: { ...record.tab, id: 'popup', title: 'Destination' } })
+    }
+    const result = await manager.interact('tab', { action: 'click', ref: '@e1', snapshot_id: snapshot.snapshotId })
+    expect(result.observation).toMatchObject({ tabId: 'tab', openedTabs: [{ id: 'popup' }] })
+    expect(result.observation?.openedTabs).toHaveLength(1)
+    expect(result.snapshot?.tabId).toBe('popup')
   })
 
   it('executes every batch step without keyword classification or a confirmation dialog', async () => {

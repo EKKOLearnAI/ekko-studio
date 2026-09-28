@@ -12,6 +12,42 @@ afterEach(async () => {
 })
 
 describe('Desktop Browser Broker', () => {
+  it.each(['observed', 'popup', 'unavailable'] as const)('preserves single-action %s evidence over HTTP', async mode => {
+    const root = await mkdtemp(join(tmpdir(), 'hermes-browser-broker-interact-'))
+    roots.push(root)
+    const tab = { id: 'tab-1', title: 'Example', url: 'https://example.com/?token=private', agentControl: 'idle' }
+    const snapshot = { tabId: mode === 'popup' ? 'popup' : tab.id, snapshotId: 'fresh', nodes: [] }
+    const evidence = mode === 'unavailable'
+      ? { snapshotError: 'Follow-up snapshot unavailable', observation: { status: 'unavailable', hint: 'Read a fresh snapshot' } }
+      : { snapshot, observation: { status: 'observed', tabId: tab.id, changed: true,
+        ...(mode === 'popup' ? { openedTabs: [{ id: 'popup', title: 'Destination', url: 'https://example.com/next' }] } : {}) } }
+    const manager = {
+      state: () => ({ tabs: [tab] }),
+      interact: async () => ({ ...tab, ...evidence, internalOnly: '/private/profile' }),
+      setAgentControl: () => {}, revokeAgentControl: () => {}, cancelAgentOperation: () => {},
+    } as unknown as BrowserManager
+    const broker = new BrowserBroker(manager, root)
+    const descriptor = await broker.start()
+    try {
+      const registration = await fetch(`${descriptor.endpoint}/session`, {
+        method: 'POST', headers: { Authorization: `Bearer ${descriptor.token}`, 'Content-Type': 'application/json' }, body: '{}',
+      })
+      const client = await registration.json() as { client_id: string; session_token: string }
+      const response = await fetch(descriptor.endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${client.session_token}`, 'Content-Type': 'application/json', 'X-Hermes-Browser-Client': client.client_id },
+        body: JSON.stringify({ method: 'interact', params: { tab_id: tab.id, action: { action: 'press', key: 'Tab' } } }),
+      })
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      expect(body.result).toMatchObject({ id: tab.id, ...evidence })
+      expect(body.result).not.toHaveProperty('internalOnly')
+      expect(JSON.stringify(body)).not.toContain('private')
+    } finally {
+      await broker.stop()
+    }
+  })
+
   it('authenticates loopback MCP clients and enforces per-tab leases', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-browser-broker-'))
     roots.push(root)

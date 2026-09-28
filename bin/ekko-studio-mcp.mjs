@@ -966,7 +966,7 @@ const tools = [
   {
     name: 'ekko_studio_browser_interact',
     toolset: 'browser',
-    description: 'Click, type, press a key, or scroll in one Desktop browser tab. Click/type require a ref and snapshot_id from the latest snapshot. Supply expectation for optional JEV judgment of visible evidence after execution; verification is advisory and never retries the action.',
+    description: 'Click, type, press a key, or scroll in one Desktop browser tab. Click/type require a ref and snapshot_id from the latest snapshot. Returns a fresh snapshot and local observation of target states, changes and openedTabs even without JEV. Use the returned snapshot.tabId (it may be a newly opened destination). Dispatch alone does not prove success; if no change is observed, inspect a relevant region or screenshot instead of blindly repeating. Supply expectation for optional JEV judgment; verification is advisory and never retries the action.',
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
       expectation: { type: 'string', minLength: 1, maxLength: 2000, description: 'Expected visible outcome to judge after the action, when enabled in Models > JEV.' },
@@ -979,7 +979,7 @@ const tools = [
   {
     name: 'ekko_studio_browser_batch',
     toolset: 'browser',
-    description: 'Execute 1-50 click/type/press/scroll actions sequentially in one tab in a single call. For click/type, pass one current snapshot_id and refs from that snapshot; original DOM targets are revalidated before each step. Stops on the first failure, navigation, user takeover, or the 30-second execution budget. Returns zero-based per-step completed/failed/skipped results and a fresh snapshot when available. Completed actions are not rolled back. Supply expectation for optional JEV verification of the final snapshot after a fully completed batch; verification does not change completion status or retry actions.',
+    description: 'Execute 1-50 click/type/press/scroll actions sequentially in one tab in a single call. For click/type, pass one current snapshot_id and refs from that snapshot; original DOM targets are revalidated before each step. Stops on the first failure, new-document navigation/reload, user takeover, or the 30-second execution budget. Same-document URL/SKU changes can continue when targets remain valid. Returns zero-based per-step completed/failed/skipped results, local observation and a fresh snapshot when available, even without JEV. Completed means dispatched, not a confirmed outcome; completed actions are not rolled back. Inspect target states and use snapshot.tabId if a new tab opened. Supply expectation for optional JEV verification after a fully completed batch; verification does not change completion status or retry actions.',
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
       snapshot_id: { type: 'string', description: 'Current snapshot used by all click/type refs; optional for a batch containing only press/scroll.' },

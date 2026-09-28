@@ -8,6 +8,7 @@ import {
 import type { ChatMessage } from '../context-compressor'
 import { truncateToolResultForContext } from './tool-result-context'
 import { logger } from '../../public/logging'
+import { projectChatBrowserHistory } from '../../public/chat-agent-runtime'
 import { isAssistantMessageSendable } from './message-format'
 
 export interface CursorSnapshotParts {
@@ -29,11 +30,11 @@ export function buildDbHistoryFromContextRows(
     truncateToolResults?: boolean
   } = {},
 ): ChatMessage[] {
-  const sourceRows = options.excludeLastUser ? excludeLatestUserAndFollowing(rows) : rows
+  const selectedRows = options.excludeLastUser ? excludeLatestUserAndFollowing(rows) : rows
+  const sourceRows = options.truncateToolResults === false ? selectedRows
+    : projectChatBrowserHistory(selectedRows, { truncateOtherTools: truncateToolResultForContext })
   return sourceRows.map((row, index, allRows) => {
-    const content = row.role === 'tool' && options.truncateToolResults !== false
-      ? truncateToolResultForContext(row.content || '')
-      : row.content || ''
+    const content = row.content || ''
     const cursorId = Number(row.id)
     const message: ChatMessage = {
       role: row.role,

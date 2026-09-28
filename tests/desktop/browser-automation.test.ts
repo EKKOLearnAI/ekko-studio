@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { WebContents } from 'electron'
 import { BrowserAutomation } from '../../packages/desktop/src/main/browser/browser-automation'
+import { observeBrowserState } from '../../packages/desktop/src/main/browser/browser-observation'
 
 function fakeContents(options: {
   attributes?: string[]
@@ -96,6 +97,41 @@ describe('desktop browser automation safety', () => {
     const contents = fakeContents({ nodes: [{ backendDOMNodeId: 1, role: { value: 'radio' }, name: { value: 'Vertical' },
       properties: [{ name: 'checked', value: { value: 'true' } }, { name: 'selected', value: { value: false } }] }] })
     expect((await automation.snapshot('tab', contents)).nodes[0]).toMatchObject({ checked: true, selected: false })
+  })
+
+  it.each([
+    ['Alice ', 'Alice', false],
+    [' Alice', 'Alice', false],
+    ['Alice  Smith', 'Alice Smith', false],
+    ['Alice\nSmith', 'Alice Smith', false],
+    [' Alice \n Smith ', ' Alice \n Smith ', true],
+    ['', '', true],
+  ] as const)('compares input value %j with %j without normalizing whitespace', async (value, typed, matches) => {
+    const automation = new BrowserAutomation()
+    const contents = fakeContents({ nodes: [{ backendDOMNodeId: 7, role: { value: 'textbox' },
+      name: { value: 'Name' }, value: { value } }] })
+    const snapshot = await automation.snapshot('tab', contents)
+    const observation = observeBrowserState(undefined, automation.observedState('tab')!, [
+      { nodeId: 7, actionIndex: 0, text: typed },
+    ])
+    expect(observation.targets?.[0].valueMatches).toBe(matches)
+    expect(snapshot.nodes[0].value).toBe(value)
+  })
+
+  it.each([
+    { value: 'password=private', typed: 'public', protectedValue: false },
+    { value: 'private', typed: 'public', protectedValue: true },
+    { value: 'x'.repeat(501), typed: 'x'.repeat(499), protectedValue: false },
+  ])('omits comparisons for protected, redacted or truncated values: %j', async ({ value, typed, protectedValue }) => {
+    const automation = new BrowserAutomation()
+    await automation.snapshot('tab', fakeContents({ nodes: [{ backendDOMNodeId: 7, role: { value: 'textbox' },
+      name: { value: 'Name' }, value: { value },
+      properties: protectedValue ? [{ name: 'protected', value: { value: true } }] : [] }] }))
+    const observation = observeBrowserState(undefined, automation.observedState('tab')!, [
+      { nodeId: 7, actionIndex: 0, text: typed },
+    ])
+    expect(observation.targets?.[0]).not.toHaveProperty('valueMatches')
+    expect(JSON.stringify(observation)).not.toContain('private')
   })
 
   it.each([{ limit: 301 }, { offset: -1 }, { offset: 0.5 }, { snapshotId: 'id', query: 'changed' },

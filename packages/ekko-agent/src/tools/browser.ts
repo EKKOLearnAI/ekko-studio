@@ -54,7 +54,7 @@ const BROWSER_PASSTHROUGH_ENV = [
 const browserToolDefinitions: AgentTool['definition'][] = [
   {
     name: 'browser_navigate',
-    description: 'Navigate to a URL in a browser session. Use this before other browser tools. Returns page metadata and a compact accessibility snapshot with refs.',
+    description: 'Navigate in the separate Agent browser environment. It does not share Ekko Studio built-in browser tabs or logins. For Studio built-in browser tasks prefer ekko_studio_browser_toolset when available. Returns page metadata and a compact accessibility snapshot with refs.',
     parameters: {
       type: 'object',
       properties: {

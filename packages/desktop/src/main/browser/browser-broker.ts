@@ -262,7 +262,7 @@ export class BrowserBroker {
         }
         case 'interact': {
           const tab = await this.manager.interact(requiredString(params.tab_id, 'tab_id'), asObject(params.action) as unknown as BrowserInteractAction)
-          return this.publicTab(tab)
+          return { ...this.publicTab(tab), snapshot: tab.snapshot, snapshotError: tab.snapshotError, observation: tab.observation }
         }
         case 'interact.batch':
           return await this.manager.interactBatch(requiredString(params.tab_id, 'tab_id'), params.actions, params.snapshot_id, () => {
