@@ -201,6 +201,62 @@ describe('ChatRunSocket queued bridge runs', () => {
     expect((server as any).sessionMap.get('session-1').isWorking).toBe(false)
   })
 
+  it('edits a queued user message in place and broadcasts the updated queue', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, roomEmit, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).onConnection(socket)
+    ;(server as any).sessionMap.set('session-1', {
+      messages: [], isWorking: true, isAborting: false, events: [],
+      source: 'cli', profile: 'default', runId: 'run-1',
+      queue: [
+        { queue_id: 'queue-first', input: 'first', displayInput: 'first', profile: 'default', source: 'cli' },
+        { queue_id: 'queue-second', input: 'second', profile: 'default', source: 'cli' },
+      ],
+    })
+
+    handlers.get('edit_queued_run')?.({ session_id: 'session-1', queue_id: 'queue-first', content: '  first edited  ' })
+
+    const queue = (server as any).sessionMap.get('session-1').queue
+    expect(queue).toHaveLength(2)
+    expect(queue[0]).toEqual(expect.objectContaining({ queue_id: 'queue-first', input: 'first edited', displayInput: 'first edited' }))
+    expect(queue[1]).toEqual(expect.objectContaining({ queue_id: 'queue-second', input: 'second' }))
+    expect(roomEmit).toHaveBeenCalledWith('run.queued', expect.objectContaining({
+      queue_length: 2,
+      queued_messages: [
+        expect.objectContaining({ id: 'queue-first', content: 'first edited' }),
+        expect.objectContaining({ id: 'queue-second', content: 'second' }),
+      ],
+    }))
+  })
+
+  it('rejects queued message edits with empty content, unknown ids, or command messages', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, roomEmit, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).onConnection(socket)
+    ;(server as any).sessionMap.set('session-1', {
+      messages: [], isWorking: true, isAborting: false, events: [],
+      source: 'cli', profile: 'default', runId: 'run-1',
+      queue: [
+        { queue_id: 'queue-user', input: 'hello', profile: 'default', source: 'cli' },
+        { queue_id: 'queue-command', input: '/compact', displayRole: 'command', profile: 'default', source: 'cli' },
+      ],
+    })
+
+    const edit = handlers.get('edit_queued_run')
+    edit?.({ session_id: 'session-1', queue_id: 'queue-user', content: '   ' })
+    edit?.({ session_id: 'session-1', queue_id: 'queue-missing', content: 'replacement' })
+    edit?.({ session_id: 'session-1', queue_id: 'queue-command', content: 'replacement' })
+    edit?.({ session_id: 'session-1', queue_id: 'queue-user', content: '/compact now' })
+    edit?.({ session_id: 'session-1', queue_id: 'queue-user' })
+
+    const queue = (server as any).sessionMap.get('session-1').queue
+    expect(queue[0].input).toBe('hello')
+    expect(queue[1].input).toBe('/compact')
+    expect(roomEmit).not.toHaveBeenCalledWith('run.queued', expect.anything())
+  })
+
   it('promotes a selected queued Hermes message and arms one strict boundary request', async () => {
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const { handlers, io, roomEmit, socket } = makeServerHarness()
