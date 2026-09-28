@@ -16,7 +16,6 @@ export interface PortableLayout {
   dataRoot: string
   webUiHome: string
   hermesHome: string
-  runtimeDir: string
   userData: string
 }
 
@@ -34,7 +33,6 @@ export function resolvePortableLayout(
     dataRoot,
     webUiHome: join(dataRoot, 'studio'),
     hermesHome: join(dataRoot, 'hermes'),
-    runtimeDir: join(dataRoot, 'desktop-runtime'),
     userData: join(dataRoot, 'electron'),
   }
 }
@@ -48,7 +46,10 @@ export function applyPortableEnv(layout: PortableLayout, env: NodeJS.ProcessEnv 
   env.HERMES_WEB_UI_HOME = layout.webUiHome
   env.HERMES_WEBUI_STATE_DIR = layout.webUiHome
   env.HERMES_HOME = layout.hermesHome
-  env.HERMES_DESKTOP_RUNTIME_DIR = layout.runtimeDir
+  // Deliberately no HERMES_DESKTOP_RUNTIME_DIR: the app derives its runtime
+  // storage from HERMES_WEB_UI_HOME, and a second runtime root that never holds
+  // the installed runtime is recorded as a validation failure, which the Runtime
+  // page then lists as a bogus version row.
 }
 
 export function isPortableMode(env: NodeJS.ProcessEnv = process.env): boolean {

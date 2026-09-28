@@ -27,7 +27,6 @@ test('portable layout keeps every writable root inside the app directory', () =>
   assert.equal(layout.dataRoot, join(ROOT, 'ekko-data'))
   assert.equal(layout.webUiHome, join(ROOT, 'ekko-data', 'studio'))
   assert.equal(layout.hermesHome, join(ROOT, 'ekko-data', 'hermes'))
-  assert.equal(layout.runtimeDir, join(ROOT, 'ekko-data', 'desktop-runtime'))
   assert.equal(layout.userData, join(ROOT, 'ekko-data', 'electron'))
 })
 
@@ -43,6 +42,8 @@ test('applying portable env redirects all three relocated roots and flags the mo
   assert.equal(env.HERMES_WEB_UI_HOME, layout.webUiHome)
   assert.equal(env.HERMES_WEBUI_STATE_DIR, layout.webUiHome)
   assert.equal(env.HERMES_HOME, layout.hermesHome)
-  assert.equal(env.HERMES_DESKTOP_RUNTIME_DIR, layout.runtimeDir)
+  // The runtime must stay under webUiHome, or the app records a validation
+  // failure for the stranded root and lists it as an extra version.
+  assert.equal(env.HERMES_DESKTOP_RUNTIME_DIR, undefined)
   assert.equal(isPortableMode(env), true)
 })

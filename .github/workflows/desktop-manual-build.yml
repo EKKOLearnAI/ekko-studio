@@ -187,7 +187,7 @@ jobs:
           Set-Content -Path (Join-Path $unpacked 'README-PORTABLE.txt') -Value @(
             'Portable (green) build. Keep this whole folder together, on the drive you run it from.',
             'Everything writable lives in ekko-data\: Studio state, Hermes home, runtime, Electron userData.',
-            'First launch downloads the Hermes runtime (~550 MB) unless ekko-data\desktop-runtime is pre-seeded.',
+            'First launch downloads the Hermes runtime (~550 MB) unless ekko-data\\studio\\desktop-runtime\\hermes is pre-seeded.',
             'Quit the app before unplugging the drive.'
           )
           $sevenZip = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
