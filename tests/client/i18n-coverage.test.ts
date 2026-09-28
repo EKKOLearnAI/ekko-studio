@@ -140,6 +140,15 @@ it('localizes all JEV messages and error codes without relying on English fallba
   }
 })
 
+it('does not expose Chinese locale-code placeholders in JEV copy', () => {
+  for (const locale of ['zh', 'zh-TW'] as const) {
+    const actual = flattenLeafPaths(rawMessages[locale].jev)
+    for (const [key, value] of actual) {
+      expect(value, `${locale}: jev.${key} starts with a locale-code placeholder`).not.toMatch(/^zh(?:-TW)?\s+/i)
+    }
+  }
+})
+
 const SKILLS_USAGE_LOCALIZED_KEYS = [
   'sidebar.skillsUsage',
   'skillsUsage.title',
