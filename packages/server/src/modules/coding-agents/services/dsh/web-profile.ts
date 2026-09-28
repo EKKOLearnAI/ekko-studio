@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { isMap, isSeq, parseDocument, stringify, type YAMLMap } from 'yaml'
 import { dshInstallation, dshPackageDirectory } from './installation'
 import { writeDshAcpAdapter } from './acp-adapter'
+import { readDshBundlePatches, usesDshPresetRegistry } from './bundle'
 
 const WEB_BACKEND_ROWS = new Set([
   'subagent-model-selection-settings', 'code-runtime', 'message-feedback',
@@ -36,6 +37,7 @@ export function anchorDshPatch(content: string, filename: string) {
         if (typeof path === 'string' && !isAbsolute(path)) item.setIn(['config', 'path'], resolve(dirname(filename), path))
       }
       if (item.get('group') === true && isSeq(item.get('config', true))) entries((item.get('config', true) as any).items)
+      if (name === '@deepseek-ai/dsh-agent-preset' && isSeq(item.getIn(['config', 'plugins'], true))) entries((item.getIn(['config', 'plugins'], true) as any).items)
     }
   }
   for (const item of (doc.contents as any).items) if (isMap(item) && isSeq(item.get('insert', true))) entries((item.get('insert', true) as any).items)
@@ -56,15 +58,16 @@ export async function prepareDshWebProfile(input: { command: string; sourceHome:
   const homePatch = await optionalDshFile(join(input.sourceHome, 'cordis.patch.yml'), '[]\n')
   const anchors = [installation, manifestPath]
   const layers: string[] = []
+  const webLayers: string[] = []
   const dependencies = new Map<string, string>()
   for (const name of new Set([...bundles, ...Object.keys(manifest.dependencies || {}), '@deepseek-ai/dsh-acp-app'])) {
     dependencies.set(name, await dshPackageDirectory(name, anchors))
   }
   for (const name of bundles) {
     const directory = dependencies.get(name)!
-    const pkg = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
-    if (typeof pkg.dsh?.bundle?.patch !== 'string') throw new Error(`Web bundle ${name} has no composition patch`)
-    layers.push(await readFile(join(directory, pkg.dsh.bundle.patch), 'utf8'))
+    const patches = (await readDshBundlePatches(directory)).map(patch => patch.content)
+    layers.push(...patches)
+    if (name === '@deepseek-ai/dsh-web-app') webLayers.push(...patches)
   }
   const generation = createHash('sha256').update(JSON.stringify([installation, manifestText, profilePatch, homePatch, layers, [...dependencies]])).digest('hex').slice(0, 16)
   const profile = `studio-web-${generation}`
@@ -82,13 +85,16 @@ export async function prepareDshWebProfile(input: { command: string; sourceHome:
   await writeFile(join(directory, 'package.json'), JSON.stringify({ name: profile, version: '0.0.0', private: true,
     dsh: { profile: { bundles: [...bundles, '@deepseek-ai/dsh-acp-app'], patchReload: 'startup' } } }, null, 2))
   await writeFile(join(directory, 'cordis.patch.yml'), anchorDshPatch(profilePatch, join(sourceProfile, 'cordis.patch.yml')), { mode: 0o600 })
-  const webIndex = bundles.indexOf('@deepseek-ai/dsh-web-app')
-  const web = dshPatchDocument(layers[webIndex])
+  const registry = usesDshPresetRegistry(layers)
   const disabled: string[] = []
-  for (const patch of (web.contents as any).items) {
-    if (!isMap(patch) || !isSeq(patch.get('insert', true))) continue
-    for (const row of (patch.get('insert', true) as any).items) {
-      if (isMap(row) && typeof row.get('id') === 'string' && !WEB_BACKEND_ROWS.has(String(row.get('id')))) disabled.push(String(row.get('id')))
+  for (const content of webLayers) {
+    const web = dshPatchDocument(content)
+    for (const patch of (web.contents as any).items) {
+      if (!isMap(patch) || !isSeq(patch.get('insert', true))) continue
+      for (const row of (patch.get('insert', true) as any).items) {
+        if (isMap(row) && typeof row.get('id') === 'string' && !WEB_BACKEND_ROWS.has(String(row.get('id')))
+          && !['@deepseek-ai/dsh-agent-preset-registry', '@deepseek-ai/dsh-agent-preset', '@deepseek-ai/dsh-tool-cordis/host'].includes(String(row.get('name')))) disabled.push(String(row.get('id')))
+      }
     }
   }
   const adapterPath = join(directory, 'studio-acp.mjs')
@@ -104,7 +110,7 @@ export async function prepareDshWebProfile(input: { command: string; sourceHome:
   const adapterRow = (adaptation.contents as any).items[disabled.length + 1].get('insert').items[0]
   const modelConfig = parseDocument('provider: !!js ctx.agentDefaultModel.currentSelection().provider\nmodel: !!js ctx.agentDefaultModel.currentSelection().model\n', { logLevel: 'silent' })
   adapterRow.set('config', modelConfig.contents)
-  adaptation.add({ id: 'agent-presets', inject: ['settings'], config: dshPresetSourceConfig([...layers, profilePatch, homePatch], input.sourceHome) })
+  if (!registry) adaptation.add({ id: 'agent-presets', inject: ['settings'], config: dshPresetSourceConfig([...layers, profilePatch, homePatch], input.sourceHome) })
   adaptation.add({ id: 'agent-default-model', inject: ['settings'] })
   const path = join(directory, 'web-acp.patch.yml')
   await writeFile(path, String(adaptation), { mode: 0o600 })

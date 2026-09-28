@@ -1,6 +1,39 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
+for (const failure of [
+  { status: 403, code: 'DSH_UI_FORBIDDEN', error: 'Super administrator required' },
+  { status: 422, code: 'DSH_CAPABILITY_UNSUPPORTED', error: 'Native preset capability is unavailable' },
+]) test(`DSH shows the actual configuration failure: ${failure.code}`, async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await page.route('**/api/coding-agents/dsh/ui-session', route => route.fulfill({ status: failure.status, json: failure }))
+  await page.route('**/api/coding-agents/dsh/plugin-inventory', route => route.fulfill({ status: failure.status, json: failure }))
+  await page.goto('/#/studio/agents/dsh/plugins')
+  const panel = page.getByTestId('dsh-plugins')
+  await expect(panel.getByTestId('dsh-plugin-settings')).toContainText(failure.code)
+  await expect(panel.getByTestId('dsh-plugin-settings')).toContainText(failure.error)
+  await expect(panel.locator('iframe')).toHaveCount(0)
+  await panel.getByRole('tab', { name: 'Plugin list', exact: true }).click()
+  await expect(panel.getByTestId('dsh-native-plugins')).toContainText(failure.code)
+  await expect(panel.getByTestId('dsh-native-plugins')).toContainText(failure.error)
+})
+
+test('DSH declaration presets expose viewing and selection without filesystem authoring', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await page.route('**/api/coding-agents/dsh/agent-presets', route => route.fulfill({ json: { authorable: false, presets: [
+    { id: 'standard', name: 'Standard mode', isDefault: true }, { id: 'minimal', name: 'Minimal mode', isDefault: false },
+  ] } }))
+  await page.goto('/#/studio/agents/dsh/presets')
+  const preset = page.getByTestId('dsh-preset-minimal')
+  await expect(preset.getByRole('button', { name: 'View', exact: true })).toBeEnabled()
+  await expect(preset.getByRole('button', { name: 'Set as default', exact: true })).toBeEnabled()
+  await expect(preset.getByRole('button', { name: 'Duplicate', exact: true })).toBeDisabled()
+  await expect(preset.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0)
+  await expect(preset.locator('.n-tag')).toHaveCount(0)
+})
+
 for (const mobile of [false, true]) test(`DSH native slot and plugin list retain their state (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
   if (mobile) await page.setViewportSize({ width: 390, height: 844 })
   await authenticate(page, TEST_ACCESS_KEY, 'research')

@@ -49,7 +49,7 @@ onMounted(load)
       <NSpin v-if="loading" />
       <div v-else-if="roster.presets.length" class="preset-grid">
         <section v-for="row in roster.presets" :key="row.id" class="preset-card" :class="{ selected: row.isDefault }" :data-testid="`dsh-preset-${row.id}`">
-          <div class="preset-heading"><h3>{{ row.name || row.id }}</h3><NTag size="small" :bordered="false">{{ t(row.trust === 'system' ? 'dshPlugins.shipped' : 'dshPlugins.userPreset') }}</NTag><NTag v-if="row.isDefault" size="small" type="success">{{ t('dshPresets.default') }}</NTag></div>
+          <div class="preset-heading"><h3>{{ row.name || row.id }}</h3><NTag v-if="row.trust" size="small" :bordered="false">{{ t(row.trust === 'system' ? 'dshPlugins.shipped' : 'dshPlugins.userPreset') }}</NTag><NTag v-if="row.isDefault" size="small" type="success">{{ t('dshPresets.default') }}</NTag></div>
           <code>{{ row.id }}</code>
           <p class="preset-description">{{ row.description }}</p>
           <NAlert v-if="row.broken" type="error">{{ row.broken }}</NAlert>

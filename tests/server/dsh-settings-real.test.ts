@@ -9,6 +9,7 @@ import { DshAgentPresetService } from '../../packages/server/src/modules/coding-
 import { DshManagement } from '../../packages/server/src/modules/coding-agents/services/dsh/management'
 import { DshUiGateway } from '../../packages/server/src/modules/coding-agents/services/dsh/ui-gateway'
 import { securityHeaders } from '../../packages/server/src/modules/studio/middleware/security'
+import { dshReleaseFixture } from '../fixtures/dsh-release'
 vi.mock('../../packages/server/src/modules/studio/public/auth', () => ({ authenticateUserToken: async (token: string) => token === 'fixture-admin' ? { role: 'super_admin' } : null }))
 
 it.skipIf(!process.env.DSH_WEB_COMMAND)('renders native plugin slots and submits native configuration through the mounted transport', async () => {
@@ -33,6 +34,7 @@ it.skipIf(!process.env.DSH_WEB_COMMAND)('renders native plugin slots and submits
   const detach = gateway.attach([server])
   const browser = await chromium.launch({ headless: true })
   try {
+    const release = await dshReleaseFixture(process.env.DSH_WEB_COMMAND!)
     await expect(gateway.create('not-admin')).rejects.toMatchObject({ status: 403 })
     const session = await gateway.create('fixture-admin')
     const page = await browser.newPage(); const errors: string[] = []
@@ -41,6 +43,36 @@ it.skipIf(!process.env.DSH_WEB_COMMAND)('renders native plugin slots and submits
     await page.goto(base + session.path + '?studioTheme=light')
     const loop = page.getByRole('button', { name: /Agent loop/ })
     await loop.waitFor({ timeout: 15_000 }).catch(async error => { console.error(await page.locator('body').innerText()); throw error });
+    if (release.registry) {
+      // Current DSH owns a native Plugins panel and persists settings as profile
+      // patches, rather than the legacy accordion and settings.yaml storage.
+      await loop.click()
+      await page.getByLabel('Parallel tool calls', { exact: true }).fill('13')
+      await page.evaluate(() => window.postMessage({ type: 'studio-dsh-theme', theme: 'dark' }, location.origin))
+      await expect.poll(() => page.evaluate(() => document.documentElement.style.colorScheme)).toBe('dark')
+      expect(await page.getByLabel('Parallel tool calls', { exact: true }).inputValue()).toBe('13')
+      await page.getByRole('button', { name: 'Save', exact: true }).click()
+      const sourcePatch = join(home, 'profiles/web/cordis.patch.yml')
+      await expect.poll(() => readFile(sourcePatch, 'utf8')).toContain('maxParallelToolCalls: 13')
+      await page.getByRole('button', { name: 'Save', exact: true }).waitFor()
+      expect(await page.locator('[data-rightbar-col]').evaluate(element => getComputedStyle(element.parentElement!).gridTemplateColumns.split(' ')[0])).toBe('0px')
+      await page.screenshot({ path: '/tmp/dsh-registry-settings-desktop.png' })
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.screenshot({ path: '/tmp/dsh-registry-settings-mobile.png' })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      const presets = new DshAgentPresetService(management)
+      expect(await presets.list()).toMatchObject({ authorable: false, presets: expect.arrayContaining([expect.objectContaining({ id: 'standard', isDefault: true })]) })
+      expect((await presets.read('standard')).content).toContain('name:')
+      await presets.makeDefault('minimal')
+      expect(await readFile(sourcePatch, 'utf8')).toContain('selectedDefault: minimal')
+      await page.close(); await management.close()
+      expect((await presets.list()).presets).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'minimal', isDefault: true })]))
+      expect(await readFile(sourcePatch, 'utf8')).toContain('maxParallelToolCalls: 13')
+      expect(await readFile(sourcePatch, 'utf8')).not.toContain('studio-dark')
+      expect(errors).toEqual([])
+      gateway.remove(session.id, 'fixture-admin')
+      return
+    }
     expect(await loop.evaluate(element => getComputedStyle(element, '::after').content)).toContain('settings')
     await loop.click()
     const card = page.locator('li').filter({ has: page.getByRole('button', { name: /Agent loop/ }) })

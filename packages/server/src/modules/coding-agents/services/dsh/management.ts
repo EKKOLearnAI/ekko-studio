@@ -73,7 +73,7 @@ export class DshManagement {
     const execution = this.host.commandExecution(input.installationCommand, ['--profile', prepared.profile, '--patch', prepared.patch, '--host', '127.0.0.1', '--port', '0', '--no-open'])
     const child = spawn(execution.command, execution.args, { cwd: input.sourceHome, detached: process.platform !== 'win32', windowsHide: true,
       ...(execution.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-      env: { ...await this.host.commandEnv(), DSH_HOME: this.root, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+      env: { ...await this.host.commandEnv(), DSH_HOME: prepared.home || this.root, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
     this.child = child
     try {
       const target = await new Promise<DshUiTarget>((resolve, reject) => {

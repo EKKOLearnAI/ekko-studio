@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { stringify } from 'yaml'
+import { parseDocument, stringify } from 'yaml'
+import { dshReleaseFixture } from '../fixtures/dsh-release'
 import { ProbeRpc } from '../fixtures/dsh-m0/rpc'
 import { dshInstallation } from '../../packages/server/src/modules/coding-agents/services/dsh/installation'
 import { describe, expect, it } from 'vitest'
@@ -55,6 +56,16 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
       const workspace = join(root, 'workspace')
       await mkdir(workspace)
       await mkdir(join(root, 'empty-home'))
+      const release = await dshReleaseFixture(process.env.DSH_WEB_COMMAND!)
+      if (release.registry && mode === 'global') {
+        const profile = join(root, 'empty-home/profiles/web')
+        await mkdir(profile, { recursive: true })
+        await writeFile(join(profile, 'cordis.patch.yml'), stringify([
+          { id: 'agent-default-model', config: { provider: 'native-web', model: 'studio-test' } },
+          { id: 'llm-pi-ai', config: { providers: { 'native-web': { apiKeyEnv: DSH_API_KEY_ENV, api: 'openai-responses', baseURL: `http://127.0.0.1:${port}/v1`,
+            models: [{ id: 'studio-test', input: ['text'], contextWindow: 128000, maxTokens: 8192, reasoningEfforts: { high: 'high' } }] } } } },
+        ]))
+      }
       await writeFile(join(root, 'empty-home', 'settings.yaml'), mode === 'global' ? stringify({
         'agent-default-model': { provider: 'native-web', model: 'studio-test' },
         'llm-pi-ai': { providers: { 'native-web': { apiKeyEnv: DSH_API_KEY_ENV, api: 'openai-responses', baseURL: `http://127.0.0.1:${port}/v1`,
@@ -194,8 +205,8 @@ it.skipIf(process.env.DSH_WEB_REAL !== '1')('runs a Web-installed bundle and cus
       }
     `)
     // The actual native standard preset supplies delegation and filesystem tools.
-    const standard = join(require.resolve('@deepseek-ai/dsh-agent-presets/package.json'), '..', 'presets/standard/agent.cordis.yml')
-    await writeFile(join(preset, 'agent.cordis.yml'), (await readFile(standard, 'utf8')).replaceAll('backgroundMode: continuable', 'backgroundMode: one-shot'))
+    const release = await dshReleaseFixture(command)
+    await writeFile(join(preset, 'agent.cordis.yml'), release.standard.replaceAll('backgroundMode: continuable', 'backgroundMode: one-shot'))
     await writeFile(join(preset, 'agent.cordis.yml'), await readFile(join(preset, 'agent.cordis.yml'), 'utf8') + '\n- id: custom-preset-probe\n  name: ./preset.mjs\n')
     await writeFile(join(preset, 'preset.mjs'), `
       import { defineTool } from ${JSON.stringify(pathToFileURL(require.resolve('@deepseek-ai/dsh-tools')).href)};
@@ -207,6 +218,15 @@ it.skipIf(process.env.DSH_WEB_REAL !== '1')('runs a Web-installed bundle and cus
       }
     `)
     await writeFile(join(preset, 'preset.yml'), 'name: Custom Web preset\n')
+    if (release.registry) {
+      const patch = parseDocument(await readFile(join(profile, 'cordis.patch.yml'), 'utf8'), { logLevel: 'silent' })
+      const plugins = parseDocument(await readFile(join(preset, 'agent.cordis.yml'), 'utf8'), { logLevel: 'silent' })
+      plugins.setIn([Number((plugins.contents as any).items.length) - 1, 'name'], pathToFileURL(join(preset, 'preset.mjs')).href)
+      const declaration = parseDocument('- insert:\n    - id: preset-custom\n      name: "@deepseek-ai/dsh-agent-preset"\n      config:\n        id: custom\n        name: Custom Web preset\n        plugins: []\n')
+      declaration.setIn([0, 'insert', 0, 'config', 'plugins'], plugins.contents)
+      patch.add(declaration.get(0, true))
+      await writeFile(join(profile, 'cordis.patch.yml'), String(patch))
+    }
     const settings = 'agent-presets:\n  default: standard\npermission:\n  defaultPreset: workspace-write\n'
     await writeFile(join(sourceHome, 'settings.yaml'), settings)
     server.listen(0, '127.0.0.1'); await once(server, 'listening')
@@ -225,7 +245,7 @@ it.skipIf(process.env.DSH_WEB_REAL !== '1')('runs a Web-installed bundle and cus
     const { sessionId } = await rpc.request('session/new', { cwd: workspace, mcpServers: [], _meta: { agentPreset: 'custom' } })
     expect(await rpc.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'Check Web plugin and child.' }] }, 40_000), rpc.stderr).toMatchObject({ stopReason: 'end_turn' })
     expect(await readFile(outside, 'utf8')).toBe('outside sandbox')
-    expect(await readFile(shellOutside, 'utf8')).toBe('shell-access')
+    expect(await readFile(shellOutside, 'utf8').catch(() => JSON.stringify(requests[3].input))).toBe('shell-access')
     expect(JSON.stringify(requests[1].input)).toContain('WEB_PROFILE_OVERRIDE')
     expect(requests.every(request => request.model === 'studio-test')).toBe(true)
     expect(requests[4].tools.map((tool: any) => tool.name)).toContain('custom_preset_probe')
@@ -250,8 +270,9 @@ it.skipIf(process.env.DSH_WEB_REAL !== '1')('runs a Web-installed bundle and cus
     const logs = await readdir(join(home, 'sessions'), { recursive: true })
     const log = logs.find(path => path.includes(sessionId) && path.endsWith('.jsonl'))!
     const persisted = await readFile(join(home, 'sessions', log), 'utf8')
-    expect(persisted.split('\n')[0], rpc.stderr + '\nSETTINGS: ' + await readFile(join(home, 'settings.yaml'), 'utf8')).toContain('custom')
+    expect(persisted.split('\n')[0], rpc.stderr).toContain('custom')
     await writeFile(join(sourceHome, 'settings.yaml'), settings.replace('default: standard', 'default: minimal'))
+    if (release.registry) await writeFile(join(profile, 'cordis.patch.yml'), await readFile(join(profile, 'cordis.patch.yml'), 'utf8') + '\n- id: agent-preset-registry\n  config:\n    default: standard\n    selectedDefault: minimal\n')
     steps.push({ name: 'write', args: { file_path: restoredOutside, content: 'restored full access' } }, { text: 'Restored' })
     const restored = await start()
     await restored.request('session/resume', { sessionId, cwd: workspace, mcpServers: [] })

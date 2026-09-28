@@ -95,3 +95,25 @@ it('declares a version on every generated plugin manifest', async () => {
   expect(await readManifest(join(managementDir, 'package.json'))).toMatchObject({ name: 'studio-plugins', version: '0.0.0' })
   expect(await readManifest(join(managementDir, 'node_modules/studio-dsh-ui/package.json'))).toMatchObject({ name: 'studio-dsh-ui', version: '0.0.0' })
 })
+
+it('retains registry presets across bundle patches and saves native management edits in the source profile', async () => {
+  const input = await fixture()
+  // Resolve from the fixture CLI's scope directory, as npm's sibling packages do.
+  const directory = join(input.installation, '../../dsh-web-app')
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-web-app', dsh: { bundle: { patch: ['./cordis.patch.yml', './presets.yml'] } } }))
+  await writeFile(join(directory, 'cordis.patch.yml'), '- insert:\n  - id: webserver\n    name: webserver\n  - id: agent-preset-registry\n    name: "@deepseek-ai/dsh-agent-preset-registry"\n')
+  await writeFile(join(directory, 'presets.yml'), '- insert:\n  - id: preset-standard\n    name: "@deepseek-ai/dsh-agent-preset"\n    config:\n      id: standard\n      plugins: []\n  - id: another-ui\n    name: ui-only\n')
+  const sourcePatch = '- insert:\n  - id: preset-custom\n    name: "@deepseek-ai/dsh-agent-preset"\n    config:\n      id: custom\n      plugins:\n        - name: ./custom-tool.mjs\n          disabled: !!js process.env.DISABLE_CUSTOM\n'
+  await writeFile(join(input.profile, 'cordis.patch.yml'), sourcePatch)
+  const web = await prepareDshWebProfile(input)
+  const rows = parse(await readFile(web.patch, 'utf8'), { logLevel: 'silent' })
+  expect(rows.filter((row: any) => row.disabled).map((row: any) => row.id)).toEqual(['webserver', 'another-ui', 'acp'])
+  expect(rows.some((row: any) => ['agent-presets', 'agent-preset-registry', 'preset-standard'].includes(row.id))).toBe(false)
+  const copied = await readFile(join(input.rootDir, 'profiles', web.profile, 'cordis.patch.yml'), 'utf8')
+  expect(copied).toContain(pathToFileURL(join(input.profile, 'custom-tool.mjs')).href)
+  expect(copied).toContain('!!js process.env.DISABLE_CUSTOM')
+  const management = await prepareDshManagementProfile(input)
+  expect(management).toMatchObject({ profile: 'web', home: input.sourceHome })
+  expect(await readFile(management.patch, 'utf8')).not.toContain('id: agent-presets')
+  expect(await readFile(join(input.profile, 'cordis.patch.yml'), 'utf8')).toBe(sourcePatch)
+})

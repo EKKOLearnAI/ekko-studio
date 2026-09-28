@@ -11,10 +11,11 @@ const src = ref('')
 const frame = ref<HTMLIFrameElement>()
 const loading = ref(true)
 const failed = ref(false)
+const failureDetail = ref('')
 let id = '', sequence = 0, disposed = false
 async function refresh() {
   const current = ++sequence
-  loading.value = true; failed.value = false
+  loading.value = true; failed.value = false; failureDetail.value = ''
   try {
     const session = await openDshPluginUi()
     if (disposed || current !== sequence) { void closeDshPluginUi(session.id).catch(() => {}); return }
@@ -23,7 +24,10 @@ async function refresh() {
     url.searchParams.set('studioTheme', isDark.value ? 'dark' : 'light')
     src.value = url.href
     if (previous) void closeDshPluginUi(previous).catch(() => {})
-  } catch { if (current === sequence) { failed.value = true; loading.value = false } }
+  } catch (error) { if (current === sequence) {
+    failed.value = true; loading.value = false
+    failureDetail.value = error instanceof Error ? [Reflect.get(error, 'code'), error.message].filter(Boolean).join(': ') : ''
+  } }
 }
 function syncTheme() {
   if (!src.value) return
@@ -42,7 +46,7 @@ defineExpose({ refresh })
 <template>
   <div class="native-settings" data-testid="dsh-plugin-settings">
     <NSpin v-if="loading" class="loading" />
-    <NAlert v-if="failed" type="error">{{ t('dshPlugins.settingsUnavailable') }}</NAlert>
+    <NAlert v-if="failed" type="error">{{ t('dshPlugins.settingsUnavailable') }}<div v-if="failureDetail">{{ failureDetail }}</div></NAlert>
     <iframe v-if="src" ref="frame" :src="src" :title="t('dshPlugins.configurationTab')" referrerpolicy="no-referrer" class="native-slot" @load="syncTheme" @error="failed = true; loading = false" />
   </div>
 </template>

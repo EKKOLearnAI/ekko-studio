@@ -14,6 +14,16 @@ This repairs the CLI dependency tree without removing the native DSH home.
 Studio reports connection failures separately from HTTP authentication rejection;
 older builds can show this startup failure as `native authentication failed`.
 
+DSH `0.1.7-rc.2` uses `@deepseek-ai/dsh-agent-preset` and
+`@deepseek-ai/dsh-agent-preset-registry` in place of the former plural
+`dsh-agent-presets` package. The missing plural package is not evidence of an
+incomplete installation. npm may also nest dependencies under the CLI package.
+Studio supports both native layouts by inspecting bundle composition and API
+capabilities, including ordered arrays of bundle patches. Reinstalling the same
+CLI cannot repair an older Studio adapter that assumes the previous layout.
+The Plugins page includes the backend error code and detail; a
+`DSH_UI_FORBIDDEN` response still requires a super administrator.
+
 The Settings button opens the shared Coding Agent configuration pages:
 
 | Page | Native files |
@@ -31,7 +41,7 @@ Skills support direct `<name>/SKILL.md` bundles and flat `<name>.md` files. File
 
 The **Plugins** page has exactly two tabs:
 
-- **Plugin configuration** mounts the native `settings.plugins.tab` configuration contribution in a DSH-owned browser runtime. DSH and installed plugins render their own `settings.plugin.item` cards and own fields, dependencies, credentials, validation and saving. Studio contributes only the root slot container and scoped HTTP/SSE/WebSocket transport. It does not generate forms from schemas or implement plugin-specific APIs. Switching tabs keeps the native frame and its drafts mounted.
+- **Plugin configuration** mounts the native Plugins panel in a DSH-owned browser runtime. Older releases expose `settings.plugins.tab`; registry-based releases expose a keyed `main` panel. DSH and installed plugins own fields, dependencies, credentials, validation and saving. Studio contributes the panel selection/container and scoped HTTP/SSE/WebSocket transport. It does not generate forms from schemas or implement plugin-specific APIs. Switching tabs keeps the native frame and its drafts mounted.
 - **Plugin list** shows packages installed in the source `web` profile separately from shipped/user preset entries. Package installation, update (installing a new pinned version) and removal run `dsh plugin --profile web` against that source home. The list reports registration/configuration state, not live chat activation. Registry versions and GitHub commits must be pinned.
 
 The old Studio ACP package store, rollback API, installer and runtime overlays have been removed. There is no migration or compatibility path. Existing old files are never consulted or automatically deleted.
@@ -41,7 +51,7 @@ system-mode changes, through frame-scoped theme messages. The bridge uses native
 registered palettes so plugin tokens and controls switch together without
 reloading drafts or persisting Studio's choice into DSH's `ui-theme` settings.
 
-The configuration runtime is an owned native Web process on an OS-assigned loopback port, using the source Web dependencies and native settings/credential files. Studio retains the native authentication cookie server-side. A super-admin creates a short-lived frame ticket; every HTTP/WS request checks the ticket and current user authorization, and targets only that owned DSH process. The frame renders the configuration slot without the native chat/navigation shell. Unmount revokes its ticket; shutdown terminates owned processes and transport connections.
+The configuration runtime is an owned native Web process on an OS-assigned loopback port, using the source Web dependencies and native settings/credential files. Registry-based releases persist settings through their active profile's config editor, so management runs the source `web` profile with a private Studio plugin supplied only as a CLI overlay. Saved edits stay in `profiles/web/cordis.patch.yml` after the process exits. Older releases retain their private management profile with the source `settings.yaml`. Studio retains the native authentication cookie server-side. A super-admin creates a short-lived frame ticket; every HTTP/WS request checks the ticket and current user authorization, and targets only that owned DSH process. The frame selects plugin configuration and disables native navigation. Unmount revokes its ticket; shutdown terminates owned processes and transport connections.
 
 Web and desktop continue to build with the existing Vue/Vite and Electron pipelines. DSH's React, Cordis and plugin browser bundles are loaded at runtime from the installed DSH dependency graph, inside the frame; they are not dependencies of Studio's renderer or bundled into its desktop artifacts. DSH must be installed on the Studio backend host. Both transports use Studio's origin, including reverse-proxied HTTPS; no browser access to the backend machine's loopback port is needed. Unknown plugin/runtime combinations still require compatibility verification; this is not a guarantee that every third-party plugin targets only supported native services.
 
@@ -76,6 +86,11 @@ Native format reference: [DeepSeek Harness source, dsh-v0.1.5-rc.1](https://gith
 
 Validate the Web-backed production path with `DSH_WEB_REAL=1 DSH_WEB_COMMAND=/absolute/path/to/dsh npx vitest run tests/server/dsh-web-real.test.ts`. It uses temporary native Web bundles/presets and a local model fixture, including real tool calls and writes outside the workspace; no model credentials or external model requests are needed.
 
+Run that command together with `tests/server/dsh-settings-real.test.ts` against
+both the legacy `0.1.5-rc.2` and registry-based `0.1.7-rc.2` installations. The
+browser check saves native plugin settings, changes the default preset, restarts
+the management host and verifies persistence in the native source home.
+
 DSH skill format handling lives in `services/dsh/skills.ts` and is registered at bootstrap through Studio’s generic skill-file provider interface. Shared skill write protection belongs to Studio’s common file-access policy.
 
 ## Agent presets
@@ -86,6 +101,16 @@ states; users can view compositions, duplicate a preset, set the default, open a
 custom preset directory and delete custom presets with confirmation. Composition
 viewing is read-only, matching the native management workflow; custom composition
 changes are made in the preset files.
+
+Registry-based DSH provides viewing and default selection but no longer exposes
+the filesystem copy/delete/directory methods. Studio disables those actions
+instead of calling removed APIs or fabricating a preset trust level. Such presets
+are declarations managed through native plugin configuration. Defaults persist
+via `agent-preset-registry.selectedDefault`; older releases use
+`agent-presets.default`. The Plugin list's `bundle-declarations` inventory
+statically inspects top-level bundle/profile declarations and patches without
+evaluating `!!js`. It is configuration inventory, not live activation state or a
+full evaluator of dynamic Cordis compositions.
 
 Studio’s DSH-only preset API calls `agentPresets/list`, `read`, `copy`,
 `deletePreset` and the native settings methods through the existing management

@@ -52,3 +52,23 @@ it('fixes a session preset independently of the global default and rejects unava
     { id: 'broken', isDefault: false, unavailable: true },
   ] })
 })
+
+it.each([true, false, undefined])('uses the native default settings format with authorable=%s', async authorable => {
+  const calls: Array<{ method: string; payload: { args: unknown } }> = []
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+    const message = JSON.parse(String(init.body)); calls.push(message)
+    return Response.json({ type: 'server-response', rpcId: message.rpcId, result: { ok: true, value: {
+      presets: [{ id: 'standard', isDefault: true }], ...(authorable === undefined ? {} : { authorable }),
+    } } })
+  }))
+  expect(await service.makeDefault('standard')).toEqual({ authorable: authorable === true, presets: [{ id: 'standard', isDefault: true }] })
+  expect(calls.find(call => call.method === 'settings/update')?.payload.args).toEqual(authorable === undefined
+    ? { ns: 'agent-preset-registry', patch: { selectedDefault: 'standard' } }
+    : { ns: 'agent-presets', patch: { default: 'standard' } })
+  if (authorable === undefined) {
+    await expect(service.copy({ from: 'standard', id: 'custom' })).rejects.toMatchObject({ status: 422, code: 'DSH_CAPABILITY_UNSUPPORTED' })
+    await expect(service.remove('standard')).rejects.toMatchObject({ status: 422 })
+    await expect(service.openLocation('standard')).rejects.toMatchObject({ status: 422 })
+    expect(calls.some(call => ['agentPresets/copy', 'agentPresets/deletePreset', 'settings/openAgentPresetDirectory'].includes(call.method))).toBe(false)
+  }
+})
