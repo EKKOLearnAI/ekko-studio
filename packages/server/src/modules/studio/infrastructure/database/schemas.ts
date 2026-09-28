@@ -795,10 +795,6 @@ export const GC_ROOMS_SCHEMA: Record<string, string> = {
   summaryApiMode: "TEXT NOT NULL DEFAULT ''",
   summaryEveryTurns: 'INTEGER NOT NULL DEFAULT 20',
   summaryGeneration: 'INTEGER NOT NULL DEFAULT 0',
-  evaluationProfile: "TEXT NOT NULL DEFAULT ''",
-  summaryReviewMode: "TEXT NOT NULL DEFAULT 'inherit'",
-  summaryRevisionEnabled: 'INTEGER NOT NULL DEFAULT 0',
-  messageRoutingMode: "TEXT NOT NULL DEFAULT 'off'",
   triggerTokens: 'INTEGER NOT NULL DEFAULT 100000',
   maxHistoryTokens: 'INTEGER NOT NULL DEFAULT 32000',
   tailMessageCount: 'INTEGER NOT NULL DEFAULT 10',
@@ -942,7 +938,7 @@ export const GC_MESSAGES_SCHEMA: Record<string, string> = {
 export const GC_MESSAGE_ROUTING_CONTEXTS_TABLE = 'gc_message_routing_contexts'
 export const GC_MESSAGE_ROUTING_CONTEXTS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', requesterMemberId: 'TEXT NOT NULL', requesterAuthUserId: 'INTEGER', createdAt: 'INTEGER NOT NULL' }
 export const GC_MESSAGE_ROUTING_DECISIONS_TABLE = 'gc_message_routing_decisions'
-export const GC_MESSAGE_ROUTING_DECISIONS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', candidateHash: 'TEXT NOT NULL', configHash: 'TEXT NOT NULL', targetAgentId: 'TEXT', targetAgentName: 'TEXT', mode: "TEXT NOT NULL DEFAULT 'suggest'", status: "TEXT NOT NULL DEFAULT 'suggested'", queueId: 'TEXT', confidence: 'REAL', createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
+export const GC_MESSAGE_ROUTING_DECISIONS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', candidateHash: 'TEXT NOT NULL', configHash: 'TEXT NOT NULL', targetAgentId: 'TEXT', targetAgentName: 'TEXT', mode: "TEXT NOT NULL DEFAULT 'suggest'", status: "TEXT NOT NULL DEFAULT 'suggested'", queueId: 'TEXT', confidence: 'REAL', handoffComplete: 'INTEGER', loopDetected: 'INTEGER', createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
 export const GC_MESSAGE_ROUTING_CLAIMS_TABLE = 'gc_message_routing_claims'
 export const GC_MESSAGE_ROUTING_CLAIMS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', targetAgentId: 'TEXT NOT NULL', queueId: 'TEXT NOT NULL', status: "TEXT NOT NULL DEFAULT 'queued'", createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
 

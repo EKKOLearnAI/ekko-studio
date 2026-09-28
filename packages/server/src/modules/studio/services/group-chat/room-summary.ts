@@ -56,9 +56,6 @@ interface SummaryRoom {
   summaryModel: string
   summaryApiMode: string
   summaryEveryTurns: number
-  evaluationProfile?: string
-  summaryReviewMode?: 'inherit' | 'off'
-  summaryRevisionEnabled?: number
   ownerAuthUserId?: number | null
   summaryGeneration?: number
 }

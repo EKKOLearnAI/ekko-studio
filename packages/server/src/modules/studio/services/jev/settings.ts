@@ -7,12 +7,16 @@ import { safeFileStore } from '../../public/safe-file-store'
 export interface JevSettings {
   groupSummaryReviewEnabled: boolean
   groupSummaryReviewMinConfidence: number
+  groupSummaryRevisionEnabled: boolean
   groupSummaryReviewTimeoutMs: number
   workflowQualityEnabled: boolean
   workflowQualityMinConfidence: number
   workflowQualityTimeoutMs: number
   groupMessageRoutingEnabled: boolean
+  groupHandoffReviewEnabled: boolean
+  groupLoopDetectionEnabled: boolean
   groupMessageRoutingMinConfidence: number
+  groupMessageRoutingMode: 'suggest' | 'auto'
   groupMessageRoutingTimeoutMs: number
   browserMatchEnabled: boolean
   browserMatchCandidateLimit: number
@@ -52,12 +56,16 @@ export class JevError extends Error {
 const defaults: StoredSettings = {
   groupSummaryReviewEnabled: false,
   groupSummaryReviewMinConfidence: 0.8,
+  groupSummaryRevisionEnabled: false,
   groupSummaryReviewTimeoutMs: 3000,
   workflowQualityEnabled: false,
   workflowQualityMinConfidence: 0.8,
   workflowQualityTimeoutMs: 5000,
   groupMessageRoutingEnabled: false,
+  groupHandoffReviewEnabled: true,
+  groupLoopDetectionEnabled: true,
   groupMessageRoutingMinConfidence: 0.9,
+  groupMessageRoutingMode: 'suggest',
   groupMessageRoutingTimeoutMs: 1500,
   browserMatchEnabled: false,
   browserMatchCandidateLimit: 20,
@@ -95,7 +103,7 @@ function settingsPath(profile: string): string {
 function normalize(input: unknown, current = defaults): StoredSettings {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new JevError('Invalid JEV settings')
   const value = input as Record<string, unknown>
-  if (Object.keys(value).some(key => !['browserMatchEnabled', 'browserMatchCandidateLimit', 'browserMatchMinConfidence', 'browserMatchTimeoutMs', 'browserVerifyEnabled', 'browserVerifyMinConfidence', 'browserVerifyTimeoutMs', 'groupSummaryReviewEnabled', 'groupSummaryReviewMinConfidence', 'groupSummaryReviewTimeoutMs', 'workflowQualityEnabled', 'workflowQualityMinConfidence', 'workflowQualityTimeoutMs', 'groupMessageRoutingEnabled', 'groupMessageRoutingMinConfidence', 'groupMessageRoutingTimeoutMs', 'baseUrl', 'model', 'timeoutMs', 'apiKey', 'ekkoSkillsEnabled', 'ekkoSkillsCandidateLimit', 'ekkoSkillsMinConfidence', 'ekkoSkillsTimeoutMs', 'ekkoMemoryEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled', 'ekkoMemoryCandidateLimit', 'ekkoMemoryRecallMinConfidence', 'ekkoMemoryFilterMinConfidence', 'ekkoMemoryMinConfidence', 'ekkoMemoryTimeoutMs'].includes(key))) {
+  if (Object.keys(value).some(key => !['browserMatchEnabled', 'browserMatchCandidateLimit', 'browserMatchMinConfidence', 'browserMatchTimeoutMs', 'browserVerifyEnabled', 'browserVerifyMinConfidence', 'browserVerifyTimeoutMs', 'groupSummaryReviewEnabled', 'groupSummaryReviewMinConfidence', 'groupSummaryRevisionEnabled', 'groupSummaryReviewTimeoutMs', 'workflowQualityEnabled', 'workflowQualityMinConfidence', 'workflowQualityTimeoutMs', 'groupMessageRoutingEnabled', 'groupHandoffReviewEnabled', 'groupLoopDetectionEnabled', 'groupMessageRoutingMinConfidence', 'groupMessageRoutingMode', 'groupMessageRoutingTimeoutMs', 'baseUrl', 'model', 'timeoutMs', 'apiKey', 'ekkoSkillsEnabled', 'ekkoSkillsCandidateLimit', 'ekkoSkillsMinConfidence', 'ekkoSkillsTimeoutMs', 'ekkoMemoryEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled', 'ekkoMemoryCandidateLimit', 'ekkoMemoryRecallMinConfidence', 'ekkoMemoryFilterMinConfidence', 'ekkoMemoryMinConfidence', 'ekkoMemoryTimeoutMs'].includes(key))) {
     throw new JevError('Unknown JEV setting')
   }
   const next = { ...current }
@@ -103,7 +111,7 @@ function normalize(input: unknown, current = defaults): StoredSettings {
     if (typeof value.ekkoMemoryEnabled !== 'boolean') throw new JevError('JEV ekkoMemoryEnabled must be a boolean')
     next.ekkoMemoryEnabled = value.ekkoMemoryEnabled
   }
-  for (const key of ['browserMatchEnabled', 'browserVerifyEnabled', 'groupSummaryReviewEnabled', 'workflowQualityEnabled', 'groupMessageRoutingEnabled', 'ekkoSkillsEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled'] as const) {
+  for (const key of ['browserMatchEnabled', 'browserVerifyEnabled', 'groupSummaryReviewEnabled', 'groupSummaryRevisionEnabled', 'workflowQualityEnabled', 'groupMessageRoutingEnabled', 'groupHandoffReviewEnabled', 'groupLoopDetectionEnabled', 'ekkoSkillsEnabled', 'ekkoMemoryKindRoutingEnabled', 'ekkoMemoryRelevanceFilterEnabled', 'ekkoMemoryRerankEnabled', 'ekkoMemoryWriteReviewEnabled'] as const) {
     if (value[key] === undefined) continue
     if (typeof value[key] !== 'boolean') throw new JevError(`Invalid JEV ${key}`)
     next[key] = value[key]
@@ -118,6 +126,10 @@ function normalize(input: unknown, current = defaults): StoredSettings {
   if (!Number.isFinite(next.browserVerifyMinConfidence) || next.browserVerifyMinConfidence < 0.5 || next.browserVerifyMinConfidence > 1) throw new JevError('Invalid JEV browserVerifyMinConfidence')
   if (value.browserVerifyTimeoutMs !== undefined) next.browserVerifyTimeoutMs = value.browserVerifyTimeoutMs as number
   if (!Number.isInteger(next.browserVerifyTimeoutMs) || next.browserVerifyTimeoutMs < 100 || next.browserVerifyTimeoutMs > 30000) throw new JevError('Invalid JEV browserVerifyTimeoutMs')
+  if (value.groupMessageRoutingMode !== undefined) {
+    if (value.groupMessageRoutingMode !== 'suggest' && value.groupMessageRoutingMode !== 'auto') throw new JevError('Invalid JEV group message routing mode')
+    next.groupMessageRoutingMode = value.groupMessageRoutingMode
+  }
   if (value.groupMessageRoutingMinConfidence !== undefined) next.groupMessageRoutingMinConfidence = value.groupMessageRoutingMinConfidence as number
   if (value.groupMessageRoutingTimeoutMs !== undefined) next.groupMessageRoutingTimeoutMs = value.groupMessageRoutingTimeoutMs as number
   if (!Number.isFinite(next.groupMessageRoutingMinConfidence) || next.groupMessageRoutingMinConfidence < 0.5 || next.groupMessageRoutingMinConfidence > 1) throw new JevError('Invalid JEV group message routing confidence')
@@ -169,9 +181,9 @@ function normalize(input: unknown, current = defaults): StoredSettings {
 
 function publicSettings(value: StoredSettings): JevSettings {
   return {
-    groupMessageRoutingEnabled: value.groupMessageRoutingEnabled, groupMessageRoutingMinConfidence: value.groupMessageRoutingMinConfidence, groupMessageRoutingTimeoutMs: value.groupMessageRoutingTimeoutMs,
+    groupMessageRoutingEnabled: value.groupMessageRoutingEnabled, groupHandoffReviewEnabled: value.groupHandoffReviewEnabled, groupLoopDetectionEnabled: value.groupLoopDetectionEnabled, groupMessageRoutingMinConfidence: value.groupMessageRoutingMinConfidence, groupMessageRoutingMode: value.groupMessageRoutingMode, groupMessageRoutingTimeoutMs: value.groupMessageRoutingTimeoutMs,
     workflowQualityEnabled: value.workflowQualityEnabled, workflowQualityMinConfidence: value.workflowQualityMinConfidence, workflowQualityTimeoutMs: value.workflowQualityTimeoutMs,
-    groupSummaryReviewEnabled: value.groupSummaryReviewEnabled, groupSummaryReviewMinConfidence: value.groupSummaryReviewMinConfidence, groupSummaryReviewTimeoutMs: value.groupSummaryReviewTimeoutMs,
+    groupSummaryReviewEnabled: value.groupSummaryReviewEnabled, groupSummaryReviewMinConfidence: value.groupSummaryReviewMinConfidence, groupSummaryRevisionEnabled: value.groupSummaryRevisionEnabled, groupSummaryReviewTimeoutMs: value.groupSummaryReviewTimeoutMs,
     browserMatchEnabled: value.browserMatchEnabled,
     browserMatchCandidateLimit: value.browserMatchCandidateLimit,
     browserMatchMinConfidence: value.browserMatchMinConfidence,

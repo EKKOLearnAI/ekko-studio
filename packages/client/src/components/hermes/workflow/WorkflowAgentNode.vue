@@ -3,7 +3,7 @@ import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPre
 import { computed, ref } from 'vue'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { NodeResizer } from '@vue-flow/node-resizer'
-import { NButton, NInput, NSelect, NSwitch, NTooltip, useMessage } from 'naive-ui'
+import { NInput, NSelect, NSwitch, NTooltip, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import WorkflowModelSelector from './WorkflowModelSelector.vue'
 import WorkflowFieldHelp from './WorkflowFieldHelp.vue'
@@ -50,10 +50,6 @@ const apiModeOptions = computed(() => [
   { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
   { label: t('codingAgents.protocolAnthropicMessages'), value: 'anthropic_messages' },
 ])
-const qualityEvidenceOptions = computed(() => [
-  { label: t('workflow.node.qualityEvidenceOutput'), value: 'output' },
-  { label: t('workflow.node.qualityEvidenceExecution'), value: 'execution' },
-])
 const reasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.default'), value: 'default' },
   { label: t('chat.reasoningEffort.options.none'), value: 'none' },
@@ -70,14 +66,6 @@ const fileAttachments = computed(() => props.data.images.filter(path => !isImage
 function updateField<K extends keyof WorkflowAgentNodeEditableData>(key: K, value: WorkflowAgentNodeEditableData[K]) {
   props.data.onUpdate(props.id, { [key]: value } as Partial<WorkflowAgentNodeEditableData>)
 }
-
-function addQualityCriterion() {
-  const criteria = [...(props.data.qualityReview?.criteria || []), { id: `criterion-${Date.now().toString(36)}`, text: '', evidence: 'output' as const }].slice(0, 10)
-  updateField('qualityReview', { mode: 'observe', criteria })
-}
-function updateQualityCriterion(index: number, text: string) { const criteria = [...(props.data.qualityReview?.criteria || [])]; if (criteria[index]) criteria[index] = { ...criteria[index], text }; updateField('qualityReview', { mode: props.data.qualityReview?.mode || 'observe', criteria }) }
-function updateQualityEvidence(index: number, evidence: 'output' | 'execution') { const criteria = [...(props.data.qualityReview?.criteria || [])]; if (criteria[index]) criteria[index] = { ...criteria[index], evidence }; updateField('qualityReview', { mode: props.data.qualityReview?.mode || 'observe', criteria }) }
-function removeQualityCriterion(index: number) { const criteria = [...(props.data.qualityReview?.criteria || [])]; criteria.splice(index,1); updateField('qualityReview', { mode: props.data.qualityReview?.mode || 'observe', criteria }) }
 
 function handleModelSelect(selection: { provider: string; model: string; apiMode?: ProviderApiMode }) {
   const patch: Partial<WorkflowAgentNodeEditableData> = {
@@ -252,34 +240,6 @@ async function uploadImages(files: File[]) {
           :disabled="data.readonly"
           @update:value="value => updateField('orchestration', { join: value as 'all' | 'any' })"
         />
-      </div>
-      <label class="node-toggle-row">
-        <span>{{ t('workflow.node.qualityReview') }}</span>
-        <NSwitch :value="data.qualityReview?.mode === 'observe'" size="small" :disabled="data.readonly" @update:value="value => updateField('qualityReview', { mode: value ? 'observe' : 'off', criteria: data.qualityReview?.criteria || [] })" />
-      </label>
-      <div v-if="data.qualityReview?.mode === 'observe'" class="quality-criteria">
-        <div v-for="(criterion, index) in data.qualityReview.criteria" :key="criterion.id" class="quality-criterion">
-          <NSelect
-            class="quality-evidence-select"
-            :value="criterion.evidence"
-            :options="qualityEvidenceOptions"
-            size="small"
-            :disabled="data.readonly"
-            :placeholder="t('workflow.node.qualityEvidence')"
-            :aria-label="t('workflow.node.qualityEvidence')"
-            @update:value="value => updateQualityEvidence(index, value as 'output' | 'execution')"
-          />
-          <div class="quality-criterion-input-row">
-            <NInput :value="criterion.text" size="small" :disabled="data.readonly" :placeholder="t('workflow.node.qualityCriterion')" @update:value="value => updateQualityCriterion(index, value)" />
-            <button type="button" :aria-label="t('workflow.node.removeQualityCriterion')" :disabled="data.readonly" @click="removeQualityCriterion(index)">×</button>
-          </div>
-        </div>
-        <NButton v-if="data.qualityReview.criteria.length < 10" class="quality-add-button" size="small" secondary type="primary" :disabled="data.readonly" @click="addQualityCriterion">
-          <template #icon>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-          </template>
-          {{ t('workflow.node.addQualityCriterion') }}
-        </NButton>
       </div>
       <label class="node-toggle-row">
         <span>{{ t('workflow.node.approvalRequired') }}</span>
@@ -826,5 +786,3 @@ async function uploadImages(files: File[]) {
   bottom: -9px;
 }
 </style>
-
-<style scoped>.quality-criteria{display:grid;gap:8px}.quality-criterion{display:grid;gap:6px}.quality-evidence-select{width:138px;max-width:100%}.quality-criterion-input-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}.quality-criterion button{border:0;background:transparent;color:var(--text-color-2);cursor:pointer}.quality-add-button{justify-self:start;width:auto;max-width:100%;padding-inline:10px}</style>

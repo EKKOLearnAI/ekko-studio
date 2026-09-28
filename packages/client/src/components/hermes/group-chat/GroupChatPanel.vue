@@ -138,10 +138,6 @@ const summaryConfig = ref<RoomSummaryConfig>({
     summaryModel: '',
     summaryApiMode: 'chat_completions',
     summaryEveryTurns: 20,
-    evaluationProfile: 'default',
-    summaryReviewMode: 'inherit',
-    summaryRevisionEnabled: false,
-    messageRoutingMode: 'off',
 })
 const agentHandoffEnabledDraft = ref(true)
 const agentHandoffMaxDepthDraft = ref<number | null>(4)
@@ -1867,10 +1863,6 @@ async function handleOpenRoomSettings() {
             summaryModel: room.summaryModel || '',
             summaryApiMode: room.summaryApiMode || 'chat_completions',
             summaryEveryTurns: room.summaryEveryTurns || 20,
-            evaluationProfile: room.evaluationProfile || room.summaryProfile || profilesStore.activeProfileName || 'default',
-            summaryReviewMode: room.summaryReviewMode || 'inherit',
-            summaryRevisionEnabled: Number(room.summaryRevisionEnabled || 0) === 1,
-            messageRoutingMode: room.messageRoutingMode || 'off',
         }
         agentHandoffEnabledDraft.value = Number(room.agentHandoffEnabled ?? 1) === 1
         agentHandoffMaxDepthDraft.value = room.agentHandoffMaxDepth ?? 4
@@ -1997,7 +1989,6 @@ async function handleSaveSummaryConfig() {
     try {
         const res = await updateRoomConfig(store.currentRoomId, {
             ...summaryConfig.value,
-            summaryRevisionEnabled: summaryConfig.value.summaryRevisionEnabled === true,
             agentHandoffEnabled: agentHandoffEnabledDraft.value,
             agentHandoffMaxDepth: agentHandoffMaxDepthDraft.value,
             agentHandoffUnlimited: agentHandoffUnlimitedDraft.value,
@@ -3431,19 +3422,6 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                 <NInputNumber v-model:value="summaryConfig.summaryEveryTurns" :min="1" :max="1000" :step="1" style="width: 100%" />
                                 <p class="form-hint">{{ t('groupChat.summaryEveryTurnsDesc') }}</p>
                             </div>
-                            <div class="form-group">
-                                <label class="form-label">{{ t('groupChat.summaryEvaluationProfile') }}</label>
-                                <NSelect v-model:value="summaryConfig.evaluationProfile" :options="profilesStore.profiles.map(profile => ({ label: profile.name, value: profile.name }))" />
-                            </div>
-                            <div class="guest-agent-policy-row">
-                                <div><strong>{{ t('groupChat.summaryReviewEnabled') }}</strong><p class="form-hint">{{ t('groupChat.summaryReviewHint') }}</p></div>
-                                <NSwitch :value="summaryConfig.summaryReviewMode !== 'off'" @update:value="value => summaryConfig.summaryReviewMode = value ? 'inherit' : 'off'" />
-                            </div>
-                            <div class="guest-agent-policy-row">
-                                <div><strong>{{ t('groupChat.summaryRevisionEnabled') }}</strong><p class="form-hint">{{ t('groupChat.summaryRevisionHint') }}</p></div>
-                                <NSwitch v-model:value="summaryConfig.summaryRevisionEnabled" />
-                            </div>
-                            <div class="form-group"><label class="form-label">{{ t('groupChat.messageRoutingMode') }}</label><NSelect v-model:value="summaryConfig.messageRoutingMode" :options="[{label:t('groupChat.routingOff'),value:'off'},{label:t('groupChat.routingSuggest'),value:'suggest'},{label:t('groupChat.routingAuto'),value:'auto'}]" /></div>
                             <NButton
                                 type="primary"
                                 :disabled="!summaryConfig.summaryProvider || !summaryConfig.summaryModel || !summaryConfig.summaryApiMode"

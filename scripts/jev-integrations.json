@@ -176,6 +176,26 @@
         "control": "NInputNumber",
         "binding": "settings.groupMessageRoutingTimeoutMs",
         "label": "jev.groupMessageRoutingTimeout"
+      },
+      "groupSummaryRevisionEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.groupSummaryRevisionEnabled",
+        "label": "jev.groupSummaryRevisionEnabled"
+      },
+      "groupMessageRoutingMode": {
+        "control": "NSelect",
+        "binding": "settings.groupMessageRoutingMode",
+        "label": "jev.groupMessageRoutingMode"
+      },
+      "groupHandoffReviewEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.groupHandoffReviewEnabled",
+        "label": "jev.groupHandoffReviewEnabled"
+      },
+      "groupLoopDetectionEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.groupLoopDetectionEnabled",
+        "label": "jev.groupLoopDetectionEnabled"
       }
     }
   },
@@ -396,6 +416,7 @@
       "studioDefaultEnabled": false,
       "options": [
         "groupSummaryReviewMinConfidence",
+        "groupSummaryRevisionEnabled",
         "groupSummaryReviewTimeoutMs"
       ],
       "tests": [
@@ -434,6 +455,9 @@
       "studioDefaultEnabled": false,
       "options": [
         "groupMessageRoutingMinConfidence",
+        "groupMessageRoutingMode",
+        "groupHandoffReviewEnabled",
+        "groupLoopDetectionEnabled",
         "groupMessageRoutingTimeoutMs"
       ],
       "tests": [

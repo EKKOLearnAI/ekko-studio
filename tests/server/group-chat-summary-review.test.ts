@@ -11,8 +11,7 @@ function harness(options: { revision?: boolean; revise?: () => Promise<string> }
   let summary: GroupRoomSummary = { roomId: 'room-1', summary: 'Original summary', summaryThroughMessageId: 'm2',
     summaryThroughMessageTimestamp: 2, summarizedTurnCount: 2, status: 'success', version: 1, updatedAt: 3, lastError: null }
   const records: GroupSummaryReviewRecord[] = []
-  const room = { id: 'room-1', summaryProfile: 'default', evaluationProfile: 'default', summaryReviewMode: 'inherit',
-    summaryRevisionEnabled: options.revision ? 1 : 0, summaryGeneration: 0, ownerAuthUserId: 1 }
+  const room = { id: 'room-1', summaryProfile: 'default', summaryGeneration: 0, ownerAuthUserId: 1 }
   const storage = {
     getRoom: () => room, getRoomSummary: () => summary, getLatestSummaryReview: () => records.at(-1) || null,
     applySummaryReviewOutcome: (input: any) => { if (input.revision) summary = { ...summary, summary: input.revision.nextText, version: summary.version + 1 }; records.push({ ...input.record, appliedRevisionVersion: input.revision ? summary.version : null }); return true },
@@ -46,16 +45,16 @@ describe('group summary JEV review', () => {
 
   it('optionally applies one revision without changing the anchor or turn count', async () => {
     let call = 0; vi.stubGlobal('fetch', vi.fn(async () => Response.json(response(call++ === 0 ? 0.95 : 0.1))))
-    const state = harness({ revision: true, revise: async () => 'Revised summary' }); await waitFor(() => state.records.length === 1)
+    await saveJevSettings('default', { groupSummaryRevisionEnabled: true }); const state = harness({ revision: true, revise: async () => 'Revised summary' }); await waitFor(() => state.records.length === 1)
     expect(state.summary).toMatchObject({ summary: 'Revised summary', version: 2, summaryThroughMessageId: 'm2', summarizedTurnCount: 2 })
     expect(state.records[0].appliedRevisionVersion).toBe(2)
   })
 
-  it('makes no provider request when room review is disabled', async () => {
+  it('makes no provider request when the central review switch is disabled', async () => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
     const summary: GroupRoomSummary = { roomId:'room-1', summary:'S0', summaryThroughMessageId:'m1', summaryThroughMessageTimestamp:1,
       summarizedTurnCount:1, status:'success', version:1, updatedAt:1, lastError:null }
-    const storage: any = { getRoom: () => ({ id:'room-1', summaryReviewMode:'off' }), getRoomSummary:()=>summary,
+    await saveJevSettings('default', { groupSummaryReviewEnabled: false }); const storage: any = { getRoom: () => ({ id:'room-1', summaryProfile:'default' }), getRoomSummary:()=>summary,
       getLatestSummaryReview:()=>null, applySummaryReviewOutcome:()=>true }
     new GroupSummaryReviewService(storage).schedule({ previous: summary, summary, messages: [], profile:'default' })
     await new Promise(r=>setTimeout(r,20)); expect(fetch).not.toHaveBeenCalled()

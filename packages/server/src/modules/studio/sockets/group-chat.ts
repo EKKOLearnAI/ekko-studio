@@ -347,10 +347,6 @@ export interface RoomInfo {
     summaryApiMode: string
     summaryEveryTurns: number
     summaryGeneration: number
-    evaluationProfile: string
-    summaryReviewMode: 'inherit' | 'off'
-    summaryRevisionEnabled: number
-    messageRoutingMode: 'off' | 'suggest' | 'auto'
     triggerTokens: number
     maxHistoryTokens: number
     tailMessageCount: number
@@ -380,10 +376,6 @@ const ROOM_SELECT_COLUMNS = [
     'summaryApiMode',
     'summaryEveryTurns',
     'summaryGeneration',
-    'evaluationProfile',
-    'summaryReviewMode',
-    'summaryRevisionEnabled',
-    'messageRoutingMode',
     'triggerTokens',
     'maxHistoryTokens',
     'tailMessageCount',
@@ -465,10 +457,6 @@ export interface RoomSummaryConfig {
     summaryModel?: string
     summaryApiMode?: string
     summaryEveryTurns?: number
-    evaluationProfile?: string
-    summaryReviewMode?: 'inherit' | 'off'
-    summaryRevisionEnabled?: boolean
-    messageRoutingMode?: 'off' | 'suggest' | 'auto'
 }
 
 export interface RoomAgentHandoffConfig {
@@ -1096,10 +1084,10 @@ class ChatStorage {
         this.db()?.prepare(
             `INSERT OR IGNORE INTO gc_rooms (
                 id, name, inviteCode, summaryProfile, summaryProvider, summaryModel,
-                summaryApiMode, summaryEveryTurns, evaluationProfile, summaryReviewMode, summaryRevisionEnabled, messageRoutingMode, workspace, ownerAuthUserId, createdAt,
+                summaryApiMode, summaryEveryTurns, workspace, ownerAuthUserId, createdAt,
                 agentHandoffEnabled, agentHandoffMaxDepth, agentHandoffUnlimited,
                 tokenAccountingVersion
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
             id,
             name,
@@ -1109,10 +1097,6 @@ class ChatStorage {
             String(config?.summaryModel || '').trim(),
             String(config?.summaryApiMode || '').trim(),
             Math.max(1, Math.floor(Number(config?.summaryEveryTurns || 20))),
-            String(config?.evaluationProfile || config?.summaryProfile || 'default').trim() || 'default',
-            config?.summaryReviewMode === 'off' ? 'off' : 'inherit',
-            config?.summaryRevisionEnabled ? 1 : 0,
-            ['suggest', 'auto'].includes(String(config?.messageRoutingMode)) ? String(config?.messageRoutingMode) : 'off',
             config?.workspace || '',
             ownerAuthUserId,
             Date.now(),
@@ -1155,10 +1139,6 @@ class ChatStorage {
         if (config.summaryModel !== undefined) { sets.push('summaryModel = ?'); vals.push(config.summaryModel) }
         if (config.summaryApiMode !== undefined) { sets.push('summaryApiMode = ?'); vals.push(config.summaryApiMode) }
         if (config.summaryEveryTurns !== undefined) { sets.push('summaryEveryTurns = ?'); vals.push(config.summaryEveryTurns) }
-        if (config.evaluationProfile !== undefined) { sets.push('evaluationProfile = ?'); vals.push(config.evaluationProfile) }
-        if (config.summaryReviewMode !== undefined) { sets.push('summaryReviewMode = ?'); vals.push(config.summaryReviewMode) }
-        if (config.summaryRevisionEnabled !== undefined) { sets.push('summaryRevisionEnabled = ?'); vals.push(config.summaryRevisionEnabled ? 1 : 0) }
-        if (config.messageRoutingMode !== undefined) { sets.push('messageRoutingMode = ?'); vals.push(config.messageRoutingMode) }
         if (config.agentHandoffEnabled !== undefined) { sets.push('agentHandoffEnabled = ?'); vals.push(config.agentHandoffEnabled ? 1 : 0) }
         if (config.agentHandoffMaxDepth !== undefined) {
             sets.push('agentHandoffMaxDepth = ?')
@@ -2410,8 +2390,8 @@ class ChatStorage {
     }
 
     saveRoutingSuggestion(decision: GroupRoutingDecision): boolean {
-        try { this.db()?.prepare(`INSERT OR IGNORE INTO gc_message_routing_decisions (messageId, roomId, messageHash, candidateHash, configHash, targetAgentId, targetAgentName, mode, status, queueId, confidence, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(decision.messageId,decision.roomId,decision.messageHash,decision.candidateHash,decision.configHash,decision.targetAgentId,decision.targetAgentName,decision.mode,decision.status,decision.queueId,decision.confidence,decision.createdAt,decision.updatedAt); return true } catch { return false }
+        try { this.db()?.prepare(`INSERT OR IGNORE INTO gc_message_routing_decisions (messageId, roomId, messageHash, candidateHash, configHash, targetAgentId, targetAgentName, mode, status, queueId, confidence, handoffComplete, loopDetected, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(decision.messageId,decision.roomId,decision.messageHash,decision.candidateHash,decision.configHash,decision.targetAgentId,decision.targetAgentName,decision.mode,decision.status,decision.queueId,decision.confidence,decision.handoffComplete == null ? null : decision.handoffComplete ? 1 : 0,decision.loopDetected == null ? null : decision.loopDetected ? 1 : 0,decision.createdAt,decision.updatedAt); return true } catch { return false }
     }
 
     markRoutingSuggestionQueued(messageId: string, queueId: string | null): GroupRoutingDecision | null {
@@ -2430,7 +2410,7 @@ class ChatStorage {
           const sequence=Number((db.prepare('SELECT COALESCE(MAX(sequence),0)+1 sequence FROM gc_execution_queue WHERE roomId=?').get(decision.roomId) as any).sequence);const queueId=randomUUID();const now=Date.now()
           db.prepare(`INSERT INTO gc_execution_queue (id,roomId,messageId,targetAgentId,targetAgentName,requesterMemberId,cancelCapabilityHash,textSummary,sequence,status,createdAt) VALUES (?,?,?,?,?,?,?,?,?,'queued',?)`).run(queueId,decision.roomId,decision.messageId,decision.targetAgentId,decision.targetAgentName,requesterMemberId,'',text.replace(/\s+/g,' ').slice(0,160),sequence,now)
           db.prepare(`INSERT INTO gc_message_routing_claims (messageId,roomId,targetAgentId,queueId,status,createdAt,updatedAt) VALUES (?,?,?,?,'queued',?,?)`).run(decision.messageId,decision.roomId,decision.targetAgentId,queueId,now,now)
-          const next={...decision,status:'queued' as const,queueId,updatedAt:now};db.prepare(`INSERT INTO gc_message_routing_decisions (messageId,roomId,messageHash,candidateHash,configHash,targetAgentId,targetAgentName,mode,status,queueId,confidence,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(next.messageId,next.roomId,next.messageHash,next.candidateHash,next.configHash,next.targetAgentId,next.targetAgentName,next.mode,next.status,next.queueId,next.confidence,next.createdAt,next.updatedAt);return next})}catch{return null}
+          const next={...decision,status:'queued' as const,queueId,updatedAt:now};db.prepare(`INSERT INTO gc_message_routing_decisions (messageId,roomId,messageHash,candidateHash,configHash,targetAgentId,targetAgentName,mode,status,queueId,confidence,handoffComplete,loopDetected,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(next.messageId,next.roomId,next.messageHash,next.candidateHash,next.configHash,next.targetAgentId,next.targetAgentName,next.mode,next.status,next.queueId,next.confidence,next.handoffComplete == null ? null : next.handoffComplete ? 1 : 0,next.loopDetected == null ? null : next.loopDetected ? 1 : 0,next.createdAt,next.updatedAt);return next})}catch{return null}
     }
 
     enqueueExecutionQueueItem(input: {
@@ -3487,7 +3467,7 @@ export class GroupChatServer {
         summaryReviewService = new GroupSummaryReviewService(this.storage, async committed => {
             const room = this.storage.getRoom(committed.summary.roomId)
             if (!room) throw new Error('Room not found')
-            return this.roomSummaryService.reviseCommittedSummary({ profile: String(room.evaluationProfile || room.summaryProfile),
+            return this.roomSummaryService.reviseCommittedSummary({ profile: String(room.summaryProfile),
                 provider: room.summaryProvider, model: room.summaryModel, apiMode: room.summaryApiMode,
                 previousSummary: committed.previous.summary, candidateSummary: committed.summary.summary,
                 messages: committed.messages, roomId: committed.summary.roomId })

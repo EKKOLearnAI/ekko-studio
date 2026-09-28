@@ -43,13 +43,12 @@ export class GroupSummaryReviewService {
       integrationId: 'group-summary-review', policyVersion: '1', admissionCeilingMs: 30_000,
       maxJevCalls: 2, maxGenerationCalls: 1,
       parsePolicy: (settings: JevSettings) => ({ enabled: settings.groupSummaryReviewEnabled,
-        budgetMs: settings.groupSummaryReviewTimeoutMs, policy: { minConfidence: settings.groupSummaryReviewMinConfidence } }),
+        budgetMs: settings.groupSummaryReviewTimeoutMs, policy: { minConfidence: settings.groupSummaryReviewMinConfidence, revisionEnabled: settings.groupSummaryRevisionEnabled } }),
       eligibility: () => ({ eligible: true }),
       readAuthority: async (ref, expected) => {
         const room = this.storage.getRoom(ref.object.id)
         const summary = this.storage.getRoomSummary(ref.object.id)
         if (!room || !summary) return { allowed: false, reason: 'object_deleted' }
-        if ((room.summaryReviewMode || 'inherit') === 'off') return { allowed: false, reason: 'disabled' }
         const currentHash = summary.version === Number(expected.sourceKey.split(':').at(-1)) ? hashJevCanonical(summary.summary) : ''
         if (currentHash !== expected.sourceHash) return { allowed: false, reason: 'source_changed' }
         return { allowed: true }
@@ -61,7 +60,7 @@ export class GroupSummaryReviewService {
 
   schedule(input: CommittedGroupSummary): void {
     const room = this.storage.getRoom(input.summary.roomId)
-    if (!room || (room.summaryReviewMode || 'inherit') === 'off') return
+    if (!room) return
     const sourceHash = hashJevCanonical(input.summary.summary)
     const state = { previous_summary: input.previous.summary, new_messages: input.messages.map(message => ({ ...message })), candidate_summary: input.summary.summary }
     const inputHash = hashJevCanonical({ version: 1, roomId: input.summary.roomId, sourceVersion: input.summary.version, state })
@@ -69,8 +68,8 @@ export class GroupSummaryReviewService {
     const task: JevSidecarTaskSpec<{ record: GroupSummaryReviewRecord; revision?: { expected: { roomId: string; generation: number; version: number; summaryHash: string; anchor: string; turnCount: number }; nextText: string } }, boolean> = {
       integrationId: 'group-summary-review', sourceKey, attemptId: inputHash, createdAt: Date.now(), input: state,
       identity: { actor: { type: 'room-owner', id: String(room.ownerAuthUserId || 'local') },
-        authority: { type: 'room-profile', id: String(room.evaluationProfile || room.summaryProfile || input.profile) },
-        profile: String(room.evaluationProfile || room.summaryProfile || input.profile), object: { type: 'group-room', id: input.summary.roomId } },
+        authority: { type: 'room-profile', id: String(room.summaryProfile || input.profile) },
+        profile: String(room.summaryProfile || input.profile), object: { type: 'group-room', id: input.summary.roomId } },
       expected: { sourceKey: `${sourceKey}:${input.summary.version}`, sourceHash },
       run: async ctx => {
         const snapshot = await ctx.snapshot(); if (snapshot.kind !== 'completed') return
@@ -86,7 +85,7 @@ export class GroupSummaryReviewService {
         let decision: GroupSummaryReviewDecision = ruleResults.some(item => item.decision === 'needs_improvement') ? 'needs_improvement'
           : ruleResults.some(item => item.decision === 'unknown') ? 'unknown' : 'pass'
         let revision: { expected: { roomId: string; generation: number; version: number; summaryHash: string; anchor: string; turnCount: number }; nextText: string } | undefined
-        if (decision === 'needs_improvement' && Number(room.summaryRevisionEnabled || 0) === 1 && this.revise) {
+        if (decision === 'needs_improvement' && snapshot.value.policy.revisionEnabled === true && this.revise) {
           try {
             const revised = (await this.revise(input)).trim()
             if (revised && revised !== input.summary.summary.trim()) {

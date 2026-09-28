@@ -241,3 +241,25 @@ describe('JEV integration harness', () => {
     expect(jevHarnessViolations(f.sources, f.manifest).join('\n')).toContain('missing required file')
   })
 })
+
+describe('JEV configuration ownership', () => {
+  it('keeps group chat and workflow JEV configuration exclusively on the shared JEV page', () => {
+    const sharedForm = readFileSync(resolve(root, 'packages/client/src/components/hermes/models/JevSettingsPanel.vue'), 'utf8')
+    for (const binding of [
+      'settings.groupMessageRoutingEnabled', 'settings.groupMessageRoutingMode',
+      'settings.groupHandoffReviewEnabled', 'settings.groupLoopDetectionEnabled',
+      'settings.groupSummaryReviewEnabled', 'settings.groupSummaryRevisionEnabled',
+      'settings.workflowQualityEnabled',
+    ]) expect(sharedForm).toContain(binding)
+
+    const localEditors = [
+      'packages/client/src/components/hermes/group-chat/GroupChatPanel.vue',
+      'packages/client/src/components/hermes/workflow/WorkflowAgentNode.vue',
+      'packages/client/src/views/hermes/WorkflowView.vue',
+    ].map(file => readFileSync(resolve(root, file), 'utf8')).join('\n')
+    for (const forbidden of [
+      'summaryReviewMode', 'summaryRevisionEnabled', 'messageRoutingMode',
+      'evaluationProfile', 'qualityReview', 'qualityCriterion',
+    ]) expect(localEditors).not.toContain(forbidden)
+  })
+})

@@ -16,10 +16,6 @@ export interface RoomInfo {
     summaryModel: string
     summaryApiMode: string
     summaryEveryTurns: number
-    evaluationProfile?: string
-    summaryReviewMode?: 'inherit' | 'off'
-    summaryRevisionEnabled?: boolean
-    messageRoutingMode?: 'off' | 'suggest' | 'auto'
     totalTokens?: number
     workspace: string
     allowGuestAgents?: number
@@ -57,10 +53,6 @@ export interface RoomSummaryConfig {
     summaryModel: string
     summaryApiMode: string
     summaryEveryTurns: number
-    evaluationProfile?: string
-    summaryReviewMode?: 'inherit' | 'off'
-    summaryRevisionEnabled?: boolean
-    messageRoutingMode?: 'off' | 'suggest' | 'auto'
 }
 
 export interface RoomConfigInput extends Partial<RoomSummaryConfig> {
@@ -137,7 +129,7 @@ export type RoomAgentSummary = Pick<
 export interface GroupMessageRoutingDecision {
     messageId: string; roomId: string; targetAgentId: string | null; targetAgentName: string | null
     mode: 'suggest' | 'auto'; status: 'suggested' | 'queued' | 'skipped'; queueId: string | null
-    confidence: number | null; createdAt: number; updatedAt: number
+    confidence: number | null; handoffComplete: boolean | null; loopDetected: boolean | null; createdAt: number; updatedAt: number
 }
 
 export interface GroupAgentActivity {

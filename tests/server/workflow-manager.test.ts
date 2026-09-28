@@ -306,7 +306,7 @@ describe('workflow manager', () => {
     const { listWorkflowRunQualityEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     initAllStores()
     await saveJevSettings('default', { apiKey: 'quality-key', workflowQualityEnabled: true })
-    const response = { model: 'jev-test', usage: {}, answers: { exact: { type: 'choice', choice: 'pass', confidence: .95, probabilities: { pass: .95, needs_improvement: .02, unknown: .03 } } } }
+    const answer = { type: 'choice', choice: 'pass', confidence: .95, probabilities: { pass: .95, needs_improvement: .02, unknown: .03 } }; const response = { model: 'jev-test', usage: {}, answers: { expected_output: answer, completion_evidence: answer, downstream_readiness: answer } }
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(response))
     chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string }) => {
       chatRunMock.sessionOutputs.set(request.session_id, 'WORKFLOW_BASELINE_OK')
@@ -314,7 +314,7 @@ describe('workflow manager', () => {
     })
     const manager = new WorkflowManager()
     const workflow = manager.create({ name: `Quality runtime ${Date.now()}`, profile: 'default', nodes: [{ id: 'agent', type: 'agent', position: { x: 0, y: 0 }, data: {
-      title: 'Agent', agent: 'hermes', input: 'Return WORKFLOW_BASELINE_OK', qualityReview: { mode: 'observe', criteria: [{ id: 'exact', text: 'Output is exact', evidence: 'output' }] },
+      title: 'Agent', agent: 'hermes', input: 'Return WORKFLOW_BASELINE_OK',
     } }], edges: [] })
     try {
       const result = await manager.runNow(workflow.id)

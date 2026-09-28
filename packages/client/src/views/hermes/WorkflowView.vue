@@ -661,7 +661,6 @@ function makeNode(
       images: data.images || [],
       approvalRequired: data.approvalRequired === true,
       orchestration: { join: data.orchestration?.join === 'any' ? 'any' : 'all' },
-      qualityReview: data.qualityReview ? { mode: data.qualityReview.mode, criteria: data.qualityReview.criteria.map(item => ({ ...item })) } : { mode: 'off', criteria: [] },
       status: data.status || 'idle',
       agentOptions: agentOptions.value,
       skillOptions: skillOptionsForAgent(agent),
@@ -1099,7 +1098,6 @@ function serializeWorkflowNodes(source: WorkflowNode[]): unknown[] {
       images: [...node.data.images],
       approvalRequired: node.data.approvalRequired === true,
       orchestration: { join: node.data.orchestration?.join === 'any' ? 'any' : 'all' },
-      qualityReview: node.data.qualityReview ? { mode: node.data.qualityReview.mode, criteria: node.data.qualityReview.criteria.map(item => ({ ...item })) } : { mode: 'off', criteria: [] },
     },
   }))
 }
@@ -1161,7 +1159,6 @@ function normalizeStoredNode(raw: unknown, index: number): WorkflowNode {
       images: Array.isArray(data.images) ? data.images.filter(item => typeof item === 'string') : [],
       approvalRequired: data.approvalRequired === true,
       orchestration: { join: data.orchestration?.join === 'any' ? 'any' : 'all' },
-      qualityReview: data.qualityReview ? { mode: data.qualityReview.mode, criteria: data.qualityReview.criteria.map(item => ({ ...item })) } : { mode: 'off', criteria: [] },
       status: 'idle',
     },
   )

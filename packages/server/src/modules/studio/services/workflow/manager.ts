@@ -125,7 +125,6 @@ export interface WorkflowNodeSnapshot {
     images: string[]
     approvalRequired: boolean
     orchestration: { join: 'all' | 'any' }
-    qualityReview?: { mode: 'off' | 'observe'; criteria: Array<{ id: string; text: string; evidence: 'output' | 'execution' }> }
   }
 }
 
@@ -309,23 +308,6 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter(item => typeof item === 'string' && item.trim()).map(item => item.trim()) : []
 }
 
-function normalizeQualityReview(value: unknown, nodeId: string): WorkflowNodeSnapshot['data']['qualityReview'] {
-  if (value === undefined) return undefined
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`workflow node ${nodeId} has invalid qualityReview`)
-  const record = value as Record<string, unknown>
-  if (record.mode !== 'off' && record.mode !== 'observe') throw new Error(`workflow node ${nodeId} has invalid qualityReview mode`)
-  const raw = Array.isArray(record.criteria) ? record.criteria : []
-  if (raw.length > 10) throw new Error(`workflow node ${nodeId} has too many quality criteria`)
-  const ids = new Set<string>()
-  const criteria = raw.map((item, index) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`workflow node ${nodeId} has invalid quality criterion ${index + 1}`)
-    const entry = item as Record<string, unknown>; const id = String(entry.id || '').trim(); const text = String(entry.text || '').trim()
-    if (!id || ids.has(id) || !text || text.length > 1000 || (entry.evidence !== 'output' && entry.evidence !== 'execution')) throw new Error(`workflow node ${nodeId} has invalid quality criterion ${index + 1}`)
-    ids.add(id); return { id, text, evidence: entry.evidence as 'output' | 'execution' }
-  })
-  return { mode: record.mode, criteria }
-}
-
 const WORKFLOW_REASONING_EFFORTS = new Set(['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 const WORKFLOW_API_MODES = new Set(['chat_completions', 'codex_responses', 'anthropic_messages'])
 export function normalizeWorkflowNode(raw: unknown): WorkflowNodeSnapshot | null {
@@ -392,7 +374,6 @@ export function normalizeWorkflowNode(raw: unknown): WorkflowNodeSnapshot | null
       images: stringArray(data.images),
       approvalRequired: data.approvalRequired === true,
       orchestration: { join },
-      ...(normalizeQualityReview(data.qualityReview, id) ? { qualityReview: normalizeQualityReview(data.qualityReview, id) } : {}),
     },
   }
 }
