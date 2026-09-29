@@ -729,6 +729,7 @@ describe('ekko-agent runtime', () => {
       content: 'Validation passed',
       finishReason: 'stop',
       usage: {
+        costUsd: 0.04,
         inputTokens: 12,
         outputTokens: 3,
         cacheReadTokens: 5,
@@ -745,6 +746,8 @@ describe('ekko-agent runtime', () => {
         background: true,
         summary: 'Validation passed',
         output: 'Validation passed',
+        costUsd: 0.04,
+        costSource: 'reported',
         childRunId: expect.any(String),
         apiCalls: 1,
         inputTokens: 12,

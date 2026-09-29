@@ -1,5 +1,7 @@
 import { logger } from '../../public/logging'
 import { updateUsage } from '../../repositories/usage-store'
+import { getUsagePricing } from '../../repositories/usage-pricing-store'
+import { normalizeUsageCost, estimateUsageCost, type UsageCost } from './usage-cost'
 
 export interface NormalizedTokenUsage {
   inputTokens: number
@@ -23,6 +25,7 @@ export interface RecordSessionUsageInput {
   usage?: unknown
   fallbackUsage?: Partial<NormalizedTokenUsage>
   isEstimated?: boolean
+  cost?: UsageCost
 }
 
 function asRecord(value: unknown): Record<string, any> | undefined {
@@ -110,6 +113,16 @@ export function normalizeTokenUsage(
 export function recordSessionUsage(input: RecordSessionUsageInput): NormalizedTokenUsage {
   const usage = normalizeTokenUsage(input.usage, input.fallbackUsage)
   try {
+    let cost = normalizeUsageCost(input.cost) || normalizeUsageCost(input.usage)
+    if (!cost && input.model && input.provider) {
+      try {
+        const pricing = getUsagePricing(input.profile || 'default')
+          .find(row => row.provider === input.provider && row.model === input.model)
+        cost = estimateUsageCost(usage, pricing)
+      } catch (err) {
+        logger.warn({ err }, '[usage-recorder] failed to read model pricing')
+      }
+    }
     updateUsage(input.sessionId, {
       runId: input.runId || '',
       source: input.source,
@@ -126,6 +139,7 @@ export function recordSessionUsage(input: RecordSessionUsageInput): NormalizedTo
       provider: input.provider || '',
       profile: input.profile || 'default',
       isEstimated: input.isEstimated ?? usage.isEstimated,
+      ...(cost || {}),
     })
   } catch (err) {
     logger.warn({

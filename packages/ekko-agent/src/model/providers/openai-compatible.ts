@@ -105,6 +105,7 @@ interface OpenAIChatResponse {
     finish_reason?: string | null
   }>
   usage?: {
+    cost?: number
     prompt_tokens?: number
     completion_tokens?: number
     total_tokens?: number
@@ -761,6 +762,7 @@ function normalizeUsage(usage: NonNullable<OpenAIChatResponse['usage']>): ModelU
   const cacheReadTokens = usage.prompt_tokens_details?.cached_tokens ?? 0
   const inputTokens = usage.prompt_tokens ?? 0
   return {
+    ...(typeof usage.cost === 'number' && Number.isFinite(usage.cost) && usage.cost >= 0 ? { costUsd: usage.cost } : {}),
     inputTokens: Math.max(0, inputTokens - cacheReadTokens),
     outputTokens: usage.completion_tokens,
     totalTokens: usage.total_tokens,

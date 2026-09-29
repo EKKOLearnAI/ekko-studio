@@ -2808,6 +2808,24 @@ jobTriggered: 'Job declenche',
 
   // Usage
   usage: {
+    costStates: {
+      unknown: "Non enregistré",
+      partial: "Coût partiel ; certaines utilisations sans tarif",
+      reported: "Coût indiqué par le fournisseur",
+      estimated: "Coût estimé",
+      mixed: "Coûts indiqués et estimés",
+    },
+    pricing: {
+      title: "Tarifs des modèles",
+      help: "USD par million de tokens. Identifiants fournisseur et modèle exacts (par ex. global). Estimation uniquement si aucun coût reçu. Cache sans tarif : coût inconnu. Modifications pour les prochains appels, sans recalcul du passé.",
+      provider: "ID fournisseur",
+      model: "ID modèle",
+      input: "Entrée",
+      output: "Sortie",
+      cacheRead: "Lecture du cache",
+      cacheWrite: "Écriture du cache",
+      error: "Échec du chargement ou de la sauvegarde. Vérifiez les ID, les doublons et les tarifs non négatifs.",
+    },
     title: 'Statistiques d\'utilisation',
     refresh: 'Actualiser',
     totalTokens: 'Total des jetons',

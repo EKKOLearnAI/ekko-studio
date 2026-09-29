@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { useUsageStore } from '@/stores/hermes/usage'
+import { computed } from 'vue'
+import { formatUsageCost, usageCostState } from '@/utils/usage-cost'
 
 const { t } = useI18n()
 const usageStore = useUsageStore()
+const costState = computed(() => usageCostState(usageStore.estimatedCost, usageStore.stats?.cost_coverage, usageStore.hasData))
 
 function formatTokens(n: number): string {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
@@ -11,11 +14,6 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-function formatCost(n: number): string {
-  if (n === 0) return '$0.00'
-  if (n < 0.01) return '<$0.01'
-  return '$' + n.toFixed(2)
-}
 </script>
 
 <template>
@@ -34,8 +32,9 @@ function formatCost(n: number): string {
       <div class="stat-sub">{{ t('usage.avgPerDay', { n: usageStore.avgSessionsPerDay.toFixed(1) }) }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">{{ t('usage.estimatedCost') }}</div>
-      <div class="stat-value">{{ formatCost(usageStore.estimatedCost) }}</div>
+      <div class="stat-label">{{ t('usage.cost') }} (USD)</div>
+      <div class="stat-value">{{ formatUsageCost(usageStore.estimatedCost, usageStore.stats?.cost_coverage, usageStore.hasData) ?? t('usage.costStates.unknown') }}</div>
+      <div v-if="costState && costState !== 'unknown'" class="stat-sub">{{ t(`usage.costStates.${costState}`) }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">{{ t('usage.cacheHitRate') }}</div>

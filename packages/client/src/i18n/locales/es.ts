@@ -2808,6 +2808,24 @@ jobTriggered: 'Job ejecutado',
 
   // Usage
   usage: {
+    costStates: {
+      unknown: "Sin registrar",
+      partial: "Coste parcial; falta valorar parte del uso",
+      reported: "Coste informado por el proveedor",
+      estimated: "Coste estimado",
+      mixed: "Incluye costes informados y estimados",
+    },
+    pricing: {
+      title: "Precios de modelos",
+      help: "USD por millón de tokens. Coincidencia exacta de ID de proveedor y modelo (p. ej. global). Solo se estima si no se recibe un coste. Caché sin precio significa desconocido. Cambios para futuras llamadas, sin recalcular el historial.",
+      provider: "ID del proveedor",
+      model: "ID del modelo",
+      input: "Entrada",
+      output: "Salida",
+      cacheRead: "Lectura de caché",
+      cacheWrite: "Escritura de caché",
+      error: "No se pudieron cargar o guardar los precios. Revise los ID, duplicados y precios no negativos.",
+    },
     title: 'Estadisticas de uso',
     refresh: 'Actualizar',
     totalTokens: 'Total de tokens',

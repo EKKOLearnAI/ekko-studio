@@ -213,6 +213,7 @@ describe('native-style Hermes usage analytics DB aggregation', () => {
       sessions: 1,
       errors: 0,
       cost: 0.005,
+      cost_coverage: { reported: 0, estimated: 1, unknown: 0 },
     })
     expect(result.by_day[1]).toMatchObject({
       date: day(now),
@@ -267,4 +268,20 @@ describe('native-style Hermes usage analytics DB aggregation', () => {
     expect(result.output_tokens).toBe(6)
     expect(result.total_api_calls).toBe(0)
   })
+  it('recovers excluded session costs separately and treats legacy default zero as unknown', async () => {
+    const now = 1_700_000_000
+    profileDir = createStateDb(true)
+    profileMock.getActiveProfileDir.mockReturnValue(profileDir)
+    insertSession(profileDir, { id: 'local', started_at: now - 10, input_tokens: 100, estimated_cost_usd: 0.12 })
+    insertSession(profileDir, { id: 'unknown', started_at: now - 10, input_tokens: 10 })
+    insertSession(profileDir, { id: 'free', started_at: now - 10, input_tokens: 20, actual_cost_usd: 0 })
+    const mod = await import('../../packages/server/src/modules/hermes/services/history/sessions-db')
+    const result = await mod.getUsageStatsFromDb(1, now, undefined, ['local'], ['local'])
+    expect(result.input_tokens).toBe(30)
+    expect(result.cost).toBe(0)
+    expect(result.cost_coverage).toEqual({ reported: 1, estimated: 0, unknown: 1 })
+    expect(result.cost_fallbacks).toEqual([{ session_id: 'local', date: day(now), cost: 0.12, source: 'estimated' }])
+    expect((await mod.getUsageStatsFromDb(1, now, undefined, ['local'])).cost_fallbacks).toEqual([])
+  })
+
 })

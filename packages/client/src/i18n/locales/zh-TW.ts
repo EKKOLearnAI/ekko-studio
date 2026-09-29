@@ -3493,6 +3493,24 @@ export default {
 
   // 用量統計
   usage: {
+    costStates: {
+      unknown: "未記錄",
+      partial: "部分費用，其餘未記錄",
+      reported: "上游回傳費用",
+      estimated: "估算費用",
+      mixed: "含上游費用與估算費用",
+    },
+    pricing: {
+      title: "模型單價",
+      help: "單位為美元／百萬 Token。依供應商和模型 ID 精確匹配（例如 global），僅在上游未回傳費用時估算。快取單價留空表示未知。修改從後續呼叫生效，不重算歷史費用。",
+      provider: "供應商 ID",
+      model: "模型 ID",
+      input: "輸入",
+      output: "輸出",
+      cacheRead: "快取讀取",
+      cacheWrite: "快取寫入",
+      error: "無法讀取或儲存單價。請檢查供應商、模型是否填寫或重複，單價必須為非負數。",
+    },
     title: '用量統計',
     refresh: '重新整理',
     totalTokens: '總 Token 數',

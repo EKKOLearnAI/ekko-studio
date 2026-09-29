@@ -27,11 +27,19 @@ export const USAGE_SCHEMA: Record<string, string> = {
   provider: "TEXT NOT NULL DEFAULT ''",
   profile: "TEXT NOT NULL DEFAULT 'default'",
   is_estimated: 'INTEGER NOT NULL DEFAULT 0',
+  cost_usd: 'REAL',
+  cost_source: "TEXT NOT NULL DEFAULT 'unknown'",
   created_at: 'INTEGER NOT NULL DEFAULT 0',
 }
 
 export const USAGE_RUN_INDEX = `CREATE UNIQUE INDEX IF NOT EXISTS idx_session_usage_run
   ON ${USAGE_TABLE}(session_id, run_id, source) WHERE run_id <> ''`
+
+export const USAGE_PRICING_TABLE = 'usage_pricing'
+export const USAGE_PRICING_SCHEMA = {
+  profile: 'TEXT PRIMARY KEY',
+  rates: "TEXT NOT NULL DEFAULT '[]'",
+}
 
 // ============================================================================
 // Session Store (session-store.ts)
@@ -1609,6 +1617,7 @@ export function initAllHermesTables(): void {
   try {
     // Usage store
     syncTable(USAGE_TABLE, USAGE_SCHEMA, { primaryKey: 'id' })
+    syncTable(USAGE_PRICING_TABLE, USAGE_PRICING_SCHEMA, { primaryKey: 'profile' })
     db.exec(USAGE_RUN_INDEX)
 
     // Session store

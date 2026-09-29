@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUsageStore } from '@/stores/hermes/usage'
+import { formatUsageCost, usageCostState, type UsageCostCoverage } from '@/utils/usage-cost'
 
 const { t } = useI18n()
 const usageStore = useUsageStore()
@@ -12,10 +13,11 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-function formatCost(n: number): string {
-  if (n === 0) return '$0.00'
-  if (n < 0.01) return '<$0.01'
-  return '$' + n.toFixed(2)
+function formatCost(day: { cost: number; cost_coverage?: UsageCostCoverage; sessions: number }): string {
+  const amount = formatUsageCost(day.cost, day.cost_coverage, day.sessions > 0)
+  if (amount === null) return t('usage.costStates.unknown')
+  const state = usageCostState(day.cost, day.cost_coverage, day.sessions > 0)
+  return state ? `${amount} · ${t(`usage.costStates.${state}`)}` : amount
 }
 
 function cacheHitRate(d: { input_tokens: number; cache_read_tokens: number }): string {
@@ -69,7 +71,7 @@ const maxTokens = computed(() =>
           <div class="tooltip-row">{{ t('usage.cacheWrite') }}: {{ formatTokens(d.cache_write_tokens) }}</div>
           <div class="tooltip-row">{{ t('usage.cacheHitRate') }}: {{ cacheHitRate(d) }}</div>
           <div class="tooltip-row">{{ t('usage.sessions') }}: {{ d.sessions }}</div>
-          <div class="tooltip-row">{{ t('usage.cost') }}: {{ formatCost(d.cost) }}</div>
+          <div class="tooltip-row">{{ t('usage.cost') }}: {{ formatCost(d) }}</div>
         </div>
       </div>
     </div>
@@ -107,7 +109,7 @@ const maxTokens = computed(() =>
             <td>{{ formatTokens(d.cache_write_tokens) }}</td>
             <td>{{ cacheHitRate(d) }}</td>
             <td>{{ d.sessions }}</td>
-            <td>{{ formatCost(d.cost) }}</td>
+            <td>{{ formatCost(d) }}</td>
           </tr>
         </tbody>
       </table>

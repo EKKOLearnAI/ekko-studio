@@ -61,6 +61,9 @@ export interface AgentToolCall {
 }
 
 export interface ModelUsage {
+  /** Provider-reported USD cost, when supplied. Missing is not free. */
+  costUsd?: number
+  costSource?: 'reported' | 'estimated'
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number

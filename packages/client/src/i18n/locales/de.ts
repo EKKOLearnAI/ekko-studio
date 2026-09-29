@@ -2808,6 +2808,24 @@ jobTriggered: 'Job ausgelost',
 
   // Usage
   usage: {
+    costStates: {
+      unknown: "Nicht erfasst",
+      partial: "Teilkosten; einige Nutzungen ohne Preis",
+      reported: "Vom Anbieter gemeldete Kosten",
+      estimated: "Geschätzte Kosten",
+      mixed: "Gemeldete und geschätzte Kosten",
+    },
+    pricing: {
+      title: "Modellpreise",
+      help: "USD pro Million Tokens. Anbieter- und Modell-ID müssen genau passen (z. B. global). Schätzung nur ohne gemeldete Kosten. Leere Cachepreise bedeuten unbekannt. Änderungen gelten für künftige Aufrufe; frühere Kosten werden nicht neu berechnet.",
+      provider: "Anbieter-ID",
+      model: "Modell-ID",
+      input: "Eingabe",
+      output: "Ausgabe",
+      cacheRead: "Cache lesen",
+      cacheWrite: "Cache schreiben",
+      error: "Preise konnten nicht geladen oder gespeichert werden. IDs, Duplikate und nicht negative Preise prüfen.",
+    },
     title: 'Nutzungsstatistiken',
     refresh: 'Aktualisieren',
     totalTokens: 'Gesamt-Tokens',

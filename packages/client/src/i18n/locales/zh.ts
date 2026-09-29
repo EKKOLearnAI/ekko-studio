@@ -3599,6 +3599,24 @@ export default {
 
   // 用量统计
   usage: {
+    costStates: {
+      unknown: "未记录",
+      partial: "部分费用，其余未记录",
+      reported: "上游返回费用",
+      estimated: "估算费用",
+      mixed: "含上游费用与估算费用",
+    },
+    pricing: {
+      title: "模型单价",
+      help: "单位为美元／百万 Token。按供应商和模型 ID 精确匹配（例如 global），仅在上游未返回费用时估算。缓存单价留空表示未知。修改从后续调用生效，不重算历史费用。",
+      provider: "供应商 ID",
+      model: "模型 ID",
+      input: "输入",
+      output: "输出",
+      cacheRead: "缓存读取",
+      cacheWrite: "缓存写入",
+      error: "无法读取或保存单价。请检查供应商、模型是否填写或重复，单价必须为非负数。",
+    },
     title: '用量统计',
     refresh: '刷新',
     totalTokens: '总 Token 数',

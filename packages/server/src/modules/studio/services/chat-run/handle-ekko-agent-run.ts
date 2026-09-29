@@ -1131,6 +1131,8 @@ export async function handleEkkoAgentRun(
               cacheReadTokens: event.cacheReadTokens,
               cacheWriteTokens: event.cacheWriteTokens,
               reasoningTokens: event.reasoningTokens,
+              costUsd: event.costUsd,
+              costSource: event.costSource,
             },
             profile,
             model: modelConfig.model,

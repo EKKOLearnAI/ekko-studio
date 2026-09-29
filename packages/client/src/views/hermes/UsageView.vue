@@ -8,6 +8,7 @@ import StatCards from '@/components/hermes/usage/StatCards.vue'
 import ModelBreakdown from '@/components/hermes/usage/ModelBreakdown.vue'
 import AgentBreakdown from '@/components/hermes/usage/AgentBreakdown.vue'
 import DailyTrend from '@/components/hermes/usage/DailyTrend.vue'
+import UsagePricing from '@/components/hermes/usage/UsagePricing.vue'
 
 const { t } = useI18n()
 const usageStore = useUsageStore()
@@ -44,6 +45,7 @@ onMounted(() => {
     <header class="page-header">
       <h2 class="header-title">{{ t('usage.title') }}</h2>
       <div class="usage-toolbar">
+        <UsagePricing />
         <div class="period-selector" role="group" aria-label="Usage statistics period">
           <NButton
             v-for="option in periodOptions"

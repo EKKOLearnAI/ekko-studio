@@ -2807,6 +2807,24 @@ export default {
 
   // 사용량
   usage: {
+    costStates: {
+      unknown: "미기록",
+      partial: "일부 비용만 기록됨",
+      reported: "공급자 보고 비용",
+      estimated: "추정 비용",
+      mixed: "보고 비용 및 추정 비용 포함",
+    },
+    pricing: {
+      title: "모델 단가",
+      help: "백만 토큰당 USD입니다. 공급자와 모델 ID를 정확히 일치시키세요(예: global). 비용이 반환되지 않을 때만 추정합니다. 캐시 단가가 비어 있으면 알 수 없음입니다. 이후 호출부터 적용되며 과거 비용은 다시 계산하지 않습니다.",
+      provider: "공급자 ID",
+      model: "모델 ID",
+      input: "입력",
+      output: "출력",
+      cacheRead: "캐시 읽기",
+      cacheWrite: "캐시 쓰기",
+      error: "단가를 불러오거나 저장하지 못했습니다. ID, 중복 및 음수 단가를 확인하세요.",
+    },
     title: '사용량 통계',
     refresh: '새로고침',
     totalTokens: '총 토큰 수',

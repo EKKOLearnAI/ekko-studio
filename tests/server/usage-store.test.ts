@@ -187,6 +187,8 @@ describe('Usage Store (SQLite path)', () => {
       'default', // profile
       0, // isEstimated
       expect.any(Number), // created_at
+      null, // costUsd
+      'unknown', // costSource
     )
   })
 
@@ -217,6 +219,8 @@ describe('Usage Store (SQLite path)', () => {
       'default', // profile
       0, // isEstimated
       expect.any(Number), // created_at
+      null, // costUsd
+      'unknown', // costSource
       expect.any(Number), // updated_at
     )
   })
@@ -307,9 +311,10 @@ describe('Usage Store (SQLite path)', () => {
         { agent: 'coding_agent', input_tokens: 100, output_tokens: 40, cache_read_tokens: 30, cache_write_tokens: 5, reasoning_tokens: 8, sessions: 2 },
       ],
       by_day: [
-        { date: '2026-07-11', input_tokens: 100, output_tokens: 40, cache_read_tokens: 30, cache_write_tokens: 5, sessions: 2, errors: 0, cost: 0 },
+        { date: '2026-07-11', input_tokens: 100, output_tokens: 40, cache_read_tokens: 30, cache_write_tokens: 5, sessions: 2, errors: 0, cost: 0, cost_coverage: { reported: 0, estimated: 0, unknown: 0 } },
       ],
       cost: 0,
+      cost_coverage: { reported: 0, estimated: 0, unknown: 0 },
       total_api_calls: 3,
     })
     expect(getRecordedUsageSessionIds('default')).toEqual(['session-1', 'session-2'])

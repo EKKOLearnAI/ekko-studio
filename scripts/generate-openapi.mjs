@@ -1460,6 +1460,20 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
   }
 }
 
+// Usage rates are Profile-scoped and are snapshots for future usage only.
+const usageRateSchema = { type: 'object', required: ['provider', 'model', 'input', 'output'], properties: {
+  provider: { type: 'string', minLength: 1, maxLength: 200 }, model: { type: 'string', minLength: 1, maxLength: 300 },
+  ...Object.fromEntries(['input', 'output', 'cacheRead', 'cacheWrite'].map(key => [key, { type: 'number', minimum: 0, maximum: 1000000, description: 'USD per million tokens', ...(['cacheRead', 'cacheWrite'].includes(key) ? { nullable: true } : {}) }])),
+} }
+const usageRatesSchema = { type: 'object', required: ['rates'], properties: { rates: { type: 'array', maxItems: 200, items: usageRateSchema } } }
+const usagePricingPath = openapi.paths['/api/studio/usage/pricing']
+usagePricingPath.put.requestBody = { required: true, content: { 'application/json': { schema: usageRatesSchema } } }
+for (const operation of [usagePricingPath.get, usagePricingPath.put]) {
+  operation.description = 'Profile-scoped model pricing in USD per million tokens. Exact provider/model match. Applies only to future calls without reported cost; never reprices historical usage.'
+  operation.responses['200'] = { description: 'Saved pricing', content: { 'application/json': { schema: usageRatesSchema } } }
+}
+usagePricingPath.put.responses['400'] = { description: 'Invalid or duplicate provider/model pricing' }
+
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')
 writeFileSync(outputPath, JSON.stringify(openapi, null, 2))

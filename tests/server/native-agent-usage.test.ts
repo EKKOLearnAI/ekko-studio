@@ -149,6 +149,13 @@ describe('global native usage accounting', () => {
       'claude-code': { inputTokens: 1203, outputTokens: 3, cacheReadTokens: 4160, apiCalls: 1 },
       grok: { inputTokens: 16950, outputTokens: 42, cacheReadTokens: 640, reasoningTokens: 37, apiCalls: 1 },
     }[agentId])
+    const costStats = getLocalUsageStats(sessionId, 1)
+    if (agentId === 'claude-code' || agentId === 'grok') {
+      expect(costStats.cost).toBeCloseTo(agentId === 'claude-code' ? 0.01027 : 0.00586024)
+      expect(costStats.cost_coverage).toEqual({ reported: 0, estimated: 1, unknown: 0 })
+    } else {
+      expect(costStats.cost_coverage?.unknown).toBe(1)
+    }
     await vi.waitFor(() => expect(emitted).toHaveBeenCalledWith(sessionId, 'usage.updated', expect.objectContaining({
       contextTokens: { codex: 17788, pi: 483, 'claude-code': 5366, grok: 17632 }[agentId],
     })))
@@ -156,11 +163,12 @@ describe('global native usage accounting', () => {
 
   it.each(['pi', 'claude-code', 'grok', 'codex'] as const)('%s scoped usage still comes only from the proxy', async agentId => {
     start(agentId, 'scoped')
-    manager.handleProxyUsageEvent(sessionId, { type: 'response.completed', data: { response: { id: 'proxy-1', model: 'proxy-model', usage: { input_tokens: 12, output_tokens: 3 } } } })
+    manager.handleProxyUsageEvent(sessionId, { type: 'response.completed', data: { response: { id: 'proxy-1', model: 'proxy-model', usage: { input_tokens: 12, output_tokens: 3, cost: 0.001 } } } })
     for (const event of fixtures[agentId]) emit(event)
     close()
     expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: 12, outputTokens: 3, apiCalls: 1 })
     expect(getUsage(sessionId)?.model).toBe('proxy-model')
+    expect(getLocalUsageStats(sessionId, 1)).toMatchObject({ cost: 0.001, cost_coverage: { reported: 1, estimated: 0, unknown: 0 } })
   })
 
   it('does not duplicate Pi messages repeated in delivery or terminal events, and resets for another turn', () => {

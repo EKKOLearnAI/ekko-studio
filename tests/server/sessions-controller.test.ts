@@ -137,6 +137,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () 
   getUsage: vi.fn(),
   getUsageBatch: vi.fn(),
   getLocalUsageStats: getLocalUsageStatsMock,
+  getUnpricedHermesUsageSessions: vi.fn(() => []),
   getRecordedUsageSessionIds: getRecordedUsageSessionIdsMock,
 }))
 
@@ -1972,7 +1973,7 @@ describe('session conversations controller', () => {
 
     expect(getLocalUsageStatsMock).toHaveBeenCalledWith('default', 2)
     expect(getRecordedUsageSessionIdsMock).toHaveBeenCalledWith('default')
-    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(2, undefined, 'default', ['local-session'])
+    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(2, undefined, 'default', ['local-session'], [])
     expect(ctx.body).toMatchObject({
       total_input_tokens: 30,
       total_output_tokens: 15,
@@ -2024,7 +2025,7 @@ describe('session conversations controller', () => {
 
     expect(getLocalUsageStatsMock).toHaveBeenCalledWith('research', 2)
     expect(getRecordedUsageSessionIdsMock).toHaveBeenCalledWith('research')
-    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(2, undefined, 'research', [])
+    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(2, undefined, 'research', [], [])
     expect(ctx.body).toMatchObject({
       total_input_tokens: 12,
       total_output_tokens: 6,

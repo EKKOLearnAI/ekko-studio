@@ -82,6 +82,8 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
   usageBatch: usageBatchMock,
   usageSingle: usageSingleMock,
   usageStats: usageStatsMock,
+  usagePricing: vi.fn(),
+  updateUsagePricing: vi.fn(),
   contextLength: contextLengthMock,
   exportSession: exportSessionMock,
   listWorkspaceRunChanges: listWorkspaceRunChangesMock,

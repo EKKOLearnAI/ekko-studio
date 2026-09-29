@@ -23117,6 +23117,248 @@
         "x-session-share-permission": "upload"
       }
     },
+    "/api/studio/usage/pricing": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Get pricing",
+        "description": "Profile-scoped model pricing in USD per million tokens. Exact provider/model match. Applies only to future calls without reported cost; never reprices historical usage.",
+        "operationId": "usagePricing",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved pricing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "rates"
+                  ],
+                  "properties": {
+                    "rates": {
+                      "type": "array",
+                      "maxItems": 200,
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "provider",
+                          "model",
+                          "input",
+                          "output"
+                        ],
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 300
+                          },
+                          "input": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000,
+                            "description": "USD per million tokens"
+                          },
+                          "output": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000,
+                            "description": "USD per million tokens"
+                          },
+                          "cacheRead": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000,
+                            "description": "USD per million tokens",
+                            "nullable": true
+                          },
+                          "cacheWrite": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000,
+                            "description": "USD per million tokens",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Update pricing",
+        "description": "Profile-scoped model pricing in USD per million tokens. Exact provider/model match. Applies only to future calls without reported cost; never reprices historical usage.",
+        "operationId": "updateUsagePricing",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved pricing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "rates"
+                  ],
+                  "properties": {
+                    "rates": {
+                      "type": "array",
+                      "maxItems": 200,
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "provider",
+                          "model",
+                          "input",
+                          "output"
+                        ],
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 300
+                          },
+                          "input": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000,
+                            "description": "USD per million tokens"
+                          },
+                          "output": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000,
+                            "description": "USD per million tokens"
+                          },
+                          "cacheRead": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000,
+                            "description": "USD per million tokens",
+                            "nullable": true
+                          },
+                          "cacheWrite": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000,
+                            "description": "USD per million tokens",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or duplicate provider/model pricing"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "rates"
+                ],
+                "properties": {
+                  "rates": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "provider",
+                        "model",
+                        "input",
+                        "output"
+                      ],
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        },
+                        "input": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1000000,
+                          "description": "USD per million tokens"
+                        },
+                        "output": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1000000,
+                          "description": "USD per million tokens"
+                        },
+                        "cacheRead": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1000000,
+                          "description": "USD per million tokens",
+                          "nullable": true
+                        },
+                        "cacheWrite": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1000000,
+                          "description": "USD per million tokens",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/usage/stats": {
       "get": {
         "tags": [

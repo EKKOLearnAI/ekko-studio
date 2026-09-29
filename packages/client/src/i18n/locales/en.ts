@@ -3551,6 +3551,24 @@ export default {
 
   // Usage
   usage: {
+    costStates: {
+      unknown: "Not recorded",
+      partial: "Partial cost; some usage is unpriced",
+      reported: "Provider-reported cost",
+      estimated: "Estimated cost",
+      mixed: "Includes reported and estimated costs",
+    },
+    pricing: {
+      title: "Model pricing",
+      help: "USD per million tokens. Match provider and model IDs exactly (e.g. global). Used only when no cost is returned. Blank cache rates mean unknown. Changes apply to future calls; historical costs are not recalculated.",
+      provider: "Provider ID",
+      model: "Model ID",
+      input: "Input",
+      output: "Output",
+      cacheRead: "Cache read",
+      cacheWrite: "Cache write",
+      error: "Could not load or save pricing. Check provider/model IDs, duplicates and non-negative rates.",
+    },
     title: 'Usage Statistics',
     refresh: 'Refresh',
     totalTokens: 'Total Tokens',

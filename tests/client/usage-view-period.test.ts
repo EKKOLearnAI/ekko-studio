@@ -61,6 +61,10 @@ vi.mock('@/components/hermes/usage/DailyTrend.vue', () => ({
   default: defineComponent({ name: 'DailyTrend', template: '<section class="daily-trend-stub" />' }),
 }))
 
+vi.mock('@/components/hermes/usage/UsagePricing.vue', () => ({
+  default: defineComponent({ name: 'UsagePricing', template: '<span />' }),
+}))
+
 import UsageView from '@/views/hermes/UsageView.vue'
 
 describe('UsageView period selector', () => {

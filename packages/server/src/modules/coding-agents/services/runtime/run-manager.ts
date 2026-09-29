@@ -8,7 +8,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import { createSession, addMessage, getSession, updateSession, updateSessionStats } from '../../../studio/public/sessions'
 import type { ApiMode, CodingAgentImageInput } from '../../protocol/types'
 import { logger } from '../../../studio/public/logging'
-import { normalizeTokenUsage, recordSessionUsage } from '../../../studio/public/usage'
+import { normalizeTokenUsage, normalizeUsageCost, recordSessionUsage } from '../../../studio/public/usage'
 import {
   applyResponseStreamEvent,
   calcAndUpdateUsage,
@@ -1138,6 +1138,7 @@ export class CodingAgentRunManager {
       apiCalls: 1,
       usage,
       profile: run.launch.profile,
+      cost: normalizeUsageCost(final),
       model: final?.model || run.launch.model,
       provider: run.launch.provider,
       isEstimated: false,
@@ -1271,6 +1272,7 @@ export class CodingAgentRunManager {
         usageScope: row.scope,
         apiCalls: row.apiCalls,
         usage: row.usage,
+        cost: row.cost,
         profile: run.launch.profile,
         model: row.model,
         provider: row.provider || run.launch.provider,
@@ -2859,6 +2861,7 @@ export class CodingAgentRunManager {
             apiCalls: 1,
             usage,
             profile: run.launch.profile,
+            cost: normalizeUsageCost(part, 'estimated'),
             model: nativeModel?.model || run.launch.model,
             provider: nativeModel?.provider || run.launch.provider,
             isEstimated: false,

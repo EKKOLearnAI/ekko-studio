@@ -1,5 +1,6 @@
 import { isSqliteAvailable, getDb, jsonSet, jsonGet, jsonGetAll, jsonDelete } from '../infrastructure/database'
 import { USAGE_TABLE as TABLE } from '../infrastructure/database/schemas'
+import { finiteCost, emptyCostCoverage } from '../services/usage/usage-cost'
 import type {
   LocalUsageStats,
   UsageStatsAgentRow,
@@ -54,6 +55,8 @@ export function updateUsage(
     provider?: string
     profile?: string
     isEstimated?: boolean
+    costUsd?: number
+    costSource?: 'reported' | 'estimated'
   },
 ): void {
   const cacheReadTokens = data.cacheReadTokens ?? 0
@@ -63,6 +66,8 @@ export function updateUsage(
   const model = data.model || ''
   const provider = data.provider || ''
   const profile = data.profile || 'default'
+  const costUsd = finiteCost(data.costUsd) ?? null
+  const costSource = costUsd == null ? 'unknown' : data.costSource || 'reported'
   if (isSqliteAvailable()) {
     const db = getDb()!
     const columns = [
@@ -83,6 +88,8 @@ export function updateUsage(
       'profile',
       'is_estimated',
       'created_at',
+      'cost_usd',
+      'cost_source',
     ]
     const values = columns.map(() => '?')
     const params = [
@@ -103,6 +110,8 @@ export function updateUsage(
       profile,
       data.isEstimated ? 1 : 0,
       now,
+      costUsd,
+      costSource,
     ]
     if (hasUpdatedAtColumn()) {
       columns.push('updated_at')
@@ -130,6 +139,8 @@ export function updateUsage(
       profile,
       is_estimated: data.isEstimated ? 1 : 0,
       created_at: now,
+      cost_usd: costUsd,
+      cost_source: costSource,
     })
   }
 }
@@ -282,7 +293,7 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
   const empty: LocalUsageStats = {
     input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
     cache_write_tokens: 0, reasoning_tokens: 0, sessions: 0,
-    by_model: [], by_agent: [], by_day: [], cost: 0, total_api_calls: 0,
+    by_model: [], by_agent: [], by_day: [], cost: 0, cost_coverage: emptyCostCoverage(), total_api_calls: 0,
   }
   if (!isSqliteAvailable()) return empty
 
@@ -304,6 +315,7 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
       COALESCE(SUM(cache_write_tokens),0) as cache_write_tokens,
       COALESCE(SUM(reasoning_tokens),0) as reasoning_tokens,
       COALESCE(SUM(api_calls),0) as total_api_calls,
+      ${costSelect},
       COUNT(DISTINCT session_id) as sessions
     FROM ${TABLE}
     ${whereClause}
@@ -339,6 +351,7 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
 
   const byDay = db.prepare(`
     SELECT DATE(created_at / 1000, 'unixepoch') as date,
+      ${costSelect},
       COALESCE(SUM(input_tokens),0) as input_tokens,
       COALESCE(SUM(output_tokens),0) as output_tokens,
       COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
@@ -348,7 +361,7 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
     ${whereClause}
     GROUP BY date
     ORDER BY date
-  `).all(...params) as Array<{ date: string; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; sessions: number }>
+  `).all(...params) as unknown as Array<UsageStatsDailyRow & CostTotals>
 
   return {
     input_tokens: totals.input_tokens,
@@ -359,8 +372,37 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
     sessions: totals.sessions,
     by_model: byModel,
     by_agent: byAgent,
-    by_day: byDay.map(d => ({ ...d, errors: 0, cost: 0 })),
-    cost: 0,
+    by_day: byDay.map(({ cost_reported, cost_estimated, cost_unknown, ...d }) => ({ ...d, errors: 0, cost: d.cost || 0, cost_coverage: coverage({ cost_reported, cost_estimated, cost_unknown }) })),
+    cost: totals.cost || 0,
+    cost_coverage: coverage(totals),
     total_api_calls: totals.total_api_calls,
   }
+}
+
+type CostTotals = { cost_reported?: number; cost_estimated?: number; cost_unknown?: number }
+const costSelect = `COALESCE(SUM(cost_usd), 0) AS cost,
+  COALESCE(SUM(CASE WHEN cost_usd IS NOT NULL AND cost_source <> 'estimated' THEN 1 ELSE 0 END), 0) AS cost_reported,
+  COALESCE(SUM(CASE WHEN cost_usd IS NOT NULL AND cost_source = 'estimated' THEN 1 ELSE 0 END), 0) AS cost_estimated,
+  COALESCE(SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END), 0) AS cost_unknown`
+
+function coverage(row: CostTotals) {
+  return { reported: row.cost_reported || 0, estimated: row.cost_estimated || 0, unknown: row.cost_unknown || 0 }
+}
+
+/** A cumulative Hermes bill can only replace wholly unpriced sessions contained in this period. */
+export function getUnpricedHermesUsageSessions(profile: string, days: number): Array<{ sessionId: string; days: Array<{ date: string; entries: number }> }> {
+  if (!isSqliteAvailable()) return []
+  const cutoff = Date.now() - days * 86_400_000
+  const rows = getDb()!.prepare(`SELECT session_id, DATE(created_at / 1000, 'unixepoch') AS date, COUNT(*) AS entries
+    FROM ${TABLE} WHERE profile = ? AND source = 'hermes' AND session_id IN (
+      SELECT session_id FROM ${TABLE} WHERE profile = ? GROUP BY session_id
+      HAVING MIN(created_at) > ? AND COUNT(cost_usd) = 0 AND SUM(CASE WHEN source <> 'hermes' THEN 1 ELSE 0 END) = 0
+    ) GROUP BY session_id, date`).all(profile, profile, cutoff) as Array<{ session_id: string; date: string; entries: number }>
+  const sessions = new Map<string, Array<{ date: string; entries: number }>>()
+  for (const row of rows) {
+    const days = sessions.get(row.session_id) || []
+    days.push({ date: row.date, entries: row.entries })
+    sessions.set(row.session_id, days)
+  }
+  return [...sessions].map(([sessionId, days]) => ({ sessionId, days }))
 }

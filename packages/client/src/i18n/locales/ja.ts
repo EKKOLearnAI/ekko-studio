@@ -2807,6 +2807,24 @@ export default {
 
   // 使用統計
   usage: {
+    costStates: {
+      unknown: "未記録",
+      partial: "一部の費用のみ記録",
+      reported: "プロバイダー報告額",
+      estimated: "推定費用",
+      mixed: "報告額と推定額を含む",
+    },
+    pricing: {
+      title: "モデル料金",
+      help: "100万トークンあたりの米ドル。プロバイダーとモデルの ID を完全一致で指定（例: global）。費用が返されない場合のみ推定します。キャッシュ料金の空欄は不明を意味します。変更は今後の呼び出しに適用され、過去の費用は再計算されません。",
+      provider: "プロバイダー ID",
+      model: "モデル ID",
+      input: "入力",
+      output: "出力",
+      cacheRead: "キャッシュ読取",
+      cacheWrite: "キャッシュ書込",
+      error: "料金の読み込みまたは保存に失敗しました。ID、重複、負の料金がないか確認してください。",
+    },
     title: '使用統計',
     refresh: '更新',
     totalTokens: '総トークン数',
