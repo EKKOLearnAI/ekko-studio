@@ -3482,7 +3482,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const model = String(input.model || '').trim()
   const freeRuntime = provider === OPENCODE_FREE_PROVIDER ? openCodeFreeRuntime(model) : undefined
   const apiKey = freeRuntime ? '' : String(input.apiKey || '').trim()
-  assertScopedCodingAgentProviderAllowed(mode, provider)
+  assertScopedCodingAgentProviderAllowed(mode, provider, tool.id)
   if (!model) {
     const err = new Error('Model is required')
     ;(err as any).status = 400
@@ -3974,8 +3974,10 @@ async function startCodingAgentRunInternal(
   const resolvedInput = await resolveStoredProviderLaunchInput(input, existingSession)
   const requestedMode = resolvedCodingAgentLaunchMode(id, resolvedInput.mode)
   const requestedProvider = String(resolvedInput.provider || '').trim().toLowerCase()
-  assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider)
-  if (id !== 'cursor' && requestedMode !== 'global' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
+  assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider, id)
+  const nativeOpenCodeCodexAuth = id === 'opencode' && requestedProvider === 'openai-codex'
+  if (id !== 'cursor' && requestedMode !== 'global' && !nativeOpenCodeCodexAuth
+    && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
     const err = new Error('Coding agent provider credentials are missing. Re-select the provider/model or update the provider API key before continuing this session.')
     ;(err as any).status = 400
     throw err
