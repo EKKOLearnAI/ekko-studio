@@ -1889,13 +1889,20 @@ function opencodeRuntimeConfig(
   }, null, 2)}\n`
 }
 
-function openCodeNativeAuthContent(configDir: string): string {
+function openCodeNativeAuthDir(): string {
+  const explicitHome = process.env.HERMES_OPENCODE_HOME?.trim()
+  if (explicitHome) return join(explicitHome, 'data', 'opencode')
+  const shadowHome = process.env.HERMES_WEB_UI_HOME?.trim()
+  if (shadowHome) return join(dirname(shadowHome), 'opencode-home', 'data', 'opencode')
+  return join(process.env.XDG_DATA_HOME?.trim() || join(getGlobalConfigHome(), '.local', 'share'), 'opencode')
+}
+
+function openCodeNativeAuthContent(authDir = openCodeNativeAuthDir()): string {
   let auth: any
   try {
-    // OpenCode's native auth is sourced from the isolated runtime config root.
-    // The scoped base setup shares the user's OpenCode auth into this root;
-    // profile auth.json is Hermes provider state and is not OpenCode auth.
-    auth = JSON.parse(readFileSync(join(configDir, 'auth.json'), 'utf8'))
+    // OpenCode's native auth is stored in its isolated runtime home, separate
+    // from the scoped model config root and Hermes profile provider state.
+    auth = JSON.parse(readFileSync(join(authDir, 'auth.json'), 'utf8'))
   } catch {
     auth = null
   }
@@ -3909,7 +3916,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     const promptPath = join(rootDir, 'AGENTS.md')
     await writeManagedPromptFile(promptPath, scopedSystemPrompt, '')
     if (nativeAuth) {
-      secretEnv = { OPENCODE_AUTH_CONTENT: openCodeNativeAuthContent(baseRuntime.rootDir) }
+      secretEnv = { OPENCODE_AUTH_CONTENT: openCodeNativeAuthContent() }
     }
     const runtimeConfig = opencodeRuntimeConfig(scope.profile, {
       studioMcpTokenFile: input.studioMcpTokenFile,

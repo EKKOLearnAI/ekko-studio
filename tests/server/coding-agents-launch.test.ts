@@ -102,6 +102,7 @@ function makeHome(compression?: Record<string, unknown>) {
   homes.push(home)
   process.env.HERMES_WEB_UI_HOME = home
   process.env.HERMES_CODING_AGENT_GLOBAL_HOME = join(home, 'global-home')
+  process.env.HERMES_OPENCODE_HOME = join(home, 'opencode-home')
   process.env.CODEX_HOME = join(home, 'global-home', '.codex')
   configureProfileConfig({
     buildModelGroups: () => ({ default: '', groups: [] }),
@@ -1574,7 +1575,7 @@ describe('coding agent launch preparation', () => {
     const home = makeHome()
     const oauthAccess = 'oauth-access-fixture'
     const oauthRefresh = 'oauth-refresh-fixture'
-    const openCodeAuthPath = join(home, 'global-home', '.config', 'opencode', 'auth.json')
+    const openCodeAuthPath = join(home, 'opencode-home', 'data', 'opencode', 'auth.json')
     mkdirSync(dirname(openCodeAuthPath), { recursive: true })
     writeFileSync(openCodeAuthPath, JSON.stringify({
       openai: { type: 'oauth', access: oauthAccess, refresh: oauthRefresh },

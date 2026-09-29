@@ -38,12 +38,14 @@ const homes: string[] = []
 const originalPath = process.env.PATH
 const originalNpmConfigPrefix = process.env.NPM_CONFIG_PREFIX
 const originalCodingAgentGlobalHome = process.env.HERMES_CODING_AGENT_GLOBAL_HOME
+const originalOpenCodeHome = process.env.HERMES_OPENCODE_HOME
 
 function makeHome() {
   const home = mkdtempSync(join(tmpdir(), 'hermes-coding-agent-resume-'))
   homes.push(home)
   process.env.HERMES_WEB_UI_HOME = home
   process.env.HERMES_CODING_AGENT_GLOBAL_HOME = join(home, 'global-home')
+  process.env.HERMES_OPENCODE_HOME = join(home, 'opencode-home')
   return home
 }
 
@@ -72,6 +74,8 @@ describe('coding agent resumed session config', () => {
     else process.env.NPM_CONFIG_PREFIX = originalNpmConfigPrefix
     if (typeof originalCodingAgentGlobalHome === 'undefined') delete process.env.HERMES_CODING_AGENT_GLOBAL_HOME
     else process.env.HERMES_CODING_AGENT_GLOBAL_HOME = originalCodingAgentGlobalHome
+    if (typeof originalOpenCodeHome === 'undefined') delete process.env.HERMES_OPENCODE_HOME
+    else process.env.HERMES_OPENCODE_HOME = originalOpenCodeHome
     for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
   })
 
@@ -484,7 +488,10 @@ describe('coding agent resumed session config', () => {
     const profileAuthPath = join(home, 'profiles', 'default', 'auth.json')
     mkdirSync(dirname(profileAuthPath), { recursive: true })
     writeFileSync(profileAuthPath, JSON.stringify({ providers: {} }))
-    const openCodeAuthPath = join(home, 'global-home', '.config', 'opencode', 'auth.json')
+    const scopedRootAuthPath = join(home, 'coding-agent', 'model', 'default', 'openai-codex', 'opencode', 'auth.json')
+    mkdirSync(dirname(scopedRootAuthPath), { recursive: true })
+    writeFileSync(scopedRootAuthPath, JSON.stringify({ providers: {} }))
+    const openCodeAuthPath = join(home, 'opencode-home', 'data', 'opencode', 'auth.json')
     mkdirSync(dirname(openCodeAuthPath), { recursive: true })
     writeFileSync(openCodeAuthPath, JSON.stringify({
       openai: {
@@ -511,6 +518,7 @@ describe('coding agent resumed session config', () => {
     expect(started.provider).toBe('openai-codex')
     expect(started.secretEnv.OPENCODE_AUTH_CONTENT).toContain('oauth-access')
     expect(started.secretEnv.OPENCODE_AUTH_CONTENT).toContain('oauth-refresh')
+    expect(started.secretEnv.OPENCODE_AUTH_CONTENT).not.toContain('scoped-root')
     expect(started.env).not.toHaveProperty('OPENCODE_AUTH_CONTENT')
     expect(started.env).not.toHaveProperty('HERMES_OPENCODE_API_KEY')
     expect(started.args).toEqual(['--model', 'openai/gpt-5.5'])
