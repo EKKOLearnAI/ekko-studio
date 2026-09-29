@@ -99,6 +99,15 @@ describe('VersionManagementModal Runtime storage selector', () => {
     expect(api.fetchRuntimeVersionStatus).toHaveBeenCalledWith()
   })
 
+  it('hides the CLI update hint in a portable build', async () => {
+    api.fetchRuntimeVersionStatus.mockResolvedValue({ ...runtimeStatus(), portable: true })
+    const wrapper = mount(VersionManagementModal, { props: { show: false } })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="runtime-cli-update-note"]').exists()).toBe(false)
+  })
+
   it('shows the installed Hermes Agent version instead of the Runtime package version', async () => {
     const wrapper = mount(VersionManagementModal, { props: { show: false } })
     await wrapper.setProps({ show: true })
