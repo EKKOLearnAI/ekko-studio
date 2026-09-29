@@ -134,6 +134,7 @@ describe('catalog cost estimates', () => {
       costUsd: 0, costSource: 'estimated', costPricing: { rates: { provider: 'zhipuai-coding-plan' } },
     })
     expect(estimateCatalogUsageCost(snapshot({ zai: data.zai }), 'glm', 'glm-5.3-flash', usage)).toBeUndefined()
+    expect(estimateCatalogUsageCost(snapshot({ zhipuai: data.zai }), 'glm', 'glm-5.3-flash', usage)).toBeUndefined()
     expect(estimateCatalogUsageCost(snapshot(data), 'custom:glm', 'glm-5.3-flash', usage)).toBeUndefined()
   })
 })

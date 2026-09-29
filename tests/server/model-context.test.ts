@@ -109,12 +109,33 @@ describe('getModelContextLength', () => {
     writeConfig('model:\n  default: glm-5.3-flash\n  provider: glm\n')
     writeModelsCache({
       'zhipuai-coding-plan': { models: { 'glm-5.3-flash': { limit: { context: 1_000_000, output: 131_072 } } } },
+      zhipuai: { models: { 'glm-5.3-flash': { limit: { context: 400_000, output: 64_000 } } } },
       zai: { models: { 'glm-5.3-flash': { limit: { context: 200_000, output: 32_000 } } } },
     })
     const { getModelContextLength, getModelRuntimeCapabilities } = await loadModelContext()
     expect(getModelContextLength()).toBe(1_000_000)
     expect(getModelRuntimeCapabilities({ provider: 'glm', model: 'glm-5.3-flash' }))
       .toMatchObject({ contextWindow: 1_000_000, outputLimit: 131_072 })
+  })
+
+  it.each([
+    ['glm', 'zhipuai-coding-plan', 'zhipuai'],
+    ['zhipuai-coding-plan', 'zhipuai-coding-plan', 'zhipuai'],
+    ['glm-coding-plan', 'zai-coding-plan', 'zai'],
+    ['zai-coding-plan', 'zai-coding-plan', 'zai'],
+  ])('uses vendor specifications for an older model absent from the %s catalog', async (provider, plan, vendor) => {
+    writeConfig(`model:\n  default: glm-4.5\n  provider: ${provider}\n`)
+    writeModelsCache({
+      [plan]: { models: { 'glm-5.3-flash': { limit: { context: 1_000_000, output: 131_072 } } } },
+      [vendor]: { models: { 'glm-4.5': { limit: { context: 131_072, output: 98_304 }, reasoning: true, modalities: { input: ['text'] } } } },
+    })
+    const { getModelContextLength, getModelRuntimeCapabilities } = await loadModelContext()
+    expect(getModelContextLength()).toBe(131_072)
+    expect(getModelRuntimeCapabilities({ provider, model: 'glm-4.5' }))
+      .toEqual({ contextWindow: 131_072, outputLimit: 98_304, reasoning: true, input: ['text'] })
+    expect(getModelContextLength({ provider: 'custom:relay', model: 'glm-4.5' })).toBe(256_000)
+    writeConfig(`model:\n  default: glm-4.5\n  provider: ${provider}\n  context_length: 80000\n`)
+    expect(getModelContextLength()).toBe(80_000)
   })
 
   it('uses a caller-provided fallback only when no model context is configured', async () => {

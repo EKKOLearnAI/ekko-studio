@@ -49,6 +49,11 @@ Studio's built-in `glm` points to the domestic GLM Coding Plan endpoint and maps
 to `zhipuai-coding-plan` for both pricing and context limits. It does not borrow
 `zai`/`zhipuai` metered API prices. A catalog plan rate of zero is retained as an
 estimate; it does not account for the subscription fee or imply a free plan.
+When a Coding Plan catalog omits an older model such as GLM-4.5, context/output
+limits and capabilities may fall back to that vendor's ordinary API catalog
+(`zhipuai-coding-plan` → `zhipuai`, `zai-coding-plan` → `zai`). Existing plan
+specifications and manual overrides take priority. This metadata fallback does
+not make the model available on the endpoint or supply metered API prices.
 
 Estimated records retain nullable `cost_pricing` JSON with the rate source,
 effective USD-per-million rates, catalog SHA-256 version, download time and

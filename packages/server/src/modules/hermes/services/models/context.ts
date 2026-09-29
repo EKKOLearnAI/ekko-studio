@@ -75,6 +75,13 @@ const MODEL_CACHE_PROVIDER_ALIASES: Record<string, string[]> = {
   'xai-oauth': ['xai'],
 }
 
+// Coding Plan catalogs may omit older models. Only their own vendor can supply
+// missing model specifications; this fallback must never be used for pricing.
+const MODEL_METADATA_PROVIDER_FALLBACKS: Record<string, string> = {
+  'zhipuai-coding-plan': 'zhipuai',
+  'zai-coding-plan': 'zai',
+}
+
 // --- Config YAML helpers (js-yaml) ---
 
 function loadConfig(profileDir: string): any | null {
@@ -289,9 +296,15 @@ function findModelEntry(models: Record<string, ModelEntry>, modelName: string): 
   return undefined
 }
 
-function lookupContextInProvider(provider: ProviderEntry | null, modelName: string): number | null {
-  const models = provider?.models || {}
-  return getCachedContext(findModelEntry(models, modelName))
+function findProviderModelEntry(data: Record<string, ProviderEntry>, provider: string, modelName: string): ModelEntry | undefined {
+  const own = findModelEntry(getProviderEntry(data, provider)?.models || {}, modelName)
+  if (own) return own
+  for (const candidate of getProviderCandidates(provider)) {
+    const fallback = MODEL_METADATA_PROVIDER_FALLBACKS[candidate]
+    if (!fallback) continue
+    const entry = findModelEntry(getProviderEntry(data, fallback)?.models || {}, modelName)
+    if (entry) return entry
+  }
 }
 
 function lookupContextGloballyByModelName(data: Record<string, ProviderEntry>, modelName: string): number | null {
@@ -364,7 +377,7 @@ function lookupContextFromCache(config: any, modelName: string, provider: string
       const inferredProvider = resolveCustomCacheProvider(config, modelName, provider)
 
       if (inferredProvider) {
-        const scoped = lookupContextInProvider(getProviderEntry(data, inferredProvider), modelName)
+        const scoped = getCachedContext(findProviderModelEntry(data, inferredProvider, modelName))
         if (scoped) return scoped
         return null
       }
@@ -376,7 +389,7 @@ function lookupContextFromCache(config: any, modelName: string, provider: string
       return null
     }
 
-    return lookupContextInProvider(getProviderEntry(data, provider), modelName)
+    return getCachedContext(findProviderModelEntry(data, provider, modelName))
   }
 
   // Legacy configs may omit model.provider; preserve the old global exact/CI lookup semantics.
@@ -472,7 +485,7 @@ export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
       const profileDir = getProfileDir(input.profile)
       const config = loadConfig(profileDir)
       const inferredProvider = resolveCustomCacheProvider(config, model, provider)
-      if (inferredProvider) entry = findModelEntry(getProviderEntry(data, inferredProvider)?.models || {}, model)
+      if (inferredProvider) entry = findProviderModelEntry(data, inferredProvider, model)
       else if (provider === 'custom') {
         for (const candidate of Object.values(data)) {
           const found = findModelEntry(candidate.models || {}, model)
@@ -485,7 +498,7 @@ export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
         }
       }
     } else if (provider) {
-      entry = findModelEntry(getProviderEntry(data, provider)?.models || {}, model)
+      entry = findProviderModelEntry(data, provider, model)
     } else {
       for (const candidate of Object.values(data)) {
         entry = findModelEntry(candidate.models || {}, model)
