@@ -35,6 +35,7 @@ const selectedTaskId = ref<string | null>(null)
 const newBoardSlug = ref('')
 const newBoardName = ref('')
 const boardActionLoading = ref(false)
+const refreshLoading = ref(false)
 const refreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const routeReady = ref(false)
 
@@ -187,15 +188,15 @@ onMounted(async () => {
   await applyBoardSelection(routeBoard(), true, true)
   kanbanStore.startEventStream()
   routeReady.value = true
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   refreshTimer.value = setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      void Promise.all([kanbanStore.fetchBoards(), kanbanStore.fetchTasks(true), kanbanStore.fetchStats()])
-    }
+    void Promise.all([kanbanStore.fetchBoards(), kanbanStore.fetchTasks(true), kanbanStore.fetchStats()])
   }, 15000)
 })
 
 onUnmounted(() => {
   kanbanStore.stopEventStream()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   if (refreshTimer.value) clearInterval(refreshTimer.value)
 })
 
@@ -288,6 +289,24 @@ async function handleDispatch() {
     boardActionLoading.value = false
   }
 }
+
+async function handleManualRefresh() {
+  refreshLoading.value = true
+  try {
+    await kanbanStore.refreshAll()
+    message.success(t('kanban.message.refreshed'))
+  } catch (err: any) {
+    message.error(err.message)
+  } finally {
+    refreshLoading.value = false
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    void Promise.all([kanbanStore.fetchBoards(), kanbanStore.fetchTasks(true), kanbanStore.fetchStats()])
+  }
+}
 </script>
 
 <template>
@@ -323,6 +342,15 @@ async function handleDispatch() {
         </NTooltip>
         <NButton size="small" secondary :loading="boardActionLoading" @click="handleDispatch">
           {{ t('kanban.action.dispatch') }}
+        </NButton>
+        <NButton size="small" quaternary :loading="refreshLoading" @click="handleManualRefresh">
+          <template #icon>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+          </template>
+          {{ t('common.refresh') }}
         </NButton>
         <NSelect
           v-model:value="filterStatusValue"
