@@ -94,6 +94,21 @@ describe('catalog cost estimates', () => {
     expect(estimateCatalogUsageCost(snapshot(), 'openai', 'model', large, 'run', 1)?.costPricing?.contextThreshold).toBe(200_000)
   })
 
+  it.each(['explicit', 'legacy'])('does not apply %s tier rates to multi-call usage labeled as a model call', kind => {
+    const data: any = catalog()
+    if (kind === 'legacy') {
+      data.openai.models.model.cost.context_over_200k = { input: 4, output: 12 }
+      delete data.openai.models.model.cost.tiers
+    }
+    const single = { inputTokens: 150_000, outputTokens: 1000, cacheReadTokens: 0, cacheWriteTokens: 0 }
+    const aggregate = { ...single, inputTokens: 300_000, outputTokens: 2000 }
+    expect(estimateCatalogUsageCost(snapshot(data), 'openai', 'model', single, 'model_call', 1)?.costUsd).toBeCloseTo(0.308)
+    expect(estimateCatalogUsageCost(snapshot(data), 'openai', 'model', aggregate, 'model_call', 2)).toBeUndefined()
+    expect(estimateCatalogUsageCost(snapshot(data), 'openai', 'model', aggregate, 'run', 2)).toBeUndefined()
+    expect(estimateCatalogUsageCost(snapshot(data), 'openai', 'model', aggregate, 'model_call', 1)?.costPricing?.contextThreshold).toBe(200_000)
+    expect(estimateCatalogUsageCost(snapshot(data), 'openai', 'model', single, 'run', 2)?.costUsd).toBeCloseTo(0.308)
+  })
+
   it('handles legacy context pricing without confusing a newer explicit tier with the legacy 200k name', () => {
     const data: any = catalog()
     data.openai.models.model.cost.tiers[0].tier.size = 272_000

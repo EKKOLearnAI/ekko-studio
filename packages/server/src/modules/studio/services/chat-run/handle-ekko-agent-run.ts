@@ -1122,7 +1122,7 @@ export async function handleEkkoAgentRun(
             runId: `${event.runId}:subagent:${event.subagentId}`,
             source: 'ekko_agent',
             agent: 'ekko_agent',
-            usageScope: 'model_call',
+            usageScope: 'run',
             purpose: event.background ? 'ekko-background-subtask' : 'ekko-subtask',
             apiCalls: event.apiCalls,
             usage: {

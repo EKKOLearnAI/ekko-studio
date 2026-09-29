@@ -32,6 +32,7 @@ export function estimateCatalogUsageCost(
   let selected = { ...cost }
   let contextThreshold: number | undefined
   const prompt = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+  const isSingleCall = apiCalls === 1 || (apiCalls === undefined && scope === 'model_call')
   let tiers: Array<{ threshold: number; rates: Record<string, unknown> }> = []
   if (cost.tiers !== undefined) {
     if (!Array.isArray(cost.tiers)) return
@@ -50,7 +51,7 @@ export function estimateCatalogUsageCost(
   for (const tier of tiers.sort((a, b) => a.threshold - b.threshold)) {
     if (prompt <= tier.threshold) continue
     // A whole-run token sum cannot reveal which individual requests crossed a pricing tier.
-    if (scope !== 'model_call' && apiCalls !== 1) return
+    if (!isSingleCall) return
     selected = { ...selected, ...tier.rates }
     contextThreshold = tier.threshold
   }

@@ -42,7 +42,9 @@ prices are reference estimates, not a relay invoice, subscription charge or
 account-specific discount; configure custom rates when appropriate. Missing
 rates for used token categories leave cost unknown. Context tiers include cache
 tokens; a run aggregate above a tier threshold stays unknown unless it represents
-a single API call. Explicit tiers take precedence over legacy `context_over_200k`.
+a single API call. Ekko subtask totals use run scope; an explicit call count takes
+precedence over scope when determining whether tier pricing is safe. Explicit
+tiers take precedence over legacy `context_over_200k`.
 Separate reasoning rates replace the reasoning portion of the output charge.
 
 Studio's built-in `glm` points to the domestic GLM Coding Plan endpoint and maps

@@ -163,6 +163,31 @@ describe('usage cost accounting', () => {
     expect(catalogMock.refreshModelCatalog).not.toHaveBeenCalled()
   })
 
+  it.each([false, true])('keeps ambiguous subtask costs unknown while retaining reported and manual costs (cold start: %s)', async cold => {
+    const tieredCatalog = { ...catalogSnapshot, data: { global: { models: {
+      'test-model': { cost: { input: 2, output: 8, tiers: [
+        { input: 4, output: 12, tier: { type: 'context', size: 200_000 } },
+      ] } },
+    } } } }
+    if (cold) catalogMock.refreshModelCatalog.mockResolvedValue(tieredCatalog)
+    else catalogMock.getModelCatalogSnapshot.mockReturnValue(tieredCatalog)
+    const usage = { inputTokens: 300_000, outputTokens: 2000 }
+    const subtask = { source: 'ekko_agent', agent: 'ekko_agent', usageScope: 'model_call', apiCalls: 2 }
+    record('subtask', usage, subtask)
+    await Promise.resolve()
+    const saved = db.prepare('SELECT cost_usd, cost_source, cost_pricing, api_calls FROM session_usage').get()
+    expect(saved).toMatchObject({ cost_usd: null, cost_source: 'unknown', cost_pricing: null, api_calls: 2 })
+    expect(catalogMock.refreshModelCatalog).toHaveBeenCalledTimes(cold ? 1 : 0)
+
+    record('reported-subtask', { ...usage, cost: 0.5 }, subtask)
+    saveUsagePricing('p', [{ provider: 'global', model: 'test-model', input: 1, output: 2 }])
+    record('manual-subtask', usage, subtask)
+    expect(getLocalUsageStats('p', 1)).toMatchObject({
+      cost: 0.804, input_tokens: 900_000, output_tokens: 6000, total_api_calls: 6,
+      cost_coverage: { reported: 1, estimated: 1, unknown: 1 },
+    })
+  })
+
   it('late enrichment cannot overwrite a known cost or restore a deleted row', () => {
     const ref = updateUsage('one', { inputTokens: 10, outputTokens: 1 })!
     fillMissingUsageCost(ref, { costUsd: 0, costSource: 'reported' })

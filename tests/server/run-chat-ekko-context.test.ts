@@ -1037,7 +1037,7 @@ describe('ekko-agent context usage events', () => {
       runId: 'run-parent:subagent:child-background',
       source: 'ekko_agent',
       agent: 'ekko_agent',
-      usageScope: 'model_call',
+      usageScope: 'run',
       purpose: 'ekko-background-subtask',
       apiCalls: 2,
       usage: {
