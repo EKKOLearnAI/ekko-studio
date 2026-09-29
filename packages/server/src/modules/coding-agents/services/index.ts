@@ -4009,7 +4009,9 @@ async function startCodingAgentRunInternal(
   const resolvedInput = await resolveStoredProviderLaunchInput(input, existingSession)
   const requestedMode = resolvedCodingAgentLaunchMode(id, resolvedInput.mode)
   const requestedProvider = String(resolvedInput.provider || '').trim().toLowerCase()
-  assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider)
+  if (!(id === 'opencode' && requestedMode === 'scoped' && requestedProvider === 'openai-codex')) {
+    assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider)
+  }
   if (id !== 'cursor' && requestedMode !== 'global' && requestedProvider !== 'openai-codex' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
     const err = new Error('Coding agent provider credentials are missing. Re-select the provider/model or update the provider API key before continuing this session.')
     ;(err as any).status = 400

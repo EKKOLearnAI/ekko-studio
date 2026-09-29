@@ -25,7 +25,7 @@ vi.doMock('../../packages/server/src/modules/hermes/services/profiles/config', a
 
 vi.doMock('../../packages/server/src/modules/hermes/services/profiles/profile', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../packages/server/src/modules/hermes/services/profiles/profile')>(),
-  getProfileDir: (profile: string) => `/tmp/hermes-profile/${profile}`,
+  getProfileDir: (profile: string) => join(process.env.HERMES_WEB_UI_HOME || '/tmp/hermes-profile', 'profiles', profile),
 }))
 
 vi.doMock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({
@@ -464,6 +464,65 @@ describe('coding agent resumed session config', () => {
     const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await expect(startCodingAgentRun('codex', {
       sessionId: 'session-1',
+      mode: 'scoped',
+      profile: 'default',
+      provider: 'copilot',
+      model: 'gpt-5.5',
+      baseUrl: 'https://api.githubcopilot.com',
+      apiKey: 'oauth-token',
+      apiMode: 'codex_responses',
+    })).rejects.toThrow('does not support OAuth/subscription providers')
+    expect(startRunMock).not.toHaveBeenCalled()
+  })
+
+  it('starts scoped OpenCode native OpenAI OAuth through the runtime gate without persisting credential material', async () => {
+    const home = makeHome()
+    mkdirSync(join(home, 'profiles', 'default'), { recursive: true })
+    writeFileSync(join(home, 'profiles', 'default', 'auth.json'), JSON.stringify({
+      providers: {
+        'openai-codex': {
+          auth_mode: 'chatgpt',
+          tokens: { access_token: 'oauth-access', refresh_token: 'oauth-refresh' },
+        },
+      },
+    }))
+    getSessionMock.mockReturnValue(null)
+    readConfigYamlForProfileMock.mockResolvedValue({})
+    safeReadFileMock.mockResolvedValue('')
+
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
+    const result = await startCodingAgentRun('opencode', {
+      sessionId: 'session-native-auth',
+      mode: 'scoped',
+      profile: 'default',
+      provider: 'openai-codex',
+      model: 'gpt-5.5',
+      apiMode: 'codex_responses',
+    })
+    const started = startRunMock.mock.calls[0][0]
+    expect(result.provider).toBe('openai-codex')
+    expect(started.provider).toBe('openai-codex')
+    expect(started.secretEnv.OPENCODE_AUTH_CONTENT).toContain('oauth-access')
+    expect(started.env).not.toHaveProperty('OPENCODE_AUTH_CONTENT')
+    expect(started.env).not.toHaveProperty('HERMES_OPENCODE_API_KEY')
+    expect(started.args).toEqual(['--model', 'openai/gpt-5.5'])
+    expect(JSON.stringify(result)).not.toContain('oauth-access')
+    expect(JSON.stringify(started.env)).not.toContain('oauth-access')
+    expect(updateSessionMock).toHaveBeenCalledWith('session-native-auth', expect.objectContaining({
+      provider: 'openai-codex',
+      api_mode: 'codex_responses',
+    }))
+  })
+
+  it('keeps scoped OpenCode OAuth providers fail-closed', async () => {
+    makeHome()
+    getSessionMock.mockReturnValue(null)
+    readConfigYamlForProfileMock.mockResolvedValue({})
+    safeReadFileMock.mockResolvedValue('')
+
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
+    await expect(startCodingAgentRun('opencode', {
+      sessionId: 'session-oauth-blocked',
       mode: 'scoped',
       profile: 'default',
       provider: 'copilot',
