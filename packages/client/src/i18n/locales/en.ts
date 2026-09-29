@@ -1301,6 +1301,8 @@ export default {
     thinkingShow: 'Show thinking',
     thinkingHide: 'Hide thinking',
     thinkingDuration: 'Observed {duration}',
+    streamSpeed: 'First token {ttft}ms · {tps} tok/s',
+    streamSpeedTitle: 'Time to first token and generation speed',
     thinkingChars: '{count} chars',
     copyBubble: 'Copy message',
     copiedBubble: 'Message copied',

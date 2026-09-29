@@ -1301,6 +1301,8 @@ export default {
     thinkingShow: '展开思考过程',
     thinkingHide: '收起思考过程',
     thinkingDuration: '已观察 {duration}',
+    streamSpeed: '首 Token {ttft}ms · {tps} tok/s',
+    streamSpeedTitle: '首 Token 到达耗时与生成速率',
     thinkingChars: '{count} 字',
     copyBubble: '复制消息',
     copiedBubble: '已复制',
