@@ -3570,7 +3570,7 @@ export const useChatStore = defineStore('chat', () => {
       return { icon: '/coding-agents/opencode.png' }
     }
     if (codingAgentId === 'cursor') {
-      return { icon: '/coding-agents/cursor.svg' }
+      return { icon: '/coding-agents/cursor-logo.png' }
     }
     if (codingAgentId === 'ekko-agent') {
       return { icon: '/coding-agents/ekko-agent.png' }
