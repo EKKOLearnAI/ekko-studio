@@ -68,6 +68,7 @@ const MODEL_CACHE_PROVIDER_ALIASES: Record<string, string[]> = {
   'ai-gateway': ['vercel'],
   'opencode-zen': ['opencode'],
   'opencode-go': ['opencode'],
+  glm: ['zhipuai-coding-plan'],
   'glm-coding-plan': ['zai-coding-plan'],
   'kimi-coding': ['kimi-for-coding'],
   'kimi-coding-cn': ['kimi-for-coding'],

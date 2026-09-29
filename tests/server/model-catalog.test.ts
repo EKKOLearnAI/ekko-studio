@@ -124,4 +124,16 @@ describe('catalog cost estimates', () => {
     data.google.models.model.cost.tiers = [{ tier: { type: 'unknown', size: 1 }, input: 5 }]
     expect(estimateCatalogUsageCost(snapshot(data), 'gemini', 'model', usage)).toBeUndefined()
   })
+
+  it('matches glm to domestic Coding Plan rates without borrowing metered API prices', () => {
+    const data = {
+      'zhipuai-coding-plan': { models: { 'glm-5.3-flash': { cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 } } } },
+      zai: { models: { 'glm-5.3-flash': { cost: { input: 0.15, output: 0.5, cache_read: 0.03, cache_write: 0 } } } },
+    }
+    expect(estimateCatalogUsageCost(snapshot(data), 'glm', 'glm-5.3-flash', usage)).toMatchObject({
+      costUsd: 0, costSource: 'estimated', costPricing: { rates: { provider: 'zhipuai-coding-plan' } },
+    })
+    expect(estimateCatalogUsageCost(snapshot({ zai: data.zai }), 'glm', 'glm-5.3-flash', usage)).toBeUndefined()
+    expect(estimateCatalogUsageCost(snapshot(data), 'custom:glm', 'glm-5.3-flash', usage)).toBeUndefined()
+  })
 })

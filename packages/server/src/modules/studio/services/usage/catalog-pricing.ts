@@ -3,6 +3,7 @@ import { estimateUsageCost, type UsageCost, type UsagePricing } from './usage-co
 
 const providerAliases: Record<string, string> = {
   gemini: 'google', moonshot: 'moonshotai', kilocode: 'kilo', 'ai-gateway': 'vercel',
+  glm: 'zhipuai-coding-plan',
   'opencode-zen': 'opencode', 'opencode-go': 'opencode', 'glm-coding-plan': 'zai-coding-plan',
   'kimi-coding': 'kimi-for-coding', 'kimi-coding-cn': 'kimi-for-coding', 'xai-oauth': 'xai',
 }

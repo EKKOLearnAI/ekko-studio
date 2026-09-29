@@ -45,6 +45,11 @@ tokens; a run aggregate above a tier threshold stays unknown unless it represent
 a single API call. Explicit tiers take precedence over legacy `context_over_200k`.
 Separate reasoning rates replace the reasoning portion of the output charge.
 
+Studio's built-in `glm` points to the domestic GLM Coding Plan endpoint and maps
+to `zhipuai-coding-plan` for both pricing and context limits. It does not borrow
+`zai`/`zhipuai` metered API prices. A catalog plan rate of zero is retained as an
+estimate; it does not account for the subscription fee or imply a free plan.
+
 Estimated records retain nullable `cost_pricing` JSON with the rate source,
 effective USD-per-million rates, catalog SHA-256 version, download time and
 selected context threshold. `cost_source` remains `estimated`, so existing

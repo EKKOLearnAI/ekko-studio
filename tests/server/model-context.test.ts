@@ -105,6 +105,18 @@ describe('getModelContextLength', () => {
     expect(getModelContextLength()).toBe(256_000)
   })
 
+  it('matches Studio glm to the domestic Coding Plan for context and output limits', async () => {
+    writeConfig('model:\n  default: glm-5.3-flash\n  provider: glm\n')
+    writeModelsCache({
+      'zhipuai-coding-plan': { models: { 'glm-5.3-flash': { limit: { context: 1_000_000, output: 131_072 } } } },
+      zai: { models: { 'glm-5.3-flash': { limit: { context: 200_000, output: 32_000 } } } },
+    })
+    const { getModelContextLength, getModelRuntimeCapabilities } = await loadModelContext()
+    expect(getModelContextLength()).toBe(1_000_000)
+    expect(getModelRuntimeCapabilities({ provider: 'glm', model: 'glm-5.3-flash' }))
+      .toMatchObject({ contextWindow: 1_000_000, outputLimit: 131_072 })
+  })
+
   it('uses a caller-provided fallback only when no model context is configured', async () => {
     writeConfig(`model:\n  default: grok-4.6\n  provider: custom:grok\n`)
 
