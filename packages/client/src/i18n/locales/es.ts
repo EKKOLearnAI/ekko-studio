@@ -2817,7 +2817,7 @@ jobTriggered: 'Job ejecutado',
     },
     pricing: {
       title: "Precios de modelos",
-      help: "USD por millón de tokens. Coincidencia exacta de ID de proveedor y modelo (p. ej. global). Solo se estima si no se recibe un coste. Caché sin precio significa desconocido. Cambios para futuras llamadas, sin recalcular el historial.",
+      help: "Sin precios personalizados, se estima el coste con los precios del modelo correspondiente en models.dev. USD por millón de tokens. Coincidencia exacta de ID de proveedor y modelo (p. ej. global). Solo se estima si no se recibe un coste. Caché sin precio significa desconocido. Cambios para futuras llamadas, sin recalcular el historial.",
       provider: "ID del proveedor",
       model: "ID del modelo",
       input: "Entrada",

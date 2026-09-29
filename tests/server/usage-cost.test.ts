@@ -5,10 +5,12 @@ import { applyHermesCostFallbacks } from '../../packages/server/src/modules/stud
 import { NativeTurnUsage } from '../../packages/server/src/modules/coding-agents/services/runtime/native-usage'
 import { USAGE_SCHEMA, USAGE_RUN_INDEX, USAGE_PRICING_SCHEMA } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
 import { recordSessionUsage } from '../../packages/server/src/modules/studio/services/usage/usage-recorder'
-import { getLocalUsageStats, getUnpricedHermesUsageSessions } from '../../packages/server/src/modules/studio/repositories/usage-store'
+import { getLocalUsageStats, getUnpricedHermesUsageSessions, updateUsage, fillMissingUsageCost } from '../../packages/server/src/modules/studio/repositories/usage-store'
 import { getUsagePricing, saveUsagePricing, validateUsagePricing } from '../../packages/server/src/modules/studio/services/usage/usage-pricing'
 
 let db: DatabaseSync
+const catalogMock = vi.hoisted(() => ({ getModelCatalogSnapshot: vi.fn(), refreshModelCatalog: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/public/model-catalog', () => catalogMock)
 vi.mock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({
   isSqliteAvailable: () => true, getDb: () => db,
   jsonGet: vi.fn(), jsonSet: vi.fn(), jsonGetAll: vi.fn(), jsonDelete: vi.fn(),
@@ -16,6 +18,8 @@ vi.mock('../../packages/server/src/modules/studio/infrastructure/database/index'
 
 describe('usage cost accounting', () => {
   beforeEach(() => {
+    catalogMock.getModelCatalogSnapshot.mockReset()
+    catalogMock.refreshModelCatalog.mockReset().mockResolvedValue(undefined)
     db = new DatabaseSync(':memory:')
     db.exec(`CREATE TABLE session_usage (${Object.entries(USAGE_SCHEMA).map(([key, sql]) => `${key} ${sql}`).join(',')}); ${USAGE_RUN_INDEX};
       CREATE TABLE usage_pricing (${Object.entries(USAGE_PRICING_SCHEMA).map(([key, sql]) => `${key} ${sql}`).join(',')});`)
@@ -111,6 +115,62 @@ describe('usage cost accounting', () => {
     tracker.observeGrok({ type: 'usage', messageId: 'two', usage: { input_tokens: 20, output_tokens: 3, cost: 0.04 } })
     tracker.observeGrok({ type: 'error' })
     expect(tracker.rows('grok', undefined)).toMatchObject([{ usage: { inputTokens: 30 }, cost: { costUsd: 0.07, costSource: 'estimated' } }])
+  })
+
+  const catalogSnapshot = { version: 'catalog-v1', fetchedAt: 1234, data: { global: { models: {
+    'test-model': { cost: { input: 2, output: 8, cache_read: 0.2 } },
+  } } } }
+
+  it('persists catalog estimates and the exact pricing snapshot, with reported and manual costs taking priority', () => {
+    catalogMock.getModelCatalogSnapshot.mockReturnValue(catalogSnapshot)
+    record('catalog', { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 5000 })
+    const saved = db.prepare('SELECT * FROM session_usage').get() as any
+    expect(saved.cost_usd).toBeCloseTo(0.0046)
+    expect(JSON.parse(saved.cost_pricing)).toMatchObject({ source: 'models.dev', catalogVersion: 'catalog-v1', rates: { input: 2 } })
+    saveUsagePricing('p', [{ provider: 'global', model: 'test-model', input: 4, output: 16, cacheRead: 0.4 }])
+    record('manual', { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 5000 })
+    record('reported', { inputTokens: 1000, outputTokens: 200, cost: 0 })
+    const rows = db.prepare('SELECT * FROM session_usage ORDER BY id').all() as any[]
+    expect(rows.map(row => row.cost_usd)).toEqual([0.0046, 0.0092, 0])
+    expect(JSON.parse(rows[1].cost_pricing).source).toBe('manual')
+    expect(rows[2].cost_pricing).toBeNull()
+    expect(catalogMock.refreshModelCatalog).not.toHaveBeenCalled()
+  })
+
+  it('fills a cold-start record after download without duplicating tokens or repricing a replay', async () => {
+    let finish!: (snapshot: unknown) => void
+    catalogMock.refreshModelCatalog.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    record('cold', { inputTokens: 1000, outputTokens: 200 })
+    record('cold', { inputTokens: 1000, outputTokens: 200 })
+    const before = db.prepare('SELECT * FROM session_usage').get() as any
+    expect(before.cost_usd).toBeNull()
+    expect(catalogMock.refreshModelCatalog).toHaveBeenCalledTimes(1)
+    finish(catalogSnapshot)
+    await vi.waitFor(() => expect(getLocalUsageStats('p', 1).cost).toBeCloseTo(0.0036))
+    const after = db.prepare('SELECT * FROM session_usage').get() as any
+    expect(after.created_at).toBe(before.created_at)
+    expect(getLocalUsageStats('p', 1).input_tokens).toBe(1000)
+    catalogMock.getModelCatalogSnapshot.mockReturnValue({ ...catalogSnapshot, version: 'new' })
+    record('cold', { inputTokens: 9000, outputTokens: 9000 })
+    expect(db.prepare('SELECT * FROM session_usage').get()).toEqual(after)
+  })
+
+  it('does not replace an explicit partial manual price with catalog rates', () => {
+    catalogMock.getModelCatalogSnapshot.mockReturnValue(catalogSnapshot)
+    saveUsagePricing('p', [{ provider: 'global', model: 'test-model', input: 1, output: 2 }])
+    record('missing-cache', { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 5000 })
+    expect(getLocalUsageStats('p', 1).cost_coverage?.unknown).toBe(1)
+    expect(catalogMock.refreshModelCatalog).not.toHaveBeenCalled()
+  })
+
+  it('late enrichment cannot overwrite a known cost or restore a deleted row', () => {
+    const ref = updateUsage('one', { inputTokens: 10, outputTokens: 1 })!
+    fillMissingUsageCost(ref, { costUsd: 0, costSource: 'reported' })
+    fillMissingUsageCost(ref, { costUsd: 5, costSource: 'estimated' })
+    expect((db.prepare('SELECT cost_usd FROM session_usage').get() as any).cost_usd).toBe(0)
+    db.exec('DELETE FROM session_usage')
+    fillMissingUsageCost(ref, { costUsd: 5, costSource: 'estimated' })
+    expect(db.prepare('SELECT * FROM session_usage').all()).toEqual([])
   })
 
 })

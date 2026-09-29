@@ -2817,7 +2817,7 @@ jobTriggered: 'Job declenche',
     },
     pricing: {
       title: "Tarifs des modèles",
-      help: "USD par million de tokens. Identifiants fournisseur et modèle exacts (par ex. global). Estimation uniquement si aucun coût reçu. Cache sans tarif : coût inconnu. Modifications pour les prochains appels, sans recalcul du passé.",
+      help: "Sans tarif personnalisé, le coût est estimé avec les tarifs du modèle correspondant sur models.dev. USD par million de tokens. Identifiants fournisseur et modèle exacts (par ex. global). Estimation uniquement si aucun coût reçu. Cache sans tarif : coût inconnu. Modifications pour les prochains appels, sans recalcul du passé.",
       provider: "ID fournisseur",
       model: "ID modèle",
       input: "Entrée",

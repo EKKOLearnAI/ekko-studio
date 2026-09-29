@@ -2817,7 +2817,7 @@ jobTriggered: 'Job ausgelost',
     },
     pricing: {
       title: "Modellpreise",
-      help: "USD pro Million Tokens. Anbieter- und Modell-ID müssen genau passen (z. B. global). Schätzung nur ohne gemeldete Kosten. Leere Cachepreise bedeuten unbekannt. Änderungen gelten für künftige Aufrufe; frühere Kosten werden nicht neu berechnet.",
+      help: "Ohne eigene Preise werden passende Modelle anhand von models.dev geschätzt. USD pro Million Tokens. Anbieter- und Modell-ID müssen genau passen (z. B. global). Schätzung nur ohne gemeldete Kosten. Leere Cachepreise bedeuten unbekannt. Änderungen gelten für künftige Aufrufe; frühere Kosten werden nicht neu berechnet.",
       provider: "Anbieter-ID",
       model: "Modell-ID",
       input: "Eingabe",

@@ -69,6 +69,7 @@ packages/server/src/
         runs.ts
         sessions.ts
         usage.ts
+        model-catalog.ts           # shared local models.dev metadata and startup refresh
         workspace.ts
         workspace-files.ts          # shared path, preview, Git status, and file policy facade
         group-chat-agent-runtime.ts # injected concrete Agent adapters for Group Chat

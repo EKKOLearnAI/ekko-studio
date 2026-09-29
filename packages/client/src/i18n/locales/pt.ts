@@ -2817,7 +2817,7 @@ jobTriggered: 'Job acionado',
     },
     pricing: {
       title: "Preços dos modelos",
-      help: "USD por milhão de tokens. IDs de provedor e modelo devem corresponder exatamente (ex.: global). Estimativa apenas sem custo informado. Cache sem preço significa desconhecido. Alterações valem para futuras chamadas, sem recalcular o histórico.",
+      help: "Sem preços personalizados, o custo é estimado com os preços do modelo correspondente no models.dev. USD por milhão de tokens. IDs de provedor e modelo devem corresponder exatamente (ex.: global). Estimativa apenas sem custo informado. Cache sem preço significa desconhecido. Alterações valem para futuras chamadas, sem recalcular o histórico.",
       provider: "ID do provedor",
       model: "ID do modelo",
       input: "Entrada",

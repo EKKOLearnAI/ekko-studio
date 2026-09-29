@@ -33,6 +33,7 @@ import { injectBundledMcpServer } from '../modules/hermes/services/mcp/studio-au
 import { ensureProfileGatewaysRunning } from '../modules/hermes/services/gateway/autostart'
 import { runRegisteredStartupTasks } from './startup-tasks'
 import { refreshConfiguredProviderModelCatalogsInBackground } from '../modules/hermes/services/providers/model-catalog-cache'
+import { refreshModelCatalog } from '../modules/studio/public/model-catalog'
 import { initializeOpenCodeFreeInBackground } from '../modules/hermes/services/providers/opencode-free'
 import {
   scanLanDevices,
@@ -498,6 +499,8 @@ export async function bootstrap() {
   // Initialize all web-ui SQLite tables
   const { initAllStores } = await import('../modules/studio/infrastructure/database/init')
   initAllStores()
+  // Refresh once on every startup; context and cost lookups can use the disk cache immediately.
+  void refreshModelCatalog(true)
   const { interruptOrphanedTaskPlans } = await import('../modules/studio/repositories/task-plan-store')
   interruptOrphanedTaskPlans()
   startChatWebhookDispatcher()

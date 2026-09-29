@@ -3560,7 +3560,7 @@ export default {
     },
     pricing: {
       title: "Model pricing",
-      help: "USD per million tokens. Match provider and model IDs exactly (e.g. global). Used only when no cost is returned. Blank cache rates mean unknown. Changes apply to future calls; historical costs are not recalculated.",
+      help: "Without a custom price, models.dev is used to estimate costs for matching models. USD per million tokens. Match provider and model IDs exactly (e.g. global). Used only when no cost is returned. Blank cache rates mean unknown. Changes apply to future calls; historical costs are not recalculated.",
       provider: "Provider ID",
       model: "Model ID",
       input: "Input",

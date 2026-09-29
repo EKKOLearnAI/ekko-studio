@@ -1,7 +1,9 @@
 import { logger } from '../../public/logging'
-import { updateUsage } from '../../repositories/usage-store'
+import { updateUsage, fillMissingUsageCost } from '../../repositories/usage-store'
 import { getUsagePricing } from '../../repositories/usage-pricing-store'
+import { getModelCatalogSnapshot, refreshModelCatalog } from '../../public/model-catalog'
 import { normalizeUsageCost, estimateUsageCost, type UsageCost } from './usage-cost'
+import { estimateCatalogUsageCost } from './catalog-pricing'
 
 export interface NormalizedTokenUsage {
   inputTokens: number
@@ -114,16 +116,23 @@ export function recordSessionUsage(input: RecordSessionUsageInput): NormalizedTo
   const usage = normalizeTokenUsage(input.usage, input.fallbackUsage)
   try {
     let cost = normalizeUsageCost(input.cost) || normalizeUsageCost(input.usage)
+    let hasManualPricing = false
     if (!cost && input.model && input.provider) {
       try {
         const pricing = getUsagePricing(input.profile || 'default')
           .find(row => row.provider === input.provider && row.model === input.model)
+        hasManualPricing = !!pricing
         cost = estimateUsageCost(usage, pricing)
+        if (cost && pricing) cost.costPricing = { source: 'manual', rates: pricing }
       } catch (err) {
         logger.warn({ err }, '[usage-recorder] failed to read model pricing')
       }
     }
-    updateUsage(input.sessionId, {
+    const catalog = !cost && !hasManualPricing ? getModelCatalogSnapshot() : undefined
+    if (!cost && !hasManualPricing && input.provider && input.model) {
+      cost = estimateCatalogUsageCost(catalog, input.provider, input.model, usage, input.usageScope, input.apiCalls)
+    }
+    const row = updateUsage(input.sessionId, {
       runId: input.runId || '',
       source: input.source,
       agent: input.agent,
@@ -141,6 +150,16 @@ export function recordSessionUsage(input: RecordSessionUsageInput): NormalizedTo
       isEstimated: input.isEstimated ?? usage.isEstimated,
       ...(cost || {}),
     })
+    // Cold start: persist tokens immediately, then fill this new row after the shared download.
+    // Replays return no inserted row, so a later catalog never reprices historical usage.
+    if (row && !cost && !hasManualPricing && !catalog && input.provider && input.model) {
+      const provider = input.provider
+      const model = input.model
+      void refreshModelCatalog().then(snapshot => {
+        const estimate = estimateCatalogUsageCost(snapshot, provider, model, usage, input.usageScope, input.apiCalls)
+        if (estimate) fillMissingUsageCost(row, estimate)
+      }).catch(err => logger.warn({ err }, '[usage-recorder] failed to fill catalog cost'))
+    }
   } catch (err) {
     logger.warn({
       err,

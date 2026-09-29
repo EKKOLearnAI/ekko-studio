@@ -7,6 +7,7 @@ let homeDir = ''
 const originalHermesHome = process.env.HERMES_HOME
 const originalLocalAppData = process.env.LOCALAPPDATA
 const originalAppData = process.env.APPDATA
+const originalStudioHome = process.env.HERMES_WEB_UI_HOME
 
 function hermesPath(...parts: string[]) {
   return join(homeDir, '.hermes', ...parts)
@@ -18,8 +19,9 @@ function writeConfig(content: string) {
 }
 
 function writeModelsCache(data: Record<string, unknown>) {
-  mkdirSync(hermesPath(), { recursive: true })
-  writeFileSync(hermesPath('models_dev_cache.json'), JSON.stringify(data))
+  const directory = join(homeDir, 'studio', 'models')
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, 'models.dev.json'), JSON.stringify(data))
 }
 
 async function loadModelContext() {
@@ -45,9 +47,11 @@ async function loadModelContext() {
 describe('getModelContextLength', () => {
   beforeEach(() => {
     homeDir = mkdtempSync(join(tmpdir(), 'hwui-model-context-'))
+    process.env.HERMES_WEB_UI_HOME = join(homeDir, 'studio')
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.doUnmock('os')
     vi.doUnmock('../../packages/server/src/modules/studio/public/provider-context')
     if (originalHermesHome === undefined) delete process.env.HERMES_HOME
@@ -56,8 +60,25 @@ describe('getModelContextLength', () => {
     else process.env.LOCALAPPDATA = originalLocalAppData
     if (originalAppData === undefined) delete process.env.APPDATA
     else process.env.APPDATA = originalAppData
+    if (originalStudioHome === undefined) delete process.env.HERMES_WEB_UI_HOME
+    else process.env.HERMES_WEB_UI_HOME = originalStudioHome
     if (homeDir) rmSync(homeDir, { recursive: true, force: true })
     homeDir = ''
+  })
+
+  it('uses the shared catalog for context/output limits and observes a startup refresh without restarting', async () => {
+    writeModelsCache({ openai: { models: { 'catalog-model': { limit: { context: 100_000, output: 10_000 } } } } })
+    const { getModelRuntimeCapabilities } = await loadModelContext()
+    const { refreshModelCatalog } = await import('../../packages/server/src/modules/studio/public/model-catalog')
+    const input = { provider: 'openai', model: 'catalog-model' }
+    expect(getModelRuntimeCapabilities(input)).toMatchObject({ contextWindow: 100_000, outputLimit: 10_000 })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ openai: { models: {
+      'catalog-model': { limit: { context: 300_000, output: 32_000 }, reasoning: true, modalities: { input: ['text', 'image'] } },
+    } } }))))
+    await refreshModelCatalog(true)
+    expect(getModelRuntimeCapabilities(input)).toEqual({ contextWindow: 300_000, outputLimit: 32_000, reasoning: true, input: ['text', 'image'] })
+    writeConfig('model:\n  context_length: 80000\n')
+    expect(getModelRuntimeCapabilities(input).contextWindow).toBe(80_000)
   })
 
   it.each([false, true])('prefers the manually edited model window (config file exists: %s)', async withConfig => {

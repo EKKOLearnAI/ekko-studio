@@ -3,6 +3,15 @@ import type { UsageCostCoverage } from '../../contracts/runs/usage'
 export interface UsageCost {
   costUsd: number
   costSource: 'reported' | 'estimated'
+  costPricing?: UsagePriceSnapshot
+}
+
+export interface UsagePriceSnapshot {
+  source: 'manual' | 'models.dev'
+  rates: UsagePricing
+  catalogVersion?: string
+  catalogFetchedAt?: number
+  contextThreshold?: number
 }
 
 export interface UsagePricing {
@@ -12,6 +21,7 @@ export interface UsagePricing {
   output: number
   cacheRead?: number
   cacheWrite?: number
+  reasoning?: number
 }
 
 export function finiteCost(value: unknown): number | undefined {
@@ -43,18 +53,21 @@ export function normalizeUsageCost(value: unknown, source: UsageCost['costSource
   }
 }
 
-export function estimateUsageCost(usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }, pricing?: UsagePricing): UsageCost | undefined {
+export function estimateUsageCost(usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens?: number }, pricing?: UsagePricing): UsageCost | undefined {
   if (!pricing) return
+  const separateReasoning = pricing.reasoning === undefined ? 0 : usage.reasoningTokens || 0
+  if (separateReasoning > usage.outputTokens) return
   let costUsd = 0
   for (const [tokens, rate] of [
-    [usage.inputTokens, pricing.input], [usage.outputTokens, pricing.output],
+    [usage.inputTokens, pricing.input], [usage.outputTokens - separateReasoning, pricing.output],
     [usage.cacheReadTokens, pricing.cacheRead], [usage.cacheWriteTokens, pricing.cacheWrite],
+    [separateReasoning, pricing.reasoning],
   ]) {
     if (!tokens) continue
     if (rate === undefined || finiteCost(rate) === undefined) return
     costUsd += tokens * rate / 1_000_000
   }
-  // Reasoning tokens are already included in output; never charge them twice.
+  // Reasoning is included in output; a separate rate replaces, rather than adds to, its output charge.
   return Number.isFinite(costUsd) ? { costUsd, costSource: 'estimated' } : undefined
 }
 

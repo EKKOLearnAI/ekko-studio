@@ -1,6 +1,7 @@
 import { isSqliteAvailable, getDb, jsonSet, jsonGet, jsonGetAll, jsonDelete } from '../infrastructure/database'
+import { randomUUID } from 'crypto'
 import { USAGE_TABLE as TABLE } from '../infrastructure/database/schemas'
-import { finiteCost, emptyCostCoverage } from '../services/usage/usage-cost'
+import { finiteCost, emptyCostCoverage, type UsageCost, type UsagePriceSnapshot } from '../services/usage/usage-cost'
 import type {
   LocalUsageStats,
   UsageStatsAgentRow,
@@ -37,6 +38,8 @@ function hasUpdatedAtColumn(): boolean {
   }
 }
 
+export type UsageRowRef = { id: number } | { id: string; sessionId: string }
+
 export function updateUsage(
   sessionId: string,
   data: {
@@ -57,8 +60,9 @@ export function updateUsage(
     isEstimated?: boolean
     costUsd?: number
     costSource?: 'reported' | 'estimated'
+    costPricing?: UsagePriceSnapshot
   },
-): void {
+): UsageRowRef | undefined {
   const cacheReadTokens = data.cacheReadTokens ?? 0
   const cacheWriteTokens = data.cacheWriteTokens ?? 0
   const reasoningTokens = data.reasoningTokens ?? 0
@@ -68,6 +72,7 @@ export function updateUsage(
   const profile = data.profile || 'default'
   const costUsd = finiteCost(data.costUsd) ?? null
   const costSource = costUsd == null ? 'unknown' : data.costSource || 'reported'
+  const costPricing = costUsd == null || !data.costPricing ? null : JSON.stringify(data.costPricing)
   if (isSqliteAvailable()) {
     const db = getDb()!
     const columns = [
@@ -90,6 +95,7 @@ export function updateUsage(
       'created_at',
       'cost_usd',
       'cost_source',
+      'cost_pricing',
     ]
     const values = columns.map(() => '?')
     const params = [
@@ -112,17 +118,21 @@ export function updateUsage(
       now,
       costUsd,
       costSource,
+      costPricing,
     ]
     if (hasUpdatedAtColumn()) {
       columns.push('updated_at')
       values.push('?')
       params.push(now)
     }
-    db.prepare(
+    const result = db.prepare(
       `INSERT OR IGNORE INTO ${TABLE} (${columns.join(', ')}) VALUES (${values.join(', ')})`,
     ).run(...params)
+    return result?.changes ? { id: Number(result.lastInsertRowid) } : undefined
   } else {
+    const id = randomUUID()
     jsonSet(TABLE, sessionId, {
+      id,
       run_id: data.runId || '',
       source: data.source || '',
       agent: data.agent || '',
@@ -141,7 +151,25 @@ export function updateUsage(
       created_at: now,
       cost_usd: costUsd,
       cost_source: costSource,
+      cost_pricing: costPricing,
     })
+    return { id, sessionId }
+  }
+}
+
+/** Enrich only the inserted record, without changing its tokens, timestamp, or an existing price. */
+export function fillMissingUsageCost(row: UsageRowRef, cost: UsageCost): void {
+  const amount = finiteCost(cost.costUsd)
+  if (amount === undefined) return
+  const pricing = cost.costPricing ? JSON.stringify(cost.costPricing) : null
+  if (!('sessionId' in row)) {
+    getDb()?.prepare(`UPDATE ${TABLE} SET cost_usd = ?, cost_source = ?, cost_pricing = ? WHERE id = ? AND cost_usd IS NULL`)
+      .run(amount, cost.costSource, pricing, row.id)
+  } else {
+    const saved = jsonGet(TABLE, row.sessionId)
+    if (saved?.id === row.id && saved.cost_usd == null) {
+      jsonSet(TABLE, row.sessionId, { ...saved, cost_usd: amount, cost_source: cost.costSource, cost_pricing: pricing })
+    }
   }
 }
 

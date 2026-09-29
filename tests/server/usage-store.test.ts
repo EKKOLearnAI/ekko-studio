@@ -21,6 +21,7 @@ vi.mock('../../packages/server/src/modules/studio/infrastructure/database/index'
 
 import {
   updateUsage,
+  fillMissingUsageCost,
   getUsage,
   getUsageBatch,
   deleteUsage,
@@ -64,6 +65,21 @@ describe('Usage Store (JSON fallback)', () => {
       created_at: 0,
     })
     expect(mockJsonGet).toHaveBeenCalledWith('session_usage', 'session-1')
+  })
+
+  it('fills JSON costs only for the same unpriced row, preserving newer usage and known zero costs', () => {
+    const ref = updateUsage('session-1', { inputTokens: 100, outputTokens: 50 })!
+    const saved = mockJsonSet.mock.calls[0][2]
+    mockJsonGet.mockReturnValue(saved)
+    const cost = { costUsd: 0.25, costSource: 'estimated' as const }
+    fillMissingUsageCost(ref, cost)
+    expect(mockJsonSet).toHaveBeenLastCalledWith('session_usage', 'session-1', { ...saved, cost_usd: 0.25, cost_source: 'estimated', cost_pricing: null })
+    mockJsonSet.mockClear()
+    for (const newer of [undefined, { ...saved, id: 'another-row' }, { ...saved, cost_usd: 0 }]) {
+      mockJsonGet.mockReturnValue(newer)
+      fillMissingUsageCost(ref, cost)
+    }
+    expect(mockJsonSet).not.toHaveBeenCalled()
   })
 
   it('getUsage returns undefined when jsonGet returns nothing', () => {
@@ -189,6 +205,7 @@ describe('Usage Store (SQLite path)', () => {
       expect.any(Number), // created_at
       null, // costUsd
       'unknown', // costSource
+      null, // costPricing
     )
   })
 
@@ -221,6 +238,7 @@ describe('Usage Store (SQLite path)', () => {
       expect.any(Number), // created_at
       null, // costUsd
       'unknown', // costSource
+      null, // costPricing
       expect.any(Number), // updated_at
     )
   })

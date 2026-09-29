@@ -29,6 +29,7 @@ export const USAGE_SCHEMA: Record<string, string> = {
   is_estimated: 'INTEGER NOT NULL DEFAULT 0',
   cost_usd: 'REAL',
   cost_source: "TEXT NOT NULL DEFAULT 'unknown'",
+  cost_pricing: 'TEXT',
   created_at: 'INTEGER NOT NULL DEFAULT 0',
 }
 
