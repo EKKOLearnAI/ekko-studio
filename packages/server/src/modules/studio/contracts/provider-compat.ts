@@ -246,6 +246,7 @@ export function getCompatibleCustomProviders(config: any): NormalizedCustomProvi
 const SCOPED_CODING_AGENT_AUTH_PROVIDERS = new Set([
   'openai-codex',
   'copilot',
+  'copilot',
   'xai-oauth',
   'qwen-oauth',
   'nous',

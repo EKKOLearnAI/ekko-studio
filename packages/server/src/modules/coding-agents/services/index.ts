@@ -1843,7 +1843,7 @@ function opencodeRuntimeConfig(
     ...config,
     $schema: 'https://opencode.ai/config.json',
     ...(runtime.model ? {
-      model: runtime.nativeAuth ? runtime.model : `${OPENCODE_PROVIDER_ID}/${runtime.model}`,
+      model: runtime.nativeAuth ? `openai/${runtime.model}` : `${OPENCODE_PROVIDER_ID}/${runtime.model}`,
       ...(runtime.nativeAuth ? {} : {
         provider: {
           [OPENCODE_PROVIDER_ID]: {
@@ -3325,6 +3325,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
 
   const mcpCapabilities = studioMcpCapabilities(getCodingAgentManagedMcpServerConfigs(tool.id, input.profile || 'default'))
   const mode = resolvedCodingAgentLaunchMode(tool.id, input.mode)
+  let secretEnv: Record<string, string> | undefined
   if (mode === 'global') {
     const scope = normalizeConfigScope({ profile: input.profile, provider: 'global' })
     const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
@@ -3392,7 +3393,6 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     let files: Array<{ key: string; path: string; absolutePath: string }> = []
     let args: string[] = []
     let env: Record<string, string> = {}
-    let secretEnv: Record<string, string> | undefined
 
     if (tool.id === 'claude-code') {
       promptFile = join(rootDir, 'hermes-rules.md')
@@ -3510,7 +3510,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const model = String(input.model || '').trim()
   const freeRuntime = provider === OPENCODE_FREE_PROVIDER ? openCodeFreeRuntime(model) : undefined
   const apiKey = freeRuntime ? '' : String(input.apiKey || '').trim()
-  assertScopedCodingAgentProviderAllowed(mode, provider)
+  if (!(tool.id === 'opencode' && provider === 'openai-codex')) assertScopedCodingAgentProviderAllowed(mode, provider)
   if (!model) {
     const err = new Error('Model is required')
     ;(err as any).status = 400
@@ -3928,7 +3928,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       runtimeConfig,
       apiKey: nativeAuth ? undefined : (proxyTarget?.token || apiKey),
     })
-    args = ['--model', nativeAuth ? model : `${OPENCODE_PROVIDER_ID}/${model}`]
+    args = ['--model', nativeAuth ? `openai/${model}` : `${OPENCODE_PROVIDER_ID}/${model}`]
   }
 
   const chatSessionId = String(isolatedInput.sessionId || '').trim()
