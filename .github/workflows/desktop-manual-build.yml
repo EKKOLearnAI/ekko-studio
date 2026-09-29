@@ -182,7 +182,8 @@ jobs:
           $unpacked = 'packages/desktop/release/win-unpacked'
           if (-not (Test-Path $unpacked)) { throw "missing $unpacked" }
           $version = (Get-Content packages/desktop/package.json -Raw | ConvertFrom-Json).version
-          $zip = "packages/desktop/release/EkkoStudio-Portable-$version-x64.zip"
+          $arch = "${{ needs.validate.outputs.target_arch }}"
+          $zip = "packages/desktop/release/EkkoStudio-Portable-$version-win-$arch.zip"
           New-Item -ItemType File -Force -Path (Join-Path $unpacked 'ekko-portable.json') | Out-Null
           Set-Content -Path (Join-Path $unpacked 'README-PORTABLE.txt') -Value @(
             'Portable (green) build. Keep this whole folder together, on the drive you run it from.',
