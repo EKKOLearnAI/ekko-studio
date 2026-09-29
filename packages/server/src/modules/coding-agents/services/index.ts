@@ -15,6 +15,7 @@ import { promisify } from 'util'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { getWebUiHome } from '../../studio/public/config'
 import { getProfileDir, PROVIDER_ENV_MAP, readConfigYamlForProfile, safeReadFile } from '../../studio/public/profile-config'
+import { resolveAuthorizedProviderRuntimeCredentials } from '../../studio/public/authorized-provider-runtime'
 import { getCompatibleCustomProviders } from '../../studio/contracts/provider-compat'
 import { registerClaudeCodeProxyTarget } from './claude-code/proxy'
 import { registerCodexProxyTarget, restoreCodexProxyTarget } from './codex/proxy'
@@ -77,6 +78,7 @@ const OPENCODE_PROVIDER_ID = 'hermes-studio'
 const OPENCODE_CONFIG_FILE = 'opencode.json'
 const OPENCODE_DATABASE_FILE = 'opencode.db'
 const OPENCODE_API_KEY_ENV = 'HERMES_OPENCODE_API_KEY'
+const OPENCODE_AUTH_ENV = 'OPENCODE_AUTH_CONTENT'
 const OPENCODE_RUNTIME_CONFIG_ENV = 'OPENCODE_CONFIG_CONTENT'
 const OPENCODE_SHARED_CONFIG_DIRS = [
   'agent',
@@ -1884,11 +1886,30 @@ function opencodeRuntimeConfig(
   }, null, 2)}\n`
 }
 
+function openCodeNativeAuthContent(input: {
+  provider: string
+  accessToken?: string
+  refreshToken?: string
+}): string | undefined {
+  if (input.provider !== 'openai-codex') return undefined
+  const accessToken = String(input.accessToken || '').trim()
+  const refreshToken = String(input.refreshToken || '').trim()
+  if (!accessToken || !refreshToken) return undefined
+  return JSON.stringify({
+    'openai-codex': {
+      type: 'oauth',
+      access: accessToken,
+      refresh: refreshToken,
+    },
+  })
+}
+
 function openCodeRuntimeEnv(input: {
   configDir: string
   databasePath: string
   runtimeConfig?: string
   apiKey?: string
+  authContent?: string
 }): Record<string, string> {
   // OPENCODE_CONFIG_DIR is OpenCode's native global-config override. Keep it
   // stable at the provider/profile root so OpenCode installs its plugin SDK
@@ -1903,6 +1924,7 @@ function openCodeRuntimeEnv(input: {
     OPENCODE_CONFIG_DIR: input.configDir,
     OPENCODE_DB: input.databasePath,
     ...(input.runtimeConfig ? { [OPENCODE_RUNTIME_CONFIG_ENV]: input.runtimeConfig } : {}),
+    ...(input.authContent ? { [OPENCODE_AUTH_ENV]: input.authContent } : {}),
     OPENCODE_DISABLE_CLAUDE_CODE: '1',
     ...(input.apiKey ? { [OPENCODE_API_KEY_ENV]: input.apiKey } : {}),
   }
@@ -3858,7 +3880,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     args = prepared.args
     env = {}
   } else {
-    const proxyTarget = baseUrl && (apiKey || freeRuntime)
+    const proxyTarget = provider !== 'openai-codex' && baseUrl && (apiKey || freeRuntime)
       ? registerCodexProxyTarget({
           profile: scope.profile,
           provider,
@@ -3889,11 +3911,30 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       { key: 'config', path: OPENCODE_CONFIG_FILE, absolutePath: configPath },
       { key: 'agents', path: 'AGENTS.md', absolutePath: promptPath },
     )
+    let authContent: string | undefined
+    if (!proxyTarget && provider === 'openai-codex') {
+      const credentials = await resolveAuthorizedProviderRuntimeCredentials({
+        profile: scope.profile,
+        provider,
+        model,
+      })
+      authContent = openCodeNativeAuthContent({
+        provider,
+        accessToken: credentials.apiKey,
+        refreshToken: credentials.refreshToken,
+      })
+      if (!authContent) {
+        const err = new Error('OpenCode native OAuth credentials are incomplete')
+        ;(err as any).status = 400
+        throw err
+      }
+    }
     env = openCodeRuntimeEnv({
       configDir: baseRuntime.rootDir,
       databasePath: join(rootDir, OPENCODE_DATABASE_FILE),
       runtimeConfig,
       apiKey: proxyTarget?.token || apiKey,
+      authContent,
     })
     args = ['--model', `${OPENCODE_PROVIDER_ID}/${model}`]
   }
