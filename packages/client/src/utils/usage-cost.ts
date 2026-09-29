@@ -13,7 +13,5 @@ export function usageCostState(amount: number, coverage?: UsageCostCoverage, has
 export function formatUsageCost(amount: number, coverage?: UsageCostCoverage, hasActivity = true): string | null {
   if (usageCostState(amount, coverage, hasActivity) === 'unknown') return null
   if (amount === 0) return '$0.00'
-  if (amount < 0.000001) return '<$0.000001'
-  // Keep small token charges visible in both daily amounts and larger totals.
-  return `$${amount.toFixed(6).replace(/(\.\d{2,}?)0+$/, '$1')}`
+  return amount < 0.01 ? '<$0.01' : `$${amount.toFixed(2)}`
 }
