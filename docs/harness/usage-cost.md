@@ -10,6 +10,12 @@ Studio keeps `total_cost` and daily `cost` numeric for older clients. New
 "Not recorded" for wholly unknown usage and label partial totals. Empty days
 still show zero. A provider report is not a reconciled account invoice.
 
+Studio and App display USD amounts with two to six decimal places, trimming
+trailing zeros. Positive amounts below one millionth of a dollar show
+`<$0.000001`. This keeps sub-cent calls visible in totals and daily costs instead
+of rendering different amounts with the same `<$0.01` label. Storage retains the
+original precision.
+
 The Usage page's Model pricing dialog stores Profile-scoped USD prices per
 million ordinary input, output, cache read and cache write tokens. Provider and
 model IDs must match exactly; no cross-provider model-name fallback is used.

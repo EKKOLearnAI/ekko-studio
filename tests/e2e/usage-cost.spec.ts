@@ -25,6 +25,14 @@ test('shows unknown, partial and free costs and saves explicit model pricing', a
   await page.getByRole('button', { name: 'Refresh', exact: true }).click()
   await expect(card.getByText('$0.25', { exact: true })).toBeVisible()
   await expect(card.getByText('Partial cost; some usage is unpriced')).toBeVisible()
+  coverage = { reported: 0, estimated: 1, unknown: 1 }; cost = 0.002887398
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(card.getByText('$0.002887', { exact: true })).toBeVisible()
+  await expect(page.locator('tbody')).toContainText('$0.002887')
+  coverage = { reported: 0, estimated: 3, unknown: 1 }; cost = 0.004529376
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(card.getByText('$0.004529', { exact: true })).toBeVisible()
+  await expect(page.locator('tbody')).toContainText('$0.004529')
   coverage = { reported: 1, estimated: 0, unknown: 0 }; cost = 0
   await page.getByRole('button', { name: 'Refresh', exact: true }).click()
   await expect(card.getByText('$0.00', { exact: true })).toBeVisible()
