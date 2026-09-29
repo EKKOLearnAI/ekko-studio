@@ -1212,6 +1212,8 @@ export default {
     thinkingShow: '사고 과정 펼치기',
     thinkingHide: '사고 과정 접기',
     thinkingDuration: '관측 {duration}',
+    streamSpeed: '첫 토큰 {ttft}ms · {tps} tok/s',
+    streamSpeedTitle: '첫 토큰 도달 시간과 생성 속도',
     thinkingChars: '{count}자',
     copyBubble: '메시지 복사',
     copiedBubble: '복사됨',

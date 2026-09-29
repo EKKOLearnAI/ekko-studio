@@ -1283,6 +1283,8 @@ export default {
     thinkingShow: '展開思考過程',
     thinkingHide: '收起思考過程',
     thinkingDuration: '已觀察 {duration}',
+    streamSpeed: '首 Token 耗時 {ttft}ms · {tps} tok/s',
+    streamSpeedTitle: '首 Token 到達耗時與生成速率',
     thinkingChars: '{count} 字',
     copyBubble: '複製訊息',
     copiedBubble: '已複製',

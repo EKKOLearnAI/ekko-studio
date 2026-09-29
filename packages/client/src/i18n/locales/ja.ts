@@ -1212,6 +1212,8 @@ export default {
     thinkingShow: '思考過程を表示',
     thinkingHide: '思考過程を隠す',
     thinkingDuration: '観測 {duration}',
+    streamSpeed: '最初のトークン {ttft}ms · {tps} tok/s',
+    streamSpeedTitle: '初回トークン時間と生成速度',
     thinkingChars: '{count} 文字',
     copyBubble: 'メッセージをコピー',
     copiedBubble: 'コピーしました',

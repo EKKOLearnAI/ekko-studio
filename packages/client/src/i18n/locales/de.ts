@@ -1212,6 +1212,8 @@ export default {
     thinkingShow: 'Denkprozess anzeigen',
     thinkingHide: 'Denkprozess ausblenden',
     thinkingDuration: 'Beobachtet {duration}',
+    streamSpeed: 'Erstes Token {ttft}ms · {tps} tok/s',
+    streamSpeedTitle: 'Zeit bis zum ersten Token und Generierungstempo',
     thinkingChars: '{count} Zeichen',
     copyBubble: 'Nachricht kopieren',
     copiedBubble: 'Nachricht kopiert',

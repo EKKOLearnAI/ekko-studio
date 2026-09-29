@@ -1294,6 +1294,8 @@ export default {
     thinkingShow: 'إظهار التفكير',
     thinkingHide: 'إخفاء التفكير',
     thinkingDuration: 'المدة المرصودة {duration}',
+    streamSpeed: 'أول رمز {ttft}ms · {tps} رمز/ث',
+    streamSpeedTitle: 'الزمن حتى أول رمز وسرعة التوليد',
     thinkingChars: '{count} حرفاً',
     copyBubble: 'نسخ الرسالة',
     copiedBubble: 'تم نسخ الرسالة',

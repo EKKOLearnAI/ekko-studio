@@ -1212,6 +1212,8 @@ export default {
     thinkingShow: 'Afficher le raisonnement',
     thinkingHide: 'Masquer le raisonnement',
     thinkingDuration: 'Observé {duration}',
+    streamSpeed: 'Premier jeton {ttft}ms · {tps} jetons/s',
+    streamSpeedTitle: 'Délai du premier token et vitesse',
     thinkingChars: '{count} caractères',
     copyBubble: 'Copier le message',
     copiedBubble: 'Message copié',
