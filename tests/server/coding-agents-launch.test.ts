@@ -1570,6 +1570,41 @@ describe('coding agent launch preparation', () => {
     expect(readFileSync(second.promptFile!, 'utf8')).toContain('ROLE_second')
   })
 
+  it('launches scoped OpenCode with native OpenAI OAuth without serializing the credential', async () => {
+    const home = makeHome()
+    const oauthAccess = 'oauth-access-fixture'
+    const oauthRefresh = 'oauth-refresh-fixture'
+    mkdirSync(join(home, 'profiles', 'default'), { recursive: true })
+    writeFileSync(join(home, 'profiles', 'default', 'auth.json'), JSON.stringify({
+      providers: { 'openai-codex': { auth_mode: 'chatgpt', tokens: { access_token: oauthAccess, refresh_token: oauthRefresh } } },
+    }))
+    const result = await prepareCodingAgentLaunch('opencode', {
+      mode: 'scoped', profile: 'default', sessionId: 'native-auth-session', agentSessionId: 'native-auth-run',
+      provider: 'openai-codex', model: 'gpt-5.5', apiMode: 'codex_responses',
+    })
+    const configText = readFileSync(join(result.rootDir, 'opencode.json'), 'utf8')
+    const launcherText = readFileSync(launcherFile(result.rootDir), 'utf8')
+    const config = JSON.parse(configText)
+    expect(result.args).toEqual(['--model', 'gpt-5.5'])
+    expect(result.env.HERMES_OPENCODE_API_KEY).toBeUndefined()
+    expect(result.env.OPENCODE_CONFIG_CONTENT).not.toContain(oauthAccess)
+    expect(result.secretEnv?.OPENCODE_AUTH_CONTENT).toContain(oauthAccess)
+    expect(result.secretEnv?.OPENCODE_AUTH_CONTENT).toContain(oauthRefresh)
+    expect(JSON.stringify(result)).not.toContain(oauthAccess)
+    expect(launcherText).not.toContain(oauthAccess)
+    expect(config.model).toBe('gpt-5.5')
+    expect(config.provider).toBeUndefined()
+    expect(config.mcp['ekko-studio-api']).toMatchObject({ type: 'local', enabled: true })
+    expect(result.workspaceDir).toContain('/coding-agent/workspace/default/openai-codex/scoped')
+  })
+
+  it('fails closed when scoped OpenCode native OAuth is unavailable', async () => {
+    makeHome()
+    await expect(prepareCodingAgentLaunch('opencode', {
+      mode: 'scoped', profile: 'default', provider: 'openai-codex', model: 'gpt-5.5', apiMode: 'codex_responses',
+    })).rejects.toThrow('OpenCode native auth requires an OpenAI OAuth credential')
+  })
+
   it('launches scoped OpenCode through the Responses proxy without writing the upstream key', async () => {
     const home = makeHome()
     const globalOpenCodeHome = join(home, 'global-home', '.config', 'opencode')
