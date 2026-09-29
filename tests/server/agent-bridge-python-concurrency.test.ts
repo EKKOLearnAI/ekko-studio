@@ -241,6 +241,28 @@ def wait_for(condition, timeout=20):
     return False
 `
 
+const gatewayApprovalPrelude = String.raw`
+pool, _fake_db = make_pool()
+
+def notify_gateway_approval(session_id, run_id, request_id, queue_request):
+    session = bridge.AgentSession(session_id=session_id, agent=object(), current_run_id=run_id)
+    record = bridge.RunRecord(run_id=run_id, session_id=session_id)
+    with pool._lock:
+        pool._sessions[session_id] = session
+        pool._runs[run_id] = record
+    if queue_request:
+        approval.queue_gateway_approval(session_id, request_id)
+    pool._gateway_approval_notify(session_id)({
+        "request_id": request_id,
+        "command": "printf harmless gateway",
+        "description": "harmless test command",
+    })
+    approval_id = next(
+        key for key, value in pool._gateway_approval_requests.items() if value[0] == session_id
+    )
+    return record, approval_id
+`
+
 describe('agent bridge Python session concurrency', () => {
   it('denies only the interrupted session run generation approval queues', () => {
     runPython(String.raw`
@@ -1368,6 +1390,21 @@ assert [(msg["role"], msg["content"]) for msg in messages] == [
     ("assistant", "already flushed"),
     ("tool", "missing tool result"),
 ]
+`)
+  })
+
+  it('reports an unresolved gateway approval outcome when the runtime never registered the request', () => {
+    runPython(String.raw`
+${harness}
+${gatewayApprovalPrelude}
+
+record, approval_id = notify_gateway_approval("session-stale", "run-stale", "request-stale", False)
+result = pool.respond_approval(approval_id, "once")
+assert result["resolved"] is False, result
+resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
+assert len(resolved_events) == 1, resolved_events
+assert resolved_events[0]["resolved"] is False, resolved_events[0]
+assert resolved_events[0]["choice"] == "once", resolved_events[0]
 `)
   })
 
