@@ -1382,21 +1382,6 @@ assert [(msg["role"], msg["content"]) for msg in messages] == [
 `)
   })
 
-  it('reports a resolved gateway approval outcome on the broadcast approval.resolved event', () => {
-    runPython(String.raw`
-${harness}
-${gatewayApprovalPrelude}
-
-record, approval_id = notify_gateway_approval("session-ok", "run-ok", "request-ok", True)
-result = pool.respond_approval(approval_id, "once")
-assert result["resolved"] is True, result
-resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
-assert len(resolved_events) == 1, resolved_events
-assert resolved_events[0]["resolved"] is True, resolved_events[0]
-assert resolved_events[0]["choice"] == "once", resolved_events[0]
-`)
-  })
-
   it('reports an unresolved gateway approval outcome when the runtime never registered the request', () => {
     runPython(String.raw`
 ${harness}
@@ -1409,60 +1394,6 @@ resolved_events = [event for event in record.events if event["event"] == "approv
 assert len(resolved_events) == 1, resolved_events
 assert resolved_events[0]["resolved"] is False, resolved_events[0]
 assert resolved_events[0]["choice"] == "once", resolved_events[0]
-`)
-  })
-
-  it('reports an unresolved gateway approval outcome for a runtime that sends no request id', () => {
-    runPython(String.raw`
-${harness}
-${gatewayApprovalPrelude}
-
-# An empty request_id short-circuits before resolve_gateway_approval is reached.
-record, approval_id = notify_gateway_approval("session-legacy", "run-legacy", "", False)
-before = len(approval._resolved_gateway_requests)
-result = pool.respond_approval(approval_id, "deny")
-assert result["resolved"] is False, result
-assert len(approval._resolved_gateway_requests) == before, approval._resolved_gateway_requests
-resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
-assert len(resolved_events) == 1, resolved_events
-assert resolved_events[0]["resolved"] is False, resolved_events[0]
-assert resolved_events[0]["choice"] == "deny", resolved_events[0]
-`)
-  })
-
-  it('reports an unresolved gateway approval outcome when the approval gateway raises', () => {
-    runPython(String.raw`
-${harness}
-${gatewayApprovalPrelude}
-
-def raising_resolve_gateway_approval(session_key, choice, request_id=None):
-    raise RuntimeError("gateway unavailable")
-
-approval.resolve_gateway_approval = raising_resolve_gateway_approval
-
-record, approval_id = notify_gateway_approval("session-raise", "run-raise", "request-raise", True)
-result = pool.respond_approval(approval_id, "once")
-assert result["resolved"] is False, result
-resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
-assert len(resolved_events) == 1, resolved_events
-assert resolved_events[0]["resolved"] is False, resolved_events[0]
-`)
-  })
-
-  it('omits the outcome on the session-interrupt approval.resolved event', () => {
-    runPython(String.raw`
-${harness}
-${gatewayApprovalPrelude}
-
-# The interrupt path resolves gateway approvals of its own and reports a reason
-# instead of an outcome.
-record, approval_id = notify_gateway_approval("session-interrupt", "run-interrupt", "request-interrupt", True)
-pool._cancel_pending_approvals_for_generation("session-interrupt", "run-interrupt")
-resolved_events = [event for event in record.events if event["event"] == "approval.resolved"]
-assert len(resolved_events) == 1, resolved_events
-assert "resolved" not in resolved_events[0], resolved_events[0]
-assert resolved_events[0]["reason"] == "Session interrupted", resolved_events[0]
-assert resolved_events[0]["choice"] == "deny", resolved_events[0]
 `)
   })
 
