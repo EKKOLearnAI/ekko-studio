@@ -339,6 +339,7 @@ async function removeRuntime(version: string) {
           </div>
           <HermesDataDirectoryHint v-if="currentHermesSource === 'managed-runtime'" />
           <NAlert
+            v-if="!status?.portable"
             data-testid="runtime-cli-update-note"
             type="info"
             :bordered="false"
