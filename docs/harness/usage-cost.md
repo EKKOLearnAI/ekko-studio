@@ -46,6 +46,8 @@ a single API call. Ekko subtask totals use run scope; an explicit call count tak
 precedence over scope when determining whether tier pricing is safe. Explicit
 tiers take precedence over legacy `context_over_200k`.
 Separate reasoning rates replace the reasoning portion of the output charge.
+App Live Activity token totals include these disjoint Ekko subtask records along
+with individual model calls, while excluding other run summaries and estimates.
 
 Studio's built-in `glm` points to the domestic GLM Coding Plan endpoint and maps
 to `zhipuai-coding-plan` for both pricing and context limits. It does not borrow
