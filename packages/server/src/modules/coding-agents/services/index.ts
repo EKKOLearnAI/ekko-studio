@@ -1889,19 +1889,22 @@ function opencodeRuntimeConfig(
   }, null, 2)}\n`
 }
 
-function openCodeNativeAuthContent(profile: string): string {
+function openCodeNativeAuthContent(configDir: string): string {
   let auth: any
   try {
-    auth = JSON.parse(readFileSync(join(getProfileDir(profile), 'auth.json'), 'utf8'))
+    // OpenCode's native auth is sourced from the isolated runtime config root.
+    // The scoped base setup shares the user's OpenCode auth into this root;
+    // profile auth.json is Hermes provider state and is not OpenCode auth.
+    auth = JSON.parse(readFileSync(join(configDir, 'auth.json'), 'utf8'))
   } catch {
     auth = null
   }
-  const provider = auth?.providers?.['openai-codex']
+  const provider = auth?.openai || auth?.providers?.['openai-codex']
   const tokens = provider?.tokens || provider
-  const access = String(tokens?.access_token || '').trim()
-  const refresh = String(tokens?.refresh_token || '').trim()
-  const authMode = String(provider?.auth_mode || '').toLowerCase()
-  if (!access || !refresh || (authMode && !['chatgpt', 'oauth', 'oauth_pkce'].includes(authMode))) {
+  const access = String(tokens?.access || tokens?.access_token || '').trim()
+  const refresh = String(tokens?.refresh || tokens?.refresh_token || '').trim()
+  const authMode = String(provider?.type || provider?.auth_mode || '').toLowerCase()
+  if (!access || !refresh || (authMode && !['oauth', 'chatgpt', 'oauth_pkce'].includes(authMode))) {
     const err = new Error('OpenCode native auth requires an OpenAI OAuth credential')
     ;(err as any).status = 400
     throw err
@@ -3906,7 +3909,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     const promptPath = join(rootDir, 'AGENTS.md')
     await writeManagedPromptFile(promptPath, scopedSystemPrompt, '')
     if (nativeAuth) {
-      secretEnv = { OPENCODE_AUTH_CONTENT: openCodeNativeAuthContent(scope.profile) }
+      secretEnv = { OPENCODE_AUTH_CONTENT: openCodeNativeAuthContent(baseRuntime.rootDir) }
     }
     const runtimeConfig = opencodeRuntimeConfig(scope.profile, {
       studioMcpTokenFile: input.studioMcpTokenFile,

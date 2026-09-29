@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { delimiter, join } from 'path'
+import { delimiter, dirname, join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const getSessionMock = vi.fn()
@@ -37,11 +37,13 @@ vi.doMock('../../packages/server/src/modules/coding-agents/services/runtime/run-
 const homes: string[] = []
 const originalPath = process.env.PATH
 const originalNpmConfigPrefix = process.env.NPM_CONFIG_PREFIX
+const originalCodingAgentGlobalHome = process.env.HERMES_CODING_AGENT_GLOBAL_HOME
 
 function makeHome() {
   const home = mkdtempSync(join(tmpdir(), 'hermes-coding-agent-resume-'))
   homes.push(home)
   process.env.HERMES_WEB_UI_HOME = home
+  process.env.HERMES_CODING_AGENT_GLOBAL_HOME = join(home, 'global-home')
   return home
 }
 
@@ -68,6 +70,8 @@ describe('coding agent resumed session config', () => {
     else process.env.PATH = originalPath
     if (typeof originalNpmConfigPrefix === 'undefined') delete process.env.NPM_CONFIG_PREFIX
     else process.env.NPM_CONFIG_PREFIX = originalNpmConfigPrefix
+    if (typeof originalCodingAgentGlobalHome === 'undefined') delete process.env.HERMES_CODING_AGENT_GLOBAL_HOME
+    else process.env.HERMES_CODING_AGENT_GLOBAL_HOME = originalCodingAgentGlobalHome
     for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
   })
 
@@ -477,13 +481,16 @@ describe('coding agent resumed session config', () => {
 
   it('starts scoped OpenCode native OpenAI OAuth through the runtime gate without persisting credential material', async () => {
     const home = makeHome()
-    mkdirSync(join(home, 'profiles', 'default'), { recursive: true })
-    writeFileSync(join(home, 'profiles', 'default', 'auth.json'), JSON.stringify({
-      providers: {
-        'openai-codex': {
-          auth_mode: 'chatgpt',
-          tokens: { access_token: 'oauth-access', refresh_token: 'oauth-refresh' },
-        },
+    const profileAuthPath = join(home, 'profiles', 'default', 'auth.json')
+    mkdirSync(dirname(profileAuthPath), { recursive: true })
+    writeFileSync(profileAuthPath, JSON.stringify({ providers: {} }))
+    const openCodeAuthPath = join(home, 'global-home', '.config', 'opencode', 'auth.json')
+    mkdirSync(dirname(openCodeAuthPath), { recursive: true })
+    writeFileSync(openCodeAuthPath, JSON.stringify({
+      openai: {
+        type: 'oauth',
+        access: 'oauth-access',
+        refresh: 'oauth-refresh',
       },
     }))
     getSessionMock.mockReturnValue(null)
@@ -503,6 +510,7 @@ describe('coding agent resumed session config', () => {
     expect(result.provider).toBe('openai-codex')
     expect(started.provider).toBe('openai-codex')
     expect(started.secretEnv.OPENCODE_AUTH_CONTENT).toContain('oauth-access')
+    expect(started.secretEnv.OPENCODE_AUTH_CONTENT).toContain('oauth-refresh')
     expect(started.env).not.toHaveProperty('OPENCODE_AUTH_CONTENT')
     expect(started.env).not.toHaveProperty('HERMES_OPENCODE_API_KEY')
     expect(started.args).toEqual(['--model', 'openai/gpt-5.5'])

@@ -1574,9 +1574,10 @@ describe('coding agent launch preparation', () => {
     const home = makeHome()
     const oauthAccess = 'oauth-access-fixture'
     const oauthRefresh = 'oauth-refresh-fixture'
-    mkdirSync(join(home, 'profiles', 'default'), { recursive: true })
-    writeFileSync(join(home, 'profiles', 'default', 'auth.json'), JSON.stringify({
-      providers: { 'openai-codex': { auth_mode: 'chatgpt', tokens: { access_token: oauthAccess, refresh_token: oauthRefresh } } },
+    const openCodeAuthPath = join(home, 'global-home', '.config', 'opencode', 'auth.json')
+    mkdirSync(dirname(openCodeAuthPath), { recursive: true })
+    writeFileSync(openCodeAuthPath, JSON.stringify({
+      openai: { type: 'oauth', access: oauthAccess, refresh: oauthRefresh },
     }))
     const result = await prepareCodingAgentLaunch('opencode', {
       mode: 'scoped', profile: 'default', sessionId: 'native-auth-session', agentSessionId: 'native-auth-run',
