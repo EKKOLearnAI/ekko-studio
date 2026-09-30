@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { delimiter, join } from 'path'
+import { delimiter, dirname, join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const getSessionMock = vi.fn()
@@ -25,7 +25,7 @@ vi.doMock('../../packages/server/src/modules/hermes/services/profiles/config', a
 
 vi.doMock('../../packages/server/src/modules/hermes/services/profiles/profile', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../packages/server/src/modules/hermes/services/profiles/profile')>(),
-  getProfileDir: (profile: string) => `/tmp/hermes-profile/${profile}`,
+  getProfileDir: (profile: string) => join(process.env.HERMES_WEB_UI_HOME || '/tmp/hermes-profile', 'profiles', profile),
 }))
 
 vi.doMock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({
@@ -37,11 +37,15 @@ vi.doMock('../../packages/server/src/modules/coding-agents/services/runtime/run-
 const homes: string[] = []
 const originalPath = process.env.PATH
 const originalNpmConfigPrefix = process.env.NPM_CONFIG_PREFIX
+const originalCodingAgentGlobalHome = process.env.HERMES_CODING_AGENT_GLOBAL_HOME
+const originalOpenCodeHome = process.env.HERMES_OPENCODE_HOME
 
 function makeHome() {
   const home = mkdtempSync(join(tmpdir(), 'hermes-coding-agent-resume-'))
   homes.push(home)
   process.env.HERMES_WEB_UI_HOME = home
+  process.env.HERMES_CODING_AGENT_GLOBAL_HOME = join(home, 'global-home')
+  process.env.HERMES_OPENCODE_HOME = join(home, 'opencode-home')
   return home
 }
 
@@ -68,6 +72,10 @@ describe('coding agent resumed session config', () => {
     else process.env.PATH = originalPath
     if (typeof originalNpmConfigPrefix === 'undefined') delete process.env.NPM_CONFIG_PREFIX
     else process.env.NPM_CONFIG_PREFIX = originalNpmConfigPrefix
+    if (typeof originalCodingAgentGlobalHome === 'undefined') delete process.env.HERMES_CODING_AGENT_GLOBAL_HOME
+    else process.env.HERMES_CODING_AGENT_GLOBAL_HOME = originalCodingAgentGlobalHome
+    if (typeof originalOpenCodeHome === 'undefined') delete process.env.HERMES_OPENCODE_HOME
+    else process.env.HERMES_OPENCODE_HOME = originalOpenCodeHome
     for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
   })
 
@@ -464,6 +472,73 @@ describe('coding agent resumed session config', () => {
     const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await expect(startCodingAgentRun('codex', {
       sessionId: 'session-1',
+      mode: 'scoped',
+      profile: 'default',
+      provider: 'copilot',
+      model: 'gpt-5.5',
+      baseUrl: 'https://api.githubcopilot.com',
+      apiKey: 'oauth-token',
+      apiMode: 'codex_responses',
+    })).rejects.toThrow('does not support OAuth/subscription providers')
+    expect(startRunMock).not.toHaveBeenCalled()
+  })
+
+  it('starts scoped OpenCode native OpenAI OAuth through the runtime gate without persisting credential material', async () => {
+    const home = makeHome()
+    const profileAuthPath = join(home, 'profiles', 'default', 'auth.json')
+    mkdirSync(dirname(profileAuthPath), { recursive: true })
+    writeFileSync(profileAuthPath, JSON.stringify({ providers: {} }))
+    const scopedRootAuthPath = join(home, 'coding-agent', 'model', 'default', 'openai-codex', 'opencode', 'auth.json')
+    mkdirSync(dirname(scopedRootAuthPath), { recursive: true })
+    writeFileSync(scopedRootAuthPath, JSON.stringify({ providers: {} }))
+    const openCodeAuthPath = join(home, 'opencode-home', 'data', 'opencode', 'auth.json')
+    mkdirSync(dirname(openCodeAuthPath), { recursive: true })
+    writeFileSync(openCodeAuthPath, JSON.stringify({
+      openai: {
+        type: 'oauth',
+        access: 'oauth-access',
+        refresh: 'oauth-refresh',
+      },
+    }))
+    getSessionMock.mockReturnValue(null)
+    readConfigYamlForProfileMock.mockResolvedValue({})
+    safeReadFileMock.mockResolvedValue('')
+
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
+    const result = await startCodingAgentRun('opencode', {
+      sessionId: 'session-native-auth',
+      mode: 'scoped',
+      profile: 'default',
+      provider: 'openai-codex',
+      model: 'gpt-5.5',
+      apiMode: 'codex_responses',
+    })
+    const started = startRunMock.mock.calls[0][0]
+    expect(result.provider).toBe('openai-codex')
+    expect(started.provider).toBe('openai-codex')
+    expect(started.secretEnv.OPENCODE_AUTH_CONTENT).toContain('oauth-access')
+    expect(started.secretEnv.OPENCODE_AUTH_CONTENT).toContain('oauth-refresh')
+    expect(started.secretEnv.OPENCODE_AUTH_CONTENT).not.toContain('scoped-root')
+    expect(started.env).not.toHaveProperty('OPENCODE_AUTH_CONTENT')
+    expect(started.env).not.toHaveProperty('HERMES_OPENCODE_API_KEY')
+    expect(started.args).toEqual(['--model', 'openai/gpt-5.5'])
+    expect(JSON.stringify(result)).not.toContain('oauth-access')
+    expect(JSON.stringify(started.env)).not.toContain('oauth-access')
+    expect(updateSessionMock).toHaveBeenCalledWith('session-native-auth', expect.objectContaining({
+      provider: 'openai-codex',
+      api_mode: 'codex_responses',
+    }))
+  })
+
+  it('keeps scoped OpenCode OAuth providers fail-closed', async () => {
+    makeHome()
+    getSessionMock.mockReturnValue(null)
+    readConfigYamlForProfileMock.mockResolvedValue({})
+    safeReadFileMock.mockResolvedValue('')
+
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
+    await expect(startCodingAgentRun('opencode', {
+      sessionId: 'session-oauth-blocked',
       mode: 'scoped',
       profile: 'default',
       provider: 'copilot',

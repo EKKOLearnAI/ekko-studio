@@ -7,7 +7,7 @@ import { OPENCODE_FREE_PROVIDER, openCodeFreeRuntime } from '../../studio/contra
 import { beginAgentPreparation } from './update-lock'
 import { execFile, spawn } from 'child_process'
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'crypto'
-import { existsSync, readdirSync, realpathSync } from 'fs'
+import { existsSync, readdirSync, realpathSync, readFileSync } from 'fs'
 import { chmod, copyFile, cp, lstat, mkdir, open, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'fs/promises'
 import { homedir } from 'os'
 import { delimiter, dirname, join } from 'path'
@@ -342,6 +342,8 @@ export interface CodingAgentLaunchResult {
   command: string
   args: string[]
   env: Record<string, string>
+  /** Memory-only environment values passed to direct child execution. */
+  secretEnv?: Record<string, string>
   shellCommand: string
   files: Array<{ key: string; path: string; absolutePath: string }>
   promptFile?: string
@@ -1809,6 +1811,7 @@ function opencodeRuntimeConfig(
   runtime: {
     provider?: string
     model?: string
+    nativeAuth?: boolean
     baseUrl?: string
     systemPrompt?: string
     contextPolicy?: CodingAgentContextPolicy
@@ -1840,30 +1843,32 @@ function opencodeRuntimeConfig(
     ...config,
     $schema: 'https://opencode.ai/config.json',
     ...(runtime.model ? {
-      model: `${OPENCODE_PROVIDER_ID}/${runtime.model}`,
-      provider: {
-        [OPENCODE_PROVIDER_ID]: {
-          npm: '@ai-sdk/openai',
-          name: runtime.provider || 'Ekko Studio',
-          options: {
-            baseURL: runtime.baseUrl || '',
-            apiKey: `{env:${OPENCODE_API_KEY_ENV}}`,
-          },
-          models: {
-            [runtime.model]: {
-              name: displayNameForModel(runtime.model),
-              // Always forward images; let the upstream model handle support.
-              attachment: true,
-              modalities: { input: ['text', 'image'], output: ['text'] },
-              ...(runtime.contextPolicy ? { limit: {
-                context: runtime.contextPolicy.contextWindow,
-                input: runtime.contextPolicy.contextWindow,
-                output: runtime.contextPolicy.outputLimit,
-              } } : {}),
+      model: runtime.nativeAuth ? `openai/${runtime.model}` : `${OPENCODE_PROVIDER_ID}/${runtime.model}`,
+      ...(runtime.nativeAuth ? {} : {
+        provider: {
+          [OPENCODE_PROVIDER_ID]: {
+            npm: '@ai-sdk/openai',
+            name: runtime.provider || 'Ekko Studio',
+            options: {
+              baseURL: runtime.baseUrl || '',
+              apiKey: `{env:${OPENCODE_API_KEY_ENV}}`,
+            },
+            models: {
+              [runtime.model]: {
+                name: displayNameForModel(runtime.model),
+                // Always forward images; let the upstream model handle support.
+                attachment: true,
+                modalities: { input: ['text', 'image'], output: ['text'] },
+                ...(runtime.contextPolicy ? { limit: {
+                  context: runtime.contextPolicy.contextWindow,
+                  input: runtime.contextPolicy.contextWindow,
+                  output: runtime.contextPolicy.outputLimit,
+                } } : {}),
+              },
             },
           },
         },
-      },
+      }),
     } : {}),
     ...(runtime.contextPolicy ? { compaction: {
       ...(config.compaction && typeof config.compaction === 'object' ? config.compaction : {}),
@@ -1882,6 +1887,38 @@ function opencodeRuntimeConfig(
     },
     permission: { '*': 'allow' },
   }, null, 2)}\n`
+}
+
+function openCodeNativeAuthDir(): string {
+  const explicitHome = process.env.HERMES_OPENCODE_HOME?.trim()
+  if (explicitHome) return join(explicitHome, 'data', 'opencode')
+  const shadowHome = process.env.HERMES_WEB_UI_HOME?.trim()
+  if (shadowHome) return join(dirname(shadowHome), 'opencode-home', 'data', 'opencode')
+  return join(process.env.XDG_DATA_HOME?.trim() || join(getGlobalConfigHome(), '.local', 'share'), 'opencode')
+}
+
+function openCodeNativeAuthContent(authDir = openCodeNativeAuthDir()): string {
+  let auth: any
+  try {
+    // OpenCode's native auth is stored in its isolated runtime home, separate
+    // from the scoped model config root and Hermes profile provider state.
+    auth = JSON.parse(readFileSync(join(authDir, 'auth.json'), 'utf8'))
+  } catch {
+    auth = null
+  }
+  const provider = auth?.openai || auth?.providers?.['openai-codex']
+  const tokens = provider?.tokens || provider
+  const access = String(tokens?.access || tokens?.access_token || '').trim()
+  const refresh = String(tokens?.refresh || tokens?.refresh_token || '').trim()
+  const authMode = String(provider?.type || provider?.auth_mode || '').toLowerCase()
+  if (!access || !refresh || (authMode && !['oauth', 'chatgpt', 'oauth_pkce'].includes(authMode))) {
+    const err = new Error('OpenCode native auth requires an OpenAI OAuth credential')
+    ;(err as any).status = 400
+    throw err
+  }
+  // OpenCode reads this snapshot from the child environment. Never write it to
+  // the scoped config, launcher, database, or the returned serializable env.
+  return JSON.stringify({ openai: { type: 'oauth', access, refresh, expires: 0 } })
 }
 
 function openCodeRuntimeEnv(input: {
@@ -3298,6 +3335,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
 
   const mcpCapabilities = studioMcpCapabilities(getCodingAgentManagedMcpServerConfigs(tool.id, input.profile || 'default'))
   const mode = resolvedCodingAgentLaunchMode(tool.id, input.mode)
+  let secretEnv: Record<string, string> | undefined
   if (mode === 'global') {
     const scope = normalizeConfigScope({ profile: input.profile, provider: 'global' })
     const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
@@ -3482,7 +3520,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const model = String(input.model || '').trim()
   const freeRuntime = provider === OPENCODE_FREE_PROVIDER ? openCodeFreeRuntime(model) : undefined
   const apiKey = freeRuntime ? '' : String(input.apiKey || '').trim()
-  assertScopedCodingAgentProviderAllowed(mode, provider)
+  if (!(tool.id === 'opencode' && provider === 'openai-codex')) assertScopedCodingAgentProviderAllowed(mode, provider)
   if (!model) {
     const err = new Error('Model is required')
     ;(err as any).status = 400
@@ -3858,7 +3896,8 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     args = prepared.args
     env = {}
   } else {
-    const proxyTarget = baseUrl && (apiKey || freeRuntime)
+    const nativeAuth = provider === 'openai-codex'
+    const proxyTarget = !nativeAuth && baseUrl && (apiKey || freeRuntime)
       ? registerCodexProxyTarget({
           profile: scope.profile,
           provider,
@@ -3876,10 +3915,14 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     const configPath = join(rootDir, OPENCODE_CONFIG_FILE)
     const promptPath = join(rootDir, 'AGENTS.md')
     await writeManagedPromptFile(promptPath, scopedSystemPrompt, '')
+    if (nativeAuth) {
+      secretEnv = { OPENCODE_AUTH_CONTENT: openCodeNativeAuthContent() }
+    }
     const runtimeConfig = opencodeRuntimeConfig(scope.profile, {
       studioMcpTokenFile: input.studioMcpTokenFile,
       provider,
       model,
+      nativeAuth,
       baseUrl: proxyTarget?.baseUrl || baseUrl,
       systemPrompt: promptPath,
       contextPolicy,
@@ -3893,9 +3936,9 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       configDir: baseRuntime.rootDir,
       databasePath: join(rootDir, OPENCODE_DATABASE_FILE),
       runtimeConfig,
-      apiKey: proxyTarget?.token || apiKey,
+      apiKey: nativeAuth ? undefined : (proxyTarget?.token || apiKey),
     })
-    args = ['--model', `${OPENCODE_PROVIDER_ID}/${model}`]
+    args = ['--model', nativeAuth ? `openai/${model}` : `${OPENCODE_PROVIDER_ID}/${model}`]
   }
 
   const chatSessionId = String(isolatedInput.sessionId || '').trim()
@@ -3920,7 +3963,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   })
   shellCommand = buildLauncherShellCommand(workspaceDir, launcherPath)
 
-  return {
+  const launchResult: CodingAgentLaunchResult = {
     agentId: tool.id,
     mode,
     profile: scope.profile,
@@ -3943,6 +3986,8 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         : undefined,
     reasoningEffort,
   }
+  if (secretEnv) Object.defineProperty(launchResult, 'secretEnv', { value: secretEnv, enumerable: false })
+  return launchResult
 }
 
 export async function startCodingAgentRun(id: string, input: CodingAgentLaunchInput & { sessionId: string }, state?: SessionState): Promise<CodingAgentRunStartResult> {
@@ -3974,8 +4019,10 @@ async function startCodingAgentRunInternal(
   const resolvedInput = await resolveStoredProviderLaunchInput(input, existingSession)
   const requestedMode = resolvedCodingAgentLaunchMode(id, resolvedInput.mode)
   const requestedProvider = String(resolvedInput.provider || '').trim().toLowerCase()
-  assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider)
-  if (id !== 'cursor' && requestedMode !== 'global' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
+  if (!(id === 'opencode' && requestedMode === 'scoped' && requestedProvider === 'openai-codex')) {
+    assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider)
+  }
+  if (id !== 'cursor' && requestedMode !== 'global' && requestedProvider !== 'openai-codex' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
     const err = new Error('Coding agent provider credentials are missing. Re-select the provider/model or update the provider API key before continuing this session.')
     ;(err as any).status = 400
     throw err
@@ -4042,6 +4089,7 @@ async function startCodingAgentRunInternal(
     shellCommand: launch.shellCommand,
     workspaceDir: launch.workspaceDir,
     env: runtimeEnv,
+    secretEnv: launch.secretEnv,
     promptFile: launch.promptFile,
     state,
     reasoningEffort: launch.reasoningEffort,

@@ -99,6 +99,8 @@ export interface CodingAgentRunLaunch {
   shellCommand: string
   workspaceDir: string
   env?: NodeJS.ProcessEnv
+  /** Memory-only values merged only into direct child spawn environments. */
+  secretEnv?: NodeJS.ProcessEnv
   promptFile?: string
   state?: SessionState
   sessionSource?: 'global_agent' | 'workflow' | 'group_chat'
@@ -786,6 +788,7 @@ export class CodingAgentRunManager {
       env: {
         ...process.env,
         ...(launch.env || {}),
+        ...(launch.secretEnv || {}),
       },
     })
 
@@ -1471,8 +1474,8 @@ export class CodingAgentRunManager {
     const child = spawnCodingAgentChild(run.launch.command, run.launch.args, {
       cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
       env: run.launch.mode === 'global'
-        ? { ...process.env, ...(run.launch.env || {}) }
-        : isolatedCodingAgentChildEnv(run.launch.env),
+        ? { ...process.env, ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }
+        : isolatedCodingAgentChildEnv({ ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }),
       pipeStdin: true,
     })
     run.currentChild = child
@@ -1958,8 +1961,8 @@ export class CodingAgentRunManager {
     const child = spawnCodingAgentChild(run.launch.command, args, {
       cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
       env: run.launch.mode === 'global'
-        ? { ...process.env, ...(run.launch.env || {}) }
-        : isolatedCodingAgentChildEnv(run.launch.env),
+        ? { ...process.env, ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }
+        : isolatedCodingAgentChildEnv({ ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }),
       pipeStdin: true,
     })
     run.currentChild = child
@@ -2527,8 +2530,8 @@ export class CodingAgentRunManager {
       rootDir,
       workspaceDir,
       env: run.launch.mode === 'global'
-        ? { ...process.env, ...(run.launch.env || {}) }
-        : isolatedCodingAgentChildEnv(run.launch.env),
+        ? { ...process.env, ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }
+        : isolatedCodingAgentChildEnv({ ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }),
       nativeSessionId,
       resume: run.nativeResumeReady === true,
       input,
@@ -2642,8 +2645,8 @@ export class CodingAgentRunManager {
       baseArgs: run.launch.args,
       workspaceDir,
       env: run.launch.mode === 'global'
-        ? { ...process.env, ...(run.launch.env || {}) }
-        : isolatedCodingAgentChildEnv(run.launch.env),
+        ? { ...process.env, ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }
+        : isolatedCodingAgentChildEnv({ ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }),
       nativeSessionId,
       resume: run.nativeResumeReady === true && Boolean(nativeSessionId),
       input: turnInput,
@@ -2778,8 +2781,8 @@ export class CodingAgentRunManager {
     const child = spawnCodingAgentChild(run.launch.command, args, {
       cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
       env: run.launch.mode === 'global'
-        ? { ...process.env, ...(run.launch.env || {}) }
-        : isolatedCodingAgentChildEnv(run.launch.env),
+        ? { ...process.env, ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }
+        : isolatedCodingAgentChildEnv({ ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }),
     })
     run.currentChild = child
 
@@ -2996,8 +2999,8 @@ export class CodingAgentRunManager {
     const child = spawnCodingAgentChild(run.launch.command, args, {
       cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
       env: run.launch.mode === 'global'
-        ? { ...process.env, ...(run.launch.env || {}) }
-        : isolatedCodingAgentChildEnv(run.launch.env),
+        ? { ...process.env, ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }
+        : isolatedCodingAgentChildEnv({ ...(run.launch.env || {}), ...(run.launch.secretEnv || {}) }),
       pipeStdin: true,
     })
     run.currentChild = child
