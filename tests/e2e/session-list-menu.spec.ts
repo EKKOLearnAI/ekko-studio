@@ -24,7 +24,7 @@ for (const width of [1440, 390]) {
     }, sessions)
     await page.goto('/#/hermes/chat')
     if (width < 769) await page.getByRole('button', { name: 'Menu', exact: true }).click()
-    const sidebar = page.locator('.chat-panel > .session-list')
+    const sidebar = page.locator(width < 769 ? '.studio-mobile-navigation .session-list' : '.chat-panel > .session-list')
     const more = sidebar.getByRole('button', { name: 'Session list actions', exact: true })
     await expect(more).toBeVisible()
     await expect(sidebar.locator('.session-list-toolbar')).toHaveCount(0)
@@ -77,8 +77,9 @@ for (const width of [1440, 390]) {
     await page.screenshot({ animations: 'disabled', path: `/tmp/studio-session-menu-open-${width}.png` })
     await more.click()
     if (width < 769) {
-      await sidebar.getByRole('button', { name: 'Close', exact: true }).click()
-      await expect(sidebar).toHaveClass(/collapsed/)
+      await page.locator('.studio-mobile-navigation__close').click()
+      await expect(sidebar).toBeHidden()
+      await expect(page.getByRole('button', { name: 'Menu', exact: true })).toHaveAttribute('aria-expanded', 'false')
     }
   })
 }

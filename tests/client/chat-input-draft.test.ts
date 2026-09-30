@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
 import { nextTick } from 'vue'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import ChatInput from '@/components/hermes/chat/ChatInput.vue'
+
+enableAutoUnmount(afterEach)
 
 const fetchSkillsMock = vi.hoisted(() => vi.fn())
 const fetchSkillBundlesMock = vi.hoisted(() => vi.fn())
@@ -23,6 +25,7 @@ vi.mock('naive-ui', () => ({
   NSwitch: { template: '<button type="button"></button>' },
   NDropdown: { template: '<div><slot /></div>' },
   NModal: { template: '<div><slot /><slot name="footer" /></div>' },
+  NSpin: { template: '<div role="status"><slot /></div>' },
   NInputNumber: { template: '<input />' },
   NPopover: {
     template: '<div class="n-popover-stub"><slot name="trigger" /><slot /></div>',

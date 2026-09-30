@@ -19,7 +19,13 @@ for (const width of [1440, 390]) {
     await page.goto('/#/hermes/workflow')
     if (width < 769) await page.getByRole('button', { name: 'Menu', exact: true }).click()
     const sidebar = page.locator('.workflow-sidebar')
-    await expect(sidebar).toHaveCSS('width', '240px')
+    await expect(sidebar).toBeVisible()
+    if (width < 769) {
+      const content = page.locator('.studio-mobile-navigation__content')
+      expect((await sidebar.boundingBox())!.width).toBe((await content.boundingBox())!.width)
+    } else {
+      await expect(sidebar).toHaveCSS('width', '240px')
+    }
     const more = sidebar.getByRole('button', { name: 'Workflow list actions', exact: true })
     await expect(sidebar.locator('.workflow-list-item')).toHaveCount(2)
     await expect(sidebar.locator('.workflow-list-toolbar')).toHaveCount(0)
@@ -66,8 +72,9 @@ for (const width of [1440, 390]) {
     await expect(sidebar.locator('.workflow-profile-indicator')).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     if (width < 769) {
-      await sidebar.getByRole('button', { name: 'Close', exact: true }).click()
-      await expect(sidebar).toHaveClass(/collapsed/)
+      await page.locator('.studio-mobile-navigation__close').click()
+      await expect(sidebar).toBeHidden()
+      await expect(page.getByRole('button', { name: 'Menu', exact: true })).toHaveAttribute('aria-expanded', 'false')
     }
   })
 }

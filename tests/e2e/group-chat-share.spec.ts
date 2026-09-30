@@ -254,7 +254,7 @@ test.describe('invite-only group chat share page', () => {
     })
     await page.locator('#group-chat-guest-name input').fill('Visitor')
     await page.getByRole('button', { name: 'Enter room' }).click()
-    await expect(page.locator('.invite-loading')).toBeVisible()
+    await expect(page.locator('.shared-group-chat-view > .page-loading-overlay')).toBeVisible()
     await expect(page.locator('.invite-card')).toHaveCount(0)
     await expect(page.locator('.room-title-text')).toHaveText('Shared Planning Room')
     await expect(page.getByText('Welcome to the shared room')).toBeVisible()

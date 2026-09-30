@@ -512,6 +512,7 @@ test('workflow nodes connect from every side and create an automatic self loop',
   await page.goto('/#/hermes/workflow')
 
   const node = page.locator('.vue-flow__node[data-id="review"]')
+  await expect(page.locator('.workflow-view')).toHaveAttribute('aria-busy', 'false')
   const handles = node.locator('.workflow-handle')
   await expect(handles).toHaveCount(4)
   for (const handleId of ['input', 'top', 'output', 'bottom']) {
@@ -736,6 +737,7 @@ test('opposite-side self loops use measured node bounds in the rendered SVG', as
   await page.goto('/#/hermes/workflow')
 
   for (const nodeId of ['horizontal', 'vertical']) {
+    await expect(page.locator('.workflow-view')).toHaveAttribute('aria-busy', 'false')
     const result = await page.locator(`.vue-flow__edge[data-id="${nodeId}-${nodeId}"] .vue-flow__edge-path`)
       .evaluate((path: SVGPathElement, currentNodeId) => {
         const matrix = path.getScreenCTM()!
@@ -796,6 +798,7 @@ test('workflow loop validation blocks invalid editor and workflow saves before A
   expect(api.requests.filter(request => request.method === 'PATCH' && request.pathname === '/api/studio/workflows/wf-invalid-loops')).toHaveLength(patchCount)
 
   const feedbackEdge = page.locator('.vue-flow__edge[data-id="b-a"]')
+  await expect(page.locator('.workflow-view')).toHaveAttribute('aria-busy', 'false')
   await feedbackEdge.dblclick({ force: true })
   const edgeDialog = page.locator('.workflow-edge-editor-form').first()
   await expect(edgeDialog).toBeVisible()

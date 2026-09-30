@@ -433,8 +433,8 @@ test('shows one real subagent card and opens its live chat stream in the resizab
 
   // A child completion is not the aggregate lifecycle: delivery can still be pending.
   await page.setViewportSize({ width: 1280, height: 720 })
-  // Entering mobile closes the sessions pane; resizing does not reopen it.
-  await page.locator('.header-sidebar-toggle').click()
+  // The desktop sessions pane retains its expanded state across mobile layouts.
+  await expect(workingLogos.first()).toBeVisible()
   await expect(workingLogos).toHaveClass([/streaming/, /streaming/])
   await page.evaluate((sid) => {
     const socket = { __trigger: (window as any).__PW_CHAT_SOCKET__.broadcast }

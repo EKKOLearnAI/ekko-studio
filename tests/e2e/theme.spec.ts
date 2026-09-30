@@ -66,6 +66,7 @@ test('loads and saves the signed-in user theme without profile scoping', async (
     'border-color',
     'rgba(51, 102, 255, 0.18)',
   )
+  await expect(textarea).toBeVisible()
   await textarea.focus()
   await expect(inputWrapper).toHaveCSS('border-color', 'rgb(51, 102, 255)')
 

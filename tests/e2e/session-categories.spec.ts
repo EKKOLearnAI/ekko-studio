@@ -42,6 +42,15 @@ async function waitForRun(page: Page) {
   return handle.jsonValue() as Promise<any>
 }
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = Object.fromEntries(
+      ['work-session', 'default-work-session', 'uncategorized-session', 'notes-session', 'latest-session', 'older-session', 'recent-session', 'general-session', 'other-session']
+        .map(sessionId => [sessionId, { session_id: sessionId, messages: [], isWorking: false, events: [] }]),
+    )
+  })
+})
+
 test('groups sessions by category and persists collapsed groups', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await page.addInitScript(() => {
@@ -111,13 +120,6 @@ test('groups sessions by category and persists collapsed groups', async ({ page 
 test('keeps manually collapsed categories closed across polling and foreground refreshes', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await page.clock.install()
-  await page.addInitScript(() => {
-    (window as any).__PW_CHAT_SOCKET_RESUMES__ = Object.fromEntries(
-      ['work-session', 'notes-session'].map(sessionId => [sessionId, {
-        session_id: sessionId, messages: [], isWorking: false,
-      }]),
-    )
-  })
   const sessions = [
     sessionSummary('work-session', 'Project Alpha', 1, 200),
     sessionSummary('notes-session', 'General Notes', null, 100),
@@ -412,7 +414,7 @@ test('moves a session to another category from its context menu', async ({ page 
   await expect(page.getByRole('link', { name: /General Notes/ }).first().locator('.session-item-category-tag')).toHaveText('Work')
 })
 
-test('disables category creation until the destination list finishes loading', async ({ page }) => {
+test('keeps category actions covered until the destination list finishes loading', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const api = await mockHermesApi(page, {
     sessionCategories: [{ id: 1, name: 'Work' }],
@@ -434,13 +436,9 @@ test('disables category creation until the destination list finishes loading', a
 
   await page.goto('/#/hermes/chat')
   const generalNotes = page.getByRole('link', { name: /General Notes/ }).first()
-  await generalNotes.click({ button: 'right' })
-  await page.locator('.n-dropdown-option').filter({ hasText: 'Move to category' }).hover()
-  const createOption = page.locator('.n-dropdown-option:visible')
-    .filter({ hasText: /^Create new category$/ })
-    .locator(':scope > .n-dropdown-option-body')
-  await expect(createOption).toHaveClass(/n-dropdown-option-body--disabled/)
-  await createOption.evaluate((element: HTMLElement) => element.click())
+  await expect(page.locator('.chat-view > .page-loading-overlay')).toBeVisible()
+  await expect(page.locator('.chat-view > .page-loading-content')).toHaveAttribute('inert', '')
+  await expect(generalNotes).toHaveCount(0)
   await expect(page.getByRole('dialog').filter({ hasText: 'Create new category' })).toHaveCount(0)
   expect(api.requests.filter(request =>
     request.method === 'POST' && request.pathname === '/api/studio/session-categories',
@@ -452,9 +450,8 @@ test('disables category creation until the destination list finishes loading', a
   ))
   releaseCategories()
   await categoryResponse
+  await expect(generalNotes).toBeVisible()
   await expect(generalNotes.locator('.session-item-category-tag')).toHaveText('Uncategorized')
-  await page.locator('.chat-panel').click({ position: { x: 800, y: 200 } })
-  await expect(page.locator('.n-dropdown-menu:visible')).toHaveCount(0)
 
   await generalNotes.click({ button: 'right' })
   await page.locator('.n-dropdown-option').filter({ hasText: 'Move to category' }).hover()

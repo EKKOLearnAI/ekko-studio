@@ -106,6 +106,7 @@ onBeforeUnmount(() => {
   flex-direction: inherit;
 
   &--hidden {
+    visibility: hidden;
     opacity: 0;
     pointer-events: none;
   }

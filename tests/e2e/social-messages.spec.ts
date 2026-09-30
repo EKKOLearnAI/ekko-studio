@@ -105,6 +105,12 @@ test('creates a standalone Feishu app by QR code', async ({ page }) => {
     ],
     socialMessageFeishuQrStatus: { status: 'confirmed', open_id: 'ou_owner' },
   })
+  let confirmScan!: () => void
+  const scanConfirmation = new Promise<void>(resolve => { confirmScan = resolve })
+  await page.route('**/api/social-messages/feishu/qrcode/status?**', async route => {
+    await scanConfirmation
+    await route.fallback()
+  })
 
   await page.goto('/#/social-messages')
 
@@ -112,6 +118,7 @@ test('creates a standalone Feishu app by QR code', async ({ page }) => {
   await expect(page.getByText('Scan with Feishu to create and connect the app.')).toBeVisible()
   await expect(page.getByLabel('App ID')).toHaveCount(0)
   await expect(page.getByLabel('App Secret')).toHaveCount(0)
+  confirmScan()
   await expect(page.getByText(
     'Send this Bot one message in Feishu first so Studio can identify the push target.',
   )).toBeVisible({ timeout: 5_000 })

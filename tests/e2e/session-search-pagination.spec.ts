@@ -77,9 +77,10 @@ for (const { path, hit, listed, total } of [
     const loading = page.locator('.message-search-loading')
     if (listed) {
       await expect(loading).toBeVisible()
+      await expect(loading.locator('.studio-loading-logo')).toHaveCount(0)
       await expect(page.locator('.virtual-message-list-host')).toHaveCount(0)
       await loading.evaluate(async loader => {
-        const spinner = loader.querySelector('.studio-loading-logo')!
+        const spinner = loader.querySelector('.n-base-loading__container')!
         const animation = spinner.getAnimations({ subtree: true })[0]
         await animation.ready
         const startTime = animation.startTime
@@ -100,14 +101,12 @@ for (const { path, hit, listed, total } of [
       })
       if (cdp) {
         // Verify Chromium actually accelerates this animation, so a busy
-        // message-rendering main thread cannot pause the logo sweep.
+        // message-rendering main thread cannot pause the loading indicator.
         const { root } = await cdp.send('DOM.getDocument')
-        const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.studio-loading-logo' })
+        const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.message-search-loading .n-base-loading__container' })
         const { node } = await cdp.send('DOM.describeNode', { nodeId })
-        const sweep = node.pseudoElements?.find(item => item.pseudoType === 'after')
-        expect(sweep).toBeTruthy()
         await expect.poll(async () => {
-          const layer = layers.find(item => item.backendNodeId === sweep?.backendNodeId)
+          const layer = layers.find(item => item.backendNodeId === node.backendNodeId)
           if (!layer) return []
           return (await cdp.send('LayerTree.compositingReasons', { layerId: layer.layerId })).compositingReasonIds
         }).toContain('ActiveTransformAnimation')
@@ -124,6 +123,7 @@ for (const { path, hit, listed, total } of [
       })
     }
     const target = page.locator(`#message-${hit}.highlight`)
+    await expect(target).toBeVisible()
     await expect(target).toBeInViewport()
     // Once revealed, no alignment retries or virtual size corrections may shake the hit.
     const positions = await target.evaluate(async element => {

@@ -122,7 +122,7 @@ for (const mobile of [false, true]) test(`DSH Agent presets use Studio component
   })
   await page.goto('/#/studio/agents/dsh/presets')
   const panel = page.getByTestId('dsh-agent-presets')
-  await expect(panel.getByRole('heading', { name: 'Agent presets', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Agent presets', exact: true })).toBeVisible()
   await expect(panel.locator('iframe')).toHaveCount(0)
   await expect(page.getByTestId('coding-agent-config-presets')).toHaveCount(1)
   const standard = panel.getByTestId('dsh-preset-standard')

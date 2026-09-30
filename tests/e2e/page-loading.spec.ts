@@ -13,6 +13,7 @@ async function expectCovered(page: Page, selector: string) {
   await expect(overlay.locator('.studio-loading-logo')).toBeVisible()
   await expect(surface).toHaveAttribute('aria-busy', 'true')
   await expect(surface.locator(':scope > .page-loading-content')).toHaveAttribute('inert', '')
+  await expect(surface.locator(':scope > .page-loading-content')).not.toBeVisible()
   const bounds = await surface.evaluate(element => {
     const a = element.getBoundingClientRect()
     const b = element.querySelector('.page-loading-overlay')!.getBoundingClientRect()
