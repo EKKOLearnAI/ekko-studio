@@ -661,6 +661,17 @@ useKeyboard();
 }
 
 .app-shell--custom-background {
+  &.app-shell--navigation-rail .app-box::after {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    inset: var(--studio-header-height) 0 0;
+    // Match the layout margins so the outer gutters keep the shell's solid color.
+    border-right: 5px solid $bg-sidebar; // rtl-physical: matches the physical right margin of app-layout.
+    border-bottom: 5px solid $bg-sidebar;
+    pointer-events: none;
+  }
+
   .app-layout {
     background-color: transparent;
   }
