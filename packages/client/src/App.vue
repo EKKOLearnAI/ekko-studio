@@ -516,6 +516,8 @@ useKeyboard();
 .app-shell--navigation-rail {
   --studio-header-height: 40px;
   --studio-header-inset: #{$navigation-rail-width};
+  --studio-content-gutter: 5px;
+  --studio-content-radius: #{$radius-lg};
   --desktop-window-controls-width: 139px;
   flex-direction: row;
   background-color: $bg-sidebar;
@@ -643,8 +645,8 @@ useKeyboard();
   }
   .app-layout {
     width: auto;
-    margin: 0 5px 5px 0;
-    border-radius: $radius-lg;
+    margin: 0 var(--studio-content-gutter) var(--studio-content-gutter) 0;
+    border-radius: var(--studio-content-radius);
   }
   .app-layout.no-sidebar { display: flex; }
 
@@ -661,15 +663,30 @@ useKeyboard();
 }
 
 .app-shell--custom-background {
-  &.app-shell--navigation-rail .app-box::after {
-    content: "";
-    position: absolute;
-    z-index: 1;
-    inset: var(--studio-header-height) 0 0;
-    // Match the layout margins so the outer gutters keep the shell's solid color.
-    border-right: 5px solid $bg-sidebar; // rtl-physical: matches the physical right margin of app-layout.
-    border-bottom: 5px solid $bg-sidebar;
-    pointer-events: none;
+  &.app-shell--navigation-rail .app-box::before {
+    --cutout-width: calc(100% - var(--studio-content-gutter));
+    --cutout-height: calc(100% - var(--studio-header-height) - var(--studio-content-gutter));
+    --corner-size: calc(2 * var(--studio-content-radius));
+    --corner-mask: radial-gradient(circle closest-side, #000 calc(100% - 0.5px), transparent);
+    inset: 0;
+    height: auto;
+    // One glass sheet covers the header, gutters and rounded corners. Subtract
+    // the content rectangle (two strips and four circles) to avoid double tinting.
+    mask:
+      linear-gradient(#000 0 0),
+      linear-gradient(#000 0 0) left var(--studio-content-radius) top var(--studio-header-height) /
+        calc(var(--cutout-width) - var(--corner-size)) var(--cutout-height) no-repeat,
+      linear-gradient(#000 0 0) left 0 top calc(var(--studio-header-height) + var(--studio-content-radius)) /
+        var(--cutout-width) calc(var(--cutout-height) - var(--corner-size)) no-repeat,
+      var(--corner-mask) left 0 top var(--studio-header-height) /
+        var(--corner-size) var(--corner-size) no-repeat,
+      var(--corner-mask) right var(--studio-content-gutter) top var(--studio-header-height) /
+        var(--corner-size) var(--corner-size) no-repeat,
+      var(--corner-mask) left 0 bottom var(--studio-content-gutter) /
+        var(--corner-size) var(--corner-size) no-repeat,
+      var(--corner-mask) right var(--studio-content-gutter) bottom var(--studio-content-gutter) /
+        var(--corner-size) var(--corner-size) no-repeat;
+    mask-composite: subtract, add, add, add, add, add, add;
   }
 
   .app-layout {
