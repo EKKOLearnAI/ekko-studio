@@ -134,7 +134,8 @@ describe('client style system', () => {
     expect(variables).toContain('--bg-main-surface-rgb: var(--bg-card-rgb);')
     expect(variables).toContain('--bg-main-surface-rgb: var(--bg-primary-rgb);')
     expect(customBackgroundStyles).toContain('rgba(var(--bg-main-surface-rgb), 0.72)')
-    expect(customBackgroundStyles).toContain('rgba(var(--bg-sidebar-surface-rgb), 0.72)')
+    expect(customBackgroundStyles).toContain('background-color: var(--glass-sidebar-bg)')
+    expect(customBackgroundStyles).toContain('background-color: var(--glass-content-bg)')
     expect(customBackgroundStyles).toContain('backdrop-filter: blur(8px) saturate(110%)')
     expect(customBackgroundStyles).toContain(':deep(.chat-panel > .chat-main)')
     expect(customBackgroundStyles).toContain(':deep(.group-chat-panel > .chat-main)')
@@ -153,10 +154,10 @@ describe('client style system', () => {
       /:deep\(\.chat-panel > \.chat-main\),[\s\S]*background-color: transparent;[\s\S]*backdrop-filter: none;/,
     )
     expect(customBackgroundStyles).toMatch(
-      /:deep\(\.chat-panel > \.chat-main > \.chat-header\),[\s\S]*background-color: rgba\(var\(--bg-main-surface-rgb\), 0\.72\);[\s\S]*backdrop-filter: blur\(8px\) saturate\(110%\);/,
+      /:deep\(\.chat-panel > \.chat-main > \.chat-header\),[\s\S]*background-color: var\(--glass-chrome-bg\);[\s\S]*backdrop-filter: blur\(16px\) saturate\(110%\);/,
     )
     expect(customBackgroundStyles).toMatch(
-      /:deep\(\.desktop-titlebar:not\(\.desktop-titlebar--flush\)\),[\s\S]*:deep\(\.chat-panel > \.chat-main > \.chat-header\),[\s\S]*background-color: rgba\(var\(--bg-main-surface-rgb\), 0\.72\);[\s\S]*backdrop-filter: blur\(8px\) saturate\(110%\);/,
+      /:deep\(\.desktop-titlebar:not\(\.desktop-titlebar--flush\)\),[\s\S]*:deep\(\.chat-panel > \.chat-main > \.chat-header\),[\s\S]*background-color: var\(--glass-chrome-bg\);[\s\S]*backdrop-filter: blur\(16px\) saturate\(110%\);/,
     )
     expect(customBackgroundStyles).toMatch(
       /:deep\(\.chat-input-area \.input-wrapper\)\s*\{[\s\S]*background-color: rgba\(var\(--bg-main-surface-rgb\), 0\.72\);[\s\S]*backdrop-filter: blur\(8px\) saturate\(110%\);/,
