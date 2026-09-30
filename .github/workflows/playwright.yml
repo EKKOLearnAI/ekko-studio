@@ -16,8 +16,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  e2e:
+  e2e-shard:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
@@ -39,14 +44,46 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run Playwright tests
-        run: npm run test:e2e
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
 
-      - name: Upload Playwright report
+      - name: Upload shard report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: |
-            playwright-report/
-            test-results/
+          name: playwright-blob-${{ matrix.shard }}
+          path: blob-report/
+          if-no-files-found: error
           retention-days: 7
+
+  # Preserve the existing required check name and fail if any shard fails.
+  e2e:
+    if: ${{ !cancelled() }}
+    needs: e2e-shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: playwright-blob-*
+          path: all-blob-reports
+          merge-multiple: true
+      - name: Merge Playwright reports
+        run: npx playwright merge-reports --reporter=html all-blob-reports
+      - uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Require every shard to pass
+        if: ${{ always() }}
+        env:
+          SHARD_RESULT: ${{ needs.e2e-shard.result }}
+        run: test "$SHARD_RESULT" = success

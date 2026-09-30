@@ -73,7 +73,12 @@ state and does not require a running Gateway.
 
 - Build workflow: installs dependencies, runs coverage, and builds production
   assets on pushes and pull requests.
-- Playwright workflow: runs browser e2e tests.
+- Playwright workflow: runs all browser tests across four independent shards,
+  then merges their blob reports into the `playwright-report` HTML artifact.
+  The final `e2e` check requires every shard to pass. Keep route/viewport sweeps
+  as independent route tests so they can be distributed across runners.
+  Mock both HTTP and WebSocket channels: `page.route` does not intercept native
+  WebSockets, and the test Vite server has no backend on port 8648.
 - NPM lockfile workflow: verifies `package-lock.json` is synchronized.
 - Desktop release and manual desktop build workflows build and upload
   platform-specific desktop artifacts.

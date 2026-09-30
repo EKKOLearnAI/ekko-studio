@@ -50,34 +50,63 @@ async function clippedControls(header: Locator) {
   })
 }
 
-for (const { width, platform } of [
-  { width: 390 }, { width: 769 }, { width: 900 }, { width: 1440 },
-  { width: 769, platform: 'win32' }, { width: 900, platform: 'darwin' },
+for (const { widths, platform } of [
+  { widths: [390, 769, 900, 1440] },
+  { widths: [769], platform: 'win32' }, { widths: [900], platform: 'darwin' },
 ]) {
-  test(`keeps every page header action visible at ${width}px ${platform || 'browser'}`, async ({ page }) => {
-    test.setTimeout(180_000)
-    await page.setViewportSize({ width, height: 900 })
-    await setup(page, platform)
-    for (const route of routes) {
-      await test.step(route, async () => {
-        // A fresh document avoids checking the previous route's header during async navigation.
-        await page.goto(`/?header-layout=${encodeURIComponent(route)}#${route}`)
-        const header = width > 768
+  for (const route of routes) {
+    test(`keeps header actions visible on ${route} (${platform || 'browser'})`, async ({ page }) => {
+      await page.setViewportSize({ width: widths[0], height: 900 })
+      await page.clock.install()
+      await setup(page, platform)
+      const headerAtWidth = (width: number) => width > 768
           ? page.locator('.studio-page-header > :not(.header-sidebar-control)')
           : page.locator('.app-main .page-header, .app-main .chat-header, .app-main .terminal-header, .app-main .file-toolbar').first()
-        await expect(header).toBeVisible()
-        const surface = page.locator('.app-main > .page-loading')
-        if (await surface.count()) await expect(surface).not.toHaveAttribute('aria-busy', 'true')
-        if (width > 768) {
-          await expect.poll(async () => (await header.boundingBox())!.height).toBe(40)
-          expect.soft((await header.boundingBox())!.x + (await header.boundingBox())!.width, route)
-            .toBeLessThanOrEqual(width - (platform === 'win32' ? 139 : 0) + 1)
-        }
-        await softExpect.poll(() => clippedControls(header), { message: route }).toEqual([])
-      })
-    }
-  })
+      // Each route starts fresh; widths within the browser case share that load.
+      await page.goto(`/#${route}`)
+      const surface = page.locator('.app-main > .page-loading')
+      // This suite measures geometry. Advance the presentation delay while still
+      // waiting for data; page-loading.spec.ts exercises the real loading timing.
+      await expect.poll(async () => {
+        await page.clock.fastForward(1000)
+        return await headerAtWidth(widths[0]).isVisible()
+          && (!(await surface.count()) || await surface.getAttribute('aria-busy') !== 'true')
+      }, { intervals: [0, 50, 100] }).toBe(true)
+      for (const width of widths) {
+        await test.step(`${width}px`, async () => {
+          await page.setViewportSize({ width, height: 900 })
+          const header = headerAtWidth(width)
+          await expect(header).toBeVisible()
+          if (width > 768) {
+            await expect.poll(async () => (await header.boundingBox())!.height).toBe(40)
+            expect.soft((await header.boundingBox())!.x + (await header.boundingBox())!.width, route)
+              .toBeLessThanOrEqual(width - (platform === 'win32' ? 139 : 0) + 1)
+          }
+          await softExpect.poll(() => clippedControls(header), { message: route }).toEqual([])
+        })
+      }
+    })
+  }
 }
+
+test('keeps job sorting and creation usable at the minimum Windows width', async ({ page }) => {
+  await setup(page, 'win32')
+  await page.setViewportSize({ width: 769, height: 900 })
+  await page.goto('/#/hermes/jobs')
+  const header = page.locator('.studio-page-header > .page-header')
+  await expect.poll(() => clippedControls(header)).toEqual([])
+  await header.getByRole('button', { name: 'More', exact: true }).click()
+  const menu = page.locator('.header-overflow-menu')
+  await expect(menu).toBeVisible()
+  expect(await clippedControls(menu)).toEqual([])
+  await menu.getByRole('button', { name: /Time/ }).click()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect(menu).toBeHidden()
+  await expect(header.getByRole('button', { name: /Time/ })).toContainText('↑')
+  await page.setViewportSize({ width: 769, height: 900 })
+  await header.getByRole('button', { name: 'Create Job', exact: true }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+})
 
 test('keeps compact Kanban actions and filters usable as the header resizes', async ({ page }) => {
   await setup(page)

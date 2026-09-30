@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
-import { authenticate, TEST_MODEL_GROUP } from './fixtures'
+import { authenticate, mockChatSocket, TEST_MODEL_GROUP } from './fixtures'
 
 const historySessions = [
   {
@@ -224,6 +224,7 @@ async function mockHistoryApi(page: Page, sessions = historySessions, groupRooms
 
     return json({ error: `Unexpected mocked route: ${request.method()} ${pathname}` }, 404)
   })
+  await mockChatSocket(page)
 }
 
 test.describe('history session deep links', () => {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderActionOverflow from '@/components/layout/HeaderActionOverflow.vue'
 import { ref, computed, onMounted } from 'vue'
 import { NButton, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -93,32 +94,34 @@ function arrowIcon(field: 'time' | 'name'): string {
     <header class="page-header">
       <h2 class="header-title">{{ t('jobs.title') }}</h2>
       <div class="header-actions">
-        <div class="sort-toggle">
-          <NTooltip>
-            <template #trigger>
-              <NButton
-                size="tiny"
-                :type="sortBy === 'name' ? 'primary' : 'default'"
-                @click="toggleSort('name')"
-              >
-                {{ t('jobs.sortByName') }} <span class="sort-arrow">{{ arrowIcon('name') }}</span>
-              </NButton>
-            </template>
-            {{ sortBy === 'name' ? (sortAsc ? t('jobs.sortAsc') : t('jobs.sortDesc')) : t('jobs.sortByNameHint') }}
-          </NTooltip>
-          <NTooltip>
-            <template #trigger>
-              <NButton
-                size="tiny"
-                :type="sortBy === 'time' ? 'primary' : 'default'"
-                @click="toggleSort('time')"
-              >
-                {{ t('jobs.sortByTime') }} <span class="sort-arrow">{{ arrowIcon('time') }}</span>
-              </NButton>
-            </template>
-            {{ sortBy === 'time' ? (sortAsc ? t('jobs.sortAsc') : t('jobs.sortDesc')) : t('jobs.sortByTimeHint') }}
-          </NTooltip>
-        </div>
+        <HeaderActionOverflow :label="t('chat.more')" :breakpoint="420">
+          <div class="sort-toggle">
+            <NTooltip>
+              <template #trigger>
+                <NButton
+                  size="tiny"
+                  :type="sortBy === 'name' ? 'primary' : 'default'"
+                  @click="toggleSort('name')"
+                >
+                  {{ t('jobs.sortByName') }} <span class="sort-arrow">{{ arrowIcon('name') }}</span>
+                </NButton>
+              </template>
+              {{ sortBy === 'name' ? (sortAsc ? t('jobs.sortAsc') : t('jobs.sortDesc')) : t('jobs.sortByNameHint') }}
+            </NTooltip>
+            <NTooltip>
+              <template #trigger>
+                <NButton
+                  size="tiny"
+                  :type="sortBy === 'time' ? 'primary' : 'default'"
+                  @click="toggleSort('time')"
+                >
+                  {{ t('jobs.sortByTime') }} <span class="sort-arrow">{{ arrowIcon('time') }}</span>
+                </NButton>
+              </template>
+              {{ sortBy === 'time' ? (sortAsc ? t('jobs.sortAsc') : t('jobs.sortDesc')) : t('jobs.sortByTimeHint') }}
+            </NTooltip>
+          </div>
+        </HeaderActionOverflow>
         <span class="sort-divider"></span>
         <NButton type="primary" size="small" @click="openCreateModal">
           <template #icon>

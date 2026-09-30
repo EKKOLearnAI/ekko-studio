@@ -592,6 +592,7 @@ test('reports partial success and retries moving without recreating the category
   )).toHaveLength(1)
   expect(moveAttempts).toBe(1)
 
+  await expect(createDialog.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
   await categoryNameInput.press('Enter')
   await expect.poll(() => moveAttempts).toBe(2)
   await expect(page.getByText('Category "Client Work" was created, but the session was not moved. Try again to move it.').last()).toBeVisible()
@@ -600,6 +601,9 @@ test('reports partial success and retries moving without recreating the category
     request.method === 'POST' && request.pathname === '/api/studio/session-categories',
   )).toHaveLength(1)
 
+  // The previous error toast can remain visible while the next request is still
+  // in flight. Wait for submission to finish before sending another Enter.
+  await expect(createDialog.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
   await categoryNameInput.press('Enter')
   await expect(page.getByText('Category "Client Work" created and session moved')).toBeVisible()
   await expect(createDialog).toBeHidden()
