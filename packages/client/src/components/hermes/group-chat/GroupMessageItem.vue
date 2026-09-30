@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import TaskPlanCard from '../chat/TaskPlanCard.vue'
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
@@ -35,8 +35,7 @@ import { groupAgentAvatar, groupMessageAgent, parseStoredAvatar } from '@/utils/
 import GroupAgentMessageAvatar from './GroupAgentMessageAvatar.vue'
 import GroupAgentRobotIcon from './GroupAgentRobotIcon.vue'
 import ImagePreviewOverlay from '@/components/hermes/chat/ImagePreviewOverlay.vue'
-
-const MarkdownRenderer = defineAsyncComponent(async () => (await import('../chat/MarkdownRenderer.vue')).default)
+import MarkdownRenderer from '../chat/MarkdownRenderer.vue'
 
 const TOOL_PAYLOAD_DISPLAY_LIMIT = 1000
 const JSON_STRING_DISPLAY_LIMIT = 200
