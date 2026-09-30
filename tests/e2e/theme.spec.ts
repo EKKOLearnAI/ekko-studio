@@ -198,11 +198,18 @@ test('tints transparent app surfaces with the active theme background color', as
     'rgba(26, 26, 26, 0.72)',
   )
 
-  await page.goto('/#/studio/agents')
-  await expect(page.locator('.agent-manager-panel')).toHaveCSS(
-    'background-color',
-    'rgba(0, 0, 0, 0)',
-  )
-  await expect(page.locator('.app-main--card')).toHaveCount(0)
+  for (const [route, surface] of [
+    ['/hermes/connections', '.connections-panel'],
+    ['/studio/agents', '.agent-manager-panel'],
+    ['/hermes/models', '.models-view'],
+  ]) {
+    await page.goto(`/#${route}`)
+    await expect(page.locator(surface)).toHaveCSS('background-color', 'rgba(26, 26, 26, 0.72)')
+    await expect(page.locator(surface)).toHaveCSS('backdrop-filter', 'blur(8px) saturate(1.1)')
+    await expect(page.locator('.app-main--card')).toHaveCount(0)
+    if (route === '/hermes/connections') {
+      await expect(page.locator('.connections-tabs > .n-tabs-nav')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    }
+  }
   expect(api.unexpectedRequests).toEqual([])
 })

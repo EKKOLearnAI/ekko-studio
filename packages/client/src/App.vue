@@ -718,7 +718,10 @@ useKeyboard();
   }
 
   :deep(.history-panel > .page-loading-content > .chat-main),
-  :deep(.workflow-view > .page-loading-content > .workflow-main) {
+  :deep(.workflow-view > .page-loading-content > .workflow-main),
+  :deep(.connections-panel),
+  :deep(.agent-manager-panel),
+  :deep(.models-view) {
     background-color: rgba(var(--bg-main-surface-rgb), 0.72);
     -webkit-backdrop-filter: blur(8px) saturate(110%);
     backdrop-filter: blur(8px) saturate(110%);
@@ -740,7 +743,7 @@ useKeyboard();
   }
 
   :deep(.chat-input-area),
-  :deep(.agent-manager-panel) {
+  :deep(.connections-tabs > .n-tabs-nav) {
     background-color: transparent;
   }
 
