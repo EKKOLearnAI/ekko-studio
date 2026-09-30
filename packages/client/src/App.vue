@@ -663,6 +663,10 @@ useKeyboard();
 }
 
 .app-shell--custom-background {
+  .studio-page-header {
+    box-shadow: inset 0 -1px 0 var(--glass-divider-color);
+  }
+
   &.app-shell--navigation-rail {
     .app-box::before {
       inset: 0;
@@ -688,7 +692,7 @@ useKeyboard();
     background-color: transparent;
 
     &--card {
-      background-color: rgba(var(--bg-main-surface-rgb), 0.72);
+      background-color: var(--glass-content-bg);
       -webkit-backdrop-filter: blur(8px) saturate(110%);
       backdrop-filter: blur(8px) saturate(110%);
     }
@@ -703,8 +707,16 @@ useKeyboard();
   }
 
   &.app-shell--navigation-rail .app-box::before,
-  :deep(.sidebar),
   :deep(.studio-navigation-rail),
+  :deep(.desktop-titlebar:not(.desktop-titlebar--flush)),
+  :deep(.chat-panel > .chat-main > .chat-header),
+  :deep(.group-chat-panel > .chat-main > .chat-header) {
+    background-color: var(--glass-chrome-bg);
+    -webkit-backdrop-filter: blur(16px) saturate(110%);
+    backdrop-filter: blur(16px) saturate(110%);
+  }
+
+  :deep(.sidebar),
   :deep(.hermes-config-sidebar),
   :deep(.ekko-config-sidebar),
   :deep(.coding-agent-config-sidebar),
@@ -712,9 +724,9 @@ useKeyboard();
   :deep(.history-panel > .page-loading-content > .session-list),
   :deep(.group-chat-panel > .room-sidebar),
   :deep(.workflow-view > .page-loading-content > .workflow-sidebar) {
-    background-color: rgba(var(--bg-sidebar-surface-rgb), 0.72);
-    -webkit-backdrop-filter: blur(8px) saturate(110%);
-    backdrop-filter: blur(8px) saturate(110%);
+    background-color: var(--glass-sidebar-bg);
+    -webkit-backdrop-filter: blur(12px) saturate(110%);
+    backdrop-filter: blur(12px) saturate(110%);
   }
 
   :deep(.history-panel > .page-loading-content > .chat-main),
@@ -722,7 +734,7 @@ useKeyboard();
   :deep(.connections-panel),
   :deep(.agent-manager-panel),
   :deep(.models-view) {
-    background-color: rgba(var(--bg-main-surface-rgb), 0.72);
+    background-color: var(--glass-content-bg);
     -webkit-backdrop-filter: blur(8px) saturate(110%);
     backdrop-filter: blur(8px) saturate(110%);
   }
@@ -732,14 +744,6 @@ useKeyboard();
     background-color: transparent;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-  }
-
-  :deep(.desktop-titlebar:not(.desktop-titlebar--flush)),
-  :deep(.chat-panel > .chat-main > .chat-header),
-  :deep(.group-chat-panel > .chat-main > .chat-header) {
-    background-color: rgba(var(--bg-main-surface-rgb), 0.72);
-    -webkit-backdrop-filter: blur(8px) saturate(110%);
-    backdrop-filter: blur(8px) saturate(110%);
   }
 
   :deep(.chat-input-area),

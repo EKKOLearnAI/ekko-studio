@@ -279,7 +279,7 @@ test('matches Windows controls to the header glass over custom backgrounds', asy
   await expect(page.getByRole('heading', { name: 'Browser' })).toBeVisible()
   await expect(header).toHaveCSS('height', '40px')
   await expect(header).not.toContainText('Browser Settings')
-  await expect(page.locator('.app-main--card')).toHaveCSS('background-color', 'rgba(26, 26, 26, 0.72)')
+  await expect(page.locator('.app-main--card')).toHaveCSS('background-color', 'rgba(42, 42, 42, 0.82)')
   await expect(page.locator('.settings-card')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(page.locator('.profile-card.active')).toHaveCSS('border-color', 'rgba(51, 102, 255, 0.55)')
   await expect(page.locator('.profile-card.active .active-badge')).toHaveCSS('color', 'rgb(51, 102, 255)')
@@ -289,7 +289,7 @@ test('matches Windows controls to the header glass over custom backgrounds', asy
     const style = getComputedStyle(el, '::before')
     return { background: style.backgroundColor, backdrop: style.backdropFilter }
   })
-  expect(headerGlass).toEqual({ background: railBackground, backdrop: 'blur(8px) saturate(1.1)' })
+  expect(headerGlass).toEqual({ background: railBackground, backdrop: 'blur(16px) saturate(1.1)' })
   expect(api.unexpectedRequests).toEqual([])
 })
 
