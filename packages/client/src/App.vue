@@ -626,7 +626,7 @@ useKeyboard();
   // Three 46px window buttons and their 1px separator.
   &.desktop-platform-win32 .studio-page-header,
   &.desktop-platform-linux .studio-page-header {
-    padding-right: var(--desktop-window-controls-width);
+    padding-right: var(--desktop-window-controls-width); // rtl-physical: window controls stay on the physical right in every locale.
   }
 
   .app-box {

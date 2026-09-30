@@ -52,7 +52,8 @@ async function clippedControls(header: Locator) {
 
 for (const { widths, platform } of [
   { widths: [390, 769, 900, 1440] },
-  { widths: [769], platform: 'win32' }, { widths: [900], platform: 'darwin' },
+  { widths: [769], platform: 'win32' }, { widths: [769], platform: 'linux' },
+  { widths: [900], platform: 'darwin' },
 ]) {
   for (const route of routes) {
     test(`keeps header actions visible on ${route} (${platform || 'browser'})`, async ({ page }) => {
@@ -60,7 +61,7 @@ for (const { widths, platform } of [
       await page.clock.install()
       await setup(page, platform)
       const headerAtWidth = (width: number) => width > 768
-          ? page.locator('.studio-page-header > :not(.header-sidebar-control)')
+          ? page.locator('.studio-page-header > :not(.header-sidebar-control):not(.desktop-titlebar)')
           : page.locator('.app-main .page-header, .app-main .chat-header, .app-main .terminal-header, .app-main .file-toolbar').first()
       // Each route starts fresh; widths within the browser case share that load.
       await page.goto(`/#${route}`)
@@ -80,7 +81,7 @@ for (const { widths, platform } of [
           if (width > 768) {
             await expect.poll(async () => (await header.boundingBox())!.height).toBe(40)
             expect.soft((await header.boundingBox())!.x + (await header.boundingBox())!.width, route)
-              .toBeLessThanOrEqual(width - (platform === 'win32' ? 139 : 0) + 1)
+              .toBeLessThanOrEqual(width - (platform === 'win32' || platform === 'linux' ? 139 : 0) + 1)
           }
           await softExpect.poll(() => clippedControls(header), { message: route }).toEqual([])
         })
