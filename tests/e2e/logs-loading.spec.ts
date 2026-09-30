@@ -48,7 +48,7 @@ for (const { width, platform } of [
     await expect(page.locator('.logs-view')).toHaveAttribute('aria-busy', 'false')
     const checkBounds = async () => {
       const box = (await header.boundingBox())!
-      expect(box.x + box.width).toBeLessThanOrEqual(width - (platform ? 139 : 0))
+      expect(box.x + box.width).toBeLessThanOrEqual(width - (platform ? 138 : 0))
       expect(await header.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
       const controls = await header.locator('button, input, .n-base-selection').evaluateAll(elements => elements.map(el => el.getBoundingClientRect().toJSON()).filter(rect => rect.width > 0 && rect.height > 0))
       for (const control of controls) {

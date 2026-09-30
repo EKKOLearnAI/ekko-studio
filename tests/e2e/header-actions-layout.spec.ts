@@ -81,7 +81,7 @@ for (const { widths, platform } of [
           if (width > 768) {
             await expect.poll(async () => (await header.boundingBox())!.height).toBe(40)
             expect.soft((await header.boundingBox())!.x + (await header.boundingBox())!.width, route)
-              .toBeLessThanOrEqual(width - (platform === 'win32' || platform === 'linux' ? 139 : 0) + 1)
+              .toBeLessThanOrEqual(width - (platform === 'win32' || platform === 'linux' ? 138 : 0) + 1)
           }
           await softExpect.poll(() => clippedControls(header), { message: route }).toEqual([])
         })

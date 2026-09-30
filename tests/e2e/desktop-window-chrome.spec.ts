@@ -183,7 +183,7 @@ for (const platform of ['win32', 'linux'] as const) {
     const create = header.getByRole('button').last()
     await expect(create).toBeVisible()
     const bounds = (await create.boundingBox())!
-    expect(bounds.x + bounds.width).toBeLessThanOrEqual(769 - 139)
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(769 - 138)
     expect(bounds.y).toBeGreaterThanOrEqual(0)
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(40)
     await create.click()
@@ -212,7 +212,7 @@ for (const platform of ['win32', 'linux'] as const) {
     expect(headerBox!.height).toBe(40)
     const windowButtonsBox = await controls.locator('.desktop-titlebar__controls').boundingBox()
     expect(headerBox!.x + headerBox!.width).toBeLessThanOrEqual(windowButtonsBox!.x)
-    expect(controlsBox!.width).toBe(139)
+    expect(controlsBox!.width).toBe(138)
     expect(controlsBox!.x + controlsBox!.width).toBe(page.viewportSize()!.width)
     expect((await sidebar.boundingBox())?.y).toBe(40)
     await expect(header).toHaveCSS('padding-right', '16px')
@@ -226,7 +226,15 @@ for (const platform of ['win32', 'linux'] as const) {
     await controls.getByRole('button', { name: 'Minimize' }).click()
     await controls.locator('.desktop-window-btn').nth(1).click()
     await expect(controls.getByRole('button', { name: 'Restore' })).toBeVisible()
-    await controls.getByRole('button', { name: 'Close' }).click()
+    const close = controls.getByRole('button', { name: 'Close' })
+    await close.hover()
+    await expect(close).toHaveCSS('border-radius', '0px')
+    await expect.poll(() => close.evaluate(button => {
+      const hover = getComputedStyle(button, '::before')
+      return { background: hover.backgroundColor, radius: hover.borderRadius }
+    })).toEqual({ background: 'rgb(196, 43, 28)', radius: '0px' })
+    await expect.poll(() => controls.evaluate(bar => getComputedStyle(bar, '::after').display)).toBe('none')
+    await close.click()
     await expect.poll(() => page.evaluate(() => (
       window as typeof window & { __PW_DESKTOP_WINDOW__?: { actions: string[] } }
     ).__PW_DESKTOP_WINDOW__?.actions)).toEqual(['minimize', 'toggle-maximize', 'close'])
@@ -248,7 +256,7 @@ for (const platform of ['win32', 'linux'] as const) {
 
     await expect(titleBar).toHaveCSS('direction', 'ltr')
     await expect.poll(buttonPositions).toEqual(ltrPositions)
-    await expect(controls).toHaveCSS('border-left-width', '1px')
+    await expect(controls).toHaveCSS('border-left-width', '0px')
     await expect(controls).toHaveCSS('border-right-width', '0px')
     await expect(controls).toHaveCSS('border-top-right-radius', '0px')
   })

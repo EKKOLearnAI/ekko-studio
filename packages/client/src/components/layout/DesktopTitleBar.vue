@@ -141,22 +141,6 @@ onUnmounted(() => stopWindowStateListener?.())
   height: 100%;
 }
 
-.desktop-titlebar--flush {
-  background: transparent;
-  // Inside the shared Header, occupy only the controls at its physical right.
-  left: auto;
-  width: var(--desktop-window-controls-width, 139px);
-  height: var(--studio-header-height, 40px);
-  top: 0;
-  right: 0;
-  border-radius: 0;
-  box-shadow: none;
-  clip-path: none;
-
-  &::after { border-width: 0 0 1px; }
-  .desktop-titlebar__controls { border-radius: 0; clip-path: none; }
-}
-
 .desktop-titlebar__standalone-drag {
   position: fixed;
   z-index: 0;
@@ -246,5 +230,29 @@ onUnmounted(() => stopWindowStateListener?.())
     border-top-left-radius: 11px;
     border-bottom-left-radius: 11px;
   }
+}
+
+// Header controls share its surface; override the floating bar's decoration.
+.desktop-titlebar--flush {
+  background: transparent;
+  // Inside the shared Header, occupy only the controls at its physical right.
+  left: auto;
+  width: var(--desktop-window-controls-width, 138px);
+  height: var(--studio-header-height, 40px);
+  top: 0;
+  right: 0;
+  border-radius: 0;
+  box-shadow: none;
+  clip-path: none;
+
+  &::after { display: none; }
+
+  .desktop-titlebar__controls {
+    border: 0;
+    border-radius: 0;
+    clip-path: none;
+  }
+
+  .desktop-window-btn { border-radius: 0; }
 }
 </style>
