@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NAlert, NEmpty, NInput, NSelect, NTag } from 'naive-ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NEmpty, NInput, NSelect, NSpin, NTag } from 'naive-ui'
+
 import { readNativeDshPlugins, type DshNativePluginInventory } from '@/api/coding-agents/dsh'
 import DshWebPackagesPanel from './DshWebPackagesPanel.vue'
 const { t } = useI18n()
@@ -50,6 +52,8 @@ async function refresh() {
 onMounted(refresh)
 onUnmounted(() => { disposed = true })
 defineExpose({ refresh })
+
+usePageLoadingTask(() => loading.value)
 </script>
 <template>
   <div class="native-plugins" data-testid="dsh-native-plugins">

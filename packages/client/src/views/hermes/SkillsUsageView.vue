@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton } from 'naive-ui'
@@ -32,7 +34,7 @@ interface ChartSegment {
 }
 
 const selectedDays = ref(7)
-const loading = ref(false)
+const loading = ref(true)
 const error = ref('')
 const statsByPeriod = ref<Record<number, SkillUsageStats | undefined>>({})
 let requestSeq = 0
@@ -127,15 +129,15 @@ function hideTooltip(day: SkillUsageDailyRow) {
 
 async function loadStats(days = selectedDays.value, force = false) {
   selectedDays.value = days
-  if (!profilesStore.activeProfileName || profilesStore.profiles.length === 0) {
-    await profilesStore.fetchProfiles()
-  }
   const seq = ++requestSeq
   latestRequestByPeriod[days] = seq
   loading.value = true
   if (!statsByPeriod.value[days] || force) error.value = ''
 
   try {
+    if (!profilesStore.activeProfileName || profilesStore.profiles.length === 0) {
+      await profilesStore.fetchProfiles()
+    }
     const next = await fetchSkillUsageStats(days)
     if (latestRequestByPeriod[days] === seq) {
       statsByPeriod.value = {
@@ -157,11 +159,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="skills-usage-view">
+  <PageLoading :show="loading && !stats" class="skills-usage-view">
+    <PageHeader>
     <header class="page-header">
       <div class="header-text">
         <h2 class="header-title">{{ t('skillsUsage.title') }}</h2>
-        <p class="header-subtitle">{{ t('skillsUsage.subtitle') }}</p>
       </div>
       <div class="skills-usage-toolbar">
         <div class="period-selector" role="group" :aria-label="t('skillsUsage.periodSelector')">
@@ -183,13 +185,14 @@ onMounted(() => {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="skills-usage-content">
       <div v-if="error && !stats" class="skills-usage-state error">
         {{ error }}
       </div>
       <div v-else-if="loading && !stats" class="skills-usage-state">
-        {{ t('common.loading') }}
+
       </div>
       <template v-else-if="stats">
         <div v-if="error" class="inline-error">
@@ -301,7 +304,7 @@ onMounted(() => {
         </section>
       </template>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -317,12 +320,6 @@ onMounted(() => {
   display: flex;
   align-items: baseline;
   gap: 8px;
-}
-
-.header-subtitle {
-  margin: 4px 0 0;
-  color: $text-muted;
-  font-size: 13px;
 }
 
 .skills-usage-toolbar {

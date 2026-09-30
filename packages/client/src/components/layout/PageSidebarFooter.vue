@@ -2,19 +2,18 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { NPopover } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useAccountStore } from '@/stores/account'
-import { useAppStore } from '@/stores/hermes/app'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import SidebarAccountControls from './SidebarAccountControls.vue'
+import { useNavigationRail } from '@/composables/useNavigationRail'
 
-const props = defineProps<{ collapsed?: boolean }>()
+const props = defineProps<{ collapsed?: boolean; rail?: boolean }>()
+const hasNavigationRail = useNavigationRail()
 
-const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
 const accountStore = useAccountStore()
-const appStore = useAppStore()
 const showMenu = ref(false)
 const footer = ref<HTMLElement | null>(null)
 const sidebarWidth = ref<number>()
@@ -34,14 +33,17 @@ function syncSidebarWidth() {
 
 onMounted(() => {
   void accountStore.loadAccount()
-  syncSidebarWidth()
-  if (footer.value?.parentElement) {
-    sidebarObserver = new ResizeObserver(syncSidebarWidth)
-    sidebarObserver.observe(footer.value.parentElement)
-  }
 })
+watch(footer, (element) => {
+  sidebarObserver?.disconnect()
+  if (!element?.parentElement) return
+  syncSidebarWidth()
+  sidebarObserver = new ResizeObserver(syncSidebarWidth)
+  sidebarObserver.observe(element.parentElement)
+}, { flush: 'post' })
 onBeforeUnmount(() => { sidebarObserver?.disconnect() })
 watch(() => route.fullPath, () => { showMenu.value = false })
+watch(hasNavigationRail, () => { showMenu.value = false })
 
 function closeMenu() {
   showMenu.value = false
@@ -58,20 +60,15 @@ async function focusMenu() {
   panel.value?.focus()
 }
 
-function openSettingsPage() {
-  closeMenu()
-  if (window.matchMedia('(max-width: 768px)').matches) appStore.closeSidebar()
-  void router.push({ name: 'hermes.settings' })
-}
 </script>
 
 <template>
-  <div ref="footer" class="page-sidebar-bottom" :class="{ 'is-collapsed': collapsed }">
+  <div v-if="rail || !hasNavigationRail" ref="footer" class="page-sidebar-bottom" :class="{ 'is-collapsed': collapsed }">
     <NPopover
       v-model:show="showMenu"
       class="sidebar-account-popover"
       trigger="click"
-      placement="top"
+      :placement="rail ? 'right-start' : 'top'"
       display-directive="show"
       :show-arrow="false"
       :width="sidebarWidth"
@@ -116,15 +113,6 @@ function openSettingsPage() {
           </div>
         </div>
         <SidebarAccountControls @open-modal="closeMenu" />
-        <div class="account-menu-settings">
-          <button class="account-settings-btn" type="button" @click="openSettingsPage">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-            <span>{{ t('sidebar.settings') }}</span>
-          </button>
-        </div>
       </section>
     </NPopover>
   </div>
@@ -139,8 +127,7 @@ function openSettingsPage() {
   padding: 10px 12px;
 }
 
-.page-sidebar-account-btn,
-.account-settings-btn {
+.page-sidebar-account-btn {
   width: 100%;
   min-width: 0;
   border: none;
@@ -210,6 +197,4 @@ function openSettingsPage() {
 
 .account-menu-identity { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
 .account-label { font-size: 11px; color: $text-muted; }
-.account-menu-settings { border-top: 1px solid $border-color; margin-top: 8px; padding-top: 6px; }
-.account-settings-btn { padding: 10px 12px; }
 </style>

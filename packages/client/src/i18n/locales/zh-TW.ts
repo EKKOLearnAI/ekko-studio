@@ -365,6 +365,7 @@ export default {
 
   // 通用
   common: {
+    close: '關閉',
     loading: '載入中...',
     cancel: '取消',
     delete: '刪除',
@@ -1201,6 +1202,9 @@ export default {
     interactionCountdownElapsed: '00:00 · 等待伺服器確認',
     deleteSession: '確定刪除此工作階段？',
     sessionDeleted: '工作階段已刪除',
+    sessionListActions: '會話列表操作',
+    filterByProfile: '依 Profile 篩選',
+    selectedSessions: '已選 {count} 項',
     toggleBatchMode: '批次選取',
     selectAll: '全選',
     confirmBatchDelete: '確定刪除選取的 {count} 個工作階段？',
@@ -1308,6 +1312,7 @@ export default {
   },
 
   workflow: {
+    listActions: '工作流列表操作',
     quality: { results: "JEV 质量观察", rerun: "编辑并从此节点重跑", decision: { pass: "已通过", needs_improvement: "需要改进", unknown: "未知" } },
     title: '工作流',
     profile: '設定檔',
@@ -1821,6 +1826,7 @@ export default {
 
   // 技能
   skills: {
+    filterBySource: "依來源篩選",
     title: '技能',
     targetFilter: '執行環境',
     targets: {
@@ -2367,6 +2373,10 @@ export default {
 
   // 日誌
   logs: {
+    file: "日誌檔案",
+    level: "日誌等級",
+    lines: "行數",
+    filters: "篩選日誌",
     title: '日誌',
     all: '全部',
     searchPlaceholder: '搜尋...',

@@ -377,6 +377,7 @@ export default {
 
   // Common
   common: {
+    close: 'Fermer',
     loading: 'Chargement...',
     cancel: 'Annuler',
     retry: 'Réessayer',
@@ -1148,6 +1149,9 @@ export default {
     interactionCountdown: '{time} restante',
     interactionCountdownElapsed: '00:00 · Confirmation du serveur en attente',
     deleteSession: 'Supprimer cette session ?',
+    sessionListActions: 'Actions de la liste des sessions',
+    filterByProfile: 'Filtrer par profil',
+    selectedSessions: '{count} sélectionnées',
     toggleBatchMode: 'Sélection par lot',
     selectAll: 'Tout sélectionner',
     confirmBatchDelete: 'Supprimer {count} sessions sélectionnées?',
@@ -1379,6 +1383,7 @@ jobTriggered: 'Job declenche',
 
   // Skills
   skills: {
+    filterBySource: "Filtrer par source",
     title: 'Competences',
     targetFilter: 'Runtime',
     targets: {
@@ -1925,6 +1930,10 @@ jobTriggered: 'Job declenche',
 
   // Logs
   logs: {
+    file: "Fichier journal",
+    level: "Niveau de journalisation",
+    lines: "Lignes",
+    filters: "Filtrer les journaux",
     title: 'Journaux',
     all: 'Tout',
     searchPlaceholder: 'Rechercher...',
@@ -2872,6 +2881,7 @@ jobTriggered: 'Job declenche',
   },
 
   workflow: {
+    listActions: 'Actions de la liste des workflows',
     quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Profil',

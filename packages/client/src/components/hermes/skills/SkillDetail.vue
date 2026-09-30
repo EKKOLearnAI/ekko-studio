@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { NSpin, useMessage } from 'naive-ui'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { fetchSkillContent, fetchSkillFiles, pinSkillApi, saveSkillContent, type SkillFileEntry, type SkillTarget } from '@/api/hermes/skills'
 import { useI18n } from 'vue-i18n'
-import { useMessage } from 'naive-ui'
+
 
 const MarkdownRenderer = defineAsyncComponent(async () => (await import('@/components/hermes/chat/MarkdownRenderer.vue')).default)
 
@@ -187,7 +188,7 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
       </div>
     </div>
 
-    <div v-if="loading && !content" class="detail-loading">{{ t('common.loading') }}</div>
+    <div v-if="loading && !content" class="detail-loading"><NSpin :description="t('common.loading')" /></div>
 
     <template v-else>
       <!-- Breadcrumb for file view -->

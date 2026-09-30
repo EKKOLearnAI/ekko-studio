@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NInput, NSelect, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -57,8 +58,15 @@ const sttStudioAvailable = computed(() => {
   return !!connection && connection.provider !== 'browser' && (connection.provider === 'local' ? connection.available === true : connection.hasSecret)
 })
 
+const initializing = ref(true)
+usePageLoadingTask(() => initializing.value)
+
 onMounted(async () => {
-  await voiceApi.refresh()
+  try {
+    await voiceApi.refresh()
+  } finally {
+    initializing.value = false
+  }
 })
 
 onBeforeUnmount(() => {

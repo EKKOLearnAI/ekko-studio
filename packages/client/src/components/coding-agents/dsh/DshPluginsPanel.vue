@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton } from 'naive-ui'
@@ -25,7 +26,9 @@ const settings = ref<InstanceType<typeof DshPluginSettingsPanel>>()
 </script>
 <template>
   <div class="plugins-view dsh-plugins" data-testid="dsh-plugins">
+    <PageHeader>
     <header class="page-header"><h2 class="header-title">{{ t('dshPlugins.title') }}</h2><NButton size="small" quaternary @click="tab === 'configuration' ? settings?.refresh() : list?.refresh()">{{ t('mcp.refresh') }}</NButton></header>
+    </PageHeader>
     <div class="plugins-content">
       <div ref="tabsElement" class="plugin-tabs" role="tablist" :aria-label="t('dshPlugins.title')" @keydown="keydown">
         <button id="dsh-config-tab" role="tab" data-tab="configuration" :aria-selected="tab === 'configuration'" aria-controls="dsh-config-panel" :tabindex="tab === 'configuration' ? 0 : -1" @click="select('configuration')">{{ t('dshPlugins.configurationTab') }}</button>

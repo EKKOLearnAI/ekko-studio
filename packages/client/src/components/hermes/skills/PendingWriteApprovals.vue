@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NButton, NTag, useMessage } from 'naive-ui'
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
-import { NButton, NTag, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import {
   approvePendingWrite,
@@ -183,7 +184,7 @@ onMounted(() => {
       {{ t('skills.writeApprovalUnsupported') }}
     </div>
     <div v-else-if="pendingLoading && pendingCount === 0" class="write-approval-state">
-      {{ t('common.loading') }}
+      <NSpin :description="t('common.loading')" />
     </div>
     <div v-else-if="pendingCount === 0" class="write-approval-state">
       {{ t('skills.writeApprovalEmpty') }}

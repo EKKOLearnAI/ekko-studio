@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onUnmounted, ref } from 'vue'
 import {
   NAlert, NButton, NEmpty, NInput, NModal,
-  NSpin, NRadioGroup, NRadioButton, useMessage,
+  NRadioGroup, NRadioButton, useMessage,
   NCheckbox, NScrollbar,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -18,7 +20,7 @@ const { t } = useI18n()
 const message = useMessage()
 
 const servers = ref<McpServerInfo[]>([])
-const loading = ref(false)
+const loading = ref(true)
 const error = ref('')
 const searchQuery = ref('')
 
@@ -388,7 +390,8 @@ async function saveToolsVisibility() {
 </script>
 
 <template>
-  <div class="mcp-view">
+  <PageLoading :show="loading && servers.length === 0" class="mcp-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('mcp.title') }}</h2>
       <div class="header-actions">
@@ -397,10 +400,11 @@ async function saveToolsVisibility() {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="mcp-content" :class="{ 'is-loading': loading && servers.length === 0 }">
       <div v-if="loading && servers.length === 0" class="mcp-loading-state">
-        <NSpin />
+
       </div>
       <template v-else>
         <NAlert v-if="error" type="error" class="mcp-notice">
@@ -547,7 +551,7 @@ async function saveToolsVisibility() {
         </div>
       </div>
     </NModal>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">

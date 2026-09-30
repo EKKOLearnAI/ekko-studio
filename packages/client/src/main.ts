@@ -5,6 +5,7 @@ import { i18nReady } from './i18n'
 import App from './App.vue'
 import './styles/global.scss'
 import { desktopBridge } from '@/utils/desktop-bridge'
+import { useTheme } from '@/composables/useTheme'
 
 // Apply theme classes before mount to prevent FOUC (Flash of Unstyled Content)
 function storedPreference(key: string, fallback: string): string {
@@ -16,14 +17,14 @@ function storedPreference(key: string, fallback: string): string {
 }
 
 const savedBrightness = storedPreference('hermes_brightness', 'system')
-const savedStyle = storedPreference('hermes_style', 'ink')
+const themeStyle = useTheme().style.value
 
 // Resolve dark mode
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
 const isDark = savedBrightness === 'dark' || (savedBrightness === 'system' && prefersDark)
 
 // Resolve style
-const isComic = savedStyle === 'comic'
+const isComic = themeStyle === 'comic'
 const bridge = desktopBridge()
 const isDesktopShell = bridge?.isDesktop === true
 const isDesktopPetWindow = bridge?.windowKind === 'pet' || window.location.hash.startsWith('#/desktop-pet')

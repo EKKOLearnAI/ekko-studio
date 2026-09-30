@@ -124,7 +124,7 @@ test('keeps the ensemble tab selected and edits the newly selected Profile on a 
   expect(Object.keys(configs.research.presets)).toEqual(['research-updated'])
   await expect(page.locator('.preset-name')).toContainText('research-updated')
   await expect(page).toHaveURL(/tab=combination/)
-  expect(await page.locator('.models-view > .page-header').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  expect(await page.locator('.models-view > .page-loading-content > .page-header').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
 })
 
 for (const kind of ['stt', 'tts'] as const) {

@@ -20,6 +20,7 @@ test('opens account controls from chat without navigating and keeps nested dialo
   await expect(menu.locator('.language-switch')).toContainText('English')
   await expect(menu.locator('.version-text')).toContainText('Studio v0.5.23')
   await expect(menu.getByRole('button', { name: /Sign Out/ })).toBeVisible()
+  await expect(menu.getByRole('button', { name: 'Settings', exact: true })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('account-menu.png'), animations: 'disabled' })
 
   await menu.getByTestId('profile-selector-select').click()
@@ -42,8 +43,7 @@ test('opens account controls from chat without navigating and keeps nested dialo
   await expect(page.locator('.changelog-list')).toBeVisible()
   await page.keyboard.press('Escape')
 
-  await account.click()
-  await menu.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.locator('.studio-navigation-rail').getByRole('link', { name: 'Settings', exact: true }).click()
   await expect(page).toHaveURL(/#\/hermes\/settings$/)
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
   await expect(menu).not.toBeVisible()
@@ -87,11 +87,12 @@ test('keeps the menu and language selection within a narrow viewport', async ({ 
   await expect(menu).toBeInViewport()
   await menu.locator('.language-switch').click()
   await page.locator('.n-base-select-option').filter({ hasText: /^简体中文$/ }).click()
-  await expect(menu.getByRole('button', { name: '设置', exact: true })).toBeVisible()
+  await expect(menu.locator('.language-switch')).toContainText('简体中文')
+  await expect(menu.getByRole('button', { name: '设置', exact: true })).toHaveCount(0)
   await expect(page.locator('.n-base-select-menu')).not.toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('account-menu-mobile-zh.png'), animations: 'disabled' })
-  await menu.getByRole('button', { name: '设置', exact: true }).click()
-  await expect(page.locator('aside.sidebar')).not.toHaveClass(/\bopen\b/)
+  await page.keyboard.press('Escape')
+  await expect(menu).not.toBeVisible()
 })
 
 test('updates sidebar identity immediately after changing account details', async ({ page }) => {

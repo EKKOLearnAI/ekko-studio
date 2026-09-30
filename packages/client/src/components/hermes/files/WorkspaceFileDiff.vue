@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NAlert, NButton, NTooltip, useMessage } from 'naive-ui'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
-import { NAlert, NButton, NSpin, NTooltip, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import type { FileEntry, WorkspaceFileDiff } from '@/api/studio/files'
 import { fetchSessionWorkspaceFileDiff, readSessionWorkspaceFile } from '@/api/studio/sessions'

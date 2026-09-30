@@ -178,7 +178,7 @@ describe("AppSidebar navigation", () => {
     mockAppStore.sidebarCollapsed = true;
     const wrapper = mountSidebar();
 
-    expect(wrapper.classes()).toContain("collapsed");
+    expect(wrapper.get("aside.sidebar").classes()).toContain("collapsed");
     expect(wrapper.findAll(".nav-group-label")).toHaveLength(0);
     expect(
       wrapper.findAll(".sidebar-nav > .route-link-item").length,

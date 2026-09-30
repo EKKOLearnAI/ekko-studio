@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NButton, useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, NSpin, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import {
   fetchFallbackProviders,
@@ -18,7 +20,7 @@ const appStore = useAppStore()
 const modelsStore = useModelsStore()
 const profilesStore = useProfilesStore()
 
-const loading = ref(false)
+const loading = ref(true)
 const saving = ref(false)
 const chain = ref<FallbackProviderEntry[]>([])
 const savedChain = ref('')
@@ -125,6 +127,8 @@ onMounted(() => {
 watch(() => profilesStore.activeProfileName, () => {
   void load()
 })
+
+usePageLoadingTask(() => loading.value)
 </script>
 
 <template>

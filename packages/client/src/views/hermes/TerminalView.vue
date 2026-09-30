@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { getApiKey, getBaseUrlValue } from "@/api/client";
-import { NButton, NPopconfirm, NTooltip, NSelect, useMessage } from "naive-ui";
+import { NSpin, NButton, NPopconfirm, NTooltip, NSelect, useMessage } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import type { ITheme } from "@xterm/xterm";
 
@@ -617,7 +618,7 @@ onUnmounted(() => {
       </div>
       <div v-if="showSessions" class="session-items">
         <div v-if="sessions.length === 0" class="session-empty">
-          {{ t("common.loading") }}
+          <NSpin size="small" :description="t('common.loading')" />
         </div>
         <button
           v-for="s in sessions"
@@ -665,6 +666,7 @@ onUnmounted(() => {
 
     <!-- Main terminal area -->
     <div class="terminal-main">
+      <PageHeader>
       <header class="terminal-header">
         <div class="header-left">
           <NButton
@@ -720,6 +722,7 @@ onUnmounted(() => {
           </NButton>
         </div>
       </header>
+      </PageHeader>
       <div class="terminal-container">
         <div
           ref="terminalRef"
@@ -968,6 +971,10 @@ onUnmounted(() => {
 
 .theme-select {
   width: 130px;
+}
+
+@container studio-page-header (max-width: 400px) {
+  .theme-select { width: 100px; }
 }
 
 // ─── Terminal container ─────────────────────────────────────────

@@ -172,7 +172,24 @@ async function openDesktopPageSidebar(page: Page, platform: DesktopPlatform, pat
   await page.goto(path)
 }
 
-test('places Windows controls in a dedicated bar above main content', async ({ page }) => {
+test('keeps browser settings header actions visible at the minimum Windows width', async ({ page }) => {
+  await installDesktopBridge(page, 'win32', true)
+  await authenticate(page)
+  await mockHermesApi(page)
+  await page.setViewportSize({ width: 769, height: 900 })
+  await page.goto('/#/hermes/browser')
+  const header = page.locator('.studio-page-header > .page-header')
+  const create = header.getByRole('button').last()
+  await expect(create).toBeVisible()
+  const bounds = (await create.boundingBox())!
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(769 - 139)
+  expect(bounds.y).toBeGreaterThanOrEqual(0)
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(40)
+  await create.click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+})
+
+test('shares the outer header with Windows controls while keeping page actions clickable', async ({ page }) => {
   await openDesktopJobs(page, 'win32')
 
   const controls = page.locator('.desktop-titlebar')
@@ -189,12 +206,20 @@ test('places Windows controls in a dedicated bar above main content', async ({ p
   ])
   expect(controlsBox).not.toBeNull()
   expect(headerBox).not.toBeNull()
-  expect(controlsBox!.y).toBe(10)
-  expect(headerBox!.y).toBe(51)
-  expect(controlsBox!.y + controlsBox!.height).toBeLessThan(headerBox!.y)
-  expect(controlsBox!.x).toBeGreaterThanOrEqual((await sidebar.boundingBox())!.x + (await sidebar.boundingBox())!.width)
-  await expect(header).toHaveCSS('padding-right', '20px')
-  await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'drag', height: '10px' })
+  expect(controlsBox!.y).toBe(0)
+  expect(headerBox!.y).toBe(0)
+  expect(headerBox!.height).toBe(40)
+  const windowButtonsBox = await controls.locator('.desktop-titlebar__controls').boundingBox()
+  expect(headerBox!.x + headerBox!.width).toBeLessThanOrEqual(windowButtonsBox!.x)
+  expect(controlsBox!.x).toBe(64)
+  expect((await sidebar.boundingBox())?.y).toBe(40)
+  await expect(header).toHaveCSS('padding-right', '16px')
+  await expect(page.locator('.app-main .page-header')).toHaveCount(0)
+  await expect(header.getByRole('button').last()).toHaveCSS('-webkit-app-region', 'no-drag')
+  await header.getByRole('button').last().click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'drag', height: '40px' })
 
   await controls.locator('.desktop-window-btn').nth(1).click()
   await expect(controls.getByRole('button', { name: 'Restore' })).toBeVisible()
@@ -221,7 +246,7 @@ test('keeps Windows controls physically stable when the app language is RTL', as
   await expect.poll(buttonPositions).toEqual(ltrPositions)
   await expect(controls).toHaveCSS('border-left-width', '1px')
   await expect(controls).toHaveCSS('border-right-width', '0px')
-  await expect(controls).toHaveCSS('border-top-right-radius', '12px')
+  await expect(controls).toHaveCSS('border-top-right-radius', '0px')
 })
 
 test('matches Windows controls to the header glass over custom backgrounds', async ({ page }) => {
@@ -247,42 +272,51 @@ test('matches Windows controls to the header glass over custom backgrounds', asy
   const header = page.locator('.page-header')
   await expect(page.locator('.app-shell')).toHaveClass(/app-shell--custom-background/)
   await expect(page.getByRole('heading', { name: 'Browser' })).toBeVisible()
-  await expect(header).toHaveCSS('min-height', '64px')
+  await expect(header).toHaveCSS('height', '40px')
   await expect(header).not.toContainText('Browser Settings')
   await expect(page.locator('.app-main--card')).toHaveCSS('background-color', 'rgba(26, 26, 26, 0.72)')
   await expect(page.locator('.settings-card')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(page.locator('.profile-card.active')).toHaveCSS('border-color', 'rgba(51, 102, 255, 0.55)')
   await expect(page.locator('.profile-card.active .active-badge')).toHaveCSS('color', 'rgb(51, 102, 255)')
-  await expect(controls).toHaveCSS('background-color', 'rgba(26, 26, 26, 0.72)')
-  await expect(controls).toHaveCSS('backdrop-filter', 'blur(8px) saturate(1.1)')
+  await expect(controls).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  const railBackground = await page.locator('.studio-navigation-rail').evaluate(el => getComputedStyle(el).backgroundColor)
+  const headerGlass = await page.locator('.app-box').evaluate(el => {
+    const style = getComputedStyle(el, '::before')
+    return { background: style.backgroundColor, backdrop: style.backdropFilter }
+  })
+  expect(headerGlass).toEqual({ background: railBackground, backdrop: 'blur(8px) saturate(1.1)' })
   expect(api.unexpectedRequests).toEqual([])
 })
 
-test('reserves the macOS traffic-light area inside the primary sidebar', async ({ page }) => {
+test('reserves the macOS traffic-light area while only insetting the workspace', async ({ page }) => {
   await openDesktopJobs(page, 'darwin')
 
   await expect(page.locator('.desktop-titlebar')).toHaveCount(0)
-  expect((await page.locator('.app-layout').boundingBox())?.y).toBe(0)
-  expect((await page.locator('aside.hermes-config-sidebar').boundingBox())?.y).toBe(10)
-  await expect(page.locator('aside.hermes-config-sidebar')).toHaveCSS('padding-top', '40px')
-  await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'drag', height: '10px' })
+  expect((await page.locator('.app-layout').boundingBox())?.y).toBe(40)
+  expect((await page.locator('aside.hermes-config-sidebar').boundingBox())?.y).toBe(40)
+  await expect(page.locator('aside.hermes-config-sidebar')).toHaveCSS('padding-top', '8px')
+  await expect(page.locator('.studio-navigation-rail')).toHaveCSS('padding-top', '44px')
+  expect((await page.locator('.studio-navigation-rail').boundingBox())?.y).toBe(0)
+  await expect(page.locator('.studio-navigation-rail')).toHaveCSS('border-right-width', '0px')
+  await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'drag', height: '40px' })
 })
 
-test('keeps chat gutters while placing New below macOS traffic lights', async ({ page }) => {
+test('keeps chat and group actions below the shared macOS header', async ({ page }) => {
   await openDesktopPageSidebar(page, 'darwin', '/#/hermes/chat')
 
   const chatSidebar = page.locator('.chat-panel > .session-list')
   const newChat = chatSidebar.locator('.page-sidebar-tab').first()
   await expect(newChat).toBeVisible()
-  expect((await chatSidebar.boundingBox())?.y).toBe(10)
-  expect((await newChat.boundingBox())?.y).toBeGreaterThanOrEqual(43)
+  expect((await chatSidebar.boundingBox())?.y).toBe(40)
+  expect((await newChat.boundingBox())?.x).toBeGreaterThanOrEqual(64)
+  expect((await page.locator('.studio-navigation-rail .page-sidebar-account-btn').boundingBox())?.y).toBeGreaterThanOrEqual(44)
 
   await page.goto('/#/hermes/group-chat')
   const groupSidebar = page.locator('.group-chat-panel > .room-sidebar')
   const newRoom = groupSidebar.locator('.page-sidebar-tab').first()
   await expect(newRoom).toBeVisible()
-  expect((await groupSidebar.boundingBox())?.y).toBe(10)
-  expect((await newRoom.boundingBox())?.y).toBeGreaterThanOrEqual(43)
+  expect((await groupSidebar.boundingBox())?.y).toBe(40)
+  expect((await newRoom.boundingBox())?.x).toBeGreaterThanOrEqual(64)
 })
 
 test('renders a native-chrome desktop chat route with only messages and input', async ({ page }) => {
@@ -366,14 +400,14 @@ test('routes the desktop session popup action to the native chat window bridge',
   ])
 })
 
-test('keeps the larger top gutter on macOS workflow pages', async ({ page }) => {
+test('keeps the macOS workflow sidebar and main content flush', async ({ page }) => {
   await openDesktopPageSidebar(page, 'darwin', '/#/hermes/workflow')
 
-  const workflowSidebar = page.locator('.workflow-view > .workflow-sidebar')
-  const workflowMain = page.locator('.workflow-view > .workflow-main')
+  const workflowSidebar = page.locator('.workflow-view .workflow-sidebar')
+  const workflowMain = page.locator('.workflow-view .workflow-main')
   await expect(workflowMain).toBeVisible()
-  expect((await workflowSidebar.boundingBox())?.y).toBe(10)
-  expect((await workflowMain.boundingBox())?.y).toBe(10)
+  expect((await workflowSidebar.boundingBox())?.y).toBe(40)
+  expect((await workflowMain.boundingBox())?.y).toBe(40)
 })
 
 test('does not reserve macOS traffic-light spacing in Windows chat sidebars', async ({ page }) => {
@@ -387,17 +421,17 @@ test('does not reserve macOS traffic-light spacing in Windows chat sidebars', as
   await expect(sidebarTop).toHaveCSS('padding-top', '12px')
   await expect(sidebarTop).toHaveCSS('-webkit-app-region', 'drag')
   await expect(newChat).toHaveCSS('-webkit-app-region', 'no-drag')
-  expect((await sidebar.boundingBox())?.y).toBe(10)
-  expect((await main.boundingBox())?.y).toBe(50)
-  expect((await controls.boundingBox())!.x).toBeGreaterThanOrEqual((await sidebar.boundingBox())!.x + (await sidebar.boundingBox())!.width)
+  expect((await sidebar.boundingBox())?.y).toBe(40)
+  expect((await main.boundingBox())?.y).toBe(40)
+  expect((await controls.boundingBox())!.x).toBe((await sidebar.boundingBox())!.x)
 })
 
-test('keeps Linux on native chrome and preserves its original sidebar spacing', async ({ page }) => {
+test('keeps Linux on native chrome with a flush sidebar', async ({ page }) => {
   await openDesktopJobs(page, 'linux')
 
   await expect(page.locator('.desktop-titlebar')).toHaveCount(0)
-  expect((await page.locator('.app-layout').boundingBox())?.y).toBe(0)
-  expect((await page.locator('aside.hermes-config-sidebar').boundingBox())?.y).toBe(10)
+  expect((await page.locator('.app-layout').boundingBox())?.y).toBe(40)
+  expect((await page.locator('aside.hermes-config-sidebar').boundingBox())?.y).toBe(40)
   await expect(page.locator('aside.hermes-config-sidebar')).toHaveCSS('padding-top', '8px')
   await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'none', height: 'auto' })
 })

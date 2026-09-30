@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDialog } from 'naive-ui'
@@ -85,25 +87,34 @@ async function ensureProfilesLoaded() {
   }
 }
 
+const initializing = ref(true)
+let loadGeneration = 0
+
 async function loadFromRoute() {
-  await ensureProfilesLoaded()
+  const generation = ++loadGeneration
+  initializing.value = true
+  try {
+    await ensureProfilesLoaded()
 
-  const profile = scopedProfile.value
-  const filePath = routeFilePath.value
-  const directoryPath = filePath
-    ? parentDir(filePath)
-    : (firstQueryString(route.query.path) || '')
+    const profile = scopedProfile.value
+    const filePath = routeFilePath.value
+    const directoryPath = filePath
+      ? parentDir(filePath)
+      : (firstQueryString(route.query.path) || '')
 
-  if (!isProfileConfigEditor.value) {
-    await filesStore.fetchEntries(directoryPath, {
-      profile,
-      workspaceSessionId: null,
-      workspaceRoomId: null,
-    })
-  }
+    if (!isProfileConfigEditor.value) {
+      await filesStore.fetchEntries(directoryPath, {
+        profile,
+        workspaceSessionId: null,
+        workspaceRoomId: null,
+      })
+    }
 
-  if (filePath) {
-    await filesStore.openEditor(filePath, { profile })
+    if (filePath) {
+      await filesStore.openEditor(filePath, { profile })
+    }
+  } finally {
+    if (generation === loadGeneration) initializing.value = false
   }
 }
 
@@ -136,14 +147,16 @@ watch(
 </script>
 
 <template>
-  <div class="files-view" :class="{ 'profile-config-editor-view': isProfileConfigEditor }">
+  <PageLoading :show="initializing" class="files-view" :class="{ 'profile-config-editor-view': isProfileConfigEditor }">
     <template v-if="isProfileConfigEditor">
+      <PageHeader>
       <div class="profile-config-editor-header">
         <div class="profile-config-title">
           <span class="profile-config-eyebrow">{{ t('profiles.editConfig') }}</span>
           <span class="profile-config-file">{{ profileConfigTitle }}</span>
         </div>
       </div>
+      </PageHeader>
       <div class="profile-config-editor-content">
         <FileEditor v-if="filesStore.editingFile" :custom-close="closeProfileConfigEditor" />
       </div>
@@ -154,11 +167,13 @@ watch(
         <FileTree :profile="scopedProfile" />
       </div>
       <div class="files-main-panel">
+        <PageHeader>
         <FileToolbar
           @show-new-file="handleShowNewFile"
           @show-new-folder="handleShowNewFolder"
           @show-upload="showUpload = true"
         />
+        </PageHeader>
         <FileBreadcrumb />
         <div class="files-content">
           <FileEditor v-if="filesStore.editingFile" />
@@ -178,7 +193,7 @@ watch(
       :entry="renameEntry"
       :target-path="renameTargetPath"
     />
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">

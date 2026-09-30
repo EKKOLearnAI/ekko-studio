@@ -232,6 +232,74 @@ test.describe('history session deep links', () => {
     await mockHistoryApi(page)
   })
 
+  test('covers the whole page until list and legacy detail are ready, ignoring stale switches', async ({ page }) => {
+    let releaseList!: () => void
+    let releaseDetail!: () => void
+    let releaseOld!: () => void
+    const listGate = new Promise<void>(resolve => { releaseList = resolve })
+    const detailGate = new Promise<void>(resolve => { releaseDetail = resolve })
+    const oldGate = new Promise<void>(resolve => { releaseOld = resolve })
+    let detailRequested = false
+    let oldRequested = false
+    await page.route('**/api/studio/sessions/hermes/groups?**', async route => { await listGate; await route.fallback() })
+    await page.route(/\/api\/studio\/sessions\/hermes\/hist-beta(?:\?.*)?$/, async route => {
+      detailRequested = true
+      await detailGate
+      await route.fallback()
+    })
+    await page.route(/\/api\/studio\/sessions\/hermes\/hist-alpha(?:\?.*)?$/, async route => {
+      oldRequested = true
+      await oldGate
+      await route.fallback()
+    })
+    await page.goto('/#/hermes/history/session/hist-beta')
+    const overlay = page.locator('.history-panel > .page-loading-overlay')
+    await expect(overlay.locator('.studio-loading-logo')).toBeVisible()
+    await expect(page.locator('.history-panel > .page-loading-content')).toHaveAttribute('inert', '')
+    releaseList()
+    await expect.poll(() => detailRequested).toBe(true)
+    await expect(overlay).toBeVisible()
+    expect(await overlay.boundingBox()).toEqual(await page.locator('.history-panel').boundingBox())
+    await expect.poll(() => overlay.locator('img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
+    await expect(overlay.locator('.studio-loading-logo')).toHaveCSS('height', '72px')
+    await overlay.locator('img').evaluate((image: HTMLImageElement) => image.decode())
+    await page.screenshot({ path: '/tmp/studio-history-page-loading.png', animations: 'disabled' })
+    releaseDetail()
+    await expect(overlay).toHaveCount(0)
+    await expect(page.getByText('Answer from Beta History Session')).toBeVisible()
+
+    await page.evaluate(() => { location.hash = '#/hermes/history/session/hist-alpha' })
+    await expect.poll(() => oldRequested).toBe(true)
+    await expect(overlay).toHaveCount(0)
+    await expect(page.locator('.history-panel > .page-loading-content')).not.toHaveAttribute('inert', '')
+    await page.evaluate(() => { location.hash = '#/hermes/history/session/hist-beta' })
+    await expect(overlay).toHaveCount(0)
+    const oldResponse = page.waitForResponse(response => /\/sessions\/hermes\/hist-alpha(?:\?|$)/.test(response.url()))
+    releaseOld()
+    await oldResponse
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    await expect(page.getByText('Answer from Beta History Session')).toBeVisible()
+    await expect(page.getByText('Answer from Alpha History Session')).toHaveCount(0)
+  })
+
+  test('releases full-page loading when history detail fails', async ({ page }) => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    await page.route(/\/api\/studio\/sessions\/hermes\/hist-beta(?:\?.*)?$/, async route => {
+      await gate
+      await route.fulfill({ status: 503, json: { error: 'History unavailable' } })
+    })
+    await page.goto('/#/hermes/history/session/hist-beta')
+    const overlay = page.locator('.history-panel > .page-loading-overlay')
+    await expect(overlay).toBeVisible()
+    release()
+    await expect(overlay).toHaveCount(0)
+    await expect(page.locator('.history-panel')).toHaveAttribute('aria-busy', 'false')
+    await expect(page.getByText('Session not found', { exact: true })).toBeVisible()
+    await page.getByText('Alpha History Session', { exact: true }).click()
+    await expect(page.getByText('Answer from Alpha History Session')).toBeVisible()
+  })
+
   test('route session id opens selected history session', async ({ page }) => {
     await page.goto('/#/hermes/history/session/hist-beta')
 
@@ -365,3 +433,99 @@ test('groups database-pinned history separately from its source', async ({ page 
   await expect(page.locator('.session-item').filter({ hasText: 'Alpha History Session' })).toHaveCount(1)
   await expect(page.locator('.session-item').filter({ hasText: 'Alpha History Session' }).locator('.session-item-pin')).toBeVisible()
 })
+
+for (const width of [1440, 390]) {
+  test(`opens history batch selection from the search menu at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await authenticate(page)
+    await mockHistoryApi(page)
+    await page.goto('/#/hermes/history/session/hist-alpha')
+    await expect(page.getByText('Answer from Alpha History Session')).toBeVisible()
+    if (width < 769) await page.getByRole('button', { name: 'Menu', exact: true }).click()
+    const sidebar = page.locator(width < 769 ? '.studio-mobile-drawer .session-list' : '.history-panel .session-list')
+    await expect(sidebar.getByRole('button', { name: 'New Chat', exact: true })).toHaveCount(0)
+    await expect(sidebar).toHaveCSS('width', width < 769 ? '295px' : '240px')
+    const more = sidebar.getByRole('button', { name: 'Session list actions', exact: true })
+    await expect(sidebar.locator('.session-list-toolbar')).toHaveCount(0)
+    await expect(sidebar.locator('.page-sidebar-top')).toHaveCSS('border-bottom-width', '0px')
+    expect((await more.boundingBox())!.y).toBe((await sidebar.getByRole('button', { name: 'Search', exact: true }).boundingBox())!.y)
+    await more.press('Enter')
+    await expect(page.getByText('Filter by Profile', { exact: true })).toHaveCount(0)
+    await page.getByText('Batch selection', { exact: true }).click()
+    const toolbar = sidebar.locator('.session-list-toolbar')
+    await expect(toolbar).toContainText('0 selected')
+    const selectAll = toolbar.getByRole('button', { name: 'Select all', exact: true })
+    await selectAll.click()
+    await expect(toolbar).toContainText('3 selected')
+    await expect(selectAll).toHaveAttribute('aria-pressed', 'true')
+    await expect(toolbar.getByRole('button', { name: 'Cancel', exact: true })).toHaveText('')
+    await sidebar.locator('.page-sidebar-top').hover({ position: { x: 2, y: 2 } })
+    expect(await toolbar.getByRole('button', { name: 'Delete', exact: true }).evaluate(element => getComputedStyle(element).color))
+      .toBe(await selectAll.evaluate(element => getComputedStyle(element).color))
+    await page.screenshot({ animations: 'disabled', path: `/tmp/studio-history-batch-${width}.png` })
+    await toolbar.getByRole('button', { name: 'Delete', exact: true }).click()
+    await expect(page.getByText('Delete 3 selected sessions?', { exact: true })).toBeVisible()
+    await page.locator('.n-popconfirm').getByRole('button', { name: 'Cancel', exact: true }).click()
+    await selectAll.click()
+    await expect(toolbar).toContainText('0 selected')
+    await expect(selectAll).toHaveAttribute('aria-pressed', 'false')
+    await toolbar.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(toolbar).toHaveCount(0)
+    await expect(sidebar.locator('.session-item-checkbox')).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    if (width < 769) {
+      await page.locator('.studio-mobile-drawer').getByRole('button', { name: 'Close', exact: true }).click()
+      await expect(page.locator('.studio-mobile-drawer')).not.toBeVisible()
+    }
+  })
+}
+
+for (const width of [1280, 390]) {
+  test(`history virtual messages fill the pane and stay scrollable at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 820 })
+    await authenticate(page)
+    await mockHistoryApi(page)
+    const detail = detailFor('hist-beta')!
+    const messages = Array.from({ length: 180 }, (_, index) => ({
+      ...detail.messages[index % 2], id: index + 1,
+      content: `History message ${index + 1}\n\n${'A longer historical message for checking viewport layout. '.repeat(10)}`,
+      timestamp: detail.started_at + index,
+    }))
+    await page.route('**/api/studio/sessions/conversations/hist-beta/messages/paginated*', route => route.fulfill({ json: {
+      session: detail, messages, total: messages.length, offset: 0, limit: 180, hasMore: false,
+    } }))
+    await page.goto('/#/hermes/history/session/hist-beta')
+    await expect(page.locator('.history-panel')).toHaveAttribute('aria-busy', 'false')
+    const scroller = page.locator('.history-panel .virtual-message-list')
+    await expect(scroller).toBeVisible()
+    const pane = page.locator('.history-panel .chat-main')
+    await expect(pane).toHaveCSS('margin', '0px')
+    await expect(pane).toHaveCSS('border-top-width', '0px')
+    await expect(pane).toHaveCSS('border-radius', '0px')
+    await expect(pane).toHaveCSS('box-shadow', 'none')
+    const panelBounds = (await page.locator('.history-panel').boundingBox())!
+    const listBounds = (await scroller.boundingBox())!
+    expect(listBounds.x + listBounds.width).toBe(panelBounds.x + panelBounds.width)
+    expect(listBounds.y + listBounds.height).toBe(panelBounds.y + panelBounds.height)
+    if (width > 768) {
+      expect(listBounds.y).toBe(panelBounds.y)
+      expect(listBounds.x).toBe(panelBounds.x + 240)
+      const toggle = page.locator('.studio-page-header .history-sidebar-toggle')
+      await toggle.click()
+      await expect.poll(async () => (await scroller.boundingBox())?.x).toBe(panelBounds.x)
+      await expect(pane).toHaveCSS('margin', '0px')
+      await toggle.click()
+      await expect.poll(async () => (await scroller.boundingBox())?.x).toBe(panelBounds.x + 240)
+    }
+    await page.screenshot({ path: `/tmp/studio-history-layout-${width}.png`, animations: 'disabled' })
+    await expect.poll(() => scroller.evaluate(el => el.clientHeight)).toBeGreaterThan(600)
+    await expect.poll(() => scroller.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(1000)
+    await expect.poll(() => scroller.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(5)
+    await scroller.hover()
+    await page.mouse.wheel(0, -500)
+    await expect.poll(() => scroller.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeGreaterThan(400)
+    const viewport = await scroller.boundingBox()
+    expect(viewport!.x + viewport!.width).toBeLessThanOrEqual(width)
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true)
+  })
+}

@@ -1,0 +1,44 @@
+.studio-loading-logo {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: var(--studio-loading-size, 48px);
+  height: var(--studio-loading-size, 48px);
+  overflow: hidden;
+  border-radius: 25%;
+  vertical-align: middle;
+}
+
+.studio-loading-logo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.85) 48%, transparent 66%);
+  transform: translateX(-140%);
+  mix-blend-mode: screen;
+  pointer-events: none;
+  -webkit-mask: url("/logo.png") center / contain no-repeat;
+  mask: url("/logo.png") center / contain no-repeat;
+  will-change: transform;
+  animation: studio-logo-shimmer 1.8s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+.studio-loading-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+}
+
+@keyframes studio-logo-shimmer {
+  0% { transform: translateX(-140%); }
+  52%, 100% { transform: translateX(140%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-loading-logo::after {
+    animation: none;
+    will-change: auto;
+  }
+}

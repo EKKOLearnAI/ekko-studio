@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, ref } from 'vue'
 import { NButton, NInputNumber, NSelect, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -147,6 +148,7 @@ async function handleReset() {
 
 <template>
   <div class="theme-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('theme.title') }}</h2>
       <div class="header-actions">
@@ -155,6 +157,7 @@ async function handleReset() {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="theme-content">
       <section class="theme-card">

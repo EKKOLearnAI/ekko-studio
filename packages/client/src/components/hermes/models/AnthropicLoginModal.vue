@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NModal, NButton, NInput, NSpin, useMessage } from 'naive-ui'
+import { NSpin, NModal, NButton, NInput, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { startAnthropicLogin, submitAnthropicLogin } from '@/api/hermes/anthropic-auth'
 import { copyToClipboard } from '@/utils/clipboard'

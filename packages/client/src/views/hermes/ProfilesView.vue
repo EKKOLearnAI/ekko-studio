@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { ref, onMounted } from 'vue'
-import { NButton, NSpin } from 'naive-ui'
+import { NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import ProfilesPanel from '@/components/hermes/profiles/ProfilesPanel.vue'
 import ProfileCreateModal from '@/components/hermes/profiles/ProfileCreateModal.vue'
@@ -33,7 +35,8 @@ function handleImported() {
 </script>
 
 <template>
-  <div class="profiles-view">
+  <PageLoading :show="profilesStore.loading && profilesStore.profiles.length === 0" class="profiles-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('profiles.title') }}</h2>
       <div class="header-actions">
@@ -58,11 +61,12 @@ function handleImported() {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="profiles-content">
-      <NSpin :show="profilesStore.loading && profilesStore.profiles.length === 0">
+      <div>
         <ProfilesPanel @rename="renamingProfile = $event" />
-      </NSpin>
+      </div>
     </div>
 
     <ProfileCreateModal
@@ -81,14 +85,14 @@ function handleImported() {
       @close="showImportModal = false"
       @saved="handleImported"
     />
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .profiles-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }

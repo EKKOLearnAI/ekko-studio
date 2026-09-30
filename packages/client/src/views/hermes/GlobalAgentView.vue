@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import PageLoading from '@/components/common/PageLoading.vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ChatPanel from '@/components/hermes/chat/ChatPanel.vue'
 import { useAppStore } from '@/stores/hermes/app'
@@ -39,16 +40,22 @@ async function applyRouteProfile() {
   chatStore.setSessionProfileFilter(profile)
 }
 
+const initializing = ref(true)
+
 onMounted(async () => {
-  chatStore.setRuntimeMode('global_agent')
-  appStore.loadModels()
-  await Promise.all([
-    profilesStore.fetchProfiles(),
-    settingsStore.fetchSettings(),
-  ])
-  chatStore.validateSessionProfileFilter(profilesStore.profiles.map(profile => profile.name))
-  await applyRouteProfile()
-  await loadRouteSession()
+  try {
+    chatStore.setRuntimeMode('global_agent')
+    await Promise.all([
+      appStore.loadModels(),
+      profilesStore.fetchProfiles(),
+      settingsStore.fetchSettings(),
+    ])
+    chatStore.validateSessionProfileFilter(profilesStore.profiles.map(profile => profile.name))
+    await applyRouteProfile()
+    await loadRouteSession()
+  } finally {
+    initializing.value = false
+  }
 })
 
 onUnmounted(() => {
@@ -75,14 +82,14 @@ watch([routeSessionId, routeProfile], async ([sessionId]) => {
 </script>
 
 <template>
-  <div class="global-agent-view">
+  <PageLoading :show="initializing || chatStore.isLoadingSessions || chatStore.isLoadingMessages" class="global-agent-view">
     <ChatPanel />
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 .global-agent-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   NAlert,
@@ -8,7 +10,6 @@ import {
   NModal,
   NRadioButton,
   NRadioGroup,
-  NSpin,
   useMessage,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -29,7 +30,7 @@ import {
 
 const { t } = useI18n()
 const message = useMessage()
-const loading = ref(false)
+const loading = ref(true)
 const saving = ref(false)
 const probingServers = ref<Set<string>>(new Set())
 const error = ref('')
@@ -277,7 +278,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mcp-view">
+  <PageLoading :show="loading && servers.length === 0" class="mcp-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('ekkoConfig.mcpTitle') }}</h2>
       <div class="header-actions">
@@ -286,9 +288,10 @@ onBeforeUnmount(() => {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="mcp-content" :class="{ 'is-loading': loading && servers.length === 0 }">
-      <div v-if="loading && servers.length === 0" class="mcp-loading-state"><NSpin /></div>
+      <div v-if="loading && servers.length === 0" class="mcp-loading-state"></div>
       <template v-else>
         <NAlert v-if="error" type="error" class="mcp-notice">{{ error }}</NAlert>
 
@@ -375,7 +378,7 @@ onBeforeUnmount(() => {
         </NButton>
       </div>
     </NModal>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">

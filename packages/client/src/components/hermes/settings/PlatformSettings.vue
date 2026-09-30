@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, onUnmounted, watch } from 'vue'
-import { NSwitch, NInput, NButton, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NSpin, NSwitch, NInput, NButton, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { clearCredentials as clearCredsApi, saveCredentials as saveCredsApi, fetchWeixinQrCode, pollWeixinQrStatus, saveWeixinCredentials } from '@/api/hermes/config'

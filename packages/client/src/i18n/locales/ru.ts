@@ -363,6 +363,7 @@ export default {
 
 
   common: {
+    close: 'Закрыть',
     loading: 'Загрузка...',
     cancel: 'Отмена',
     delete: 'Удалить',
@@ -1095,6 +1096,9 @@ export default {
     newCliChat: 'Новый CLI',
     deleteSession: 'Удалить этот сеанс?',
     sessionDeleted: 'Сеанс удалён',
+    sessionListActions: 'Действия со списком сеансов',
+    filterByProfile: 'Фильтр по профилю',
+    selectedSessions: 'Выбрано: {count}',
     toggleBatchMode: 'Пакетный выбор',
     selectAll: 'Выбрать всё',
     confirmBatchDelete: 'Удалить выбранные сеансы ({count})?',
@@ -1195,6 +1199,7 @@ export default {
 
 
   workflow: {
+    listActions: 'Действия со списком рабочих процессов',
     quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Рабочий процесс',
     profile: 'Профиль',
@@ -1683,6 +1688,7 @@ export default {
 
 
   skills: {
+    filterBySource: "Фильтр по источнику",
     title: 'Навыки',
     targetFilter: 'Среда',
     targets: {
@@ -2187,6 +2193,10 @@ export default {
 
 
   logs: {
+    file: "Файл журнала",
+    level: "Уровень журнала",
+    lines: "Строки",
+    filters: "Фильтровать журнал",
     title: 'Логи',
     all: 'Все',
     searchPlaceholder: 'Поиск...',

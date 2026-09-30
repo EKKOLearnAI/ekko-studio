@@ -25,7 +25,7 @@ describe('client style system', () => {
     expect(theme).toContain("borderRadiusSmall: '6px'")
   })
 
-  it('keeps chat surfaces aligned while preserving composer elevation in dark mode', () => {
+  it('keeps chat and composer surfaces aligned in dark mode', () => {
     const chatInput = readClientFile('components/hermes/chat/ChatInput.vue')
     const groupChatInput = readClientFile('components/hermes/group-chat/GroupChatInput.vue')
     const virtualMessageList = readClientFile('components/hermes/chat/VirtualMessageList.vue')
@@ -33,8 +33,8 @@ describe('client style system', () => {
     expect(chatInput).toContain('background-color: $bg-main-surface;')
     expect(groupChatInput).toContain('background-color: $bg-main-surface;')
     expect(virtualMessageList).toContain('background-color: $bg-main-surface;')
-    expect(chatInput.match(/background-color: #333333;/g)).toHaveLength(1)
-    expect(groupChatInput.match(/background-color: #333333;/g)).toHaveLength(1)
+    expect(chatInput).not.toContain('background-color: #333333;')
+    expect(groupChatInput).not.toContain('background-color: #333333;')
   })
 
   it('keeps message metadata and context usage on custom theme text colors', () => {
@@ -108,11 +108,11 @@ describe('client style system', () => {
     expect(agentManagerView).not.toContain('.sidebar-summary')
     expect(agentManagerView).not.toContain('.agent-manager-main')
     expect(chatPanel).toContain('<AgentManagerPanel')
-    expect(chatPanel).toContain(':sidebar-collapsed="!showSessions"')
+    expect(chatPanel).not.toContain(':sidebar-collapsed="!showSessions"')
     expect(agentManagerView).not.toContain('min-height: 72px;')
     expect(agentManagerView).not.toContain('padding: 14px 24px;')
     expect(agentManagerView).not.toContain("<p>{{ t('agentManager.subtitle') }}</p>")
-    expect(agentManagerView).toContain('<rect x="14" y="14" width="7" height="7" />')
+    expect(agentManagerView).not.toContain('<HeaderSidebarToggle')
     expect(agentManagerView).toMatch(
       /\.coding-agent-grid\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s,
     )
@@ -156,7 +156,7 @@ describe('client style system', () => {
       /:deep\(\.chat-panel > \.chat-main > \.chat-header\),[\s\S]*background-color: rgba\(var\(--bg-main-surface-rgb\), 0\.72\);[\s\S]*backdrop-filter: blur\(8px\) saturate\(110%\);/,
     )
     expect(customBackgroundStyles).toMatch(
-      /:deep\(\.desktop-titlebar\),[\s\S]*:deep\(\.chat-panel > \.chat-main > \.chat-header\),[\s\S]*background-color: rgba\(var\(--bg-main-surface-rgb\), 0\.72\);[\s\S]*backdrop-filter: blur\(8px\) saturate\(110%\);/,
+      /:deep\(\.desktop-titlebar:not\(\.desktop-titlebar--flush\)\),[\s\S]*:deep\(\.chat-panel > \.chat-main > \.chat-header\),[\s\S]*background-color: rgba\(var\(--bg-main-surface-rgb\), 0\.72\);[\s\S]*backdrop-filter: blur\(8px\) saturate\(110%\);/,
     )
     expect(customBackgroundStyles).toMatch(
       /:deep\(\.chat-input-area \.input-wrapper\)\s*\{[\s\S]*background-color: rgba\(var\(--bg-main-surface-rgb\), 0\.72\);[\s\S]*backdrop-filter: blur\(8px\) saturate\(110%\);/,

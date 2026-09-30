@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NSpin, NTabPane, NTabs } from 'naive-ui'
+import { NTabPane, NTabs } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import AgentSettings from '@/components/hermes/settings/AgentSettings.vue'
 import GatewayAutoStartSettings from '@/components/hermes/settings/GatewayAutoStartSettings.vue'
@@ -44,23 +46,23 @@ async function loadSettingsForProfile() {
   await settingsStore.fetchSettings()
 }
 
+const initializing = ref(true)
+
 onMounted(() => {
-  void loadSettingsForProfile()
+  void loadSettingsForProfile().finally(() => { initializing.value = false })
 })
 </script>
 
 <template>
-  <div class="hermes-settings-view">
+  <PageLoading :show="initializing || settingsStore.loading" class="hermes-settings-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('settings.title') }}</h2>
     </header>
+    </PageHeader>
 
     <div class="hermes-settings-content">
-      <NSpin
-        :show="settingsStore.loading || settingsStore.saving"
-        size="large"
-        :description="t('common.loading')"
-      >
+      <div>
         <NTabs v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
           <NTabPane name="agent" :tab="t('settings.tabs.agent')">
             <AgentSettings />
@@ -73,9 +75,9 @@ onMounted(() => {
             <SessionSettings />
           </NTabPane>
         </NTabs>
-      </NSpin>
+      </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">

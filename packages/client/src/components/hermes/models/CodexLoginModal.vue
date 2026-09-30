@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
-import { NModal, NButton, useMessage } from 'naive-ui'
+import { NSpin, NModal, NButton, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { startCodexLogin, pollCodexLogin } from '@/api/hermes/codex-auth'
 import { copyToClipboard } from '@/utils/clipboard'

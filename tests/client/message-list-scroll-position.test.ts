@@ -177,13 +177,13 @@ describe('MessageList session scroll position', () => {
     expect(mockScrollToMessage).not.toHaveBeenCalled()
     expect(wrapper.attributes('aria-busy')).toBe('true')
     expect(wrapper.find('.message-search-loading').exists()).toBe(true)
-    const spinner = wrapper.get('.message-search-spinner').element
+    const spinner = wrapper.get('.message-search-loading > .n-spin-body').element
     expect(wrapper.findComponent({ name: 'VirtualMessageList' }).exists()).toBe(false)
 
     store.activeSession.messages.unshift(makeMessage('intermediate-page'))
     await flushSessionScroll()
     expect(wrapper.find('.stub-message').exists()).toBe(false)
-    expect(wrapper.get('.message-search-spinner').element).toBe(spinner)
+    expect(wrapper.get('.message-search-loading > .n-spin-body').element).toBe(spinner)
     store.activeSession.messages.unshift(makeMessage('older-hit'))
     store.activeSession.loadedMessageCount = 450
     loading.value = false
@@ -193,7 +193,7 @@ describe('MessageList session scroll position', () => {
     expect(mockScrollToBottom).not.toHaveBeenCalled()
     expect(wrapper.getComponent({ name: 'VirtualMessageList' }).props('virtualized')).toBe(true)
     expect(wrapper.attributes('aria-busy')).toBe('true')
-    expect(wrapper.get('.message-search-spinner').element).toBe(spinner)
+    expect(wrapper.get('.message-search-loading > .n-spin-body').element).toBe(spinner)
     expect(wrapper.get('.virtual-message-list-stub').attributes('inert')).toBeDefined()
     expect(wrapper.get('.virtual-message-list-stub').classes()).toContain('message-list--search-loading')
 

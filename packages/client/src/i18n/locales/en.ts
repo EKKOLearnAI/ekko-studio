@@ -365,6 +365,7 @@ export default {
 
   // Common
   common: {
+    close: 'Close',
     loading: 'Loading...',
     cancel: 'Cancel',
     delete: 'Delete',
@@ -1211,6 +1212,9 @@ export default {
     newCliChat: 'New CLI',
     deleteSession: 'Delete this session?',
     sessionDeleted: 'Session deleted',
+    sessionListActions: 'Session list actions',
+    filterByProfile: 'Filter by Profile',
+    selectedSessions: '{count} selected',
     toggleBatchMode: 'Batch selection',
     selectAll: 'Select all',
     confirmBatchDelete: 'Delete {count} selected sessions?',
@@ -1315,6 +1319,7 @@ export default {
   },
 
   workflow: {
+    listActions: 'Workflow list actions',
     quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Profile',
@@ -1787,6 +1792,7 @@ export default {
 
   // Skills
   skills: {
+    filterBySource: "Filter by source",
     title: 'Skills',
     targetFilter: 'Runtime',
     targets: {
@@ -2380,6 +2386,10 @@ export default {
 
   // Logs
   logs: {
+    file: "Log file",
+    level: "Log level",
+    lines: "Lines",
+    filters: "Filter logs",
     title: 'Logs',
     all: 'All',
     searchPlaceholder: 'Search...',

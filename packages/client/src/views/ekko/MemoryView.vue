@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NEmpty, NInput, NModal,
-  NPopconfirm, NSelect, NSpin, NTag, useMessage,
+  NPopconfirm, NSelect, NTag, useMessage,
 } from 'naive-ui'
 import { Handle, MarkerType, Position, VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
@@ -45,7 +47,7 @@ const RELATION_COLORS: Record<EkkoMemoryRelationshipKind, string> = {
 const { t } = useI18n()
 const message = useMessage()
 const { fitView } = useVueFlow('ekko-memory')
-const loading = ref(false)
+const loading = ref(true)
 const saving = ref(false)
 const query = ref('')
 const status = ref<MemoryStatusFilter>('active')
@@ -296,7 +298,8 @@ watch(viewMode, (mode) => {
 </script>
 
 <template>
-  <div class="ekko-page">
+  <PageLoading :show="loading" class="ekko-page">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('ekkoConfig.memoryTitle') }}</h2>
       <NButton size="small" quaternary :loading="loading" @click="loadMemory">
@@ -309,6 +312,7 @@ watch(viewMode, (mode) => {
         {{ t('ekkoConfig.refresh') }}
       </NButton>
     </header>
+    </PageHeader>
 
     <div class="toolbar">
       <NInput v-model:value="query" clearable :placeholder="t('ekkoConfig.searchMemory')" @keyup.enter="loadMemory" />
@@ -328,7 +332,7 @@ watch(viewMode, (mode) => {
           <span class="relationship-legend__item relationship-legend__item--entity"><i />{{ t('ekkoConfig.relationEntity') }} · {{ relationCounts.entity }}</span>
         </div>
 
-        <NSpin :show="loading" class="memory-graph-spin">
+        <div class="memory-graph-spin">
           <div ref="graphWrapRef" class="memory-graph-wrap">
             <VueFlow
               id="ekko-memory" :nodes="flowNodes" :edges="flowEdges" :fit-view-on-init="false"
@@ -369,10 +373,10 @@ watch(viewMode, (mode) => {
               <span>{{ graphEdges.length }} {{ t('ekkoConfig.memoryRelations') }}</span>
             </div>
           </div>
-        </NSpin>
+        </div>
       </section>
 
-      <NSpin v-else :show="loading" class="memory-list-spin">
+      <div v-else class="memory-list-spin">
         <div class="memory-list-scroll">
           <div v-if="memories.length" class="memory-grid">
             <article v-for="memory in memories" :key="memory.id" class="memory-card">
@@ -401,7 +405,7 @@ watch(viewMode, (mode) => {
           </div>
           <NEmpty v-else class="empty" :description="t('ekkoConfig.noMemory')" />
         </div>
-      </NSpin>
+      </div>
     </main>
 
     <NDrawer :show="detailDrawerOpen" :width="drawerWidth" placement="right" @update:show="handleDrawerShow">
@@ -460,7 +464,7 @@ watch(viewMode, (mode) => {
         <div class="modal-actions"><NButton @click="editing = null">{{ t('common.cancel') }}</NButton><NButton type="primary" :loading="saving" @click="saveMemory">{{ t('common.save') }}</NButton></div>
       </div>
     </NModal>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -485,7 +489,6 @@ watch(viewMode, (mode) => {
 
 .memory-graph-spin { flex: 1; height: auto; min-height: 0; }
 .memory-list-spin { height: 100%; min-height: 0; }
-.memory-graph-spin, .memory-list-spin { :deep(.n-spin-container), :deep(.n-spin-content) { height: 100%; min-height: 0; } }
 .memory-graph-wrap { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; border: 1px solid color-mix(in srgb, $border-color 72%, transparent); border-radius: $radius-md; background: radial-gradient(circle at 50% 42%, rgba(var(--accent-info-rgb), 0.07), transparent 50%), $bg-primary; }
 .memory-flow { width: 100%; height: 100%;
   :deep(.vue-flow__pane) { cursor: grab; }

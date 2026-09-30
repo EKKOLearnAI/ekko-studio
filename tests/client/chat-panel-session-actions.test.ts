@@ -13,7 +13,7 @@ describe('ChatPanel session action menus', () => {
   it('keeps the side-panel button and replaces the two adjacent actions with one accessible menu button', () => {
     const header = headerActionsSource()
 
-    expect(header.match(/<NButton/g)).toHaveLength(2)
+    expect(header.match(/<NButton/g)).toHaveLength(3)
     expect(header).toContain('class="header-tool-toggle"')
     expect(header).toContain('@click="toggleToolPanel"')
     expect(header).toContain(':aria-label="t(\'chat.sidePanel\')"')
@@ -33,7 +33,9 @@ describe('ChatPanel session action menus', () => {
     expect(header).toContain('<NTooltip trigger="hover" :disabled="showActiveSessionMenu">')
     expect(header).toContain('{{ t("chat.sessionActions") }}')
     expect(header).not.toContain('{{ t("chat.more") }}')
-    expect(header).toContain('d="M5 12h.01M12 12h.01M19 12h.01"')
+    expect(header).toContain('<circle cx="5" cy="12" r="1.6" />')
+    expect(header).toContain('<circle cx="12" cy="12" r="1.6" />')
+    expect(header).toContain('<circle cx="19" cy="12" r="1.6" />')
     expect(header).not.toContain('@click="showOutline = !showOutline"')
     expect(header).not.toContain('@click="copySessionId()"')
   })

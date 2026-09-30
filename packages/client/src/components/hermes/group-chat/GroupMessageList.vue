@@ -202,7 +202,7 @@ defineExpose({ scrollToBottom })
                     v-else-if="store.hasMoreBefore || store.isLoadingOlderMessages"
                     class="history-loader"
                 >
-                    <span v-if="store.isLoadingOlderMessages" class="history-loader-spinner"></span>
+                    <span v-if="store.isLoadingOlderMessages" class="history-loader-spinner" role="status" :aria-label="t('common.loading')"></span>
                 </div>
             </template>
             <template #item="{ message: msg }">
@@ -474,14 +474,6 @@ defineExpose({ scrollToBottom })
     letter-spacing: 0.02em;
 }
 
-.history-loader {
-    height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-}
-
 .history-loader-spinner {
     width: 14px;
     height: 14px;
@@ -495,6 +487,15 @@ defineExpose({ scrollToBottom })
         border-top-color: $accent-primary;
     }
 }
+
+.history-loader {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
 
 .history-load-error {
     display: flex;
@@ -530,11 +531,6 @@ defineExpose({ scrollToBottom })
     cursor: pointer;
 }
 
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
 
 @media (max-width: 640px) {
     .summary-anchor-divider {
@@ -544,6 +540,11 @@ defineExpose({ scrollToBottom })
 
     .summary-anchor-divider-line {
         display: none;
+    }
+}
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
     }
 }
 </style>

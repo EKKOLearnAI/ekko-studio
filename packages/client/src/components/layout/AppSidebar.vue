@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageSidebar from "./PageSidebar.vue";
+import { usePageSidebarState } from "@/composables/usePageSidebar";
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
@@ -11,6 +13,7 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const appStore = useAppStore();
+const { expanded, isMobile } = usePageSidebarState();
 const selectedKey = computed(() => {
   return route.name as string;
 });
@@ -37,17 +40,18 @@ function handleSidebarClick(event: MouseEvent) {
     typeof window !== "undefined" &&
     window.matchMedia("(max-width: 768px)").matches
   ) {
-    appStore.closeSidebar();
+    expanded.value = false;
   }
 }
 </script>
 
 <template>
+  <PageSidebar>
   <aside
     class="sidebar"
     :class="{
-      open: appStore.sidebarOpen,
-      collapsed: appStore.sidebarCollapsed,
+      open: expanded,
+      collapsed: !isMobile && appStore.sidebarCollapsed,
     }"
     @click="handleSidebarClick"
   >
@@ -330,6 +334,7 @@ function handleSidebarClick(event: MouseEvent) {
     </div>
 
   </aside>
+  </PageSidebar>
 </template>
 
 <style scoped lang="scss">
@@ -341,11 +346,9 @@ function handleSidebarClick(event: MouseEvent) {
   height: auto;
   min-height: 0;
   align-self: stretch;
-  margin: 10px;
+  margin: 0;
   background-color: $bg-sidebar-surface;
-  border: 1px solid $border-color;
-  border-radius: 14px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  border-inline-end: 1px solid $border-color;
   display: flex;
   flex-direction: column;
   padding: 8px 12px 20px;
@@ -492,13 +495,13 @@ function handleSidebarClick(event: MouseEvent) {
 @media (max-width: $breakpoint-mobile) {
   .sidebar {
     position: fixed;
-    left: 10px;
-    top: 10px;
-    bottom: 10px;
+    left: 0;
+    top: 0;
+    bottom: 0;
     margin: 0;
     height: auto;
     z-index: 1000;
-    transform: translateX(calc(-100% - 10px));
+    transform: translateX(-100%);
     transition: transform $transition-normal;
     padding-top: env(safe-area-inset-top, 0px);
 

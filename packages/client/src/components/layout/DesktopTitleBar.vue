@@ -16,10 +16,11 @@ type WindowWithHermesDesktop = Window & typeof globalThis & {
 const desktop = (window as WindowWithHermesDesktop).hermesDesktop
 const props = defineProps<{
   standalone?: boolean
+  flush?: boolean
   leftOffset?: number
 }>()
 const showWindowButtons = computed(() => desktop?.platform === 'win32')
-const titleBarStyle = computed(() => props.standalone ? undefined : { left: `${props.leftOffset ?? 260}px` })
+const titleBarStyle = computed(() => props.standalone ? undefined : { left: `${props.leftOffset ?? 240}px` })
 const isMaximized = ref(false)
 
 async function refreshWindowState() {
@@ -51,7 +52,7 @@ onMounted(() => {
   <div
     v-if="showWindowButtons"
     class="desktop-titlebar"
-    :class="{ standalone }"
+    :class="{ standalone, 'desktop-titlebar--flush': flush }"
     :style="titleBarStyle"
     @dblclick="controlWindow('toggle-maximize')"
   >
@@ -131,6 +132,19 @@ onMounted(() => {
   min-width: 0;
   flex: 1;
   height: 100%;
+}
+
+.desktop-titlebar--flush {
+  background: transparent;
+  height: var(--studio-header-height, 40px);
+  top: 0;
+  right: 0;
+  border-radius: 0;
+  box-shadow: none;
+  clip-path: none;
+
+  &::after { border-width: 0 0 1px; }
+  .desktop-titlebar__controls { border-radius: 0; clip-path: none; }
 }
 
 .desktop-titlebar__standalone-drag {

@@ -58,6 +58,24 @@ vi.mock('naive-ui', () => ({
   }),
 }))
 
+vi.mock('@/components/common/PageLoading.vue', () => ({
+  default: defineComponent({ template: '<div><slot /></div>' }),
+}))
+
+vi.mock('@/components/hermes/skills/SkillList.vue', () => ({
+  default: defineComponent({
+    props: ['categories', 'selectedSkill'],
+    template: '<aside class="skill-list-stub" :data-selected="selectedSkill" />',
+  }),
+}))
+
+vi.mock('@/components/hermes/skills/SkillDetail.vue', () => ({
+  default: defineComponent({
+    props: ['category', 'skill', 'skillName', 'readonly'],
+    template: '<article class="detail skill-detail-stub" :data-category="category" :data-skill="skill" :data-readonly="readonly">{{ skillName }}</article>',
+  }),
+}))
+
 import SkillsView from '@/views/hermes/SkillsView.vue'
 
 describe('SkillsView', () => {

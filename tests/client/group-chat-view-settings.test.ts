@@ -6,6 +6,10 @@ import GroupChatView from '@/views/hermes/GroupChatView.vue'
 import { useGroupChatStore } from '@/stores/hermes/group-chat'
 import { useSettingsStore } from '@/stores/hermes/settings'
 
+vi.mock('@/components/common/PageLoading.vue', () => ({
+  default: { props: ['show'], template: '<div><slot /></div>' },
+}))
+
 vi.mock('@/components/hermes/group-chat/GroupChatPanel.vue', () => ({
   default: { template: '<div data-testid="group-chat-panel" />' },
 }))

@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NInput, NButton, NEmpty, useMessage } from 'naive-ui'
 import { ref, onMounted } from 'vue'
-import { NInput, NButton, NSpin, NEmpty, useMessage } from 'naive-ui'
+
 import { useModelsStore } from '@/stores/hermes/models'
 import { updateProvider } from '@/api/hermes/system'
 import { useI18n } from 'vue-i18n'
@@ -62,6 +64,8 @@ async function handleSaveCustom(providerKey: string) {
     savingKey.value = null
   }
 }
+
+usePageLoadingTask(() => modelsStore.loading)
 </script>
 
 <template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NButton, NModal, NSpin, useMessage } from 'naive-ui'
+import { NSpin, NButton, NModal, useMessage } from 'naive-ui'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import {
   fetchProfileRuntimeStatusesWithMeta,

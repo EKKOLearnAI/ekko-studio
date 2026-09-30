@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NButton, NButtonGroup, NInputNumber } from 'naive-ui'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NButtonGroup, NInputNumber, NSpin } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 
 const MAX_PDF_PAGES = 500

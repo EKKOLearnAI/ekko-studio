@@ -1,7 +1,12 @@
 <script setup lang="ts">
+import PageSidebar from "@/components/layout/PageSidebar.vue"
+import { usePageSidebarState } from "@/composables/usePageSidebar"
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
 import { AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NCheckbox, NDrawer, NDrawerContent, NDropdown, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace, NTooltip, useMessage, type DropdownOption } from 'naive-ui'
+import { NSpin, NButton, NCheckbox, NDrawer, NDrawerContent, NDropdown, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace, NTooltip, useMessage, type DropdownOption } from 'naive-ui'
 import {
   ConnectionMode,
   ConnectionLineType,
@@ -71,6 +76,7 @@ import ChatInput from '@/components/hermes/chat/ChatInput.vue'
 import MessageList from '@/components/hermes/chat/MessageList.vue'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
+import ListActionsMenu from '@/components/layout/ListActionsMenu.vue'
 import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
 import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore } from '@/stores/hermes/chat'
@@ -316,15 +322,13 @@ const workflowWorkspace = ref<string | null>(null)
 const workspaceModalVisible = ref(false)
 const workspacePickerTarget = ref<'active' | 'create'>('active')
 const activeWorkflowId = ref('')
-const showWorkflowSidebar = ref(
-  typeof window === 'undefined' || !window.matchMedia('(max-width: 768px)').matches,
-)
+const { expanded: showWorkflowSidebar, isMobile } = usePageSidebarState()
 watch(
   showWorkflowSidebar,
   expanded => appStore.setPageSidebarExpanded(expanded),
   { immediate: true },
 )
-const isMobile = ref(false)
+
 const workflowsLoading = ref(false)
 const workflowProfileFilter = ref<string | null>(null)
 const createWorkflowDrawerVisible = ref(false)
@@ -388,6 +392,11 @@ const manuallyDeselectedWorkflowRunIds = ref<Set<string>>(new Set())
 const autoSelectRunningWorkflowIds = ref<Set<string>>(new Set())
 const workflowChatPanelVisible = ref(false)
 const workflowChatPanelLoading = ref(false)
+const initializingPage = ref(true)
+const workflowSelectionLoading = ref(false)
+let workflowSelectionSequence = 0
+let pageDisposed = false
+const pageLoading = computed(() => initializingPage.value || workflowsLoading.value || workflowSelectionLoading.value)
 const workflowChatPanelTitle = ref('')
 const workflowChatPanelNodeId = ref<string | null>(null)
 const workflowChatPanelSessionId = ref<string | null>(null)
@@ -401,7 +410,7 @@ const skillOptionRequests = new Map<string, Promise<void>>()
 const runtimeStatusByWorkflowId = ref<Record<string, WorkflowRuntimeStatus>>({})
 let removeWorkflowStatusListener: (() => void) | null = null
 let removeWorkflowStatusErrorListener: (() => void) | null = null
-let mobileQuery: MediaQueryList | null = null
+
 let applyingWorkflow = false
 let workflowRunsLoadSeq = 0
 let workflowRunsLoadingSeq = 0
@@ -476,11 +485,6 @@ const workflowProfileOptions = computed(() => {
     : [{ label: 'default', value: 'default' }]
   return profiles
 })
-
-const workflowProfileFilterOptions = computed(() => [
-  { label: t('chat.allProfiles'), value: '__all__' },
-  ...workflowProfileOptions.value,
-])
 
 function profileAvatarFor(profileName: string) {
   return profilesStore.profiles.find(profile => profile.name === profileName)?.avatar || null
@@ -630,7 +634,7 @@ async function ensureSkillOptionsForAgent(agent: string, profile = activeWorkflo
 
 function ensureSkillOptionsForVisibleNodes() {
   const agents = new Set(nodes.value.map(node => node.data.agent))
-  for (const agent of agents) void ensureSkillOptionsForAgent(agent)
+  return Promise.all([...agents].map(agent => ensureSkillOptionsForAgent(agent)))
 }
 
 function makeNode(
@@ -914,23 +918,22 @@ watch([workflowName, workflowWorkspace, nodes, edges, nextNodeIndex], () => {
 onMounted(() => {
   if (typeof window === 'undefined') return
   workflowBudgetClock = window.setInterval(() => { workflowBudgetNow.value = Date.now() }, 1000)
-  mobileQuery = window.matchMedia('(max-width: 768px)')
-  handleMobileChange(mobileQuery)
-  mobileQuery.addEventListener('change', handleMobileChange)
-  window.addEventListener('hermes:open-page-sidebar', openPageSidebar)
+
+
+
   window.addEventListener('resize', handleWorkflowChatPanelViewportResize)
   window.addEventListener('keydown', handleWorkflowUndoShortcut)
   handleWorkflowChatPanelViewportResize()
-  void refreshAgentAvailability()
   void initializeWorkflowPage()
 })
 
 onUnmounted(() => {
+  pageDisposed = true
+  workflowSelectionSequence++
   publishVisibleWorkflowApproval(visibleWorkflowApprovalKey.value, false)
   if (workflowBudgetClock !== null) window.clearInterval(workflowBudgetClock)
   workflowBudgetClock = null
-  mobileQuery?.removeEventListener('change', handleMobileChange)
-  window.removeEventListener('hermes:open-page-sidebar', openPageSidebar)
+
   window.removeEventListener('resize', handleWorkflowChatPanelViewportResize)
   window.removeEventListener('keydown', handleWorkflowUndoShortcut)
   clearWorkflowEdgePreview()
@@ -941,15 +944,8 @@ onUnmounted(() => {
   removeWorkflowStatusErrorListener = null
 })
 
-function handleMobileChange(event: MediaQueryList | MediaQueryListEvent) {
-  isMobile.value = event.matches
-  showWorkflowSidebar.value = !event.matches
-  if (event.matches) showWorkflowRunsPanel.value = false
-}
+watch(isMobile, mobile => { if (mobile) showWorkflowRunsPanel.value = false })
 
-function openPageSidebar() {
-  showWorkflowSidebar.value = true
-}
 
 function loadWorkflowChatPanelWidth() {
   if (typeof window === 'undefined') return WORKFLOW_CHAT_PANEL_DEFAULT_WIDTH
@@ -1227,19 +1223,29 @@ async function openWorkflowNotificationTarget() {
 }
 
 async function initializeWorkflowPage() {
-  await profilesStore.fetchProfiles()
-  createWorkflowProfile.value = defaultWorkflowProfile.value
-  removeWorkflowStatusListener = onWorkflowStatusUpdated(handleWorkflowRuntimeStatus)
-  removeWorkflowStatusErrorListener = onWorkflowStatusError((error) => {
-    console.error('Workflow execution evidence read failed:', error)
-    message.error(error.error || t('workflow.evidence.loadFailed'))
-  })
-  await loadWorkflows()
-  await openWorkflowNotificationTarget()
-  void subscribeWorkflowStatuses().then(applyWorkflowRuntimeStatuses).catch((err) => {
-    console.error('Failed to subscribe workflow statuses:', err)
+  try {
+    await Promise.all([profilesStore.fetchProfiles(), appStore.loadModels(), refreshAgentAvailability()])
+    if (pageDisposed) return
+    createWorkflowProfile.value = defaultWorkflowProfile.value
+    removeWorkflowStatusListener = onWorkflowStatusUpdated(handleWorkflowRuntimeStatus)
+    removeWorkflowStatusErrorListener = onWorkflowStatusError((error) => {
+      console.error('Workflow execution evidence read failed:', error)
+      message.error(error.error || t('workflow.evidence.loadFailed'))
+    })
+    await loadWorkflows()
+    if (pageDisposed) return
+    await openWorkflowNotificationTarget()
+    if (pageDisposed) return
+    void subscribeWorkflowStatuses().then(applyWorkflowRuntimeStatuses).catch((err) => {
+      console.error('Failed to subscribe workflow statuses:', err)
+      message.error(err?.message || t('workflow.evidence.loadFailed'))
+    })
+  } catch (err: any) {
+    console.error('Failed to initialize workflow page:', err)
     message.error(err?.message || t('workflow.evidence.loadFailed'))
-  })
+  } finally {
+    initializingPage.value = false
+  }
 }
 
 watch(
@@ -2219,8 +2225,8 @@ function handleWorkflowRuntimeStatus(status: WorkflowRuntimeStatus) {
   }))
 }
 
-function handleWorkflowProfileFilterChange(value: string) {
-  workflowProfileFilter.value = value === '__all__' ? null : value
+function handleWorkflowProfileFilterChange(value: string | null) {
+  workflowProfileFilter.value = value
   selectedWorkflowIds.value = new Set()
 }
 
@@ -2333,30 +2339,40 @@ async function applyWorkflow(
   closeMobile: boolean,
   options: { resetRuntime?: boolean } = {},
 ) {
+  const selection = ++workflowSelectionSequence
+  workflowSelectionLoading.value = true
   applyingWorkflow = true
-  selectedWorkflowRunId.value = null
-  clearWorkflowSchedules()
-  activeWorkflowId.value = workflow.id
-  workflowName.value = workflow.name
-  workflowWorkspace.value = workflow.workspace
-  const runtimeStatus = workflowCanvasRuntimeStatus(workflow.id)
-  nodes.value = cloneWorkflowNodes(workflow.nodes, { resetRuntime: options.resetRuntime }).map<WorkflowNode>(node => ({
-    ...node,
-    data: withRuntimeNodeData({
-      ...node.data,
-      status: options.resetRuntime ? 'idle' : workflowNodeStatusFromRuntime(runtimeStatus, node.id),
-      statusError: options.resetRuntime ? null : workflowNodeErrorFromRuntime(runtimeStatus, node.id),
-      readonly: false,
-    }),
-  }))
-  edges.value = cloneWorkflowEdges(workflow.edges)
-  nextNodeIndex.value = workflow.nextNodeIndex
-  await nextTick()
-  await setViewport(workflow.viewport, { duration: 0 })
-  applyingWorkflow = false
-  ensureSkillOptionsForVisibleNodes()
-  void loadWorkflowRuns(workflow.id)
-  if (closeMobile && isMobile.value) showWorkflowSidebar.value = false
+  try {
+    selectedWorkflowRunId.value = null
+    clearWorkflowSchedules()
+    activeWorkflowId.value = workflow.id
+    workflowName.value = workflow.name
+    workflowWorkspace.value = workflow.workspace
+    const runtimeStatus = workflowCanvasRuntimeStatus(workflow.id)
+    nodes.value = cloneWorkflowNodes(workflow.nodes, { resetRuntime: options.resetRuntime }).map<WorkflowNode>(node => ({
+      ...node,
+      data: withRuntimeNodeData({
+        ...node.data,
+        status: options.resetRuntime ? 'idle' : workflowNodeStatusFromRuntime(runtimeStatus, node.id),
+        statusError: options.resetRuntime ? null : workflowNodeErrorFromRuntime(runtimeStatus, node.id),
+        readonly: false,
+      }),
+    }))
+    edges.value = cloneWorkflowEdges(workflow.edges)
+    nextNodeIndex.value = workflow.nextNodeIndex
+    await nextTick()
+    if (pageDisposed || selection !== workflowSelectionSequence) return
+    await setViewport(workflow.viewport, { duration: 0 })
+    if (pageDisposed || selection !== workflowSelectionSequence) return
+    applyingWorkflow = false
+    await Promise.all([ensureSkillOptionsForVisibleNodes(), loadWorkflowRuns(workflow.id)])
+    if (closeMobile && isMobile.value) showWorkflowSidebar.value = false
+  } finally {
+    if (selection === workflowSelectionSequence) {
+      applyingWorkflow = false
+      workflowSelectionLoading.value = false
+    }
+  }
 }
 
 async function selectWorkflow(workflowId: string) {
@@ -3184,45 +3200,48 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 </script>
 
 <template>
-  <div class="workflow-view">
-    <div class="workflow-sidebar-backdrop" :class="{ active: showWorkflowSidebar }" @click="showWorkflowSidebar = false" />
+  <PageLoading :show="pageLoading" initial-only class="workflow-view">
+    <PageSidebar>
     <aside class="workflow-sidebar" :class="{ collapsed: !showWorkflowSidebar }">
       <div v-if="showWorkflowSidebar" class="page-sidebar-top">
         <PageSidebarNav
           active="workflow"
           :primary-label="t('workflow.actions.newWorkflow')"
           @primary="openCreateWorkflowDrawer"
-        />
-        <div class="workflow-list-toolbar">
-          <NSelect
-            class="workflow-profile-filter"
-            :value="workflowProfileFilter || '__all__'"
-            :options="workflowProfileFilterOptions"
-            size="small"
-            :loading="profilesStore.loading"
-            @update:value="handleWorkflowProfileFilterChange"
-          />
-          <div class="workflow-list-actions">
-            <NButton
-              v-if="!isWorkflowBatchMode"
-              quaternary
-              size="tiny"
-              :title="t('workflow.batch.toggle')"
-              @click="toggleWorkflowBatchMode"
+        >
+          <template #actions>
+            <ListActionsMenu
+              :label="t('workflow.listActions')"
+              :profiles="workflowProfileOptions.map(option => ({ name: option.value }))"
+              :profile="workflowProfileFilter"
+              :loading="profilesStore.loading"
+              :batch-mode="isWorkflowBatchMode"
+              @filter="handleWorkflowProfileFilterChange"
+              @batch="toggleWorkflowBatchMode"
+            />
+            <button
+              v-if="isMobile"
+              class="workflow-sidebar-close"
+              type="button"
+              :aria-label="t('common.close')"
+              @click="showWorkflowSidebar = false"
             >
-              <template #icon>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M9 11l3 3L22 4" />
-                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                </svg>
-              </template>
-            </NButton>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="m18 6-12 12M6 6l12 12" />
+              </svg>
+            </button>
+          </template>
+        </PageSidebarNav>
+        <div v-if="isWorkflowBatchMode" class="workflow-list-toolbar">
+          <span class="workflow-selection-count" role="status">{{ t('chat.selectedSessions', { count: selectedWorkflowCount }) }}</span>
+          <div class="workflow-list-actions">
             <NButton
               v-if="isWorkflowBatchMode"
               quaternary
               size="tiny"
               :disabled="!canSelectAllWorkflows || isWorkflowBatchDeleting"
               :title="t('workflow.batch.selectAll')"
+              :aria-label="t('workflow.batch.selectAll')"
               @click="selectAllWorkflows"
             >
               <template #icon>
@@ -3240,7 +3259,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
               @positive-click="handleWorkflowBatchDeleteConfirm"
             >
               <template #trigger>
-                <NButton quaternary size="tiny" type="error" :loading="isWorkflowBatchDeleting" :disabled="isWorkflowBatchDeleting">
+                <NButton quaternary size="tiny" :title="t('common.delete')" :aria-label="t('common.delete')" :loading="isWorkflowBatchDeleting" :disabled="isWorkflowBatchDeleting">
                   <template #icon>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="3 6 5 6 21 6" />
@@ -3256,6 +3275,8 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
               quaternary
               size="tiny"
               :disabled="isWorkflowBatchDeleting"
+              :title="t('common.cancel')"
+              :aria-label="t('common.cancel')"
               @click="toggleWorkflowBatchMode"
             >
               <template #icon>
@@ -3269,7 +3290,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
         </div>
       </div>
       <div v-if="showWorkflowSidebar" class="workflow-list">
-        <div v-if="workflowsLoading" class="workflow-list-empty">{{ t('common.loading') }}</div>
+        <div v-if="workflowsLoading" class="workflow-list-empty"><NSpin size="small" :description="t('common.loading')" /></div>
         <div v-else-if="workflowList.length === 0" class="workflow-list-empty">{{ t('common.noData') }}</div>
         <button
           v-for="workflow in workflowList"
@@ -3321,47 +3342,40 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
       </div>
       <PageSidebarFooter v-if="showWorkflowSidebar" />
     </aside>
+    </PageSidebar>
 
     <main
       class="workflow-main"
       :class="{ 'workflow-main--sidebar-collapsed': !showWorkflowSidebar }"
     >
+      <PageHeader>
       <header class="page-header">
         <div class="header-left">
-          <NButton
+          <HeaderSidebarToggle
             class="header-sidebar-toggle"
-            quaternary
-            size="small"
-            circle
-            @click="showWorkflowSidebar = !showWorkflowSidebar"
-          >
-            <template #icon>
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-              </svg>
-            </template>
-          </NButton>
+            :expanded="showWorkflowSidebar"
+            @toggle="showWorkflowSidebar = !showWorkflowSidebar"
+          />
           <div class="header-workflow-meta">
             <span class="header-workflow-title">{{ workflowName }}</span>
-            <button class="workspace-badge" type="button" :title="workflowWorkspace || t('workflow.workspace.select')" @click="openWorkspacePicker('active')">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              </svg>
-              <span>{{ workflowWorkspace ? (workflowWorkspace.split('/').pop() || workflowWorkspace) : t('workflow.workspace.select') }}</span>
-            </button>
           </div>
         </div>
         <div class="header-actions">
+          <NButton
+            class="header-workspace-button"
+            quaternary
+            size="small"
+            circle
+            :title="workflowWorkspace || t('workflow.workspace.select')"
+            :aria-label="t('workflow.workspace.select')"
+            @click="openWorkspacePicker('active')"
+          >
+            <template #icon>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              </svg>
+            </template>
+          </NButton>
           <NTooltip trigger="hover">
             <template #trigger>
               <NButton
@@ -3487,6 +3501,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
           </NTooltip>
         </div>
       </header>
+      </PageHeader>
     <NModal
       data-testid="workflow-schedules-modal"
       :show="workflowScheduleModalVisible"
@@ -3497,7 +3512,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
     >
       <div class="workflow-schedules-layout">
         <section class="workflow-schedules-list">
-          <div v-if="workflowSchedulesLoading" class="workflow-schedules-empty">{{ t('common.loading') }}</div>
+          <div v-if="workflowSchedulesLoading" class="workflow-schedules-empty"><NSpin size="small" :description="t('common.loading')" /></div>
           <div v-else-if="workflowScheduleLoadError" class="workflow-schedule-error">{{ workflowScheduleLoadError }}</div>
           <div v-else-if="workflowSchedules.length === 0" class="workflow-schedules-empty">{{ t('workflow.schedule.empty') }}</div>
           <article v-for="schedule in workflowSchedules" :key="schedule.id" class="workflow-schedule-item">
@@ -3696,7 +3711,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
           </header>
           <div class="workflow-chat-content">
             <div v-if="workflowChatPanelLoading" class="workflow-chat-loading">
-              {{ t('common.loading') }}
+              <NSpin size="small" :description="t('common.loading')" />
             </div>
             <template v-else-if="workflowChatPanelSessionId">
               <div v-if="workflowChatPanelPendingApproval" class="workflow-node-approval-panel">
@@ -3826,7 +3841,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
           </div>
         </div>
         <div ref="workflowRunsHistoryScrollRef" class="workflow-runs-page-scroll">
-          <div v-if="workflowRunsLoading" class="workflow-runs-empty">{{ t('common.loading') }}</div>
+          <div v-if="workflowRunsLoading" class="workflow-runs-empty"><NSpin size="small" :description="t('common.loading')" /></div>
           <div v-else-if="workflowRuns.length === 0" class="workflow-runs-empty">{{ t('workflow.runs.empty') }}</div>
           <div v-else class="workflow-runs-list">
           <button
@@ -4205,14 +4220,14 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
         </template>
       </NDrawerContent>
     </NDrawer>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .workflow-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   min-width: 0;
   position: relative;
@@ -4242,11 +4257,9 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   width: $sidebar-width;
   min-height: 0;
   align-self: stretch;
-  margin: 10px;
+  margin: 0;
   background: $bg-sidebar-surface;
-  border: 1px solid $border-color;
-  border-radius: 14px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  border-inline-end: 1px solid $border-color;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -4269,19 +4282,35 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 .page-sidebar-top {
   flex-shrink: 0;
   padding: 12px;
-  border-bottom: 1px solid $border-color;
 }
 
 .workflow-list-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 8px;
+  justify-content: space-between;
 }
 
-.workflow-profile-filter {
+.workflow-selection-count {
   min-width: 0;
-  flex: 1;
+  font-size: 12px;
+  color: $text-secondary;
+}
+
+.workflow-sidebar-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 4px;
+  border: 0;
+  border-radius: $radius-sm;
+  background: transparent;
+  color: $text-secondary;
+  cursor: pointer;
+  &:hover { background: rgba(var(--accent-primary-rgb), 0.06); }
 }
 
 .workflow-list-actions {
@@ -4304,7 +4333,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 10px 6px 12px;
+  padding: 0 6px 12px;
 }
 
 .workflow-list-empty {
@@ -4665,40 +4694,6 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   font-weight: 600;
   line-height: 22px;
   color: $text-primary;
-}
-
-.workspace-badge {
-  flex: 0 1 auto;
-  max-width: 160px;
-  min-width: 0;
-  border: 0;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.05);
-  color: $text-muted;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  line-height: 16px;
-  cursor: pointer;
-  overflow: hidden;
-
-  svg {
-    flex: 0 0 auto;
-  }
-
-  span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &:hover {
-    color: $text-secondary;
-    background: rgba(var(--accent-primary-rgb), 0.06);
-  }
 }
 
 .header-actions {
@@ -5255,16 +5250,16 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 
   .workflow-sidebar {
     position: absolute;
-    left: 10px;
-    top: 10px;
-    bottom: 10px;
+    left: 0;
+    top: 0;
+    bottom: 0;
     height: auto;
     margin: 0;
     z-index: 120;
     width: $sidebar-width;
 
     &.collapsed {
-      transform: translateX(calc(-100% - 10px));
+      transform: translateX(-100%);
       opacity: 0;
     }
   }
@@ -5314,12 +5309,6 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 
   .header-workflow-title {
     display: none;
-  }
-
-  .workspace-badge {
-    flex: 1 1 auto;
-    max-width: none;
-    padding: 2px 6px;
   }
 
   .workflow-body {

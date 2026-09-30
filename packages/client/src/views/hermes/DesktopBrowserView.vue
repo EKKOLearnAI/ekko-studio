@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NCard, NInput, NModal, NSelect, NSwitch, NTabPane, NTabs, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -223,6 +225,8 @@ function downloadSummary(item: DesktopBrowserDownload): string {
   return `${downloadStateLabel(item.state)}${percent === null ? '' : ` · ${percent}%`} · ${transferred}`
 }
 
+const initializing = ref(!!bridge)
+
 onMounted(async () => {
   if (!bridge) return
   try {
@@ -232,6 +236,8 @@ onMounted(async () => {
   } catch (error) {
     loadError.value = `${t('browser.loadFailed')}: ${error instanceof Error ? error.message : String(error)}`
     message.error(loadError.value)
+  } finally {
+    initializing.value = false
   }
 })
 
@@ -243,8 +249,9 @@ onUnmounted(() => {
 
 <template>
   <section class="browser-settings-page">
-    <div v-if="!bridge" class="unavailable">{{ t('browser.desktopOnly') }}</div>
+    <PageLoading :show="initializing" v-if="!bridge" class="unavailable">{{ t('browser.desktopOnly') }}</PageLoading>
     <template v-else>
+      <PageHeader>
       <header class="page-header">
         <h2 class="header-title">{{ t('browser.title') }}</h2>
         <div class="header-actions">
@@ -256,6 +263,7 @@ onUnmounted(() => {
           </NButton>
         </div>
       </header>
+      </PageHeader>
 
       <div v-if="loadError" class="unavailable">{{ loadError }}</div>
       <NCard v-else class="settings-card" :bordered="false">

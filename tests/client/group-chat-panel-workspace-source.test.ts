@@ -91,15 +91,16 @@ describe('GroupChatPanel workspace save handling', () => {
     expect(source).not.toContain('store.rooms[index] = result.room')
   })
 
-  it('renders the active room workspace badge beside the room title like single chat', () => {
+  it('renders the active room workspace icon in the right header actions', () => {
     const source = readFileSync('packages/client/src/components/hermes/group-chat/GroupChatPanel.vue', 'utf8')
+    const headerInfo = source.slice(source.indexOf('<div class="header-info">'), source.indexOf('</PageHeader>'))
 
-    expect(source).toContain('<div class="header-left">')
-    expect(source).toContain('class="workspace-badge"')
-    expect(source).toContain('v-if="currentRoom?.workspace"')
-    expect(source).toContain(':title="currentRoom.workspace"')
+    expect(headerInfo).toContain('class="header-workspace-button"')
+    expect(headerInfo).toContain('v-if="currentRoomCanManage"')
+    expect(headerInfo).toContain(':title="currentRoom?.workspace || t(\'chat.setWorkspace\')"')
+    expect(headerInfo).toContain('@click="handleOpenWorkspacePicker()"')
+    expect(source).not.toContain('class="workspace-badge"')
     expect(source).not.toContain('class="workspace-chip"')
-    expect(source).not.toContain("currentWorkspaceLabel || t('chat.setWorkspace')")
   })
 
   it('offers a selected manual room link when browser clipboard access fails', () => {

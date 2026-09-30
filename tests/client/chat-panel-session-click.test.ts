@@ -17,7 +17,8 @@ describe('ChatPanel session clicks', () => {
     expect(source).toContain('bridge.openChatWindow(sessionId, profile || undefined)')
     expect(source).toContain('window.open(sessionHref(sessionId, profile), "_blank", "noopener,noreferrer")')
     expect(source).toContain('openSessionInNewTab(sessionId, chatStore.activeSession?.profile || null)')
-    expect(source).toContain('v-if="currentMode === \'chat\' && !standalone"')
+    expect(source).toContain('v-if="hasPageSidebar"')
+    expect(source).toContain('!props.standalone && currentMode.value === "chat"')
     expect(source).toContain('<header v-if="!standalone" class="chat-header">')
   })
 

@@ -1,10 +1,15 @@
 <script setup lang="ts">
+import PageSidebar from "@/components/layout/PageSidebar.vue"
+import { usePageSidebarState } from "@/composables/usePageSidebar"
+import { usePageLoadingState } from '@/composables/usePageLoading'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
 import { ref, computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, provide, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { useMessage, NInput, NButton, NSpace, NSelect, NPopconfirm, NInputNumber, NDropdown, NModal, NPopover, NDrawer, NDrawerContent, NSwitch, type DropdownOption } from 'naive-ui'
+import { NSpin, useMessage, NInput, NButton, NSpace, NSelect, NPopconfirm, NInputNumber, NDropdown, NModal, NPopover, NDrawer, NDrawerContent, NSwitch, type DropdownOption } from 'naive-ui'
 import { nextCodingAgentMode, storedPriorAgentMode, submittedCodingAgentSelection } from '@/utils/coding-agent-mode'
 import { useGroupChatStore } from '@/stores/hermes/group-chat'
 import { useAppStore } from '@/stores/hermes/app'
@@ -110,7 +115,7 @@ const profilesStore = useProfilesStore()
 const filesStore = useFilesStore()
 const toolPanelStore = useToolPanelStore()
 
-const showSidebar = ref(!props.standalone && window.innerWidth > 768)
+const { expanded: showSidebar } = usePageSidebarState(!props.standalone)
 watch(
     showSidebar,
     expanded => appStore.setPageSidebarExpanded(expanded),
@@ -120,6 +125,7 @@ const showCreateModal = ref(false)
 const showCloneModal = ref(false)
 const showAddAgentDrawer = ref(false)
 const showGroupChatRefactorNotice = ref(false)
+const pageLoading = usePageLoadingState()
 const showManualRoomLinkModal = ref(false)
 const manualRoomLink = ref('')
 const manualRoomLinkInput = ref<HTMLInputElement | null>(null)
@@ -691,7 +697,6 @@ watch(
 const visibleAgentPairing = computed(() =>
     currentRoomCanManage.value ? pendingAgentPairings.value[0] || null : null,
 )
-const currentWorkspaceLabel = computed(() => workspaceBasename(currentRoom.value?.workspace || ''))
 const groupToolPanelTitle = computed(() => desktopBrowserAvailable
     ? `${t('drawer.files')} / ${t('drawer.terminal')} / ${t('browser.title')}`
     : `${t('drawer.files')} / ${t('drawer.terminal')}`
@@ -744,12 +749,6 @@ async function handleRemoveMember(member: MemberInfo) {
 function formatTokens(tokens: number): string {
     const value = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens)
     return `${value} ${t('usage.tokens')}`
-}
-
-function workspaceBasename(path: string): string {
-    const trimmed = String(path || '').trim().replace(/[\\/]+$/, '')
-    if (!trimmed) return ''
-    return trimmed.split(/[\\/]/).pop() || trimmed
 }
 
 function toggleSidebar() {
@@ -845,15 +844,6 @@ function handleToolPanelBeforeLeave(): void {
 
 function handleToolPanelLeaveCancelled(): void {
     toolPanelTransitionReady.value = true
-}
-
-function openWorkspaceFilesPanel(): void {
-    if (!currentRoom.value?.workspace) return
-    if (showWorkspacePanel.value && activeWorkspacePanel.value === 'files') {
-        closeWorkspacePanel()
-        return
-    }
-    selectWorkspacePanel('files')
 }
 
 function selectWorkspacePanel(panel: 'files' | 'terminal' | 'browser'): void {
@@ -962,10 +952,6 @@ function handleGroupAttachmentPreviewRequest(event: Event): void {
     })
 }
 
-function openPageSidebar() {
-    if (props.standalone) return
-    showSidebar.value = true
-}
 
 function acknowledgeGroupChatRefactorNotice() {
     try {
@@ -1605,7 +1591,6 @@ onMounted(() => {
             showGroupChatRefactorNotice.value = true
         }
     }
-    window.addEventListener('hermes:open-page-sidebar', openPageSidebar)
     window.addEventListener('hermes:preview-workspace-file', handleWorkspaceFilePreviewRequest)
     window.addEventListener('hermes:preview-group-attachment', handleGroupAttachmentPreviewRequest)
     window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest)
@@ -1625,7 +1610,6 @@ onMounted(() => {
 
 onUnmounted(() => {
     hideInlineSummaryStatus()
-    window.removeEventListener('hermes:open-page-sidebar', openPageSidebar)
     window.removeEventListener('hermes:preview-workspace-file', handleWorkspaceFilePreviewRequest)
     window.removeEventListener('hermes:preview-group-attachment', handleGroupAttachmentPreviewRequest)
     window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest)
@@ -2127,9 +2111,8 @@ function handleClarifyKeydown(event: KeyboardEvent) {
 
 <template>
     <div class="group-chat-panel">
-        <!-- Mobile backdrop -->
-        <div v-if="!props.standalone" class="sidebar-backdrop" :class="{ active: showSidebar }" @click="showSidebar = false" />
         <!-- Room sidebar -->
+        <PageSidebar>
         <div v-if="!props.standalone && showSidebar" class="room-sidebar">
             <div class="sidebar-header">
                 <PageSidebarNav
@@ -2225,6 +2208,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
             </div>
             <PageSidebarFooter />
         </div>
+        </PageSidebar>
 
         <NDropdown
             v-if="!props.standalone"
@@ -2259,31 +2243,34 @@ function handleClarifyKeydown(event: KeyboardEvent) {
             @dragleave="handleChatDragLeave"
             @drop="handleChatDrop"
         >
+            <PageHeader :disabled="props.standalone">
             <div class="chat-header">
                 <div class="header-left">
-                    <button v-if="!props.standalone" class="icon-btn header-sidebar-toggle" @click="toggleSidebar">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <rect x="3" y="3" width="7" height="7" />
-                            <rect x="14" y="3" width="7" height="7" />
-                            <rect x="3" y="14" width="7" height="7" />
-                            <rect x="14" y="14" width="7" height="7" />
-                        </svg>
-                    </button>
+                    <HeaderSidebarToggle
+                      v-if="!props.standalone"
+                      class="header-sidebar-toggle"
+                      :expanded="showSidebar"
+                      @toggle="toggleSidebar"
+                    />
                     <span class="room-title-text">{{ store.roomName || (store.currentRoomId || t('groupChat.title')) }}</span>
-                    <button
-                        v-if="currentRoom?.workspace"
-                        class="workspace-badge"
-                        type="button"
-                        :title="currentRoom.workspace"
-                        @click="openWorkspaceFilesPanel"
-                    >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                        </svg>
-                        <span>{{ currentWorkspaceLabel }}</span>
-                    </button>
                 </div>
                 <div class="header-info">
+                    <NButton
+                        v-if="currentRoomCanManage"
+                        class="header-workspace-button"
+                        quaternary
+                        size="small"
+                        circle
+                        :title="currentRoom?.workspace || t('chat.setWorkspace')"
+                        :aria-label="t('chat.setWorkspace')"
+                        @click="handleOpenWorkspacePicker()"
+                    >
+                        <template #icon>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                            </svg>
+                        </template>
+                    </NButton>
                     <button
                         v-if="currentRoomCanManage && pendingAgentPairings.length"
                         class="agent-pairing-header-button"
@@ -2336,6 +2323,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     <span class="connection-dot" :class="{ connected: store.connected, disconnected: !store.connected }"></span>
                 </div>
             </div>
+            </PageHeader>
 
             <div
                 v-if="hasRoom"
@@ -2978,7 +2966,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                         :placeholder="t('groupChat.searchAgentPresets')"
                     />
                     <div v-if="isLoadingAgentPresets" class="agent-preset-dialog-state">
-                        {{ t('groupChat.agentPresetsLoading') }}
+                        <NSpin size="small" :description="t('groupChat.agentPresetsLoading')" />
                     </div>
                     <div v-else-if="agentPresetLoadError" class="agent-preset-dialog-state is-error">
                         <span>{{ agentPresetLoadError }}</span>
@@ -3175,6 +3163,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
             </NModal>
             <NModal
                 v-model:show="showGroupChatRefactorNotice"
+                v-if="!pageLoading"
                 preset="dialog"
                 :title="t('groupChat.refactorNoticeTitle')"
                 :mask-closable="false"
@@ -3462,7 +3451,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                 {{ roomSummaryStatusLabel(liveRoomSummaryState?.status) }}
                             </span>
                         </div>
-                        <div v-if="isLoadingRoomSummary" class="summary-loading">{{ t('common.loading') }}</div>
+                        <div v-if="isLoadingRoomSummary" class="summary-loading"><NSpin size="small" :description="t('common.loading')" /></div>
                         <template v-else>
                             <div class="summary-meta">
                                 <span>
@@ -3722,11 +3711,9 @@ export default defineComponent({ components: { CreateRoomForm } })
     width: $sidebar-width;
     min-height: 0;
     align-self: stretch;
-    margin: 10px;
+    margin: 0;
     background: $bg-sidebar-surface;
-    border: 1px solid $border-color;
-    border-radius: 14px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    border-inline-end: 1px solid $border-color;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -3839,7 +3826,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 .room-list {
     flex: 1;
     overflow-y: auto;
-    padding: 8px;
+    padding: 0 8px 8px;
 }
 
 .room-section + .room-section {
@@ -4665,39 +4652,6 @@ export default defineComponent({ components: { CreateRoomForm } })
         flex-shrink: 0;
     }
 
-    .workspace-badge {
-        border: 0;
-        font-size: 11px;
-        line-height: 16px;
-        color: $text-muted;
-        background: rgba(255, 255, 255, 0.05);
-        padding: 2px 8px;
-        border-radius: 4px;
-        max-width: 160px;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        overflow: hidden;
-        cursor: pointer;
-        flex-shrink: 0;
-
-        svg {
-            flex: 0 0 auto;
-        }
-
-        span {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        &:hover {
-            color: $text-secondary;
-            background: rgba(var(--accent-primary-rgb), 0.06);
-        }
-    }
-
     .member-count {
         font-size: 12px;
         color: $text-muted;
@@ -5248,9 +5202,9 @@ export default defineComponent({ components: { CreateRoomForm } })
 
     .room-sidebar {
         position: absolute;
-        left: 10px;
-        top: 10px;
-        bottom: 10px;
+        left: 0;
+        top: 0;
+        bottom: 0;
         height: auto;
         margin: 0;
         z-index: 100;

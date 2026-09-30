@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NAlert } from 'naive-ui'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NSpin } from 'naive-ui'
+
 import { openDshPluginUi, closeDshPluginUi } from '@/api/coding-agents/dsh'
 import { useTheme } from '@/composables/useTheme'
 import { getBaseUrlValue } from '@/api/client'
@@ -42,6 +44,8 @@ function ready(event: MessageEvent) {
 onMounted(() => { window.addEventListener('message', ready); void refresh() })
 onUnmounted(() => { disposed = true; window.removeEventListener('message', ready); if (id) void closeDshPluginUi(id).catch(() => {}) })
 defineExpose({ refresh })
+
+usePageLoadingTask(() => loading.value)
 </script>
 <template>
   <div class="native-settings" data-testid="dsh-plugin-settings">

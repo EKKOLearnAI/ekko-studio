@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NAlert, NButton, NForm, NInput, NInputNumber, NPopconfirm, NSelect, NSpace, NSwitch, useMessage } from 'naive-ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { NAlert, NButton, NForm, NInput, NInputNumber, NPopconfirm, NSelect, NSpace, NSpin, NSwitch, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import { deleteJevSettings, getJevSettings, saveJevSettings, testJevConnection, type JevSettings } from '@/api/studio/jev'
 import SettingRow from '@/components/hermes/settings/SettingRow.vue'
@@ -67,6 +69,8 @@ async function perform(action: 'save' | 'delete' | 'test') {
   } catch (err) { if (!disposed) error.value = errorKey(err) }
   finally { busy.value = false }
 }
+
+usePageLoadingTask(() => loading.value)
 </script>
 
 <template>

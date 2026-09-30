@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
-import { NButton, NDropdown, NInput, NModal, NSpace, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NSpin, NButton, NDropdown, NInput, NModal, NSpace, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api/client'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -346,7 +346,7 @@ const flatNodes = computed<FlatNode[]>(() => {
         @contextmenu="showContextMenu($event, node.folder)"
       >
         <span class="folder-expand" @click.stop="toggleExpand(node.folder)">
-          <template v-if="node.isLoading">⏳</template>
+          <NSpin v-if="node.isLoading" :size="16" />
           <template v-else>{{ node.isExpanded ? '▼' : '▶' }}</template>
         </span>
         <span class="folder-icon">📁</span>

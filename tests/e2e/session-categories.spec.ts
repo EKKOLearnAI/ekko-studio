@@ -671,6 +671,7 @@ test('shows category load failure and retries instead of presenting an empty men
   await page.getByRole('link', { name: /General Notes/ }).first().click({ button: 'right' })
   await page.locator('.n-dropdown-option').filter({ hasText: 'Move to category' }).hover()
   await expect(page.locator('.n-dropdown-option:visible').filter({ hasText: /^Failed to load categories$/ })).toBeVisible()
+  await page.locator('.chat-header').click()
   await failure.getByRole('button', { name: 'Retry' }).click()
 
   await expect(failure).toHaveCount(0)

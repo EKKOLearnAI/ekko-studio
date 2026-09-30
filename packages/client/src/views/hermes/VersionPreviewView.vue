@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { useI18n } from 'vue-i18n'
 import GithubPreviewSettings from '@/components/hermes/settings/GithubPreviewSettings.vue'
 
@@ -6,22 +8,24 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <div class="version-preview-view">
+  <PageLoading :show="false" class="version-preview-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('githubPreview.title') }}</h2>
     </header>
+    </PageHeader>
 
     <div class="page-content">
       <GithubPreviewSettings />
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
 
 .version-preview-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }

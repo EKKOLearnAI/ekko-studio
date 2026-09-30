@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderActionOverflow from '@/components/layout/HeaderActionOverflow.vue'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { NButton, NSelect, NSpin, NModal, NInput, NTooltip, useDialog, useMessage } from 'naive-ui'
+import { NButton, NSelect, NModal, NInput, NTooltip, useDialog, useMessage } from 'naive-ui'
 import { VueFlow, type Node } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -178,20 +181,26 @@ watch(() => route.query.board, async () => {
   await applyBoardSelection(routeBoard(), false)
 })
 
+const initializing = ref(true)
+
 onMounted(async () => {
-  await Promise.all([
-    kanbanStore.fetchBoards(),
-    kanbanStore.fetchCapabilities(),
-    profilesStore.profiles.length === 0 ? profilesStore.fetchProfiles() : Promise.resolve(),
-  ])
-  await applyBoardSelection(routeBoard(), true, true)
-  kanbanStore.startEventStream()
-  routeReady.value = true
-  refreshTimer.value = setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      void Promise.all([kanbanStore.fetchBoards(), kanbanStore.fetchTasks(true), kanbanStore.fetchStats()])
-    }
-  }, 15000)
+  try {
+    await Promise.all([
+      kanbanStore.fetchBoards(),
+      kanbanStore.fetchCapabilities(),
+      profilesStore.profiles.length === 0 ? profilesStore.fetchProfiles() : Promise.resolve(),
+    ])
+    await applyBoardSelection(routeBoard(), true, true)
+    kanbanStore.startEventStream()
+    routeReady.value = true
+    refreshTimer.value = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void Promise.all([kanbanStore.fetchBoards(), kanbanStore.fetchTasks(true), kanbanStore.fetchStats()])
+      }
+    }, 15000)
+  } finally {
+    initializing.value = false
+  }
 })
 
 onUnmounted(() => {
@@ -291,7 +300,8 @@ async function handleDispatch() {
 </script>
 
 <template>
-  <div class="kanban-view">
+  <PageLoading :show="initializing || (kanbanStore.loading && kanbanStore.tasks.length === 0)" class="kanban-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('kanban.title') }}</h2>
       <div class="header-actions">
@@ -300,44 +310,46 @@ async function handleDispatch() {
           :options="boardOptions"
           :loading="kanbanStore.boardsLoading"
           size="small"
-          style="width: 260px;"
+          class="board-select"
         />
-        <NButton size="small" :loading="boardActionLoading" @click="showCreateBoardForm = true">
-          {{ t('common.add') }}
-        </NButton>
-        <NTooltip trigger="hover" :disabled="kanbanStore.selectedBoard !== DEFAULT_KANBAN_BOARD">
-          <template #trigger>
-            <span class="archive-board-trigger">
-              <NButton
-                size="small"
-                secondary
-                :disabled="kanbanStore.selectedBoard === DEFAULT_KANBAN_BOARD"
-                :loading="boardActionLoading"
-                @click="handleArchiveSelectedBoard"
-              >
-                {{ t('kanban.board.archive') }}
-              </NButton>
-            </span>
-          </template>
-          {{ t('kanban.board.defaultArchiveUnavailable') }}
-        </NTooltip>
-        <NButton size="small" secondary :loading="boardActionLoading" @click="handleDispatch">
-          {{ t('kanban.action.dispatch') }}
-        </NButton>
-        <NSelect
-          v-model:value="filterStatusValue"
-          :options="statusFilterOptions"
-          size="small"
-          style="width: 150px;"
-          @update:value="handleApplyFilter"
-        />
-        <NSelect
-          v-model:value="filterAssigneeValue"
-          :options="assigneeFilterOptions"
-          size="small"
-          style="width: 170px;"
-          @update:value="handleApplyFilter"
-        />
+        <HeaderActionOverflow :label="t('chat.more')" :breakpoint="1100">
+          <NButton size="small" :loading="boardActionLoading" @click="showCreateBoardForm = true">
+            {{ t('common.add') }}
+          </NButton>
+          <NTooltip trigger="hover" :disabled="kanbanStore.selectedBoard !== DEFAULT_KANBAN_BOARD">
+            <template #trigger>
+              <span class="archive-board-trigger">
+                <NButton
+                  size="small"
+                  secondary
+                  :disabled="kanbanStore.selectedBoard === DEFAULT_KANBAN_BOARD"
+                  :loading="boardActionLoading"
+                  @click="handleArchiveSelectedBoard"
+                >
+                  {{ t('kanban.board.archive') }}
+                </NButton>
+              </span>
+            </template>
+            {{ t('kanban.board.defaultArchiveUnavailable') }}
+          </NTooltip>
+          <NButton size="small" secondary :loading="boardActionLoading" @click="handleDispatch">
+            {{ t('kanban.action.dispatch') }}
+          </NButton>
+          <NSelect
+            v-model:value="filterStatusValue"
+            :options="statusFilterOptions"
+            size="small"
+            style="width: 150px;"
+            @update:value="handleApplyFilter"
+          />
+          <NSelect
+            v-model:value="filterAssigneeValue"
+            :options="assigneeFilterOptions"
+            size="small"
+            style="width: 170px;"
+            @update:value="handleApplyFilter"
+          />
+        </HeaderActionOverflow>
         <NButton type="primary" size="small" @click="showCreateForm = true">
           <template #icon>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -346,6 +358,7 @@ async function handleDispatch() {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <!-- Stats bar -->
     <div v-if="kanbanStore.stats" class="stats-bar">
@@ -375,10 +388,7 @@ async function handleDispatch() {
     </div>
 
     <!-- Board -->
-    <NSpin
-      class="kanban-board-spin"
-      :show="kanbanStore.loading && kanbanStore.tasks.length === 0"
-    >
+    <div class="kanban-board-spin">
       <div class="kanban-canvas">
         <VueFlow
           :key="kanbanCanvasKey"
@@ -424,7 +434,7 @@ async function handleDispatch() {
           <Controls />
         </VueFlow>
       </div>
-    </NSpin>
+    </div>
 
     <!-- Task detail drawer -->
     <KanbanTaskDrawer
@@ -452,14 +462,14 @@ async function handleDispatch() {
       @close="showCreateForm = false"
       @created="handleTaskCreated"
     />
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .kanban-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -472,6 +482,15 @@ async function handleDispatch() {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.board-select {
+  width: 260px;
+  min-width: 96px;
+}
+
+@container studio-page-header (max-width: 700px) {
+  .board-select { width: 140px; }
 }
 
 .stats-bar {
@@ -575,16 +594,8 @@ async function handleDispatch() {
   min-height: 0;
   overflow: hidden;
 
-  :deep(.n-spin-container),
-  :deep(.n-spin-content) {
-    height: 100%;
-    min-height: 0;
-  }
-
-  :deep(.n-spin-content) {
-    display: flex;
-    flex-direction: column;
-  }
+  display: flex;
+  flex-direction: column;
 }
 
 .column-header {

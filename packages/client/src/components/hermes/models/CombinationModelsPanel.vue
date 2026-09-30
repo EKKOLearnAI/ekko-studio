@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NButton, NInput, NInputNumber, NModal, NSelect, NSwitch, useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, NInput, NInputNumber, NModal, NSelect, NSpin, NSwitch, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import { fetchMoaConfig, saveMoaConfig, type MoaConfig, type MoaModelSlot, type MoaPreset } from '@/api/hermes/config'
 import { useAppStore } from '@/stores/hermes/app'
@@ -14,7 +16,7 @@ const appStore = useAppStore()
 const modelsStore = useModelsStore()
 const profilesStore = useProfilesStore()
 
-const loading = ref(false)
+const loading = ref(true)
 const saving = ref(false)
 const moa = ref<MoaConfig | null>(null)
 const showEditor = ref(false)
@@ -280,6 +282,8 @@ onMounted(() => {
 watch(() => profilesStore.activeProfileName, () => {
   void loadMoaConfig()
 })
+
+usePageLoadingTask(() => loading.value)
 </script>
 
 <template>

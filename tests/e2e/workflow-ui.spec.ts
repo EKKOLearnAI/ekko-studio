@@ -1235,7 +1235,7 @@ test('workflow import reports an unsupported version without confirming or creat
   expect(api.unexpectedRequests).toEqual([])
 })
 
-test('workflow title is hidden on mobile', async ({ page }) => {
+test('workflow workspace stays available as a right-side icon when the title is hidden on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await mockHermesApi(page, { workflows: [{
@@ -1245,9 +1245,13 @@ test('workflow title is hidden on mobile', async ({ page }) => {
   await page.goto('/#/hermes/workflow')
   await expect(page.locator('.header-workflow-title')).toHaveText('Mobile workflow title')
   await expect(page.locator('.header-workflow-title')).toBeHidden()
-  const workspaceBadge = page.locator('.workspace-badge')
-  await expect(workspaceBadge).toHaveCSS('flex-grow', '1')
-  await expect(workspaceBadge).toHaveCSS('max-width', 'none')
+  const workspaceButton = page.locator('.header-actions .header-workspace-button')
+  await expect(workspaceButton).toBeInViewport()
+  await expect(workspaceButton).toHaveText('')
+  await expect(workspaceButton).toHaveAttribute('title', '/tmp/mobile-workspace')
+  await expect(page.locator('.workspace-badge')).toHaveCount(0)
+  await workspaceButton.click()
+  await expect(page.getByRole('dialog')).toBeVisible()
 })
 
 test('workflow schedules can be created, edited, disabled, and deleted from the Workflow page', async ({ page }) => {

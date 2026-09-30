@@ -96,7 +96,16 @@ test('consolidates current-session actions into one icon-bearing header menu', a
   await openDesktopChat(page)
 
   const headerActions = page.locator('.header-actions')
-  await expect(headerActions.getByRole('button')).toHaveCount(2)
+  await expect(headerActions.getByRole('button')).toHaveCount(3)
+
+  const workspaceButton = headerActions.getByRole('button', { name: 'Set Workspace', exact: true })
+  await expect(workspaceButton).toHaveAttribute('title', session.workspace)
+  await expect(workspaceButton).toHaveText('')
+  await expect(page.locator('.header-left .workspace-badge')).toHaveCount(0)
+  await workspaceButton.click()
+  const workspaceDialog = page.getByRole('dialog').filter({ hasText: 'Set Session Workspace' })
+  await expect(workspaceDialog.getByRole('textbox')).toHaveValue(session.workspace)
+  await workspaceDialog.getByRole('button', { name: 'Cancel' }).click()
 
   const sidePanelButton = headerActions.getByRole('button', { name: 'Side panel' })
   await expect(sidePanelButton).toHaveAttribute('aria-controls', 'chat-tool-panel')

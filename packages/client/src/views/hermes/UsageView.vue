@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderActionOverflow from '@/components/layout/HeaderActionOverflow.vue'
 import { NButton } from 'naive-ui'
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -35,41 +38,47 @@ async function loadUsage(days = selectedPeriod.value) {
   await usageStore.loadSessions(days)
 }
 
+const initializing = ref(true)
+
 onMounted(() => {
-  void loadUsage(30)
+  void loadUsage(30).finally(() => { initializing.value = false })
 })
 </script>
 
 <template>
-  <div class="usage-view">
+  <PageLoading :show="initializing || (usageStore.isLoading && !usageStore.hasData)" class="usage-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('usage.title') }}</h2>
       <div class="usage-toolbar">
         <UsagePricing />
-        <div class="period-selector" role="group" aria-label="Usage statistics period">
-          <NButton
-            v-for="option in periodOptions"
-            :key="option.days"
-            class="period-option"
-            size="small"
-            :type="selectedPeriod === option.days ? 'primary' : 'default'"
-            :secondary="selectedPeriod === option.days"
-            :quaternary="selectedPeriod !== option.days"
-            :aria-pressed="selectedPeriod === option.days"
-            @click="loadUsage(option.days)"
-          >
-            {{ option.label }}
-          </NButton>
-        </div>
+        <HeaderActionOverflow :label="t('chat.more')" :breakpoint="500">
+          <div class="period-selector" role="group" aria-label="Usage statistics period">
+            <NButton
+              v-for="option in periodOptions"
+              :key="option.days"
+              class="period-option"
+              size="small"
+              :type="selectedPeriod === option.days ? 'primary' : 'default'"
+              :secondary="selectedPeriod === option.days"
+              :quaternary="selectedPeriod !== option.days"
+              :aria-pressed="selectedPeriod === option.days"
+              @click="loadUsage(option.days)"
+            >
+              {{ option.label }}
+            </NButton>
+          </div>
+        </HeaderActionOverflow>
         <NButton class="refresh-button" size="small" quaternary :loading="usageStore.isLoading" @click="loadUsage()">
           {{ t('usage.refresh') }}
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="usage-content">
       <div v-if="usageStore.isLoading && !usageStore.hasData" class="usage-loading">
-        {{ t('common.loading') }}
+
       </div>
 
       <template v-else-if="usageStore.hasData">
@@ -83,7 +92,7 @@ onMounted(() => {
         {{ t('usage.noData') }}
       </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { NButton, NInput, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -27,7 +29,7 @@ type SourceFilter = SkillSource | 'modified'
 const { t } = useI18n()
 const message = useMessage()
 const skills = ref<EkkoSkillSummary[]>([])
-const loading = ref(false)
+const loading = ref(true)
 const selectedCategory = ref('')
 const selectedSkill = ref('')
 const searchQuery = ref('')
@@ -150,9 +152,10 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
 </script>
 
 <template>
-  <div class="skills-view">
+  <PageLoading :show="loading && skills.length === 0" class="skills-view">
+    <PageHeader>
     <header class="page-header">
-      <div class="title-row">
+      <div class="skills-header-heading">
         <h2 class="header-title">{{ t('skills.title') }}</h2>
         <button v-if="!showSidebar" class="sidebar-toggle" @click="showSidebar = true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -161,9 +164,8 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
+        <SkillSourceLegend v-model="sourceFilter" />
       </div>
-
-      <SkillSourceLegend v-model="sourceFilter" />
 
       <div class="header-actions">
         <NButton class="header-action-btn" size="small" :title="t('skills.import')" @click="showImportModal = true">
@@ -187,6 +189,7 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
         <NInput v-model:value="searchQuery" :placeholder="t('skills.searchPlaceholder')" size="small" clearable style="width: 130px" />
       </div>
     </header>
+    </PageHeader>
 
     <SkillImportModal
       v-if="showImportModal"
@@ -203,7 +206,7 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
     />
 
     <div class="skills-content">
-      <div v-if="loading && skills.length === 0" class="skills-loading">{{ t('common.loading') }}</div>
+      <div v-if="loading && skills.length === 0" class="skills-loading"></div>
       <div v-else class="skills-layout">
         <div class="mobile-backdrop" :class="{ active: showSidebar }" @click="showSidebar = false" />
         <div v-if="showSidebar" class="skills-sidebar">
@@ -242,7 +245,7 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
         </div>
       </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -251,7 +254,6 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
 
 @include skills-manager.layout;
 
-.title-row { display: flex; align-items: center; gap: 8px; }
 .header-actions { display: flex; align-items: center; gap: 8px; }
 
 @media (max-width: $breakpoint-mobile) {

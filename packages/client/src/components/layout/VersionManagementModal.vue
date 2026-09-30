@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { NSpin, NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NProgress, NTag, useMessage } from 'naive-ui'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NProgress, NSpin, NTag, useMessage } from 'naive-ui'
+
 import {
   activateRuntimeVersion,
   deleteRuntimeVersion,

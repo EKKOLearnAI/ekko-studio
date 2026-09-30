@@ -365,6 +365,7 @@ export default {
 
   // 通用
   common: {
+    close: '关闭',
     loading: '加载中...',
     cancel: '取消',
     delete: '删除',
@@ -1211,6 +1212,9 @@ export default {
     newCliChat: '新建 CLI',
     deleteSession: '确定删除此会话？',
     sessionDeleted: '会话已删除',
+    sessionListActions: '会话列表操作',
+    filterByProfile: '按 Profile 筛选',
+    selectedSessions: '已选 {count} 项',
     toggleBatchMode: '批量选择',
     selectAll: '全选',
     confirmBatchDelete: '确定删除选中的 {count} 个会话？',
@@ -1315,6 +1319,7 @@ export default {
   },
 
   workflow: {
+    listActions: '工作流列表操作',
     quality: { results: "JEV 质量观察", rerun: "编辑并从此节点重跑", decision: { pass: "已通过", needs_improvement: "需要改进", unknown: "未知" } },
     title: '工作流',
     profile: '配置',
@@ -1833,6 +1838,7 @@ export default {
 
   // 技能
   skills: {
+    filterBySource: "按来源筛选",
     title: '技能',
     targetFilter: '运行时',
     targets: {
@@ -2418,6 +2424,10 @@ export default {
 
   // 日志
   logs: {
+    file: "日志文件",
+    level: "日志级别",
+    lines: "行数",
+    filters: "筛选日志",
     title: '日志',
     all: '全部',
     searchPlaceholder: '搜索...',

@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NButton, NInput, NInputNumber, NModal, NSelect, useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, NInput, NInputNumber, NModal, NSelect, NSpin, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import {
   fetchAuxiliaryModels,
@@ -21,7 +23,7 @@ const message = useMessage()
 const modelsStore = useModelsStore()
 const profilesStore = useProfilesStore()
 
-const loading = ref(false)
+const loading = ref(true)
 const saving = ref(false)
 const savingDelegation = ref(false)
 const tasks = ref<AuxiliaryModelTask[]>([])
@@ -389,6 +391,8 @@ watch(() => delegationForm.value.provider, (provider) => {
     delegationForm.value.model = ''
   }
 }, { flush: 'sync' })
+
+usePageLoadingTask(() => loading.value)
 </script>
 
 <template>

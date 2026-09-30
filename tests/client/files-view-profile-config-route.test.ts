@@ -41,6 +41,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('naive-ui', () => ({
+  NSpin: { template: '<div><slot /><slot name="icon" /></div>' },
   useDialog: () => ({ warning: vi.fn() }),
 }))
 
