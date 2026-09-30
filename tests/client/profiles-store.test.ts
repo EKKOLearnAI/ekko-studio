@@ -104,6 +104,64 @@ describe('Profiles Store', () => {
     expect(store.loading).toBe(false)
   })
 
+  it('shares concurrent page/selector loads but refreshes on later visits', async () => {
+    const profiles = [{ name: 'default', active: true, model: 'test-model', alias: '' }]
+    let resolve!: (value: typeof profiles) => void
+    mockProfilesApi.fetchProfiles.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    const store = useProfilesStore()
+
+    const pageLoad = store.fetchProfiles()
+    const selectorLoad = store.fetchProfiles()
+
+    expect(mockProfilesApi.fetchProfiles).toHaveBeenCalledTimes(1)
+    expect(store.loading).toBe(true)
+    resolve(profiles)
+    await Promise.all([pageLoad, selectorLoad])
+    expect(store.profiles).toEqual(profiles)
+    expect(store.loading).toBe(false)
+
+    mockProfilesApi.fetchProfiles.mockResolvedValueOnce([])
+    await store.fetchProfiles()
+    expect(mockProfilesApi.fetchProfiles).toHaveBeenCalledTimes(2)
+    expect(store.profiles).toEqual([])
+  })
+
+  it('can retry after a shared profile request fails', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockProfilesApi.fetchProfiles.mockRejectedValueOnce(new Error('temporarily unavailable'))
+    const store = useProfilesStore()
+    await Promise.all([store.fetchProfiles(), store.fetchProfiles()])
+    expect(mockProfilesApi.fetchProfiles).toHaveBeenCalledTimes(1)
+    expect(store.loading).toBe(false)
+
+    mockProfilesApi.fetchProfiles.mockResolvedValueOnce([{ name: 'default', active: true, model: 'test-model', alias: '' }])
+    await store.fetchProfiles()
+    expect(store.profiles).toHaveLength(1)
+    expect(mockProfilesApi.fetchProfiles).toHaveBeenCalledTimes(2)
+    errorLog.mockRestore()
+  })
+
+  it('refreshes after a mutation even when an older list is still pending', async () => {
+    let resolve!: (value: unknown[]) => void
+    mockProfilesApi.fetchProfiles.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    mockProfilesApi.createProfile.mockResolvedValueOnce({ success: true })
+    const store = useProfilesStore()
+    const initialLoad = store.fetchProfiles()
+    const mutation = store.createProfile('new-profile')
+    await Promise.resolve()
+    expect(mockProfilesApi.fetchProfiles).toHaveBeenCalledTimes(1)
+
+    mockProfilesApi.fetchProfiles.mockResolvedValueOnce([
+      { name: 'default', active: true, model: '', alias: '' },
+      { name: 'new-profile', active: false, model: '', alias: '' },
+    ])
+    resolve([])
+    await Promise.all([initialLoad, mutation])
+
+    expect(mockProfilesApi.fetchProfiles).toHaveBeenCalledTimes(2)
+    expect(store.profiles.map(profile => profile.name)).toEqual(['default', 'new-profile'])
+  })
+
   it('createProfile calls API and refreshes list', async () => {
     mockProfilesApi.createProfile.mockResolvedValue({ success: true })
     mockProfilesApi.fetchProfiles.mockResolvedValue([

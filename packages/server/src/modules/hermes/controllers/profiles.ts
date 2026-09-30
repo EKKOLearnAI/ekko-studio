@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { createReadStream, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { basename, join } from 'path'
 import { tmpdir } from 'os'
@@ -14,7 +14,8 @@ import {
 import { logger } from '../../studio/public/logging'
 import { smartCloneCleanup, copyModelProviderAuthForClone } from '../services/profiles/profile-credentials'
 import { detectHermesRootHome } from '../services/runtime/path'
-import { getActiveProfileName } from '../services/profiles/profile'
+import { getActiveProfileName, listProfileNamesFromDisk } from '../services/profiles/profile'
+import { listProfilesFromDisk, type HermesProfile } from '../services/profiles/catalog'
 import {
   createProfileWithoutHermes,
   deleteProfileWithoutHermes,
@@ -25,7 +26,6 @@ import {
 } from '../services/profiles/lifecycle'
 import { exportProfileWithoutHermes, importProfileWithoutHermes } from '../services/profiles/archive'
 import { HermesSkillInjector } from '../services/skills/injector'
-import type { HermesProfile } from '../services/runtime/cli'
 import { listUserProfiles } from '../../studio/public/users'
 import { isHermesAgentAvailable } from '../../studio/public/agent-status-registry'
 import { readAppProfileAvatar } from '../services/profiles/app-profile-avatar'
@@ -69,35 +69,6 @@ function isForbiddenProfileName(name: string): boolean {
   } catch {
     return true
   }
-}
-
-function getActiveProfileFile(): string {
-  return join(detectHermesRootHome(), 'active_profile')
-}
-
-function listProfilesFromDisk(activeProfileName: string): HermesProfile[] {
-  const base = detectHermesRootHome()
-  const profiles: HermesProfile[] = [{
-    name: 'default',
-    active: activeProfileName === 'default',
-    model: '—',
-    alias: '',
-  }]
-  const profilesDir = join(base, 'profiles')
-  if (!existsSync(profilesDir)) return profiles
-  for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const name = entry.name
-    const dir = join(profilesDir, name)
-    if (!existsSync(join(dir, 'config.yaml')) && !existsSync(dir)) continue
-    profiles.push({
-      name,
-      active: name === activeProfileName,
-      model: '—',
-      alias: '',
-    })
-  }
-  return profiles
 }
 
 function profileExistsForManualSwitch(name: string): boolean {
@@ -332,7 +303,10 @@ function setRuntimeStatusCache(status: RuntimeStatus, checkedAt = Date.now()): v
 }
 
 function listProfilesForStatusFast(): HermesProfile[] {
-  return filterVisibleProfiles(listProfilesFromDisk(getActiveProfileName()))
+  const activeProfileName = getActiveProfileName()
+  return filterVisibleProfiles(listProfileNamesFromDisk().map(name => ({
+    name, active: name === activeProfileName, model: '—', alias: '',
+  })))
 }
 
 async function refreshRuntimeStatusCache(checkedAt: number): Promise<void> {
@@ -371,31 +345,8 @@ function respondWithProfileLifecycleError(ctx: any, err: unknown): boolean {
 
 export async function list(ctx: any) {
   try {
-    let profiles: HermesProfile[]
-    if (!isHermesAgentAvailable()) {
-      profiles = listProfilesFromDisk(getActiveProfileName())
-    } else {
-      try {
-        profiles = await hermesCli.listProfiles()
-      } catch (err: any) {
-        const activeProfileName = getActiveProfileName()
-        if (!isForbiddenProfileName(activeProfileName)) throw err
-
-        logger.warn(err, '[listProfiles] active_profile "%s" is invalid/reserved; resetting to default and listing profiles from disk', activeProfileName)
-        writeFileSync(getActiveProfileFile(), 'default\n', 'utf-8')
-        profiles = listProfilesFromDisk('default')
-      }
-    }
-
     const activeProfileName = requestedProfileName(ctx)
-
-    profiles = filterVisibleProfiles(profiles)
-    profiles = filterProfilesForUser(ctx, profiles)
-
-    // Web UI active profile is request-scoped and comes from X-Hermes-Profile.
-    profiles.forEach(p => {
-      p.active = (p.name === activeProfileName)
-    })
+    const profiles = filterProfilesForUser(ctx, filterVisibleProfiles(listProfilesFromDisk(activeProfileName)))
 
     ctx.body = { profiles: attachProfileAvatars(profiles) }
   } catch (err: any) {
@@ -406,27 +357,8 @@ export async function list(ctx: any) {
 
 export async function listForApp(ctx: any) {
   try {
-    let profiles: HermesProfile[]
-    if (!isHermesAgentAvailable()) {
-      profiles = listProfilesFromDisk(getActiveProfileName())
-    } else {
-      try {
-        profiles = await hermesCli.listProfiles()
-      } catch (err: any) {
-        const activeProfileName = getActiveProfileName()
-        if (!isForbiddenProfileName(activeProfileName)) throw err
-
-        logger.warn(err, '[listAppProfiles] active_profile "%s" is invalid/reserved; resetting to default and listing profiles from disk', activeProfileName)
-        writeFileSync(getActiveProfileFile(), 'default\n', 'utf-8')
-        profiles = listProfilesFromDisk('default')
-      }
-    }
-
     const activeProfileName = requestedProfileName(ctx)
-    profiles = filterProfilesForUser(ctx, filterVisibleProfiles(profiles))
-    profiles.forEach(profile => {
-      profile.active = profile.name === activeProfileName
-    })
+    const profiles = filterProfilesForUser(ctx, filterVisibleProfiles(listProfilesFromDisk(activeProfileName)))
 
     ctx.body = { profiles: await attachAppProfileAvatars(profiles) }
   } catch (err: any) {

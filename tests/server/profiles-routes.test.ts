@@ -30,6 +30,9 @@ const agentStatusMocks = vi.hoisted(() => ({
   hermesAvailable: true,
 }))
 
+const userProfilesMocks = vi.hoisted(() => ({ listUserProfiles: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/public/users', () => userProfilesMocks)
+
 // Mock hermes-cli
 vi.mock('../../packages/server/src/modules/hermes/services/runtime/cli', () => ({
   listProfiles: vi.fn(),
@@ -377,13 +380,20 @@ describe('Profile Routes', () => {
       expect(readFileSync(join(hermesHome, 'active_profile'), 'utf-8')).toBe('default\n')
     })
 
-    it('lists profiles from disk without invoking Hermes CLI', async () => {
+    it.each([
+      ['list', true], ['list', false], ['listForApp', true], ['listForApp', false],
+    ] as const)('%s lists local metadata without CLI or runtime probes (Hermes installed: %s)', async (endpoint, installed) => {
       const hermesHome = await mkdtemp(join(tmpdir(), 'studio-native-profile-list-'))
       tempHomes.push(hermesHome)
       process.env.HERMES_HOME = hermesHome
-      agentStatusMocks.hermesAvailable = false
+      agentStatusMocks.hermesAvailable = installed
       await mkdir(join(hermesHome, 'profiles', 'work'), { recursive: true })
-      const { list } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      await writeFile(join(hermesHome, 'config.yaml'), 'model: default-model\n')
+      await writeFile(join(hermesHome, 'profiles', 'work', 'config.yaml'), 'model:\n  default: work-model\n')
+      await writeFile(join(hermesHome, 'active_profile'), 'default\n')
+      // A broken or slow CLI must not affect page bootstrap.
+      vi.mocked(hermesCli.listProfiles).mockRejectedValue(new Error('CLI unavailable'))
+      const controller = await import('../../packages/server/src/modules/hermes/controllers/profiles')
       const ctx: any = {
         state: { profile: { name: 'work' } },
         get: vi.fn(),
@@ -391,11 +401,33 @@ describe('Profile Routes', () => {
         body: undefined,
       }
 
-      await list(ctx)
+      await controller[endpoint](ctx)
 
       expect(ctx.status).toBe(200)
-      expect(ctx.body.profiles.map((profile: any) => profile.name)).toEqual(['default', 'work'])
+      expect(ctx.body.profiles).toMatchObject([
+        { name: 'default', active: false, model: 'default-model' },
+        { name: 'work', active: true, model: 'work-model' },
+      ])
       expect(hermesCli.listProfiles).not.toHaveBeenCalled()
+      expect(gatewayAutostartMocks.getGatewayRuntimeStatusForProfile).not.toHaveBeenCalled()
+      expect(AgentBridgeClient).not.toHaveBeenCalled()
+      expect(await readFile(join(hermesHome, 'active_profile'), 'utf8')).toBe('default\n')
+    })
+
+    it.each(['list', 'listForApp'] as const)('%s keeps user access and reserved-profile filtering', async endpoint => {
+      const hermesHome = await mkdtemp(join(tmpdir(), 'studio-profile-access-'))
+      tempHomes.push(hermesHome)
+      process.env.HERMES_HOME = hermesHome
+      await Promise.all(['work', 'private', 'hermes'].map(name => mkdir(join(hermesHome, 'profiles', name), { recursive: true })))
+      userProfilesMocks.listUserProfiles.mockReturnValue([{ profile_name: 'work' }, { profile_name: 'hermes' }])
+      const controller = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const ctx: any = { state: { user: { id: 'user-1', role: 'user' }, profile: { name: 'work' } }, status: 200 }
+
+      await controller[endpoint](ctx)
+
+      expect(ctx.status).toBe(200)
+      expect(ctx.body.profiles.map((profile: any) => profile.name)).toEqual(['work'])
+      expect(userProfilesMocks.listUserProfiles).toHaveBeenCalledWith('user-1')
     })
 
     it('exports a profile without invoking Hermes CLI', async () => {
@@ -622,12 +654,10 @@ describe('Profile Routes', () => {
         mime: 'image/png',
         updatedAt: 123,
       }), 'utf-8')
-      vi.mocked(hermesCli.listProfiles).mockResolvedValue([{
-        name: 'work',
-        active: true,
-        model: 'test-model',
-        alias: '',
-      }] as any)
+      const hermesHome = await mkdtemp(join(tmpdir(), 'studio-app-avatar-profiles-'))
+      tempHomes.push(hermesHome)
+      process.env.HERMES_HOME = hermesHome
+      await mkdir(join(hermesHome, 'profiles', 'work'), { recursive: true })
       const { listForApp } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
       const ctx: any = {
         state: { profile: { name: 'work' } },
@@ -638,8 +668,7 @@ describe('Profile Routes', () => {
       await listForApp(ctx)
 
       expect(ctx.status).toBe(200)
-      expect(ctx.body.profiles).toHaveLength(1)
-      const dataUrl = String(ctx.body.profiles[0].avatar.dataUrl)
+      const dataUrl = String(ctx.body.profiles.find((profile: any) => profile.name === 'work').avatar.dataUrl)
       expect(dataUrl).toMatch(/^data:image\/webp;base64,/)
       const preview = Buffer.from(dataUrl.split(',', 2)[1], 'base64')
       const metadata = await sharp(preview).metadata()
@@ -659,12 +688,10 @@ describe('Profile Routes', () => {
         seed: 'app-seed',
         updatedAt: 456,
       }), 'utf-8')
-      vi.mocked(hermesCli.listProfiles).mockResolvedValue([{
-        name: 'work',
-        active: true,
-        model: 'test-model',
-        alias: '',
-      }] as any)
+      const hermesHome = await mkdtemp(join(tmpdir(), 'studio-app-avatar-profiles-'))
+      tempHomes.push(hermesHome)
+      process.env.HERMES_HOME = hermesHome
+      await mkdir(join(hermesHome, 'profiles', 'work'), { recursive: true })
       const { listForApp } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
       const ctx: any = {
         state: { profile: { name: 'work' } },
@@ -674,12 +701,13 @@ describe('Profile Routes', () => {
 
       await listForApp(ctx)
 
-      expect(ctx.body.profiles[0].avatar).toEqual({
+      const avatar = ctx.body.profiles.find((profile: any) => profile.name === 'work').avatar
+      expect(avatar).toEqual({
         type: 'generated',
         seed: 'app-seed',
         updatedAt: 456,
       })
-      expect(ctx.body.profiles[0].avatar.dataUrl).toBeUndefined()
+      expect(avatar.dataUrl).toBeUndefined()
     })
 
     it('stores generated avatar metadata under the Web UI home', async () => {
