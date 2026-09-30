@@ -502,11 +502,17 @@ async function createWindow(): Promise<void> {
           // Keep all three native buttons above the 64px navigation rail avatar.
           trafficLightPosition: { x: 8, y: 16 },
         }
-      : process.platform === 'win32' || process.platform === 'linux'
+      : process.platform === 'win32'
         ? {
             frame: false,
+            // Keep native resizing/shadows and Windows 11 corners. DWM removes
+            // rounding for maximized/snapped windows; older Windows stays square.
+            thickFrame: true,
+            roundedCorners: true,
           }
-        : {}),
+        : process.platform === 'linux'
+          ? { frame: false }
+          : {}),
     ...(process.platform === 'linux' ? { icon: desktopIcon() } : {}),
     webPreferences: {
       preload: join(__dirname, '..', 'preload', 'index.js'),
