@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 type WindowControlAction = 'minimize' | 'toggle-maximize' | 'close'
 
@@ -7,6 +7,7 @@ interface HermesDesktopBridge {
   platform?: string
   getWindowState?: () => Promise<{ isMaximized: boolean }>
   windowControl?: (action: WindowControlAction) => Promise<{ isMaximized: boolean }>
+  onWindowStateChange?: (callback: (state: { isMaximized: boolean }) => void) => () => void
 }
 
 type WindowWithHermesDesktop = Window & typeof globalThis & {
@@ -19,9 +20,10 @@ const props = defineProps<{
   flush?: boolean
   leftOffset?: number
 }>()
-const showWindowButtons = computed(() => desktop?.platform === 'win32')
-const titleBarStyle = computed(() => props.standalone ? undefined : { left: `${props.leftOffset ?? 240}px` })
+const showWindowButtons = computed(() => desktop?.platform === 'win32' || desktop?.platform === 'linux')
+const titleBarStyle = computed(() => props.standalone || props.flush ? undefined : { left: `${props.leftOffset ?? 240}px` })
 const isMaximized = ref(false)
+let stopWindowStateListener: (() => void) | undefined
 
 async function refreshWindowState() {
   if (!desktop?.getWindowState) return
@@ -45,7 +47,12 @@ async function controlWindow(action: WindowControlAction) {
 
 onMounted(() => {
   void refreshWindowState()
+  stopWindowStateListener = desktop?.onWindowStateChange?.((state) => {
+    isMaximized.value = !!state.isMaximized
+  })
 })
+
+onUnmounted(() => stopWindowStateListener?.())
 </script>
 
 <template>
@@ -57,7 +64,7 @@ onMounted(() => {
     @dblclick="controlWindow('toggle-maximize')"
   >
     <div v-if="standalone" class="desktop-titlebar__standalone-drag" @dblclick="controlWindow('toggle-maximize')" />
-    <div v-else class="desktop-titlebar__drag" />
+    <div v-else-if="!flush" class="desktop-titlebar__drag" />
     <div class="desktop-titlebar__controls" @dblclick.stop>
       <button class="desktop-window-btn" type="button" aria-label="Minimize" @click.stop="controlWindow('minimize')">
         <svg viewBox="0 0 12 12" aria-hidden="true">
@@ -136,6 +143,9 @@ onMounted(() => {
 
 .desktop-titlebar--flush {
   background: transparent;
+  // Inside the shared Header, occupy only the controls at its physical right.
+  left: auto;
+  width: var(--desktop-window-controls-width, 139px);
   height: var(--studio-header-height, 40px);
   top: 0;
   right: 0;

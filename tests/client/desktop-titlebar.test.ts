@@ -7,6 +7,7 @@ type DesktopBridge = {
   platform?: string
   getWindowState?: () => Promise<{ isMaximized: boolean }>
   windowControl?: (action: 'minimize' | 'toggle-maximize' | 'close') => Promise<{ isMaximized: boolean }>
+  onWindowStateChange?: (callback: (state: { isMaximized: boolean }) => void) => () => void
 }
 
 function setDesktopBridge(bridge: DesktopBridge) {
@@ -22,9 +23,7 @@ describe('DesktopTitleBar', () => {
     delete (window as typeof window & { hermesDesktop?: DesktopBridge }).hermesDesktop
   })
 
-  it('does not render a custom title bar on Linux so native window controls remain visible', () => {
-    setDesktopBridge({ platform: 'linux' })
-
+  it('does not render desktop controls in an ordinary browser', () => {
     const wrapper = mount(DesktopTitleBar)
 
     expect(wrapper.find('.desktop-titlebar').exists()).toBe(false)
@@ -38,9 +37,9 @@ describe('DesktopTitleBar', () => {
     expect(wrapper.find('.desktop-titlebar').exists()).toBe(false)
   })
 
-  it('renders custom window controls on Windows frameless windows', () => {
+  it.each(['win32', 'linux'])('renders custom window controls on %s frameless windows', (platform) => {
     setDesktopBridge({
-      platform: 'win32',
+      platform,
       getWindowState: vi.fn().mockResolvedValue({ isMaximized: false }),
       windowControl: vi.fn().mockResolvedValue({ isMaximized: false }),
     })
@@ -52,10 +51,10 @@ describe('DesktopTitleBar', () => {
     expect(wrapper.find('.desktop-titlebar__brand').exists()).toBe(false)
   })
 
-  it('keeps Windows controls interactive in the standalone control bar', async () => {
+  it.each(['win32', 'linux'])('keeps %s controls interactive in the control bar', async (platform) => {
     const windowControl = vi.fn().mockResolvedValue({ isMaximized: true })
     setDesktopBridge({
-      platform: 'win32',
+      platform,
       getWindowState: vi.fn().mockResolvedValue({ isMaximized: false }),
       windowControl,
     })
@@ -67,5 +66,28 @@ describe('DesktopTitleBar', () => {
 
     expect(windowControl).toHaveBeenCalledWith('toggle-maximize')
     expect(wrapper.find('.desktop-window-btn[aria-label="Restore"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('keeps the restore button in sync with native window changes and removes the listener', async () => {
+    let listener: ((state: { isMaximized: boolean }) => void) | undefined
+    const stop = vi.fn()
+    setDesktopBridge({
+      platform: 'linux',
+      getWindowState: vi.fn().mockResolvedValue({ isMaximized: false }),
+      onWindowStateChange: callback => { listener = callback; return stop },
+    })
+    const wrapper = mount(DesktopTitleBar, { props: { flush: true } })
+    await flushPromises()
+
+    listener?.({ isMaximized: true })
+    await flushPromises()
+    expect(wrapper.find('.desktop-window-btn[aria-label="Restore"]').exists()).toBe(true)
+
+    listener?.({ isMaximized: false })
+    await flushPromises()
+    expect(wrapper.find('.desktop-window-btn[aria-label="Maximize"]').exists()).toBe(true)
+    wrapper.unmount()
+    expect(stop).toHaveBeenCalledOnce()
   })
 })

@@ -172,82 +172,87 @@ async function openDesktopPageSidebar(page: Page, platform: DesktopPlatform, pat
   await page.goto(path)
 }
 
-test('keeps browser settings header actions visible at the minimum Windows width', async ({ page }) => {
-  await installDesktopBridge(page, 'win32', true)
-  await authenticate(page)
-  await mockHermesApi(page)
-  await page.setViewportSize({ width: 769, height: 900 })
-  await page.goto('/#/hermes/browser')
-  const header = page.locator('.studio-page-header > .page-header')
-  const create = header.getByRole('button').last()
-  await expect(create).toBeVisible()
-  const bounds = (await create.boundingBox())!
-  expect(bounds.x + bounds.width).toBeLessThanOrEqual(769 - 139)
-  expect(bounds.y).toBeGreaterThanOrEqual(0)
-  expect(bounds.y + bounds.height).toBeLessThanOrEqual(40)
-  await create.click()
-  await expect(page.getByRole('dialog')).toBeVisible()
-})
+for (const platform of ['win32', 'linux'] as const) {
+  test(`keeps browser settings header actions visible at the minimum ${platform} width`, async ({ page }) => {
+    await installDesktopBridge(page, platform, true)
+    await authenticate(page)
+    await mockHermesApi(page)
+    await page.setViewportSize({ width: 769, height: 900 })
+    await page.goto('/#/hermes/browser')
+    const header = page.locator('.studio-page-header > .page-header')
+    const create = header.getByRole('button').last()
+    await expect(create).toBeVisible()
+    const bounds = (await create.boundingBox())!
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(769 - 139)
+    expect(bounds.y).toBeGreaterThanOrEqual(0)
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(40)
+    await create.click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+  })
 
-test('shares the outer header with Windows controls while keeping page actions clickable', async ({ page }) => {
-  await openDesktopJobs(page, 'win32')
+  test(`places ${platform} window controls inside the header right edge and keeps page actions clickable`, async ({ page }) => {
+    await openDesktopJobs(page, platform)
 
-  const controls = page.locator('.desktop-titlebar')
-  const header = page.locator('.page-header')
-  const sidebar = page.locator('aside.hermes-config-sidebar')
-  await expect(controls).toBeVisible()
-  await expect(controls.locator('.desktop-window-btn')).toHaveCount(3)
-  await expect(controls.locator('img')).toHaveCount(0)
-  await expect(controls).not.toContainText('Ekko Studio')
+    const controls = page.locator('.studio-page-header > .desktop-titlebar')
+    const header = page.locator('.page-header')
+    const sidebar = page.locator('aside.hermes-config-sidebar')
+    await expect(controls).toBeVisible()
+    await expect(controls.locator('.desktop-window-btn')).toHaveCount(3)
+    await expect(controls.locator('img')).toHaveCount(0)
+    await expect(controls).not.toContainText('Ekko Studio')
 
-  const [controlsBox, headerBox] = await Promise.all([
-    controls.boundingBox(),
-    header.boundingBox(),
-  ])
-  expect(controlsBox).not.toBeNull()
-  expect(headerBox).not.toBeNull()
-  expect(controlsBox!.y).toBe(0)
-  expect(headerBox!.y).toBe(0)
-  expect(headerBox!.height).toBe(40)
-  const windowButtonsBox = await controls.locator('.desktop-titlebar__controls').boundingBox()
-  expect(headerBox!.x + headerBox!.width).toBeLessThanOrEqual(windowButtonsBox!.x)
-  expect(controlsBox!.x).toBe(64)
-  expect((await sidebar.boundingBox())?.y).toBe(40)
-  await expect(header).toHaveCSS('padding-right', '16px')
-  await expect(page.locator('.app-main .page-header')).toHaveCount(0)
-  await expect(header.getByRole('button').last()).toHaveCSS('-webkit-app-region', 'no-drag')
-  await header.getByRole('button').last().click()
-  await expect(page.getByRole('dialog')).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'drag', height: '40px' })
+    const [controlsBox, headerBox] = await Promise.all([
+      controls.boundingBox(),
+      header.boundingBox(),
+    ])
+    expect(controlsBox).not.toBeNull()
+    expect(headerBox).not.toBeNull()
+    expect(controlsBox!.y).toBe(0)
+    expect(headerBox!.y).toBe(0)
+    expect(headerBox!.height).toBe(40)
+    const windowButtonsBox = await controls.locator('.desktop-titlebar__controls').boundingBox()
+    expect(headerBox!.x + headerBox!.width).toBeLessThanOrEqual(windowButtonsBox!.x)
+    expect(controlsBox!.width).toBe(139)
+    expect(controlsBox!.x + controlsBox!.width).toBe(page.viewportSize()!.width)
+    expect((await sidebar.boundingBox())?.y).toBe(40)
+    await expect(header).toHaveCSS('padding-right', '16px')
+    await expect(page.locator('.app-main .page-header')).toHaveCount(0)
+    await expect(header.getByRole('button').last()).toHaveCSS('-webkit-app-region', 'no-drag')
+    await header.getByRole('button').last().click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'drag', height: '40px' })
 
-  await controls.locator('.desktop-window-btn').nth(1).click()
-  await expect(controls.getByRole('button', { name: 'Restore' })).toBeVisible()
-  await expect.poll(() => page.evaluate(() => (
-    window as typeof window & { __PW_DESKTOP_WINDOW__?: { actions: string[] } }
-  ).__PW_DESKTOP_WINDOW__?.actions)).toEqual(['toggle-maximize'])
-})
+    await controls.getByRole('button', { name: 'Minimize' }).click()
+    await controls.locator('.desktop-window-btn').nth(1).click()
+    await expect(controls.getByRole('button', { name: 'Restore' })).toBeVisible()
+    await controls.getByRole('button', { name: 'Close' }).click()
+    await expect.poll(() => page.evaluate(() => (
+      window as typeof window & { __PW_DESKTOP_WINDOW__?: { actions: string[] } }
+    ).__PW_DESKTOP_WINDOW__?.actions)).toEqual(['minimize', 'toggle-maximize', 'close'])
+  })
 
-test('keeps Windows controls physically stable when the app language is RTL', async ({ page }) => {
-  await openDesktopJobs(page, 'win32')
+  test(`keeps ${platform} controls physically stable when the app language is RTL`, async ({ page }) => {
+    await openDesktopJobs(page, platform)
 
-  const titleBar = page.locator('.desktop-titlebar')
-  const controls = titleBar.locator('.desktop-titlebar__controls')
-  const buttonPositions = async () => controls.locator('.desktop-window-btn').evaluateAll(buttons =>
-    buttons.map(button => Math.round(button.getBoundingClientRect().left)),
-  )
-  await expect(titleBar).toBeVisible()
-  await expect(controls.locator('.desktop-window-btn')).toHaveCount(3)
-  const ltrPositions = await buttonPositions()
+    const titleBar = page.locator('.studio-page-header > .desktop-titlebar')
+    const controls = titleBar.locator('.desktop-titlebar__controls')
+    const buttonPositions = async () => controls.locator('.desktop-window-btn').evaluateAll(buttons =>
+      buttons.map(button => Math.round(button.getBoundingClientRect().left)),
+    )
+    await expect(titleBar).toBeVisible()
+    await expect(controls.locator('.desktop-window-btn')).toHaveCount(3)
+    const ltrPositions = await buttonPositions()
 
-  await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'))
+    await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'))
 
-  await expect(titleBar).toHaveCSS('direction', 'ltr')
-  await expect.poll(buttonPositions).toEqual(ltrPositions)
-  await expect(controls).toHaveCSS('border-left-width', '1px')
-  await expect(controls).toHaveCSS('border-right-width', '0px')
-  await expect(controls).toHaveCSS('border-top-right-radius', '0px')
-})
+    await expect(titleBar).toHaveCSS('direction', 'ltr')
+    await expect.poll(buttonPositions).toEqual(ltrPositions)
+    await expect(controls).toHaveCSS('border-left-width', '1px')
+    await expect(controls).toHaveCSS('border-right-width', '0px')
+    await expect(controls).toHaveCSS('border-top-right-radius', '0px')
+  })
+}
 
 test('matches Windows controls to the header glass over custom backgrounds', async ({ page }) => {
   await installDesktopBridge(page, 'win32', true)
@@ -288,7 +293,7 @@ test('matches Windows controls to the header glass over custom backgrounds', asy
   expect(api.unexpectedRequests).toEqual([])
 })
 
-test('reserves the macOS traffic-light area while only insetting the workspace', async ({ page }) => {
+test('reserves the macOS traffic-light area above the avatar in LTR and RTL', async ({ page }) => {
   await openDesktopJobs(page, 'darwin')
 
   await expect(page.locator('.desktop-titlebar')).toHaveCount(0)
@@ -298,6 +303,15 @@ test('reserves the macOS traffic-light area while only insetting the workspace',
   await expect(page.locator('.studio-navigation-rail')).toHaveCSS('padding-top', '44px')
   expect((await page.locator('.studio-navigation-rail').boundingBox())?.y).toBe(0)
   await expect(page.locator('.studio-navigation-rail')).toHaveCSS('border-right-width', '0px')
+  for (const direction of ['ltr', 'rtl']) {
+    await page.evaluate(dir => document.documentElement.setAttribute('dir', dir), direction)
+    const rail = (await page.locator('.studio-navigation-rail').boundingBox())!
+    const avatar = (await page.locator('.studio-navigation-rail .page-sidebar-account-btn').boundingBox())!
+    expect(rail.x).toBe(0)
+    expect(rail.width).toBe(64)
+    expect(avatar.y).toBeGreaterThanOrEqual(44)
+    expect(avatar.x + avatar.width / 2).toBe(32)
+  }
   await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'drag', height: '40px' })
 })
 
@@ -423,17 +437,18 @@ test('does not reserve macOS traffic-light spacing in Windows chat sidebars', as
   await expect(newChat).toHaveCSS('-webkit-app-region', 'no-drag')
   expect((await sidebar.boundingBox())?.y).toBe(40)
   expect((await main.boundingBox())?.y).toBe(40)
-  expect((await controls.boundingBox())!.x).toBe((await sidebar.boundingBox())!.x)
+  expect((await controls.boundingBox())!.x + (await controls.boundingBox())!.width).toBe(page.viewportSize()!.width)
+  await expect(page.locator('.studio-page-header > .desktop-titlebar')).toHaveCount(1)
 })
 
-test('keeps Linux on native chrome with a flush sidebar', async ({ page }) => {
+test('keeps the Linux sidebar flush below the shared window-control header', async ({ page }) => {
   await openDesktopJobs(page, 'linux')
 
-  await expect(page.locator('.desktop-titlebar')).toHaveCount(0)
+  await expect(page.locator('.studio-page-header > .desktop-titlebar')).toBeVisible()
   expect((await page.locator('.app-layout').boundingBox())?.y).toBe(40)
   expect((await page.locator('aside.hermes-config-sidebar').boundingBox())?.y).toBe(40)
   await expect(page.locator('aside.hermes-config-sidebar')).toHaveCSS('padding-top', '8px')
-  await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'none', height: 'auto' })
+  await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'drag', height: '40px' })
 })
 
 test('keeps the chat tool drawer unchanged in LTR and mirrors its resize seam in RTL', async ({ page }) => {

@@ -200,14 +200,14 @@ const nodeVersionLow = computed(() => {
 
 const isDesktopShell = computed(() => desktopBridge()?.isDesktop === true);
 const desktopPlatform = computed(() => desktopBridge()?.platform || "");
-const isDesktopWindows = computed(
-  () => isDesktopShell.value && desktopPlatform.value === "win32",
+const hasCustomWindowControls = computed(
+  () => isDesktopShell.value && ["win32", "linux"].includes(desktopPlatform.value),
 );
 const isDesktopChatWindow = computed(
   () => desktopBridge()?.windowKind === "chat",
 );
 const showDesktopTitleBar = computed(
-  () => isDesktopWindows.value && !isDesktopChatWindow.value,
+  () => hasCustomWindowControls.value && !isDesktopChatWindow.value,
 );
 const desktopTitleBarLeft = computed(() => {
   if (isLoginPage.value) return 10;
@@ -262,7 +262,7 @@ onMounted(() => {
   const bridge = desktopBridge();
   if (
     !bridge?.isDesktop ||
-    (desktopPlatform.value !== "win32" && bridge.windowKind !== "chat")
+    (!hasCustomWindowControls.value && bridge.windowKind !== "chat")
   )
     return;
   bridge
@@ -313,10 +313,9 @@ useKeyboard();
             ]"
           >
             <DesktopTitleBar
-              v-if="showDesktopTitleBar"
+              v-if="showDesktopTitleBar && !showNavigationRail"
               :standalone="isLoginPage || isDesktopChatWindow"
               :left-offset="desktopTitleBarLeft"
-              :flush="showNavigationRail"
             />
             <StudioNavigationRail v-if="showNavigationRail" />
             <MobileNavigationDrawer
@@ -331,6 +330,10 @@ useKeyboard();
               class="studio-page-header"
               :class="{ 'studio-page-header--shell-sidebar': usesShellSidebar }"
             >
+              <DesktopTitleBar
+                v-if="showDesktopTitleBar && showNavigationRail"
+                flush
+              />
               <HeaderSidebarToggle
                 v-if="showNavigationRail && usesShellSidebar"
                 class="header-sidebar-toggle"
@@ -513,6 +516,7 @@ useKeyboard();
 .app-shell--navigation-rail {
   --studio-header-height: 40px;
   --studio-header-inset: #{$navigation-rail-width};
+  --desktop-window-controls-width: 139px;
   flex-direction: row;
   background-color: $bg-sidebar;
 
@@ -528,7 +532,7 @@ useKeyboard();
     align-items: center;
     -webkit-app-region: drag;
 
-    > :deep(:not(.header-sidebar-control)) {
+    > :deep(:not(.header-sidebar-control):not(.desktop-titlebar)) {
       box-sizing: border-box;
       display: flex;
       align-items: center;
@@ -557,7 +561,7 @@ useKeyboard();
     }
 
     &--shell-sidebar {
-      > :deep(:not(.header-sidebar-control)) {
+      > :deep(:not(.header-sidebar-control):not(.desktop-titlebar)) {
         padding-inline-start: 0;
       }
 
@@ -620,7 +624,10 @@ useKeyboard();
   }
 
   // Three 46px window buttons and their 1px separator.
-  &.desktop-platform-win32 .studio-page-header { right: 139px; }
+  &.desktop-platform-win32 .studio-page-header,
+  &.desktop-platform-linux .studio-page-header {
+    padding-right: var(--desktop-window-controls-width);
+  }
 
   .app-box {
     padding-top: var(--studio-header-height);
@@ -745,7 +752,8 @@ useKeyboard();
 }
 
 .app-shell.desktop-platform-darwin,
-.app-shell.desktop-platform-win32 {
+.app-shell.desktop-platform-win32,
+.app-shell.desktop-platform-linux:not(.desktop-chat-window) {
   &::before {
     content: "";
     position: absolute;
@@ -776,7 +784,8 @@ useKeyboard();
   }
 }
 
-.app-shell.desktop-platform-win32 {
+.app-shell.desktop-platform-win32,
+.app-shell.desktop-platform-linux:not(.desktop-chat-window) {
   overflow: hidden;
 
   &:not(.app-shell--navigation-rail) {
@@ -809,6 +818,11 @@ useKeyboard();
 }
 
 .app-shell.desktop-platform-darwin {
+  // Native macOS traffic lights remain on the physical left in RTL locales.
+  &.app-shell--navigation-rail:dir(rtl) {
+    flex-direction: row-reverse;
+  }
+
   :deep(.studio-navigation-rail) {
     padding-top: 44px;
 

@@ -499,9 +499,10 @@ async function createWindow(): Promise<void> {
     ...(process.platform === 'darwin'
       ? {
           titleBarStyle: 'hiddenInset' as const,
-          trafficLightPosition: { x: 20, y: 16 },
+          // Keep all three native buttons above the 64px navigation rail avatar.
+          trafficLightPosition: { x: 8, y: 16 },
         }
-      : process.platform === 'win32'
+      : process.platform === 'win32' || process.platform === 'linux'
         ? {
             frame: false,
           }
