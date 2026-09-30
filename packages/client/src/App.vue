@@ -663,30 +663,21 @@ useKeyboard();
 }
 
 .app-shell--custom-background {
-  &.app-shell--navigation-rail .app-box::before {
-    --cutout-width: calc(100% - var(--studio-content-gutter));
-    --cutout-height: calc(100% - var(--studio-header-height) - var(--studio-content-gutter));
-    --corner-size: calc(2 * var(--studio-content-radius));
-    --corner-mask: radial-gradient(circle closest-side, #000 calc(100% - 0.5px), transparent);
-    inset: 0;
-    height: auto;
-    // One glass sheet covers the header, gutters and rounded corners. Subtract
-    // the content rectangle (two strips and four circles) to avoid double tinting.
-    mask:
-      linear-gradient(#000 0 0),
-      linear-gradient(#000 0 0) left var(--studio-content-radius) top var(--studio-header-height) /
-        calc(var(--cutout-width) - var(--corner-size)) var(--cutout-height) no-repeat,
-      linear-gradient(#000 0 0) left 0 top calc(var(--studio-header-height) + var(--studio-content-radius)) /
-        var(--cutout-width) calc(var(--cutout-height) - var(--corner-size)) no-repeat,
-      var(--corner-mask) left 0 top var(--studio-header-height) /
-        var(--corner-size) var(--corner-size) no-repeat,
-      var(--corner-mask) right var(--studio-content-gutter) top var(--studio-header-height) /
-        var(--corner-size) var(--corner-size) no-repeat,
-      var(--corner-mask) left 0 bottom var(--studio-content-gutter) /
-        var(--corner-size) var(--corner-size) no-repeat,
-      var(--corner-mask) right var(--studio-content-gutter) bottom var(--studio-content-gutter) /
-        var(--corner-size) var(--corner-size) no-repeat;
-    mask-composite: subtract, add, add, add, add, add, add;
+  &.app-shell--navigation-rail {
+    .app-box::before {
+      inset: 0;
+      height: auto;
+    }
+
+    .app-layout {
+      // Align this image with the shell's full-window background. Its opaque base
+      // keeps the continuous frame glass from tinting the content a second time.
+      background: $bg-sidebar var(--app-background-image, none) center / cover no-repeat fixed;
+      // Composite the image and surfaces before rounding them together. Separate
+      // rounded clips leave antialiased pixels that expose the unfiltered image.
+      border-radius: 0;
+      clip-path: inset(0 round var(--studio-content-radius));
+    }
   }
 
   .app-layout {
