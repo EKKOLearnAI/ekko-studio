@@ -532,6 +532,9 @@ export class AppRelayClient {
     if (!path) return httpError(request.id, 'path_not_allowed', 'Relay request path is not allowed', 403)
 
     const headers = normalizeHeaders(request.headers)
+    if (headers.has('authorization')) {
+      headers.set('authorization', canonicalBearerHeader(headers.get('authorization') || ''))
+    }
     if (method === 'POST' && path === '/api/auth/app-login') {
       headers.delete('authorization')
       headers.set('x-hermes-app-connection', 'cloud')
@@ -1045,6 +1048,11 @@ function normalizeRelayPath(value: unknown): string | null {
     return `${parsed.pathname}${parsed.search}`
   }
   return null
+}
+
+function canonicalBearerHeader(value: string): string {
+  const token = value.trim().replace(/^Bearer\s+/i, '').trim()
+  return token ? `Bearer ${token}` : ''
 }
 
 function normalizeHeaders(input: AppRelayHttpRequest['headers']): Headers {

@@ -69,6 +69,7 @@ describe('Studio authorized provider runtime credentials', () => {
     }, { profileDir, now: () => NOW, fetch: fetcher })).resolves.toMatchObject({
       provider: 'xai-oauth',
       apiKey: accessToken,
+      refreshToken: 'refresh-token',
       baseUrl: 'https://api.x.ai/v1',
       apiMode: 'codex_responses',
       lastRefresh: new Date(NOW).toISOString(),
