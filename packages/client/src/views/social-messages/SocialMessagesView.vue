@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, onUnmounted, ref, unref, watch } from 'vue'
 import QRCode from 'qrcode'
 import {
+  NSpin,
   NAlert,
   NButton,
   NCard,
@@ -9,7 +12,6 @@ import {
   NFormItem,
   NInput,
   NSelect,
-  NSpin,
   NTag,
   useMessage,
 } from 'naive-ui'
@@ -699,14 +701,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="social-messages-view" :class="{ 'social-messages-view--embedded': embedded }">
+  <PageLoading :show="loading" class="social-messages-view" :class="{ 'social-messages-view--embedded': embedded }">
+    <PageHeader>
     <header v-if="!embedded" class="page-header">
       <h1>{{ t('socialMessages.title') }}</h1>
       <p>{{ t('socialMessages.description') }}</p>
     </header>
+    </PageHeader>
 
     <main class="push-content">
-      <NSpin :show="loading">
+      <div>
         <div v-if="loadError" class="load-error">
           <NAlert type="error" class="push-alert">{{ loadError }}</NAlert>
           <NButton size="small" @click="loadPushState">{{ t('common.retry') }}</NButton>
@@ -990,16 +994,16 @@ onUnmounted(() => {
             </NAlert>
           </NForm>
         </NCard>
-      </NSpin>
+      </div>
     </main>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .social-messages-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }

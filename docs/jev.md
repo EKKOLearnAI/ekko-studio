@@ -58,7 +58,7 @@ Use `evaluateJev(profile, input, signal?)` from `@/api/studio/jev`. It has the s
 typed request/response shape and routes through the authenticated Studio server.
 
 - `GET /api/studio/jev/settings`: read non-secret settings.
-- `PUT /api/studio/jev/settings`: save `baseUrl`, `model`, `timeoutMs`, optional `apiKey` and the memory/skill options listed below.
+- `PUT /api/studio/jev/settings`: save `baseUrl`, `model`, `timeoutMs`, optional `apiKey` and the memory/skill/browser options listed below.
 - `DELETE /api/studio/jev/settings`: reset settings and remove the key.
 - `POST /api/studio/jev/test`: test saved settings with a fixed sample.
 - `POST /api/studio/jev/evaluate`: accept `{ state, questions, model? }`.
@@ -167,3 +167,92 @@ Both use the run snapshot, one request per decision, bounded input and conservat
 fallback. Background review snapshots remain isolated while queued. Skill JEV
 logs use `skill.jev`; context estimation makes no JEV calls.
 See [Ekko skill JEV behavior](../packages/ekko-agent/docs/skills-jev.md) for details.
+
+
+## Built-in browser automation
+
+Models → JEV → **Built-in browser automation** provides two independent,
+default-off switches per Studio Profile. These are Studio MCP settings, not
+standalone Ekko runtime settings. Save takes effect at the next assessment;
+disabling retains numeric options, while Delete resets them.
+
+| Field | Default / range |
+| --- | --- |
+| `browserMatchEnabled` | false |
+| `browserMatchCandidateLimit` | 20 / integer 1–50 |
+| `browserMatchMinConfidence` | 0.8 / 0.5–1 |
+| `browserMatchTimeoutMs` | 3000 / integer 100–30000 ms |
+| `browserVerifyEnabled` | false |
+| `browserVerifyMinConfidence` | 0.8 / 0.5–1 |
+| `browserVerifyTimeoutMs` | 3000 / integer 100–30000 ms |
+
+The existing browser toolset remains list → describe → call:
+
+- `ekko_studio_browser_snapshot({ tab_id, target? })` accepts a natural-language
+  target, e.g. `"the Continue button"`. If enabled and configured, `result.elementMatch`
+  returns `matched` with an existing ref and snapshot identity, `no_match`,
+  `skipped`, or `unavailable`. Non-disabled interactive elements across the entire
+  bounded snapshot are ranked by target-label relevance before applying the
+  candidate limit. Document, heading and text nodes do not consume that budget.
+  Low-confidence or ambiguous choices never invent refs. The full original
+  snapshot is preserved, including elements outside that candidate window.
+- `ekko_studio_browser_interact({ ..., expectation? })` accepts an expected visible
+  outcome, e.g. `"the order confirmation heading is visible"`. After the action,
+  enabled verification takes a new snapshot and returns it with `result.verification`.
+- `ekko_studio_browser_batch({ ..., expectation? })` reuses the final snapshot of a
+  fully completed batch. Partial batches, takeover/snapshot failure and action
+  errors are not evaluated or retried. Verification reports `met`, `not_met`,
+  `unknown`, `skipped`, or `unavailable`; it never changes action completion or MCP
+  error status. An immediate snapshot may precede asynchronous page updates, so
+  `unknown` is valid; the agent can inspect the page again without repeating actions.
+
+Omitting `target`/`expectation` preserves the exact legacy call path with no JEV
+settings request or extra snapshot. A described intent is required even when a
+switch is enabled. Explicit refs and snapshot freshness, DOM checks, control
+and leases remain enforced by the Desktop Broker. Browser actions execute without
+label-based risk classification or additional Agent confirmation dialogs; downloads
+use the configured browser Profile preferences.
+A match is a recommendation, not permission to act.
+
+Browser snapshot, interact and batch responses retain the nodes of their selected
+page and use compact JSON. Large-page local search and pagination work independently
+of JEV; see [browser snapshot usage](browser-snapshots.md). The duplicate `text` rendering is omitted by default; pass
+`include_text: true` when needed. Invalid arguments are rejected before dispatch
+with their field path and a schema-discovery hint. Clicks wait up to 1.5 seconds
+for the original target to become visible/enabled, within the existing batch
+budget and control lease. Only readiness is polled; dispatched clicks are never
+retried. CDP execution failures retain a bounded, redacted error description.
+For a sequence with known refs, prefer one batch and one final `expectation`;
+use `target` for semantic help when a target is ambiguous.
+
+The MCP transport uses the run's configured, authorized Studio Profile. There is
+no browser-tool Profile/key override or fallback to another Profile. The browser's
+cookie-storage Profile is independent of this Studio settings Profile. Direct Ekko
+runs receive revocable credentials bound to the authenticated user, Profile and
+turn, ahead of any inherited static server token. MCP connections are isolated by
+run; background tasks retain their originating lease until they finish. A completed
+or aborted lease cannot reconnect. MCP checks
+non-secret settings before an assessment; the server independently rechecks the
+switch on every request. Disabled features or absent credentials make zero provider
+requests. Unavailable/old Studio servers, provider failures, timeouts, malformed
+answers, and low confidence preserve the original snapshot/action result. Cancellation
+propagates through the compact MCP toolset and aborts assessment transport. It cannot
+undo actions already dispatched to the browser.
+Failed assessments report their stage (`settings`, `snapshot`, `assessment`) and
+safe reasons such as `auth_required`, `access_denied` and `timeout`; HTTP failures
+include the status code. The surrounding `operation_id` correlates these results
+with browser execution. Provider authentication failures and rate limits remain
+distinct from generic provider unavailability, without exposing response bodies.
+
+Assessment endpoints are authenticated `POST /api/studio/jev/browser/match`
+(`{ target, snapshot }`) and `/api/studio/jev/browser/verify`
+(`{ expectation, snapshot }`). They use the public JEV facade and bounded Choice
+questions, never generated scripts. Only bounded rendered node refs, roles,
+names, disabled flags and the page title are sent to JEV. Input values,
+raw snapshot text, URLs, cookies and HTML are excluded. Verification therefore
+cannot establish an entered field value. It judges the supplied snapshot, not
+external state or eventual server-side effects. Page content is treated as data.
+Feature timeouts bound the provider assessment, independently of the browser's
+execution budget; the shared provider timeout also applies. The MCP settings
+lookup has a five-second transport deadline and assessment transport allows one
+extra second for the server response. Optional evaluations do not automatically retry.

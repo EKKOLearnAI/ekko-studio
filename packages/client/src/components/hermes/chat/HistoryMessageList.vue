@@ -209,7 +209,7 @@ defineExpose({
           v-if="activeSession?.hasMoreBefore || activeSession?.isLoadingOlderMessages"
           class="history-loader"
         >
-          <span v-if="activeSession?.isLoadingOlderMessages" class="history-loader-spinner"></span>
+          <span v-if="activeSession?.isLoadingOlderMessages" class="history-loader-spinner" role="status" :aria-label="t('common.loading')"></span>
         </div>
       </template>
       <template #item="{ message: msg }">
@@ -293,14 +293,6 @@ defineExpose({
   }
 }
 
-.history-loader {
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-}
-
 .history-loader-spinner {
   width: 14px;
   height: 14px;
@@ -314,6 +306,15 @@ defineExpose({
     border-top-color: $accent-primary;
   }
 }
+
+.history-loader {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
 
 .scroll-bottom-button {
   position: absolute;
@@ -347,11 +348,6 @@ defineExpose({
   height: 19px;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 .fade-enter-active,
 .fade-leave-active {
@@ -360,5 +356,10 @@ defineExpose({
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

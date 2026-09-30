@@ -76,6 +76,7 @@ describe('Studio Live Activity orchestration', () => {
   ['coding_agent','claude-code','claude'],['coding_agent','codex','codex'],
   ['coding_agent','pi','pi'],['coding_agent','grok','grok'],
   ['coding_agent','opencode','opencode'],['coding_agent','dsh','deepseek'],
+  ['coding_agent','cursor','cursor'],
   ['chat','bridge','hermes'],['chat','ekko-agent','ekko'],
  ])('preserves title and normalized agent for %s / %s',async(source,runtime,expected)=>{
   const consume=await setup(), e=event('chat.plan.updated')

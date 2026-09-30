@@ -1,9 +1,11 @@
 import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { stringify } from 'yaml'
 import { anchorDshPatch, dshPresetSourceConfig, optionalDshFile } from './web-profile'
 import { dshInstallation, dshPackageDirectory } from './installation'
-import { DSH_UI_SLOT_CLIENT, DSH_UI_SLOT_HOST } from './ui-slot'
+import { dshUiSlotClient, DSH_UI_SLOT_HOST } from './ui-slot'
+import { readDshBundlePatches, usesDshPresetRegistry } from './bundle'
 
 /** An owned Web host with the source profile's plugins and a configuration slot.
  * Native packages stay installed externally; Studio bundles no DSH/React code. */
@@ -21,9 +23,7 @@ export async function prepareDshManagementProfile(input: { command: string; sour
   for (const name of new Set([...bundles, ...Object.keys(manifest.dependencies || {})])) {
     const target = await dshPackageDirectory(name, [installation, manifestPath])
     if (bundles.includes(name)) {
-      const pkg = JSON.parse(await optionalDshFile(join(target, 'package.json')))
-      if (typeof pkg.dsh?.bundle?.patch !== 'string') throw new Error(`Web bundle ${name} has no composition patch`)
-      layers.push(await optionalDshFile(join(target, pkg.dsh.bundle.patch)))
+      layers.push(...(await readDshBundlePatches(target)).map(patch => patch.content))
     }
     const link = join(directory, 'node_modules', name)
     await mkdir(dirname(link), { recursive: true })
@@ -43,15 +43,19 @@ export async function prepareDshManagementProfile(input: { command: string; sour
   await mkdir(slot, { recursive: true })
   await writeFile(join(slot, 'package.json'), JSON.stringify({ name: 'studio-dsh-ui', version: '0.0.0', type: 'module', exports: { '.': './index.js', './client': './client.js', './package.json': './package.json' }, dsh: { client: { platform: 'web', immediately: true, inject: ['slots', 'layout', 'locale', 'theme'], external: ['react'] } } }))
   await writeFile(join(slot, 'index.js'), DSH_UI_SLOT_HOST)
-  await writeFile(join(slot, 'client.js'), DSH_UI_SLOT_CLIENT)
+  const registry = usesDshPresetRegistry(layers)
+  await writeFile(join(slot, 'client.js'), dshUiSlotClient(registry))
   const patch = join(input.rootDir, 'management.patch.yml')
   await writeFile(patch, stringify([
     { id: 'ui-sidebar', disabled: true },
-    { id: 'agent-presets', inject: ['settings'], config: dshPresetSourceConfig(layers, input.sourceHome) },
+    ...(!registry ? [{ id: 'agent-presets', inject: ['settings'], config: dshPresetSourceConfig(layers, input.sourceHome) }] : []),
     { id: 'web-runtime', config: { printUrl: false, openBrowser: false, surfaceContext: false } },
     { id: 'settings', config: { path: join(input.sourceHome, 'settings.yaml') } },
     { id: 'credentials', config: { path: join(input.sourceHome, '.credentials.yaml'), dshHome: input.sourceHome } },
-    { insert: [{ id: 'studio-dsh-ui', name: 'studio-dsh-ui' }] },
+    { insert: [{ id: 'studio-dsh-ui', name: registry ? pathToFileURL(join(slot, 'index.js')).href : 'studio-dsh-ui' }] },
   ]), { mode: 0o600 })
-  return { profile, patch }
+  // New native settings persist through the active profile's config editor.
+  // Launch that source profile so saved edits survive this owned host's cleanup.
+  // The Studio UI plugin remains private and is supplied only as a CLI overlay.
+  return registry ? { profile: 'web', home: input.sourceHome, patch } : { profile, patch }
 }

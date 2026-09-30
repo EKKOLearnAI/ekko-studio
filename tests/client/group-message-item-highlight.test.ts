@@ -23,6 +23,14 @@ vi.mock('@/api/studio/download', () => ({
   getDownloadUrl: (_path: string, name: string) => `/download/${name}`,
 }))
 
+vi.mock('@/components/hermes/chat/MarkdownRenderer.vue', () => ({
+  default: {
+    name: 'MarkdownRenderer',
+    props: ['content'],
+    template: '<markdown-renderer-stub :content="content" />',
+  },
+}))
+
 import GroupMessageItem from '@/components/hermes/group-chat/GroupMessageItem.vue'
 import type { ChatMessage } from '@/api/studio/group-chat'
 import { useGroupChatStore } from '@/stores/hermes/group-chat'

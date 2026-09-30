@@ -30,6 +30,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('naive-ui', () => ({
+  NSpin: { template: '<div><slot /><slot name="icon" /></div>' },
   NButton: defineComponent({
     name: 'NButton',
     props: {
@@ -59,6 +60,10 @@ vi.mock('@/components/hermes/usage/AgentBreakdown.vue', () => ({
 
 vi.mock('@/components/hermes/usage/DailyTrend.vue', () => ({
   default: defineComponent({ name: 'DailyTrend', template: '<section class="daily-trend-stub" />' }),
+}))
+
+vi.mock('@/components/hermes/usage/UsagePricing.vue', () => ({
+  default: defineComponent({ name: 'UsagePricing', template: '<span />' }),
 }))
 
 import UsageView from '@/views/hermes/UsageView.vue'

@@ -32,6 +32,7 @@ import {
   type WorkflowRunNodeStatus,
   type WorkflowRunRecord,
 } from '../../repositories/workflow-run-store'
+import { cancelWorkflowQualityReviews, scheduleWorkflowQualityReview } from './quality-review'
 import { createSession, deleteSession, getSession, getSessionDetail } from '../../repositories/session-store'
 import type { ContentBlock } from '../../contracts/runs/session'
 import type { AuthenticatedUser } from '../../public/auth'
@@ -50,13 +51,13 @@ export type { WorkflowCreateInput, WorkflowRecord, WorkflowUpdateInput }
 
 export type WorkflowRuntimeState = 'idle' | 'queued' | 'running' | 'pending_approval' | 'completed' | 'skipped' | 'failed' | 'approval_rejected' | 'canceled'
 export type WorkflowRunType = 'workflow'
-export type WorkflowNodeAgent = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
+export type WorkflowNodeAgent = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
 
 export interface WorkflowNodeRunTarget {
   type: WorkflowRunType
   source: 'workflow'
-  agent: 'hermes' | 'ekko-agent' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
-  codingAgentId?: 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
+  agent: 'hermes' | 'ekko-agent' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
+  codingAgentId?: 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
 }
 
 export interface WorkflowRuntimeStatus {
@@ -277,6 +278,14 @@ export function resolveWorkflowNodeRunTarget(agent?: string | null): WorkflowNod
       codingAgentId: 'grok',
     }
   }
+  if (agent === 'cursor') {
+    return {
+      type: 'workflow',
+      source: 'workflow',
+      agent: 'cursor',
+      codingAgentId: 'cursor',
+    }
+  }
   if (agent === 'opencode' || agent === 'dsh') {
     return {
       type: 'workflow',
@@ -318,11 +327,11 @@ export function normalizeWorkflowNode(raw: unknown): WorkflowNodeSnapshot | null
     join = orchestration.join
   }
   const agent = typeof data.agent === 'string' && data.agent.trim() ? data.agent.trim() : 'hermes'
-  if (agent !== 'hermes' && agent !== 'ekko-agent' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'opencode' && agent !== 'dsh')) {
+  if (agent !== 'hermes' && agent !== 'ekko-agent' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && agent !== 'cursor' && (agent !== 'opencode' && agent !== 'dsh')) {
     throw new Error(`workflow node ${id} has unsupported agent runtime`)
   }
-  const agentMode = data.agentMode === 'global' ? 'global' : 'scoped'
-  if (agentMode === 'global' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'opencode' && agent !== 'dsh')) {
+  const agentMode = agent === 'cursor' ? 'global' : data.agentMode === 'global' ? 'global' : 'scoped'
+  if (agentMode === 'global' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && agent !== 'cursor' && (agent !== 'opencode' && agent !== 'dsh')) {
     throw new Error(`workflow node ${id} cannot use global mode with this agent runtime`)
   }
   const provider = typeof data.provider === 'string' ? data.provider.trim() : ''
@@ -944,7 +953,7 @@ function workflowOutputConditionContext(output: string, edges: WorkflowEdgeSnaps
 
 function isWorkflowCodingAgentSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null } | null): boolean {
   const agent = String(session?.agent || '').trim()
-  return agent === 'ekko-agent' || agent === 'claude' || agent === 'codex' || agent === 'pi' || agent === 'grok' || (agent === 'opencode' || agent === 'dsh') || Boolean(session?.agent_session_id)
+  return agent === 'ekko-agent' || agent === 'claude' || agent === 'codex' || agent === 'pi' || agent === 'grok' || agent === 'cursor' || (agent === 'opencode' || agent === 'dsh') || Boolean(session?.agent_session_id)
 }
 
 async function deleteHermesSessionIfPresent(sessionId: string, profile: string): Promise<void> {
@@ -1173,6 +1182,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
     if (!run || run.workflow_id !== workflowId) return null
     if (run.status !== 'queued' && run.status !== 'running') return run
     this.canceledRunIds.add(runId)
+    cancelWorkflowQualityReviews(runId)
     this.cancelPendingNodeApprovals(runId)
     const finishedAt = Date.now()
     const nodeStatuses: Record<string, WorkflowRuntimeState> = {}
@@ -1571,7 +1581,8 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
         if (isCanceled()) throw new Error(getWorkflowRun(run.id)?.error || 'Workflow run canceled')
         if (!approved) throw new Error('Workflow node approval rejected')
         outputs.set(node.id, output)
-        updateWorkflowRunNodeSession(nodeSession.id, { status: 'completed', finished_at: Date.now(), error: null })
+        const completedNodeSession = updateWorkflowRunNodeSession(nodeSession.id, { status: 'completed', finished_at: Date.now(), error: null })
+        if (completedNodeSession) scheduleWorkflowQualityReview({ run, node, nodeSession: completedNodeSession, input: assembledInput, output })
         nodeStatuses[node.id] = 'completed'
         const outgoingEdges = forwardEdges.filter(item => activeIds.has(item.target) && item.source === node.id)
         const conditionContext = workflowOutputConditionContext(output, outgoingEdges)
@@ -2148,7 +2159,8 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
             runId: run.id,
             nodeStatuses: { ...nodeStatuses },
           })
-          updateWorkflowRunNodeSession(nodeSession.id, { status: 'completed', finished_at: Date.now(), error: null })
+          const completedNodeSession = updateWorkflowRunNodeSession(nodeSession.id, { status: 'completed', finished_at: Date.now(), error: null })
+          if (completedNodeSession) scheduleWorkflowQualityReview({ run, node, nodeSession: completedNodeSession, input: assembledInput, output })
           return { node, ok: true }
           })()
           inFlight.set(node.id, execution)

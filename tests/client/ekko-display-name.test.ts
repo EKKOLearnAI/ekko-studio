@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { AGENT_OPTIONS, GROUP_AGENT_OPTIONS } from '../../packages/client/src/utils/agent-options'
 
 function clientSourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -16,28 +17,27 @@ describe('Ekko display name', () => {
       .flatMap(path => readFileSync(path, 'utf8').includes('Ekko Agent') ? [path] : [])
 
     expect(occurrences).toEqual([])
-    expect(readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8'))
-      .toContain('{ label: "Ekko", value: "ekko-agent" }')
+    expect(AGENT_OPTIONS).toContainEqual({ label: 'Ekko', value: 'ekko-agent' })
+    expect(GROUP_AGENT_OPTIONS).toContainEqual({ label: 'Ekko', value: 'ekko' })
   })
 
   it.each([
     ['single chat', 'packages/client/src/components/hermes/chat/ChatPanel.vue',
-      '{ label: "Hermes", value: "hermes" }', '{ label: "Ekko", value: "ekko-agent" }', '{ label: "Claude", value: "claude-code" }'],
+      AGENT_OPTIONS, 'AGENT_OPTIONS', 'const newChatAgentOptions = computed(() => AGENT_OPTIONS.map('],
     ['group chat', 'packages/client/src/components/hermes/group-chat/GroupChatPanel.vue',
-      "{ label: 'Hermes', value: 'hermes' }", "{ label: 'Ekko', value: 'ekko' }", "{ label: 'Claude', value: 'claude' }"],
+      GROUP_AGENT_OPTIONS, 'GROUP_AGENT_OPTIONS', 'const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS'],
     ['group chat link', 'packages/client/src/views/hermes/GroupChatLinkView.vue',
-      "{ label: 'Hermes', value: 'hermes' }", "{ label: 'Ekko', value: 'ekko' }", "{ label: 'Claude', value: 'claude' }"],
+      GROUP_AGENT_OPTIONS, 'GROUP_AGENT_OPTIONS', 'const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS'],
     ['workflow', 'packages/client/src/views/hermes/WorkflowView.vue',
-      "{ label: 'Hermes', value: 'hermes' }", "{ label: 'Ekko', value: 'ekko-agent' }", "{ label: 'Claude', value: 'claude-code' }"],
-  ])('places Ekko second in the %s Agent dropdown', (_name, path, hermes, ekko, claude) => {
+      AGENT_OPTIONS, 'AGENT_OPTIONS', 'const workflowAgentDefinitions = AGENT_OPTIONS'],
+  ] as const)('uses the shared order with Ekko second in the %s Agent dropdown', (_name, path, options, exportName, binding) => {
     const source = readFileSync(path, 'utf8')
-    const hermesIndex = source.indexOf(hermes)
-    const ekkoIndex = source.indexOf(ekko)
-    const claudeIndex = source.indexOf(claude)
 
-    expect(hermesIndex).toBeGreaterThanOrEqual(0)
-    expect(ekkoIndex).toBeGreaterThan(hermesIndex)
-    expect(claudeIndex).toBeGreaterThan(ekkoIndex)
+    expect(source).toMatch(new RegExp(`import\\s+\\{\\s*${exportName}\\s*\\}\\s+from\\s+['"]@/utils/agent-options['"]`))
+    expect(source).toContain(binding)
+    expect(options.map(option => option.label)).toEqual([
+      'Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor',
+    ])
   })
 
   it('keeps server-managed provider choices available for Ekko workflow nodes', () => {
@@ -61,7 +61,7 @@ describe('Ekko display name', () => {
       .flatMap(path => readFileSync(path, 'utf8').includes('Claude Code') ? [path] : [])
 
     expect(occurrences).toEqual([])
-    expect(readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8'))
-      .toContain('{ label: "Claude", value: "claude-code" }')
+    expect(AGENT_OPTIONS).toContainEqual({ label: 'Claude', value: 'claude-code' })
+    expect(GROUP_AGENT_OPTIONS).toContainEqual({ label: 'Claude', value: 'claude' })
   })
 })

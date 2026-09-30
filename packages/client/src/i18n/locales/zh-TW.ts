@@ -2,6 +2,55 @@ import { socialMessagesZhTw } from '../social-messages'
 
 export default {
   jev: {
+    browserAutomation: "內建瀏覽器自動化",
+    browserAutomationHint: "選用判斷沿用目前 Profile 儲存的 JEV 連線，下次判斷生效。頁面可見標籤會傳送給 JEV，不包含輸入欄位的值。關閉、服務無法使用或判斷不確定時保留原有流程。",
+    browserMatchEnabled: "JEV 元素比對",
+    browserMatchHint: "依目標描述推薦快照中的真實元素參照。先掃描整份快照中的可互動元素，按目標相關性排序後套用候選上限；有歧義時不推薦。",
+    browserMatchOptions: "元素比對選項",
+    browserMatchCandidateLimit: "元素候選上限",
+    browserMatchMinConfidence: "元素比對最低信賴度",
+    browserMatchTimeoutMs: "元素比對逾時（毫秒）",
+    browserVerifyEnabled: "JEV 操作結果判斷",
+    browserVerifyHint: "依預期結果，判斷單步或完整批次操作後的可見證據。回傳已達成、未達成或無法確定，不自動重試操作，也不驗證輸入欄位的值。",
+    browserVerifyOptions: "結果判斷選項",
+    browserVerifyMinConfidence: "結果判斷最低信賴度",
+    browserVerifyTimeoutMs: "結果判斷逾時（毫秒）",
+
+    groupSchedulingTitle: "群聊調度增強",
+    groupMessageRoutingMode: "任務分派方式",
+    groupRoutingSuggest: "僅建議，由使用者確認",
+    groupRoutingAuto: "自動分派",
+    groupHandoffReviewEnabled: "檢查交接資訊完整性",
+    groupHandoffReviewHint: "判斷交給下一位 Agent 的上下文、約束與待辦是否完整。",
+    groupLoopDetectionEnabled: "檢查重複空轉",
+    groupLoopDetectionHint: "識別 Agent 之間重複討論但沒有新增進展的協作。",
+    groupSummaryTitle: "群聊總結增強",
+    groupSummaryRevisionEnabled: "自動修訂摘要",
+    groupSummaryRevisionHint: "檢查發現可靠問題時，額外產生並複評一次修訂。",
+    workflowExpectationTitle: "工作流預期達成評估",
+    groupMessageRoutingEnabled: "啟用群聊調度增強",
+    groupRoutingDisabled: "已關閉；未明確指定 Agent 的訊息保持不分派。",
+    groupRoutingReady: "已啟用；可建議或自動分派 Agent。",
+    groupMessageRoutingMinConfidence: "分派信心門檻",
+    groupMessageRoutingMinConfidenceHint: "建議或自動分派所需的最低信心值。",
+    groupMessageRoutingTimeout: "分派時間預算（毫秒）",
+    groupMessageRoutingTimeoutHint: "一則沒有明確目標訊息的 JEV 總時間預算。",
+
+    workflowQualityEnabled: "啟用工作流預期達成評估",
+    workflowQualityDisabled: "已關閉；Workflow 執行保持不變。",
+    workflowQualityReady: "已為完成的工作流節點啟用。",
+    workflowQualityMinConfidence: "工作流評估信心門檻",
+    workflowQualityMinConfidenceHint: "判定預期未達成所需的最低信心值。",
+    workflowQualityTimeout: "工作流評估時間預算（毫秒）",
+    workflowQualityTimeoutHint: "節點完成後 JEV 評估可使用的總時間預算。",
+
+    groupSummaryReviewEnabled: '啟用群聊總結增強',
+    groupSummaryDisabled: '已關閉；群聊摘要沿用原流程。',
+    groupSummaryReady: '已為此設定檔建立的摘要啟用。',
+    groupSummaryReviewMinConfidence: '摘要檢查信心門檻',
+    groupSummaryReviewMinConfidenceHint: '回報摘要品質問題所需的最低信心值。',
+    groupSummaryReviewTimeout: '摘要檢查時間預算（毫秒）',
+    groupSummaryReviewTimeoutHint: '原摘要儲存後可使用的 JEV 總時間預算。',
     ekkoSkillsEnabled: "啟用 Ekko 技能 JEV 增強",
     skillsDisabled: "未啟用；繼續使用原有技能匹配與學習流程。",
     skillsReady: "已啟用技能語意匹配與學習預篩選。",
@@ -316,6 +365,7 @@ export default {
 
   // 通用
   common: {
+    close: '關閉',
     loading: '載入中...',
     cancel: '取消',
     delete: '刪除',
@@ -420,6 +470,17 @@ export default {
   },
 
   sidebar: {
+    desktopUpdatePreparing: "正在準備更新",
+    desktopUpdateStopping: "正在停止下載…",
+    desktopUpdateReady: "更新已就緒",
+    desktopUpdateFailed: "下載失敗",
+    desktopUpdateInstalling: "正在重新啟動更新…",
+    desktopUpdateInstall: "重新啟動更新",
+    desktopUpdateActionFailed: "操作失敗，請重試。",
+    desktopUpdateStop: "停止下載",
+    desktopUpdateStopped: "下載已停止",
+    desktopUpdateRetry: "重新下載",
+    desktopUpdateDownloading: "正在下載更新",
     chat: '對話',
     backToChat: '返回',
     search: '搜尋',
@@ -510,6 +571,8 @@ export default {
     ekkoDescription: 'Ekko 隨 Studio 提供，無需單獨安裝、升級或刪除。',
     version: '版本',
     codingAgentDescription: '可由 Studio 安裝、檢查更新及刪除。',
+    cursorDescription: '請從 https://cursor.com/install 安裝 Cursor CLI（`agent`），然後重新整理。Studio 不會用 npm 安裝。',
+    cursorNoManagedConfig: '啟動不會改寫 ~/.cursor/mcp.json。託管服務寫在本次工作階段的執行時副本裡。',
     updateToVersion: '更新至 {version}',
     deleteConfirm: '確定刪除 {name}？',
     installOperation: '安裝',
@@ -1073,6 +1136,7 @@ export default {
     stopGateway: '停止閘道',
     send: '發送',
     contextUsed: '上下文已用:',
+    sessionUsage: '累計用量:',
     sessions: '工作階段',
     webUiSessions: '工作階段',
     allProfiles: '全部設定',
@@ -1138,6 +1202,9 @@ export default {
     interactionCountdownElapsed: '00:00 · 等待伺服器確認',
     deleteSession: '確定刪除此工作階段？',
     sessionDeleted: '工作階段已刪除',
+    sessionListActions: '會話列表操作',
+    filterByProfile: '依 Profile 篩選',
+    selectedSessions: '已選 {count} 項',
     toggleBatchMode: '批次選取',
     selectAll: '全選',
     confirmBatchDelete: '確定刪除選取的 {count} 個工作階段？',
@@ -1245,6 +1312,8 @@ export default {
   },
 
   workflow: {
+    listActions: '工作流列表操作',
+    quality: { results: "JEV 质量观察", rerun: "编辑并从此节点重跑", decision: { pass: "已通过", needs_improvement: "需要改进", unknown: "未知" } },
     title: '工作流',
     profile: '設定檔',
     namePlaceholder: '工作流名稱',
@@ -1757,6 +1826,7 @@ export default {
 
   // 技能
   skills: {
+    filterBySource: "依來源篩選",
     title: '技能',
     targetFilter: '執行環境',
     targets: {
@@ -2303,6 +2373,10 @@ export default {
 
   // 日誌
   logs: {
+    file: "日誌檔案",
+    level: "日誌等級",
+    lines: "行數",
+    filters: "篩選日誌",
     title: '日誌',
     all: '全部',
     searchPlaceholder: '搜尋...',
@@ -2985,6 +3059,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "用量：輸入 {inputTokens}，輸出 {outputTokens}，快取讀取 {cacheReadTokens}，快取寫入 {cacheWriteTokens}，合計 {totalTokens} tokens。",
+    nativeUsageUnknown: "用量未知：此工作階段尚未收到原生 Token 用量資料。",
+    nativeContextUnknown: "上下文未知：暫時無法取得原生工作階段的目前占用及上限。",
+    nativeContextEstimate: "上下文估算（最近一次用量 / 設定上限）：{contextTokens} / {contextWindow} tokens（{contextPercent}%）。",
+    nativeCompactUnavailable: "Studio 目前的 Cursor print 模式整合不支援 /compact。",
     title: "編程工具",
     notice: "並非所有提供商和模型都相容。",
     claudeDescription: "Anthropic CLI，適合 print mode 單次任務和互動式編程工作階段。",
@@ -2999,6 +3078,7 @@ export default {
     notInstalled: "未安裝",
     installRequired: "{agent} 未安裝，請先安裝後再建立會話。",
     installNow: "安裝",
+    cursorInstallGuide: "安裝指引",
     installing: "安裝中",
     installSuccess: "安裝完成",
     installFailed: "安裝失敗",
@@ -3192,6 +3272,15 @@ export default {
 
   // 群聊
   groupChat: {
+    routingHandoffIncomplete: '交接資訊可能不完整。',
+    routingLoopDetected: '偵測到協作可能在重複空轉。',
+    routingSuggested: 'JEV 建議交給 {agent}',
+    routingUseSuggestion: '分派',
+    routingAutoQueued: 'JEV 已分派給 {agent}',
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent 预设',
     agentPresets: 'Agent 预设',
     agentPresetPlaceholder: '选择预设',
@@ -3414,6 +3503,24 @@ export default {
 
   // 用量統計
   usage: {
+    costStates: {
+      unknown: "未記錄",
+      partial: "部分費用，其餘未記錄",
+      reported: "上游回傳費用",
+      estimated: "估算費用",
+      mixed: "含上游費用與估算費用",
+    },
+    pricing: {
+      title: "模型單價",
+      help: "未設定自訂單價時，自動使用 models.dev 中相符模型的價格估算。單位為美元／百萬 Token。依供應商和模型 ID 精確匹配（例如 global），僅在上游未回傳費用時估算。快取單價留空表示未知。修改從後續呼叫生效，不重算歷史費用。",
+      provider: "供應商 ID",
+      model: "模型 ID",
+      input: "輸入",
+      output: "輸出",
+      cacheRead: "快取讀取",
+      cacheWrite: "快取寫入",
+      error: "無法讀取或儲存單價。請檢查供應商、模型是否填寫或重複，單價必須為非負數。",
+    },
     title: '用量統計',
     refresh: '重新整理',
     totalTokens: '總 Token 數',
@@ -3425,7 +3532,7 @@ export default {
     cacheHitRate: '快取命中率',
     modelBreakdown: '模型分布',
     agentBreakdown: 'Agent 分布',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', ekkoAgent: 'Ekko', unknown: '未知' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: '未知' },
     dailyTrend: '每日用量',
     date: '日期',
     tokens: 'Token',
@@ -3546,6 +3653,24 @@ export default {
 
   // 更新日誌
   changelog: {
+    new_0_7_26_1: '統一 Studio 導覽列、頁面標題與清單操作，並最佳化行動版配置 (#3232)',
+    new_0_7_26_2: '統一頁面載入回饋，改善 Logo 載入動畫及減少動態效果模式下的可見性 (#3232、#3236)',
+    new_0_7_26_3: '最佳化自訂背景與毛玻璃層次，修復視窗邊緣和圓角銜接，並讓麥克風按鈕跟隨佈景主題配色 (#3236)',
+    new_0_7_26_4: '依平台調整桌面視窗控制按鈕的位置與樣式，並保留 Windows 原生視窗圓角 (#3234、#3235)',
+    new_0_7_26_5: 'Gateway 自動啟動改為明確啟用，Profile 清單載入不再等待 CLI 檢查，並修復訊息氣泡首次繪製 (#3233)',
+    new_0_7_26_6: '用量統計新增費用記錄與自訂模型單價，支援依本機模型目錄估算費用，並改善模型上下文限制比對 (#3226)',
+    new_0_7_26_7: '相容 DSH 登錄表預設與原生外掛設定，修復外掛頁面未填滿可用區域的問題 (#3218)',
+    new_0_7_26_8: '修復 Agent 管理員中 Cursor 圖示在淺色卡片上的顯示 (#3222)',
+    new_0_7_25_1: '新增 Cursor CLI 支援，可用於聊天、群組聊天與工作流程，並提供原生設定、技能管理及獨立的 Studio MCP 設定 (#3110)',
+    new_0_7_25_2: '新增可設定的 JEV 記憶召回、相關性篩選、寫入審核、技能匹配與學習預先檢查 (#3159, #3161, #3169)',
+    new_0_7_25_3: '新增可選的 JEV 瀏覽器目標匹配與操作驗證、群組摘要審核與訊息路由，以及工作流程品質檢查 (#3208, #3211)',
+    new_0_7_25_4: '增強瀏覽器自動化，支援循序批次操作、最多 12 個分頁、大型頁面處理與更清楚的操作回饋 (#3206, #3207, #3212, #3215)',
+    new_0_7_25_5: '新增桌面更新下載進度，並支援 macOS、Windows 與 Linux 的獨立更新測試建置 (#3176, #3177)',
+    new_0_7_25_6: '修正長對話搜尋跳轉、新聊天附件、工作階段置頂重新整理與工作區收藏操作 (#3182, #3168, #3193)',
+    new_0_7_25_7: '新增側欄帳戶選單，統一 Agent 選擇器排序，並改善 Agent 管理器與群組聊天版面 (#3191, #3199, #3201, #3188)',
+    new_0_7_25_8: '修正 Hermes 升級相容性、橋接程序生命週期、跨 Studio 執行個體的 MCP 路由與群聊 Coding Agent 憑證 (#3202, #3157, #3187)',
+    new_0_7_25_9: '修正 DSH 啟動相依套件與 ACP 所屬套件解析，並清除獨立設定中的 Codex 重複鍵 (#3156, #3190, #3163)',
+    new_0_7_25_10: '改善 iOS 即時動態清理，停用失效的通知目標 (#3167)',
     new_0_7_24_1: '新增 iOS 即時動態編排，支援依語言更新及按使用者路由通知 (#3102, #3111, #3152)',
     new_0_7_24_2: '改善通知預設值與預覽、忽略舊版工作階段退出設定，並隱藏不支援的社交推播項目 (#3131, #3133, #3146, #3151)',
     new_0_7_24_3: '修正所有工作階段分享流程中的共享工作階段上傳與附件存取權限 (#3144)',

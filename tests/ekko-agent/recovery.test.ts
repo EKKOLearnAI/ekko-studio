@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +13,22 @@ import {
 } from '../../packages/ekko-agent/src'
 
 const temporaryDirectories: string[] = []
+const execFileAsync = promisify(execFile)
+
+async function revokeDirectoryWrite(directory: string): Promise<void> {
+  await chmod(directory, 0o500)
+  if (process.platform !== 'win32') return
+  const user = process.env.USERNAME
+  if (!user) throw new Error('USERNAME is required to revoke write access')
+  await execFileAsync('icacls', [directory, '/deny', `${user}:(W)`])
+}
+
+async function restoreDirectoryWrite(directory: string): Promise<void> {
+  if (process.platform === 'win32' && process.env.USERNAME) {
+    await execFileAsync('icacls', [directory, '/remove:d', process.env.USERNAME])
+  }
+  await chmod(directory, 0o700)
+}
 
 afterEach(async () => {
   vi.unstubAllEnvs()
@@ -157,7 +175,7 @@ describe('Ekko capability recovery', () => {
     initial.close()
     await rm(databasePath)
     await mkdir(databasePath, { recursive: true })
-    await chmod(ekkoRoot, 0o500)
+    await revokeDirectoryWrite(ekkoRoot)
 
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const setup = setupEkkoAgent({ baseDirectory, env: { NODE_ENV: 'test' } })
@@ -200,7 +218,7 @@ describe('Ekko capability recovery', () => {
         expect.objectContaining({ component: 'database', operation: 'repair.retry' }),
       ])
 
-      await chmod(ekkoRoot, 0o700)
+      await restoreDirectoryWrite(ekkoRoot)
       await rm(databasePath, { recursive: true })
       const repaired = await setup.tool.execute('ekko_repair_database', { strategy: 'retry' })
       expect(repaired).toMatchObject({
@@ -241,7 +259,7 @@ describe('Ekko capability recovery', () => {
         'Ekko Studio will automatically reload Ekko Setup after all active runs finish',
       )
     } finally {
-      await chmod(ekkoRoot, 0o700)
+      await restoreDirectoryWrite(ekkoRoot)
       setup.close()
       warning.mockRestore()
     }
@@ -289,13 +307,13 @@ describe('Ekko capability recovery', () => {
       CREATE TABLE schema_migrations (component TEXT PRIMARY KEY);
     `)
     malformed.close()
-    await chmod(ekkoRoot, 0o500)
+    await revokeDirectoryWrite(ekkoRoot)
 
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const degraded = setupEkkoAgent({ baseDirectory, env: { NODE_ENV: 'test' } })
     try {
       expect(degraded.database.databasePath).toBe(':memory:')
-      await chmod(ekkoRoot, 0o700)
+      await restoreDirectoryWrite(ekkoRoot)
 
       await expect(degraded.tool.execute('ekko_repair_database', {
         strategy: 'rebuild',
@@ -344,7 +362,7 @@ describe('Ekko capability recovery', () => {
         recovered.close()
       }
     } finally {
-      await chmod(ekkoRoot, 0o700)
+      await restoreDirectoryWrite(ekkoRoot)
       degraded.close()
       warning.mockRestore()
     }

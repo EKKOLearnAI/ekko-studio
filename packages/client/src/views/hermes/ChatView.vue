@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import PageLoading from '@/components/common/PageLoading.vue'
 import { useRoute, useRouter } from 'vue-router'
 import ChatPanel from '@/components/hermes/chat/ChatPanel.vue'
 import { useAppStore } from '@/stores/hermes/app'
@@ -34,6 +35,13 @@ const contentMode = computed<ChatContentMode>(() => {
   return 'chat'
 })
 const productTitle = 'Ekko Studio'
+const initializing = ref(true)
+const routeLoading = ref(false)
+let routeLoadSequence = 0
+let disposed = false
+const pageLoading = computed(() => contentMode.value === 'chat' && (
+  initializing.value || routeLoading.value || chatStore.isLoadingSessions || chatStore.isLoadingMessages
+))
 const tabTitle = computed(() => {
   if (route.name !== 'hermes.session' && route.name !== 'desktop.chat') return productTitle
   return chatStore.activeSession?.title?.trim() || productTitle
@@ -44,12 +52,15 @@ watch(tabTitle, (value) => {
 }, { immediate: true })
 
 onUnmounted(() => {
+  disposed = true
+  routeLoadSequence++
   document.title = productTitle
 })
 
 async function loadRouteSession() {
-  await chatStore.loadSessions(chatStore.sessionProfileFilter, routeSessionId.value)
-  if (routeSessionId.value && chatStore.activeSessionId !== routeSessionId.value) {
+  const sessionId = routeSessionId.value
+  await chatStore.loadSessions(chatStore.sessionProfileFilter, sessionId)
+  if (!disposed && sessionId && routeSessionId.value === sessionId && chatStore.activeSessionId !== sessionId) {
     await router.replace({ name: 'hermes.chat' })
   }
 }
@@ -64,49 +75,70 @@ async function applyRouteProfile() {
 
 onMounted(async () => {
   chatStore.setRuntimeMode('default')
-  appStore.loadModels()
+  const models = appStore.loadModels()
   // 先加载 profile，确保缓存 key 使用正确的 profile name；同时预取显示设置，
   // 让聊天完成提示音不依赖用户先打开 Settings 页面。
-  await Promise.all([
-    profilesStore.fetchProfiles(),
-    settingsStore.fetchSettings(),
-  ])
-  chatStore.validateSessionProfileFilter(profilesStore.profiles.map(profile => profile.name))
-  await applyRouteProfile()
-  await loadRouteSession()
+  try {
+    await Promise.all([
+      profilesStore.fetchProfiles(),
+      settingsStore.fetchSettings(),
+    ])
+    if (disposed) return
+    chatStore.validateSessionProfileFilter(profilesStore.profiles.map(profile => profile.name))
+    do {
+      const target = [routeSessionId.value, routeProfile.value].join(':')
+      await applyRouteProfile()
+      if (disposed) return
+      await Promise.all([models, loadRouteSession()])
+      if (target === [routeSessionId.value, routeProfile.value].join(':')) break
+    } while (!disposed)
+  } catch (error) {
+    console.error('Failed to initialize chat page:', error)
+  } finally {
+    initializing.value = false
+  }
 })
 
 watch([routeSessionId, routeProfile], async ([sessionId]) => {
-  if (!chatStore.sessionsLoaded) return
-  await applyRouteProfile()
-  if (!sessionId) {
-    await chatStore.loadSessions(chatStore.sessionProfileFilter)
-    return
-  }
-  if (chatStore.activeSessionId === sessionId) return
+  if (initializing.value || !chatStore.sessionsLoaded) return
+  const sequence = ++routeLoadSequence
+  routeLoading.value = true
+  try {
+    await applyRouteProfile()
+    if (disposed || sequence !== routeLoadSequence) return
+    if (!sessionId) {
+      await chatStore.loadSessions(chatStore.sessionProfileFilter)
+      return
+    }
+    if (chatStore.activeSessionId === sessionId) return
 
-  const exists = chatStore.sessions.some(session => session.id === sessionId)
-  if (!exists) {
-    await loadRouteSession()
-    return
-  }
+    const exists = chatStore.sessions.some(session => session.id === sessionId)
+    if (!exists) {
+      await loadRouteSession()
+      return
+    }
 
-  await chatStore.switchSession(sessionId)
+    await chatStore.switchSession(sessionId)
+  } catch (error) {
+    console.error('Failed to switch chat page:', error)
+  } finally {
+    if (sequence === routeLoadSequence) routeLoading.value = false
+  }
 })
 </script>
 
 <template>
-  <div class="chat-view" :class="{ 'chat-view--standalone': isStandaloneChat }">
+  <PageLoading :show="pageLoading" :initial-only="contentMode === 'chat'" class="chat-view" :class="{ 'chat-view--standalone': isStandaloneChat }">
     <ChatPanel
       :standalone="isStandaloneChat"
       :content-mode="contentMode"
     />
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 .chat-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 

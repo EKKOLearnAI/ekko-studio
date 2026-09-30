@@ -121,6 +121,18 @@ describe('desktop browser security primitives', () => {
     if (process.platform !== 'win32') expect((await stat(join(stateRoot, 'profiles.json'))).mode & 0o077).toBe(0)
   })
 
+  it('persists only the newest twelve tabs', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hermes-browser-tab-limit-'))
+    roots.push(root)
+    const store = new BrowserProfileStore(root)
+    await store.initialize()
+    const urls = Array.from({ length: 15 }, (_, index) => `https://example.com/${index}`)
+    await store.setTabs(store.active().id, urls)
+    const restarted = new BrowserProfileStore(root)
+    await restarted.initialize()
+    expect(restarted.active().tabs).toEqual(urls.slice(3))
+  })
+
   it('persists an empty tab list after the final browser tab is closed', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-browser-empty-tabs-'))
     roots.push(root)

@@ -1,13 +1,15 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NButton, NSpin, useMessage } from 'naive-ui'
+import { NButton, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { fetchPerformanceRuntime, type PerformanceRuntimeSnapshot } from '@/api/studio/performance-monitor'
 
 const { t } = useI18n()
 const message = useMessage()
 const snapshot = ref<PerformanceRuntimeSnapshot | null>(null)
-const loading = ref(false)
+const loading = ref(true)
 const autoRefresh = ref(true)
 let timer: ReturnType<typeof setInterval> | undefined
 
@@ -84,7 +86,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="performance-view">
+  <PageLoading :show="loading && !snapshot" class="performance-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('performance.title') }}</h2>
       <div class="header-actions">
@@ -94,8 +97,9 @@ onBeforeUnmount(() => {
         <NButton size="small" :loading="loading" @click="loadRuntime()">{{ t('performance.refresh') }}</NButton>
       </div>
     </header>
+    </PageHeader>
 
-    <NSpin :show="loading && !snapshot" class="performance-spin">
+    <div class="performance-spin">
       <main v-if="snapshot" class="performance-content">
         <section class="summary-grid">
           <div class="summary-item">
@@ -202,8 +206,8 @@ onBeforeUnmount(() => {
           </div>
         </section>
       </main>
-    </NSpin>
-  </div>
+    </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">

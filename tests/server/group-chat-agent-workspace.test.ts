@@ -188,6 +188,7 @@ describe('group chat agent workspace bridge runs', () => {
   it.each([
     ['codex', 'codex'],
     ['claude', 'claude-code'],
+    ['cursor', 'cursor'],
     ['dsh', 'dsh'],
     ['ekko', 'ekko-agent'],
   ] as const)('keeps %s tool output mention text non-routable', async (agent, codingAgentId) => {
@@ -743,6 +744,7 @@ describe('group chat agent workspace bridge runs', () => {
   it.each([
     ['ekko', 'ekko-agent'],
     ['claude', 'claude-code'],
+    ['cursor', 'cursor'],
     ['dsh', 'dsh'],
     ['pi', 'pi'],
   ] as const)('passes the dynamic group system prompt to the %s runtime', async (agent, codingAgentId) => {

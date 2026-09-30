@@ -7,3 +7,6 @@ jevRoutes.put('/api/studio/jev/settings', ctrl.saveSettings)
 jevRoutes.delete('/api/studio/jev/settings', ctrl.deleteSettings)
 jevRoutes.post('/api/studio/jev/test', ctrl.testConnection)
 jevRoutes.post('/api/studio/jev/evaluate', ctrl.evaluate)
+
+jevRoutes.post('/api/studio/jev/browser/match', ctrl.matchBrowser)
+jevRoutes.post('/api/studio/jev/browser/verify', ctrl.verifyBrowser)

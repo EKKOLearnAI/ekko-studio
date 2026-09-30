@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import PageSidebar from "@/components/layout/PageSidebar.vue"
+import { usePageSidebarState } from "@/composables/usePageSidebar"
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
+import { AGENT_OPTIONS } from "@/utils/agent-options"
 import { setSessionPinned } from "@/api/studio/sessions";
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue";
 import {
@@ -23,6 +29,7 @@ import { useFilesStore } from "@/stores/hermes/files";
 import { useToolPanelStore } from "@/stores/hermes/tool-panel";
 import { useSessionBrowserPrefsStore } from "@/stores/hermes/session-browser-prefs";
 import {
+  NSpin,
   NButton,
   NDrawer,
   NDrawerContent,
@@ -35,7 +42,6 @@ import {
   NPopconfirm,
   NRadioButton,
   NRadioGroup,
-  NSpin,
   useMessage,
   type DropdownOption,
 } from "naive-ui";
@@ -44,11 +50,13 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { copyToClipboard } from "@/utils/clipboard";
 import FolderPicker from "./FolderPicker.vue";
+import StarIcon from "@/components/common/StarIcon.vue";
 import ChatInput from "./ChatInput.vue";
 import RealtimeVoiceStage from "./RealtimeVoiceStage.vue";
 import ConversationMonitorPane from "./ConversationMonitorPane.vue";
 import MessageList from "./MessageList.vue";
 import SessionListItem from "./SessionListItem.vue";
+import ListActionsMenu from "@/components/layout/ListActionsMenu.vue";
 import OutlinePanel from "./OutlinePanel.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import SubagentStreamPanel from "./SubagentStreamPanel.vue";
@@ -57,6 +65,7 @@ import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./se
 import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } from "./session-category-menu";
 import { buildActiveSessionMenuOptions, buildSessionContextMenuOptions } from "./session-menu-options";
 import PageSidebarNav from "@/components/layout/PageSidebarNav.vue";
+import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
 import { isStoredSuperAdmin } from "@/api/client";
 import { useDefaultWorkspace } from "@/composables/useDefaultWorkspace";
 import { useCollapsedProviderGroups } from "@/composables/useCollapsedProviderGroups";
@@ -153,26 +162,12 @@ const selectedSessionKeys = ref<Set<string>>(new Set());
 const showBatchDeleteConfirm = ref(false);
 const isBatchDeleting = ref(false);
 
-// Initialize synchronously from the media query so first paint is correct.
-// On narrow viewports the session list is an absolute-positioned overlay
-// (z-index 10) on top of the chat area; if we default to `true`, onMounted
-// only flips it to `false` AFTER the first render, causing a visible flash
-// where the session list covers the chat content ("auto-fixes after a
-// moment" — that was the race).
-const showSessions = ref(
-  !props.standalone && (
-    typeof window === "undefined" ||
-    !window.matchMedia("(max-width: 768px)").matches
-  )
+const { expanded: showSessions, isMobile } = usePageSidebarState(!props.standalone)
+
+const hasPageSidebar = computed(
+  () => !props.standalone && currentMode.value === "chat" && props.contentMode === "chat",
 );
-const pageSidebarExpanded = computed(
-  () => !props.standalone && currentMode.value === "chat" && showSessions.value,
-);
-let mobileQuery: MediaQueryList | null = null;
-const isMobile = ref(
-  typeof window !== "undefined" &&
-  window.matchMedia("(max-width: 768px)").matches,
-);
+const pageSidebarExpanded = computed(() => hasPageSidebar.value && showSessions.value);
 const toolPanelStyle = computed(() => ({
   width: isMobile.value ? "100%" : `min(${toolPanelWidth.value}px, 100%)`,
 }));
@@ -365,6 +360,7 @@ async function handleSessionClick(
     setCategoryRevealSuppressedSessionId(null);
   }
   chatStore.clearSessionCompletedUnread(sessionId);
+  if (isMobile.value) showSessions.value = false;
   await router.push({
     name: chatStore.runtimeMode === "global_agent" ? "hermes.globalAgentSession" : "hermes.session",
     params: { sessionId },
@@ -372,7 +368,6 @@ async function handleSessionClick(
   if (chatStore.activeSessionId !== sessionId) {
     await chatStore.switchSession(sessionId);
   }
-  if (mobileQuery?.matches) showSessions.value = false;
 }
 
 async function handleRecentSessionClick(sessionId: string) {
@@ -381,16 +376,6 @@ async function handleRecentSessionClick(sessionId: string) {
   await handleSessionClick(sessionId, { preserveCategoryCollapse: true });
 }
 
-function handleMobileChange(e: MediaQueryListEvent | MediaQueryList) {
-  isMobile.value = e.matches;
-  if (e.matches && showSessions.value) {
-    showSessions.value = false;
-  }
-}
-
-function openPageSidebar() {
-  showSessions.value = true;
-}
 
 watch(
   pageSidebarExpanded,
@@ -502,10 +487,9 @@ function handleOpenDesktopBrowserPanelRequest() {
 }
 
 onMounted(() => {
-  mobileQuery = window.matchMedia("(max-width: 768px)");
-  handleMobileChange(mobileQuery);
-  mobileQuery.addEventListener("change", handleMobileChange);
-  window.addEventListener("hermes:open-page-sidebar", openPageSidebar);
+
+
+
   window.addEventListener("hermes:preview-workspace-file", handleWorkspaceFilePreviewRequest);
   window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.addEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
@@ -556,8 +540,7 @@ watch(
 );
 
 onUnmounted(() => {
-  mobileQuery?.removeEventListener("change", handleMobileChange);
-  window.removeEventListener("hermes:open-page-sidebar", openPageSidebar);
+
   window.removeEventListener("hermes:preview-workspace-file", handleWorkspaceFilePreviewRequest);
   window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.removeEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
@@ -610,6 +593,7 @@ const sessionProfileFilter = computed(() => chatStore.sessionProfileFilter);
 const sessionCategories = ref<SessionCategory[]>([]);
 const sessionCategoriesLoading = ref(false);
 const sessionCategoriesLoaded = ref(false);
+usePageLoadingTask(() => !props.standalone && props.contentMode === 'chat' && !sessionCategoriesLoaded.value);
 const sessionCategoriesLoadFailed = ref(false);
 const showCreateCategoryModal = ref(false);
 const createCategoryValue = ref("");
@@ -673,16 +657,8 @@ function toggleCategoryGroup(key: string) {
   collapsedCategories.value = next;
   persistCollapsedCategories();
 }
-const profileFilterOptions = computed(() => [
-  { label: t("chat.allProfiles"), value: "__all__" },
-  ...profilesStore.profiles.map((profile) => ({
-    label: profile.name,
-    value: profile.name,
-  })),
-]);
-
-async function handleProfileFilterChange(value: string) {
-  chatStore.setSessionProfileFilter(value === "__all__" ? null : value);
+async function handleProfileFilterChange(value: string | null) {
+  chatStore.setSessionProfileFilter(value);
   await chatStore.loadSessions(chatStore.sessionProfileFilter);
 }
 
@@ -999,16 +975,7 @@ const hiddenDefaultWorkspaces = computed(() => {
   return defaultWorkspaces.value.filter(ws => !visible.has(ws));
 });
 
-const newChatAgentOptions = computed(() => [
-  { label: "Hermes", value: "hermes" },
-  { label: "Ekko", value: "ekko-agent" },
-  { label: "Claude", value: "claude-code" },
-  { label: "Codex", value: "codex" },
-  { label: "Pi", value: "pi" },
-  { label: "Grok", value: "grok" },
-  { label: "OpenCode", value: "opencode" },
-  { label: "DeepSeek Harness", value: "dsh" },
-]);
+const newChatAgentOptions = computed(() => AGENT_OPTIONS.map(option => ({ ...option })));
 
 const newChatApiModeOptions = computed(() => [
   { label: t("codingAgents.protocolOpenAiChat"), value: "chat_completions" },
@@ -1025,7 +992,9 @@ function effectiveNewChatMode(
   agent: typeof newChatAgent.value,
   requestedMode: typeof newChatAgentMode.value,
 ) {
-  return agent === "ekko-agent" ? "scoped" : requestedMode;
+  if (agent === "ekko-agent") return "scoped";
+  if (agent === "cursor") return "global";
+  return requestedMode;
 }
 
 function getModelGroupsForProfile(profile: string) {
@@ -1124,7 +1093,7 @@ const selectedNewChatProviderGroup = computed(() =>
 );
 
 const isNewChatCodingAgent = computed(() => newChatAgent.value !== "hermes");
-const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
+const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || newChatAgent.value === "cursor" || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
 const effectiveNewChatAgentMode = computed(() =>
   effectiveNewChatMode(newChatAgent.value, newChatAgentMode.value),
 );
@@ -1370,6 +1339,8 @@ async function confirmNewChat() {
         ? "grok"
       : newChatAgent.value === "dsh" ? "dsh" : newChatAgent.value === "opencode"
         ? "opencode"
+      : newChatAgent.value === "cursor"
+        ? "cursor"
       : newChatAgent.value === "ekko-agent"
         ? "ekko-agent"
       : "hermes";
@@ -1399,7 +1370,7 @@ async function confirmNewChat() {
     params: { sessionId: session.id },
   });
   showNewChatModal.value = false;
-  if (mobileQuery?.matches) showSessions.value = false;
+  if (isMobile.value) showSessions.value = false;
 }
 
 function sessionProfile(sessionId: string): string | null {
@@ -1845,10 +1816,6 @@ const contextMenuCategoriesKey = computed(() => [
   ...sessionCategories.value.map(category => `${category.id}:${category.name}`),
 ].join("|"));
 
-function openSettingsPage() {
-  router.push({ name: "hermes.settings" });
-}
-
 function handleContextMenu(e: MouseEvent, sessionId: string) {
   e.preventDefault();
   showCategoryContextMenu.value = false;
@@ -2132,6 +2099,8 @@ const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>
         ? "grok"
       : sessionModelSession.value?.agent === "dsh" ? "dsh" : sessionModelSession.value?.agent === "opencode"
         ? "opencode"
+      : sessionModelSession.value?.agent === "cursor"
+        ? "cursor"
       : sessionModelSession.value?.agent === "ekko-agent"
         ? "ekko-agent"
         : undefined),
@@ -2345,67 +2314,45 @@ async function handleSessionModelCustomSubmit() {
 
 <template>
   <div class="chat-panel" :class="{ 'chat-panel--standalone': standalone }">
-    <div
-      v-if="currentMode === 'chat' && !standalone"
-      class="session-backdrop"
-      :class="{ active: showSessions }"
-      @click="showSessions = false"
-    />
+    <PageSidebar>
     <aside
-      v-if="currentMode === 'chat' && !standalone"
+      v-if="hasPageSidebar"
       class="session-list"
-      :class="{ collapsed: !showSessions }"
+      :class="{ collapsed: !showSessions, 'session-list--navigation': contentMode !== 'chat' }"
     >
       <div v-if="showSessions" class="page-sidebar-top">
         <PageSidebarNav
           :active="contentMode === 'connections' ? 'connections' : contentMode === 'agents' ? 'agents' : contentMode === 'models' ? 'models' : chatStore.runtimeMode === 'global_agent' ? 'global' : 'chat'"
           :primary-label="t('chat.newChat')"
           @primary="openNewChatModal"
-        />
-        <div class="session-list-toolbar">
-          <NSelect
-            class="session-profile-filter"
-            :value="sessionProfileFilter || '__all__'"
-            :options="profileFilterOptions"
-            size="small"
-            :loading="profilesStore.loading"
-            @update:value="handleProfileFilterChange"
-          />
-          <div class="session-list-actions">
-            <button class="session-close-btn" @click="showSessions = false">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
+        >
+          <template #actions>
+            <ListActionsMenu
+              v-if="contentMode === 'chat'"
+              :label="t('chat.sessionListActions')"
+              :profiles="profilesStore.profiles"
+              :profile="sessionProfileFilter"
+              :loading="profilesStore.loading"
+              :batch-mode="isBatchMode"
+              @filter="handleProfileFilterChange"
+              @batch="toggleBatchMode"
+            />
+            <button
+              v-if="isMobile"
+              class="session-close-btn"
+              type="button"
+              :aria-label="t('common.close')"
+              @click="showSessions = false"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="m18 6-12 12M6 6l12 12" />
               </svg>
             </button>
-            <NButton
-              v-if="!isBatchMode"
-              quaternary
-              size="tiny"
-              @click="toggleBatchMode"
-              :title="t('chat.toggleBatchMode')"
-            >
-              <template #icon>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path d="M9 11l3 3L22 4" />
-                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                </svg>
-              </template>
-            </NButton>
+          </template>
+        </PageSidebarNav>
+        <div v-if="contentMode === 'chat' && isBatchMode" class="session-list-toolbar">
+          <span class="session-selection-count" role="status">{{ t('chat.selectedSessions', { count: selectedCount }) }}</span>
+          <div class="session-list-actions">
             <NButton
               v-if="isBatchMode"
               quaternary
@@ -2413,6 +2360,7 @@ async function handleSessionModelCustomSubmit() {
               @click="selectAllSessions"
               :disabled="!canSelectAll || isBatchDeleting"
               :title="t('chat.selectAll')"
+              :aria-label="t('chat.selectAll')"
             >
               <template #icon>
                 <svg
@@ -2436,7 +2384,7 @@ async function handleSessionModelCustomSubmit() {
               @positive-click="handleBatchDeleteConfirm"
             >
               <template #trigger>
-                <NButton quaternary size="tiny" type="error" :loading="isBatchDeleting" :disabled="isBatchDeleting">
+                <NButton quaternary size="tiny" :title="t('common.delete')" :aria-label="t('common.delete')" :loading="isBatchDeleting" :disabled="isBatchDeleting">
                   <template #icon>
                     <svg
                       width="14"
@@ -2460,30 +2408,24 @@ async function handleSessionModelCustomSubmit() {
               size="tiny"
               @click="toggleBatchMode"
               :disabled="isBatchDeleting"
+              :title="t('common.cancel')"
+              :aria-label="t('common.cancel')"
             >
               <template #icon>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="m18 6-12 12M6 6l12 12" />
                 </svg>
               </template>
             </NButton>
           </div>
         </div>
       </div>
-      <div v-if="showSessions" class="session-items">
+      <div v-if="contentMode === 'chat' && showSessions" class="session-items">
         <div
           v-if="chatStore.isLoadingSessions && chatStore.sessions.length === 0"
           class="session-loading"
         >
-          {{ t("common.loading") }}
+          <NSpin size="small" :description="t('common.loading')" />
         </div>
         <div v-else-if="chatStore.sessions.length === 0" class="session-empty">
           {{ t("chat.noSessions") }}
@@ -2658,25 +2600,9 @@ async function handleSessionModelCustomSubmit() {
           </template>
         </template>
       </div>
-      <div v-if="showSessions" class="page-sidebar-bottom">
-        <button class="page-sidebar-menu-btn" type="button" @click="openSettingsPage">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-          <span>{{ t("sidebar.settings") }}</span>
-        </button>
-      </div>
+      <PageSidebarFooter v-if="showSessions" />
     </aside>
+    </PageSidebar>
 
     <NDropdown
       :key="contextMenuCategoriesKey"
@@ -2995,7 +2921,7 @@ async function handleSessionModelCustomSubmit() {
             v-if="showNewChatModal && newChatAgent === 'dsh'"
             v-model="newChatAgentPreset" :disabled="newChatLoading" @valid="newChatPresetReady = $event"
           />
-          <label v-if="isNewChatExternalCodingAgent" class="new-chat-field">
+          <label v-if="isNewChatExternalCodingAgent && newChatAgent !== 'cursor'" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.launchModeScope") }}</span>
             <NRadioGroup v-model:value="newChatAgentMode" name="new-chat-coding-agent-mode">
               <NRadioButton
@@ -3115,8 +3041,16 @@ async function handleSessionModelCustomSubmit() {
                   <span v-if="index < visibleDefaultWorkspaces.length - 1 || hasHiddenDefaults" class="workspace-chip-separator">/</span>
                 </template>
                 <div v-if="hasHiddenDefaults" class="workspace-chip-dropdown">
-                  <button class="workspace-chip-more" @click="showDefaultWorkspaceMenu = !showDefaultWorkspaceMenu">
-                    {{ t("chat.more") }} ▼
+                  <button
+                    class="workspace-chip-more"
+                    type="button"
+                    :aria-expanded="showDefaultWorkspaceMenu"
+                    @click="showDefaultWorkspaceMenu = !showDefaultWorkspaceMenu"
+                  >
+                    <span>{{ t("chat.more") }}</span>
+                    <svg class="workspace-more-chevron" :class="{ expanded: showDefaultWorkspaceMenu }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
                   </button>
                   <div v-if="showDefaultWorkspaceMenu" class="workspace-dropdown-menu">
                     <div
@@ -3152,17 +3086,13 @@ async function handleSessionModelCustomSubmit() {
                 >
                   <template #icon>
                     <span
-                      v-if="defaultWorkspaces.includes(ws.path)"
                       class="recent-pin-icon"
+                      :class="{ 'is-pinned': defaultWorkspaces.includes(ws.path) }"
                       @click.stop="handleTogglePinRecent(ws.path)"
-                      :title="t('chat.workspaceUnpin')"
-                    >★</span>
-                    <span
-                      v-else
-                      class="recent-pin-icon"
-                      @click.stop="handleTogglePinRecent(ws.path)"
-                      :title="t('chat.workspacePin')"
-                    >☆</span>
+                      :title="defaultWorkspaces.includes(ws.path) ? t('chat.workspaceUnpin') : t('chat.workspacePin')"
+                    >
+                      <StarIcon :filled="defaultWorkspaces.includes(ws.path)" width="14" height="14" />
+                    </span>
                   </template>
                   {{ getFolderName(ws.path) }}
                 </NButton>
@@ -3187,70 +3117,46 @@ async function handleSessionModelCustomSubmit() {
 
     <div
       class="chat-main"
-      :class="{ 'chat-main--sidebar-collapsed': currentMode !== 'chat' || !showSessions }"
+      :class="{ 'chat-main--sidebar-collapsed': !pageSidebarExpanded }"
     >
       <ConnectionsPanel
         v-if="contentMode === 'connections'"
-        :sidebar-collapsed="!showSessions"
-        @toggle-sidebar="showSessions = !showSessions"
       />
       <AgentManagerPanel
         v-else-if="contentMode === 'agents'"
-        :sidebar-collapsed="!showSessions"
-        @toggle-sidebar="showSessions = !showSessions"
       />
       <ModelsPanel
         v-else-if="contentMode === 'models'"
-        :sidebar-collapsed="!showSessions"
-        @toggle-sidebar="showSessions = !showSessions"
       />
       <template v-else>
+      <PageHeader>
       <header v-if="!standalone" class="chat-header">
         <div class="header-left">
-          <NButton
+          <HeaderSidebarToggle
             v-if="currentMode === 'chat'"
             class="header-sidebar-toggle"
+            :expanded="showSessions"
+            @toggle="showSessions = !showSessions"
+          />
+          <span class="header-session-title" dir="auto">{{ headerTitle }}</span>
+        </div>
+        <div class="header-actions">
+          <NButton
+            v-if="chatStore.activeSession?.workspace"
+            class="header-workspace-button"
             quaternary
             size="small"
-            @click="showSessions = !showSessions"
             circle
+            :title="chatStore.activeSession.workspace"
+            :aria-label="t('chat.setWorkspace')"
+            @click="openActiveSessionWorkspace"
           >
             <template #icon>
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
               </svg>
             </template>
           </NButton>
-          <span class="header-session-title" dir="auto">{{ headerTitle }}</span>
-          <button
-            v-if="chatStore.activeSession?.workspace"
-            class="workspace-badge"
-            type="button"
-            :title="chatStore.activeSession.workspace"
-            @click="openActiveSessionWorkspace"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-            </svg>
-            <span>
-              {{
-                chatStore.activeSession.workspace.split("/").pop() ||
-                chatStore.activeSession.workspace
-              }}
-            </span>
-          </button>
-        </div>
-        <div class="header-actions">
           <!-- chat/live mode toggle hidden -->
           <template v-if="currentMode === 'chat'">
             <NTooltip v-if="isSuperAdmin" trigger="hover">
@@ -3314,17 +3220,10 @@ async function handleSessionModelCustomSubmit() {
                     circle
                   >
                     <template #icon>
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.4"
-                        stroke-linecap="round"
-                        aria-hidden="true"
-                      >
-                        <path d="M5 12h.01M12 12h.01M19 12h.01" />
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <circle cx="5" cy="12" r="1.6" />
+                        <circle cx="12" cy="12" r="1.6" />
+                        <circle cx="19" cy="12" r="1.6" />
                       </svg>
                     </template>
                   </NButton>
@@ -3335,6 +3234,7 @@ async function handleSessionModelCustomSubmit() {
           </template>
         </div>
       </header>
+      </PageHeader>
 
       <template v-if="currentMode === 'chat'">
         <div
@@ -3716,11 +3616,9 @@ async function handleSessionModelCustomSubmit() {
   width: $sidebar-width;
   min-height: 0;
   align-self: stretch;
-  margin: 10px;
+  margin: 0;
   background: $bg-sidebar-surface;
-  border: 1px solid $border-color;
-  border-radius: 14px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  border-inline-end: 1px solid $border-color;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -3728,6 +3626,11 @@ async function handleSessionModelCustomSubmit() {
     width $transition-normal,
     opacity $transition-normal;
   overflow: hidden;
+
+  &--navigation .page-sidebar-top {
+    flex: 1;
+    overflow-y: auto;
+  }
 
   &.collapsed {
     width: 0;
@@ -3741,26 +3644,22 @@ async function handleSessionModelCustomSubmit() {
 
   @media (max-width: $breakpoint-mobile) {
     position: absolute;
-    left: 10px;
-    top: 10px;
-    bottom: 10px;
+    left: 0;
+    top: 0;
+    bottom: 0;
     height: auto;
     margin: 0;
     z-index: 120;
     width: $sidebar-width;
 
     &.collapsed {
-      transform: translateX(calc(-100% - 10px));
+      transform: translateX(-100%);
       opacity: 0;
     }
   }
 }
 
 @media (max-width: $breakpoint-mobile) {
-  .session-close-btn {
-    display: flex;
-  }
-
   .session-backdrop {
     position: absolute;
     inset: 0;
@@ -3780,7 +3679,6 @@ async function handleSessionModelCustomSubmit() {
 .page-sidebar-top {
   flex-shrink: 0;
   padding: 12px;
-  border-bottom: 1px solid $border-color;
 }
 
 .page-sidebar-tabs {
@@ -3831,7 +3729,14 @@ async function handleSessionModelCustomSubmit() {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 8px;
+  justify-content: space-between;
+}
+
+.session-selection-count {
+  min-width: 0;
+  font-size: 12px;
+  color: $text-secondary;
 }
 
 .session-list-actions {
@@ -3850,7 +3755,7 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .session-close-btn {
-  display: none;
+  display: inline-flex;
   border: none;
   background: none;
   cursor: pointer;
@@ -3874,11 +3779,6 @@ async function handleSessionModelCustomSubmit() {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   line-height: 22px;
-}
-
-.session-profile-filter {
-  min-width: 0;
-  flex: 1;
 }
 
 .conversation-switch {
@@ -4104,49 +4004,7 @@ async function handleSessionModelCustomSubmit() {
 .session-items {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 6px 12px;
-}
-
-.page-sidebar-bottom {
-  flex-shrink: 0;
-  padding: 10px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.page-sidebar-menu-btn {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
-  height: 36px;
-  border: none;
-  border-radius: $radius-sm;
-  background: transparent;
-  color: $text-secondary;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
-  cursor: pointer;
-  transition:
-    background-color $transition-fast,
-    color $transition-fast;
-
-  &:hover {
-    background: rgba(var(--accent-primary-rgb), 0.06);
-    color: $text-primary;
-  }
-}
-
-.page-sidebar-menu-btn span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  line-height: 18px;
+  padding: 0 6px 12px;
 }
 
 .session-loading,
@@ -4288,41 +4146,9 @@ async function handleSessionModelCustomSubmit() {
   }
 
   .header-session-title {
-    display: none;
+    font-size: 14px;
   }
 
-}
-
-.workspace-badge {
-  border: 0;
-  font-size: 11px;
-  line-height: 16px;
-  color: $text-muted;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 2px 8px;
-  border-radius: 4px;
-  max-width: 160px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  overflow: hidden;
-  cursor: pointer;
-
-  svg {
-    flex: 0 0 auto;
-  }
-
-  span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &:hover {
-    color: $text-secondary;
-    background: rgba(var(--accent-primary-rgb), 0.06);
-  }
 }
 
 .header-tool-toggle.active {
@@ -4569,7 +4395,9 @@ async function handleSessionModelCustomSubmit() {
 .default-workspace-chips {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-width: 0;
   margin-bottom: 8px;
 }
 
@@ -4581,6 +4409,8 @@ async function handleSessionModelCustomSubmit() {
 
 .workspace-chips-container {
   display: flex;
+  flex: 1 1 240px;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
@@ -4588,6 +4418,7 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .workspace-chip {
+  min-width: 0;
   padding: 4px 12px;
   font-size: 13px;
   color: var(--text-secondary);
@@ -4616,6 +4447,7 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .workspace-chip-separator {
+  flex-shrink: 0;
   color: var(--n-text-color-3);
   font-size: 13px;
   user-select: none;
@@ -4623,12 +4455,16 @@ async function handleSessionModelCustomSubmit() {
 
 .workspace-chip-dropdown {
   position: relative;
-  display: inline-block;
+  display: flex;
+  flex-shrink: 0;
 }
 
 .workspace-chip-more {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  line-height: inherit;
   padding: 4px 12px;
   font-size: 13px;
   background: var(--bg-card);
@@ -4645,12 +4481,21 @@ async function handleSessionModelCustomSubmit() {
   color: var(--text-primary);
 }
 
+.workspace-more-chevron {
+  flex-shrink: 0;
+
+  &.expanded {
+    transform: rotate(180deg);
+  }
+}
+
 .workspace-dropdown-menu {
   position: absolute;
   top: 100%;
-  left: 0;
+  inset-inline-end: 0;
   margin-top: 4px;
-  min-width: 200px;
+  width: 240px;
+  max-width: calc(100vw - 48px);
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -4706,14 +4551,18 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .recent-pin-icon {
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
   cursor: pointer;
-  color: $text-muted;
-  transition: color $transition-fast;
+  color: inherit;
+  opacity: 0.6;
+  transition: opacity $transition-fast;
 
-  &:hover {
-    color: #f5a623;
+  &:hover,
+  &.is-pinned {
+    opacity: 1;
   }
 }
 </style>

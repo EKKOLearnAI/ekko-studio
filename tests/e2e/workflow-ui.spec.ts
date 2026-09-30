@@ -512,6 +512,7 @@ test('workflow nodes connect from every side and create an automatic self loop',
   await page.goto('/#/hermes/workflow')
 
   const node = page.locator('.vue-flow__node[data-id="review"]')
+  await expect(page.locator('.workflow-view')).toHaveAttribute('aria-busy', 'false')
   const handles = node.locator('.workflow-handle')
   await expect(handles).toHaveCount(4)
   for (const handleId of ['input', 'top', 'output', 'bottom']) {
@@ -736,6 +737,7 @@ test('opposite-side self loops use measured node bounds in the rendered SVG', as
   await page.goto('/#/hermes/workflow')
 
   for (const nodeId of ['horizontal', 'vertical']) {
+    await expect(page.locator('.workflow-view')).toHaveAttribute('aria-busy', 'false')
     const result = await page.locator(`.vue-flow__edge[data-id="${nodeId}-${nodeId}"] .vue-flow__edge-path`)
       .evaluate((path: SVGPathElement, currentNodeId) => {
         const matrix = path.getScreenCTM()!
@@ -796,6 +798,7 @@ test('workflow loop validation blocks invalid editor and workflow saves before A
   expect(api.requests.filter(request => request.method === 'PATCH' && request.pathname === '/api/studio/workflows/wf-invalid-loops')).toHaveLength(patchCount)
 
   const feedbackEdge = page.locator('.vue-flow__edge[data-id="b-a"]')
+  await expect(page.locator('.workflow-view')).toHaveAttribute('aria-busy', 'false')
   await feedbackEdge.dblclick({ force: true })
   const edgeDialog = page.locator('.workflow-edge-editor-form').first()
   await expect(edgeDialog).toBeVisible()
@@ -1235,7 +1238,7 @@ test('workflow import reports an unsupported version without confirming or creat
   expect(api.unexpectedRequests).toEqual([])
 })
 
-test('workflow title is hidden on mobile', async ({ page }) => {
+test('workflow workspace stays available as a right-side icon when the title is hidden on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await mockHermesApi(page, { workflows: [{
@@ -1245,9 +1248,13 @@ test('workflow title is hidden on mobile', async ({ page }) => {
   await page.goto('/#/hermes/workflow')
   await expect(page.locator('.header-workflow-title')).toHaveText('Mobile workflow title')
   await expect(page.locator('.header-workflow-title')).toBeHidden()
-  const workspaceBadge = page.locator('.workspace-badge')
-  await expect(workspaceBadge).toHaveCSS('flex-grow', '1')
-  await expect(workspaceBadge).toHaveCSS('max-width', 'none')
+  const workspaceButton = page.locator('.header-actions .header-workspace-button')
+  await expect(workspaceButton).toBeInViewport()
+  await expect(workspaceButton).toHaveText('')
+  await expect(workspaceButton).toHaveAttribute('title', '/tmp/mobile-workspace')
+  await expect(page.locator('.workspace-badge')).toHaveCount(0)
+  await workspaceButton.click()
+  await expect(page.getByRole('dialog')).toBeVisible()
 })
 
 test('workflow schedules can be created, edited, disabled, and deleted from the Workflow page', async ({ page }) => {

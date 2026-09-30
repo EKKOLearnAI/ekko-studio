@@ -193,23 +193,24 @@ describe('App web pet mounting', () => {
     expect(wrapper.findComponent({ name: 'DesktopTitleBar' }).exists()).toBe(false)
   })
 
-  it('mounts the standalone Windows control bar above main content', async () => {
+  it.each(['win32', 'linux'])('mounts the %s control bar above main content', async (platform) => {
     Object.defineProperty(window, 'hermesDesktop', {
       configurable: true,
-      value: { isDesktop: true, platform: 'win32' },
+      value: { isDesktop: true, platform },
     })
 
     const wrapper = mountApp()
     await flushPromises()
 
-    expect(wrapper.find('.app-shell').classes()).toContain('desktop-platform-win32')
+    expect(wrapper.find('.app-shell').classes()).toContain(`desktop-platform-${platform}`)
     expect(wrapper.findComponent({ name: 'DesktopTitleBar' }).exists()).toBe(true)
+    wrapper.unmount()
   })
 
-  it('expands the Windows control bar when a page-owned sidebar is collapsed', async () => {
+  it.each(['win32', 'linux'])('expands the %s control bar when a page-owned sidebar is collapsed', async (platform) => {
     Object.defineProperty(window, 'hermesDesktop', {
       configurable: true,
-      value: { isDesktop: true, platform: 'win32' },
+      value: { isDesktop: true, platform },
     })
     appStoreMock.pageSidebarExpanded = false
 
@@ -217,15 +218,16 @@ describe('App web pet mounting', () => {
     await flushPromises()
 
     expect(wrapper.findComponent({ name: 'DesktopTitleBar' }).props('leftOffset')).toBe(10)
+    wrapper.unmount()
   })
 
-  it('marks Windows desktop shell as maximized when the native window state changes', async () => {
+  it.each(['win32', 'linux'])('marks the %s shell as maximized when native window state changes', async (platform) => {
     let listener: ((state: { isMaximized: boolean }) => void) | undefined
     Object.defineProperty(window, 'hermesDesktop', {
       configurable: true,
       value: {
         isDesktop: true,
-        platform: 'win32',
+        platform,
         getWindowState: vi.fn().mockResolvedValue({ isMaximized: false }),
         onWindowStateChange: vi.fn((callback) => {
           listener = callback
@@ -242,6 +244,7 @@ describe('App web pet mounting', () => {
     await flushPromises()
 
     expect(wrapper.find('.app-shell').classes()).toContain('desktop-window-maximized')
+    wrapper.unmount()
   })
 
   it('does not duplicate the web pet on the dedicated desktop pet route', () => {

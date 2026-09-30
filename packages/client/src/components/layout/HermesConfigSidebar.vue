@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import PageSidebar from "./PageSidebar.vue"
+import { usePageSidebarState } from "@/composables/usePageSidebar"
+import { computed, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
 import PluginIcon from "@/components/common/PluginIcon.vue";
@@ -9,12 +11,8 @@ import { useAppStore } from "@/stores/hermes/app";
 const { t } = useI18n();
 const route = useRoute();
 const appStore = useAppStore();
-const isMobile = ref(
-  typeof window !== "undefined" &&
-    window.matchMedia("(max-width: 768px)").matches,
-);
-const expanded = ref(!isMobile.value);
-let mobileQuery: MediaQueryList | null = null;
+const { expanded, isMobile } = usePageSidebarState()
+watch(expanded, value => appStore.setPageSidebarExpanded(value), { immediate: true })
 
 const activeRoute = computed(() => route.name as string);
 
@@ -23,43 +21,19 @@ function setExpanded(value: boolean) {
   appStore.setPageSidebarExpanded(value);
 }
 
-function handleMobileChange(event: MediaQueryList | MediaQueryListEvent) {
-  isMobile.value = event.matches;
-  setExpanded(!event.matches);
-}
-
-function openSidebar() {
-  setExpanded(true);
-}
-
 function handleNavClick(event: MouseEvent) {
   if (!isMobile.value) return;
   const target = event.target instanceof Element ? event.target : null;
   if (target?.closest(".route-link-item")) setExpanded(false);
 }
 
-onMounted(() => {
-  mobileQuery = window.matchMedia("(max-width: 768px)");
-  handleMobileChange(mobileQuery);
-  mobileQuery.addEventListener("change", handleMobileChange);
-  window.addEventListener("hermes:open-page-sidebar", openSidebar);
-});
-
-onUnmounted(() => {
-  mobileQuery?.removeEventListener("change", handleMobileChange);
-  window.removeEventListener("hermes:open-page-sidebar", openSidebar);
-});
 </script>
 
 <template>
-  <div
-    class="hermes-config-backdrop"
-    :class="{ active: isMobile && expanded }"
-    @click="setExpanded(false)"
-  />
+  <PageSidebar>
   <aside
     class="hermes-config-sidebar"
-    :class="{ open: expanded, collapsed: appStore.sidebarCollapsed }"
+    :class="{ open: expanded, collapsed: !isMobile && appStore.sidebarCollapsed }"
   >
     <nav class="hermes-config-nav" @click="handleNavClick">
       <RouteLinkItem
@@ -242,7 +216,7 @@ onUnmounted(() => {
       </RouteLinkItem>
     </nav>
 
-    <footer class="hermes-config-footer">
+    <footer class="hermes-config-footer" @click="handleNavClick">
       <RouteLinkItem
         class="hermes-config-nav-item hermes-config-return"
         :to="{ name: 'hermes.agentManager' }"
@@ -288,6 +262,7 @@ onUnmounted(() => {
       </button>
     </footer>
   </aside>
+  </PageSidebar>
 </template>
 
 <style scoped lang="scss">

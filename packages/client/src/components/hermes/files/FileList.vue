@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton, NSpin, NEmpty, useMessage } from 'naive-ui'
+import { NSpin, NButton, NEmpty, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useFilesStore, isPreviewableFile, isTextFile } from '@/stores/hermes/files'
 import { downloadFile } from '@/api/studio/download'

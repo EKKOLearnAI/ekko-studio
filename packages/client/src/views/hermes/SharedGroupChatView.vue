@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -489,7 +490,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="shared-group-chat-view">
+    <PageLoading :show="joining && !joined" class="shared-group-chat-view">
         <template v-if="joined">
             <GroupChatPanel
                 standalone
@@ -550,7 +551,7 @@ onUnmounted(() => {
             :aria-label="t('groupChat.shareJoining')"
             aria-busy="true"
         >
-            <span class="invite-loading-spinner" aria-hidden="true" />
+
         </main>
 
         <main v-else class="invite-gate">
@@ -660,15 +661,16 @@ onUnmounted(() => {
                 <p class="invite-hint">{{ t('groupChat.shareCodeHint') }}</p>
             </section>
         </main>
-    </div>
+    </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .shared-group-chat-view {
+    flex-direction: column;
     width: 100%;
-    height: calc(100 * var(--vh));
+    height: 100%;
     min-height: 0;
 }
 
@@ -746,18 +748,6 @@ onUnmounted(() => {
     background: $bg-main-surface;
 }
 
-.invite-loading-spinner {
-    width: 24px;
-    height: 24px;
-    box-sizing: border-box;
-    border: 2px solid $border-color;
-    border-top-color: var(--accent-primary);
-    border-radius: 50%;
-    opacity: 0;
-    animation:
-        invite-loading-reveal 0s linear 200ms forwards,
-        invite-loading-spin 0.7s linear infinite;
-}
 
 .invite-gate {
     box-sizing: border-box;
@@ -878,17 +868,7 @@ onUnmounted(() => {
     text-align: center;
 }
 
-@keyframes invite-loading-reveal {
-    to {
-        opacity: 1;
-    }
-}
 
-@keyframes invite-loading-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
 
 @media (max-width: 520px) {
     .invite-gate {

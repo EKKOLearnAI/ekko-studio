@@ -1,13 +1,13 @@
-import { resolve, join } from 'path'
-import { readFileSync, existsSync, statSync } from 'fs'
+import { join } from 'path'
+import { readFileSync, existsSync } from 'fs'
 import yaml from 'js-yaml'
 import { getCompatibleCustomProviders } from '../../../studio/contracts/provider-compat'
 import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
 import { readModelContextRecord } from '../../../studio/public/provider-context'
+import { getModelCatalog as loadModelsDevCache } from '../../../studio/public/model-catalog'
 import { detectHermesHome } from '../runtime/path'
 
 const HERMES_BASE = detectHermesHome()
-const MODELS_DEV_CACHE = resolve(HERMES_BASE, 'models_dev_cache.json')
 const DEFAULT_CONTEXT_LENGTH = 256_000
 
 function fallbackContextLength(options: ModelContextLengthOptions): number {
@@ -68,10 +68,18 @@ const MODEL_CACHE_PROVIDER_ALIASES: Record<string, string[]> = {
   'ai-gateway': ['vercel'],
   'opencode-zen': ['opencode'],
   'opencode-go': ['opencode'],
+  glm: ['zhipuai-coding-plan'],
   'glm-coding-plan': ['zai-coding-plan'],
   'kimi-coding': ['kimi-for-coding'],
   'kimi-coding-cn': ['kimi-for-coding'],
   'xai-oauth': ['xai'],
+}
+
+// Coding Plan catalogs may omit older models. Only their own vendor can supply
+// missing model specifications; this fallback must never be used for pricing.
+const MODEL_METADATA_PROVIDER_FALLBACKS: Record<string, string> = {
+  'zhipuai-coding-plan': 'zhipuai',
+  'zai-coding-plan': 'zai',
 }
 
 // --- Config YAML helpers (js-yaml) ---
@@ -83,32 +91,6 @@ function loadConfig(profileDir: string): any | null {
     return yaml.load(readFileSync(configPath, 'utf-8'), { json: true }) as any
   } catch {
     return null
-  }
-}
-
-// --- In-memory cache: parsed models_dev_cache (1.7MB), invalidated by mtime ---
-
-let _cache: Record<string, ProviderEntry> | null = null
-let _cacheMtime = 0
-const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
-let _cacheLoadedAt = 0
-
-function loadModelsDevCache(): Record<string, ProviderEntry> | null {
-  if (!existsSync(MODELS_DEV_CACHE)) return null
-  try {
-    const stat = statSync(MODELS_DEV_CACHE)
-    const now = Date.now()
-    // Return cached if file hasn't changed and within TTL
-    if (_cache && stat.mtimeMs === _cacheMtime && now - _cacheLoadedAt < CACHE_TTL_MS) {
-      return _cache
-    }
-    const raw = readFileSync(MODELS_DEV_CACHE, 'utf-8')
-    _cache = JSON.parse(raw) as Record<string, ProviderEntry>
-    _cacheMtime = stat.mtimeMs
-    _cacheLoadedAt = now
-    return _cache
-  } catch {
-    return _cache // return stale cache on error
   }
 }
 
@@ -314,9 +296,15 @@ function findModelEntry(models: Record<string, ModelEntry>, modelName: string): 
   return undefined
 }
 
-function lookupContextInProvider(provider: ProviderEntry | null, modelName: string): number | null {
-  const models = provider?.models || {}
-  return getCachedContext(findModelEntry(models, modelName))
+function findProviderModelEntry(data: Record<string, ProviderEntry>, provider: string, modelName: string): ModelEntry | undefined {
+  const own = findModelEntry(getProviderEntry(data, provider)?.models || {}, modelName)
+  if (own) return own
+  for (const candidate of getProviderCandidates(provider)) {
+    const fallback = MODEL_METADATA_PROVIDER_FALLBACKS[candidate]
+    if (!fallback) continue
+    const entry = findModelEntry(getProviderEntry(data, fallback)?.models || {}, modelName)
+    if (entry) return entry
+  }
 }
 
 function lookupContextGloballyByModelName(data: Record<string, ProviderEntry>, modelName: string): number | null {
@@ -389,7 +377,7 @@ function lookupContextFromCache(config: any, modelName: string, provider: string
       const inferredProvider = resolveCustomCacheProvider(config, modelName, provider)
 
       if (inferredProvider) {
-        const scoped = lookupContextInProvider(getProviderEntry(data, inferredProvider), modelName)
+        const scoped = getCachedContext(findProviderModelEntry(data, inferredProvider, modelName))
         if (scoped) return scoped
         return null
       }
@@ -401,7 +389,7 @@ function lookupContextFromCache(config: any, modelName: string, provider: string
       return null
     }
 
-    return lookupContextInProvider(getProviderEntry(data, provider), modelName)
+    return getCachedContext(findProviderModelEntry(data, provider, modelName))
   }
 
   // Legacy configs may omit model.provider; preserve the old global exact/CI lookup semantics.
@@ -416,7 +404,7 @@ function lookupContextFromCache(config: any, modelName: string, provider: string
  *   3. provider-level providers.<provider>.context_length when the model belongs to that provider
  *   4. custom_providers models.<model>.context_length
  *   5. top-level model.context_length fallback
- *   6. models_dev_cache.json, scoped to model.provider when configured
+ *   6. Studio's shared models.dev catalog, scoped to model.provider when configured
  *   7. DEFAULT_CONTEXT_LENGTH
  */
 /**
@@ -473,7 +461,7 @@ export function getModelContextLength(input?: string | ModelContextLengthOptions
   const configCtx = getConfigContextLength(config)
   if (configCtx && configCtx > 0) return configCtx
 
-  // 4. models_dev_cache.json
+  // 4. Shared local models.dev catalog
   const cached = lookupContextFromCache(config, model, provider)
   if (cached) return cached
 
@@ -497,7 +485,7 @@ export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
       const profileDir = getProfileDir(input.profile)
       const config = loadConfig(profileDir)
       const inferredProvider = resolveCustomCacheProvider(config, model, provider)
-      if (inferredProvider) entry = findModelEntry(getProviderEntry(data, inferredProvider)?.models || {}, model)
+      if (inferredProvider) entry = findProviderModelEntry(data, inferredProvider, model)
       else if (provider === 'custom') {
         for (const candidate of Object.values(data)) {
           const found = findModelEntry(candidate.models || {}, model)
@@ -510,7 +498,7 @@ export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
         }
       }
     } else if (provider) {
-      entry = findModelEntry(getProviderEntry(data, provider)?.models || {}, model)
+      entry = findProviderModelEntry(data, provider, model)
     } else {
       for (const candidate of Object.values(data)) {
         entry = findModelEntry(candidate.models || {}, model)

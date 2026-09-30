@@ -498,6 +498,15 @@ def _ensure_agent_imports() -> None:
         )
     os.environ.setdefault("HERMES_HOME", str(_hermes_home()))
     os.environ.setdefault("HERMES_AGENT_BRIDGE_BASE_HOME", str(_hermes_home()))
+    # Updated Hermes installs may re-exec into a new Python interpreter here.
+    # Finish that bootstrap before either bridge binds its socket/reports ready;
+    # deferring it to the first run_agent import drops the in-flight chat socket.
+    try:
+        importlib.import_module("hermes_bootstrap")
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_bootstrap":
+            raise
+        # Older Hermes runtimes do not have a bootstrap module.
     _apply_openrouter_attribution_override()
     from bridge_mcp import install_studio_mcp_env
 
@@ -529,6 +538,16 @@ def _apply_openrouter_attribution_override() -> None:
         pass
 
 
+def _load_yaml_module():
+    """Use Hermes' YAML policy, with PyYAML support for older runtimes."""
+    try:
+        return importlib.import_module("hermes_yaml")
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_yaml":
+            raise
+        return importlib.import_module("yaml")
+
+
 def _load_cfg(profile: str | None = None) -> dict[str, Any]:
     _ensure_agent_imports()
     try:
@@ -538,7 +557,7 @@ def _load_cfg(profile: str | None = None) -> dict[str, Any]:
         return cfg if isinstance(cfg, dict) else {}
     except Exception:
         try:
-            import yaml
+            yaml = _load_yaml_module()
 
             path = _hermes_home() / "config.yaml"
             if not path.exists():
@@ -614,7 +633,9 @@ def _set_worker_profile_env(profile: str | None) -> None:
     profile_home = _profile_home(profile)
     os.environ["HERMES_HOME"] = str(profile_home)
     os.environ["HERMES_AGENT_BRIDGE_WORKER_PROFILE"] = profile or "default"
-    _refresh_worker_profile_env()
+    # Bind the worker's home and credentials before importing any Hermes code.
+    # Terminal config requires Hermes' YAML adapter and is refreshed after bootstrap.
+    _apply_profile_dotenv(profile)
 
 
 def _refresh_worker_profile_env() -> None:
@@ -657,7 +678,7 @@ def _refresh_terminal_env() -> None:
     if not config_path.exists():
         return
     try:
-        import yaml
+        yaml = _load_yaml_module()
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
         terminal_cfg = cfg.get("terminal", {})

@@ -287,6 +287,9 @@ describe('GroupMessageList scroll behavior', () => {
     await nextTick()
 
     expect(getRoomDetail).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.history-loader-spinner').exists()).toBe(true)
+    expect(wrapper.find('.studio-loading-logo').exists()).toBe(false)
+    expect(wrapper.get('.stub-group-message').text()).toBe(makeMessage('message-151').content)
     expect(getRoomDetail).toHaveBeenCalledWith('room-1', {
       before: 'message-151',
       limit: 150,
@@ -306,5 +309,6 @@ describe('GroupMessageList scroll behavior', () => {
     })
 
     expect(store.messages.map(message => message.id)).toEqual(['message-150', 'message-151'])
+    expect(wrapper.find('.history-loader-spinner').exists()).toBe(false)
   })
 })

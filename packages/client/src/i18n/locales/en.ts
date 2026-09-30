@@ -2,6 +2,55 @@ import { socialMessagesEn } from '../social-messages'
 
 export default {
   jev: {
+    browserAutomation: "Built-in browser automation",
+    browserAutomationHint: "Optional assessments use this Profile’s saved JEV connection and take effect on the next assessment. Rendered page labels are sent to JEV; input values are excluded. Disabled, unavailable or uncertain assessments preserve the original flow.",
+    browserMatchEnabled: "JEV element matching",
+    browserMatchHint: "Suggests a real snapshot ref from the target description. Interactive elements across the snapshot are ranked by relevance before applying the candidate limit; ambiguous matches are declined.",
+    browserMatchOptions: "Element matching options",
+    browserMatchCandidateLimit: "Maximum element candidates",
+    browserMatchMinConfidence: "Element matching minimum confidence",
+    browserMatchTimeoutMs: "Element matching timeout (ms)",
+    browserVerifyEnabled: "JEV outcome verification",
+    browserVerifyHint: "With an expected outcome, judge visible evidence after one action or a completed batch. Reports met, not met or unknown; never retries an action. Input values are not verified.",
+    browserVerifyOptions: "Outcome verification options",
+    browserVerifyMinConfidence: "Outcome verification minimum confidence",
+    browserVerifyTimeoutMs: "Outcome verification timeout (ms)",
+
+    groupSchedulingTitle: "Group chat scheduling enhancement",
+    groupMessageRoutingMode: "Task assignment mode",
+    groupRoutingSuggest: "Suggest for user confirmation",
+    groupRoutingAuto: "Assign automatically",
+    groupHandoffReviewEnabled: "Check handoff completeness",
+    groupHandoffReviewHint: "Check whether context, constraints, and remaining work are complete for the next Agent.",
+    groupLoopDetectionEnabled: "Check repeated collaboration loops",
+    groupLoopDetectionHint: "Detect repeated Agent discussion without meaningful new progress.",
+    groupSummaryTitle: "Group chat summary enhancement",
+    groupSummaryRevisionEnabled: "Automatically revise summaries",
+    groupSummaryRevisionHint: "Generate and recheck one revision when a reliable issue is found.",
+    workflowExpectationTitle: "Workflow expectation attainment assessment",
+    groupMessageRoutingEnabled: "Use JEV for group message routing",
+    groupRoutingDisabled: "Disabled; unmentioned messages remain unassigned.",
+    groupRoutingReady: "Enabled for room suggest/auto modes.",
+    groupMessageRoutingMinConfidence: "Routing confidence",
+    groupMessageRoutingMinConfidenceHint: "Minimum confidence required to suggest or auto-route.",
+    groupMessageRoutingTimeout: "Routing time budget (ms)",
+    groupMessageRoutingTimeoutHint: "Total JEV budget for one unaddressed message.",
+
+    workflowQualityEnabled: "Review Workflow node quality with JEV",
+    workflowQualityDisabled: "Disabled; Workflow execution is unchanged.",
+    workflowQualityReady: "Enabled for completed nodes with quality criteria.",
+    workflowQualityMinConfidence: "Workflow quality confidence",
+    workflowQualityMinConfidenceHint: "Minimum confidence required to report a criterion as needing improvement.",
+    workflowQualityTimeout: "Workflow quality time budget (ms)",
+    workflowQualityTimeoutHint: "Total JEV budget after a node has completed.",
+
+    groupSummaryReviewEnabled: "Review group summaries with JEV",
+    groupSummaryDisabled: "Disabled; group summaries keep their existing behavior.",
+    groupSummaryReady: "Enabled for summaries created with this Profile.",
+    groupSummaryReviewMinConfidence: "Summary review confidence",
+    groupSummaryReviewMinConfidenceHint: "Minimum confidence required to report a quality issue.",
+    groupSummaryReviewTimeout: "Summary review time budget (ms)",
+    groupSummaryReviewTimeoutHint: "Total JEV budget after the original summary has already been saved.",
     ekkoSkillsEnabled: "Use JEV for Ekko skills",
     skillsDisabled: "Disabled; existing skill matching and learning remain active.",
     skillsReady: "Enabled for semantic matching and learning preflight.",
@@ -316,6 +365,7 @@ export default {
 
   // Common
   common: {
+    close: 'Close',
     loading: 'Loading...',
     cancel: 'Cancel',
     delete: 'Delete',
@@ -420,6 +470,17 @@ export default {
 
   // Sidebar
   sidebar: {
+    desktopUpdatePreparing: "Preparing update",
+    desktopUpdateStopping: "Stopping download…",
+    desktopUpdateReady: "Update ready",
+    desktopUpdateFailed: "Download failed",
+    desktopUpdateInstalling: "Restarting to update…",
+    desktopUpdateInstall: "Restart to update",
+    desktopUpdateActionFailed: "Could not complete the action. Please try again.",
+    desktopUpdateStop: "Stop download",
+    desktopUpdateStopped: "Download stopped",
+    desktopUpdateRetry: "Download again",
+    desktopUpdateDownloading: "Downloading update",
     chat: 'Chat',
     backToChat: 'Back',
     search: 'Search',
@@ -510,6 +571,8 @@ export default {
     ekkoDescription: 'Ekko ships with Studio and does not need separate installation, updates, or removal.',
     version: 'Version',
     codingAgentDescription: 'Studio can install, check for updates, and remove this Agent.',
+    cursorDescription: 'Install the Cursor CLI (`agent`) from https://cursor.com/install, then refresh. Studio does not install it with npm.',
+    cursorNoManagedConfig: 'Launch does not rewrite ~/.cursor/mcp.json. Managed servers live in this session\'s runtime copy.',
     updateToVersion: 'Update to {version}',
     deleteConfirm: 'Remove {name}?',
     installOperation: 'installation',
@@ -1082,6 +1145,7 @@ export default {
     stopGateway: 'Stop Gateway',
     send: 'Send',
     contextUsed: 'Context used:',
+    sessionUsage: 'Session usage:',
     sessions: 'Sessions',
     webUiSessions: 'Sessions',
     allProfiles: 'All profiles',
@@ -1148,6 +1212,9 @@ export default {
     newCliChat: 'New CLI',
     deleteSession: 'Delete this session?',
     sessionDeleted: 'Session deleted',
+    sessionListActions: 'Session list actions',
+    filterByProfile: 'Filter by Profile',
+    selectedSessions: '{count} selected',
     toggleBatchMode: 'Batch selection',
     selectAll: 'Select all',
     confirmBatchDelete: 'Delete {count} selected sessions?',
@@ -1252,6 +1319,8 @@ export default {
   },
 
   workflow: {
+    listActions: 'Workflow list actions',
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Profile',
     namePlaceholder: 'Workflow name',
@@ -1723,6 +1792,7 @@ export default {
 
   // Skills
   skills: {
+    filterBySource: "Filter by source",
     title: 'Skills',
     targetFilter: 'Runtime',
     targets: {
@@ -2316,6 +2386,10 @@ export default {
 
   // Logs
   logs: {
+    file: "Log file",
+    level: "Log level",
+    lines: "Lines",
+    filters: "Filter logs",
     title: 'Logs',
     all: 'All',
     searchPlaceholder: 'Search...',
@@ -3048,6 +3122,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "Usage: input {inputTokens}, output {outputTokens}, cache read {cacheReadTokens}, cache write {cacheWriteTokens}, total {totalTokens} tokens.",
+    nativeUsageUnknown: "Usage: unknown. No native token usage has been reported for this session.",
+    nativeContextUnknown: "Context: unknown. Current native context usage and its limit are not available.",
+    nativeContextEstimate: "Context estimate (latest reported usage / configured limit): {contextTokens} / {contextWindow} tokens ({contextPercent}%).",
+    nativeCompactUnavailable: "Cursor /compact is not available through the Studio print-mode integration.",
     title: "Coding Agents",
     notice: "Not all providers and models are compatible.",
     claudeDescription: "Anthropic CLI for one-shot print mode and interactive coding sessions.",
@@ -3062,6 +3141,7 @@ export default {
     notInstalled: "Not installed",
     installRequired: "{agent} is not installed. Install it before creating a session.",
     installNow: "Install",
+    cursorInstallGuide: "Install guide",
     installing: "Installing",
     installSuccess: "Installed",
     installFailed: "Install failed",
@@ -3250,6 +3330,15 @@ export default {
 
   // Group Chat
   groupChat: {
+    routingHandoffIncomplete: 'Handoff information may be incomplete.',
+    routingLoopDetected: 'Possible repeated collaboration loop detected.',
+    routingSuggested: 'JEV suggests {agent}',
+    routingUseSuggestion: 'Assign',
+    routingAutoQueued: 'JEV assigned {agent}',
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',
@@ -3472,6 +3561,24 @@ export default {
 
   // Usage
   usage: {
+    costStates: {
+      unknown: "Not recorded",
+      partial: "Partial cost; some usage is unpriced",
+      reported: "Provider-reported cost",
+      estimated: "Estimated cost",
+      mixed: "Includes reported and estimated costs",
+    },
+    pricing: {
+      title: "Model pricing",
+      help: "Without a custom price, models.dev is used to estimate costs for matching models. USD per million tokens. Match provider and model IDs exactly (e.g. global). Used only when no cost is returned. Blank cache rates mean unknown. Changes apply to future calls; historical costs are not recalculated.",
+      provider: "Provider ID",
+      model: "Model ID",
+      input: "Input",
+      output: "Output",
+      cacheRead: "Cache read",
+      cacheWrite: "Cache write",
+      error: "Could not load or save pricing. Check provider/model IDs, duplicates and non-negative rates.",
+    },
     title: 'Usage Statistics',
     refresh: 'Refresh',
     totalTokens: 'Total Tokens',
@@ -3483,7 +3590,7 @@ export default {
     cacheHitRate: 'Cache Hit Rate',
     modelBreakdown: 'Model Breakdown',
     agentBreakdown: 'Agent Breakdown',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', ekkoAgent: 'Ekko', unknown: 'Unknown' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: 'Unknown' },
     dailyTrend: 'Daily Usage',
     date: 'Date',
     tokens: 'Tokens',
@@ -3602,6 +3709,24 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_26_1: 'Unified Studio navigation, page headers, and list actions, with improved mobile layouts (#3232)',
+    new_0_7_26_2: 'Unified page loading feedback and improved logo loading visibility, including reduced-motion mode (#3232, #3236)',
+    new_0_7_26_3: 'Improved custom backgrounds and glass layers, fixed window edges and rounded corners, and made microphone buttons follow theme colors (#3236)',
+    new_0_7_26_4: 'Adjusted desktop window control placement and styling by platform while preserving native Windows rounded corners (#3234, #3235)',
+    new_0_7_26_5: 'Made Gateway auto-start opt-in, removed CLI checks from Profile list loading, and fixed initial message bubble rendering (#3233)',
+    new_0_7_26_6: 'Added usage cost recording and custom model pricing, with estimates from the local model catalog and improved context-limit matching (#3226)',
+    new_0_7_26_7: 'Added compatibility with DSH registry presets and native plugin configuration, and fixed plugin pages not filling the available space (#3218)',
+    new_0_7_26_8: 'Fixed Cursor logo visibility on light Agent Manager cards (#3222)',
+    new_0_7_25_1: 'Added Cursor CLI support for chat, group chats, and workflows, with native settings, skills management, and isolated Studio MCP (#3110)',
+    new_0_7_25_2: 'Added configurable JEV memory recall, relevance filtering, write review, skill matching, and learning preflight (#3159, #3161, #3169)',
+    new_0_7_25_3: 'Added optional JEV browser target matching and action verification, group summary review and message routing, and workflow quality checks (#3208, #3211)',
+    new_0_7_25_4: 'Improved browser automation with sequential action batches, up to 12 tabs, large-page support, and clearer action feedback (#3206, #3207, #3212, #3215)',
+    new_0_7_25_5: 'Added desktop update download progress and isolated update test builds for macOS, Windows, and Linux (#3176, #3177)',
+    new_0_7_25_6: 'Fixed long-chat search navigation, attachments in new chats, session pin refresh, and workspace favorites (#3182, #3168, #3193)',
+    new_0_7_25_7: 'Added a sidebar account menu, unified Agent picker ordering, and improved Agent Manager and group chat layouts (#3191, #3199, #3201, #3188)',
+    new_0_7_25_8: 'Fixed Hermes upgrade compatibility, bridge worker lifecycle, MCP routing across Studio instances, and group Coding Agent credentials (#3202, #3157, #3187)',
+    new_0_7_25_9: 'Fixed DSH startup dependencies and ACP bundle resolution, and removed duplicate keys from scoped Codex configuration (#3156, #3190, #3163)',
+    new_0_7_25_10: 'Improved iOS Live Activity cleanup by retiring stale notification destinations (#3167)',
     new_0_7_24_1: 'Added iOS Live Activities orchestration with locale-aware updates and per-user notification routing (#3102, #3111, #3152)',
     new_0_7_24_2: 'Improved notification defaults and previews, ignored legacy session opt-outs, and hid unsupported social push entries (#3131, #3133, #3146, #3151)',
     new_0_7_24_3: 'Fixed shared session uploads and attachment access across session sharing flows (#3144)',

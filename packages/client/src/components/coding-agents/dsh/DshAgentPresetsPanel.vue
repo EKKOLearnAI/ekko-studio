@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NAlert, NButton, NEmpty, NInput, NModal, NPopconfirm, NTag } from 'naive-ui'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NEmpty, NInput, NModal, NPopconfirm, NSpin, NTag } from 'naive-ui'
+
 import { listDshAgentPresets, readDshAgentPreset, copyDshAgentPreset, deleteDshAgentPreset, defaultDshAgentPreset, locateDshAgentPreset, type DshAgentPreset, type DshAgentPresets } from '@/api/coding-agents/dsh'
 const { t } = useI18n()
 const roster = ref<DshAgentPresets>({ presets: [], authorable: false })
@@ -39,17 +42,21 @@ async function locate(row: DshAgentPreset) {
   catch (err) { error.value = message(err) } finally { busy.value = false }
 }
 onMounted(load)
+
+usePageLoadingTask(() => loading.value)
 </script>
 <template>
   <div class="plugins-view dsh-presets" data-testid="dsh-agent-presets">
+    <PageHeader>
     <header class="page-header"><h2 class="header-title">{{ t('dshPresets.title') }}</h2><NButton size="small" quaternary :disabled="busy || loading" @click="load">{{ t('mcp.refresh') }}</NButton></header>
+    </PageHeader>
     <div class="plugins-content">
       <p class="preset-hint">{{ t('dshPresets.hint') }}</p>
       <NAlert v-if="error" type="error" class="preset-error">{{ error }}</NAlert>
       <NSpin v-if="loading" />
       <div v-else-if="roster.presets.length" class="preset-grid">
         <section v-for="row in roster.presets" :key="row.id" class="preset-card" :class="{ selected: row.isDefault }" :data-testid="`dsh-preset-${row.id}`">
-          <div class="preset-heading"><h3>{{ row.name || row.id }}</h3><NTag size="small" :bordered="false">{{ t(row.trust === 'system' ? 'dshPlugins.shipped' : 'dshPlugins.userPreset') }}</NTag><NTag v-if="row.isDefault" size="small" type="success">{{ t('dshPresets.default') }}</NTag></div>
+          <div class="preset-heading"><h3>{{ row.name || row.id }}</h3><NTag v-if="row.trust" size="small" :bordered="false">{{ t(row.trust === 'system' ? 'dshPlugins.shipped' : 'dshPlugins.userPreset') }}</NTag><NTag v-if="row.isDefault" size="small" type="success">{{ t('dshPresets.default') }}</NTag></div>
           <code>{{ row.id }}</code>
           <p class="preset-description">{{ row.description }}</p>
           <NAlert v-if="row.broken" type="error">{{ row.broken }}</NAlert>

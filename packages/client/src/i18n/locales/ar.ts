@@ -2,6 +2,55 @@ import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
   jev: {
+    browserAutomation: "أتمتة المتصفح المدمج",
+    browserAutomationHint: "تستخدم التقييمات الاختيارية اتصال JEV المحفوظ لهذا الملف الشخصي بدءًا من التقييم التالي. تُرسل التسميات المرئية دون قيم الإدخال. يستمر المسار المعتاد عند التعطيل أو عدم التوفر أو عدم اليقين.",
+    browserMatchEnabled: "مطابقة العناصر عبر JEV",
+    browserMatchHint: "يقترح مرجعًا فعليًا من اللقطة وفق وصف الهدف. تُرتب العناصر التفاعلية في اللقطة كاملة حسب الصلة قبل تطبيق حد المرشحين، وتُرفض المطابقات الملتبسة.",
+    browserMatchOptions: "خيارات مطابقة العناصر",
+    browserMatchCandidateLimit: "الحد الأقصى للعناصر المرشحة",
+    browserMatchMinConfidence: "الحد الأدنى لثقة المطابقة",
+    browserMatchTimeoutMs: "مهلة المطابقة (مللي ثانية)",
+    browserVerifyEnabled: "التحقق من النتائج عبر JEV",
+    browserVerifyHint: "يقيّم الأدلة المرئية بعد إجراء أو دفعة مكتملة وفق النتيجة المتوقعة. يعيد تحقق أو لم يتحقق أو غير معروف، دون إعادة الإجراءات أو التحقق من قيم الإدخال.",
+    browserVerifyOptions: "خيارات التحقق من النتائج",
+    browserVerifyMinConfidence: "الحد الأدنى لثقة التحقق",
+    browserVerifyTimeoutMs: "مهلة التحقق (مللي ثانية)",
+
+    groupSchedulingTitle: 'تعزيز تنسيق الدردشة الجماعية',
+    groupMessageRoutingMode: 'وضع إسناد المهام',
+    groupRoutingSuggest: 'اقتراح مع تأكيد المستخدم',
+    groupRoutingAuto: 'إسناد تلقائي',
+    groupHandoffReviewEnabled: 'فحص اكتمال التسليم',
+    groupHandoffReviewHint: 'يفحص السياق والقيود والعمل المتبقي للوكيل التالي.',
+    groupLoopDetectionEnabled: 'كشف الدوران المتكرر',
+    groupLoopDetectionHint: 'يكشف النقاش المتكرر بلا تقدم جديد.',
+    groupSummaryTitle: 'تعزيز ملخص الدردشة',
+    groupSummaryRevisionEnabled: 'مراجعة الملخص تلقائياً',
+    groupSummaryRevisionHint: 'ينشئ مراجعة موثوقة واحدة ثم يعيد تقييمها.',
+    workflowExpectationTitle: 'تقييم تحقيق توقعات سير العمل',
+    groupMessageRoutingEnabled: 'تفعيل تعزيز تنسيق الدردشة الجماعية',
+    groupRoutingDisabled: 'معطّل؛ تبقى الرسائل التي لا تحدد Agent بلا إسناد.',
+    groupRoutingReady: 'مفعّل؛ يمكن لـ JEV اقتراح Agent أو إسناده تلقائياً.',
+    groupMessageRoutingMinConfidence: 'ثقة الإسناد',
+    groupMessageRoutingMinConfidenceHint: 'الحد الأدنى للثقة المطلوب للاقتراح أو الإسناد التلقائي.',
+    groupMessageRoutingTimeout: 'ميزانية وقت الإسناد (مللي ثانية)',
+    groupMessageRoutingTimeoutHint: 'إجمالي ميزانية JEV لرسالة بلا جهة مستهدفة صريحة.',
+
+    workflowQualityEnabled: 'تفعيل تقييم تحقيق توقعات سير العمل',
+    workflowQualityDisabled: 'معطّل؛ يبقى تنفيذ سير العمل دون تغيير.',
+    workflowQualityReady: 'مفعّل لعقد سير العمل المكتملة.',
+    workflowQualityMinConfidence: 'ثقة تقييم سير العمل',
+    workflowQualityMinConfidenceHint: 'الحد الأدنى للثقة للإبلاغ عن توقع غير متحقق.',
+    workflowQualityTimeout: 'ميزانية وقت تقييم سير العمل (مللي ثانية)',
+    workflowQualityTimeoutHint: 'إجمالي ميزانية JEV بعد اكتمال العقدة.',
+
+    groupSummaryReviewEnabled: 'مراجعة ملخصات المجموعة باستخدام JEV',
+    groupSummaryDisabled: 'معطّل؛ تستمر الملخصات بالسلوك الحالي.',
+    groupSummaryReady: 'مفعّل للملخصات المنشأة بهذا الملف.',
+    groupSummaryReviewMinConfidence: 'ثقة مراجعة الملخص',
+    groupSummaryReviewMinConfidenceHint: 'الحد الأدنى للثقة للإبلاغ عن مشكلة جودة.',
+    groupSummaryReviewTimeout: 'مهلة مراجعة الملخص (مللي ثانية)',
+    groupSummaryReviewTimeoutHint: 'ميزانية JEV بعد حفظ الملخص الأصلي.',
     ekkoSkillsEnabled: "استخدام JEV لمهارات Ekko",
     skillsDisabled: "معطّل؛ يستمر اختيار المهارات والتعلّم بالطريقة الحالية.",
     skillsReady: "تم تفعيل المطابقة الدلالية والتقييم المسبق للتعلّم.",
@@ -316,6 +365,7 @@ export default {
 
   // Common
   common: {
+    close: 'إغلاق',
     loading: 'جارٍ التحميل...',
     cancel: 'إلغاء',
     delete: 'حذف',
@@ -420,6 +470,17 @@ export default {
 
   // Sidebar
   sidebar: {
+    desktopUpdatePreparing: "جارٍ تجهيز التحديث",
+    desktopUpdateStopping: "جارٍ إيقاف التنزيل…",
+    desktopUpdateReady: "التحديث جاهز",
+    desktopUpdateFailed: "فشل التنزيل",
+    desktopUpdateInstalling: "جارٍ إعادة التشغيل للتحديث…",
+    desktopUpdateInstall: "إعادة التشغيل للتحديث",
+    desktopUpdateActionFailed: "تعذر إكمال الإجراء. حاول مرة أخرى.",
+    desktopUpdateStop: "إيقاف التنزيل",
+    desktopUpdateStopped: "تم إيقاف التنزيل",
+    desktopUpdateRetry: "تنزيل مرة أخرى",
+    desktopUpdateDownloading: "جارٍ تنزيل التحديث",
     chat: 'محادثة',
     backToChat: 'رجوع',
     search: 'بحث',
@@ -510,6 +571,8 @@ export default {
     ekkoDescription: 'يأتي Ekko ضمن Studio ولا يحتاج إلى تثبيت أو تحديث أو إزالة بشكل منفصل.',
     version: 'الإصدار',
     codingAgentDescription: 'يمكن لـ Studio تثبيت هذا الوكيل والتحقق من تحديثاته وإزالته.',
+    cursorDescription: 'ثبّت Cursor CLI (`agent`) من https://cursor.com/install ثم حدّث. Studio لا يثبّته عبر npm.',
+    cursorNoManagedConfig: 'بدء التشغيل لا يعيد كتابة ~/.cursor/mcp.json. الخوادم المُدارة تكون في نسخة التشغيل لهذه الجلسة.',
     updateToVersion: 'التحديث إلى {version}',
     deleteConfirm: 'هل تريد إزالة {name}؟',
     installOperation: 'التثبيت',
@@ -1075,6 +1138,7 @@ export default {
     stopGateway: 'إيقاف البوابة',
     send: 'إرسال',
     contextUsed: 'السياق المستخدم:',
+    sessionUsage: 'استخدام هذه الجلسة:',
     sessions: 'الجلسات',
     webUiSessions: 'الجلسات',
     allProfiles: 'كل البروفايلات',
@@ -1141,6 +1205,9 @@ export default {
     newCliChat: 'CLI جديد',
     deleteSession: 'حذف هذه الجلسة؟',
     sessionDeleted: 'تم حذف الجلسة',
+    sessionListActions: 'إجراءات قائمة الجلسات',
+    filterByProfile: 'التصفية حسب الملف الشخصي',
+    selectedSessions: 'تم تحديد {count}',
     toggleBatchMode: 'تحديد متعدد',
     selectAll: 'تحديد الكل',
     confirmBatchDelete: 'حذف {count} جلسات محددة؟',
@@ -1245,6 +1312,8 @@ export default {
   },
 
   workflow: {
+    listActions: 'إجراءات قائمة سير العمل',
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'مسار العمل',
     profile: 'البروفايل',
     namePlaceholder: 'اسم مسار العمل',
@@ -1762,6 +1831,7 @@ export default {
 
   // Skills
   skills: {
+    filterBySource: "تصفية حسب المصدر",
     title: 'المهارات',
     targetFilter: 'بيئة التشغيل',
     targets: {
@@ -2355,6 +2425,10 @@ export default {
 
   // Logs
   logs: {
+    file: "ملف السجل",
+    level: "مستوى السجل",
+    lines: "الأسطر",
+    filters: "تصفية السجلات",
     title: 'السجلات',
     all: 'الكل',
     searchPlaceholder: 'بحث...',
@@ -3035,6 +3109,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "الاستخدام: إدخال {inputTokens}، إخراج {outputTokens}، قراءة ذاكرة مؤقتة {cacheReadTokens}، كتابة ذاكرة مؤقتة {cacheWriteTokens}، الإجمالي {totalTokens} رمزًا.",
+    nativeUsageUnknown: "الاستخدام غير معروف. لم تُبلّغ الأداة الأصلية بعد عن استخدام الرموز لهذه الجلسة.",
+    nativeContextUnknown: "السياق غير معروف. استخدام السياق الأصلي الحالي وحدّه غير متاحين.",
+    nativeContextEstimate: "تقدير السياق (آخر استخدام / الحد المضبوط): {contextTokens} / {contextWindow} رمزًا ({contextPercent}%).",
+    nativeCompactUnavailable: "الأمر /compact غير متاح عبر تكامل وضع print في Cursor مع Studio.",
     title: "وكلاء البرمجة",
     notice: "ليست كل المزوّدات والنماذج متوافقة.",
     claudeDescription: "واجهة Anthropic السطرية لوضع الطباعة الفوري وجلسات البرمجة التفاعلية.",
@@ -3049,6 +3128,7 @@ export default {
     notInstalled: "غير مثبت",
     installRequired: "{agent} غير مثبت. ثبّته قبل إنشاء جلسة.",
     installNow: "تثبيت",
+    cursorInstallGuide: "دليل التثبيت",
     installing: "جارٍ التثبيت",
     installSuccess: "تم التثبيت",
     installFailed: "فشل التثبيت",
@@ -3231,6 +3311,15 @@ export default {
 
   // Group Chat
   groupChat: {
+    routingHandoffIncomplete: 'قد تكون معلومات التسليم غير مكتملة.',
+    routingLoopDetected: 'تم اكتشاف دوران متكرر محتمل في التعاون.',
+    routingSuggested: 'يقترح JEV \u200f{agent}',
+    routingUseSuggestion: 'تعيين',
+    routingAutoQueued: 'عيّن JEV \u200f{agent}',
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',
@@ -3453,6 +3542,24 @@ export default {
 
   // Usage
   usage: {
+    costStates: {
+      unknown: "غير مسجل",
+      partial: "تكلفة جزئية؛ بعض الاستخدام بلا تسعير",
+      reported: "التكلفة الواردة من المزود",
+      estimated: "تكلفة تقديرية",
+      mixed: "تشمل تكاليف واردة وتقديرية",
+    },
+    pricing: {
+      title: "أسعار النماذج",
+      help: "عند عدم تعيين سعر مخصص، تُقدَّر التكلفة باستخدام أسعار النموذج المطابق في models.dev. دولار لكل مليون رمز. يجب تطابق معرفَي المزود والنموذج تمامًا (مثل global). يُستخدم التقدير عند غياب التكلفة فقط. سعر التخزين المؤقت الفارغ يعني أنه غير معروف. تسري التغييرات على الاستدعاءات القادمة دون إعادة حساب السجل.",
+      provider: "معرف المزود",
+      model: "معرف النموذج",
+      input: "الإدخال",
+      output: "الإخراج",
+      cacheRead: "قراءة التخزين المؤقت",
+      cacheWrite: "كتابة التخزين المؤقت",
+      error: "تعذر تحميل الأسعار أو حفظها. تحقق من المعرفات والتكرارات وأن الأسعار غير سالبة.",
+    },
     title: 'إحصائيات الاستخدام',
     refresh: 'تحديث',
     totalTokens: 'إجمالي التوكنات',
@@ -3464,7 +3571,7 @@ export default {
     cacheHitRate: 'معدل إصابة الذاكرة المؤقتة',
     modelBreakdown: 'التوزيع حسب النموذج',
     agentBreakdown: 'التوزيع حسب الوكيل',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', ekkoAgent: 'Ekko', unknown: 'غير معروف' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: 'غير معروف' },
     dailyTrend: 'الاستخدام اليومي',
     date: 'التاريخ',
     tokens: 'التوكنات',
@@ -3583,6 +3690,24 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_26_1: 'وُحّدت عناصر التنقل وعناوين الصفحات وإجراءات القوائم في Studio، مع تحسين تخطيط الأجهزة المحمولة (#3232)',
+    new_0_7_26_2: 'وُحّدت مؤشرات تحميل الصفحات وحُسّنت رؤية شعار التحميل، بما في ذلك وضع تقليل الحركة (#3232, #3236)',
+    new_0_7_26_3: 'حُسّنت الخلفيات المخصصة والطبقات الزجاجية، وأُصلحت حواف النوافذ وزواياها المستديرة، وأصبحت أزرار الميكروفون تتبع ألوان السمة (#3236)',
+    new_0_7_26_4: 'عُدّل موضع أزرار التحكم بالنوافذ ومظهرها حسب المنصة مع الحفاظ على زوايا Windows المستديرة الأصلية (#3234, #3235)',
+    new_0_7_26_5: 'أصبح التشغيل التلقائي لـ Gateway يتطلب تفعيلًا صريحًا، ولم يعد تحميل قائمة ملفات التعريف ينتظر فحوصات CLI، وأُصلح العرض الأولي لفقاعات الرسائل (#3233)',
+    new_0_7_26_6: 'أُضيف تسجيل تكاليف الاستخدام وأسعار مخصصة للنماذج، مع تقديرات من كتالوج النماذج المحلي وتحسين مطابقة حدود السياق (#3226)',
+    new_0_7_26_7: 'أُضيف التوافق مع إعدادات سجل DSH المسبقة وتهيئة الإضافات الأصلية، وأُصلحت صفحات الإضافات التي لم تكن تملأ المساحة المتاحة (#3218)',
+    new_0_7_26_8: 'أُصلحت رؤية شعار Cursor على البطاقات الفاتحة في مدير الوكلاء (#3222)',
+    new_0_7_25_1: 'أضيف دعم Cursor CLI للمحادثات والمجموعات وسير العمل، مع الإعدادات الأصلية وإدارة المهارات وإعدادات Studio MCP المعزولة (#3110)',
+    new_0_7_25_2: 'أضيفت وظائف JEV قابلة للضبط لاسترجاع الذاكرة وتصفية الصلة ومراجعة الكتابة ومطابقة المهارات والفحص المسبق للتعلم (#3159، #3161، #3169)',
+    new_0_7_25_3: 'أضيفت فحوص JEV اختيارية لمطابقة أهداف المتصفح والتحقق من الإجراءات ومراجعة ملخصات المجموعات وتوجيه الرسائل وجودة سير العمل (#3208، #3211)',
+    new_0_7_25_4: 'حُسنت أتمتة المتصفح بدفعات إجراءات متسلسلة ودعم ما يصل إلى 12 علامة تبويب والصفحات الكبيرة ونتائج أوضح للإجراءات (#3206، #3207، #3212، #3215)',
+    new_0_7_25_5: 'أضيف عرض تقدم تنزيل تحديثات سطح المكتب وبناء نسخ معزولة لاختبار التحديثات على macOS وWindows وLinux (#3176، #3177)',
+    new_0_7_25_6: 'أُصلح التنقل بين نتائج البحث في المحادثات الطويلة ومرفقات المحادثات الجديدة وتحديث الجلسات المثبتة ومفضلة مساحات العمل (#3182، #3168، #3193)',
+    new_0_7_25_7: 'أضيفت قائمة الحساب في الشريط الجانبي ووُحد ترتيب Agents وحُسن تخطيط مدير Agents والمحادثات الجماعية (#3191، #3199، #3201، #3188)',
+    new_0_7_25_8: 'أُصلح توافق ترقيات Hermes ودورة حياة عملية الربط وتوجيه MCP بين نسخ Studio وبيانات اعتماد Coding Agents في المجموعات (#3202، #3157، #3187)',
+    new_0_7_25_9: 'أُصلحت تبعيات بدء DSH وتحديد حزمة ACP، وأُزيلت المفاتيح المكررة من إعدادات Codex المعزولة (#3156، #3190، #3163)',
+    new_0_7_25_10: 'حُسن تنظيف الأنشطة المباشرة على iOS بتعطيل وجهات الإشعارات القديمة (#3167)',
     new_0_7_24_1: 'أضيفت أتمتة الأنشطة المباشرة على iOS مع تحديثات تراعي اللغة وتوجيه الإشعارات لكل مستخدم (#3102، #3111، #3152)',
     new_0_7_24_2: 'حُسنت الإعدادات الافتراضية ومعاينات الإشعارات، وتجاهل إلغاء الاشتراك القديم للجلسات، وأُخفيت إدخالات الدفع الاجتماعي غير المدعومة (#3131، #3133، #3146، #3151)',
     new_0_7_24_3: 'أُصلح الوصول إلى تحميلات الجلسات والمرفقات المشتركة عبر مسارات مشاركة الجلسات (#3144)',

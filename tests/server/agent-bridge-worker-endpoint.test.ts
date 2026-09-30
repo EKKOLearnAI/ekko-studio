@@ -7,6 +7,7 @@ function runPython(script: string): any {
       cwd: process.cwd(),
       encoding: 'utf-8',
       stdio: 'pipe',
+      env: { ...process.env, HERMES_AGENT_BRIDGE_WORKER_PORT_BASE: '18780', HERMES_AGENT_BRIDGE_WORKER_TRANSPORT: '' },
     })
     return JSON.parse(output)
   } catch (error) {

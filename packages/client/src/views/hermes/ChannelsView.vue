@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { NSpin } from 'naive-ui'
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import { onMounted, ref } from 'vue'
+
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { useProfilesStore } from '@/stores/hermes/profiles'
@@ -17,30 +19,34 @@ async function loadSettingsForProfile() {
   await settingsStore.fetchSettings()
 }
 
+const initializing = ref(true)
+
 onMounted(() => {
-  void loadSettingsForProfile()
+  void loadSettingsForProfile().finally(() => { initializing.value = false })
 })
 </script>
 
 <template>
-  <div class="channels-view">
+  <PageLoading :show="initializing || settingsStore.loading" class="channels-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('sidebar.channels') }}</h2>
     </header>
+    </PageHeader>
 
     <div class="channels-content">
-      <NSpin :show="settingsStore.loading || settingsStore.saving" size="large" :description="t('common.loading')">
+      <div>
         <PlatformSettings v-if="!settingsStore.loading" />
-      </NSpin>
+      </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .channels-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }

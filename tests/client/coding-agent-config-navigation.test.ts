@@ -39,6 +39,8 @@ describe('coding Agent configuration navigation', () => {
 
     expect(view).not.toContain('NEmpty')
     expect(view).not.toContain("router.push({ name: 'hermes.agentManager' })")
+    expect(view).not.toContain('isUnmanagedLocalCli')
+    expect(view).not.toContain("t('agentManager.cursorNoManagedConfig')")
     expect(view).toContain('readCodingAgentConfigFile')
     expect(view).toContain('writeCodingAgentConfigFile')
     expect(view).toContain('<CodingAgentSkillsPanel :target="skillTarget" />')

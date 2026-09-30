@@ -65,6 +65,7 @@ import {
 import '../../packages/server/src/bootstrap/coding-agent-adapters'
 
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+const windowsCmd = process.env.comspec || 'cmd.exe'
 
 function setPlatform(platform: NodeJS.Platform) {
   Object.defineProperty(process, 'platform', { value: platform })
@@ -525,7 +526,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-pi-1', prompt, { systemPrompt })
 
     const call = testState.spawnCalls[0]
-    expect(call.command).toBe('cmd.exe')
+    expect(call.command).toBe(windowsCmd)
     expect(call.args[3]).toContain('C:\\用户\\管理员\\AppData\\Roaming\\npm\\pi.cmd')
     expect(call.args[3]).toContain('C:\\用户\\会话^ 目录')
     expect(call.args[3]).not.toContain('超长中文内容')
@@ -979,7 +980,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-1', groupInput, { systemPrompt: 'system prompt\nsecond line' })
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\Users\\Administrator\\AppData\\Roaming\\npm\\claude.cmd')
@@ -1037,7 +1038,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-codex-1', groupInput, { systemPrompt: 'system prompt\nsecond line' })
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\Users\\Administrator\\AppData\\Roaming\\npm\\codex.cmd')
@@ -1294,7 +1295,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-codex-unicode-1', 'test')
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\用户\\管理员\\AppData\\Roaming\\npm\\codex.cmd')
@@ -1330,7 +1331,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-codex-quoted-1', 'test')
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\nvm4w\\nodejs\\codex.cmd')

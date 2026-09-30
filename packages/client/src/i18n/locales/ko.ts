@@ -2,6 +2,55 @@ import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
   jev: {
+    browserAutomation: "내장 브라우저 자동화",
+    browserAutomationHint: "이 프로필에 저장된 JEV 연결을 사용하며 다음 판단부터 적용됩니다. 화면의 레이블을 JEV에 보내지만 입력값은 제외합니다. 비활성화, 서비스 오류 또는 불확실한 판단 시 기존 흐름을 유지합니다.",
+    browserMatchEnabled: "JEV 요소 매칭",
+    browserMatchHint: "대상 설명을 바탕으로 실제 스냅샷 참조를 추천합니다. 전체 스냅샷의 상호작용 가능한 요소를 관련성순으로 정렬한 후 후보 한도를 적용하며, 모호한 경우 추천하지 않습니다.",
+    browserMatchOptions: "요소 매칭 옵션",
+    browserMatchCandidateLimit: "최대 요소 후보 수",
+    browserMatchMinConfidence: "요소 매칭 최소 신뢰도",
+    browserMatchTimeoutMs: "요소 매칭 제한 시간(ms)",
+    browserVerifyEnabled: "JEV 결과 확인",
+    browserVerifyHint: "단일 작업 또는 완료된 일괄 작업 후 화면의 증거로 예상 결과를 판단합니다. 달성, 미달성, 불확실을 반환하며 작업을 재시도하거나 입력값을 확인하지 않습니다.",
+    browserVerifyOptions: "결과 확인 옵션",
+    browserVerifyMinConfidence: "결과 확인 최소 신뢰도",
+    browserVerifyTimeoutMs: "결과 확인 제한 시간(ms)",
+
+    groupSchedulingTitle: '그룹 채팅 조정 강화',
+    groupMessageRoutingMode: '작업 할당 방식',
+    groupRoutingSuggest: '제안 후 사용자 확인',
+    groupRoutingAuto: '자동 할당',
+    groupHandoffReviewEnabled: '인계 정보 완전성 확인',
+    groupHandoffReviewHint: '다음 Agent에 필요한 맥락·제약·남은 작업을 확인합니다.',
+    groupLoopDetectionEnabled: '반복 공회전 확인',
+    groupLoopDetectionHint: '새 진전 없는 반복 협업을 감지합니다.',
+    groupSummaryTitle: '그룹 요약 강화',
+    groupSummaryRevisionEnabled: '요약 자동 수정',
+    groupSummaryRevisionHint: '확실한 문제가 있으면 한 번 수정하고 재평가합니다.',
+    workflowExpectationTitle: '워크플로 기대 달성 평가',
+    groupMessageRoutingEnabled: '그룹 채팅 조정 강화 활성화',
+    groupRoutingDisabled: '비활성화됨. 대상 Agent가 명시되지 않은 메시지는 할당하지 않습니다.',
+    groupRoutingReady: '활성화됨. Agent 제안 또는 자동 할당을 사용할 수 있습니다.',
+    groupMessageRoutingMinConfidence: '할당 신뢰도',
+    groupMessageRoutingMinConfidenceHint: '제안 또는 자동 할당에 필요한 최소 신뢰도입니다.',
+    groupMessageRoutingTimeout: '할당 시간 예산(ms)',
+    groupMessageRoutingTimeoutHint: '대상 Agent가 없는 메시지 한 건에 대한 JEV 총 시간 예산입니다.',
+
+    workflowQualityEnabled: '워크플로 기대 달성 평가 활성화',
+    workflowQualityDisabled: '비활성화됨. 워크플로 실행은 변경되지 않습니다.',
+    workflowQualityReady: '완료된 워크플로 노드에 대해 활성화되었습니다.',
+    workflowQualityMinConfidence: '워크플로 평가 신뢰도',
+    workflowQualityMinConfidenceHint: '기대 미달로 판단하는 데 필요한 최소 신뢰도입니다.',
+    workflowQualityTimeout: '워크플로 평가 시간 예산(ms)',
+    workflowQualityTimeoutHint: '노드 완료 후 JEV 평가에 사용할 총 시간 예산입니다.',
+
+    groupSummaryReviewEnabled: 'JEV로 그룹 요약 검토',
+    groupSummaryDisabled: '비활성화됨. 기존 요약 동작을 유지합니다.',
+    groupSummaryReady: '이 프로필로 생성한 요약에 활성화되었습니다.',
+    groupSummaryReviewMinConfidence: '요약 검토 신뢰도',
+    groupSummaryReviewMinConfidenceHint: '품질 문제를 보고할 최소 신뢰도입니다.',
+    groupSummaryReviewTimeout: '요약 검토 시간 예산(ms)',
+    groupSummaryReviewTimeoutHint: '원본 요약 저장 후 사용하는 총 JEV 예산입니다.',
     ekkoSkillsEnabled: "Ekko 스킬에 JEV 사용",
     skillsDisabled: "비활성화됨. 기존 스킬 매칭과 학습을 사용합니다.",
     skillsReady: "의미 기반 매칭과 학습 사전 판단이 활성화되었습니다.",
@@ -328,6 +377,7 @@ export default {
 
   // 공통
   common: {
+    close: '닫기',
     loading: '로딩 중...',
     cancel: '취소',
     retry: '재시도',
@@ -432,6 +482,17 @@ export default {
   },
 
   sidebar: {
+    desktopUpdatePreparing: "업데이트 준비 중",
+    desktopUpdateStopping: "다운로드 중지 중…",
+    desktopUpdateReady: "업데이트 준비 완료",
+    desktopUpdateFailed: "다운로드 실패",
+    desktopUpdateInstalling: "업데이트를 위해 재시작 중…",
+    desktopUpdateInstall: "재시작하여 업데이트",
+    desktopUpdateActionFailed: "작업을 완료하지 못했습니다. 다시 시도하세요.",
+    desktopUpdateStop: "다운로드 중지",
+    desktopUpdateStopped: "다운로드 중지됨",
+    desktopUpdateRetry: "다시 다운로드",
+    desktopUpdateDownloading: "업데이트 다운로드 중",
     chat: '채팅',
     backToChat: '뒤로',
     search: '검색',
@@ -522,6 +583,8 @@ export default {
     ekkoDescription: 'Ekko는 Studio에 포함되어 있어 별도로 설치, 업데이트 또는 삭제할 필요가 없습니다.',
     version: '버전',
     codingAgentDescription: 'Studio에서 설치, 업데이트 확인 및 삭제할 수 있습니다.',
+    cursorDescription: 'Cursor CLI(`agent`)는 https://cursor.com/install 에서 설치한 뒤 새로고침하세요. Studio는 npm으로 설치하지 않습니다.',
+    cursorNoManagedConfig: '시작 시 ~/.cursor/mcp.json은 덮어쓰지 않습니다. 관리 서버는 이번 세션의 런타임 복사본에 있습니다.',
     updateToVersion: '{version}(으)로 업데이트',
     deleteConfirm: '{name}을(를) 삭제하시겠습니까?',
     installOperation: '설치',
@@ -1032,6 +1095,7 @@ export default {
     stop: '중지',
     send: '전송',
     contextUsed: '사용된 컨텍스트:',
+    sessionUsage: '이 세션의 누적 사용량:',
     sessions: '세션',
     webUiSessions: '세션',
     allProfiles: '모든 프로필',
@@ -1085,6 +1149,9 @@ export default {
     interactionCountdown: '{time} 남음',
     interactionCountdownElapsed: '00:00 · 서버 확인 대기 중',
     deleteSession: '이 세션을 삭제하시겠습니까?',
+    sessionListActions: '세션 목록 작업',
+    filterByProfile: '프로필로 필터링',
+    selectedSessions: '{count}개 선택됨',
     toggleBatchMode: '일괄 선택',
     selectAll: '모두 선택',
     confirmBatchDelete: '선택한 {count}개의 세션을 삭제하시겠습니까?',
@@ -1316,6 +1383,7 @@ export default {
 
   // 스킬
   skills: {
+    filterBySource: "출처별 필터",
     title: '스킬',
     targetFilter: '런타임',
     targets: {
@@ -1862,6 +1930,10 @@ export default {
 
   // 로그
   logs: {
+    file: "로그 파일",
+    level: "로그 수준",
+    lines: "줄 수",
+    filters: "로그 필터",
     title: '로그',
     all: '전체',
     searchPlaceholder: '검색...',
@@ -2543,6 +2615,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "사용량: 입력 {inputTokens}, 출력 {outputTokens}, 캐시 읽기 {cacheReadTokens}, 캐시 쓰기 {cacheWriteTokens}, 총 {totalTokens} 토큰.",
+    nativeUsageUnknown: "사용량 알 수 없음: 이 세션의 네이티브 토큰 사용량이 아직 보고되지 않았습니다.",
+    nativeContextUnknown: "컨텍스트 알 수 없음: 네이티브 세션의 현재 사용량과 한도를 가져올 수 없습니다.",
+    nativeContextEstimate: "컨텍스트 추정(최근 사용량 / 설정 한도): {contextTokens} / {contextWindow} 토큰({contextPercent}%).",
+    nativeCompactUnavailable: "Studio의 Cursor print 모드 연동은 /compact를 지원하지 않습니다.",
     title: "코딩 에이전트",
     notice: "모든 제공업체와 모델이 호환되는 것은 아닙니다.",
     claudeDescription: "print mode 단발 작업과 대화형 코딩 세션을 위한 Anthropic CLI입니다.",
@@ -2557,6 +2634,7 @@ export default {
     notInstalled: "설치되지 않음",
     installRequired: "{agent}이(가) 설치되어 있지 않습니다. 세션을 만들기 전에 설치하세요.",
     installNow: "설치",
+    cursorInstallGuide: "설치 안내",
     installing: "설치 중",
     installSuccess: "설치됨",
     installFailed: "설치 실패",
@@ -2738,6 +2816,24 @@ export default {
 
   // 사용량
   usage: {
+    costStates: {
+      unknown: "미기록",
+      partial: "일부 비용만 기록됨",
+      reported: "공급자 보고 비용",
+      estimated: "추정 비용",
+      mixed: "보고 비용 및 추정 비용 포함",
+    },
+    pricing: {
+      title: "모델 단가",
+      help: "사용자 지정 단가가 없으면 models.dev에서 일치하는 모델의 가격으로 비용을 추정합니다. 백만 토큰당 USD입니다. 공급자와 모델 ID를 정확히 일치시키세요(예: global). 비용이 반환되지 않을 때만 추정합니다. 캐시 단가가 비어 있으면 알 수 없음입니다. 이후 호출부터 적용되며 과거 비용은 다시 계산하지 않습니다.",
+      provider: "공급자 ID",
+      model: "모델 ID",
+      input: "입력",
+      output: "출력",
+      cacheRead: "캐시 읽기",
+      cacheWrite: "캐시 쓰기",
+      error: "단가를 불러오거나 저장하지 못했습니다. ID, 중복 및 음수 단가를 확인하세요.",
+    },
     title: '사용량 통계',
     refresh: '새로고침',
     totalTokens: '총 토큰 수',
@@ -2749,7 +2845,7 @@ export default {
     cacheHitRate: '캐시 적중률',
     modelBreakdown: '모델별 분포',
     agentBreakdown: 'Agent별 분포',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', ekkoAgent: 'Ekko', unknown: '알 수 없음' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: '알 수 없음' },
     dailyTrend: '일별 사용량',
     date: '날짜',
     tokens: '토큰',
@@ -2784,6 +2880,8 @@ export default {
   },
 
   workflow: {
+    listActions: '워크플로 목록 작업',
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: '워크플로',
     profile: '프로필',
     namePlaceholder: '워크플로 이름',
@@ -2951,6 +3049,15 @@ export default {
 
   // 변경 이력
   groupChat: {
+    routingHandoffIncomplete: '인계 정보가 불완전할 수 있습니다.',
+    routingLoopDetected: '협업이 반복 공회전 중일 수 있습니다.',
+    routingSuggested: 'JEV 추천: {agent}',
+    routingUseSuggestion: '할당',
+    routingAutoQueued: 'JEV가 {agent}에게 할당했습니다',
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',
@@ -3183,6 +3290,24 @@ export default {
   },
 
   changelog: {
+    new_0_7_26_1: 'Studio 탐색, 페이지 헤더, 목록 작업을 통일하고 모바일 레이아웃을 개선했습니다 (#3232)',
+    new_0_7_26_2: '페이지 로딩 표시를 통일하고 동작 줄이기 모드에서도 로고 로딩 표시가 잘 보이도록 개선했습니다 (#3232, #3236)',
+    new_0_7_26_3: '사용자 지정 배경과 유리 효과의 계층을 개선하고 창 가장자리와 둥근 모서리를 수정했으며 마이크 버튼에 테마 색상을 적용했습니다 (#3236)',
+    new_0_7_26_4: '플랫폼에 맞게 데스크톱 창 제어 버튼의 위치와 스타일을 조정하고 Windows 기본 둥근 모서리를 유지했습니다 (#3234, #3235)',
+    new_0_7_26_5: 'Gateway 자동 시작을 명시적으로 활성화하도록 변경하고 Profile 목록 로딩에서 CLI 검사를 분리했으며 메시지 말풍선의 최초 렌더링을 수정했습니다 (#3233)',
+    new_0_7_26_6: '사용 비용 기록과 사용자 지정 모델 단가를 추가하고 로컬 모델 카탈로그 기반 비용 추정 및 컨텍스트 한도 매칭을 개선했습니다 (#3226)',
+    new_0_7_26_7: 'DSH 레지스트리 프리셋과 네이티브 플러그인 설정을 지원하고 플러그인 페이지가 사용 가능한 공간을 채우지 못하는 문제를 수정했습니다 (#3218)',
+    new_0_7_26_8: 'Agent Manager의 밝은 카드에서 Cursor 로고가 잘 보이지 않던 문제를 수정했습니다 (#3222)',
+    new_0_7_25_1: '채팅, 그룹 채팅, 워크플로에서 Cursor CLI를 지원하며 네이티브 설정, 스킬 관리, 분리된 Studio MCP 설정을 추가했습니다 (#3110)',
+    new_0_7_25_2: '설정 가능한 JEV 메모리 검색, 관련성 필터링, 쓰기 검토, 스킬 매칭, 학습 사전 검사를 추가했습니다 (#3159, #3161, #3169)',
+    new_0_7_25_3: '선택적으로 활성화할 수 있는 JEV 브라우저 대상 매칭과 작업 검증, 그룹 요약 검토와 메시지 라우팅, 워크플로 품질 검사를 추가했습니다 (#3208, #3211)',
+    new_0_7_25_4: '브라우저 자동화에 순차 일괄 작업, 최대 12개 탭, 대형 페이지 지원, 더 명확한 작업 피드백을 추가했습니다 (#3206, #3207, #3212, #3215)',
+    new_0_7_25_5: '데스크톱 업데이트 다운로드 진행률과 macOS, Windows, Linux용 독립 업데이트 테스트 빌드를 추가했습니다 (#3176, #3177)',
+    new_0_7_25_6: '긴 대화의 검색 결과 이동, 새 채팅 첨부 파일, 세션 고정 새로 고침, 작업 공간 즐겨찾기를 수정했습니다 (#3182, #3168, #3193)',
+    new_0_7_25_7: '사이드바 계정 메뉴를 추가하고 Agent 선택 순서를 통일했으며 Agent 관리자와 그룹 채팅 레이아웃을 개선했습니다 (#3191, #3199, #3201, #3188)',
+    new_0_7_25_8: 'Hermes 업그레이드 호환성, 브리지 프로세스 수명 주기, Studio 인스턴스 간 MCP 라우팅, 그룹 Coding Agent 자격 증명을 수정했습니다 (#3202, #3157, #3187)',
+    new_0_7_25_9: 'DSH 시작 의존성과 ACP 소속 번들 확인을 수정하고 개별 Codex 설정의 중복 키를 제거했습니다 (#3156, #3190, #3163)',
+    new_0_7_25_10: '오래된 알림 대상을 비활성화하여 iOS Live Activities 정리를 개선했습니다 (#3167)',
     new_0_7_24_1: '언어별 업데이트와 사용자별 알림 라우팅을 지원하는 iOS Live Activities 오케스트레이션을 추가했습니다 (#3102, #3111, #3152)',
     new_0_7_24_2: '알림 기본값과 미리보기를 개선하고 이전 세션 옵트아웃을 무시하며 지원되지 않는 소셜 푸시 항목을 숨겼습니다 (#3131, #3133, #3146, #3151)',
     new_0_7_24_3: '공유 세션 업로드와 첨부 파일에 대한 접근을 모든 세션 공유 흐름에서 수정했습니다 (#3144)',

@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 interface DailyUsage {
+  cost_coverage?: import('@/utils/usage-cost').UsageCostCoverage
   date: string
   input_tokens: number
   output_tokens: number

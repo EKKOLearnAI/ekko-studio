@@ -9,6 +9,10 @@ import { useChatStore, type Session } from '@/stores/hermes/chat'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
 
+vi.mock('@/components/common/PageLoading.vue', () => ({
+  default: { props: ['show'], template: '<div><slot /></div>' },
+}))
+
 vi.mock('@/components/hermes/chat/ChatPanel.vue', () => ({
   default: {
     name: 'ChatPanel',

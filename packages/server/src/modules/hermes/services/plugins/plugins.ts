@@ -47,6 +47,7 @@ export interface HermesPluginMutationResult {
 }
 
 const PYTHON_BRIDGE = String.raw`
+import importlib
 import json
 import os
 import sys
@@ -65,6 +66,19 @@ if agent_root:
     sys.path.insert(0, agent_root)
 
 try:
+    # Updated Hermes may select a new interpreter and dependency generation.
+    # Finish its bootstrap before importing plugin/config dependencies.
+    try:
+        importlib.import_module("hermes_bootstrap")
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_bootstrap":
+            raise
+    try:
+        yaml = importlib.import_module("hermes_yaml")
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_yaml":
+            raise
+        yaml = importlib.import_module("yaml")
     from hermes_cli.plugins import (
         PluginManager,
         get_bundled_plugins_dir,
@@ -99,7 +113,6 @@ def coerce_list(value):
 
 def read_manifest_list(plugin_path, *keys):
     try:
-        import yaml
         plugin_dir = Path(plugin_path)
         manifest_file = plugin_dir / "plugin.yaml"
         if not manifest_file.exists():
@@ -128,7 +141,6 @@ def read_config_file(home):
     if not home:
         return {}
     try:
-        import yaml
         path = Path(home) / "config.yaml"
         if not path.exists():
             return {}

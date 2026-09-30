@@ -82,6 +82,8 @@ function handoffErrorText(error: string | null | undefined): string {
     return key ? t(key) : ''
 }
 
+function routingDecision(message: import('@/api/studio/group-chat').ChatMessage) { return store.messageRoutingDecisions.get(message.id) }
+
 function isOtherMemberMessage(message: import('@/api/studio/group-chat').ChatMessage): boolean {
     if (!store.userId || message.senderId === store.userId) return false
     return store.members.some(member =>
@@ -200,7 +202,7 @@ defineExpose({ scrollToBottom })
                     v-else-if="store.hasMoreBefore || store.isLoadingOlderMessages"
                     class="history-loader"
                 >
-                    <span v-if="store.isLoadingOlderMessages" class="history-loader-spinner"></span>
+                    <span v-if="store.isLoadingOlderMessages" class="history-loader-spinner" role="status" :aria-label="t('common.loading')"></span>
                 </div>
             </template>
             <template #item="{ message: msg }">
@@ -228,6 +230,13 @@ defineExpose({ scrollToBottom })
                         :allow-speech="props.allowSpeech"
                         @mention-agent="emit('mentionAgent', $event)"
                     />
+                    <div v-if="routingDecision(msg)?.status === 'suggested' && routingDecision(msg)?.targetAgentName" class="routing-suggestion" role="status">
+                        <span>{{ t('groupChat.routingSuggested', { agent: routingDecision(msg)!.targetAgentName }) }}</span>
+                        <button type="button" @click="store.acceptRoutingSuggestion(msg.id)">{{ t('groupChat.routingUseSuggestion') }}</button>
+                    </div>
+                    <div v-else-if="routingDecision(msg)?.status === 'queued'" class="routing-suggestion" role="status">{{ t('groupChat.routingAutoQueued', { agent: routingDecision(msg)!.targetAgentName }) }}</div>
+                    <div v-if="routingDecision(msg)?.handoffComplete === false" class="routing-suggestion routing-warning" role="status">{{ t('groupChat.routingHandoffIncomplete') }}</div>
+                    <div v-if="routingDecision(msg)?.loopDetected === true" class="routing-suggestion routing-warning" role="status">{{ t('groupChat.routingLoopDetected') }}</div>
                     <div
                         v-if="handoffChainFor(msg)"
                         class="handoff-stop-card"
@@ -465,14 +474,6 @@ defineExpose({ scrollToBottom })
     letter-spacing: 0.02em;
 }
 
-.history-loader {
-    height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-}
-
 .history-loader-spinner {
     width: 14px;
     height: 14px;
@@ -486,6 +487,15 @@ defineExpose({ scrollToBottom })
         border-top-color: $accent-primary;
     }
 }
+
+.history-loader {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
 
 .history-load-error {
     display: flex;
@@ -521,11 +531,6 @@ defineExpose({ scrollToBottom })
     cursor: pointer;
 }
 
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
 
 @media (max-width: 640px) {
     .summary-anchor-divider {
@@ -537,4 +542,11 @@ defineExpose({ scrollToBottom })
         display: none;
     }
 }
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
 </style>
+
+<style scoped>.routing-suggestion{margin:4px 12px 10px;padding:8px 10px;border:1px solid var(--border-color);border-radius:8px;display:flex;gap:8px;align-items:center}.routing-warning{border-color:#f0a020}.routing-suggestion button{border:0;background:transparent;color:var(--primary-color);cursor:pointer}</style>

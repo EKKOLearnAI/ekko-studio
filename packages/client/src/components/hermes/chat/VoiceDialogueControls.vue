@@ -143,7 +143,7 @@ function cancel() {
   appearance: none;
   border: 0;
   font: inherit;
-  color: var(--text-color-3, #999999);
+  color: var(--text-muted);
   background: transparent;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
@@ -161,12 +161,12 @@ function cancel() {
 }
 
 .voice-dialogue-controls__toggle:hover {
-  color: var(--text-color-2, currentColor);
+  color: var(--text-secondary);
   background: rgba(128, 128, 128, 0.12);
 }
 
 .voice-dialogue-controls__toggle:focus-visible {
-  outline: 2px solid var(--primary-color, #18a058);
+  outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
 
@@ -204,7 +204,7 @@ function cancel() {
 }
 
 .voice-dialogue-controls__cancel:hover {
-  color: var(--text-color-2, currentColor);
+  color: var(--text-secondary);
   background: rgba(128, 128, 128, 0.12);
 }
 </style>

@@ -19,13 +19,13 @@ Do not use one `source` or `agent` field for all of these concepts:
 | Concept | Allowed values | Meaning |
 | --- | --- | --- |
 | `AgentFamily` | `hermes`, `ekko`, `coding` | Product/domain owner of an agent implementation. |
-| `AgentRuntime` | `hermes`, `ekko`, `claude-code`, `codex`, `pi`, `grok` | Concrete runtime selected for a run. |
+| `AgentRuntime` | `hermes`, `ekko`, `claude-code`, `codex`, `pi`, `grok`, `opencode`, `dsh`, `cursor` | Concrete runtime selected for a run. |
 | `RunSurface` | `chat`, `workflow`, `group-chat`, `global-agent`, `api` | Studio surface that initiated a run. |
 | `RunMode` | `scoped`, `global` | Whether the run is workspace/profile scoped or global. |
 
-Hermes and Ekko are both a family and a runtime. Claude Code, Codex, Pi, and
-Grok are four runtimes in the Coding family. Persist and transport these concepts
-separately whenever a schema is introduced or revised.
+Hermes and Ekko are both a family and a runtime. Claude Code, Codex, Pi, Grok,
+OpenCode, DSH, and Cursor are seven runtimes in the Coding family. Persist and
+transport these concepts separately whenever a schema is introduced or revised.
 
 ## Target Directory
 
@@ -69,6 +69,7 @@ packages/server/src/
         runs.ts
         sessions.ts
         usage.ts
+        model-catalog.ts           # shared local models.dev metadata and startup refresh
         workspace.ts
         workspace-files.ts          # shared path, preview, Git status, and file policy facade
         group-chat-agent-runtime.ts # injected concrete Agent adapters for Group Chat
@@ -285,7 +286,7 @@ packages/server/src/
       sockets/
         chat.ts
 
-    coding-agents/                 # Claude Code, Codex, Pi, and Grok family
+    coding-agents/                 # Claude Code, Codex, Pi, Grok, OpenCode, DSH, and Cursor family
       index.ts
       public/
         runner.ts
@@ -314,6 +315,9 @@ packages/server/src/
         codex/
         pi/
         grok/
+        opencode/
+        dsh/
+        cursor/
       sockets/
         runs.ts
 ```
@@ -341,7 +345,7 @@ registry. Studio orchestration never imports a concrete agent module.
 | Hermes Agent history adapters | Hermes | Read `~/.hermes/.../state.db`; they are separate from Studio repositories. |
 | Hermes runtime download/activation/version | Hermes | Manages the Hermes runtime; split it from Studio Web UI updating. |
 | Ekko runtime, provider handling, tools, memory, approvals, clarification, MCP | Ekko | Concrete Ekko Agent behavior. |
-| Claude Code, Codex, Pi, Grok, and their shared protocol | Coding Agents | Shared by runtimes in one family, not by all Studio agents. |
+| Claude Code, Codex, Pi, Grok, OpenCode, DSH, Cursor, and their shared protocol | Coding Agents | Shared by runtimes in one family, not by all Studio agents. |
 
 If a feature can dispatch multiple agents, that alone does not make its data
 and business rules common. Ownership follows the state, command, and rules that

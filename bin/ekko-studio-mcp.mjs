@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { browserIntent, matchBrowserSnapshot, verifyBrowserResult } from './browser/jev.mjs'
+import { validateBrowserArguments } from './browser/arguments.mjs'
+import { browserOutput } from './browser/output.mjs'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { createInterface } from 'node:readline'
@@ -117,6 +120,21 @@ function readToken(tokenOverride, allowTokenFile = true, profile = '') {
   }
 }
 
+function readRunCredential(profile) {
+  const file = process.env.HERMES_WEB_UI_RUN_TOKEN_FILE
+  if (!file) return null
+  let credential
+  try { credential = JSON.parse(readFileSync(file, 'utf8')) } catch {
+    throw new Error('The current run credential is unavailable. Start a new Studio run.')
+  }
+  if (!credential || typeof credential.token !== 'string' || !credential.token.startsWith('studio_run_')
+    || typeof credential.context_id !== 'string' || !credential.context_id
+    || typeof credential.profile !== 'string' || credential.profile !== profile) {
+    throw new Error('The MCP request does not match its configured run credential.')
+  }
+  return credential
+}
+
 function defaultProfile() {
   return String(
     process.env.HERMES_WEB_UI_PROFILE ||
@@ -150,10 +168,9 @@ function errorText(message) {
 async function request(path, options = {}) {
   const envelope = await requestEnvelope(path, options)
   if (envelope.status < 200 || envelope.status >= 300) {
-    if (envelope.status === 401) {
-      throw new Error(`${envelope.body?.error || 'Unauthorized'}. ${authHint()}`)
-    }
-    throw new Error(envelope.body?.error || envelope.bodyText || `HTTP ${envelope.status}`)
+    const message = envelope.status === 401 ? `${envelope.body?.error || 'Unauthorized'}. ${authHint()}`
+      : envelope.body?.error || envelope.bodyText || `HTTP ${envelope.status}`
+    throw Object.assign(new Error(message), { status: envelope.status })
   }
   return envelope.body
 }
@@ -216,7 +233,10 @@ async function requestEnvelope(path, options = {}) {
   const profile = typeof options.profile === 'string' && options.profile.trim()
     ? options.profile.trim()
     : defaultProfile()
-  const token = readToken(options.token, options.allowTokenFile !== false, profile)
+  // A managed group run must never fall back to another run's profile token,
+  // a stale inherited AUTH_TOKEN, or an explicit tool-argument override.
+  const runCredential = readRunCredential(profile)
+  const token = runCredential?.token || readToken(options.token, options.allowTokenFile !== false, profile)
   const method = options.method || 'GET'
   const body = method === 'GET' || method === 'HEAD' ? undefined : options.body
   const headers = {
@@ -224,6 +244,7 @@ async function requestEnvelope(path, options = {}) {
     ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(profile ? { 'X-Hermes-Profile': profile } : {}),
+    ...(runCredential ? { 'X-Studio-Run-Context': runCredential.context_id } : {}),
   }
   const fetchRequest = path === '/api/studio/mobile-calendar/request' || path === '/api/studio/mobile-health/request' || path === '/api/studio/clarifications/request' ? fetchMobileConsent : fetch
   const response = await fetchRequest(`${baseUrl()}${appendQuery(path, options.query)}`, {
@@ -637,7 +658,8 @@ function browserDescriptor() {
   return { endpoint, token, instanceId: String(descriptor.instanceId || '') }
 }
 
-async function browserSession(descriptor) {
+async function browserSession(descriptor, signal) {
+  signal?.throwIfAborted()
   if (cachedBrowserSession?.instanceId === descriptor.instanceId) return cachedBrowserSession
   const sessionUrl = new URL(descriptor.endpoint)
   sessionUrl.pathname = '/v1/session'
@@ -645,7 +667,7 @@ async function browserSession(descriptor) {
     method: 'POST',
     headers: { Authorization: `Bearer ${descriptor.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ client: BROWSER_CLIENT_ID, client_pid: process.pid }),
-    signal: AbortSignal.timeout(10_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok || !payload?.client_id || !payload?.session_token) throw new Error(payload?.error || 'Desktop Browser Broker session failed')
@@ -653,9 +675,10 @@ async function browserSession(descriptor) {
   return cachedBrowserSession
 }
 
-async function browserRequest(method, params = {}) {
+async function browserRequest(method, params = {}, signal) {
   const descriptor = browserDescriptor()
-  const session = await browserSession(descriptor)
+  const session = await browserSession(descriptor, signal)
+  signal?.throwIfAborted()
   const operationId = randomUUID()
   const response = await fetch(descriptor.endpoint, {
     method: 'POST',
@@ -665,7 +688,7 @@ async function browserRequest(method, params = {}) {
       'X-Hermes-Browser-Client': session.clientId,
     },
     body: JSON.stringify({ method, params, operation_id: operationId }),
-    signal: AbortSignal.timeout(45_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000),
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok) throw new Error(payload?.error || `Browser Broker HTTP ${response.status}`)
@@ -914,8 +937,18 @@ const tools = [
   {
     name: 'ekko_studio_browser_snapshot',
     toolset: 'browser',
-    description: 'Return a bounded accessibility snapshot with stable element refs. Pass its snapshot_id to read text, click, or type; stale snapshots are rejected.',
-    inputSchema: browserInputSchema({ tab_id: { type: 'string' } }, ['tab_id']),
+    description: 'Read an accessibility snapshot in bounded pages. Large pages: use selector for a CSS region (e.g. #form-demo-layout), query for local label/text search, or interactive_only for controls. These search the full document before paging and require no JEV. When hasMore is true, continue with snapshot_id and offset=nextOffset instead of repeating or scrolling the same tree. Refs stay stable across pages of that snapshot; use snapshot_id/ref for click/type. Optional target adds JEV advice only when configured.',
+    inputSchema: browserInputSchema({
+      tab_id: { type: 'string' },
+      selector: { type: 'string', minLength: 1, maxLength: 2000, description: 'CSS selector for one region in the main document. A URL #anchor often identifies the intended demo/form. Omit to inspect the whole document.' },
+      query: { type: 'string', minLength: 1, maxLength: 2000, description: 'Local case-insensitive substring search of rendered names, roles and descriptions across the full selected region. Works without JEV.' },
+      interactive_only: { type: 'boolean', description: 'Return controls and links, excluding static text and layout containers. Works without JEV.' },
+      snapshot_id: { type: 'string', minLength: 1, maxLength: 2000, description: 'Continue the latest cached snapshot without re-reading the page. Do not combine with selector/query/interactive_only; omit for a fresh snapshot.' },
+      offset: { type: 'number', minimum: 0, description: 'Zero-based node offset, normally the previous nextOffset. Defaults to 0.' },
+      limit: { type: 'number', minimum: 1, maximum: 300, description: 'Nodes per response, default 100. Use pagination rather than increasing the limit for large documents.' },
+      include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside nodes. Defaults to false.' },
+      target: { type: 'string', minLength: 1, maxLength: 2000, description: 'Optional JEV semantic advice within the returned page; use local selector/query/interactive_only to locate missing controls first.' },
+    }, ['tab_id']),
   },
   {
     name: 'ekko_studio_browser_read_text',
@@ -933,13 +966,37 @@ const tools = [
   {
     name: 'ekko_studio_browser_interact',
     toolset: 'browser',
-    description: 'Click, type, press a key, or scroll in one Desktop browser tab. Click/type require a ref and snapshot_id from the latest snapshot.',
+    description: 'Click, type, press a key, or scroll in one Desktop browser tab. Click/type require a ref and snapshot_id from the latest snapshot. Returns a fresh snapshot and local observation of target states, changes and openedTabs even without JEV. Use the returned snapshot.tabId (it may be a newly opened destination). Dispatch alone does not prove success; if no change is observed, inspect a relevant region or screenshot instead of blindly repeating. Supply expectation for optional JEV judgment; verification is advisory and never retries the action.',
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
+      expectation: { type: 'string', minLength: 1, maxLength: 2000, description: 'Expected visible outcome to judge after the action, when enabled in Models > JEV.' },
+      include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside snapshot nodes. Defaults to false.' },
       action: { type: 'string', enum: ['click', 'type', 'press', 'scroll'] },
       ref: { type: 'string' }, snapshot_id: { type: 'string' }, text: { type: 'string' }, key: { type: 'string' },
       direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, pixels: { type: 'number' },
     }, ['tab_id', 'action']),
+  },
+  {
+    name: 'ekko_studio_browser_batch',
+    toolset: 'browser',
+    description: 'Execute 1-50 click/type/press/scroll actions sequentially in one tab in a single call. For click/type, pass one current snapshot_id and refs from that snapshot; original DOM targets are revalidated before each step. Stops on the first failure, new-document navigation/reload, user takeover, or the 30-second execution budget. Same-document URL/SKU changes can continue when targets remain valid. Returns zero-based per-step completed/failed/skipped results, local observation and a fresh snapshot when available, even without JEV. Completed means dispatched, not a confirmed outcome; completed actions are not rolled back. Inspect target states and use snapshot.tabId if a new tab opened. Supply expectation for optional JEV verification after a fully completed batch; verification does not change completion status or retry actions.',
+    inputSchema: browserInputSchema({
+      tab_id: { type: 'string' },
+      snapshot_id: { type: 'string', description: 'Current snapshot used by all click/type refs; optional for a batch containing only press/scroll.' },
+      include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside final snapshot nodes. Defaults to false.' },
+      expectation: { type: 'string', minLength: 1, maxLength: 2000, description: 'Expected visible outcome after all actions finish. Prefer one batch assessment over assessing every intermediate click.' },
+      actions: {
+        type: 'array', minItems: 1, maxItems: 50,
+        items: {
+          oneOf: [
+            browserInputSchema({ action: { type: 'string', const: 'click' }, ref: { type: 'string' } }, ['action', 'ref']),
+            browserInputSchema({ action: { type: 'string', const: 'type' }, ref: { type: 'string' }, text: { type: 'string', maxLength: 100000 } }, ['action', 'ref', 'text']),
+            browserInputSchema({ action: { type: 'string', const: 'press' }, key: { type: 'string', minLength: 1, maxLength: 64 } }, ['action', 'key']),
+            browserInputSchema({ action: { type: 'string', const: 'scroll' }, direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, pixels: { type: 'number', minimum: 1, maximum: 10000 } }, ['action', 'direction']),
+          ],
+        },
+      },
+    }, ['tab_id', 'actions']),
   },
   {
     name: 'ekko_studio_browser_screenshot',
@@ -1747,8 +1804,8 @@ const TOOL_ALIASES = new Map([
 const CATEGORY_TOOLSETS = {
   browser: {
     name: 'ekko_studio_browser_toolset',
-    coverage: 'Ekko Studio Desktop browser tabs and leases; HTTP/HTTPS navigation; accessibility snapshots with stable refs; click, type, key press, and scroll interaction; viewport or full-page screenshots; bounded console log read and clear.',
-    description: 'Discover and invoke Ekko Studio Desktop browser operations without loading every browser tool schema into the model context. Covers tab list/create/activate/close/release, navigation back/forward/reload/stop/open, accessibility snapshots, click/type/key/scroll interaction, screenshots, and console logs. Use action=list for the compact operation catalog, action=describe for one full input schema, then action=call with that exact tool name and arguments.',
+    coverage: 'Ekko Studio Desktop browser tabs and leases; HTTP/HTTPS navigation; accessibility snapshots with stable refs; single or sequential batch click, type, key press, and scroll interaction; viewport or full-page screenshots; bounded console log read and clear.',
+    description: 'Discover and invoke Ekko Studio Desktop browser operations without loading every browser tool schema into the model context. Covers tab list/create/activate/close/release, navigation back/forward/reload/stop/open, accessibility snapshots, single or batch click/type/key/scroll interaction, screenshots, and console logs. Use action=list for the compact operation catalog, action=describe for one full input schema, then action=call with that exact tool name and arguments.',
   },
   devices: {
     name: 'ekko_studio_devices_toolset',
@@ -1852,7 +1909,7 @@ function isToolCallable(name) {
   return activeToolsetTools().some(tool => tool.name === resolved)
 }
 
-async function callCategoryToolset(args = {}) {
+async function callCategoryToolset(args = {}, signal) {
   const category = CATEGORY_TOOLSETS[ACTIVE_TOOLSET]
   if (!category) return errorText(`No compact category toolset is available for '${ACTIVE_TOOLSET}'.`)
   if (args.action === 'list') {
@@ -1877,7 +1934,7 @@ async function callCategoryToolset(args = {}) {
   }
   if (args.action === 'call') {
     if (!isRecord(args.arguments)) return errorText('arguments must be an object when action=call.')
-    return await callTool(target.name, args.arguments)
+    return await callTool(target.name, args.arguments, signal)
   }
   return errorText('Invalid category toolset action. Allowed: list, describe, call.')
 }
@@ -1888,7 +1945,12 @@ async function callTool(name, args = {}, signal) {
   }
   const resolvedName = resolveToolName(name)
   const categoryToolset = categoryToolsetDefinition(ACTIVE_TOOLSET)
-  if (resolvedName === categoryToolset?.name) return await callCategoryToolset(args)
+  if (resolvedName === categoryToolset?.name) return await callCategoryToolset(args, signal)
+  const browserTool = tools.find(tool => tool.name === resolvedName && tool.toolset === 'browser')
+  if (browserTool) {
+    const error = validateBrowserArguments(browserTool, args)
+    if (error) return errorText(`${error}. Use ekko_studio_browser_toolset action=describe tool=${resolvedName} for the schema.`)
+  }
   switch (resolvedName) {
     case 'ekko_studio_browser_tabs': {
       if (args.action === 'list') return jsonText(await browserRequest('tabs.list'))
@@ -1906,8 +1968,15 @@ async function callTool(name, args = {}, signal) {
       }
       return jsonText(await browserRequest('navigation.action', { tab_id: args.tab_id, action }))
     }
-    case 'ekko_studio_browser_snapshot':
-      return jsonText(await browserRequest('snapshot', { tab_id: args.tab_id }))
+    case 'ekko_studio_browser_snapshot': {
+      const target = browserIntent(args.target, 'target')
+      const params = { tab_id: args.tab_id }
+      for (const key of ['selector', 'query', 'interactive_only', 'snapshot_id', 'offset', 'limit']) {
+        if (args[key] !== undefined) params[key] = args[key]
+      }
+      const envelope = await browserRequest('snapshot', params, signal)
+      return browserOutput(await matchBrowserSnapshot(request, envelope, target, signal), args.include_text)
+    }
     case 'ekko_studio_browser_read_text':
       return jsonText(await browserRequest('text.read', {
         tab_id: args.tab_id,
@@ -1918,11 +1987,19 @@ async function callTool(name, args = {}, signal) {
         limit: args.limit,
       }))
     case 'ekko_studio_browser_interact': {
+      const expectation = browserIntent(args.expectation, 'expectation')
       const action = { action: args.action }
       for (const key of ['ref', 'snapshot_id', 'text', 'key', 'direction', 'pixels']) {
         if (args[key] !== undefined) action[key] = args[key]
       }
-      return jsonText(await browserRequest('interact', { tab_id: args.tab_id, action }))
+      const envelope = await browserRequest('interact', { tab_id: args.tab_id, action }, signal)
+      return browserOutput(await verifyBrowserResult(request, envelope, expectation, () => browserRequest('snapshot', { tab_id: args.tab_id }, signal), signal), args.include_text)
+    }
+    case 'ekko_studio_browser_batch': {
+      const expectation = browserIntent(args.expectation, 'expectation')
+      const executed = await browserRequest('interact.batch', { tab_id: args.tab_id, snapshot_id: args.snapshot_id, actions: args.actions }, signal)
+      const envelope = await verifyBrowserResult(request, executed, expectation, () => browserRequest('snapshot', { tab_id: args.tab_id }, signal), signal)
+      return { ...browserOutput(envelope, args.include_text), ...(envelope.result?.completed < envelope.result?.total ? { isError: true } : {}) }
     }
     case 'ekko_studio_browser_screenshot': {
       try {
@@ -2218,7 +2295,8 @@ async function handle(message) {
       case 'tools/list':
         return { jsonrpc: '2.0', id: message.id, result: { tools: visibleTools() } }
       case 'tools/call': {
-        const abort = resolveToolName(message.params?.name) === 'ekko_studio_clarify' ? new AbortController() : undefined
+        const resolvedName = resolveToolName(message.params?.name)
+        const abort = resolvedName === 'ekko_studio_clarify' || resolvedName?.startsWith('ekko_studio_browser_') ? new AbortController() : undefined
         if (abort) pendingInteractions.set(message.id, abort)
         try {
           return {

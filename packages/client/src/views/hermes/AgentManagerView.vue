@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { getAgentUpdatePolicies, setAgentAutoUpdate, type AgentUpdatePolicyState } from '@/api/coding-agents'
 import { computed, defineAsyncComponent, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NSpin, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import {
   checkCodingAgentUpdate,
   deleteCodingAgent,
@@ -35,14 +37,6 @@ interface CodingAgentCard {
   command: string
   packageName: string
 }
-
-defineProps<{
-  sidebarCollapsed: boolean
-}>()
-
-const emit = defineEmits<{
-  toggleSidebar: []
-}>()
 
 const codingAgents: CodingAgentCard[] = [
   {
@@ -86,6 +80,14 @@ const codingAgents: CodingAgentCard[] = [
     packageName: 'opencode-ai',
   },
   { id: 'dsh', name: 'DeepSeek Harness', provider: 'DeepSeek', logo: '/coding-agents/deepseek.svg', command: 'dsh', packageName: '@deepseek-ai/dsh' },
+  {
+    id: 'cursor',
+    name: 'Cursor',
+    provider: 'Cursor',
+    logo: '/coding-agents/cursor-logo.png',
+    command: 'agent',
+    packageName: 'cursor-agent',
+  },
 ]
 
 const updatePolicies = ref<Record<string, AgentUpdatePolicyState>>({})
@@ -113,7 +115,7 @@ const router = useRouter()
 
 const tools = ref<CodingAgentToolStatus[]>([])
 const agentStatusSnapshot = ref<AgentStatusSnapshot | null>(null)
-const loading = ref(false)
+const loading = ref(true)
 const loadError = ref('')
 const runtimeManagerVisible = ref(false)
 const hermesCliDetailsVisible = ref(false)
@@ -122,9 +124,9 @@ const hermesRuntimeStatus = ref<RuntimeVersionStatus | null>(null)
 const aiHelpDrawerVisible = ref(false)
 const aiHelpPrompt = ref('')
 const legacyDataMigrationChecked = ref(false)
-const installing = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false })
-const deleting = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false })
-const checkingUpdate = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false })
+const installing = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false })
+const deleting = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false })
+const checkingUpdate = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false })
 const updateInfo = ref<Record<CodingAgentId, CodingAgentUpdateResult | null>>({
   'claude-code': null,
   codex: null,
@@ -132,6 +134,7 @@ const updateInfo = ref<Record<CodingAgentId, CodingAgentUpdateResult | null>>({
   grok: null,
   opencode: null,
   dsh: null,
+  cursor: null,
 })
 
 const hermesStatus = computed(() => agentStatusSnapshot.value?.agents.find(agent => agent.id === 'hermes'))
@@ -272,6 +275,36 @@ async function loadCachedStatus() {
     loadError.value = errorMessage(error)
   } finally {
     loading.value = false
+    void checkExternalCursorInstallation()
+  }
+}
+
+let checkingExternalInstallation = false
+let managerMounted = false
+let externalInstallationRefreshPending = false
+
+async function checkExternalCursorInstallation() {
+  // Cursor is installed outside Studio. Returning from its guide or a terminal
+  // must probe the CLI again instead of reusing the startup inventory.
+  if (!managerMounted || document.visibilityState === 'hidden') return
+  if (loading.value || installing.value.cursor || checkingExternalInstallation) {
+    externalInstallationRefreshPending = true
+    return
+  }
+  externalInstallationRefreshPending = false
+  if (!toolStatus('cursor') || toolStatus('cursor')?.installed) return
+  checkingExternalInstallation = true
+  try {
+    const result = await fetchCodingAgentsStatus()
+    if (managerMounted) {
+      tools.value = result.tools
+      loadError.value = ''
+    }
+  } catch (error) {
+    if (managerMounted) loadError.value = errorMessage(error)
+  } finally {
+    checkingExternalInstallation = false
+    if (externalInstallationRefreshPending) void checkExternalCursorInstallation()
   }
 }
 
@@ -294,6 +327,7 @@ async function refreshAll() {
   }
   if (errors.length) loadError.value = errors.join('\n')
   loading.value = false
+  if (externalInstallationRefreshPending) void checkExternalCursorInstallation()
 }
 
 async function openHermesCliDetails() {
@@ -361,9 +395,16 @@ async function maybePromptLegacyWindowsDataMigration() {
 async function handleInstall(id: CodingAgentId) {
   installing.value[id] = true
   try {
+    if (id === 'cursor' && typeof window !== 'undefined') {
+      window.open('https://cursor.com/install', '_blank', 'noopener,noreferrer')
+    }
     const result = await installCodingAgent(id)
     tools.value = result.tools
     if (result.updateState) updatePolicies.value[id] = result.updateState
+    if (id === 'cursor' && !result.success) {
+      message.info(t('agentManager.cursorDescription'))
+      return
+    }
     if (!result.success) throw new Error(result.message || t('codingAgents.installFailed'))
     updateInfo.value[id] = null
     message.success(t('codingAgents.installSuccess'))
@@ -371,6 +412,7 @@ async function handleInstall(id: CodingAgentId) {
     handleMutationError(id, 'install', error)
   } finally {
     installing.value[id] = false
+    if (externalInstallationRefreshPending) void checkExternalCursorInstallation()
   }
 }
 
@@ -404,6 +446,9 @@ async function handleCheckUpdate(id: CodingAgentId) {
 }
 
 onMounted(() => {
+  managerMounted = true
+  window.addEventListener('focus', checkExternalCursorInstallation)
+  document.addEventListener('visibilitychange', checkExternalCursorInstallation)
   if (route.query.runtime === 'install') {
     runtimeManagerVisible.value = true
     const query = { ...route.query }
@@ -413,30 +458,20 @@ onMounted(() => {
   void loadCachedStatus()
   void maybePromptLegacyWindowsDataMigration()
 })
+
+onUnmounted(() => {
+  managerMounted = false
+  externalInstallationRefreshPending = false
+  window.removeEventListener('focus', checkExternalCursorInstallation)
+  document.removeEventListener('visibilitychange', checkExternalCursorInstallation)
+})
 </script>
 
 <template>
-  <div class="agent-manager-panel">
+  <PageLoading :show="loading" class="agent-manager-panel">
+      <PageHeader>
       <header class="page-header">
         <div class="agent-manager-header-left">
-          <NButton
-            class="agent-manager-sidebar-toggle"
-            quaternary
-            size="small"
-            circle
-            :title="sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')"
-            :aria-label="sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')"
-            @click="emit('toggleSidebar')"
-          >
-            <template #icon>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-              </svg>
-            </template>
-          </NButton>
           <h2 class="header-title">{{ t('agentManager.title') }}</h2>
         </div>
         <div class="agent-manager-header-actions">
@@ -448,8 +483,9 @@ onMounted(() => {
           </NButton>
         </div>
       </header>
+      </PageHeader>
 
-      <NSpin :show="loading" class="agent-manager-spin">
+      <div class="agent-manager-spin">
         <div class="agent-manager-content">
           <NAlert v-if="loadError" type="error" :bordered="false">
             {{ loadError }}
@@ -561,7 +597,7 @@ onMounted(() => {
                     <p v-if="toolStatus(agent.id)?.installed" class="agent-version">
                       {{ installedVersion(agent.id) }}
                     </p>
-                    <p v-else>{{ t('agentManager.codingAgentDescription') }}</p>
+                    <p v-else>{{ agent.id === 'cursor' ? t('agentManager.cursorDescription') : t('agentManager.codingAgentDescription') }}</p>
                   </div>
                 </div>
               </header>
@@ -586,10 +622,10 @@ onMounted(() => {
                   :loading="installing[agent.id]"
                   @click="handleInstall(agent.id)"
                 >
-                  {{ t('codingAgents.installNow') }}
+                  {{ agent.id === 'cursor' ? t('codingAgents.cursorInstallGuide') : t('codingAgents.installNow') }}
                 </NButton>
                 <NButton
-                  v-else-if="availableUpdateVersion(agent.id)"
+                  v-else-if="agent.id !== 'cursor' && availableUpdateVersion(agent.id)"
                   type="primary"
                   secondary
                   size="small"
@@ -599,7 +635,7 @@ onMounted(() => {
                   {{ t('agentManager.updateToVersion', { version: formatVersion(availableUpdateVersion(agent.id)) }) }}
                 </NButton>
                 <NButton
-                  v-if="toolStatus(agent.id)?.installed && !availableUpdateVersion(agent.id)"
+                  v-if="agent.id !== 'cursor' && toolStatus(agent.id)?.installed && !availableUpdateVersion(agent.id)"
                   secondary
                   size="small"
                   :loading="checkingUpdate[agent.id]"
@@ -610,7 +646,7 @@ onMounted(() => {
                 </NButton>
 
                 <NPopconfirm
-                  v-if="toolStatus(agent.id)?.installed"
+                  v-if="agent.id !== 'cursor' && toolStatus(agent.id)?.installed"
                   @positive-click="handleDelete(agent.id)"
                 >
                   <template #trigger>
@@ -630,12 +666,12 @@ onMounted(() => {
               <div v-if="toolStatus(agent.id)?.installed && updatePolicies[agent.id]" class="agent-update-policy">
                 <div class="agent-update-policy-row"><span>{{ t('agentAutoUpdate.label') }}</span><NSwitch class="agent-update-switch" size="small" :theme-overrides="{ railHeightSmall: '16px', railWidthSmall: '28px', buttonHeightSmall: '12px', buttonWidthSmall: '12px' }" :disabled="!updatePolicies[agent.id]?.autoUpdateSupported" :value="updatePolicies[agent.id]?.autoUpdate" @update:value="toggleAutoUpdate(agent.id, $event)" /></div>
 
-                <small v-if="updatePolicies[agent.id]?.error" class="agent-update-error">{{ t('codingAgents.checkUpdateFailed') }}</small>
+                <small v-if="updatePolicies[agent.id]?.autoUpdateSupported && updatePolicies[agent.id]?.error" class="agent-update-error">{{ t('codingAgents.checkUpdateFailed') }}</small>
               </div>
             </section>
           </div>
         </div>
-      </NSpin>
+      </div>
 
     <VersionManagementModal v-model:show="runtimeManagerVisible" />
 
@@ -678,7 +714,7 @@ onMounted(() => {
         />
       </NDrawerContent>
     </NDrawer>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -798,13 +834,10 @@ onMounted(() => {
   flex: 1 1 auto;
   overflow-y: auto;
 
-  :deep(.n-spin-content) {
-    height: 100%;
-  }
 }
 
 .agent-manager-content {
-  max-width: 1240px;
+  container: agent-manager / inline-size;
   min-height: 100%;
   display: flex;
   flex-direction: column;
@@ -876,9 +909,22 @@ onMounted(() => {
 
 .coding-agent-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   align-items: stretch;
   gap: 16px;
+}
+
+// Keep cards at least 340px wide when showing multiple columns, including 16px gaps.
+@container agent-manager (min-width: 696px) {
+  .coding-agent-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container agent-manager (min-width: 1052px) {
+  .coding-agent-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .coding-agent-card {
@@ -898,10 +944,6 @@ onMounted(() => {
   :global(.agent-ai-help-drawer.n-drawer) {
     width: 100vw !important;
     max-width: 100vw;
-  }
-
-  .agent-manager-sidebar-toggle {
-    display: none;
   }
 
   .agent-manager-content {

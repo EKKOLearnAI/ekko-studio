@@ -1,4 +1,7 @@
 import { businessEvents } from '../services/webhooks/business-events'
+import { getUsagePricing, saveUsagePricing, validateUsagePricing } from '../services/usage/usage-pricing'
+import { emptyCostCoverage, addCostCoverage } from '../services/usage/usage-cost'
+import { applyHermesCostFallbacks } from '../services/usage/hermes-cost-fallback'
 import { ensureBusinessConsumers } from '../services/webhooks/business-consumers'
 import { authorizeSessionShare, authorizeShareFile } from '../services/session-shares/access'
 import { sessionShareService } from '../services/session-shares/service'
@@ -35,7 +38,7 @@ import {
   updateSessionStats as localUpdateSessionStats,
 } from '../public/sessions'
 import { buildDbExportHistory, ExportCompressor } from '../services/context-compressor/export-compressor'
-import { getLocalUsageStats, getRecordedUsageSessionIds, getUsage, getUsageBatch } from '../public/sessions'
+import { getUnpricedHermesUsageSessions, getLocalUsageStats, getRecordedUsageSessionIds, getUsage, getUsageBatch } from '../public/sessions'
 import {
   SESSION_CATEGORY_NAME_MAX_LENGTH,
   createSessionCategory,
@@ -238,6 +241,7 @@ function isCodingAgentSession(session?: { source?: string | null; agent?: string
     session?.agent === 'pi' ||
     session?.agent === 'grok' ||
     session?.agent === 'opencode' ||
+    session?.agent === 'cursor' ||
     Boolean(session?.agent_session_id)
 }
 
@@ -1702,6 +1706,7 @@ export async function usageStats(ctx: any) {
 
   const local = getLocalUsageStats(profile, days)
   const localSessionIds = getRecordedUsageSessionIds(profile)
+  const unpricedHermesSessions = getUnpricedHermesUsageSessions(profile, days)
 
   let hermes = {
     input_tokens: 0,
@@ -1714,11 +1719,14 @@ export async function usageStats(ctx: any) {
     by_agent: [] as UsageStatsAgentRow[],
     by_day: [] as UsageStatsDailyRow[],
     cost: 0,
+    cost_coverage: emptyCostCoverage(),
     total_api_calls: 0,
   }
 
   try {
-    hermes = await getHermesUsageStats(days, undefined, profile, localSessionIds)
+    const result = await getHermesUsageStats(days, undefined, profile, localSessionIds, unpricedHermesSessions.map(row => row.sessionId))
+    applyHermesCostFallbacks(local, unpricedHermesSessions, result.cost_fallbacks)
+    hermes = result
   } catch (err) {
     logger.warn(err, 'usageStats: failed to load Hermes usage analytics from state.db')
   }
@@ -1771,7 +1779,7 @@ export async function usageStats(ctx: any) {
     const d = new Date(now)
     d.setDate(d.getDate() - i)
     const key = d.toISOString().slice(0, 10)
-    dayMap.set(key, { date: key, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, sessions: 0, errors: 0, cost: 0 })
+    dayMap.set(key, { date: key, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, sessions: 0, errors: 0, cost: 0, cost_coverage: emptyCostCoverage() })
   }
   for (const d of [...local.by_day, ...hermes.by_day]) {
     const existing = dayMap.get(d.date)
@@ -1779,9 +1787,13 @@ export async function usageStats(ctx: any) {
       existing.input_tokens += d.input_tokens; existing.output_tokens += d.output_tokens
       existing.cache_read_tokens += d.cache_read_tokens; existing.cache_write_tokens += d.cache_write_tokens
       existing.sessions += d.sessions; existing.errors += d.errors; existing.cost += d.cost
+      addCostCoverage(existing.cost_coverage!, d.cost_coverage)
     }
   }
 
+  const costCoverage = emptyCostCoverage()
+  addCostCoverage(costCoverage, local.cost_coverage)
+  addCostCoverage(costCoverage, hermes.cost_coverage)
   ctx.body = {
     total_input_tokens: local.input_tokens + hermes.input_tokens,
     total_output_tokens: local.output_tokens + hermes.output_tokens,
@@ -1790,12 +1802,30 @@ export async function usageStats(ctx: any) {
     total_reasoning_tokens: local.reasoning_tokens + hermes.reasoning_tokens,
     total_sessions: local.sessions + hermes.sessions,
     total_cost: local.cost + hermes.cost,
+    cost_coverage: costCoverage,
     total_api_calls: local.total_api_calls + hermes.total_api_calls,
     period_days: days,
     model_usage: [...modelMap.values()].sort((a, b) => (b.input_tokens + b.output_tokens) - (a.input_tokens + a.output_tokens)),
     agent_usage: [...agentMap.values()].sort((a, b) => (b.input_tokens + b.output_tokens) - (a.input_tokens + a.output_tokens)),
     daily_usage: [...dayMap.values()],
   }
+}
+
+export async function usagePricing(ctx: any) {
+  ctx.body = { rates: getUsagePricing(requestedProfile(ctx) || getActiveProfileName()) }
+}
+
+export async function updateUsagePricing(ctx: any) {
+  let rates
+  try {
+    rates = validateUsagePricing(ctx.request.body?.rates)
+  } catch (err) {
+    ctx.status = 400
+    ctx.body = { error: (err as Error).message }
+    return
+  }
+  saveUsagePricing(requestedProfile(ctx) || getActiveProfileName(), rates)
+  ctx.body = { rates }
 }
 
 async function listWindowsWorkspaceDrives() {

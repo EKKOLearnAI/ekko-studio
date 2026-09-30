@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref } from 'vue'
-import { NButton, NModal, NRadioButton, NRadioGroup, NSpin, useMessage } from 'naive-ui'
+import { NSpin, NButton, NModal, NRadioButton, NRadioGroup, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { pollMiniMaxLogin, startMiniMaxLogin } from '@/api/hermes/minimax-auth'
 import { copyToClipboard } from '@/utils/clipboard'

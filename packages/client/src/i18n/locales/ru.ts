@@ -2,6 +2,55 @@ import { socialMessagesRu } from '../social-messages-locales'
 
 export default {
   jev: {
+    browserAutomation: "Автоматизация встроенного браузера",
+    browserAutomationHint: "Необязательные оценки используют сохранённое подключение JEV этого профиля со следующего запроса. В JEV передаются видимые подписи без введённых значений. При отключении, недоступности или неопределённости сохраняется обычный порядок работы.",
+    browserMatchEnabled: "Поиск элементов через JEV",
+    browserMatchHint: "По описанию цели предлагает реальную ссылку из снимка. Интерактивные элементы всего снимка сортируются по релевантности до применения лимита кандидатов; неоднозначные совпадения отклоняются.",
+    browserMatchOptions: "Параметры поиска элементов",
+    browserMatchCandidateLimit: "Максимум элементов-кандидатов",
+    browserMatchMinConfidence: "Минимальная уверенность поиска",
+    browserMatchTimeoutMs: "Тайм-аут поиска (мс)",
+    browserVerifyEnabled: "Проверка результата через JEV",
+    browserVerifyHint: "Сопоставляет ожидаемый результат с видимыми данными после действия или завершённого пакета. Возвращает достигнут, не достигнут или неизвестно; не повторяет действия и не проверяет введённые значения.",
+    browserVerifyOptions: "Параметры проверки результата",
+    browserVerifyMinConfidence: "Минимальная уверенность проверки",
+    browserVerifyTimeoutMs: "Тайм-аут проверки (мс)",
+
+    groupSchedulingTitle: 'Улучшение координации группы',
+    groupMessageRoutingMode: 'Режим назначения задач',
+    groupRoutingSuggest: 'Предлагать с подтверждением',
+    groupRoutingAuto: 'Назначать автоматически',
+    groupHandoffReviewEnabled: 'Проверять полноту передачи',
+    groupHandoffReviewHint: 'Проверяет контекст, ограничения и оставшуюся работу.',
+    groupLoopDetectionEnabled: 'Выявлять повторное хождение по кругу',
+    groupLoopDetectionHint: 'Находит повторные обсуждения без нового прогресса.',
+    groupSummaryTitle: 'Улучшение групповых сводок',
+    groupSummaryRevisionEnabled: 'Автоматически исправлять сводки',
+    groupSummaryRevisionHint: 'Создаёт и повторно проверяет одну надёжную правку.',
+    workflowExpectationTitle: 'Оценка достижения ожиданий процесса',
+    groupMessageRoutingEnabled: 'Включить улучшенную координацию группы',
+    groupRoutingDisabled: 'Отключено; сообщения без явно указанного Agent остаются неназначенными.',
+    groupRoutingReady: 'Включено; JEV может предложить или автоматически назначить Agent.',
+    groupMessageRoutingMinConfidence: 'Уверенность назначения',
+    groupMessageRoutingMinConfidenceHint: 'Минимальная уверенность для рекомендации или автоматического назначения.',
+    groupMessageRoutingTimeout: 'Лимит времени назначения (мс)',
+    groupMessageRoutingTimeoutHint: 'Общий лимит времени JEV для сообщения без явного адресата.',
+
+    workflowQualityEnabled: 'Включить оценку достижения ожиданий процесса',
+    workflowQualityDisabled: 'Отключено; выполнение процесса не меняется.',
+    workflowQualityReady: 'Включено для завершённых узлов процесса.',
+    workflowQualityMinConfidence: 'Уверенность оценки процесса',
+    workflowQualityMinConfidenceHint: 'Минимальная уверенность для сообщения о недостигнутом ожидании.',
+    workflowQualityTimeout: 'Лимит времени оценки процесса (мс)',
+    workflowQualityTimeoutHint: 'Общий лимит времени JEV после завершения узла.',
+
+    groupSummaryReviewEnabled: 'Проверять сводки группы с JEV',
+    groupSummaryDisabled: 'Отключено; сводки работают как раньше.',
+    groupSummaryReady: 'Включено для сводок этого профиля.',
+    groupSummaryReviewMinConfidence: 'Уверенность проверки сводки',
+    groupSummaryReviewMinConfidenceHint: 'Минимальная уверенность для сообщения о проблеме качества.',
+    groupSummaryReviewTimeout: 'Бюджет проверки сводки (мс)',
+    groupSummaryReviewTimeoutHint: 'Общий бюджет JEV после сохранения исходной сводки.',
     ekkoSkillsEnabled: "Использовать JEV для навыков Ekko",
     skillsDisabled: "Отключено; действуют прежние подбор навыков и обучение.",
     skillsReady: "Включены семантический подбор и предварительная оценка обучения.",
@@ -314,6 +363,7 @@ export default {
 
 
   common: {
+    close: 'Закрыть',
     loading: 'Загрузка...',
     cancel: 'Отмена',
     delete: 'Удалить',
@@ -346,6 +396,17 @@ export default {
 
 
   sidebar: {
+    desktopUpdatePreparing: "Подготовка обновления",
+    desktopUpdateStopping: "Остановка загрузки…",
+    desktopUpdateReady: "Обновление готово",
+    desktopUpdateFailed: "Ошибка загрузки",
+    desktopUpdateInstalling: "Перезапуск для обновления…",
+    desktopUpdateInstall: "Перезапустить и обновить",
+    desktopUpdateActionFailed: "Не удалось выполнить действие. Повторите попытку.",
+    desktopUpdateStop: "Остановить загрузку",
+    desktopUpdateStopped: "Загрузка остановлена",
+    desktopUpdateRetry: "Скачать снова",
+    desktopUpdateDownloading: "Загрузка обновления",
     chat: 'Чат',
     backToChat: 'Назад',
     search: 'Поиск',
@@ -432,6 +493,8 @@ export default {
     ekkoDescription: 'Ekko входит в состав Studio и не требует отдельной установки, обновления или удаления.',
     version: 'Версия',
     codingAgentDescription: 'Studio может установить, проверить обновления и удалить этого агента.',
+    cursorDescription: 'Установите Cursor CLI (`agent`) с https://cursor.com/install и обновите список. Studio не устанавливает его через npm.',
+    cursorNoManagedConfig: 'Запуск не перезаписывает ~/.cursor/mcp.json. Управляемые серверы находятся в рабочей копии этого сеанса.',
     updateToVersion: 'Обновить до {version}',
     deleteConfirm: 'Удалить {name}?',
     installOperation: 'установка',
@@ -540,6 +603,12 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "Использование: вход {inputTokens}, выход {outputTokens}, чтение кэша {cacheReadTokens}, запись кэша {cacheWriteTokens}, всего {totalTokens} токенов.",
+    nativeUsageUnknown: "Использование неизвестно. Для этой сессии ещё не получены данные о токенах от CLI.",
+    nativeContextUnknown: "Контекст неизвестен. Текущий размер нативного контекста и его предел недоступны.",
+    nativeContextEstimate: "Оценка контекста (последнее использование / заданный предел): {contextTokens} / {contextWindow} токенов ({contextPercent}%).",
+    nativeCompactUnavailable: "/compact недоступен в интеграции Cursor со Studio через режим print.",
+    cursorInstallGuide: 'Руководство по установке',
     installFailedHermesHint: 'Installation failed. Ask Hermes to install it for you.',
     installFailureReason: 'Reason',
     preference: 'Предпочтения',
@@ -965,6 +1034,7 @@ export default {
     stopGateway: 'Остановить шлюз',
     send: 'Отправить',
     contextUsed: 'Контекст использован:',
+    sessionUsage: 'Расход за сеанс:',
     sessions: 'Сеансы',
     webUiSessions: 'Сеансы',
     allProfiles: 'Все профили',
@@ -1026,6 +1096,9 @@ export default {
     newCliChat: 'Новый CLI',
     deleteSession: 'Удалить этот сеанс?',
     sessionDeleted: 'Сеанс удалён',
+    sessionListActions: 'Действия со списком сеансов',
+    filterByProfile: 'Фильтр по профилю',
+    selectedSessions: 'Выбрано: {count}',
     toggleBatchMode: 'Пакетный выбор',
     selectAll: 'Выбрать всё',
     confirmBatchDelete: 'Удалить выбранные сеансы ({count})?',
@@ -1126,6 +1199,8 @@ export default {
 
 
   workflow: {
+    listActions: 'Действия со списком рабочих процессов',
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Рабочий процесс',
     profile: 'Профиль',
     namePlaceholder: 'Название рабочего процесса',
@@ -1613,6 +1688,7 @@ export default {
 
 
   skills: {
+    filterBySource: "Фильтр по источнику",
     title: 'Навыки',
     targetFilter: 'Среда',
     targets: {
@@ -2117,6 +2193,10 @@ export default {
 
 
   logs: {
+    file: "Файл журнала",
+    level: "Уровень журнала",
+    lines: "Строки",
+    filters: "Фильтровать журнал",
     title: 'Логи',
     all: 'Все',
     searchPlaceholder: 'Поиск...',
@@ -2886,6 +2966,15 @@ export default {
 
 
   groupChat: {
+    routingHandoffIncomplete: 'Информация для передачи может быть неполной.',
+    routingLoopDetected: 'Возможно повторное хождение по кругу.',
+    routingSuggested: 'JEV предлагает {agent}',
+    routingUseSuggestion: 'Назначить',
+    routingAutoQueued: 'JEV назначил {agent}',
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',
@@ -3108,6 +3197,24 @@ export default {
 
 
   usage: {
+    costStates: {
+      unknown: "Не записано",
+      partial: "Часть расходов не учтена",
+      reported: "Стоимость от провайдера",
+      estimated: "Оценочная стоимость",
+      mixed: "Включает данные провайдера и оценки",
+    },
+    pricing: {
+      title: "Тарифы моделей",
+      help: "Если свой тариф не задан, стоимость оценивается по тарифам соответствующей модели из models.dev. USD за миллион токенов. ID провайдера и модели должны совпадать точно (например global). Оценка применяется, если стоимость не получена. Пустой тариф кеша означает неизвестную стоимость. Изменения действуют для будущих вызовов без пересчёта истории.",
+      provider: "ID провайдера",
+      model: "ID модели",
+      input: "Ввод",
+      output: "Вывод",
+      cacheRead: "Чтение кеша",
+      cacheWrite: "Запись кеша",
+      error: "Не удалось загрузить или сохранить тарифы. Проверьте ID, дубликаты и отсутствие отрицательных цен.",
+    },
     title: 'Статистика использования',
     refresh: 'Обновить',
     totalTokens: 'Всего токенов',
@@ -3119,7 +3226,7 @@ export default {
     cacheHitRate: 'Попадания в кэш',
     modelBreakdown: 'Распределение по моделям',
     agentBreakdown: 'Распределение по агентам',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', ekkoAgent: 'Ekko', unknown: 'Неизвестно' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: 'Неизвестно' },
     dailyTrend: 'Ежедневная динамика',
     date: 'Дата',
     tokens: 'Токены',
@@ -3237,6 +3344,24 @@ export default {
   },
 
   changelog: {
+    new_0_7_26_1: 'Унифицированы навигация Studio, заголовки страниц и действия со списками, улучшена мобильная компоновка (#3232)',
+    new_0_7_26_2: 'Унифицированы индикаторы загрузки страниц и улучшена видимость логотипа загрузки, в том числе в режиме уменьшенной анимации (#3232, #3236)',
+    new_0_7_26_3: 'Улучшены пользовательские фоны и полупрозрачные слои, исправлены края и скругления окон; кнопки микрофона теперь используют цвета темы (#3236)',
+    new_0_7_26_4: 'Расположение и стиль кнопок управления окном адаптированы к платформе с сохранением стандартных скруглений Windows (#3234, #3235)',
+    new_0_7_26_5: 'Автозапуск Gateway теперь требует явного включения; загрузка списка профилей не ждёт проверок CLI, исправлено первоначальное отображение пузырей сообщений (#3233)',
+    new_0_7_26_6: 'Добавлены учёт стоимости использования и пользовательские цены моделей, оценки по локальному каталогу и улучшенное сопоставление лимитов контекста (#3226)',
+    new_0_7_26_7: 'Добавлена совместимость с пресетами реестра DSH и нативной настройкой плагинов; исправлено неполное заполнение доступного пространства страницами плагинов (#3218)',
+    new_0_7_26_8: 'Исправлена видимость логотипа Cursor на светлых карточках менеджера агентов (#3222)',
+    new_0_7_25_1: 'Добавлена поддержка Cursor CLI в чатах, группах и рабочих процессах с нативными настройками, управлением навыками и изолированной конфигурацией Studio MCP (#3110)',
+    new_0_7_25_2: 'Добавлены настраиваемые функции JEV для поиска воспоминаний, фильтрации по релевантности, проверки записи, подбора навыков и предварительной проверки обучения (#3159, #3161, #3169)',
+    new_0_7_25_3: 'Добавлены необязательные проверки JEV для выбора целей и действий браузера, сводок групп, маршрутизации сообщений и качества рабочих процессов (#3208, #3211)',
+    new_0_7_25_4: 'Улучшена автоматизация браузера: последовательные пакеты действий, до 12 вкладок, поддержка больших страниц и более понятные результаты действий (#3206, #3207, #3212, #3215)',
+    new_0_7_25_5: 'Добавлены прогресс загрузки обновлений приложения и изолированные тестовые сборки обновлений для macOS, Windows и Linux (#3176, #3177)',
+    new_0_7_25_6: 'Исправлены переходы по поиску в длинных чатах, вложения в новых чатах, обновление закреплённых сессий и избранное рабочих пространств (#3182, #3168, #3193)',
+    new_0_7_25_7: 'Добавлено меню аккаунта в боковой панели, унифицирован порядок Agents, улучшены менеджер Agents и компоновка групповых чатов (#3191, #3199, #3201, #3188)',
+    new_0_7_25_8: 'Исправлены совместимость обновлений Hermes, жизненный цикл процесса моста, маршрутизация MCP между экземплярами Studio и учётные данные Coding Agents в группах (#3202, #3157, #3187)',
+    new_0_7_25_9: 'Исправлены зависимости запуска DSH и разрешение пакета ACP, удалены повторяющиеся ключи в изолированных конфигурациях Codex (#3156, #3190, #3163)',
+    new_0_7_25_10: 'Улучшена очистка Live Activities в iOS за счёт отключения устаревших адресатов уведомлений (#3167)',
     new_0_7_24_1: 'Добавлена оркестрация Live Activities в iOS с локализованными обновлениями и маршрутизацией уведомлений по пользователям (#3102, #3111, #3152)',
     new_0_7_24_2: 'Улучшены настройки и предпросмотр уведомлений, игнорируются устаревшие отказы от уведомлений сессий, скрыты неподдерживаемые записи социальных push-уведомлений (#3131, #3133, #3146, #3151)',
     new_0_7_24_3: 'Исправлен доступ к загрузкам и вложениям общих сессий во всех сценариях совместного доступа (#3144)',

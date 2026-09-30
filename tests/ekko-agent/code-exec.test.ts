@@ -67,7 +67,7 @@ describe('code_exec', () => {
       expect(JSON.parse(result.content)).toMatchObject({
         status: 'completed',
         language: 'python',
-        output: 'HELLO FROM PYTHON\n',
+        output: `HELLO FROM PYTHON${process.platform === 'win32' ? '\r\n' : '\n'}`,
         toolCallsMade: 1,
         exitCode: 0,
       })

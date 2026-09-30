@@ -4,12 +4,13 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, join } from 'path'
 import { promisify } from 'util'
-import YAML from 'js-yaml'
 import { logger } from '../../../studio/public/logging'
 import { isGatewayRunningForProfile } from '../gateway/autostart'
 import { startGatewayRunManaged } from '../gateway/runner'
 import { getActiveProfileDir, getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../profiles/profile'
 import { parseProfileListRuntimeInfo, type ProfileListRuntimeInfo } from '../profiles/profile-list-parser'
+import { readProfileDefaultModel, type HermesProfile } from '../profiles/catalog'
+export type { HermesProfile } from '../profiles/catalog'
 import { probeHermesCliVersion } from './discovery'
 import { execHermesWithBin, spawnHermesWithBin } from './process'
 
@@ -551,14 +552,6 @@ export async function readLogs(
 
 // ─── Profile management ──────────────────────────────────────
 
-export interface HermesProfile {
-  name: string
-  active: boolean
-  model: string
-  gatewayStatus?: string
-  alias: string
-}
-
 export interface HermesProfileDetail {
   name: string
   path: string
@@ -567,22 +560,6 @@ export interface HermesProfileDetail {
   skills: number
   hasEnv: boolean
   hasSoulMd: boolean
-}
-
-function readProfileDefaultModel(name: string): string {
-  const configPath = join(getProfileDir(name), 'config.yaml')
-  if (!existsSync(configPath)) return '—'
-  try {
-    const config = YAML.load(readFileSync(configPath, 'utf-8'), { json: true }) as Record<string, any> | null
-    const model = config?.model
-    if (typeof model === 'string') return model.trim() || '—'
-    if (model && typeof model === 'object') {
-      return String(model.default || '').trim() || '—'
-    }
-  } catch (err) {
-    logger.warn(err, 'Hermes CLI: failed to read profile config model for %s', name)
-  }
-  return '—'
 }
 
 /**

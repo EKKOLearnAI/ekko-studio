@@ -75,6 +75,22 @@ describe('handleCodingAgentRun', () => {
     })
   })
 
+  it('passes the group credential into native launch without overwriting a shared profile token', async () => {
+    managerMock.runIdForSession.mockReturnValue(undefined)
+    startCodingAgentRunMock.mockResolvedValue({ agentSessionId: 'group-runtime' })
+    sendCodingAgentRunInputMock.mockReturnValue({ runId: 'group-runtime' })
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    await handleCodingAgentRun({} as any, { data: { user: { id: 7, username: 'requester', role: 'user' } }, join: vi.fn(), emit: vi.fn() } as any, {
+      session_id: 'group-session', input: 'Work', coding_agent_id: 'codex', mode: 'global',
+      session_source: 'group_chat', group_room_id: 'room', group_agent_id: 'agent',
+      studio_mcp_token_file: '/fixture/run-credential.json',
+    }, 'research', new Map())
+    expect(startCodingAgentRunMock).toHaveBeenCalledWith('codex', expect.objectContaining({
+      studioMcpTokenFile: '/fixture/run-credential.json', groupRuntimeScope: { roomId: 'room', agentId: 'agent' },
+    }), expect.anything())
+    expect(writeModelRunProfileTokenMock).not.toHaveBeenCalled()
+  })
+
   it('runs global Claude Code without requiring Studio OAuth credentials', async () => {
     resolveAuthorizedProviderRuntimeCredentialsMock.mockRejectedValue(new Error('Studio OAuth is not configured'))
     managerMock.runIdForSession.mockReturnValue('agent-session-1')
@@ -525,6 +541,32 @@ describe('handleCodingAgentRun', () => {
       mcpCapabilities: expect.objectContaining({ interaction: false }),
     }))
     expect(startCodingAgentRunMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps an active Cursor run when a follow-up still sends scoped', async () => {
+    managerMock.runIdForSession.mockReturnValue('cursor-run-1')
+    managerMock.isSessionLaunchCompatible.mockReturnValue(true)
+    sendCodingAgentRunInputMock.mockResolvedValue({ runId: 'cursor-run-1' })
+
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    const state = { messages: [], isWorking: false, isAborting: false, events: [], queue: [] }
+    const sessionMap = new Map([['session-1', state]])
+    const socket = { join: vi.fn(), emit: vi.fn() }
+
+    await handleCodingAgentRun({} as any, socket as any, {
+      session_id: 'session-1',
+      input: 'continue',
+      coding_agent_id: 'cursor',
+      mode: 'scoped',
+    }, 'default', sessionMap as any)
+
+    expect(managerMock.isSessionLaunchCompatible).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      agentId: 'cursor',
+      mode: 'global',
+    }))
+    expect(managerMock.stop).not.toHaveBeenCalled()
+    expect(startCodingAgentRunMock).not.toHaveBeenCalled()
+    expect(sendCodingAgentRunInputMock).toHaveBeenCalledWith('session-1', 'continue', 'system prompt')
   })
 
 })

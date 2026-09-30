@@ -27,11 +27,13 @@ import {
   createModelClient,
   DEFAULT_MODEL_REQUEST_TIMEOUT_MS,
   normalizeAgentReasoning,
+  projectBrowserHistory,
   resolveModelProviderConfigs,
   serializeAgentReasoningDetails,
 } from '../../../ekko-agent/src'
 
 configureChatAgentRuntime({
+  projectBrowserHistory,
   createPrimaryAgentBridge: options => new AgentBridgeClient(options),
   getPrimaryAgentBridgeManager: getAgentBridgeManager,
   redactPrimaryAgentBridgeError: redactAgentBridgeError,

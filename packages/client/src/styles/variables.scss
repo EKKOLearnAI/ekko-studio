@@ -21,6 +21,12 @@
   --bg-main-surface: var(--bg-card);
   --bg-main-surface-rgb: var(--bg-card-rgb);
 
+  // Custom backgrounds: frame, contextual sidebar, then the foreground page.
+  --glass-chrome-bg: rgba(var(--bg-primary-rgb), 0.6);
+  --glass-sidebar-bg: rgba(var(--bg-sidebar-surface-rgb), 0.78);
+  --glass-content-bg: rgba(var(--bg-main-surface-rgb), 0.86);
+  --glass-divider-color: rgba(var(--text-primary-rgb), 0.1);
+
   // Borders
   --border-color: #e0e0e0;
   --border-light: #ebebeb;
@@ -91,6 +97,9 @@
   --bg-sidebar-surface-rgb: var(--bg-primary-rgb);
   --bg-main-surface: var(--bg-primary);
   --bg-main-surface-rgb: var(--bg-primary-rgb);
+
+  --glass-chrome-bg: rgba(var(--bg-primary-rgb), 0.9);
+  --glass-content-bg: rgba(var(--bg-card-rgb), 0.82);
 
   // Borders
   --border-color: #3a3a3a;
@@ -210,6 +219,7 @@ $font-ui: var(--font-ui, 'Inter', system-ui, -apple-system, sans-serif);
 $font-code: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 
 // Layout
+$navigation-rail-width: 64px;
 $sidebar-width: 240px;
 $sidebar-collapsed-width: 64px;
 $header-height: 60px;

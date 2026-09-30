@@ -971,7 +971,26 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
   // Register this after the catch-all API route so Socket.IO's optimized
   // module is intercepted before Vite can proxy a connection to port 8648.
   await mockChatSocket(page)
+  await mockNativeWebSockets(page)
   return { requests, unexpectedRequests }
+}
+
+// HTTP routes do not intercept native WebSockets. Keep these channels local to
+// each browser test instead of reaching Vite's development backend on port 8648.
+export async function mockNativeWebSockets(page: Page) {
+  await page.routeWebSocket(url => url.pathname === '/api/hermes/kanban/events', () => {})
+  await page.routeWebSocket(url => url.pathname === '/api/hermes/terminal', socket => {
+    let count = 1
+    const created = (id: string, shell: string) => socket.send(JSON.stringify({ type: 'created', id, shell, pid: 100 + count }))
+    created('term-1', 'zsh')
+    socket.onMessage(data => {
+      const text = String(data)
+      if (!text.startsWith('{')) return
+      const message = JSON.parse(text)
+      if (message.type === 'create') created(`term-${++count}`, 'bash')
+      if (message.type === 'switch') socket.send(JSON.stringify({ type: 'switched', id: message.sessionId }))
+    })
+  })
 }
 
 export async function authenticate(page: Page, accessKey = TEST_ACCESS_KEY, profileName?: string) {

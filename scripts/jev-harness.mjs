@@ -4,7 +4,7 @@ import ts from 'typescript'
 import { parse as parseVue } from 'vue/compiler-sfc'
 
 const manifestPath = 'scripts/jev-integrations.json'
-const sourceRoots = ['packages/server/src', 'packages/client/src', 'packages/ekko-agent/src']
+const sourceRoots = ['packages/server/src', 'packages/client/src', 'packages/ekko-agent/src', 'packages/desktop/src', 'bin']
 const sharedFields = new Set(['baseUrl', 'model', 'apiKey', 'timeoutMs'])
 // These implement transport/configuration, or explicit manual API/connection tests.
 // Business integrations must be registered instead of extending this allowlist.
@@ -12,6 +12,12 @@ const infrastructure = new Set([
   'packages/server/src/bootstrap/routes.ts',
   'packages/server/src/modules/studio/services/jev/client.ts',
   'packages/server/src/modules/studio/services/jev/settings.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar-budget.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar-contract.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar-payload.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar-queue.ts',
+  'packages/server/src/modules/studio/services/jev/snapshot.ts',
   'packages/server/src/modules/studio/public/jev.ts',
   'packages/server/src/modules/studio/controllers/jev.ts',
   'packages/server/src/modules/studio/routes/jev.ts',
@@ -23,6 +29,7 @@ const infrastructure = new Set([
 ])
 const evaluationInfrastructure = new Set([
   'packages/server/src/modules/studio/services/jev/client.ts',
+  'packages/server/src/modules/studio/services/jev/sidecar.ts',
   'packages/server/src/modules/studio/controllers/jev.ts',
   'packages/ekko-agent/src/jev/client.ts',
 ])
@@ -83,7 +90,7 @@ export function jevUsage(file, source) {
   let used = false
   let evaluates = false
   let directSdk = false
-  const evaluators = new Set(['evaluateJev', 'evaluateMemory'])
+  const evaluators = new Set(['evaluateJev', 'evaluateMemory', 'evaluateJevWithCredentials', 'createJevSidecar'])
   walk(ast, node => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       if (!node.moduleSpecifier || !ts.isStringLiteralLike(node.moduleSpecifier)) return
@@ -96,14 +103,14 @@ export function jevUsage(file, source) {
       for (const item of elements) {
         if (item.isTypeOnly) continue
         const imported = name(item.propertyName ?? item.name)
-        if (['evaluateJev', 'evaluateMemory'].includes(imported)) evaluators.add(name(item.name))
-        if (/^(EkkoJevClient|evaluateJev|getJevRuntimeConfig)$/.test(imported)) used = true
+        if (['evaluateJev', 'evaluateMemory', 'evaluateJevWithCredentials', 'createJevSidecar'].includes(imported)) evaluators.add(name(item.name))
+        if (/^(EkkoJevClient|evaluateJev|evaluateJevWithCredentials|createJevSidecar|getJevRuntimeConfig)$/.test(imported)) used = true
       }
       if (/(?:^|\/)jev(?:\/|$|\.)/.test(specifier)) used = true
       if (specifier === '@typesafe-ai/sdk') { used = true; directSdk = true }
     }
     if (member(node) === 'jev' || ts.isBindingElement(node) && name(node.propertyName ?? node.name) === 'jev') used = true
-    if (ts.isStringLiteralLike(node) && /\/api\/studio\/jev\/(?:evaluate|test)/.test(node.text)) used = true
+    if (ts.isStringLiteralLike(node) && /\/api\/studio\/jev\/(?:evaluate|test|browser\/(?:match|verify))/.test(node.text)) used = true
     if (ts.isCallExpression(node)) {
       if ((node.expression.kind === ts.SyntaxKind.ImportKeyword || name(node.expression) === 'require')
         && node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])) {
@@ -112,7 +119,7 @@ export function jevUsage(file, source) {
         if (specifier === '@typesafe-ai/sdk') { used = true; directSdk = true }
       }
       const method = member(node.expression) ?? name(node.expression)
-      if (evaluators.has(method) || ['systemOne', 'tryEvaluate'].includes(method)
+      if (evaluators.has(method) || ['systemOne', 'tryEvaluate', 'trySchedule'].includes(method)
         || method === 'evaluate' && /jev/i.test(node.expression.getText())) {
         used = true
         evaluates = true

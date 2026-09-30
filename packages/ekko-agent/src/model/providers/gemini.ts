@@ -238,8 +238,10 @@ function toGeminiTool(tool: AgentToolDefinition): NonNullable<NonNullable<Gemini
 
 function normalizeUsage(usage: NonNullable<GeminiResponse['usageMetadata']>): ModelUsage {
   return {
-    inputTokens: usage.promptTokenCount,
-    outputTokens: usage.candidatesTokenCount,
+    // Gemini promptTokenCount includes cache; thoughts are separate from candidates.
+    // https://ai.google.dev/api/generate-content#UsageMetadata
+    inputTokens: usage.promptTokenCount == null ? undefined : Math.max(0, usage.promptTokenCount - (usage.cachedContentTokenCount ?? 0)),
+    outputTokens: usage.candidatesTokenCount == null ? undefined : usage.candidatesTokenCount + (usage.thoughtsTokenCount ?? 0),
     totalTokens: usage.totalTokenCount,
     cacheReadTokens: usage.cachedContentTokenCount,
     reasoningTokens: usage.thoughtsTokenCount,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NAlert, NButton, NDescriptions, NDescriptionsItem, NSelect, NSpace, NTag, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -176,10 +177,17 @@ async function handleStop() {
   await runAction('stop', stopPreview, 'githubPreview.stopSuccess')
 }
 
+const initializing = ref(true)
+usePageLoadingTask(() => initializing.value)
+
 onMounted(async () => {
-  await handleRefresh()
-  lastHandledCompletion.value = status.value?.last_action_completed_at || ''
-  completionNotificationsReady.value = true
+  try {
+    await handleRefresh()
+    lastHandledCompletion.value = status.value?.last_action_completed_at || ''
+    completionNotificationsReady.value = true
+  } finally {
+    initializing.value = false
+  }
 })
 
 onUnmounted(() => {

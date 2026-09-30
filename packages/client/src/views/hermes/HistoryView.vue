@@ -1,10 +1,15 @@
 <script setup lang="ts">
+import PageSidebar from "@/components/layout/PageSidebar.vue"
+import { usePageSidebarState } from "@/composables/usePageSidebar"
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { type Session } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
-import { NButton, NDropdown, NPopconfirm, NTooltip, useMessage, type DropdownOption } from 'naive-ui'
+import { NSpin, NButton, NDropdown, NPopconfirm, NTooltip, useMessage, type DropdownOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getSourceLabel } from '@/shared/session-display'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -13,6 +18,7 @@ import HistoryMessageList from '@/components/hermes/chat/HistoryMessageList.vue'
 import SessionListItem from '@/components/hermes/chat/SessionListItem.vue'
 import OutlinePanel from '@/components/hermes/chat/OutlinePanel.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
+import ListActionsMenu from '@/components/layout/ListActionsMenu.vue'
 import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
 import { setSessionPinned, batchDeleteSessions, deleteSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchHermesSession, fetchSessionMessagesPage, importHermesSession, unarchiveSession, type HermesMessage, type SessionSummary } from '@/api/studio/sessions'
 
@@ -39,6 +45,12 @@ const effectiveHistoryProfile = computed(() => profilesStore.activeProfileName |
 const hermesSessions = ref<SessionSummary[]>([])
 const hermesSessionsLoading = ref(false)
 const hermesSessionsLoaded = ref(false)
+const initializingPage = ref(true)
+const historySessionLoading = ref(false)
+const pageLoading = computed(() => initializingPage.value || hermesSessionsLoading.value || historySessionLoading.value)
+let historySessionRequestId = 0
+let pendingHistorySessionKey: string | null = null
+let disposed = false
 // History page's own selected session (independent from chatStore)
 const historySessionId = ref<string | null>(null)
 const historySession = ref<Session | null>(null)
@@ -63,10 +75,6 @@ const sourceOffsets = ref<Record<string, number>>({})
 function handleOutlineNavigate(target: { messageId: string; anchorId: string }) {
   historyMessageListRef.value?.scrollToAnchor(target.messageId, target.anchorId)
   if (isMobile.value) showOutline.value = false
-}
-
-function openNewChatPage() {
-  void router.push({ name: 'hermes.chat' })
 }
 
 async function loadHermesSessions() {
@@ -99,16 +107,14 @@ async function loadHermesSessions() {
 }
 
 // Initialize synchronously from the media query so first paint is correct.
-const showSessions = ref(
-  typeof window === 'undefined' || !window.matchMedia('(max-width: 768px)').matches,
-)
+const { expanded: showSessions, isMobile } = usePageSidebarState()
 watch(
   showSessions,
   expanded => appStore.setPageSidebarExpanded(expanded),
   { immediate: true },
 )
-let mobileQuery: MediaQueryList | null = null
-const isMobile = ref(false)
+
+
 
 function findHistorySession(sessionId: string): SessionSummary | undefined {
   return hermesSessions.value.find(session => session.id === sessionId)
@@ -197,12 +203,12 @@ function mapHistoryMessages(messages: HermesMessage[]): Session['messages'] {
 }
 
 function codingAgentFields(summary: SessionSummary): Pick<Session, 'agent' | 'agentSessionId' | 'agentNativeSessionId' | 'codingAgentId' | 'codingAgentMode'> {
-  const isCodingAgentSession = summary.source === 'coding_agent' || summary.agent === 'claude' || summary.agent === 'codex' || summary.agent === 'pi' || summary.agent === 'grok' || (summary.agent === 'opencode' || summary.agent === 'dsh')
+  const isCodingAgentSession = summary.source === 'coding_agent' || summary.agent === 'claude' || summary.agent === 'codex' || summary.agent === 'pi' || summary.agent === 'grok' || summary.agent === 'cursor' || (summary.agent === 'opencode' || summary.agent === 'dsh')
   return {
     agent: summary.agent || undefined,
     agentSessionId: summary.agent_session_id || undefined,
     agentNativeSessionId: summary.agent_native_session_id || undefined,
-    codingAgentId: summary.agent === 'codex' ? 'codex' : summary.agent === 'pi' ? 'pi' : summary.agent === 'grok' ? 'grok' : summary.agent === 'dsh' ? 'dsh' : summary.agent === 'opencode' ? 'opencode' : summary.agent === 'claude' ? 'claude-code' : undefined,
+    codingAgentId: summary.agent === 'codex' ? 'codex' : summary.agent === 'pi' ? 'pi' : summary.agent === 'grok' ? 'grok' : summary.agent === 'cursor' ? 'cursor' : summary.agent === 'dsh' ? 'dsh' : summary.agent === 'opencode' ? 'opencode' : summary.agent === 'claude' ? 'claude-code' : undefined,
     codingAgentMode: isCodingAgentSession
       ? (summary.agent_mode === 'global' || summary.agent_mode === 'scoped'
           ? summary.agent_mode
@@ -241,53 +247,73 @@ function sessionFromSummary(summary: SessionSummary, messages: Session['messages
 async function loadHistorySession(sessionId: string, profile?: string | null) {
   const summary = findHistorySession(sessionId)
   const sessionProfile = profile || summary?.profile || null
-  const page = await fetchSessionMessagesPage(sessionId, 0, HISTORY_PAGE_SIZE, sessionProfile)
-  let sessionData: Session | null = null
+  const requestKey = JSON.stringify([sessionId, sessionProfile, routeProfile.value])
+  if (historySessionLoading.value && pendingHistorySessionKey === requestKey) return
+  pendingHistorySessionKey = requestKey
+  const requestId = ++historySessionRequestId
+  const requestedRouteProfile = routeProfile.value
+  const isCurrent = () => !disposed && requestId === historySessionRequestId
+    && routeSessionId.value === sessionId && routeProfile.value === requestedRouteProfile
+  historySessionLoading.value = true
+  try {
+    const page = await fetchSessionMessagesPage(sessionId, 0, HISTORY_PAGE_SIZE, sessionProfile)
+    if (!isCurrent()) return
+    let sessionData: Session | null = null
 
-  if (page) {
-    const base = summary || page.session
-    sessionData = sessionFromSummary(base, mergeTaskPlanMessages(mapHistoryMessages(page.messages), page.taskPlans || [], sessionId))
-    sessionData.profile = summary?.profile || sessionProfile || undefined
-    sessionData.messageCount = page.total
-    sessionData.messageTotal = page.total
-    sessionData.loadedMessageCount = page.messages.length
-    sessionData.hasMoreBefore = page.hasMore
-  } else {
-    // Some imported/legacy Hermes sessions may only exist in Hermes state.db.
-    // Keep the old full-detail path as a compatibility fallback.
-    const sessionDetail = await fetchHermesSession(sessionId, sessionProfile)
-    if (!sessionDetail) {
-      message.error(t('chat.sessionNotFound'))
-      return
+    if (page) {
+      const base = summary || page.session
+      sessionData = sessionFromSummary(base, mergeTaskPlanMessages(mapHistoryMessages(page.messages), page.taskPlans || [], sessionId))
+      sessionData.profile = summary?.profile || sessionProfile || undefined
+      sessionData.messageCount = page.total
+      sessionData.messageTotal = page.total
+      sessionData.loadedMessageCount = page.messages.length
+      sessionData.hasMoreBefore = page.hasMore
+    } else {
+      // Some imported/legacy Hermes sessions may only exist in Hermes state.db.
+      // Keep the old full-detail path as a compatibility fallback.
+      const sessionDetail = await fetchHermesSession(sessionId, sessionProfile)
+      if (!isCurrent()) return
+      if (!sessionDetail) {
+        message.error(t('chat.sessionNotFound'))
+        return
+      }
+
+      sessionData = {
+        id: sessionDetail.id,
+        profile: sessionDetail.profile || sessionProfile || undefined,
+        title: sessionDetail.title || '',
+        source: sessionDetail.source,
+        createdAt: sessionDetail.started_at * 1000,
+        updatedAt: (sessionDetail.last_active || sessionDetail.started_at) * 1000,
+        model: sessionDetail.model,
+        provider: sessionDetail.provider,
+        messageCount: sessionDetail.message_count,
+        messageTotal: sessionDetail.message_count,
+        loadedMessageCount: sessionDetail.messages.length,
+        hasMoreBefore: false,
+        inputTokens: sessionDetail.input_tokens,
+        outputTokens: sessionDetail.output_tokens,
+        endedAt: sessionDetail.ended_at ? sessionDetail.ended_at * 1000 : undefined,
+        lastActiveAt: sessionDetail.last_active ? sessionDetail.last_active * 1000 : undefined,
+        workspace: sessionDetail.workspace || undefined,
+        messages: mapHistoryMessages(sessionDetail.messages),
+      }
     }
 
-    sessionData = {
-      id: sessionDetail.id,
-      profile: sessionDetail.profile || sessionProfile || undefined,
-      title: sessionDetail.title || '',
-      source: sessionDetail.source,
-      createdAt: sessionDetail.started_at * 1000,
-      updatedAt: (sessionDetail.last_active || sessionDetail.started_at) * 1000,
-      model: sessionDetail.model,
-      provider: sessionDetail.provider,
-      messageCount: sessionDetail.message_count,
-      messageTotal: sessionDetail.message_count,
-      loadedMessageCount: sessionDetail.messages.length,
-      hasMoreBefore: false,
-      inputTokens: sessionDetail.input_tokens,
-      outputTokens: sessionDetail.output_tokens,
-      endedAt: sessionDetail.ended_at ? sessionDetail.ended_at * 1000 : undefined,
-      lastActiveAt: sessionDetail.last_active ? sessionDetail.last_active * 1000 : undefined,
-      workspace: sessionDetail.workspace || undefined,
-      messages: mapHistoryMessages(sessionDetail.messages),
+    // Set history page's own session state (independent from chatStore)
+    historySessionId.value = sessionData.id
+    historySession.value = sessionData
+  } catch (err: any) {
+    if (isCurrent()) {
+      console.error('Failed to load history session:', err)
+      message.error(err?.message || t('chat.sessionNotFound'))
+    }
+  } finally {
+    if (requestId === historySessionRequestId) {
+      pendingHistorySessionKey = null
+      historySessionLoading.value = false
     }
   }
-
-  // Set history page's own session state (independent from chatStore)
-  historySessionId.value = sessionData.id
-  historySession.value = sessionData
-
-  if (mobileQuery?.matches) showSessions.value = false
 }
 
 async function loadOlderHistoryMessages(sessionId: string): Promise<boolean> {
@@ -318,12 +344,17 @@ async function loadOlderHistoryMessages(sessionId: string): Promise<boolean> {
   }
 }
 
-async function handleSessionClick(sessionId: string, profile?: string | null) {
-  await router.push({
+function openHistorySession(sessionId: string, profile?: string | null) {
+  return router.push({
     name: 'hermes.historySession',
     params: { sessionId },
     query: profile ? { profile } : undefined,
   })
+}
+
+function handleSessionClick(sessionId: string, profile?: string | null) {
+  if (isMobile.value) showSessions.value = false
+  return openHistorySession(sessionId, profile)
 }
 
 async function openDefaultHistorySession(replace = false) {
@@ -368,45 +399,45 @@ async function syncRouteSession() {
 
   const sessionProfile = routeProfile.value || summary.profile || null
   const currentProfile = historySession.value?.profile || null
-  if (historySessionId.value !== sessionId || currentProfile !== sessionProfile) {
+  if (!historySession.value || historySessionId.value !== sessionId || currentProfile !== sessionProfile) {
     historySessionId.value = sessionId
     historySession.value = null
     await loadHistorySession(sessionId, sessionProfile)
   }
 }
 
-function handleMobileChange(e: MediaQueryListEvent | MediaQueryList) {
-  isMobile.value = e.matches
-  if (e.matches && showSessions.value) {
-    showSessions.value = false
-  }
-}
-
-function openPageSidebar() {
-  showSessions.value = true
-}
 
 onMounted(async () => {
-  appStore.loadModels()
-  await profilesStore.fetchProfiles()
-  await loadHermesSessions()
-  await syncRouteSession()
 
-  mobileQuery = window.matchMedia('(max-width: 768px)')
-  handleMobileChange(mobileQuery)
-  mobileQuery.addEventListener('change', handleMobileChange)
-  window.addEventListener('hermes:open-page-sidebar', openPageSidebar)
+
+
+  try {
+    await Promise.all([appStore.loadModels(), profilesStore.fetchProfiles()])
+    if (disposed) return
+    await loadHermesSessions()
+    if (disposed) return
+    await syncRouteSession()
+  } catch (err: any) {
+    console.error('Failed to initialize history page:', err)
+    message.error(err?.message || t('chat.sessionNotFound'))
+  } finally {
+    initializingPage.value = false
+  }
 })
 
 onUnmounted(() => {
-  mobileQuery?.removeEventListener('change', handleMobileChange)
-  window.removeEventListener('hermes:open-page-sidebar', openPageSidebar)
+  disposed = true
+  historySessionRequestId++
+  hermesSessionsRequestId++
+
 })
 
 watch(
   [routeSessionId, routeProfile],
   async ([sessionId]) => {
     if (!sessionId) {
+      historySessionRequestId++
+      historySessionLoading.value = false
       historySessionId.value = null
       historySession.value = null
       return
@@ -617,7 +648,7 @@ function toggleGroup(source: string) {
     const group = groupedSessions.value.find(g => g.source === source)
     if (group?.sessions.length) {
       // Auto-select and load first session when expanding group
-      void handleSessionClick(group.sessions[0].id, group.sessions[0].profile)
+      void openHistorySession(group.sessions[0].id, group.sessions[0].profile)
     }
   }
   localStorage.setItem('hermes_collapsed_groups', JSON.stringify([...collapsedGroups.value]))
@@ -830,42 +861,42 @@ function handleBatchDeleteConfirm() {
 </script>
 
 <template>
-  <div class="history-panel">
-    <div class="session-backdrop" :class="{ active: showSessions }" @click="showSessions = false" />
+  <PageLoading :show="pageLoading" initial-only class="history-panel">
+    <PageSidebar>
     <aside class="session-list" :class="{ collapsed: !showSessions }">
       <div v-if="showSessions" class="page-sidebar-top">
-        <PageSidebarNav
-          active="history"
-          :primary-label="t('chat.newChat')"
-          @primary="openNewChatPage"
-        />
-        <div class="session-list-toolbar">
-          <span class="session-list-title">{{ t('chat.hermesHistory') }}</span>
-          <div class="session-list-actions">
-            <button class="session-close-btn" @click="showSessions = false">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-            <NButton
-              v-if="!isBatchMode"
-              quaternary
-              size="tiny"
-              :disabled="hermesSessions.length === 0"
-              :title="t('chat.toggleBatchMode')"
-              @click="toggleBatchMode"
+        <PageSidebarNav active="history">
+          <template #actions>
+            <ListActionsMenu
+              :label="t('chat.sessionListActions')"
+              :batch-mode="isBatchMode"
+              :batch-disabled="hermesSessions.length === 0"
+              @batch="toggleBatchMode"
+            />
+            <button
+              v-if="isMobile"
+              class="session-close-btn"
+              type="button"
+              :aria-label="t('common.close')"
+              @click="showSessions = false"
             >
-              <template #icon>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M9 11l3 3L22 4" />
-                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                </svg>
-              </template>
-            </NButton>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="m18 6-12 12M6 6l12 12" />
+              </svg>
+            </button>
+          </template>
+        </PageSidebarNav>
+        <div v-if="isBatchMode" class="session-list-toolbar">
+          <span class="session-selection-count" role="status">{{ t('chat.selectedSessions', { count: selectedCount }) }}</span>
+          <div class="session-list-actions">
             <NButton
               v-if="isBatchMode"
               quaternary
               size="tiny"
               :disabled="!canSelectAll || isBatchDeleting"
               :title="allSessionsSelected ? t('common.cancel') : t('chat.selectAll')"
+              :aria-label="t('chat.selectAll')"
+              :aria-pressed="allSessionsSelected"
               @click="toggleSelectAllSessions"
             >
               <template #icon>
@@ -883,7 +914,7 @@ function handleBatchDeleteConfirm() {
               @positive-click="handleBatchDeleteConfirm"
             >
               <template #trigger>
-                <NButton quaternary size="tiny" type="error" :loading="isBatchDeleting" :disabled="isBatchDeleting">
+                <NButton quaternary size="tiny" :title="t('common.delete')" :aria-label="t('common.delete')" :loading="isBatchDeleting" :disabled="isBatchDeleting">
                   <template #icon>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="3 6 5 6 21 6" />
@@ -899,6 +930,8 @@ function handleBatchDeleteConfirm() {
               quaternary
               size="tiny"
               :disabled="isBatchDeleting"
+              :title="t('common.cancel')"
+              :aria-label="t('common.cancel')"
               @click="toggleBatchMode"
             >
               <template #icon>
@@ -909,7 +942,7 @@ function handleBatchDeleteConfirm() {
         </div>
       </div>
       <div v-if="showSessions" class="session-items">
-        <div v-if="hermesSessionsLoading && hermesSessions.length === 0" class="session-loading">{{ t('common.loading') }}</div>
+        <div v-if="hermesSessionsLoading && hermesSessions.length === 0" class="session-loading"><NSpin size="small" :description="t('common.loading')" /></div>
         <div v-else-if="hermesSessions.length === 0" class="session-empty">{{ t('chat.noSessions') }}</div>
 
         <template v-if="pinnedSessions.length > 0">
@@ -985,6 +1018,7 @@ function handleBatchDeleteConfirm() {
       </div>
       <PageSidebarFooter v-if="showSessions" />
     </aside>
+    </PageSidebar>
 
     <NDropdown
       placement="bottom-start"
@@ -1001,16 +1035,16 @@ function handleBatchDeleteConfirm() {
       class="chat-main"
       :class="{ 'chat-main--sidebar-collapsed': !showSessions }"
     >
+      <PageHeader>
       <header class="chat-header">
         <div class="header-left">
-          <NButton class="history-sidebar-toggle" quaternary size="small" @click="showSessions = !showSessions" circle>
-            <template #icon>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-            </template>
-          </NButton>
+          <HeaderSidebarToggle
+            class="history-sidebar-toggle"
+            :expanded="showSessions"
+            @toggle="showSessions = !showSessions"
+          />
           <span class="header-session-title">{{ activeSessionTitle }}</span>
           <span v-if="activeSessionSource" class="source-badge">{{ getSourceLabel(activeSessionSource) }}</span>
-          <span v-if="historySession?.workspace" class="workspace-badge" :title="historySession.workspace">📁 {{ historySession.workspace.split('/').pop() || historySession.workspace }}</span>
         </div>
         <div class="header-actions">
           <NTooltip trigger="hover">
@@ -1035,6 +1069,7 @@ function handleBatchDeleteConfirm() {
           </NTooltip>
         </div>
       </header>
+      </PageHeader>
 
       <div class="history-content-wrapper">
         <div class="history-main-content">
@@ -1053,7 +1088,7 @@ function handleBatchDeleteConfirm() {
         />
       </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -1086,11 +1121,9 @@ function handleBatchDeleteConfirm() {
   width: $sidebar-width;
   min-height: 0;
   align-self: stretch;
-  margin: 10px;
+  margin: 0;
   background: $bg-sidebar-surface;
-  border: 1px solid $border-color;
-  border-radius: 14px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  border-inline-end: 1px solid $border-color;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -1109,26 +1142,22 @@ function handleBatchDeleteConfirm() {
 
   @media (max-width: $breakpoint-mobile) {
     position: absolute;
-    left: 10px;
-    top: 10px;
-    bottom: 10px;
+    left: 0;
+    top: 0;
+    bottom: 0;
     height: auto;
     margin: 0;
     z-index: 120;
     width: $sidebar-width;
 
     &.collapsed {
-      transform: translateX(calc(-100% - 10px));
+      transform: translateX(-100%);
       opacity: 0;
     }
   }
 }
 
 @media (max-width: $breakpoint-mobile) {
-  .session-close-btn {
-    display: flex;
-  }
-
   .session-backdrop {
     position: absolute;
     inset: 0;
@@ -1148,7 +1177,6 @@ function handleBatchDeleteConfirm() {
 .page-sidebar-top {
   flex-shrink: 0;
   padding: 12px;
-  border-bottom: 1px solid $border-color;
 }
 
 .session-list-toolbar {
@@ -1156,7 +1184,7 @@ function handleBatchDeleteConfirm() {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .session-list-header {
@@ -1171,10 +1199,17 @@ function handleBatchDeleteConfirm() {
   display: flex;
   align-items: center;
   gap: 4px;
+  height: 22px;
+
+  .n-button { height: 22px; min-height: 22px; }
 }
 
 .session-close-btn {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   border: none;
   background: none;
   cursor: pointer;
@@ -1187,12 +1222,10 @@ function handleBatchDeleteConfirm() {
   }
 }
 
-.session-list-title {
+.session-selection-count {
+  min-width: 0;
   font-size: 12px;
-  font-weight: 600;
-  color: $text-muted;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: $text-secondary;
 }
 
 .session-group-header {
@@ -1348,19 +1381,4 @@ function handleBatchDeleteConfirm() {
   }
 }
 
-.workspace-badge {
-  display: inline-flex;
-  align-items: center;
-  font-size: 11px;
-  color: $text-muted;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 2px 8px;
-  border-radius: 4px;
-  height: 20px;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: default;
-}
 </style>

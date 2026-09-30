@@ -74,6 +74,20 @@ export interface RoomSummaryState {
     lastError: string | null
 }
 
+export interface RoomSummaryReview {
+    id: string
+    roomId: string
+    sourceVersion: number
+    sourceSummaryHash: string
+    status: 'completed' | 'skipped'
+    decision: 'pass' | 'needs_improvement' | 'unknown'
+    ruleResults: Array<{ id: string; decision: 'pass' | 'needs_improvement' | 'unknown'; confidence?: number }>
+    reasonCode: string
+    durationMs: number
+    createdAt: number
+    appliedRevisionVersion: number | null
+}
+
 export interface RoomSummaryAnchor {
     id: string
     timestamp: number
@@ -86,8 +100,9 @@ export interface RoomAgent {
     id: string
     roomId: string
     agentId: string
-    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
     agentMode: 'scoped' | 'global'
+    priorAgentMode?: 'scoped' | 'global' | ''
     profile: string
     provider: string
     model: string
@@ -111,6 +126,12 @@ export type RoomAgentSummary = Pick<
     'id' | 'roomId' | 'agentId' | 'agent' | 'name' | 'avatar'
 >
 
+export interface GroupMessageRoutingDecision {
+    messageId: string; roomId: string; targetAgentId: string | null; targetAgentName: string | null
+    mode: 'suggest' | 'auto'; status: 'suggested' | 'queued' | 'skipped'; queueId: string | null
+    confidence: number | null; handoffComplete: boolean | null; loopDetected: boolean | null; createdAt: number; updatedAt: number
+}
+
 export interface GroupAgentActivity {
     roomId: string
     /** Stable gc_room_agents row identity. */
@@ -125,8 +146,9 @@ export interface GroupAgentActivity {
 
 export interface RoomAgentInput {
     presetId?: string
-    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
     agentMode?: 'scoped' | 'global'
+    priorAgentMode?: 'scoped' | 'global' | ''
     profile: string
     provider?: string
     model?: string
@@ -157,6 +179,7 @@ export function groupAgentPresetToRoomAgentInput(preset: GroupAgentPreset): Room
         presetId: preset.id,
         agent: preset.agent,
         agentMode: preset.agentMode,
+        priorAgentMode: preset.priorAgentMode,
         profile: preset.profile,
         provider: preset.provider,
         model: preset.model,
@@ -536,7 +559,7 @@ export async function updateRoomWorkspace(roomId: string, workspace: string): Pr
     })
 }
 
-export async function getRoomSummary(roomId: string): Promise<{ summary: RoomSummaryState; anchor: RoomSummaryAnchor | null }> {
+export async function getRoomSummary(roomId: string): Promise<{ summary: RoomSummaryState; review: RoomSummaryReview | null; anchor: RoomSummaryAnchor | null }> {
     return request(`/api/studio/group-chat/rooms/${roomId}/summary`)
 }
 

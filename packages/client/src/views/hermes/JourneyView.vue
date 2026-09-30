@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NDrawer, NDrawerContent, NSpin, NTag, useMessage } from 'naive-ui'
+import { NButton, NDrawer, NDrawerContent, NTag, useMessage } from 'naive-ui'
 import {
   Handle,
   MarkerType,
@@ -59,7 +61,7 @@ const profilesStore = useProfilesStore()
 const { fitView } = useVueFlow('hermes-journey')
 
 const data = ref<JourneyGraphResponse | null>(null)
-const loading = ref(false)
+const loading = ref(true)
 const graphWrapRef = ref<HTMLElement | null>(null)
 const selectedId = ref('')
 const hoverId = ref('')
@@ -691,10 +693,12 @@ watch(nodes, () => {
 </script>
 
 <template>
-  <div class="journey-view">
+  <PageLoading :show="loading && !data" class="journey-view">
+    <PageHeader>
     <header class="page-header journey-view__header">
       <h2 class="header-title">{{ t('journey.title') }}</h2>
     </header>
+    </PageHeader>
 
     <div class="journey-view__content">
       <div class="journey-panel">
@@ -763,7 +767,7 @@ watch(nodes, () => {
           </div>
         </div>
 
-        <NSpin :show="loading && !data" class="journey-spin">
+        <div class="journey-spin">
           <main class="journey-graph-layout">
             <section
               ref="graphWrapRef"
@@ -857,7 +861,7 @@ watch(nodes, () => {
               </div>
             </section>
           </main>
-        </NSpin>
+        </div>
 
         <NDrawer v-model:show="detailDrawerOpen" :width="drawerWidth" placement="right">
           <NDrawerContent v-if="selectedNode" class="journey-detail-drawer" :native-scrollbar="false" closable>
@@ -909,14 +913,14 @@ watch(nodes, () => {
         </NDrawer>
       </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .journey-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1113,12 +1117,6 @@ watch(nodes, () => {
   flex: 1;
   height: 100%;
   min-height: 0;
-
-  :deep(.n-spin-container),
-  :deep(.n-spin-content) {
-    height: 100%;
-    min-height: 0;
-  }
 }
 
 .journey-graph-layout,

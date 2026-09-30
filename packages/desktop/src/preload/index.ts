@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { DesktopUpdateState } from '../main/updater-types'
 import type { BrowserBounds, BrowserProfileCreateInput, BrowserProfileSwitchImpact, BrowserProfileUpdateInput, BrowserSelection, DesktopBrowserProfile, DesktopBrowserState, DesktopBrowserTab } from '../main/browser/browser-types'
 
 type DesktopWindowKind = 'main' | 'pet' | 'chat'
@@ -10,6 +11,17 @@ function desktopWindowKind(): DesktopWindowKind {
 }
 
 contextBridge.exposeInMainWorld('hermesDesktop', {
+  updater: {
+    getState: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-get-state'),
+    cancel: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-cancel'),
+    download: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-download'),
+    install: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-install'),
+    onStateChange: (callback: (state: DesktopUpdateState) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: DesktopUpdateState) => callback(state)
+      ipcRenderer.on('hermes-desktop:update-state-change', listener)
+      return () => ipcRenderer.removeListener('hermes-desktop:update-state-change', listener)
+    },
+  },
   getToken: (): Promise<string> => ipcRenderer.invoke('hermes-desktop:get-token'),
   retryBootstrap: (source?: 'cf' | 'github'): Promise<void> => ipcRenderer.invoke('hermes-desktop:retry-bootstrap', source),
   restartApp: (): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:restart-app'),

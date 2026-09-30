@@ -26,6 +26,8 @@ describe('usage store agent breakdown', () => {
         cache_read_tokens INTEGER NOT NULL DEFAULT 0,
         cache_write_tokens INTEGER NOT NULL DEFAULT 0,
         reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd REAL,
+        cost_source TEXT NOT NULL DEFAULT 'unknown',
         api_calls INTEGER NOT NULL DEFAULT 0,
         model TEXT NOT NULL DEFAULT '',
         profile TEXT NOT NULL DEFAULT 'default',

@@ -628,6 +628,7 @@ export async function exportSession(id: string, mode: 'full' | 'compressed' = 'f
 }
 
 export interface UsageStatsResponse {
+  cost_coverage?: import('@/utils/usage-cost').UsageCostCoverage
   total_input_tokens: number
   total_output_tokens: number
   total_cache_read_tokens: number
@@ -664,6 +665,7 @@ export interface UsageStatsResponse {
     sessions: number
     errors: number
     cost: number
+    cost_coverage?: import('@/utils/usage-cost').UsageCostCoverage
   }>
 }
 

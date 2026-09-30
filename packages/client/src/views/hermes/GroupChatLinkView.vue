@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -10,6 +12,7 @@ import {
   defaultGroupAgentAvatar,
   parseStoredAvatar,
 } from '@/utils/group-agent-avatar'
+import { nextCodingAgentMode, storedPriorAgentMode, submittedCodingAgentSelection } from '@/utils/coding-agent-mode'
 import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import {
   inferCodingAgentApiMode,
@@ -43,6 +46,7 @@ type GroupAgentType = RemoteGroupAgentDescriptor['agent']
 const selectedAgentType = ref<GroupAgentType>('hermes')
 const selectedProfile = ref('')
 const selectedAgentMode = ref<'scoped' | 'global'>('scoped')
+const priorAgentMode = ref<'scoped' | 'global' | undefined>()
 const selectedAgentProvider = ref('')
 const selectedAgentModel = ref('')
 const selectedAgentApiMode = ref<CodingAgentApiMode>('codex_responses')
@@ -97,16 +101,7 @@ const hasServerHandoff = computed(() => (
   && !!handoffRequestSecret.value
   && !!handoffPairingTicket.value
 ))
-const groupAgentTypeDefinitions: Array<{ label: string; value: GroupAgentType }> = [
-  { label: 'Hermes', value: 'hermes' },
-  { label: 'Ekko', value: 'ekko' },
-  { label: 'Claude', value: 'claude' },
-  { label: 'Codex', value: 'codex' },
-  { label: 'Pi', value: 'pi' },
-  { label: 'Grok', value: 'grok' },
-  { label: 'OpenCode', value: 'opencode' },
-  { label: 'DeepSeek Harness', value: 'dsh' },
-]
+const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
 const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.map((option) => {
   const disabled = !isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
   return {
@@ -136,6 +131,8 @@ function getAgentModelGroups(profile: string) {
             ? 'pi'
             : selectedAgentType.value === 'grok'
               ? 'grok'
+            : selectedAgentType.value === 'cursor'
+              ? 'cursor'
             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
               ? 'opencode'
               : 'codex'
@@ -185,7 +182,7 @@ const agentReasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
   { label: t('chat.reasoningEffort.options.max'), value: 'max' },
 ])
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -198,11 +195,15 @@ const selectedAgent = computed<RemoteGroupAgentDescriptor | null>(() => {
   if (!isAgentStatusAvailable(agentStatusSnapshot.value, selectedAgentType.value)) return null
   if (!selectedProfile.value || (!usesGlobalAgentMode.value && (!selectedAgentProvider.value || !selectedAgentModel.value))) return null
   return {
-    agent: selectedAgentType.value,
-    agentMode: usesGlobalAgentMode.value ? 'global' : 'scoped',
+    ...submittedCodingAgentSelection({
+      agent: selectedAgentType.value,
+      agentMode: selectedAgentMode.value,
+      priorAgentMode: priorAgentMode.value,
+      provider: selectedAgentProvider.value,
+      model: selectedAgentModel.value,
+      usesGlobal: usesGlobalAgentMode.value,
+    }),
     profile: selectedProfile.value,
-    provider: usesGlobalAgentMode.value ? '' : selectedAgentProvider.value,
-    model: usesGlobalAgentMode.value ? '' : selectedAgentModel.value,
     apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
     reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
     name: agentName.value.trim() || selectedProfile.value,
@@ -290,8 +291,15 @@ function handleAgentTypeChange(agent: GroupAgentType): void {
     return
   }
   error.value = ''
+  const switched = nextCodingAgentMode({
+    previousAgent: selectedAgentType.value,
+    nextAgent: agent,
+    agentMode: selectedAgentMode.value,
+    priorAgentMode: priorAgentMode.value,
+  })
   selectedAgentType.value = agent
-  if (!['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(agent)) selectedAgentMode.value = 'scoped'
+  selectedAgentMode.value = switched.agentMode
+  priorAgentMode.value = switched.priorAgentMode
   syncAgentModelSelection(selectedProfile.value)
 }
 
@@ -315,6 +323,7 @@ function handleAgentModelChange(model: string): void {
 function applyAgentConfiguration(agent: RemoteGroupAgentDescriptor): void {
   selectedAgentType.value = agent.agent
   selectedAgentMode.value = agent.agentMode === 'global' ? 'global' : 'scoped'
+  priorAgentMode.value = storedPriorAgentMode(agent.priorAgentMode)
   selectedProfile.value = agent.profile
   selectedAgentProvider.value = agent.provider
   selectedAgentModel.value = agent.model
@@ -611,7 +620,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="group-chat-link-view">
+  <PageLoading :show="loading" class="group-chat-link-view">
     <section class="link-card">
       <img src="/logo.png" alt="" class="link-logo">
       <h1>
@@ -624,7 +633,7 @@ onUnmounted(() => {
         {{ editingConnection?.cloudOrigin || parentOrigin }}
       </code>
 
-      <div v-if="loading" class="link-status">{{ t('common.loading') }}</div>
+      <div v-if="loading" class="link-status"></div>
       <div v-else-if="connected" class="link-success">
         <strong>{{ t('groupChat.agentLinkConnected') }}</strong>
         <NButton type="primary" @click="closeWindow">{{ t('groupChat.agentLinkClose') }}</NButton>
@@ -677,7 +686,7 @@ onUnmounted(() => {
               @update:value="handleAgentProfileChange"
             />
           </div>
-          <div v-if="supportsGlobalAgentMode" class="field">
+          <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="field">
             <label>{{ t('codingAgents.launchModeScope') }}</label>
             <NSelect
               v-model:value="selectedAgentMode"
@@ -791,19 +800,25 @@ onUnmounted(() => {
       <p v-if="error" class="link-error" role="alert">{{ error }}</p>
       <p class="link-security">{{ t('groupChat.agentLinkSecurityHint') }}</p>
     </section>
-  </main>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .group-chat-link-view {
-  min-height: calc(100 * var(--vh));
+  min-height: 100%;
   box-sizing: border-box;
   display: grid;
   place-items: center;
   padding: 24px;
   background: $bg-primary;
+}
+
+.group-chat-link-view > :deep(.page-loading-content) {
+  width: 100%;
+  display: grid;
+  place-items: center;
 }
 
 .link-card {

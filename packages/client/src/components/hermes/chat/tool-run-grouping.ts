@@ -1,10 +1,10 @@
 import type { Message } from '@/stores/hermes/chat'
 
-export function groupCompletedToolsByRun(messages: Message[]): Message[] {
+export function groupCompletedToolsByRun(messages: Message[], ungroupedMessageId?: string | null): Message[] {
   const toolsByRun = new Map<string, Message[]>()
   for (const message of messages) {
     const runId = message.runMarker?.trim()
-    if (message.role !== 'tool' || message.toolStatus === 'running' || !runId) continue
+    if (message.id === ungroupedMessageId || message.role !== 'tool' || message.toolStatus === 'running' || !runId) continue
     const tools = toolsByRun.get(runId) || []
     tools.push(message)
     toolsByRun.set(runId, tools)
@@ -14,7 +14,7 @@ export function groupCompletedToolsByRun(messages: Message[]): Message[] {
   const emittedRuns = new Set<string>()
   const grouped: Message[] = []
   for (const message of messages) {
-    const runId = message.role === 'tool' && message.toolStatus !== 'running'
+    const runId = message.id !== ungroupedMessageId && message.role === 'tool' && message.toolStatus !== 'running'
       ? message.runMarker?.trim()
       : undefined
     if (!runId) {

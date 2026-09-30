@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NAlert, NButton, NButtonGroup, NDataTable } from 'naive-ui'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NAlert, NButton, NButtonGroup, NDataTable, NSpin } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import { parseCsvPreview } from '@/utils/hermes/tabular-preview'
 

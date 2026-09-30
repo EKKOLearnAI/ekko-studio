@@ -2,6 +2,55 @@ import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
   jev: {
+    browserAutomation: "内蔵ブラウザーの自動化",
+    browserAutomationHint: "このプロファイルに保存した JEV 接続を使用し、次の判定から適用します。画面上のラベルを JEV に送信しますが、入力値は含みません。無効時、利用不可時、判定が不確かな場合は従来の処理を維持します。",
+    browserMatchEnabled: "JEV による要素の照合",
+    browserMatchHint: "対象の説明から実在するスナップショット参照を提案します。スナップショット全体の操作可能な要素を関連度順に並べてから候補数の上限を適用し、曖昧な場合は提案しません。",
+    browserMatchOptions: "要素照合の設定",
+    browserMatchCandidateLimit: "要素候補数の上限",
+    browserMatchMinConfidence: "要素照合の最低信頼度",
+    browserMatchTimeoutMs: "要素照合のタイムアウト（ミリ秒）",
+    browserVerifyEnabled: "JEV による結果の確認",
+    browserVerifyHint: "期待する結果と操作または完了したバッチ後の表示内容を照合します。達成・未達成・不明を返し、操作の再試行や入力値の確認は行いません。",
+    browserVerifyOptions: "結果確認の設定",
+    browserVerifyMinConfidence: "結果確認の最低信頼度",
+    browserVerifyTimeoutMs: "結果確認のタイムアウト（ミリ秒）",
+
+    groupSchedulingTitle: 'グループチャット調整の強化',
+    groupMessageRoutingMode: 'タスク割り当て方式',
+    groupRoutingSuggest: '提案のみ（ユーザー確認）',
+    groupRoutingAuto: '自動割り当て',
+    groupHandoffReviewEnabled: '引き継ぎ情報の完全性を確認',
+    groupHandoffReviewHint: '次の Agent に渡す文脈・制約・残作業を確認します。',
+    groupLoopDetectionEnabled: '重複した空回りを確認',
+    groupLoopDetectionHint: '新しい進展のない反復協議を検出します。',
+    groupSummaryTitle: 'グループ要約の強化',
+    groupSummaryRevisionEnabled: '要約を自動修正',
+    groupSummaryRevisionHint: '確かな問題がある場合に一度だけ修正し再評価します。',
+    workflowExpectationTitle: 'ワークフロー期待達成評価',
+    groupMessageRoutingEnabled: '群聊調整の強化を有効化',
+    groupRoutingDisabled: '無効です。宛先が明示されていないメッセージは割り当てられません。',
+    groupRoutingReady: '有効です。Agent の提案または自動割り当てを利用できます。',
+    groupMessageRoutingMinConfidence: '割り当て信頼度',
+    groupMessageRoutingMinConfidenceHint: '提案または自動割り当てに必要な最低信頼度です。',
+    groupMessageRoutingTimeout: '割り当て時間予算（ミリ秒）',
+    groupMessageRoutingTimeoutHint: '宛先が明示されていない1件のメッセージに対する JEV の合計時間予算です。',
+
+    workflowQualityEnabled: 'ワークフロー期待達成評価を有効化',
+    workflowQualityDisabled: '無効です。ワークフローの実行は変わりません。',
+    workflowQualityReady: '完了したワークフローノードに対して有効です。',
+    workflowQualityMinConfidence: 'ワークフロー評価信頼度',
+    workflowQualityMinConfidenceHint: '期待未達と判定するために必要な最低信頼度です。',
+    workflowQualityTimeout: 'ワークフロー評価時間予算（ミリ秒）',
+    workflowQualityTimeoutHint: 'ノード完了後の JEV 評価に使える合計時間予算です。',
+
+    groupSummaryReviewEnabled: 'JEVでグループ要約を確認',
+    groupSummaryDisabled: '無効です。要約は従来どおり動作します。',
+    groupSummaryReady: 'このプロファイルで作成した要約に対して有効です。',
+    groupSummaryReviewMinConfidence: '要約確認の信頼度',
+    groupSummaryReviewMinConfidenceHint: '品質問題を報告する最小信頼度です。',
+    groupSummaryReviewTimeout: '要約確認の時間予算（ms）',
+    groupSummaryReviewTimeoutHint: '元の要約を保存した後に使用できるJEVの総時間です。',
     ekkoSkillsEnabled: "Ekko スキルに JEV を使用",
     skillsDisabled: "無効。既存のスキル照合と学習を使用します。",
     skillsReady: "意味による照合と学習の事前判定が有効です。",
@@ -328,6 +377,7 @@ export default {
 
   // 共通
   common: {
+    close: '閉じる',
     loading: '読み込み中...',
     cancel: 'キャンセル',
     retry: '再試行',
@@ -432,6 +482,17 @@ export default {
   },
 
   sidebar: {
+    desktopUpdatePreparing: "更新を準備中",
+    desktopUpdateStopping: "ダウンロードを停止中…",
+    desktopUpdateReady: "更新の準備完了",
+    desktopUpdateFailed: "ダウンロード失敗",
+    desktopUpdateInstalling: "再起動して更新中…",
+    desktopUpdateInstall: "再起動して更新",
+    desktopUpdateActionFailed: "操作できませんでした。再試行してください。",
+    desktopUpdateStop: "ダウンロードを停止",
+    desktopUpdateStopped: "ダウンロードを停止しました",
+    desktopUpdateRetry: "再ダウンロード",
+    desktopUpdateDownloading: "更新をダウンロード中",
     chat: 'チャット',
     backToChat: '戻る',
     search: '検索',
@@ -522,6 +583,8 @@ export default {
     ekkoDescription: 'Ekko は Studio に同梱されているため、個別のインストール、更新、削除は不要です。',
     version: 'バージョン',
     codingAgentDescription: 'Studio からインストール、更新確認、削除ができます。',
+    cursorDescription: 'Cursor CLI（`agent`）は https://cursor.com/install からインストールし、その後更新してください。Studio は npm ではインストールしません。',
+    cursorNoManagedConfig: '起動時に ~/.cursor/mcp.json は書き換えられません。管理対象サーバーは今回のセッションのランタイムコピーにあります。',
     updateToVersion: '{version} に更新',
     deleteConfirm: '{name} を削除しますか？',
     installOperation: 'インストール',
@@ -1032,6 +1095,7 @@ export default {
     stop: '停止',
     send: '送信',
     contextUsed: 'コンテキスト使用量:',
+    sessionUsage: 'このセッションの累計使用量:',
     sessions: 'セッション',
     webUiSessions: 'セッション',
     allProfiles: 'すべてのプロファイル',
@@ -1085,6 +1149,9 @@ export default {
     interactionCountdown: '残り {time}',
     interactionCountdownElapsed: '00:00 · サーバー確認待ち',
     deleteSession: 'このセッションを削除しますか？',
+    sessionListActions: 'セッション一覧の操作',
+    filterByProfile: 'プロファイルで絞り込み',
+    selectedSessions: '{count} 件選択中',
     toggleBatchMode: '一括選択',
     selectAll: 'すべて選択',
     confirmBatchDelete: '{count}件のセッションを削除しますか？',
@@ -1316,6 +1383,7 @@ export default {
 
   // スキル
   skills: {
+    filterBySource: "ソースで絞り込む",
     title: 'スキル',
     targetFilter: 'ランタイム',
     targets: {
@@ -1862,6 +1930,10 @@ export default {
 
   // ログ
   logs: {
+    file: "ログファイル",
+    level: "ログレベル",
+    lines: "行数",
+    filters: "ログを絞り込む",
     title: 'ログ',
     all: 'すべて',
     searchPlaceholder: '検索...',
@@ -2543,6 +2615,11 @@ export default {
   },
 
   codingAgents: {
+    nativeUsage: "使用量：入力 {inputTokens}、出力 {outputTokens}、キャッシュ読取 {cacheReadTokens}、書込 {cacheWriteTokens}、合計 {totalTokens} トークン。",
+    nativeUsageUnknown: "使用量は不明です。このセッションのネイティブトークン使用量はまだ報告されていません。",
+    nativeContextUnknown: "コンテキストは不明です。ネイティブセッションの現在の使用量と上限を取得できません。",
+    nativeContextEstimate: "コンテキスト推定（最新の使用量 / 設定上限）：{contextTokens} / {contextWindow} トークン（{contextPercent}%）。",
+    nativeCompactUnavailable: "Studio の Cursor print モード連携では /compact を使用できません。",
     title: "コーディングエージェント",
     notice: "すべてのプロバイダーとモデルが互換性を持つわけではありません。",
     claudeDescription: "print mode の単発タスクと対話型コーディングセッション向けの Anthropic CLI です。",
@@ -2557,6 +2634,7 @@ export default {
     notInstalled: "未インストール",
     installRequired: "{agent} はインストールされていません。セッション作成前にインストールしてください。",
     installNow: "インストール",
+    cursorInstallGuide: "インストール手順",
     installing: "インストール中",
     installSuccess: "インストールしました",
     installFailed: "インストールに失敗しました",
@@ -2738,6 +2816,24 @@ export default {
 
   // 使用統計
   usage: {
+    costStates: {
+      unknown: "未記録",
+      partial: "一部の費用のみ記録",
+      reported: "プロバイダー報告額",
+      estimated: "推定費用",
+      mixed: "報告額と推定額を含む",
+    },
+    pricing: {
+      title: "モデル料金",
+      help: "カスタム料金が未設定の場合、一致するモデルの models.dev 料金で推定します。100万トークンあたりの米ドル。プロバイダーとモデルの ID を完全一致で指定（例: global）。費用が返されない場合のみ推定します。キャッシュ料金の空欄は不明を意味します。変更は今後の呼び出しに適用され、過去の費用は再計算されません。",
+      provider: "プロバイダー ID",
+      model: "モデル ID",
+      input: "入力",
+      output: "出力",
+      cacheRead: "キャッシュ読取",
+      cacheWrite: "キャッシュ書込",
+      error: "料金の読み込みまたは保存に失敗しました。ID、重複、負の料金がないか確認してください。",
+    },
     title: '使用統計',
     refresh: '更新',
     totalTokens: '総トークン数',
@@ -2749,7 +2845,7 @@ export default {
     cacheHitRate: 'キャッシュヒット率',
     modelBreakdown: 'モデル別内訳',
     agentBreakdown: 'Agent 別内訳',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', ekkoAgent: 'Ekko', unknown: '不明' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: '不明' },
     dailyTrend: '日別使用量',
     date: '日付',
     tokens: 'トークン',
@@ -2784,6 +2880,8 @@ export default {
   },
 
   workflow: {
+    listActions: 'ワークフロー一覧の操作',
+    quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'ワークフロー',
     profile: 'プロファイル',
     namePlaceholder: 'ワークフロー名',
@@ -2951,6 +3049,15 @@ export default {
 
   // 更新履歴
   groupChat: {
+    routingHandoffIncomplete: '引き継ぎ情報が不完全な可能性があります。',
+    routingLoopDetected: '協力が同じ所を回っている可能性があります。',
+    routingSuggested: 'JEV の提案: {agent}',
+    routingUseSuggestion: '割り当て',
+    routingAutoQueued: 'JEV が {agent} に割り当てました',
+    summaryQuality: "JEV summary quality",
+    summaryQualityVersion: "Checked summary version {version}",
+    summaryQualityDecision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Not evaluated" },
+    summaryQualityRule: { missing_constraints: "Missing constraints or tasks", stale_or_overstated: "Stale or overstated conclusion", unsupported_completion: "Unsupported completion claim" },
     agentPreset: 'Agent preset',
     agentPresets: 'Agent presets',
     agentPresetPlaceholder: 'Select a preset',
@@ -3183,6 +3290,24 @@ export default {
   },
 
   changelog: {
+    new_0_7_26_1: 'Studio のナビゲーション、ページヘッダー、一覧操作を統一し、モバイルレイアウトを改善 (#3232)',
+    new_0_7_26_2: 'ページ読み込み表示を統一し、動きを減らす設定時を含め、ロゴの読み込み表示を改善 (#3232, #3236)',
+    new_0_7_26_3: 'カスタム背景とガラス効果の階層を改善し、ウィンドウの縁と角丸を修正。マイクボタンをテーマの配色に対応 (#3236)',
+    new_0_7_26_4: 'プラットフォームに合わせてデスクトップのウィンドウ操作ボタンの位置とスタイルを調整し、Windows 標準の角丸を維持 (#3234, #3235)',
+    new_0_7_26_5: 'Gateway の自動起動を明示的な有効化が必要な設定に変更し、Profile 一覧の読み込みから CLI チェックを分離。メッセージ吹き出しの初回描画を修正 (#3233)',
+    new_0_7_26_6: '使用料金の記録とモデル単価のカスタマイズを追加。ローカルモデルカタログによる料金見積もりに対応し、コンテキスト上限の照合を改善 (#3226)',
+    new_0_7_26_7: 'DSH レジストリのプリセットとネイティブプラグイン設定に対応し、プラグインページが表示領域全体を使わない問題を修正 (#3218)',
+    new_0_7_26_8: 'Agent Manager の明るいカード上で Cursor ロゴが見えにくい問題を修正 (#3222)',
+    new_0_7_25_1: 'チャット、グループチャット、ワークフローで Cursor CLI に対応し、ネイティブ設定、スキル管理、分離された Studio MCP 設定を追加 (#3110)',
+    new_0_7_25_2: '設定可能な JEV の記憶検索、関連性フィルタリング、書き込みレビュー、スキル照合、学習事前チェックを追加 (#3159, #3161, #3169)',
+    new_0_7_25_3: '任意で有効にできる JEV のブラウザー対象照合と操作検証、グループ要約レビューとメッセージ振り分け、ワークフロー品質チェックを追加 (#3208, #3211)',
+    new_0_7_25_4: 'ブラウザー自動化に順次バッチ操作、最大 12 タブ、大規模ページへの対応、より明確な操作フィードバックを追加 (#3206, #3207, #3212, #3215)',
+    new_0_7_25_5: 'デスクトップ更新のダウンロード進捗表示と、macOS・Windows・Linux 向けの独立した更新テストビルドを追加 (#3176, #3177)',
+    new_0_7_25_6: '長い会話の検索結果への移動、新規チャットの添付ファイル、セッションのピン留め更新、ワークスペースのお気に入り操作を修正 (#3182, #3168, #3193)',
+    new_0_7_25_7: 'サイドバーにアカウントメニューを追加し、Agent 選択順を統一、Agent 管理画面とグループチャットのレイアウトを改善 (#3191, #3199, #3201, #3188)',
+    new_0_7_25_8: 'Hermes 更新の互換性、ブリッジプロセスのライフサイクル、Studio インスタンス間の MCP ルーティング、グループ内 Coding Agent の認証情報を修正 (#3202, #3157, #3187)',
+    new_0_7_25_9: 'DSH 起動時の依存関係と ACP の所属バンドル解決を修正し、個別の Codex 設定から重複キーを削除 (#3156, #3190, #3163)',
+    new_0_7_25_10: '無効な通知先を解除し、iOS ライブアクティビティのクリーンアップを改善 (#3167)',
     new_0_7_24_1: 'iOSライブアクティビティのオーケストレーションを追加し、ロケール対応の更新とユーザー別通知ルーティングに対応 (#3102, #3111, #3152)',
     new_0_7_24_2: '通知の既定値とプレビューを改善し、旧セッションのオプトアウトを無視するとともに、未対応のソーシャルプッシュ項目を非表示化 (#3131, #3133, #3146, #3151)',
     new_0_7_24_3: '共有セッションのアップロードと添付ファイルへのアクセスを各共有フローで修正 (#3144)',

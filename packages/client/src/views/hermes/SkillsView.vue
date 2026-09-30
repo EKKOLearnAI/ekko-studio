@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NBadge, NButton, NDrawer, NDrawerContent, NInput } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -26,7 +28,7 @@ const { t } = useI18n()
 const profilesStore = useProfilesStore()
 const categories = ref<SkillCategory[]>([])
 const archived = ref<SkillInfo[]>([])
-const loading = ref(false)
+const loading = ref(true)
 const selectedCategory = ref('')
 const selectedSkill = ref('')
 const searchQuery = ref('')
@@ -50,6 +52,7 @@ const selectedSkillData = computed(() => {
 })
 
 const isHermesTarget = computed(() => skillTarget.value === 'hermes')
+const canManageTarget = computed(() => isHermesTarget.value || skillTarget.value === 'dsh' || skillTarget.value === 'cursor')
 const selectedSkillReadonly = computed(() => {
   if (!selectedSkillData.value) return true
   if (selectedSkillData.value.readonly) return true
@@ -164,15 +167,16 @@ function handleSkillSaved() {
 </script>
 
 <template>
-  <div class="skills-view" :class="{ embedded }">
+  <PageLoading :show="loading && categories.length === 0" class="skills-view" :class="{ embedded }">
+    <PageHeader>
     <header class="page-header">
-      <div style="display: flex; align-items: center; gap: 8px;">
+      <div class="skills-header-heading">
         <h2 class="header-title">{{ t('skills.title') }}</h2>
         <button v-if="!showSidebar" class="sidebar-toggle" @click="showSidebar = true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
+        <SkillSourceLegend v-model="sourceFilter" :show-hub="isHermesTarget" />
       </div>
-      <SkillSourceLegend v-model="sourceFilter" :show-hub="isHermesTarget" />
       <div class="header-actions">
         <NButton
           v-if="isHermesTarget && writeApprovalSupported"
@@ -195,7 +199,7 @@ function handleSkillSaved() {
           </span>
         </NButton>
         <NButton
-          v-if="isHermesTarget || skillTarget === 'dsh'"
+          v-if="canManageTarget"
           class="header-action-btn"
           size="small"
           :title="t('skills.import')"
@@ -235,11 +239,12 @@ function handleSkillSaved() {
         />
       </div>
     </header>
+    </PageHeader>
 
     <SkillImportModal
       v-if="showImportModal"
       :allow-category="skillTarget !== 'dsh'"
-      :import-handler="skillTarget === 'dsh' ? (files) => importSkill(files, undefined, 'dsh') : undefined"
+      :import-handler="!isHermesTarget ? (files, category) => importSkill(files, category, skillTarget) : undefined"
       @close="showImportModal = false"
       @saved="handleImported"
     />
@@ -260,7 +265,7 @@ function handleSkillSaved() {
     </NDrawer>
 
     <div class="skills-content">
-      <div v-if="loading && categories.length === 0" class="skills-loading">{{ t('common.loading') }}</div>
+      <div v-if="loading && categories.length === 0" class="skills-loading"></div>
       <div v-else class="skills-layout">
           <div class="mobile-backdrop" :class="{ active: showSidebar }" @click="showSidebar = false" />
           <div v-if="showSidebar" class="skills-sidebar">
@@ -270,9 +275,9 @@ function handleSkillSaved() {
               :selected-skill="selectedCategory && selectedSkill ? `${selectedCategory}/${selectedSkill}` : null"
               :search-query="searchQuery"
               :source-filter="sourceFilter"
-              :readonly="!isHermesTarget && skillTarget !== 'dsh'"
+              :readonly="!canManageTarget"
               :toggleable="isHermesTarget"
-              :delete-handler="skillTarget === 'dsh' ? (category, name) => deleteSkillApi(category, name, 'dsh') : undefined"
+              :delete-handler="!isHermesTarget ? (category, name) => deleteSkillApi(category, name, skillTarget) : undefined"
               @select="handleSelect"
               @deleted="handleSkillDeleted"
             />
@@ -304,7 +309,7 @@ function handleSkillSaved() {
           </div>
         </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">

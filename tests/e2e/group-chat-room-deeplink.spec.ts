@@ -330,6 +330,14 @@ async function mockGroupChatApi(page: Page, offlinePresence = false) {
       return json({ policy })
     }
 
+    const workspaceMatch = pathname.match(/^\/api\/studio\/group-chat\/rooms\/([^/]+)\/workspace$/)
+    if (workspaceMatch && request.method() === 'PUT') {
+      const room = rooms.find(item => item.id === decodeURIComponent(workspaceMatch[1]))
+      if (!room || !room.canManage) return json({ error: 'Forbidden' }, 403)
+      room.workspace = request.postDataJSON().workspace
+      return json({ room })
+    }
+
     const workspaceListMatch = pathname.match(/^\/api\/studio\/group-chat\/rooms\/([^/]+)\/workspace-files\/list$/)
     if (workspaceListMatch) {
       return json({
@@ -601,6 +609,23 @@ async function connectGroupSocket(page: Page) {
   })
   await triggerGroupSocket(page, 'connect', undefined)
 }
+
+test('keeps populated group header actions within the available window width', async ({ page }) => {
+  await setup(page, '/#/hermes/group-chat/room/room-alpha', 'win32')
+  await expect(page.locator('.room-title-text')).toHaveText('Alpha Room')
+  for (const width of [1440, 900, 769, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    const header = page.locator('.chat-header')
+    await expect.poll(() => header.locator('button').evaluateAll(buttons => buttons
+      .filter(button => button.getBoundingClientRect().width > 0)
+      .every(button => {
+        const box = button.getBoundingClientRect()
+        const header = button.closest('.chat-header')!.getBoundingClientRect()
+        return box.left >= Math.max(0, header.left) && box.right <= Math.min(innerWidth, header.right) + 1
+          && box.top >= header.top && box.bottom <= header.bottom + 1
+      }))).toBe(true)
+  }
+})
 
 test.describe('group chat room deep links', () => {
   // This file already covers multi-tab behavior explicitly; keeping the deep-link/socket fixture serial
@@ -1149,10 +1174,34 @@ test.describe('group chat room deep links', () => {
     await expect.poll(async () => (await geometry()).panelWidth).toBeLessThan(rtl.panelWidth)
   })
 
-  test('workspace control sits beside the upper-right settings control and toggles the group workspace panel', async ({ page }) => {
+  test('workspace icon switches the room workspace while the adjacent panel control toggles the drawer', async ({ page }) => {
     await setup(page, '/#/hermes/group-chat/room/room-alpha')
 
     const toolbar = page.locator('.chat-header .header-info')
+    const folderButton = toolbar.locator('.header-workspace-button')
+    await expect(folderButton).toHaveAttribute('title', '/tmp/alpha')
+    await expect(folderButton).toHaveText('')
+    await expect(page.locator('.header-left .workspace-badge')).toHaveCount(0)
+    await folderButton.click()
+    const picker = page.locator('.workspace-modal')
+    await expect(picker).toBeVisible()
+    await expect(page.locator('.group-workspace-panel')).toHaveCount(0)
+    const pathInput = picker.locator('.folder-path-input input')
+    await expect(pathInput).toHaveValue('/tmp/alpha')
+    await pathInput.fill('/tmp/alpha-new')
+    const saveResponse = page.waitForResponse(response =>
+      response.request().method() === 'PUT'
+      && response.url().endsWith('/api/studio/group-chat/rooms/room-alpha/workspace'))
+    await picker.getByRole('button', { name: 'Save', exact: true }).click()
+    const saved = await saveResponse
+    expect(saved.status()).toBe(200)
+    expect(saved.request().postDataJSON()).toEqual({ workspace: '/tmp/alpha-new' })
+    await expect(picker).not.toBeVisible()
+    await expect(folderButton).toHaveAttribute('title', '/tmp/alpha-new')
+    await folderButton.click()
+    await expect(pathInput).toHaveValue('/tmp/alpha-new')
+    await picker.getByRole('button', { name: 'Cancel', exact: true }).click()
+
     const workspaceButton = toolbar.locator('.workspace-panel-toggle')
     const settingsButton = toolbar.locator('.compression-settings-button')
     await expect(workspaceButton).toBeVisible()
@@ -1462,6 +1511,7 @@ test.describe('group chat room deep links', () => {
     await expect(page.locator('.room-title-text', { hasText: 'Read Only Room' })).toBeVisible()
     await expect(page.locator('.room-item', { hasText: 'Read Only Room' }).locator('.room-code')).toHaveCount(0)
     await expect(page.locator('.chat-header .header-info .compression-settings-button')).toHaveCount(0)
+    await expect(page.locator('.chat-header .header-workspace-button')).toHaveCount(0)
   })
 
   test('group workspace diffs use the single-chat card and shared diff panel', async ({ page }) => {
@@ -1792,4 +1842,14 @@ test.describe('group chat room deep links', () => {
     await expect(page).toHaveURL(/#\/hermes\/group-chat\/room\/room-beta$/)
     await expect(page.locator('.room-title-text', { hasText: 'Beta Room' })).toBeVisible()
   })
+})
+
+
+test('group-chat Agent picker follows the single-chat order', async ({ page }) => {
+  await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  await page.locator('.agent-avatar-rail-add').click()
+  const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await drawer.locator('.n-select').first().click()
+  await expect.poll(async () => (await page.locator('.n-base-select-option__content:visible').allTextContents())
+    .map(label => label.split(' · ')[0])).toEqual(['Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor'])
 })

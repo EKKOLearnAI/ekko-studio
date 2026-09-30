@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -9,7 +11,6 @@ import {
   NInput,
   NInputNumber,
   NSelect,
-  NSpin,
   NSwitch,
   NTabPane,
   NTabs,
@@ -29,7 +30,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
-const loading = ref(false)
+const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const activeTab = ref<SettingsTab>('runtime')
@@ -143,16 +144,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="ekko-settings-view">
+  <PageLoading :show="loading" class="ekko-settings-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('settings.title') }}</h2>
     </header>
+    </PageHeader>
 
     <div class="ekko-settings-content">
       <NAlert v-if="error" type="error" closable class="settings-error" @close="error = ''">
         {{ error }}
       </NAlert>
-      <NSpin :show="loading || saving" size="large" :description="t('common.loading')">
+      <div>
         <NTabs v-if="form" v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
           <NTabPane name="runtime" :tab="t('ekkoConfig.settingsRuntime')">
             <section class="settings-section">
@@ -308,16 +311,16 @@ onBeforeUnmount(() => {
             </section>
           </NTabPane>
         </NTabs>
-      </NSpin>
+      </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .ekko-settings-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }

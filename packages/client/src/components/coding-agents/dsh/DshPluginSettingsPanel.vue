@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NAlert } from 'naive-ui'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NSpin } from 'naive-ui'
+
 import { openDshPluginUi, closeDshPluginUi } from '@/api/coding-agents/dsh'
 import { useTheme } from '@/composables/useTheme'
 import { getBaseUrlValue } from '@/api/client'
@@ -11,10 +13,11 @@ const src = ref('')
 const frame = ref<HTMLIFrameElement>()
 const loading = ref(true)
 const failed = ref(false)
+const failureDetail = ref('')
 let id = '', sequence = 0, disposed = false
 async function refresh() {
   const current = ++sequence
-  loading.value = true; failed.value = false
+  loading.value = true; failed.value = false; failureDetail.value = ''
   try {
     const session = await openDshPluginUi()
     if (disposed || current !== sequence) { void closeDshPluginUi(session.id).catch(() => {}); return }
@@ -23,7 +26,10 @@ async function refresh() {
     url.searchParams.set('studioTheme', isDark.value ? 'dark' : 'light')
     src.value = url.href
     if (previous) void closeDshPluginUi(previous).catch(() => {})
-  } catch { if (current === sequence) { failed.value = true; loading.value = false } }
+  } catch (error) { if (current === sequence) {
+    failed.value = true; loading.value = false
+    failureDetail.value = error instanceof Error ? [Reflect.get(error, 'code'), error.message].filter(Boolean).join(': ') : ''
+  } }
 }
 function syncTheme() {
   if (!src.value) return
@@ -38,16 +44,18 @@ function ready(event: MessageEvent) {
 onMounted(() => { window.addEventListener('message', ready); void refresh() })
 onUnmounted(() => { disposed = true; window.removeEventListener('message', ready); if (id) void closeDshPluginUi(id).catch(() => {}) })
 defineExpose({ refresh })
+
+usePageLoadingTask(() => loading.value)
 </script>
 <template>
   <div class="native-settings" data-testid="dsh-plugin-settings">
     <NSpin v-if="loading" class="loading" />
-    <NAlert v-if="failed" type="error">{{ t('dshPlugins.settingsUnavailable') }}</NAlert>
+    <NAlert v-if="failed" type="error">{{ t('dshPlugins.settingsUnavailable') }}<div v-if="failureDetail">{{ failureDetail }}</div></NAlert>
     <iframe v-if="src" ref="frame" :src="src" :title="t('dshPlugins.configurationTab')" referrerpolicy="no-referrer" class="native-slot" @load="syncTheme" @error="failed = true; loading = false" />
   </div>
 </template>
 <style scoped>
-.native-settings { position: relative; min-height: 360px; height: 100%; }
-.native-slot { display: block; width: 100%; height: 100%; min-height: 480px; border: 0; }
+.native-settings { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.native-slot { display: block; flex: 1; width: 100%; height: 100%; min-height: 0; border: 0; }
 .loading { position: absolute; inset-block-start: 12px; inset-inline-end: 12px; }
 </style>

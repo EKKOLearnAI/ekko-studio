@@ -31,6 +31,12 @@ const providerConfig: ModelProviderConfig = {
 }
 
 describe('ekko-agent model requests', () => {
+  it('preserves provider cost through chat and responses normalization', () => {
+    expect(normalizeOpenAIChatResponse('test', { choices: [], usage: { prompt_tokens: 10, completion_tokens: 2, cost: 0.002 } }).usage).toMatchObject({ costUsd: 0.002 })
+    expect(normalizeOpenAIResponsesResponse({ output: [], usage: { input_tokens: 10, output_tokens: 2, cost: 0 } }).usage).toMatchObject({ costUsd: 0 })
+    expect(normalizeOpenAIChatResponse('test', { choices: [], usage: { prompt_tokens: 10, completion_tokens: 2 } }).usage).not.toHaveProperty('costUsd')
+  })
+
   it('replays streamed DeepSeek reasoning_content through a complete tool loop', async () => {
     const encoder = new TextEncoder()
     let call = 0
@@ -1698,6 +1704,13 @@ describe('ekko-agent model requests', () => {
       generationConfig: { temperature: 0.1 },
       tools: [{ functionDeclarations: [{ name: 'lookup' }] }],
     })
+  })
+
+  it('normalizes Gemini cached input and reasoning output for cost estimation', () => {
+    const response = normalizeGeminiResponse({ candidates: [], usageMetadata: {
+      promptTokenCount: 100, cachedContentTokenCount: 60, candidatesTokenCount: 10, thoughtsTokenCount: 20, totalTokenCount: 130,
+    } }, 'gemini-test')
+    expect(response.usage).toMatchObject({ inputTokens: 40, cacheReadTokens: 60, outputTokens: 30, reasoningTokens: 20, totalTokens: 130 })
   })
 
   it('replays Gemini thought signatures with their original content parts', () => {

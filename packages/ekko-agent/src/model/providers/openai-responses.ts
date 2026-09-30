@@ -87,6 +87,7 @@ interface OpenAIResponsesResponse {
   reasoning_text?: string
   reasoning_summary?: string
   usage?: {
+    cost?: number
     input_tokens?: number
     output_tokens?: number
     total_tokens?: number
@@ -475,6 +476,7 @@ function normalizeUsage(usage: NonNullable<OpenAIResponsesResponse['usage']>): M
   const cacheReadTokens = usage.input_tokens_details?.cached_tokens ?? 0
   const inputTokens = usage.input_tokens ?? 0
   return {
+    ...(typeof usage.cost === 'number' && Number.isFinite(usage.cost) && usage.cost >= 0 ? { costUsd: usage.cost } : {}),
     inputTokens: Math.max(0, inputTokens - cacheReadTokens),
     outputTokens: usage.output_tokens,
     totalTokens: usage.total_tokens,

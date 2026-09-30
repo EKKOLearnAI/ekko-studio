@@ -1391,6 +1391,13 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
 
 // JEV accepts named heterogeneous questions and never returns its stored API key.
 const jevSettingsProperties = {
+  browserMatchEnabled: { type: 'boolean', default: false },
+  browserVerifyEnabled: { type: 'boolean', default: false },
+  browserMatchCandidateLimit: { type: 'integer', default: 20, minimum: 1, maximum: 50 },
+  browserMatchMinConfidence: { type: 'number', default: 0.8, minimum: 0.5, maximum: 1 },
+  browserVerifyMinConfidence: { type: 'number', default: 0.8, minimum: 0.5, maximum: 1 },
+  browserMatchTimeoutMs: { type: 'integer', default: 3000, minimum: 100, maximum: 30000 },
+  browserVerifyTimeoutMs: { type: 'integer', default: 3000, minimum: 100, maximum: 30000 },
   baseUrl: { type: 'string', format: 'uri', default: 'https://api.typesafe.ai' },
   model: { type: 'string', default: 'jev-latest', maxLength: 200 },
   timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000, default: 10000 },
@@ -1414,6 +1421,29 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
         },
       } } } }
     }
+    if (path.includes('/browser/')) {
+      const intent = path.endsWith('/match') ? 'target' : 'expectation'
+      operation.requestBody = { required: true, content: { 'application/json': { schema: {
+        type: 'object', required: [intent, 'snapshot'], properties: {
+          [intent]: { type: 'string', minLength: 1, maxLength: 2000 },
+          snapshot: { type: 'object', required: ['tabId', 'snapshotId', 'nodes'], properties: {
+            tabId: { type: 'string', minLength: 1, maxLength: 128 }, snapshotId: { type: 'string', minLength: 1, maxLength: 128 },
+            title: { type: 'string', maxLength: 1000 },
+            nodes: { type: 'array', maxItems: 500, items: { type: 'object', required: ['ref', 'role', 'name'], properties: {
+              ref: { type: 'string', pattern: '^@e[1-9][0-9]*$', maxLength: 32 }, role: { type: 'string', minLength: 1, maxLength: 80 },
+              name: { type: 'string', maxLength: 1000 }, disabled: { type: 'boolean' },
+            } } },
+          } },
+        },
+      } } } }
+      operation.responses['200'] = { description: 'Advisory, Profile-gated assessment of supplied snapshot evidence. Never executes actions or changes their completion status.', content: { 'application/json': { schema: {
+        type: 'object', required: ['tabId', 'snapshotId', 'status'], properties: {
+          tabId: { type: 'string' }, snapshotId: { type: 'string' },
+          status: { type: 'string', enum: intent === 'target' ? ['matched', 'no_match', 'skipped', 'unavailable'] : ['met', 'not_met', 'unknown', 'skipped', 'unavailable'] },
+          reason: { type: 'string' }, ref: { type: 'string' }, confidence: { type: 'number', minimum: 0, maximum: 1 }, considered: { type: 'integer' },
+        },
+      } } } }
+    }
     if (path.endsWith('/evaluate')) operation.requestBody = { required: true, content: { 'application/json': { schema: {
       type: 'object', required: ['state', 'questions'], properties: {
         state: { nullable: true, oneOf: [{ type: 'string' }, { type: 'object', additionalProperties: true }, { type: 'array', items: {} }] },
@@ -1429,6 +1459,20 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
     }
   }
 }
+
+// Usage rates are Profile-scoped and are snapshots for future usage only.
+const usageRateSchema = { type: 'object', required: ['provider', 'model', 'input', 'output'], properties: {
+  provider: { type: 'string', minLength: 1, maxLength: 200 }, model: { type: 'string', minLength: 1, maxLength: 300 },
+  ...Object.fromEntries(['input', 'output', 'cacheRead', 'cacheWrite'].map(key => [key, { type: 'number', minimum: 0, maximum: 1000000, description: 'USD per million tokens', ...(['cacheRead', 'cacheWrite'].includes(key) ? { nullable: true } : {}) }])),
+} }
+const usageRatesSchema = { type: 'object', required: ['rates'], properties: { rates: { type: 'array', maxItems: 200, items: usageRateSchema } } }
+const usagePricingPath = openapi.paths['/api/studio/usage/pricing']
+usagePricingPath.put.requestBody = { required: true, content: { 'application/json': { schema: usageRatesSchema } } }
+for (const operation of [usagePricingPath.get, usagePricingPath.put]) {
+  operation.description = 'Profile-scoped model pricing in USD per million tokens. Exact provider/model match. Applies only to future calls without reported cost; never reprices historical usage.'
+  operation.responses['200'] = { description: 'Saved pricing', content: { 'application/json': { schema: usageRatesSchema } } }
+}
+usagePricingPath.put.responses['400'] = { description: 'Invalid or duplicate provider/model pricing' }
 
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')

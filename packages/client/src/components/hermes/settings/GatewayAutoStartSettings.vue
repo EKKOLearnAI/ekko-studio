@@ -14,7 +14,7 @@ withDefaults(defineProps<{ standalone?: boolean }>(), {
   standalone: false,
 })
 
-const enabled = computed(() => settingsStore.gatewayAutoStart.enabled !== false)
+const enabled = computed(() => settingsStore.gatewayAutoStart.enabled === true)
 const mode = computed(() => Array.isArray(settingsStore.gatewayAutoStart.include) ? 'include' : 'all')
 const managementEnabled = computed(() => settingsStore.gatewayAutoStart.management === 'unified')
 const includeProfiles = computed(() => settingsStore.gatewayAutoStart.include || [])

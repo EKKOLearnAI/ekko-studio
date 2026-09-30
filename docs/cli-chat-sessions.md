@@ -712,7 +712,7 @@ slash command 不是独立 socket 事件。它们作为普通 `run.input` 发给
 | `/goal ...` | 设置、查询、暂停、恢复、清理 goal。 |
 | `/subgoal ...` | 子目标命令。 |
 | `/clear` | 清理当前显示状态，不删 DB 历史。 |
-| `/clear --history` | 删除当前 session DB messages，要求 session idle。 |
+| `/clear --history` | 删除当前 session DB messages，要求 session idle。该本地 session 此后不再导入 Hermes 原生 continuation，避免恢复已删除的历史；Studio 内的新消息仍正常保存。 |
 | `/title <title>` | 重命名 session。 |
 | `/compress` | session idle 时手动触发上下文压缩。 |
 | `/steer <instruction>` | 对正在运行的 bridge run 发送 steering instruction。 |

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Cursor CLI">
+  <rect width="128" height="128" rx="28" fill="#111827"/>
+  <path d="M36 40 L68 64 L36 88" fill="none" stroke="#93c5fd" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="76" y="78" width="20" height="10" rx="2" fill="#93c5fd"/>
+</svg>

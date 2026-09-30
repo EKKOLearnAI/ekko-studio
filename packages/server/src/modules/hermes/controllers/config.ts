@@ -420,7 +420,7 @@ async function writeHermesGatewayManagement(mode: unknown): Promise<'per_profile
 
 async function gatewayAutoRestartAllowed(): Promise<boolean> {
   if (gatewayAutostartDisabledByEnv()) return false
-  return normalizeGatewayAutoStartConfig((await readAppConfig()).gatewayAutoStart).enabled !== false
+  return normalizeGatewayAutoStartConfig((await readAppConfig()).gatewayAutoStart).enabled === true
 }
 
 export async function getConfig(ctx: any) {
@@ -512,7 +512,7 @@ export async function updateConfig(ctx: any) {
         if (writtenManagement) gatewayAutoStart.management = writtenManagement
         else gatewayAutoStart.management = previousGatewayAutoStart.management
         const body: Record<string, any> = { success: true, gatewayAutoStart }
-        if ('management' in values && gatewayAutoStart.enabled !== false && !gatewayAutostartDisabledByEnv()) {
+        if ('management' in values && gatewayAutoStart.enabled === true && !gatewayAutostartDisabledByEnv()) {
           const gatewayManagement = await reconcileGatewayManagementTransition(previousGatewayAutoStart, gatewayAutoStart)
           if (gatewayManagement.changed) body.gatewayManagement = gatewayManagement
         }

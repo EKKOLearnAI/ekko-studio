@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NButton, NInput, NPopover, NSelect, useDialog, useMessage } from 'naive-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NInput, NPopover, NSelect, useDialog, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import { desktopBridge, type DesktopBrowserDownload, type DesktopBrowserSelection, type DesktopBrowserState } from '@/utils/desktop-bridge'
 import type { BrowserAnnotationSubmission } from '@/utils/browser-annotation-submit'
@@ -480,7 +481,7 @@ onUnmounted(() => {
           <i v-if="tab.agentControl !== 'idle'" :title="tab.agentAction">●</i>
           <b @click="closeTab(tab.id, $event)">×</b>
         </button>
-        <button class="new-tab" :disabled="hasAnnotationSession || (state?.tabs.length || 0) >= (state?.maxTabs || 8)" @click="createTab">+</button>
+        <button class="new-tab" :disabled="hasAnnotationSession" @click="createTab">+</button>
       </div>
 
       <div class="toolbar">
@@ -608,7 +609,7 @@ onUnmounted(() => {
 
       <div v-show="!pendingAnnotation" ref="viewport" class="native-viewport">
         <span v-if="loadError">{{ loadError }}</span>
-        <span v-else-if="!state">{{ t('common.loading') }}</span>
+        <NSpin v-else-if="!state" :description="t('common.loading')" />
       </div>
     </template>
   </section>

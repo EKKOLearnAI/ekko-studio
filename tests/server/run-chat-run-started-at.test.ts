@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync, readFileSync } from 'node:fs'
+import { runMcpCredentials } from '../../packages/server/src/modules/studio/services/auth/run-mcp-credentials'
 
 const handleBridgeRunMock = vi.hoisted(() => vi.fn(async () => {}))
 const resumeBridgeRunMock = vi.hoisted(() => vi.fn(async () => {}))
@@ -18,6 +20,9 @@ vi.mock('../../packages/server/src/modules/studio/services/webhooks/app-event-st
 }))
 vi.mock('../../packages/server/src/modules/studio/services/task-plans', () => ({
   getSessionTaskPlans: getSessionTaskPlansMock,
+}))
+vi.mock('../../packages/server/src/modules/studio/repositories/task-plan-store', () => ({
+  saveTaskPlan: vi.fn(),
 }))
 const userCanAccessProfileMock = vi.hoisted(() => vi.fn((_user: unknown, _profile: string) => true))
 const reconcileHermesSessionHistoryMock = vi.hoisted(() => vi.fn(async () => ({ changed: false, added: 0 })))
@@ -166,7 +171,9 @@ describe('ChatRunSocket reports when the run started', () => {
     getRuntimeStateMock.mockReset()
     bridgeMock.statusIfLoaded.mockReset()
     reconcileHermesSessionHistoryMock.mockReset().mockResolvedValue({ changed: false, added: 0 })
-    loadSessionStateFromDbMock.mockReset()
+    loadSessionStateFromDbMock.mockReset().mockImplementation(async (id, sessions) => sessions.get(id) || {
+      messages: [], events: [], queue: [], isWorking: false,
+    })
     handleBridgeRunMock.mockClear()
     ensureReadyMock.mockResolvedValue({
       reachable: true,
@@ -264,6 +271,39 @@ describe('ChatRunSocket reports when the run started', () => {
     const resumed = socket.emit.mock.calls.find((call: any[]) => call[0] === 'resumed')
     expect(resumed![1].messages.map((message: any) => message.content)).toEqual(['stale root', 'native continuation'])
     expect(loadSessionStateFromDbMock).toHaveBeenCalledWith('resume-lineage', expect.any(Map))
+  })
+
+  it('reloads history invalidated by a concurrent HTTP reconciliation during resume', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 1, username: 'admin', role: 'super_admin' }
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).sessionMap.set('resume-invalidated', {
+      messages: [{ id: 1, role: 'user', content: 'root' }], events: [], queue: [], isWorking: false,
+    })
+    let finishLookup!: () => void
+    const lookup = new Promise<void>(resolve => { finishLookup = resolve })
+    reconcileHermesSessionHistoryMock.mockImplementationOnce(async () => {
+      await lookup
+      return { changed: false, added: 0 }
+    })
+    loadSessionStateFromDbMock.mockResolvedValueOnce({
+      messages: [
+        { id: 1, role: 'user', content: 'root' },
+        { id: 2, role: 'assistant', content: 'native continuation' },
+      ],
+      events: [], queue: [], isWorking: false,
+    })
+    ;(server as any).onConnection(socket)
+    const resume = handlers.get('resume')?.({ session_id: 'resume-invalidated' })
+    await vi.waitFor(() => expect(reconcileHermesSessionHistoryMock).toHaveBeenCalledTimes(1))
+    expect(server.invalidateSessionHistory('resume-invalidated')).toBe(true)
+    finishLookup()
+    await resume
+
+    const resumed = socket.emit.mock.calls.find((call: any[]) => call[0] === 'resumed')
+    expect(resumed?.[1].messages.map((message: any) => message.content)).toEqual(['root', 'native continuation'])
+    expect((server as any).sessionMap.get('resume-invalidated').messages).toEqual(resumed?.[1].messages)
   })
 
   it('reconciles and reloads idle history before a direct bridge send', async () => {
@@ -434,5 +474,87 @@ describe('ChatRunSocket reports when the run started', () => {
 
     const resumed = socket.emit.mock.calls.find((call: any[]) => call[0] === 'resumed')
     expect(resumed![1]).toMatchObject({ isWorking: true, runStartedAt: reattachedAt })
+  })
+})
+
+describe('group run MCP credential lifecycle', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    handleCodingAgentRunMock.mockReset()
+  })
+
+  it.each(['run.completed', 'run.failed', 'abort.completed'])('issues a fresh credential without a socket user and revokes it on %s', async terminal => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const sessionId = `group-${terminal}`
+    let runtimeData: any
+    handleCodingAgentRunMock.mockImplementation(async (_nsp: any, socket: any, data: any, _profile: any, sessionMap: any) => {
+      expect(socket.data.user).toBeUndefined()
+      runtimeData = data
+      Object.assign(sessionMap.get(sessionId), { isWorking: true, activeRunMarker: 'real-native-turn' })
+      return { runId: 'native-runtime' } as any
+    })
+    let current = true
+    const pending = server.runAndWait({
+      session_id: sessionId, coding_agent_id: 'codex', source: 'group_chat', session_source: 'group_chat',
+      group_room_id: 'room', group_agent_id: 'worker', input: 'Show progress', mode: 'global',
+    }, { profile: 'research', groupRunIsCurrent: () => current })
+    try {
+      await vi.waitFor(() => expect(runtimeData?.studio_mcp_token_file).toBeTruthy())
+      const credential = JSON.parse(readFileSync(runtimeData.studio_mcp_token_file, 'utf8'))
+      expect(credential.context_id).toBe(runtimeData.task_plan_context_id)
+      expect(runMcpCredentials.authenticate(credential.token)).toMatchObject({ sessionId, profile: 'research', roomId: 'room', agentId: 'worker' })
+      const card = server.updateTaskPlan(credential.context_id, 'research', { plan: [{ id: 'work', step: 'Work', status: 'in_progress' }] })
+      expect(card.run_id).toBe('real-native-turn')
+      current = false
+      expect(runMcpCredentials.authenticate(credential.token)).toBeUndefined()
+      current = true
+      server.emitExternalEvent(sessionId, terminal, { run_id: 'native-runtime' })
+      expect(runMcpCredentials.authenticate(credential.token)).toBeUndefined()
+      expect(existsSync(runtimeData.studio_mcp_token_file)).toBe(false)
+      if (terminal === 'abort.completed') server.emitExternalEvent(sessionId, 'run.failed', { error: 'interrupted' })
+      await pending
+    } finally {
+      runMcpCredentials.revoke(sessionId)
+    }
+  })
+
+  it('cleans up a credential if native launch fails', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    let file = ''
+    handleCodingAgentRunMock.mockImplementation(async (_nsp: any, _socket: any, data: any) => {
+      file = data.studio_mcp_token_file
+      expect(existsSync(file)).toBe(true)
+      throw new Error('native launch failed')
+    })
+    const result = await server.runAndWait({ session_id: 'failed-group', input: 'Work', coding_agent_id: 'codex',
+      source: 'group_chat', group_room_id: 'room', group_agent_id: 'worker', mode: 'global' }, { profile: 'research' })
+    expect(result.ok).toBe(false)
+    expect(result.error).toBe('native launch failed')
+    expect(existsSync(file)).toBe(false)
+  })
+
+  it.each([false, true])('delegates account identity only from the internal group coordinator (trusted=%s)', async trusted => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    socket.data = { user: { id: 7 }, ...(trusted ? { groupRunIsCurrent: () => true } : {}) }
+    let token = ''
+    handleCodingAgentRunMock.mockImplementation(async (_nsp: any, _socket: any, data: any, _profile: any, sessions: any) => {
+      token = JSON.parse(readFileSync(data.studio_mcp_token_file, 'utf8')).token
+      Object.assign(sessions.get(data.session_id), { isWorking: true, activeRunMarker: 'native-turn' })
+      return { runId: 'native-runtime' } as any
+    })
+    try {
+      await (server as any).handleRun(socket, { session_id: 'identity-group', input: 'Work', coding_agent_id: 'codex',
+        source: 'group_chat', group_room_id: 'room', group_agent_id: 'worker', mode: 'global' }, 'research')
+      expect(runMcpCredentials.authenticate(token)?.userId).toBe(trusted ? 7 : undefined)
+      expect(runMcpCredentials.authenticate(token)?.sessionId).toBe('identity-group')
+    } finally {
+      server.emitExternalEvent('identity-group', 'run.completed', {})
+    }
   })
 })

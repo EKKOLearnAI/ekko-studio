@@ -122,7 +122,7 @@ body {
 // component-scoped chunk arrives so entering chat does not flash the page bg.
 .chat-input-area,
 .chat-input-area .input-wrapper {
-  background-color: $bg-card;
+  background-color: $bg-main-surface;
 }
 
 .settings-check {
@@ -315,6 +315,12 @@ a {
 
   .page-header {
     padding: calc(16px + env(safe-area-inset-top, 0px)) 12px 16px 52px !important;
+    flex-wrap: wrap;
+  }
+
+  .page-header > .header-actions {
+    min-width: 0;
+    flex-wrap: wrap;
   }
 
   .input-sm,

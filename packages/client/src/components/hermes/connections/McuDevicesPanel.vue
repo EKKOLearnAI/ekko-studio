@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { computed, h, onMounted, ref } from 'vue'
 import { NButton, NDataTable, NForm, NFormItem, NInput, NModal, NSpace, NTag, useDialog, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
@@ -217,8 +218,11 @@ function confirmDeleteDevice(device: McuDevice) {
   })
 }
 
+const initializing = ref(true)
+usePageLoadingTask(() => initializing.value)
+
 onMounted(() => {
-  void loadDevices()
+  void loadDevices().finally(() => { initializing.value = false })
 })
 </script>
 

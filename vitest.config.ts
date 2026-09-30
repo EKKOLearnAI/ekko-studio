@@ -8,6 +8,7 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, 'packages/client/src'),
       electron: resolve(__dirname, 'tests/mocks/electron.ts'),
+      'electron-updater': resolve(__dirname, 'tests/mocks/electron-updater.ts'),
       '/logo.png': resolve(__dirname, 'packages/client/public/logo.png'),
     },
   },

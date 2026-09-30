@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NModal, NButton, NInput, useMessage } from 'naive-ui'
 import { ref, onMounted } from 'vue'
-import { NModal, NButton, NInput, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import { fetchExternalDirs, saveExternalDirs, type ExternalDirEntry } from '@/api/hermes/skills'
 
@@ -101,7 +102,7 @@ function handleClose() {
   >
     <p class="hint">{{ t('skills.externalDirs.hint') }}</p>
 
-    <div v-if="initializing" class="state-row">{{ t('common.loading') }}</div>
+    <div v-if="initializing" class="state-row"><NSpin :description="t('common.loading')" /></div>
     <div v-else-if="rows.length === 0" class="state-row empty">{{ t('skills.externalDirs.empty') }}</div>
 
     <ul v-else class="dir-list">

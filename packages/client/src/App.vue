@@ -4,7 +4,10 @@ import {
   defineAsyncComponent,
   onMounted,
   onUnmounted,
+  provide,
   ref,
+  shallowRef,
+  toRef,
   watch,
 } from "vue";
 import { useRoute } from "vue-router";
@@ -28,6 +31,17 @@ import AuthEventListener from "@/components/auth/AuthEventListener.vue";
 import { desktopBridge } from "@/utils/desktop-bridge";
 import { naiveLocaleFor } from "@/constants/naiveLocale";
 import { naiveRtlFor } from "@/constants/naiveRtl";
+import { navigationRailKey } from "@/composables/useNavigationRail";
+import { pageHeaderTargetKey } from "@/composables/usePageHeader";
+import { mobileNavigationKey } from "@/composables/usePageSidebar";
+import HeaderSidebarToggle from "@/components/layout/HeaderSidebarToggle.vue";
+
+const StudioNavigationRail = defineAsyncComponent(
+  async () => (await import("@/components/layout/StudioNavigationRail.vue")).default,
+);
+const MobileNavigationDrawer = defineAsyncComponent(
+  async () => (await import("@/components/layout/MobileNavigationDrawer.vue")).default,
+);
 
 const AppSidebar = defineAsyncComponent(
   async () => (await import("@/components/layout/AppSidebar.vue")).default,
@@ -104,6 +118,32 @@ const isStandaloneChatPage = computed(
   () => route.meta?.standaloneChat === true,
 );
 const isInviteOnlyPage = computed(() => route.meta?.inviteOnly === true);
+const wideViewportQuery = window.matchMedia('(min-width: 769px)');
+const isWideViewport = ref(wideViewportQuery.matches);
+const hasNavigationRail = computed(() =>
+  !isLoginPage.value && !isStandaloneChatPage.value && route.name !== 'desktop.pet',
+);
+const showNavigationRail = computed(() => isWideViewport.value && hasNavigationRail.value);
+provide(navigationRailKey, hasNavigationRail);
+const mobileNavigationOpen = toRef(appStore, 'sidebarOpen');
+const mobileSidebarHost = shallowRef<HTMLElement | null>(null);
+provide(mobileNavigationKey, {
+  open: mobileNavigationOpen,
+  target: computed(() => !isWideViewport.value && hasNavigationRail.value ? mobileSidebarHost.value : null),
+});
+const hasMobileContextSidebar = computed(() =>
+  !['hermes.connections', 'hermes.agentManager', 'hermes.models'].includes(String(route.name)),
+);
+watch([hasNavigationRail, isWideViewport], () => { mobileNavigationOpen.value = false; });
+watch(sessionSearchOpen, (open) => { if (open) mobileNavigationOpen.value = false; });
+watch(() => route.name, () => {
+  if (!hasMobileContextSidebar.value) mobileNavigationOpen.value = false;
+});
+const pageHeaderHost = shallowRef<HTMLElement | null>(null);
+provide(pageHeaderTargetKey, computed(() => showNavigationRail.value ? pageHeaderHost.value : null));
+function handleWideViewportChange(event: MediaQueryListEvent) {
+  isWideViewport.value = event.matches;
+}
 const usesPageSidebar = computed(() =>
   [
     "hermes.chat",
@@ -138,6 +178,9 @@ const showAppSidebar = computed(
     !usesEkkoConfigSidebar.value &&
     !usesCodingAgentConfigSidebar.value,
 );
+const usesShellSidebar = computed(() =>
+  showAppSidebar.value || usesHermesConfigSidebar.value || usesEkkoConfigSidebar.value || usesCodingAgentConfigSidebar.value,
+);
 const showMobileMenuButton = computed(
   () =>
     !isLoginPage.value &&
@@ -157,25 +200,26 @@ const nodeVersionLow = computed(() => {
 
 const isDesktopShell = computed(() => desktopBridge()?.isDesktop === true);
 const desktopPlatform = computed(() => desktopBridge()?.platform || "");
-const isDesktopWindows = computed(
-  () => isDesktopShell.value && desktopPlatform.value === "win32",
+const hasCustomWindowControls = computed(
+  () => isDesktopShell.value && ["win32", "linux"].includes(desktopPlatform.value),
 );
 const isDesktopChatWindow = computed(
   () => desktopBridge()?.windowKind === "chat",
 );
 const showDesktopTitleBar = computed(
-  () => isDesktopWindows.value && !isDesktopChatWindow.value,
+  () => hasCustomWindowControls.value && !isDesktopChatWindow.value,
 );
 const desktopTitleBarLeft = computed(() => {
   if (isLoginPage.value) return 10;
-  if (showAppSidebar.value) return appStore.sidebarCollapsed ? 84 : 260;
+  if (showNavigationRail.value) return 64;
+  if (showAppSidebar.value) return appStore.sidebarCollapsed ? 64 : 240;
   if (usesHermesConfigSidebar.value)
-    return appStore.sidebarCollapsed ? 84 : 260;
+    return appStore.sidebarCollapsed ? 64 : 240;
   if (usesEkkoConfigSidebar.value)
-    return appStore.sidebarCollapsed ? 84 : 260;
+    return appStore.sidebarCollapsed ? 64 : 240;
   if (usesCodingAgentConfigSidebar.value)
-    return appStore.sidebarCollapsed ? 84 : 260;
-  return appStore.pageSidebarExpanded ? 260 : 10;
+    return appStore.sidebarCollapsed ? 64 : 240;
+  return appStore.pageSidebarExpanded ? 240 : 10;
 });
 const isDesktopPetRoute = computed(() => route.name === "desktop.pet");
 const showWebPet = computed(
@@ -192,11 +236,7 @@ const isDesktopWindowMaximized = ref(false);
 let stopWindowStateListener: (() => void) | undefined;
 
 function handleMobileMenuClick() {
-  if (usesPageSidebar.value || usesHermesConfigSidebar.value || usesEkkoConfigSidebar.value || usesCodingAgentConfigSidebar.value) {
-    window.dispatchEvent(new CustomEvent("hermes:open-page-sidebar"));
-    return;
-  }
-  appStore.toggleSidebar();
+  mobileNavigationOpen.value = true;
 }
 
 watch(
@@ -215,13 +255,14 @@ watch(
 );
 
 onMounted(() => {
+  wideViewportQuery.addEventListener('change', handleWideViewportChange);
   if (!isInviteOnlyPage.value) {
     void syncThemeFromServer().catch(() => undefined);
   }
   const bridge = desktopBridge();
   if (
     !bridge?.isDesktop ||
-    (desktopPlatform.value !== "win32" && bridge.windowKind !== "chat")
+    (!hasCustomWindowControls.value && bridge.windowKind !== "chat")
   )
     return;
   bridge
@@ -236,6 +277,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  wideViewportQuery.removeEventListener('change', handleWideViewportChange);
   stopWindowStateListener?.();
   appStore.stopHealthPolling();
 });
@@ -266,67 +308,90 @@ useKeyboard();
                 'desktop-chat-window': isDesktopChatWindow,
                 'desktop-window-maximized': isDesktopWindowMaximized,
                 'app-shell--custom-background': hasBackgroundImage,
+                'app-shell--navigation-rail': showNavigationRail,
               },
             ]"
           >
             <DesktopTitleBar
-              v-if="showDesktopTitleBar"
+              v-if="showDesktopTitleBar && !showNavigationRail"
               :standalone="isLoginPage || isDesktopChatWindow"
               :left-offset="desktopTitleBarLeft"
             />
+            <StudioNavigationRail v-if="showNavigationRail" />
+            <MobileNavigationDrawer
+              v-if="hasNavigationRail && !isWideViewport"
+              v-model:show="mobileNavigationOpen"
+              :has-sidebar="hasMobileContextSidebar"
+              @target="mobileSidebarHost = $event"
+            />
             <div
-              v-if="nodeVersionLow && !isStandaloneChatPage"
-              class="node-warning-bar"
+              v-show="showNavigationRail"
+              ref="pageHeaderHost"
+              class="studio-page-header"
+              :class="{ 'studio-page-header--shell-sidebar': usesShellSidebar }"
             >
-              {{
-                t("sidebar.nodeVersionWarning", {
-                  version: appStore.nodeVersion,
-                })
-              }}
+              <DesktopTitleBar
+                v-if="showDesktopTitleBar && showNavigationRail"
+                flush
+              />
+              <HeaderSidebarToggle
+                v-if="showNavigationRail && usesShellSidebar"
+                class="header-sidebar-toggle"
+                :expanded="!appStore.sidebarCollapsed"
+                @toggle="appStore.toggleSidebarCollapsed()"
+              />
             </div>
-            <div
-              class="app-layout"
-              :class="{
-                'no-sidebar': isLoginPage || !showAppSidebar,
-                'has-hermes-config-sidebar': usesHermesConfigSidebar,
-                'has-ekko-config-sidebar': usesEkkoConfigSidebar,
-                'has-coding-agent-config-sidebar': usesCodingAgentConfigSidebar,
-              }"
-            >
-              <button
-                v-if="showMobileMenuButton"
-                class="hamburger-btn"
-                @click="handleMobileMenuClick"
-              >
-                <img
-                  src="/logo.png"
-                  alt="Menu"
-                  style="width: 24px; height: 24px"
-                />
-              </button>
+            <div class="app-box">
               <div
-                v-if="!isLoginPage && showAppSidebar && appStore.sidebarOpen"
-                class="mobile-backdrop"
-                @click="appStore.closeSidebar"
-              />
-              <AppSidebar v-if="!isLoginPage && showAppSidebar" />
-              <HermesConfigSidebar
-                v-if="!isLoginPage && usesHermesConfigSidebar"
-              />
-              <EkkoConfigSidebar
-                v-if="!isLoginPage && usesEkkoConfigSidebar"
-              />
-              <CodingAgentConfigSidebar
-                v-if="!isLoginPage && usesCodingAgentConfigSidebar"
-              />
-              <main
-                class="app-main"
+                v-if="nodeVersionLow && !isStandaloneChatPage"
+                class="node-warning-bar"
+              >
+                {{
+                  t("sidebar.nodeVersionWarning", {
+                    version: appStore.nodeVersion,
+                  })
+                }}
+              </div>
+              <div
+                class="app-layout"
                 :class="{
-                  'app-main--card': showAppSidebar || usesHermesConfigSidebar || usesEkkoConfigSidebar || usesCodingAgentConfigSidebar,
+                  'no-sidebar': isLoginPage || !showAppSidebar,
+                  'has-hermes-config-sidebar': usesHermesConfigSidebar,
+                  'has-ekko-config-sidebar': usesEkkoConfigSidebar,
+                  'has-coding-agent-config-sidebar': usesCodingAgentConfigSidebar,
                 }"
               >
-                <router-view />
-              </main>
+                <button
+                  v-if="showMobileMenuButton"
+                  class="hamburger-btn"
+                  :aria-expanded="mobileNavigationOpen"
+                  @click="handleMobileMenuClick"
+                >
+                  <img
+                    src="/logo.png"
+                    alt="Menu"
+                    style="width: 24px; height: 24px"
+                  />
+                </button>
+                <AppSidebar v-if="!isLoginPage && showAppSidebar" />
+                <HermesConfigSidebar
+                  v-if="!isLoginPage && usesHermesConfigSidebar"
+                />
+                <EkkoConfigSidebar
+                  v-if="!isLoginPage && usesEkkoConfigSidebar"
+                />
+                <CodingAgentConfigSidebar
+                  v-if="!isLoginPage && usesCodingAgentConfigSidebar"
+                />
+                <main
+                  class="app-main"
+                  :class="{
+                    'app-main--card': showAppSidebar || usesHermesConfigSidebar || usesEkkoConfigSidebar || usesCodingAgentConfigSidebar,
+                  }"
+                >
+                  <router-view />
+                </main>
+              </div>
             </div>
           </div>
           <WebPet v-if="showWebPet" />
@@ -388,6 +453,18 @@ useKeyboard();
   }
 }
 
+.app-box {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
 .app-layout {
   position: relative;
   z-index: 1;
@@ -436,7 +513,177 @@ useKeyboard();
   }
 }
 
+.app-shell--navigation-rail {
+  --studio-header-height: 40px;
+  --studio-header-inset: #{$navigation-rail-width};
+  --studio-content-gutter: 5px;
+  --studio-content-radius: #{$radius-lg};
+  --desktop-window-controls-width: 138px;
+  flex-direction: row;
+  background-color: $bg-sidebar;
+
+  .studio-page-header {
+    position: absolute;
+    z-index: 1001;
+    top: 0;
+    left: var(--studio-header-inset);
+    right: 0;
+    height: var(--studio-header-height);
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    -webkit-app-region: drag;
+
+    > :deep(:not(.header-sidebar-control):not(.desktop-titlebar)) {
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: nowrap;
+      gap: 12px;
+      // The sidebar control is a sibling on configuration pages.
+      flex: 1 1 0%;
+      width: 0;
+      container: studio-page-header / inline-size;
+      min-width: 0;
+      height: 100%;
+      min-height: 0;
+      margin: 0;
+      padding: 0 16px;
+      border: 0;
+      background: transparent;
+      overflow-x: auto;
+      scrollbar-width: none;
+
+      &::-webkit-scrollbar { display: none; }
+
+      &:has(.header-sidebar-control--outer) {
+        padding-inline-start: 0;
+      }
+    }
+
+    &--shell-sidebar {
+      > :deep(:not(.header-sidebar-control):not(.desktop-titlebar)) {
+        padding-inline-start: 0;
+      }
+
+      :deep(.header-sidebar-control--collapsed) {
+        flex-basis: $sidebar-collapsed-width;
+      }
+    }
+
+    :deep(.header-title),
+    :deep(h1),
+    :deep(.header-session-title),
+    :deep(.header-workflow-title),
+    :deep(.room-title-text) {
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    :deep(.header-workflow-title) {
+      margin-inline-start: 0;
+    }
+
+    :deep(.header-left) {
+      gap: 0;
+    }
+
+    :deep(button),
+    :deep(a),
+    :deep(input),
+    :deep(textarea),
+    :deep(select),
+    :deep([role="button"]),
+    :deep([role="tab"]),
+    :deep(.n-base-selection) {
+      -webkit-app-region: no-drag;
+    }
+
+    :deep(.header-actions),
+    :deep(.skills-usage-toolbar),
+    :deep(.period-selector) {
+      flex-wrap: nowrap;
+      flex-shrink: var(--header-actions-shrink, 0);
+    }
+
+    :deep(.header-heading),
+    :deep(.header-text) {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+
+      p {
+        margin: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+  }
+
+  // Three 46px window buttons.
+  &.desktop-platform-win32 .studio-page-header,
+  &.desktop-platform-linux .studio-page-header {
+    padding-right: var(--desktop-window-controls-width); // rtl-physical: window controls stay on the physical right in every locale.
+  }
+
+  .app-box {
+    padding-top: var(--studio-header-height);
+
+    &::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: var(--studio-header-height);
+      background-color: $bg-sidebar;
+      pointer-events: none;
+    }
+  }
+  .app-layout {
+    width: auto;
+    margin: 0 var(--studio-content-gutter) var(--studio-content-gutter) 0;
+    border-radius: var(--studio-content-radius);
+  }
+  .app-layout.no-sidebar { display: flex; }
+
+  .app-main--card,
+  :deep(.chat-panel > .chat-main),
+  :deep(.history-panel > .page-loading-content > .chat-main),
+  :deep(.workflow-view > .page-loading-content > .workflow-main),
+  :deep(.group-chat-panel > .chat-main) {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
 .app-shell--custom-background {
+  .studio-page-header {
+    box-shadow: inset 0 -1px 0 var(--glass-divider-color);
+  }
+
+  &.app-shell--navigation-rail {
+    .app-box::before {
+      inset: 0;
+      height: auto;
+    }
+
+    .app-layout {
+      // Align this image with the shell's full-window background. Its opaque base
+      // keeps the continuous frame glass from tinting the content a second time.
+      background: $bg-sidebar var(--app-background-image, none) center / cover no-repeat fixed;
+      // Composite the image and surfaces before rounding them together. Separate
+      // rounded clips leave antialiased pixels that expose the unfiltered image.
+      border-radius: 0;
+      clip-path: inset(0 round var(--studio-content-radius));
+    }
+  }
+
   .app-layout {
     background-color: transparent;
   }
@@ -445,7 +692,7 @@ useKeyboard();
     background-color: transparent;
 
     &--card {
-      background-color: rgba(var(--bg-main-surface-rgb), 0.72);
+      background-color: var(--glass-content-bg);
       -webkit-backdrop-filter: blur(8px) saturate(110%);
       backdrop-filter: blur(8px) saturate(110%);
     }
@@ -459,22 +706,35 @@ useKeyboard();
     background-color: transparent;
   }
 
+  &.app-shell--navigation-rail .app-box::before,
+  :deep(.studio-navigation-rail),
+  :deep(.desktop-titlebar:not(.desktop-titlebar--flush)),
+  :deep(.chat-panel > .chat-main > .chat-header),
+  :deep(.group-chat-panel > .chat-main > .chat-header) {
+    background-color: var(--glass-chrome-bg);
+    -webkit-backdrop-filter: blur(16px) saturate(110%);
+    backdrop-filter: blur(16px) saturate(110%);
+  }
+
   :deep(.sidebar),
   :deep(.hermes-config-sidebar),
   :deep(.ekko-config-sidebar),
   :deep(.coding-agent-config-sidebar),
   :deep(.chat-panel > .session-list),
-  :deep(.history-panel > .session-list),
+  :deep(.history-panel > .page-loading-content > .session-list),
   :deep(.group-chat-panel > .room-sidebar),
-  :deep(.workflow-view > .workflow-sidebar) {
-    background-color: rgba(var(--bg-sidebar-surface-rgb), 0.72);
-    -webkit-backdrop-filter: blur(8px) saturate(110%);
-    backdrop-filter: blur(8px) saturate(110%);
+  :deep(.workflow-view > .page-loading-content > .workflow-sidebar) {
+    background-color: var(--glass-sidebar-bg);
+    -webkit-backdrop-filter: blur(12px) saturate(110%);
+    backdrop-filter: blur(12px) saturate(110%);
   }
 
-  :deep(.history-panel > .chat-main),
-  :deep(.workflow-view > .workflow-main) {
-    background-color: rgba(var(--bg-main-surface-rgb), 0.72);
+  :deep(.history-panel > .page-loading-content > .chat-main),
+  :deep(.workflow-view > .page-loading-content > .workflow-main),
+  :deep(.connections-panel),
+  :deep(.agent-manager-panel),
+  :deep(.models-view) {
+    background-color: var(--glass-content-bg);
     -webkit-backdrop-filter: blur(8px) saturate(110%);
     backdrop-filter: blur(8px) saturate(110%);
   }
@@ -486,16 +746,8 @@ useKeyboard();
     backdrop-filter: none;
   }
 
-  :deep(.desktop-titlebar),
-  :deep(.chat-panel > .chat-main > .chat-header),
-  :deep(.group-chat-panel > .chat-main > .chat-header) {
-    background-color: rgba(var(--bg-main-surface-rgb), 0.72);
-    -webkit-backdrop-filter: blur(8px) saturate(110%);
-    backdrop-filter: blur(8px) saturate(110%);
-  }
-
   :deep(.chat-input-area),
-  :deep(.agent-manager-panel) {
+  :deep(.connections-tabs > .n-tabs-nav) {
     background-color: transparent;
   }
 
@@ -513,6 +765,7 @@ useKeyboard();
     backdrop-filter: none;
   }
 
+  :deep(.chat-input-area .context-usage-row),
   :deep(.chat-input-area .input-wrapper) {
     background-color: rgba(var(--bg-main-surface-rgb), 0.72);
     -webkit-backdrop-filter: blur(8px) saturate(110%);
@@ -525,21 +778,23 @@ useKeyboard();
 }
 
 .app-shell.desktop-platform-darwin,
-.app-shell.desktop-platform-win32 {
+.app-shell.desktop-platform-win32,
+.app-shell.desktop-platform-linux:not(.desktop-chat-window) {
   &::before {
     content: "";
     position: absolute;
     z-index: 1000;
     top: 0;
-    left: 0;
+    left: var(--studio-header-inset, 0px);
     right: 0;
-    height: 10px;
+    height: var(--studio-header-height, 10px);
     -webkit-app-region: drag;
   }
 
   :deep(.page-header),
   :deep(.chat-header),
-  :deep(.terminal-header) {
+  :deep(.terminal-header),
+  .studio-page-header {
     -webkit-app-region: drag;
 
     button,
@@ -555,20 +810,23 @@ useKeyboard();
   }
 }
 
-.app-shell.desktop-platform-win32 {
+.app-shell.desktop-platform-win32,
+.app-shell.desktop-platform-linux:not(.desktop-chat-window) {
   overflow: hidden;
 
-  .app-main--card,
-  :deep(.chat-panel > .chat-main),
-  :deep(.history-panel > .chat-main),
-  :deep(.workflow-view > .workflow-main),
-  :deep(.group-chat-panel > .chat-main) {
-    margin-top: 50px;
+  &:not(.app-shell--navigation-rail) {
+    .app-main--card,
+    :deep(.chat-panel > .chat-main),
+    :deep(.history-panel > .page-loading-content > .chat-main),
+    :deep(.workflow-view > .page-loading-content > .workflow-main),
+    :deep(.group-chat-panel > .chat-main) {
+      margin-top: 50px;
+    }
   }
 
   :deep(.chat-panel > .session-list > .page-sidebar-top),
-  :deep(.history-panel > .session-list > .page-sidebar-top),
-  :deep(.workflow-view > .workflow-sidebar > .page-sidebar-top),
+  :deep(.history-panel > .page-loading-content > .session-list > .page-sidebar-top),
+  :deep(.workflow-view > .page-loading-content > .workflow-sidebar > .page-sidebar-top),
   :deep(.group-chat-panel > .room-sidebar > .sidebar-header) {
     -webkit-app-region: drag;
 
@@ -586,40 +844,39 @@ useKeyboard();
 }
 
 .app-shell.desktop-platform-darwin {
-   .app-layout > :deep(.sidebar),
-   .app-layout > :deep(.hermes-config-sidebar),
-   .app-layout > :deep(.ekko-config-sidebar),
-   .app-layout > :deep(.coding-agent-config-sidebar),
-  :deep(.chat-panel > .session-list),
-  :deep(.history-panel > .session-list),
-  :deep(.workflow-view > .workflow-sidebar),
-  :deep(.group-chat-panel > .room-sidebar) {
-    position: relative;
+  // Native macOS traffic lights remain on the physical left in RTL locales.
+  &.app-shell--navigation-rail:dir(rtl) {
+    flex-direction: row-reverse;
+  }
+
+  :deep(.studio-navigation-rail) {
+    padding-top: 44px;
 
     &::before {
       content: "";
       position: absolute;
-      z-index: 1;
       top: 0;
       left: 0;
       right: 0;
-      height: 32px;
+      height: 44px;
       -webkit-app-region: drag;
     }
   }
+}
 
-   .app-layout > :deep(.sidebar),
-   .app-layout > :deep(.hermes-config-sidebar),
-   .app-layout > :deep(.ekko-config-sidebar),
-   .app-layout > :deep(.coding-agent-config-sidebar) {
+.app-shell.desktop-platform-darwin:not(.app-shell--navigation-rail) {
+  .app-layout > :deep(.sidebar),
+  .app-layout > :deep(.hermes-config-sidebar),
+  .app-layout > :deep(.ekko-config-sidebar),
+  .app-layout > :deep(.coding-agent-config-sidebar) {
     padding-top: 40px;
   }
 
   :deep(.chat-panel > .session-list > .page-sidebar-top),
-  :deep(.history-panel > .session-list > .page-sidebar-top),
-  :deep(.workflow-view > .workflow-sidebar > .page-sidebar-top),
+  :deep(.history-panel > .page-loading-content > .session-list > .page-sidebar-top),
+  :deep(.workflow-view > .page-loading-content > .workflow-sidebar > .page-sidebar-top),
   :deep(.group-chat-panel > .room-sidebar > .sidebar-header) {
-    padding-top: 32px;
+    padding-top: 44px;
   }
 }
 
@@ -646,6 +903,7 @@ useKeyboard();
 }
 
 @media (min-width: 769px) {
+  .app-shell--navigation-rail .app-main,
   .app-main--card {
     overflow: hidden;
 

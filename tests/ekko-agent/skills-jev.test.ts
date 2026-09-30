@@ -6,6 +6,7 @@ import { AgentRuntime, EkkoFileLogger, EkkoJevClient, type EkkoJevOverrides, typ
 import { resolveSkillRouting } from '../../packages/ekko-agent/src/tools/skills'
 import { SkillReviewService } from '../../packages/ekko-agent/src/skills/review'
 import { shouldReviewSkills } from '../../packages/ekko-agent/src/skills/jev'
+import { skillReviewEvidence } from '../../packages/ekko-agent/src/skills/review-evidence'
 
 const upstream = vi.fn<typeof fetch>()
 let directory: string
@@ -169,6 +170,33 @@ describe('JEV skill matching', () => {
 })
 
 describe('JEV learning preflight', () => {
+  it('evaluates repeated browser evidence under budget without dropping changed state, failures or corrections', async () => {
+    const nodes = Array.from({ length: 120 }, (_, index) => ({ ref: `@e${index + 1}`, role: 'button', name: `Item ${index}: ${'label '.repeat(20)}` }))
+    const messages: any[] = [{ role: 'user', content: 'Click Desktop, App and npm.' }]
+    for (let index = 0; index < 7; index++) messages.push({ role: 'tool', name: 'ekko_studio_browser_toolset', content: JSON.stringify({
+      operation_id: `operation-${index}`, result: { completed: index === 3 ? 1 : 2, total: 2,
+        ...(index === 3 ? { error: 'Target temporarily hidden' } : {}),
+        snapshot: { tabId: 'tab', snapshotId: `snapshot-${index}`, nodes: nodes.map(node => ({ ...node, focused: index === 6 })),
+          text: nodes.map(node => `${node.ref} ${node.role} ${node.name}`).join('\n') } },
+    }) })
+    messages.push({ role: 'user', content: 'Do not retry an already dispatched click.' })
+    expect(Buffer.byteLength(JSON.stringify(messages))).toBeGreaterThan(200_000)
+    const before = JSON.stringify(messages)
+    expect(await client().runScoped(undefined, () => shouldReviewSkills(messages))).toBe(false)
+    expect(upstream).toHaveBeenCalledOnce()
+    expect(Buffer.byteLength(JSON.stringify(request()))).toBeLessThan(64_000)
+    const state = request().state
+    expect(state.transcript.at(-1).content).toBe(messages.at(-1).content)
+    expect(state.transcript[4].content.result.error).toBe('Target temporarily hidden')
+    for (let index = 0; index < 7; index++) {
+      const snapshot = state.transcript[index + 1].content.result.snapshot
+      expect(snapshot.snapshotId).toBe(`snapshot-${index}`)
+      expect(snapshot.nodes.map(([ref, browserNode]: any) => ({ ref, ...state.browserNodes[browserNode] })))
+        .toEqual(nodes.map(node => ({ ...node, focused: index === 6 })))
+    }
+    expect(JSON.stringify(messages)).toBe(before)
+    expect(skillReviewEvidence([{ role: 'tool', name: 'custom', content: messages[1].content }]).transcript[0].content).toBe(messages[1].content)
+  })
   it.each([
     [answer('skip'), 0], [answer('skip', 0.6), 1], [answer('review'), 1], [null, 1], [answer('unknown'), 1],
   ])('only skips the full reviewer for a reliable negative decision: %j', async (decision, calls) => {

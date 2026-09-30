@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import { normalizeTokenUsage, type NormalizedTokenUsage } from '../../../studio/public/usage'
+import { normalizeTokenUsage, normalizeUsageCost, type UsageCost, type NormalizedTokenUsage } from '../../../studio/public/usage'
 
 export interface NativeUsageRow {
   id: string
@@ -8,6 +8,7 @@ export interface NativeUsageRow {
   usage: NormalizedTokenUsage
   apiCalls?: number
   scope: 'run' | 'model_call'
+  cost?: UsageCost
 }
 
 const tokenKeys = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const
@@ -34,6 +35,7 @@ export class NativeTurnUsage {
   private readonly claudeModels = new Set<string>()
   private modelUsage?: Record<string, any>
   private pendingUsage?: unknown
+  private pendingCost?: UsageCost
   private readonly grokResponses = new Map<string, unknown>()
 
   observeClaude(event: any) {
@@ -67,6 +69,7 @@ export class NativeTurnUsage {
     if (event.type === 'result') {
       this.pendingUsage = event.usage
       this.modelUsage = event.modelUsage
+      this.pendingCost = normalizeUsageCost(event, 'estimated')
     }
   }
 
@@ -86,7 +89,7 @@ export class NativeTurnUsage {
     const id = String(message.id || createHash('sha256').update(JSON.stringify(message)).digest('hex'))
     if (this.messages.has(id)) return
     const model = modelName(message.model)
-    const row: NativeUsageRow = { id, model, provider: modelName(message.provider), usage, apiCalls: 1, scope: 'model_call' }
+    const row: NativeUsageRow = { id, model, provider: modelName(message.provider), usage, apiCalls: 1, scope: 'model_call', cost: normalizeUsageCost(raw, 'estimated') }
     this.messages.set(id, row)
     this.model = model
     return row
@@ -98,6 +101,7 @@ export class NativeTurnUsage {
     }
     if (event.type === 'end' || event.type === 'error') {
       if (event.usage) this.pendingUsage = event.usage
+      this.pendingCost = normalizeUsageCost(event, 'estimated')
       if (event.modelUsage && typeof event.modelUsage === 'object' && !Array.isArray(event.modelUsage)) {
         this.modelUsage = event.modelUsage as Record<string, any>
         const models = Object.keys(this.modelUsage)
@@ -115,18 +119,26 @@ export class NativeTurnUsage {
         cache_write_tokens: raw.cache_write_input_tokens ?? raw.cache_write_tokens,
         reasoning_tokens: raw.reasoning_output_tokens ?? raw.reasoning_tokens,
       }, {}, { inputIncludesCache: true })
-      return usage.isEstimated ? [] : [{ id: 'turn', model: this.model || fallbackModel, provider: this.provider, usage, scope: 'run' }]
+      return usage.isEstimated ? [] : [{ id: 'turn', model: this.model || fallbackModel, provider: this.provider, usage, scope: 'run', cost: normalizeUsageCost(raw, 'estimated') }]
     }
 
     let usage = measured(this.pendingUsage ?? finalUsage)
+    let observedCost: UsageCost | undefined
     if (agent === 'grok' && !this.pendingUsage && this.grokResponses.size) {
       // A crash/error may omit the final aggregate. Per-response boundaries
       // are additive, whereas end.usage is already the aggregate.
       const observed = [...this.grokResponses.values()].map(measured).filter((row): row is NormalizedTokenUsage => !!row)
       if (observed.length) usage = Object.fromEntries(tokenKeys.map(key => [key, observed.reduce((sum, row) => sum + row[key], 0)])) as unknown as NormalizedTokenUsage
+      const costs = [...this.grokResponses.values()].map(value => normalizeUsageCost(value, 'estimated'))
+      if (observed.length === costs.length && costs.every(cost => cost !== undefined)) {
+        observedCost = { costUsd: costs.reduce((sum, cost) => sum + cost!.costUsd, 0), costSource: 'estimated' }
+      }
     }
     if (!usage) return agent === 'claude-code' ? [...this.messages.values()] : []
-    if (agent === 'claude-code' && this.messages.size && sameTotals([...this.messages.values()], usage)) {
+    const cost = this.pendingCost || (agent === 'grok' && !this.pendingUsage && this.grokResponses.size
+      ? observedCost : normalizeUsageCost(finalUsage, 'estimated'))
+    const hasModelCost = Object.values(this.modelUsage || {}).some(row => normalizeUsageCost(row, 'estimated'))
+    if (agent === 'claude-code' && !cost && !hasModelCost && this.messages.size && sameTotals([...this.messages.values()], usage)) {
       return [...this.messages.values()]
     }
 
@@ -138,20 +150,30 @@ export class NativeTurnUsage {
         cacheWriteTokens: raw.cacheCreationInputTokens,
         reasoningTokens: raw.reasoningTokens ?? raw.thinkingTokens,
       })
+      const messages = [...this.messages.values()].filter(row => row.model === modelName(model))
+      const apiCalls = Number.isInteger(raw.modelCalls) && raw.modelCalls >= 0
+        ? raw.modelCalls : normalized && messages.length && sameTotals(messages, normalized) ? messages.length : undefined
       return normalized ? {
         id: `model:${model}`, model: modelName(model), usage: normalized, scope: 'run' as const,
-        ...(Number.isInteger(raw.modelCalls) && raw.modelCalls >= 0 ? { apiCalls: raw.modelCalls } : {}),
+        cost: normalizeUsageCost(raw, 'estimated'),
+        ...(apiCalls !== undefined ? { apiCalls } : {}),
       } : undefined
     }).filter((row): row is NonNullable<typeof row> => !!row)
     // Grok's per-model summaries omit reasoning in some versions. With one
     // model attribution is unambiguous; with several keep an aggregate fallback.
     if (models.length === 1 && !models[0].usage.reasoningTokens) models[0].usage.reasoningTokens = usage.reasoningTokens
-    if (models.length && sameTotals(models, usage)) return models
+    if (models.length && sameTotals(models, usage) && (!cost || models.every(row => row.cost) && Math.abs(models.reduce((sum, row) => sum + row.cost!.costUsd, 0) - cost.costUsd) < 1e-9)) return models
 
     const names = new Set([...models.map(row => row.model), ...this.claudeModels].filter(Boolean))
     const model = names.size === 1 ? [...names][0] : names.size > 1 ? '' : this.model || fallbackModel
+    const modelCosts = Object.values(this.modelUsage || {}).map(row => normalizeUsageCost(row, 'estimated'))
+    const aggregateCost = modelCosts.length && modelCosts.every(value => value !== undefined)
+      ? { costUsd: modelCosts.reduce((sum, value) => sum + value!.costUsd, 0), costSource: 'estimated' as const }
+      : undefined
     // Claude modelUsage can include auxiliary work absent from result.usage.
-    // Keep the authoritative turn tokens instead of adding those totals again.
-    return [{ id: 'turn', model, usage, scope: 'run' }]
+    // Keep the authoritative turn tokens, while retaining the complete run's bill once.
+    return [{ id: 'turn', model, usage, scope: 'run', cost: cost || aggregateCost,
+      ...(this.messages.size && sameTotals([...this.messages.values()], usage) ? { apiCalls: this.messages.size } : {}),
+    }]
   }
 }

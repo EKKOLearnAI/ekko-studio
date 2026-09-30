@@ -33,16 +33,16 @@ function requestSkillsDir(ctx: any): string {
   return join(requestProfileDir(ctx), 'skills')
 }
 
-type SkillTarget = 'hermes' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
+type SkillTarget = 'hermes' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
 
 function requestSkillTarget(ctx: any): SkillTarget {
   const target = String(ctx.query?.target || 'hermes').trim().toLowerCase()
-  return target === 'claude' || target === 'codex' || target === 'pi' || target === 'grok' || target === 'opencode' || target === 'dsh' ? target : 'hermes'
+  return target === 'claude' || target === 'codex' || target === 'pi' || target === 'grok' || target === 'opencode' || target === 'dsh' || target === 'cursor' ? target : 'hermes'
 }
 
 function globalSkillsDir(target: Exclude<SkillTarget, 'hermes'>): string {
   const globalHome = getCodingAgentGlobalHome()
-  return target === 'dsh' ? join(globalHome, '.dsh', 'skills') : target === 'claude'
+  return target === 'cursor' ? join(globalHome, '.cursor', 'skills') : target === 'dsh' ? join(globalHome, '.dsh', 'skills') : target === 'claude'
     ? join(globalHome, '.claude', 'skills')
     : target === 'grok'
       ? join(globalHome, '.grok', 'skills')
@@ -83,7 +83,7 @@ async function resolveSkillDirForTarget(ctx: any, category: string, skillName: s
   if (target === 'codex') {
     return findSkillDirInRoot(codexSystemSkillsDir(), category, skillName)
   }
-  if (target === 'grok' || target === 'opencode') {
+  if (target === 'grok' || target === 'opencode' || target === 'cursor') {
     return findSkillDirInRoot(sharedAgentSkillsDir(), category, skillName)
   }
 
@@ -550,7 +550,7 @@ export async function list(ctx: any) {
           'builtin',
         )
         categories = mergeExternalCategories(categories, systemCategories)
-      } else if (target === 'grok' || target === 'opencode') {
+      } else if (target === 'grok' || target === 'opencode' || target === 'cursor') {
         const sharedDir = sharedAgentSkillsDir()
         extraDirs.push(sharedDir)
         const sharedCategories = withSkillSource(
@@ -913,7 +913,7 @@ export async function updateSkill(ctx: any) {
       await writeFile(file.path, content, 'utf-8')
       ctx.body = { success: true }; return
     }
-    const usesSharedAgentSkills = target === 'grok' || target === 'opencode'
+    const usesSharedAgentSkills = target === 'grok' || target === 'opencode' || target === 'cursor'
     const localSkillDir = usesSharedAgentSkills
       ? await resolveSkillDirForTarget(ctx, category, name)
       : await findSkillDirInRoot(skillsDir, category, name)
@@ -1001,6 +1001,21 @@ export async function deleteSkill(ctx: any) {
     }
     await rm(file.flat ? file.path : file.directory, { recursive: !file.flat, force: true })
     ctx.body = { success: true }; return
+  }
+  if (requestSkillTarget(ctx) === 'cursor') {
+    try {
+      const directory = await resolveSkillDirForTarget(ctx, category, name)
+      if (!directory) { ctx.status = 404; ctx.body = { error: 'Skill not found' }; return }
+      await assertCodingAgentSkillWritable(join(directory, 'SKILL.md'))
+      if (!isPathWithin(directory, requestTargetSkillsDir(ctx))) {
+        ctx.status = 403; ctx.body = { error: 'Access denied' }; return
+      }
+      await rm(directory, { recursive: true, force: true })
+      ctx.body = { success: true }
+    } catch (error: any) {
+      ctx.status = error.status || 500; ctx.body = { error: error.message }
+    }
+    return
   }
   if (requestSkillTarget(ctx) !== 'hermes') {
     ctx.status = 403; ctx.body = { error: 'Skill deletion is not supported for this Coding Agent target' }; return
@@ -1120,7 +1135,7 @@ export async function importSkill(ctx: any) {
   }
 
   const target = requestSkillTarget(ctx)
-  if (target !== 'hermes' && target !== 'dsh') { ctx.status = 400; ctx.body = { error: 'Skill import is not supported for this target' }; return }
+  if (target !== 'hermes' && target !== 'dsh' && target !== 'cursor') { ctx.status = 400; ctx.body = { error: 'Skill import is not supported for this target' }; return }
   if (target === 'dsh' && category) { ctx.status = 400; ctx.body = { error: 'DSH skills must be imported without a category' }; return }
   const skillsDir = requestTargetSkillsDir(ctx)
   try { await assertCodingAgentSkillWritable(category ? join(skillsDir, category) : skillsDir) } catch (error: any) {

@@ -5,7 +5,7 @@ import {
   type Message,
   type ContentBlock,
 } from "@/stores/hermes/chat";
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMessage } from "naive-ui";
 import { downloadFile, getDownloadUrl } from "@/api/studio/download";
@@ -35,8 +35,7 @@ import { isServerTtsProvider } from "@/api/studio/tts";
 import type { ProfileAvatar as ProfileAvatarData } from "@/api/hermes/profiles";
 import ProfileAvatar from "@/components/hermes/profiles/ProfileAvatar.vue";
 import ImagePreviewOverlay from "./ImagePreviewOverlay.vue";
-
-const MarkdownRenderer = defineAsyncComponent(async () => (await import("./MarkdownRenderer.vue")).default);
+import MarkdownRenderer from "./MarkdownRenderer.vue";
 
 const TOOL_PAYLOAD_DISPLAY_LIMIT = 1000;
 const JSON_STRING_DISPLAY_LIMIT = 200;
@@ -67,6 +66,15 @@ const isAgentError = computed(() => props.message.role === "assistant" && props.
 const effectiveHeadingIdPrefix = computed(() => props.headingIdPrefix || `msg-${props.message.id}`);
 const isCommandMessage = computed(() => props.message.role === "command" || props.message.systemType === "command");
 const isCommandError = computed(() => props.message.role === "command" && props.message.systemType === "error");
+const commandResultContent = computed(() => {
+  const data = props.message.commandData || {};
+  const key = String(data.messageKey || "");
+  if (!["nativeUsage", "nativeUsageUnknown", "nativeContextUnknown", "nativeContextEstimate", "nativeCompactUnavailable"].includes(key)) {
+    return props.message.content;
+  }
+  const params = Object.fromEntries(Object.entries(data).filter(([, value]) => typeof value === "string" || typeof value === "number"));
+  return t(`codingAgents.${key}`, params);
+});
 const isStatusCommand = computed(() =>
   isCommandMessage.value
   && props.message.commandAction === "status"
@@ -1252,7 +1260,7 @@ onBeforeUnmount(() => {
             </div>
             <div v-else-if="isCommandMessage && message.content" class="command-result">
               <span class="command-result-icon">/</span>
-              <MarkdownRenderer :content="message.content" />
+              <MarkdownRenderer :content="commandResultContent" />
             </div>
 
             <span v-if="message.isStreaming && !message.content" class="streaming-dots">

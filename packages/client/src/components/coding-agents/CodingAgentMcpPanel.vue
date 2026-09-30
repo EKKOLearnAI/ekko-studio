@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NAlert, NButton, NEmpty, NInput, NModal, NRadioButton, NRadioGroup, useMessage } from 'naive-ui'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NAlert, NButton, NEmpty, NInput, NModal, NRadioButton, NRadioGroup, NSpin, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import McpServerCard from '@/components/hermes/mcp/McpServerCard.vue'
 import { useMcpConfigInput } from '@/composables/useMcpConfigInput'
@@ -21,7 +24,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const message = useMessage()
-const loading = ref(false)
+const loading = ref(true)
 const reloadingAll = ref(false)
 const saving = ref(false)
 const error = ref('')
@@ -351,10 +354,13 @@ onBeforeUnmount(() => {
   for (const name of probeVersions.keys()) invalidateServerProbe(name)
 })
 watch(() => props.agentId, changeAgent)
+
+usePageLoadingTask(() => loading.value && servers.value.length === 0)
 </script>
 
 <template>
   <div class="mcp-view embedded">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('mcp.title') }}</h2>
       <div class="header-actions">
@@ -363,6 +369,7 @@ watch(() => props.agentId, changeAgent)
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="mcp-content" :class="{ 'is-loading': loading && servers.length === 0 }">
       <div v-if="loading && servers.length === 0" class="mcp-loading-state">

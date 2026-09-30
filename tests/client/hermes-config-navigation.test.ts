@@ -18,7 +18,8 @@ describe("Hermes configuration navigation", () => {
     expect(app).toContain("route.meta?.hermesConfig === true");
     expect(app).toContain('v-if="!isLoginPage && usesHermesConfigSidebar"');
     expect(app).toContain("if (usesHermesConfigSidebar.value)");
-    expect(app).toContain("return appStore.sidebarCollapsed ? 84 : 260");
+    expect(app).toContain("if (showNavigationRail.value) return 64;");
+    expect(app).toContain("return appStore.sidebarCollapsed ? 64 : 240;");
 
     for (const name of [
       "hermes.jobs",
@@ -40,7 +41,7 @@ describe("Hermes configuration navigation", () => {
     expect(configSidebar).not.toContain("hermes-config-header");
     expect(configSidebar).toContain('class="hermes-config-collapse"');
     expect(configSidebar).toContain("appStore.toggleSidebarCollapsed()");
-    expect(configSidebar).toContain("collapsed: appStore.sidebarCollapsed");
+    expect(configSidebar).toContain("collapsed: !isMobile && appStore.sidebarCollapsed");
     expect(configSidebar).toContain('@include agent-config-sidebar.layout("hermes")');
     const mainGearPath = "M19.4 15a1.65 1.65 0 0 0 .33 1.82";
     expect(appSidebar).toContain(mainGearPath);

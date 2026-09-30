@@ -7,6 +7,8 @@ test('language menu stays usable after switching to an RTL locale', async ({ pag
 
   await page.goto('/#/hermes/theme')
 
+  await page.locator('.page-sidebar-account-btn').click()
+
   const languageSwitch = page.locator('.language-switch')
   const languageMenu = page.locator('.n-base-select-menu')
   const option = (label: string) =>

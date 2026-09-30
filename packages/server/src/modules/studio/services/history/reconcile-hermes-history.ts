@@ -132,7 +132,11 @@ export async function reconcileHermesSessionHistory(
   options: HermesHistoryReconciliationOptions = {},
 ): Promise<HermesHistoryReconciliationResult> {
   const local = getSessionDetail(sessionId)
-  if (!local || !HERMES_LOCAL_SOURCES.has(local.source)) return { changed: false, added: 0 }
+  // A local clear is authoritative: native history still contains deleted turns.
+  // Without a native reset boundary, importing it again would undo that clear.
+  if (!local || !HERMES_LOCAL_SOURCES.has(local.source) || Number(local.history_revision || 0) > 0) {
+    return { changed: false, added: 0 }
+  }
 
   const localProfile = String(local.profile || 'default')
   const requestedProfile = String(options.profile || localProfile)
@@ -150,7 +154,7 @@ export async function reconcileHermesSessionHistory(
     // Re-read after the asynchronous native query so simultaneous callers and
     // bridge writes participate in de-duplication before the synchronous insert.
     const current = getSessionDetail(sessionId)
-    if (!current || String(current.profile || 'default') !== localProfile || options.isSessionActive?.()) {
+    if (!current || Number(current.history_revision || 0) > 0 || String(current.profile || 'default') !== localProfile || options.isSessionActive?.()) {
       return { changed: false, added: 0 }
     }
 

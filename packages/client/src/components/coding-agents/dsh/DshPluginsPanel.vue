@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton } from 'naive-ui'
@@ -25,7 +26,9 @@ const settings = ref<InstanceType<typeof DshPluginSettingsPanel>>()
 </script>
 <template>
   <div class="plugins-view dsh-plugins" data-testid="dsh-plugins">
+    <PageHeader>
     <header class="page-header"><h2 class="header-title">{{ t('dshPlugins.title') }}</h2><NButton size="small" quaternary @click="tab === 'configuration' ? settings?.refresh() : list?.refresh()">{{ t('mcp.refresh') }}</NButton></header>
+    </PageHeader>
     <div class="plugins-content">
       <div ref="tabsElement" class="plugin-tabs" role="tablist" :aria-label="t('dshPlugins.title')" @keydown="keydown">
         <button id="dsh-config-tab" role="tab" data-tab="configuration" :aria-selected="tab === 'configuration'" aria-controls="dsh-config-panel" :tabindex="tab === 'configuration' ? 0 : -1" @click="select('configuration')">{{ t('dshPlugins.configurationTab') }}</button>
@@ -41,10 +44,11 @@ const settings = ref<InstanceType<typeof DshPluginSettingsPanel>>()
 @use '@/styles/plugins-page' as plugins-page;
 @include plugins-page.layout(100%);
 .dsh-plugins { min-height: 0; }
-.plugins-content { display: flex; flex-direction: column; }
-.plugin-tabs { flex-shrink: 0; }
-#dsh-config-panel { flex: 1; min-height: 360px; }
-.plugin-tabs { display: flex; gap: 24px; border-bottom: 1px solid $border-color; margin-bottom: 20px; }
+.plugins-content { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+#dsh-config-panel, #dsh-list-panel { flex: 1; min-height: 0; min-width: 0; }
+#dsh-config-panel { display: flex; overflow: hidden; }
+#dsh-list-panel { padding: 20px; overflow: auto; }
+.plugin-tabs { display: flex; flex-shrink: 0; gap: 24px; padding-inline: 20px; border-bottom: 1px solid $border-color; }
 .plugin-tabs button { padding: 10px 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: $text-secondary; cursor: pointer; font: inherit; }
 .plugin-tabs button[aria-selected="true"] { color: $accent-primary; border-bottom-color: $accent-primary; }
 .plugin-tabs button:focus-visible { outline: 2px solid $accent-primary; outline-offset: 3px; }

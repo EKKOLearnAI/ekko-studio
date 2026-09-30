@@ -150,6 +150,7 @@ function openAiChatUsageToResponsesUsage(usage: Record<string, any>): Record<str
   const promptDetails = usage.prompt_tokens_details || usage.input_tokens_details
   const completionDetails = usage.completion_tokens_details || usage.output_tokens_details
   return {
+    ...usage,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     total_tokens: Number(usage.total_tokens ?? inputTokens + outputTokens),

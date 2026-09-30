@@ -10,6 +10,7 @@ import { deleteCompressionSnapshot, getCompressionSnapshot } from '../../reposit
 import { getRecordedUsageTotals, getUsage } from '../../repositories/usage-store'
 import { countTokens, SUMMARY_PREFIX } from '../context-compressor'
 import { truncateToolResultForContext } from './tool-result-context'
+import { projectChatBrowserHistory } from '../../public/chat-agent-runtime'
 import { logger } from '../../public/logging'
 import { assembleCursorSnapshotHistory, readCursorSnapshotParts } from './context-history'
 import type { SessionState } from './types'
@@ -90,24 +91,36 @@ export async function calcAndUpdateUsage(
   outputTokens: number
   contextInputTokens?: number
   contextOutputTokens?: number
+  nativeUsageAvailable?: boolean
+  nativeModel?: string
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
 }> {
   try {
     if (options.nativeSource) {
       const totals = getRecordedUsageTotals(sid, options.nativeSource)
-      const latest = getUsage(sid)
+      const latest = getUsage(sid, options.nativeSource)
       const usage = {
         inputTokens: totals.inputTokens,
         outputTokens: totals.outputTokens,
+        cacheReadTokens: totals.cacheReadTokens || 0,
+        cacheWriteTokens: totals.cacheWriteTokens || 0,
       }
-      state.inputTokens = usage.inputTokens
-      state.outputTokens = usage.outputTokens
-      emit('usage.updated', {
-        event: 'usage.updated',
-        session_id: sid,
-        ...usage,
-      })
+      if (latest) {
+        state.inputTokens = usage.inputTokens
+        state.outputTokens = usage.outputTokens
+        state.cacheReadTokens = usage.cacheReadTokens
+        state.cacheWriteTokens = usage.cacheWriteTokens
+        emit('usage.updated', {
+          event: 'usage.updated',
+          session_id: sid,
+          ...usage,
+        })
+      }
       return {
         ...usage,
+        nativeUsageAvailable: Boolean(latest),
+        nativeModel: latest?.model || '',
         ...(latest
           ? {
               // Accounting keeps ordinary and cached input disjoint, but both
@@ -182,9 +195,7 @@ export async function calcAndUpdateUsage(
     }
     const usage = estimateSnapshotUsage(storedMessages)
     const contextUsage = options.truncateToolResultsForContext
-      ? estimateSnapshotUsage(storedMessages.map(message => message.role === 'tool'
-        ? { ...message, content: truncateToolResultForContext(message.content || '') }
-        : message))
+      ? estimateSnapshotUsage(projectChatBrowserHistory(storedMessages, { truncateOtherTools: truncateToolResultForContext }))
       : undefined
     state.inputTokens = usage.inputTokens
     state.outputTokens = usage.outputTokens
@@ -205,7 +216,7 @@ export async function calcAndUpdateUsage(
     }
   } catch (err: any) {
     logger.warn(err, '[chat-run-socket] failed to calculate usage for session %s', sid)
-    return { inputTokens: 0, outputTokens: 0 }
+    return { inputTokens: 0, outputTokens: 0, ...(options.nativeSource ? { nativeUsageAvailable: false } : {}) }
   }
 }
 

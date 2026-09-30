@@ -1,6 +1,39 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
+for (const failure of [
+  { status: 403, code: 'DSH_UI_FORBIDDEN', error: 'Super administrator required' },
+  { status: 422, code: 'DSH_CAPABILITY_UNSUPPORTED', error: 'Native preset capability is unavailable' },
+]) test(`DSH shows the actual configuration failure: ${failure.code}`, async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await page.route('**/api/coding-agents/dsh/ui-session', route => route.fulfill({ status: failure.status, json: failure }))
+  await page.route('**/api/coding-agents/dsh/plugin-inventory', route => route.fulfill({ status: failure.status, json: failure }))
+  await page.goto('/#/studio/agents/dsh/plugins')
+  const panel = page.getByTestId('dsh-plugins')
+  await expect(panel.getByTestId('dsh-plugin-settings')).toContainText(failure.code)
+  await expect(panel.getByTestId('dsh-plugin-settings')).toContainText(failure.error)
+  await expect(panel.locator('iframe')).toHaveCount(0)
+  await panel.getByRole('tab', { name: 'Plugin list', exact: true }).click()
+  await expect(panel.getByTestId('dsh-native-plugins')).toContainText(failure.code)
+  await expect(panel.getByTestId('dsh-native-plugins')).toContainText(failure.error)
+})
+
+test('DSH declaration presets expose viewing and selection without filesystem authoring', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await page.route('**/api/coding-agents/dsh/agent-presets', route => route.fulfill({ json: { authorable: false, presets: [
+    { id: 'standard', name: 'Standard mode', isDefault: true }, { id: 'minimal', name: 'Minimal mode', isDefault: false },
+  ] } }))
+  await page.goto('/#/studio/agents/dsh/presets')
+  const preset = page.getByTestId('dsh-preset-minimal')
+  await expect(preset.getByRole('button', { name: 'View', exact: true })).toBeEnabled()
+  await expect(preset.getByRole('button', { name: 'Set as default', exact: true })).toBeEnabled()
+  await expect(preset.getByRole('button', { name: 'Duplicate', exact: true })).toBeDisabled()
+  await expect(preset.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0)
+  await expect(preset.locator('.n-tag')).toHaveCount(0)
+})
+
 for (const mobile of [false, true]) test(`DSH native slot and plugin list retain their state (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
   if (mobile) await page.setViewportSize({ width: 390, height: 844 })
   await authenticate(page, TEST_ACCESS_KEY, 'research')
@@ -26,6 +59,21 @@ for (const mobile of [false, true]) test(`DSH native slot and plugin list retain
   await expect(panel.getByRole('tab')).toHaveCount(2)
   const input = panel.frameLocator('iframe').getByLabel('Plugin-owned field')
   await input.fill('native draft')
+  const expectFilled = async () => {
+    await expect.poll(() => panel.evaluate(element => {
+      const bounds = element.getBoundingClientRect()
+      const tabs = element.querySelector('[role=tablist]')!.getBoundingClientRect()
+      const frame = element.querySelector('iframe')!.getBoundingClientRect()
+      return Math.max(Math.abs(frame.left - bounds.left), Math.abs(frame.right - bounds.right), Math.abs(frame.top - tabs.bottom), Math.abs(frame.bottom - bounds.bottom))
+    })).toBeLessThanOrEqual(1)
+  }
+  await expectFilled()
+  await page.setViewportSize(mobile ? { width: 740, height: 390 } : { width: 1440, height: 1000 })
+  await expectFilled()
+  await expect(input).toHaveValue('native draft')
+  await page.screenshot({ path: `/tmp/dsh-plugins-filled-${mobile ? 'landscape' : 'desktop'}.png` })
+  await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 720 })
+  await expectFilled()
   const nativeBody = panel.frameLocator('iframe').locator('body')
   await expect(nativeBody).toHaveAttribute('data-theme', 'dark')
   await page.emulateMedia({ colorScheme: 'light' })
@@ -41,6 +89,7 @@ for (const mobile of [false, true]) test(`DSH native slot and plugin list retain
   await expect(page.getByTestId('managed-packages')).toHaveCount(0)
   await panel.getByRole('tab', { name: 'Plugin configuration', exact: true }).click()
   await expect(input).toHaveValue('native draft'); expect(opens).toBe(1)
+  await expectFilled()
   await panel.getByRole('tab', { name: 'Plugin list', exact: true }).click()
   await panel.getByTestId('dsh-web-package').getByRole('button', { name: 'Remove' }).click()
   await page.locator('.n-popconfirm').getByRole('button', { name: 'Confirm', exact: true }).click()
@@ -73,7 +122,7 @@ for (const mobile of [false, true]) test(`DSH Agent presets use Studio component
   })
   await page.goto('/#/studio/agents/dsh/presets')
   const panel = page.getByTestId('dsh-agent-presets')
-  await expect(panel.getByRole('heading', { name: 'Agent presets', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Agent presets', exact: true })).toBeVisible()
   await expect(panel.locator('iframe')).toHaveCount(0)
   await expect(page.getByTestId('coding-agent-config-presets')).toHaveCount(1)
   const standard = panel.getByTestId('dsh-preset-standard')

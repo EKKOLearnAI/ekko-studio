@@ -10,14 +10,12 @@
     align-self: stretch;
     display: flex;
     flex-direction: column;
-    margin: 10px;
+    margin: 0;
     padding: 8px 12px 20px;
     overflow: hidden;
     flex-shrink: 0;
-    border: 1px solid $border-color;
-    border-radius: 14px;
+    border-inline-end: 1px solid $border-color;
     background-color: $bg-sidebar-surface;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
     transition: width $transition-normal, min-width $transition-normal, padding $transition-normal;
   }
 
@@ -52,7 +50,7 @@
   @media (max-width: $breakpoint-mobile) {
     .#{$agent}-config-backdrop { position: fixed; z-index: 1090; inset: 0; display: block; background: rgba(0, 0, 0, 0.42); opacity: 0; pointer-events: none; transition: opacity $transition-normal; }
     .#{$agent}-config-backdrop.active { opacity: 1; pointer-events: auto; }
-    .#{$agent}-config-sidebar { position: fixed; z-index: 1100; inset: 0 auto 0 0; height: 100%; margin: 0; border-width: 0 1px 0 0; border-radius: 0; transform: translateX(-102%); transition: transform $transition-normal; }
+    .#{$agent}-config-sidebar { position: fixed; z-index: 1100; inset: 0 auto 0 0; height: 100%; margin: 0; border-radius: 0; transform: translateX(-102%); transition: transform $transition-normal; }
     .#{$agent}-config-sidebar.open { transform: translateX(0); }
   }
 }

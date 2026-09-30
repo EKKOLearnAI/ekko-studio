@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NButton, useMessage } from 'naive-ui'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
-import { NButton, NSpin, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import { useFilesStore } from '@/stores/hermes/files'
 import { useToolPanelStore } from '@/stores/hermes/tool-panel'

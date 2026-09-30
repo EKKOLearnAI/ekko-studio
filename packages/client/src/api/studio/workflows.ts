@@ -66,6 +66,7 @@ export interface WorkflowRunRecord {
   node_sessions?: WorkflowRunNodeSessionRecord[]
   edge_evaluations?: WorkflowRunEdgeEvaluationRecord[]
   loop_epochs?: WorkflowRunLoopEpochRecord[]
+  quality_evaluations?: WorkflowRunQualityEvaluationRecord[]
 }
 
 export interface WorkflowRunNodeSessionRecord {
@@ -88,6 +89,14 @@ export interface WorkflowRunNodeSessionRecord {
   created_at: number
   updated_at: number
   error: string | null
+}
+
+export interface WorkflowRunQualityEvaluationRecord {
+  id: string; run_id: string; workflow_id: string; node_session_id: string; node_id: string; execution_id: string
+  iteration_path: unknown[]; input_hash: string; config_hash: string; status: 'completed' | 'skipped'
+  decision: 'pass' | 'needs_improvement' | 'unknown'
+  criteria: Array<{ id: string; decision: 'pass' | 'needs_improvement' | 'unknown'; confidence?: number; evidenceRefs: string[] }>
+  reason_code: string; duration_ms: number; created_at: number
 }
 
 export interface WorkflowRunEdgeEvaluationRecord {

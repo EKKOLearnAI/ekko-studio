@@ -47,6 +47,15 @@ must still be enabled before its configured child features can use JEV.
 | `ekko-memory-write-review` | Active: `memory/jev-write-review.ts` | `ekkoMemoryWriteReviewEnabled` | `jev.memoryWriteReviewEnabled` | Memory options → Review memory writes |
 | `ekko-skills` | Active: `skills/jev.ts`, routing and learning preflight | `ekkoSkillsEnabled` | `jev.skillsEnabled` | Models → JEV → Use JEV for Ekko skills |
 
+Browser integrations `browser-match` and `browser-verify` are registered independently
+with default-off switches `browserMatchEnabled` and `browserVerifyEnabled` at
+Models → JEV → Built-in browser automation. They share the provider connection,
+with separate confidence and timeout controls plus a matching candidate limit.
+Studio MCP orchestration lives in `bin/browser/jev.mjs`; server assessments use
+`modules/studio/services/browser/jev.ts` and the public facade. No standalone
+mapping is needed. Settings are read on every assessment, not at agent startup.
+See [browser JEV behavior](../jev.md#built-in-browser-automation).
+
 Agent source paths above are relative to `packages/ekko-agent/src`. Studio's memory
 master defaults to false; its four child switches default to true. Existing saved
 values, including explicit false, take precedence. Standalone Ekko retains false
@@ -84,7 +93,7 @@ new evaluation call there must be registered as a business integration as well.
 It reads TypeScript and Vue syntax, including real template bindings, and checks:
 
 1. JEV imports/calls, runtime evaluator access and known HTTP entry points in
-   server, client and standalone agent source have a registered owner.
+   server, client, standalone agent, Desktop and MCP `bin/` source have a registered owner.
 2. Each integration declares its own boolean switch, matching Studio default and
    concrete source/test paths; a configuration-only integration cannot directly evaluate.
 3. Settings declared by defaults and server/client interfaces are registered,
@@ -133,3 +142,52 @@ restore the complete original recall. Write review retains its independent confi
 (default 0.8). Missing legacy recall settings inherit the new default; saved write
 thresholds are preserved. All numeric thresholds require frontend controls and
 round-trip tests.
+
+## Studio sidecar infrastructure
+
+Studio business features that evaluate JEV after their baseline operation may use
+`createJevSidecar` from the public facade. The sidecar is infrastructure, not an
+integration switch: PRs that call the factory must still register their concrete
+business source, independent Profile switch, options, frontend controls and tests.
+
+The sidecar accepts only statically registered adapters. An adapter parses its
+non-secret policy from the same private Profile settings read that creates the
+provider snapshot, supplies a bounded admission ceiling and call counts, and
+rechecks an explicit source/authorization expectation before every real provider
+dispatch and before application. A snapshot freezes calculation parameters; it
+never freezes permission. Opaque handles cannot be serialized or reused after the
+task ends.
+
+Sidecar consumers must preserve these constraints:
+
+- `trySchedule` is synchronous, bounded and never performs provider/config IO.
+- The complete request is validated and limited to 64,000 UTF-8 bytes. Queue input
+  is plain bounded JSON; accessors, custom `toJSON`, cycles and non-finite values
+  are rejected.
+- Cumulative deadlines include queue and settings/authority reads. A logical
+  timeout does not free a physical request slot until the real operation settles.
+- All request state is untrusted data. Questions and finite candidate/evidence IDs
+  are constructed by trusted code and validated again after evaluation.
+- Result application uses the registered adapter's synchronous typed apply port.
+  It must perform its domain CAS/claim in a short transaction; thenables are
+  rejected. A fatal skip, cancellation or successful apply cannot be resumed.
+- Every evaluation, revision generation and apply rechecks the current feature
+  switch and credentials. Stage-specific switches (revision and auto routing)
+  are checked separately; disabling them prevents late results from applying.
+  Auto routing must use `ctx.apply`, including a fresh message hash check inside
+  the queue/claim transaction. Incomplete or non-finite JEV answers are terminal
+  skips, never permission to execute.
+- Revision generation uses `ctx.generate` with its own 30-second budget and a
+  process-wide physical slot. Its elapsed time preserves the remaining JEV
+  allowance, but cannot extend a parent deadline. Pass the generation signal
+  into the model runtime and call `beforeDispatch` at the provider fetch boundary.
+  A hung generation retains its physical slot after logical timeout/cancellation.
+- Workflow observations carry the run deadline, recheck persisted cancellation
+  before dispatch/application, and cancel locally when the run is stopped.
+  Completed nodes in completed/failed runs remain eligible; canceled runs do not.
+- Sidecar diagnostics contain only stable IDs, hashes, counts, durations and
+  reason codes. Secrets, source text and provider bodies are excluded.
+
+The sidecar does not provide durable tasks, cluster-wide provider-call
+at-most-once, summary CAS, workflow quality storage or group routing claims. Those
+remain requirements of each registered business integration.

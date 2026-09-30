@@ -7,6 +7,8 @@ import { TASK_PLANS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_
 import { normalizeMessageContentForStorageRole } from './message-content'
 import { copyCompressionSnapshot } from './compression-snapshot'
 import { recordSkillUsageMessage } from './skill-usage-store'
+import { getRecordedSessionTokensBatch } from './usage-store'
+import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
 
 // Re-export types for compatibility with sessions-db.ts consumers
 export interface HermesSessionRow {
@@ -114,6 +116,20 @@ function parseToolCalls(value: unknown): any[] | null {
 }
 
 function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
+  return mapSessionRows([row])[0]
+}
+
+function mapSessionRows(rows: Record<string, unknown>[]): HermesSessionRow[] {
+  // Native Coding Agents' ledger owns token accounting. Stored counters can remain
+  // zero; using them would erase live usage on the next session-list poll.
+  const nativeIds = rows.filter(row => row.source === 'coding_agent'
+    || (isAgentRuntime(row.agent) && agentFamilyForRuntime(row.agent) === 'coding')
+    || row.agent === 'claude' || row.agent === 'claude_code').map(row => String(row.id))
+  const usage = nativeIds.length ? getRecordedSessionTokensBatch(nativeIds, 'coding_agent') : {}
+  return rows.map(row => mapStoredSessionRow({ ...row, ...usage[String(row.id)] }))
+}
+
+function mapStoredSessionRow(row: Record<string, unknown>): HermesSessionRow {
   const rawTitle = row.title != null ? String(row.title) : null
   const preview = String(row.preview || '')
   const title = rawTitle || (preview ? (preview.length > 40 ? preview.slice(0, 40) + '...' : preview) : null)
@@ -588,7 +604,7 @@ export function listSessions(
 
   const offset = Number.isSafeInteger(options.offset) && options.offset! > 0 ? options.offset! : 0
   const rows = db.prepare(sql).all(...filters.params, limit, offset) as Record<string, unknown>[]
-  return rows.map(mapSessionRow)
+  return mapSessionRows(rows)
 }
 
 export function countSessions(
@@ -717,8 +733,7 @@ export function searchSessions(
        ORDER BY s.last_active DESC
        LIMIT ?`,
     ).all(...filters.params, limit) as Record<string, unknown>[]
-    return rows.map(row => {
-      const session = mapSessionRow(row)
+    return mapSessionRows(rows).map(session => {
       return { ...session, snippet: session.preview || '', matched_message_id: null, rank: 0 }
     })
   }
@@ -780,8 +795,9 @@ export function searchSessions(
      LIMIT 1`,
   )
 
-  return sessionRows.map(row => {
-    const session = mapSessionRow(row)
+  const sessions = mapSessionRows(sessionRows)
+  return sessionRows.map((row, index) => {
+    const session = sessions[index]
     let snippet = ''
     let matched_message_id: number | null = null
     const title = row.title != null ? String(row.title) : ''

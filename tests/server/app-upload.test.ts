@@ -41,7 +41,7 @@ describe('App chunked uploads', () => {
 
     const completed = await completeAppUpload({ id, owner: '7', profile: 'default' })
     expect(completed.name).toBe('photo.png')
-    expect(completed.path).toMatch(/default\/[^/]+\.png$/)
+    expect(completed.path).toMatch(/default[/\\][^/\\]+\.png$/)
     expect(await readFile(completed.path)).toEqual(Buffer.from([1, 2, 3, 4, 5]))
   })
 

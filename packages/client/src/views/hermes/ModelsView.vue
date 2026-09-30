@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NSelect, NSpin, NTabPane, NTabs, useMessage } from 'naive-ui'
+import { NButton, NSelect, NTabPane, NTabs, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import AuxiliaryModelsPanel from '@/components/hermes/models/AuxiliaryModelsPanel.vue'
 import CombinationModelsPanel from '@/components/hermes/models/CombinationModelsPanel.vue'
@@ -16,8 +18,6 @@ import { fetchProfiles, type HermesProfile } from '@/api/hermes/profiles'
 import { checkCopilotToken } from '@/api/hermes/copilot-auth'
 
 const { t } = useI18n()
-const props = defineProps<{ sidebarCollapsed?: boolean }>()
-const emit = defineEmits<{ toggleSidebar: [] }>()
 const modelsStore = useModelsStore()
 const appStore = useAppStore()
 const profilesStore = useProfilesStore()
@@ -160,31 +160,10 @@ async function handleRefreshModelCache() {
 </script>
 
 <template>
-  <div class="models-view">
-    <div v-if="modelsStore.refreshingModelCache" class="model-cache-overlay">
-      <NSpin size="large" :description="t('models.refreshModelCacheLoading')" />
-    </div>
-
+  <PageLoading :show="profileLoading || modelsStore.refreshingModelCache || (modelsStore.loading && modelsStore.providers.length === 0)" class="models-view">
+    <PageHeader>
     <header class="page-header">
       <div class="models-header-left">
-        <NButton
-          class="models-sidebar-toggle"
-          quaternary
-          size="small"
-          circle
-          :title="props.sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')"
-          :aria-label="props.sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')"
-          @click="emit('toggleSidebar')"
-        >
-          <template #icon>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-              <rect x="3" y="3" width="7" height="7" />
-              <rect x="14" y="3" width="7" height="7" />
-              <rect x="3" y="14" width="7" height="7" />
-              <rect x="14" y="14" width="7" height="7" />
-            </svg>
-          </template>
-        </NButton>
         <h2 class="header-title">{{ t('models.title') }}</h2>
       </div>
       <div class="header-actions">
@@ -230,14 +209,17 @@ async function handleRefreshModelCache() {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="models-content">
-      <NSpin v-if="profileLoading" class="models-profile-loading" />
+      <div v-if="profileLoading" class="models-profile-loading" role="status" aria-live="polite">
+
+      </div>
       <NTabs v-else-if="selectedProfile" :key="selectedProfile" v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
         <NTabPane name="general" :tab="t('models.generalTitle')">
-          <NSpin :show="modelsStore.loading && modelsStore.providers.length === 0">
+          <div>
             <ProvidersPanel />
-          </NSpin>
+          </div>
         </NTabPane>
         <NTabPane name="auxiliary" :tab="t('models.auxiliaryTitle')">
           <AuxiliaryModelsPanel />
@@ -262,7 +244,7 @@ async function handleRefreshModelCache() {
       @close="handleModalClose"
       @saved="handleSaved"
     />
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -282,21 +264,21 @@ async function handleRefreshModelCache() {
   gap: 8px;
 }
 
-.model-cache-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 3000;
+.models-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.models-profile-loading {
+  flex: 1;
+  min-height: 160px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, $bg-primary 78%, transparent);
-  backdrop-filter: blur(2px);
-}
-
-.models-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
 }
 
 .models-profile-select {

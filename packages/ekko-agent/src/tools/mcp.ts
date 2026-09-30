@@ -125,6 +125,7 @@ function responseDataWithoutImagePayloads(value: unknown): unknown {
 }
 
 class McpClientSession {
+  private disposed = false
   private client: Client | null = null
   private transport: McpClientTransport | null = null
   private initialized: Promise<void> | null = null
@@ -156,6 +157,7 @@ class McpClientSession {
   }
 
   dispose(): void {
+    this.disposed = true
     const client = this.client
     const transport = this.transport
     this.client = null
@@ -174,6 +176,7 @@ class McpClientSession {
   }
 
   private async ensureConnected(timeoutMs: number): Promise<Client> {
+    if (this.disposed) throw new Error('MCP connection scope has ended')
     if (!this.client) {
       const client = new Client({ name: 'ekko-agent', version: '0.1.0' })
       const transport = this.server.type === 'streamable_http'
@@ -201,6 +204,7 @@ class McpClientSession {
       })
     }
     await this.initialized
+    if (this.disposed) throw new Error('MCP connection scope has ended')
     return this.client!
   }
 }
@@ -310,16 +314,30 @@ function stableNameHash(value: string): string {
 }
 
 export function createMcpToolProvider(): AgentToolProvider {
-  const sessions = new Map<string, McpClientSession>()
+  const sharedSessions = new Map<string, McpClientSession>()
+  const scopedSessions = new WeakMap<AbortSignal, Map<string, McpClientSession>>()
   return {
     id: 'mcp',
     async listTools(context?: AgentToolContext): Promise<AgentTool[]> {
+      const scope = context?.mcpSessionSignal
+      scope?.throwIfAborted()
+      let sessions = scope ? scopedSessions.get(scope) : sharedSessions
+      if (!sessions) {
+        sessions = new Map()
+        scopedSessions.set(scope!, sessions)
+        const owned = sessions
+        scope!.addEventListener('abort', () => {
+          for (const session of owned.values()) session.dispose()
+          owned.clear()
+        }, { once: true })
+      }
       const timeoutMs = context?.timeoutMs || DEFAULT_MCP_TIMEOUT_MS
       const tools: AgentTool[] = []
       const usedNames = new Set<string>()
       const configuredServerNames = new Set<string>()
 
       for (const [serverName, rawConfig] of Object.entries(context?.mcpServers || {})) {
+        scope?.throwIfAborted()
         const server = normalizeServerConfig(rawConfig)
         if (!server) continue
         configuredServerNames.add(serverName)
@@ -334,6 +352,7 @@ export function createMcpToolProvider(): AgentToolProvider {
         try {
           const remoteTools = (await session.listTools(timeoutMs))
             .filter(tool => !!tool?.name)
+          scope?.throwIfAborted()
           const requiresProxy = remoteTools.some(tool => {
             const name = String(tool.name)
             return !modelSafeToolName(name) || usedNames.has(name)
@@ -363,6 +382,7 @@ export function createMcpToolProvider(): AgentToolProvider {
             ))
           }
         } catch {
+          scope?.throwIfAborted()
           // A broken MCP server should not prevent the rest of the agent run.
         }
       }

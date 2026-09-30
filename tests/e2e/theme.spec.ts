@@ -3,6 +3,9 @@ import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
 test('loads and saves the signed-in user theme without profile scoping', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript(() => {
+    localStorage.setItem('hermes_style', 'comic')
+  })
   const api = await mockHermesApi(page, {
     theme: {
       fontSize: 16,
@@ -14,8 +17,13 @@ test('loads and saves the signed-in user theme without profile scoping', async (
   await page.goto('/#/hermes/theme')
 
   await expect(page.getByRole('heading', { name: 'Theme' })).toBeVisible()
+  await expect(page.locator('html')).not.toHaveClass(/\bcomic\b/)
+  await page.locator('.page-sidebar-account-btn').click()
+  await expect(page.locator('.sidebar-account-menu .theme-switch')).toHaveCount(1)
+  await expect(page.getByTitle('Comic style', { exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
   await expect(page.locator('.page-header .header-subtitle')).toHaveCount(0)
-  await expect(page.locator('.page-header')).toHaveCSS('min-height', '64px')
+  await expect(page.locator('.studio-page-header .page-header')).toHaveCSS('height', '40px')
   await expect(page.getByLabel('Text color')).toHaveValue('#203040')
   await expect(page.getByLabel('Selection color')).toHaveValue('#3366ff')
   const layoutWidths = await page.locator('.theme-view').evaluate((view) => ({
@@ -58,6 +66,7 @@ test('loads and saves the signed-in user theme without profile scoping', async (
     'border-color',
     'rgba(51, 102, 255, 0.18)',
   )
+  await expect(textarea).toBeVisible()
   await textarea.focus()
   await expect(inputWrapper).toHaveCSS('border-color', 'rgb(51, 102, 255)')
 
@@ -99,11 +108,11 @@ test('tints transparent app surfaces with the active theme background color', as
   await expect(page.locator('html')).toHaveClass(/theme-has-custom-background/)
   await expect(page.locator('.app-main--card')).toHaveCSS(
     'background-color',
-    'rgba(26, 26, 26, 0.72)',
+    'rgba(42, 42, 42, 0.82)',
   )
   await expect(page.locator('aside.sidebar')).toHaveCSS(
     'background-color',
-    'rgba(26, 26, 26, 0.72)',
+    'rgba(26, 26, 26, 0.78)',
   )
   await expect(page.locator('.app-main--card')).toHaveCSS(
     'backdrop-filter',
@@ -125,20 +134,17 @@ test('tints transparent app surfaces with the active theme background color', as
   await expect(page.locator('.chat-panel')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(page.locator('.chat-panel > .session-list')).toHaveCSS(
     'background-color',
-    'rgba(26, 26, 26, 0.72)',
+    'rgba(26, 26, 26, 0.78)',
   )
   await expect(page.locator('.chat-panel > .chat-main')).toHaveCSS(
     'background-color',
     'rgba(0, 0, 0, 0)',
   )
-  await expect(page.locator('.chat-panel > .chat-main > .chat-header')).toHaveCSS(
+  await expect(page.locator('.studio-page-header > .chat-header')).toHaveCSS(
     'background-color',
-    'rgba(26, 26, 26, 0.72)',
+    'rgba(0, 0, 0, 0)',
   )
-  await expect(page.locator('.chat-panel > .chat-main > .chat-header')).toHaveCSS(
-    'backdrop-filter',
-    'blur(8px) saturate(1.1)',
-  )
+  await expect(page.locator('.chat-panel > .chat-main > .chat-header')).toHaveCount(0)
   await expect(page.locator('.chat-main-content')).toHaveCSS(
     'background-color',
     'rgba(26, 26, 26, 0.42)',
@@ -171,15 +177,15 @@ test('tints transparent app surfaces with the active theme background color', as
   )
   await expect(page.locator('.group-chat-panel > .room-sidebar')).toHaveCSS(
     'background-color',
-    'rgba(26, 26, 26, 0.72)',
+    'rgba(26, 26, 26, 0.78)',
   )
   await expect(page.locator('.group-chat-panel > .chat-main')).toHaveCSS(
     'background-color',
     'rgba(0, 0, 0, 0)',
   )
-  await expect(page.locator('.group-chat-panel > .chat-main > .chat-header')).toHaveCSS(
+  await expect(page.locator('.studio-page-header > .chat-header')).toHaveCSS(
     'background-color',
-    'rgba(26, 26, 26, 0.72)',
+    'rgba(0, 0, 0, 0)',
   )
 
   await page.goto('/#/hermes/petdex')
@@ -189,14 +195,21 @@ test('tints transparent app surfaces with the active theme background color', as
   )
   await expect(page.locator('.app-main--card')).toHaveCSS(
     'background-color',
-    'rgba(26, 26, 26, 0.72)',
+    'rgba(42, 42, 42, 0.82)',
   )
 
-  await page.goto('/#/studio/agents')
-  await expect(page.locator('.agent-manager-panel')).toHaveCSS(
-    'background-color',
-    'rgba(0, 0, 0, 0)',
-  )
-  await expect(page.locator('.app-main--card')).toHaveCount(0)
+  for (const [route, surface] of [
+    ['/hermes/connections', '.connections-panel'],
+    ['/studio/agents', '.agent-manager-panel'],
+    ['/hermes/models', '.models-view'],
+  ]) {
+    await page.goto(`/#${route}`)
+    await expect(page.locator(surface)).toHaveCSS('background-color', 'rgba(42, 42, 42, 0.82)')
+    await expect(page.locator(surface)).toHaveCSS('backdrop-filter', 'blur(8px) saturate(1.1)')
+    await expect(page.locator('.app-main--card')).toHaveCount(0)
+    if (route === '/hermes/connections') {
+      await expect(page.locator('.connections-tabs > .n-tabs-nav')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    }
+  }
   expect(api.unexpectedRequests).toEqual([])
 })

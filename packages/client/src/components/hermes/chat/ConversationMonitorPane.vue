@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { NSpin } from 'naive-ui'
 import { fetchConversationDetail, fetchConversationSummaries, type ConversationDetail, type ConversationSummary } from '@/api/studio/conversations'
 import { formatTimestampSeconds, getSourceLabel } from '@/shared/session-display'
 import { useAppStore } from '@/stores/hermes/app'
@@ -135,7 +136,7 @@ onUnmounted(() => {
 <template>
   <div class="conversation-monitor">
     <aside class="conversation-monitor__sidebar">
-      <div v-if="sessionsLoading && sessions.length === 0" class="conversation-monitor__empty">{{ t('common.loading') }}</div>
+      <div v-if="sessionsLoading && sessions.length === 0" class="conversation-monitor__empty"><NSpin :description="t('common.loading')" /></div>
       <div v-else-if="sessions.length === 0" class="conversation-monitor__empty">{{ t('chat.noSessions') }}</div>
       <button
         v-for="session in sessions"
@@ -167,7 +168,7 @@ onUnmounted(() => {
       </header>
 
       <div v-if="error" class="conversation-monitor__empty conversation-monitor__empty--error">{{ error }}</div>
-      <div v-else-if="detailLoading && !detail" class="conversation-monitor__empty">{{ t('common.loading') }}</div>
+      <div v-else-if="detailLoading && !detail" class="conversation-monitor__empty"><NSpin :description="t('common.loading')" /></div>
       <div v-else-if="!detail || detail.messages.length === 0" class="conversation-monitor__empty">{{ t('chat.noVisibleMessages') }}</div>
       <div v-else class="conversation-monitor__messages">
         <article

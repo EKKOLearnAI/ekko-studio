@@ -3,7 +3,7 @@ import { request } from '../client'
 export interface DshNativePluginInventory {
   source: 'native-presets'; sourceHome: string; packageVersion: string; defaultPreset: string
   web?: DshWebPackages
-  runtimeConnected: false; discovery: 'shipped-and-user-roots'
+  runtimeConnected: false; discovery: 'shipped-and-user-roots' | 'bundle-declarations'
   presets: Array<{ id: string; name: string; description: string; trust: 'system' | 'user'; sourcePath: string; isDefault: boolean; error?: string
     entries: Array<{ entryId: string; title?: string; description?: string; moduleName: string; configuredEnabled: boolean | 'conditional'; runtimePhase: null; groupPath: string[] }>
   }>
@@ -19,7 +19,7 @@ export const changeWebPlugins = (body: { action: 'install'; packageSpec: string 
 export const openDshPluginUi = () => request<{ id: string; path: string }>('/api/coding-agents/dsh/ui-session', { method: 'POST' })
 export const closeDshPluginUi = (id: string) => request<void>(`/api/coding-agents/dsh/ui-session/${id}`, { method: 'DELETE' })
 
-export interface DshAgentPreset { id: string; name?: string; description?: string; trust: 'system' | 'user'; isDefault: boolean; broken?: string }
+export interface DshAgentPreset { id: string; name?: string; description?: string; trust?: 'system' | 'user'; isDefault: boolean; broken?: string }
 export interface DshAgentPresets { presets: DshAgentPreset[]; authorable: boolean }
 const presetPath = (id: string) => `/api/coding-agents/dsh/agent-presets/${encodeURIComponent(id)}`
 export const listDshAgentPresets = () => request<DshAgentPresets>('/api/coding-agents/dsh/agent-presets')

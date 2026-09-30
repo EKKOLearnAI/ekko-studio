@@ -1,3 +1,9 @@
+export interface UsageCostCoverage {
+  reported: number
+  estimated: number
+  unknown: number
+}
+
 export interface UsageStatsModelRow {
   model: string
   input_tokens: number
@@ -27,6 +33,7 @@ export interface UsageStatsDailyRow {
   sessions: number
   errors: number
   cost: number
+  cost_coverage?: UsageCostCoverage
 }
 
 export interface LocalUsageStats {
@@ -40,5 +47,6 @@ export interface LocalUsageStats {
   by_agent: UsageStatsAgentRow[]
   by_day: UsageStatsDailyRow[]
   cost: number
+  cost_coverage?: UsageCostCoverage
   total_api_calls: number
 }

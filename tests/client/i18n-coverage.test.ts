@@ -140,6 +140,17 @@ it('localizes all JEV messages and error codes without relying on English fallba
   }
 })
 
+it('does not expose locale-code placeholders in generated JEV copy', () => {
+  const guardedKeys = ['groupMessageRoutingEnabled', 'groupRoutingDisabled', 'groupRoutingReady', 'groupMessageRoutingMinConfidence', 'groupMessageRoutingMinConfidenceHint', 'groupMessageRoutingTimeout', 'groupMessageRoutingTimeoutHint', 'workflowQualityEnabled', 'workflowQualityDisabled', 'workflowQualityReady', 'workflowQualityMinConfidence', 'workflowQualityMinConfidenceHint', 'workflowQualityTimeout', 'workflowQualityTimeoutHint']
+  for (const locale of supportedLocales) {
+    const actual = flattenLeafPaths(rawMessages[locale].jev)
+    for (const key of guardedKeys) {
+      const value = actual.get(key)!
+      expect(value, `${locale}: jev.${key} starts with a locale-code placeholder`).not.toMatch(/^(?:zh(?:-TW)?|en|ja|ko|fr|es|de|pt|ru|ar)\s+/i)
+    }
+  }
+})
+
 const SKILLS_USAGE_LOCALIZED_KEYS = [
   'sidebar.skillsUsage',
   'skillsUsage.title',

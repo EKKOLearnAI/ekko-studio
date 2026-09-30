@@ -62,6 +62,8 @@ export interface AgentToolContext {
   memoryDefaultWriteScope?: import('../memory/types').MemoryScope
   browserSessionId?: string
   mcpServers?: Record<string, unknown>
+  /** Isolate MCP connections for this scope; aborting it closes them without cancelling the agent. */
+  mcpSessionSignal?: AbortSignal
   timeoutMs?: number
   signal?: AbortSignal
   requestToolApproval?: AgentToolApprovalRequester

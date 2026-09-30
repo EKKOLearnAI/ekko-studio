@@ -141,6 +141,23 @@ describe('Hermes native continuation history reconciliation', () => {
     expect(addMessagesMock).not.toHaveBeenCalled()
   })
 
+  it.each([false, true])('preserves explicitly cleared history (clear during native read: %s)', async clearDuringRead => {
+    const cleared = { id: 'cleared-root', profile: 'default', source: 'cli', history_revision: 1, messages: [] }
+    getSessionDetailMock.mockReturnValue(cleared)
+    if (clearDuringRead) getSessionDetailMock.mockReturnValueOnce({ ...cleared, history_revision: 0 })
+    getHermesSessionDetailForProfileMock.mockResolvedValue({
+      id: 'cleared-root', thread_session_count: 2,
+      messages: [{ id: 2, session_id: 'native-tip', role: 'assistant', content: 'deleted continuation', timestamp: 20 }],
+    })
+    const { reconcileHermesSessionHistory } = await import(
+      '../../packages/server/src/modules/studio/services/history/reconcile-hermes-history'
+    )
+
+    await expect(reconcileHermesSessionHistory('cleared-root')).resolves.toEqual({ changed: false, added: 0 })
+    expect(addMessagesMock).not.toHaveBeenCalled()
+    if (!clearDuringRead) expect(getHermesSessionDetailForProfileMock).not.toHaveBeenCalled()
+  })
+
   it('ignores native history without a lineage-selected compression continuation', async () => {
     getSessionDetailMock.mockReturnValue({
       id: 'plain-root', profile: 'default', source: 'cli', messages: [],

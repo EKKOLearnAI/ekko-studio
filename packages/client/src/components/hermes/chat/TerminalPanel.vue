@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import { NSpin, NButton, NPopconfirm, NTooltip, useMessage } from 'naive-ui'
 import { ref, onUnmounted, computed, watch } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { getApiKey, getBaseUrlValue } from "@/api/client";
-import { NButton, NPopconfirm, NTooltip, useMessage } from "naive-ui";
+
 import { useI18n } from "vue-i18n";
 import type { ITheme } from "@xterm/xterm";
 
@@ -543,7 +544,8 @@ onUnmounted(() => {
           v-else-if="sessions.length === 0"
           class="terminal-state"
         >
-          {{ isConnecting ? t("common.loading") : t("terminal.noSessions") }}
+          <NSpin v-if="isConnecting" :description="t('common.loading')" />
+          <template v-else>{{ t('terminal.noSessions') }}</template>
         </div>
         <div
           ref="terminalRef"

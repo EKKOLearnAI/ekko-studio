@@ -1,17 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
-import {
-  NButton,
-  NCheckbox,
-  NInput,
-  NInputNumber,
-  NModal,
-  NSelect,
-  NSpin,
-  NTag,
-  useDialog,
-  useMessage,
-} from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import type {
   AvailableModelGroup,

@@ -31,6 +31,58 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('JEV settings', () => {
+  it('round-trips all group and workflow fields, explicit false and partial saves per Profile', async () => {
+    const options = { groupSummaryReviewEnabled: true, groupSummaryReviewMinConfidence: .9,
+      groupSummaryRevisionEnabled: true, groupSummaryReviewTimeoutMs: 1200,
+      workflowQualityEnabled: true, workflowQualityMinConfidence: .95, workflowQualityTimeoutMs: 1400,
+      groupMessageRoutingEnabled: true, groupMessageRoutingMinConfidence: .85, groupMessageRoutingMode: 'auto',
+      groupMessageRoutingTimeoutMs: 1600, groupHandoffReviewEnabled: false, groupLoopDetectionEnabled: false }
+    const saved = await saveJevSettings('research', options)
+    expect(saved).toMatchObject({ ...options, hasApiKey: false })
+    await saveJevSettings('research', { model: 'edited', groupSummaryReviewEnabled: false,
+      groupSummaryRevisionEnabled: false, workflowQualityEnabled: false, groupMessageRoutingEnabled: false })
+    expect(await getJevSettings('research')).toMatchObject({ ...options, model: 'edited', groupSummaryReviewEnabled: false,
+      groupSummaryRevisionEnabled: false, workflowQualityEnabled: false, groupMessageRoutingEnabled: false })
+    const defaults = { groupSummaryReviewEnabled: false, groupSummaryRevisionEnabled: false, workflowQualityEnabled: false,
+      groupMessageRoutingEnabled: false, groupHandoffReviewEnabled: true, groupLoopDetectionEnabled: true,
+      groupMessageRoutingMode: 'suggest', groupSummaryReviewTimeoutMs: 3000, workflowQualityTimeoutMs: 5000, groupMessageRoutingTimeoutMs: 1500 }
+    expect(await getJevSettings('default')).toMatchObject(defaults)
+    expect(await deleteJevSettings('research')).toMatchObject(defaults)
+  })
+
+  it.each([
+    { groupSummaryReviewEnabled: 'true' }, { groupSummaryRevisionEnabled: 1 }, { workflowQualityEnabled: null },
+    { groupMessageRoutingEnabled: 1 }, { groupHandoffReviewEnabled: 'false' }, { groupLoopDetectionEnabled: null },
+    { groupMessageRoutingMode: 'invalid' }, { groupSummaryReviewMinConfidence: .49 },
+    { workflowQualityMinConfidence: 1.01 }, { groupMessageRoutingMinConfidence: '0.9' },
+    { groupSummaryReviewTimeoutMs: 99 }, { workflowQualityTimeoutMs: 30001 }, { groupMessageRoutingTimeoutMs: 100.5 },
+  ])('rejects invalid group/workflow configuration %j', async input => {
+    await expect(saveJevSettings('research', input)).rejects.toMatchObject({ code: 'jev_invalid_request' })
+  })
+
+  it('round-trips browser switches and options per Profile without leaking them into standalone config', async () => {
+    const defaults = { browserMatchEnabled: false, browserMatchCandidateLimit: 20, browserMatchMinConfidence: 0.8,
+      browserMatchTimeoutMs: 3000, browserVerifyEnabled: false, browserVerifyMinConfidence: 0.8, browserVerifyTimeoutMs: 3000 }
+    const options = { browserMatchEnabled: true, browserMatchCandidateLimit: 7, browserMatchMinConfidence: 0.9,
+      browserMatchTimeoutMs: 1200, browserVerifyEnabled: true, browserVerifyMinConfidence: 0.95, browserVerifyTimeoutMs: 1600 }
+    expect(await getJevSettings('work')).toMatchObject(defaults)
+    await saveJevSettings('work', { ...options, apiKey: 'work-key' })
+    expect(await getJevSettings('work')).toMatchObject(options)
+    expect(await getJevSettings('other')).toMatchObject(defaults)
+    expect(Object.keys(await getJevRuntimeConfig('work')).some(key => key.startsWith('browser'))).toBe(false)
+    await saveJevSettings('work', { browserMatchEnabled: false, browserVerifyEnabled: false })
+    expect(await getJevSettings('work')).toMatchObject({ ...options, browserMatchEnabled: false, browserVerifyEnabled: false })
+    expect(await deleteJevSettings('work')).toMatchObject(defaults)
+  })
+
+  it.each([
+    ['browserMatchEnabled', 'true'], ['browserVerifyEnabled', 1], ['browserMatchCandidateLimit', 0],
+    ['browserMatchCandidateLimit', 51], ['browserMatchCandidateLimit', 2.5], ['browserMatchMinConfidence', 0.4],
+    ['browserVerifyMinConfidence', 1.1], ['browserMatchTimeoutMs', 99], ['browserVerifyTimeoutMs', 30001],
+  ])('rejects invalid browser setting %s=%s', async (key, value) => {
+    await expect(saveJevSettings('work', { [key]: value })).rejects.toMatchObject({ code: 'jev_invalid_request' })
+  })
+
   it('round-trips one skills switch and shared parameters, with isolated defaults and reset', async () => {
     const options = { ekkoSkillsEnabled: true, ekkoSkillsCandidateLimit: 7, ekkoSkillsMinConfidence: 0.95, ekkoSkillsTimeoutMs: 1200 }
     expect(await getJevSettings('work')).toMatchObject(skillsDefaults)
@@ -72,12 +124,15 @@ describe('JEV settings', () => {
   })
   it('isolates profiles and returns only credential presence', async () => {
     const saved = await saveJevSettings('research', { apiKey: 'private-key', model: 'jev-research' })
-    expect(saved).toEqual({ ...skillsDefaults, baseUrl: 'https://api.typesafe.ai', model: 'jev-research', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 })
+    expect(saved).toEqual({ groupMessageRoutingEnabled: false, groupHandoffReviewEnabled: true, groupLoopDetectionEnabled: true, groupMessageRoutingMinConfidence: 0.9, groupMessageRoutingMode: 'suggest', groupMessageRoutingTimeoutMs: 1500, workflowQualityEnabled: false, workflowQualityMinConfidence: 0.8, workflowQualityTimeoutMs: 5000, groupSummaryReviewEnabled: false, groupSummaryReviewMinConfidence: 0.8, groupSummaryRevisionEnabled: false, groupSummaryReviewTimeoutMs: 3000, browserMatchEnabled: false, browserMatchCandidateLimit: 20, browserMatchMinConfidence: 0.8, browserMatchTimeoutMs: 3000, browserVerifyEnabled: false, browserVerifyMinConfidence: 0.8, browserVerifyTimeoutMs: 3000, ...skillsDefaults, baseUrl: 'https://api.typesafe.ai', model: 'jev-research', timeoutMs: 10000, hasApiKey: true, ekkoMemoryEnabled: false, ekkoMemoryKindRoutingEnabled: true, ekkoMemoryRelevanceFilterEnabled: true, ekkoMemoryRerankEnabled: true, ekkoMemoryWriteReviewEnabled: true, ekkoMemoryCandidateLimit: 20, ekkoMemoryRecallMinConfidence: 0.5, ekkoMemoryFilterMinConfidence: 0.8, ekkoMemoryMinConfidence: 0.8, ekkoMemoryTimeoutMs: 3000 })
     expect(JSON.stringify(await getJevSettings('research'))).not.toContain('private-key')
     expect(await getJevSettings('default')).toMatchObject({ model: 'jev-latest', hasApiKey: false })
     const [file] = await readdir(directory)
-    expect((await stat(join(directory, file))).mode & 0o777).toBe(0o600)
-    expect((await stat(directory)).mode & 0o777).toBe(0o700)
+    // Windows stat mode bits do not round-trip chmod 0o600/0o700.
+    if (process.platform !== 'win32') {
+      expect((await stat(join(directory, file))).mode & 0o777).toBe(0o600)
+      expect((await stat(directory)).mode & 0o777).toBe(0o700)
+    }
   })
 
   it('persists the memory switch per Profile, maps it to Ekko, and resets it on deletion', async () => {
@@ -99,6 +154,7 @@ describe('JEV settings', () => {
     await saveJevSettings('research', { apiKey: 'legacy-key' })
     const [file] = await readdir(directory)
     await writeFile(join(directory, file), JSON.stringify({ apiKey: 'legacy-key', model: 'legacy-model', ekkoMemoryMinConfidence: 0.9 }))
+    expect(await getJevSettings('research')).toMatchObject({ browserMatchEnabled: false, browserVerifyEnabled: false, browserMatchCandidateLimit: 20 })
     expect(await getJevRuntimeConfig('research')).toMatchObject({ enabled: true, memoryEnabled: false,
       memoryKindRoutingEnabled: true, memoryRelevanceFilterEnabled: true, memoryRerankEnabled: true, memoryWriteReviewEnabled: true,
       apiKey: 'legacy-key', model: 'legacy-model', memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.9 })

@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   NTabs,
   NTabPane,
-  NSpin,
 } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import { useSettingsStore } from "@/stores/hermes/settings";
@@ -84,23 +85,23 @@ async function loadSettingsForProfile() {
   await settingsStore.fetchSettings();
 }
 
+const initializing = ref(true)
+
 onMounted(() => {
-  void loadSettingsForProfile();
+  void loadSettingsForProfile().finally(() => { initializing.value = false });
 });
 </script>
 
 <template>
-  <div class="settings-view">
+  <PageLoading :show="initializing || settingsStore.loading" class="settings-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t("settings.title") }}</h2>
     </header>
+    </PageHeader>
 
     <div class="settings-content">
-      <NSpin
-        :show="settingsStore.loading || settingsStore.saving"
-        size="large"
-        :description="t('common.loading')"
-      >
+      <div>
         <NTabs v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
           <NTabPane name="account" :tab="t('settings.tabs.account')">
             <AccountSettings />
@@ -127,16 +128,16 @@ onMounted(() => {
             <ModelSettings />
           </NTabPane>
         </NTabs>
-      </NSpin>
+      </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
 
 .settings-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }

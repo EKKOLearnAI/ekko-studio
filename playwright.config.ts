@@ -13,7 +13,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [['dot'], ['html', { open: 'never' }]] : [['list']],
+  reporter: process.env.CI ? [['dot'], ['blob']] : [['list']],
   use: {
     baseURL: BASE_URL,
     locale: 'en-US',
@@ -23,7 +23,7 @@ export default defineConfig({
     video: BROWSER_CHANNEL ? 'off' : 'retain-on-failure',
   },
   webServer: {
-    env: { HERMES_WEB_UI_VITE_CACHE_DIR: `node_modules/.vite/playwright-${PORT}` },
+    env: { NODE_ENV: 'development', HERMES_WEB_UI_VITE_CACHE_DIR: `node_modules/.vite/playwright-${PORT}` },
     command: `npx vite --host 127.0.0.1 --port ${PORT}`,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,

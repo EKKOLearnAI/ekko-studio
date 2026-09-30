@@ -1,20 +1,22 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
+import { storeToRefs } from "pinia";
+import { useAccountStore } from "@/stores/account";
 import { NButton, NInput, NModal, NForm, NFormItem, NPopconfirm, useMessage } from "naive-ui";
 import { useI18n } from "vue-i18n";
-import { changePassword, changeUsername, fetchCurrentUser, fetchLockedIps, unlockSpecificIp, unlockAllIps, fetchMyAvatar, updateMyAvatar, resetMyAvatar } from "@/api/studio/auth";
-import type { LockedIp, UserAvatar } from "@/api/studio/auth";
+import { changePassword, changeUsername, fetchLockedIps, unlockSpecificIp, unlockAllIps, updateMyAvatar, resetMyAvatar } from "@/api/studio/auth";
+import type { LockedIp } from "@/api/studio/auth";
 import ProfileAvatar from "@/components/hermes/profiles/ProfileAvatar.vue";
 import boring from "boring-avatars-vanilla";
 
 const { t } = useI18n();
 const message = useMessage();
 
-const username = ref<string | null>(null);
+const accountStore = useAccountStore();
+const { username, avatar } = storeToRefs(accountStore);
 const loading = ref(false);
 
 // User avatar
-const avatar = ref<UserAvatar | null>(null);
 const avatarFileInput = ref<HTMLInputElement | null>(null);
 const avatarSaving = ref(false);
 
@@ -125,16 +127,7 @@ const showChangeUsernameModal = ref(false);
 const currentPasswordForName = ref("");
 const newUsernameVal = ref("");
 
-onMounted(async () => {
-  try {
-    const user = await fetchCurrentUser();
-    username.value = user.username;
-  } catch { /* ignore */ }
-  try {
-    const av = await fetchMyAvatar();
-    avatar.value = av || { type: 'default', seed: username.value || 'default' };
-  } catch { /* ignore */ }
-});
+onMounted(() => { void accountStore.loadAccount(); });
 
 async function handleChangePassword() {
   if (newPasswordVal.value !== newPasswordConfirm.value) {

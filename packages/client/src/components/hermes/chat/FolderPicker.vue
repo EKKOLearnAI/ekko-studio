@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
-import { NButton, NDropdown, NInput, NModal, NSpace, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NSpin, NButton, NDropdown, NInput, NModal, NSpace, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api/client'
 import { copyToClipboard } from '@/utils/clipboard'
+import StarIcon from '@/components/common/StarIcon.vue'
 
 interface FolderEntry {
   name: string
@@ -345,7 +346,7 @@ const flatNodes = computed<FlatNode[]>(() => {
         @contextmenu="showContextMenu($event, node.folder)"
       >
         <span class="folder-expand" @click.stop="toggleExpand(node.folder)">
-          <template v-if="node.isLoading">⏳</template>
+          <NSpin v-if="node.isLoading" :size="16" />
           <template v-else>{{ node.isExpanded ? '▼' : '▶' }}</template>
         </span>
         <span class="folder-icon">📁</span>
@@ -375,15 +376,15 @@ const flatNodes = computed<FlatNode[]>(() => {
       <button
         v-if="props.showFavorite"
         class="folder-selected-favorite"
+        :class="{ 'is-pinned': props.favorite }"
         type="button"
         :disabled="props.favoriteDisabled"
         :title="props.favoriteTitle"
         :aria-label="props.favoriteTitle"
+        :aria-pressed="Boolean(props.favorite)"
         @click.stop="emit('toggle-favorite')"
       >
-        <span class="folder-selected-star" :class="{ 'is-pinned': props.favorite }">
-          {{ props.favorite ? '★' : '☆' }}
-        </span>
+        <StarIcon :filled="props.favorite" />
       </button>
     </div>
 
@@ -552,13 +553,14 @@ const flatNodes = computed<FlatNode[]>(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-muted);
   background: transparent;
   cursor: pointer;
   transition: background 0.15s, transform 0.15s, color 0.15s;
 
   &:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.08);
+    color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.08);
     transform: scale(1.08);
   }
 
@@ -566,14 +568,8 @@ const flatNodes = computed<FlatNode[]>(() => {
     opacity: 0.45;
     cursor: not-allowed;
   }
-}
-
-.folder-selected-star {
-  font-size: 16px;
-  line-height: 1;
-
   &.is-pinned {
-    color: #f5a623;
+    color: var(--accent-primary);
   }
 }
 </style>

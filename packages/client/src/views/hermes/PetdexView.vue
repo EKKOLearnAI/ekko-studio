@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, ref } from 'vue'
-import { NAlert, NButton, NEmpty, NInput, NSelect, NSpin, NTag, useMessage } from 'naive-ui'
+import { NAlert, NButton, NEmpty, NInput, NSelect, NTag, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { fetchPetdexManifest, type PetdexManifest, type PetdexPet } from '@/api/studio/petdex'
 import { usePetsStore } from '@/stores/hermes/pets'
@@ -11,7 +13,7 @@ const message = useMessage()
 const petsStore = usePetsStore()
 
 const manifest = ref<PetdexManifest | null>(null)
-const loading = ref(false)
+const loading = ref(true)
 const adoptingSlug = ref('')
 const error = ref('')
 const searchQuery = ref('')
@@ -102,17 +104,19 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="petdex-view">
+  <PageLoading :show="loading && !manifest" class="petdex-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('petdex.title') }}</h2>
       <NButton size="small" quaternary :loading="loading" @click="loadManifest(true)">
         {{ t('petdex.refresh') }}
       </NButton>
     </header>
+    </PageHeader>
 
     <div class="petdex-content" :class="{ 'is-loading': loading && !manifest }">
       <div v-if="loading && !manifest" class="loading-state">
-        <NSpin />
+
       </div>
 
       <template v-else>
@@ -189,7 +193,7 @@ onMounted(() => {
         </div>
       </template>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">

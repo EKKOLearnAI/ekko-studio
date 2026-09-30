@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderActionOverflow from '@/components/layout/HeaderActionOverflow.vue'
 import { ref, computed, onMounted } from 'vue'
-import { NButton, NSpin, NTooltip } from 'naive-ui'
+import { NButton, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import JobsPanel from '@/components/hermes/jobs/JobsPanel.vue'
 import JobRunHistory from '@/components/hermes/jobs/JobRunHistory.vue'
@@ -40,8 +43,10 @@ async function reloadJobsForProfile() {
   await jobsStore.fetchJobs()
 }
 
+const initializing = ref(true)
+
 onMounted(() => {
-  void reloadJobsForProfile()
+  void reloadJobsForProfile().finally(() => { initializing.value = false })
 })
 
 function openCreateModal() {
@@ -84,36 +89,39 @@ function arrowIcon(field: 'time' | 'name'): string {
 </script>
 
 <template>
-  <div class="jobs-view">
+  <PageLoading :show="initializing || (jobsStore.loading && jobsStore.jobs.length === 0)" class="jobs-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('jobs.title') }}</h2>
       <div class="header-actions">
-        <div class="sort-toggle">
-          <NTooltip>
-            <template #trigger>
-              <NButton
-                size="tiny"
-                :type="sortBy === 'name' ? 'primary' : 'default'"
-                @click="toggleSort('name')"
-              >
-                {{ t('jobs.sortByName') }} <span class="sort-arrow">{{ arrowIcon('name') }}</span>
-              </NButton>
-            </template>
-            {{ sortBy === 'name' ? (sortAsc ? t('jobs.sortAsc') : t('jobs.sortDesc')) : t('jobs.sortByNameHint') }}
-          </NTooltip>
-          <NTooltip>
-            <template #trigger>
-              <NButton
-                size="tiny"
-                :type="sortBy === 'time' ? 'primary' : 'default'"
-                @click="toggleSort('time')"
-              >
-                {{ t('jobs.sortByTime') }} <span class="sort-arrow">{{ arrowIcon('time') }}</span>
-              </NButton>
-            </template>
-            {{ sortBy === 'time' ? (sortAsc ? t('jobs.sortAsc') : t('jobs.sortDesc')) : t('jobs.sortByTimeHint') }}
-          </NTooltip>
-        </div>
+        <HeaderActionOverflow :label="t('chat.more')" :breakpoint="420">
+          <div class="sort-toggle">
+            <NTooltip>
+              <template #trigger>
+                <NButton
+                  size="tiny"
+                  :type="sortBy === 'name' ? 'primary' : 'default'"
+                  @click="toggleSort('name')"
+                >
+                  {{ t('jobs.sortByName') }} <span class="sort-arrow">{{ arrowIcon('name') }}</span>
+                </NButton>
+              </template>
+              {{ sortBy === 'name' ? (sortAsc ? t('jobs.sortAsc') : t('jobs.sortDesc')) : t('jobs.sortByNameHint') }}
+            </NTooltip>
+            <NTooltip>
+              <template #trigger>
+                <NButton
+                  size="tiny"
+                  :type="sortBy === 'time' ? 'primary' : 'default'"
+                  @click="toggleSort('time')"
+                >
+                  {{ t('jobs.sortByTime') }} <span class="sort-arrow">{{ arrowIcon('time') }}</span>
+                </NButton>
+              </template>
+              {{ sortBy === 'time' ? (sortAsc ? t('jobs.sortAsc') : t('jobs.sortDesc')) : t('jobs.sortByTimeHint') }}
+            </NTooltip>
+          </div>
+        </HeaderActionOverflow>
         <span class="sort-divider"></span>
         <NButton type="primary" size="small" @click="openCreateModal">
           <template #icon>
@@ -123,10 +131,11 @@ function arrowIcon(field: 'time' | 'name'): string {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="jobs-split">
       <div class="jobs-top">
-        <NSpin :show="jobsStore.loading && jobsStore.jobs.length === 0">
+        <div>
           <JobsPanel
             :selected-job-id="selectedJobId"
             :sort-by="sortBy"
@@ -134,7 +143,7 @@ function arrowIcon(field: 'time' | 'name'): string {
             @edit="openEditModal"
             @select="handleSelectJob"
           />
-        </NSpin>
+        </div>
       </div>
 
       <div class="splitter" />
@@ -154,14 +163,14 @@ function arrowIcon(field: 'time' | 'name'): string {
       @close="handleModalClose"
       @saved="handleSave"
     />
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .jobs-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -135,6 +135,8 @@ describe('workflow manager', () => {
 
   it('maps workflow node agents to the existing run backends', async () => {
     const { resolveWorkflowNodeRunTarget } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    expect(readFileSync('packages/server/src/modules/studio/services/workflow/manager.ts', 'utf8'))
+      .toContain("agent: 'hermes' | 'ekko-agent' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'")
 
     expect(resolveWorkflowNodeRunTarget('dsh')).toEqual({ type: 'workflow', source: 'workflow', agent: 'dsh', codingAgentId: 'dsh' })
     expect(resolveWorkflowNodeRunTarget('hermes')).toEqual({
@@ -166,6 +168,12 @@ describe('workflow manager', () => {
       agent: 'pi',
       codingAgentId: 'pi',
     })
+    expect(resolveWorkflowNodeRunTarget('cursor')).toEqual({
+      type: 'workflow',
+      source: 'workflow',
+      agent: 'cursor',
+      codingAgentId: 'cursor',
+    })
     expect(() => resolveWorkflowNodeRunTarget('unknown')).toThrow('unsupported workflow Agent runtime: unknown')
     expect(() => resolveWorkflowNodeRunTarget()).toThrow('unsupported workflow Agent runtime')
   })
@@ -186,7 +194,8 @@ describe('workflow manager', () => {
     expect(normalizeWorkflowNode({ id: 'ekko', type: 'agent', data: { agent: 'ekko-agent' } })?.data.agent).toBe('ekko-agent')
     expect(normalizeWorkflowNode({ id: 'claude', type: 'agent', data: { agent: 'claude-code' } })?.data.agent).toBe('claude-code')
     expect(normalizeWorkflowNode({ id: 'codex', type: 'agent', data: { agent: 'codex' } })?.data.agent).toBe('codex')
-    expect(normalizeWorkflowNode({ id: 'pi', type: 'agent', data: { agent: 'pi' } })?.data.agent).toBe('pi')
+    expect(normalizeWorkflowNode({ id: 'cursor', type: 'agent', data: { agent: 'cursor' } })?.data.agent).toBe('cursor')
+    expect(normalizeWorkflowNode({ id: 'cursor-global', type: 'agent', data: { agent: 'cursor', agentMode: 'scoped' } })?.data.agentMode).toBe('global')
     expect(normalizeWorkflowNode({ id: 'legacy-mode', type: 'agent', data: { agent: 'codex' } })?.data.agentMode).toBe('scoped')
     expect(normalizeWorkflowNode({ id: 'global-mode', type: 'agent', data: { agent: 'codex', agentMode: 'global' } })?.data.agentMode).toBe('global')
     expect(() => normalizeWorkflowNode({ id: 'bad-global', type: 'agent', data: { agent: 'ekko-agent', agentMode: 'global' } }))
@@ -288,6 +297,34 @@ describe('workflow manager', () => {
       expect(chatRunMock.runAndWait.mock.calls[0]?.[0]).not.toHaveProperty('apiMode')
       expect(chatRunMock.runAndWait.mock.calls[0]?.[0]).not.toHaveProperty('execution_policy')
     } finally { await manager.delete(workflow.id) }
+  })
+
+  it('schedules quality observation for completion-driven node execution', async () => {
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    const { saveJevSettings } = await import('../../packages/server/src/modules/studio/services/jev/settings')
+    const { listWorkflowRunQualityEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    initAllStores()
+    await saveJevSettings('default', { apiKey: 'quality-key', workflowQualityEnabled: true })
+    const answer = { type: 'choice', choice: 'pass', confidence: .95, probabilities: { pass: .95, needs_improvement: .02, unknown: .03 } }; const response = { model: 'jev-test', usage: {}, answers: { expected_output: answer, completion_evidence: answer, downstream_readiness: answer } }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(response))
+    chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string }) => {
+      chatRunMock.sessionOutputs.set(request.session_id, 'WORKFLOW_BASELINE_OK')
+      return { ok: true, output: 'WORKFLOW_BASELINE_OK' }
+    })
+    const manager = new WorkflowManager()
+    const workflow = manager.create({ name: `Quality runtime ${Date.now()}`, profile: 'default', nodes: [{ id: 'agent', type: 'agent', position: { x: 0, y: 0 }, data: {
+      title: 'Agent', agent: 'hermes', input: 'Return WORKFLOW_BASELINE_OK',
+    } }], edges: [] })
+    try {
+      const result = await manager.runNow(workflow.id)
+      for (let index = 0; index < 100 && listWorkflowRunQualityEvaluations(result.run.id).length === 0; index += 1) await new Promise(resolve => setTimeout(resolve, 5))
+      expect(listWorkflowRunQualityEvaluations(result.run.id)).toEqual([expect.objectContaining({ node_id: 'agent', decision: 'pass' })])
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      fetchMock.mockRestore()
+      await manager.delete(workflow.id)
+    }
   })
 
   it('preserves authored visual graph fields in an immutable run snapshot', async () => {

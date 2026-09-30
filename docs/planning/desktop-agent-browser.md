@@ -64,8 +64,7 @@ Electron API 和 CDP：
 - 第一版不支持 Chrome 扩展、密码导入、书签同步和浏览历史同步。
 - 普通 Web UI 和 VPS Web UI 永久不提供内置浏览器功能。
 - 不把 CDP 地址、Electron 对象或原始 IPC 暴露给 Agent。
-- 不允许 Agent 在没有确认机制的情况下执行购买、发布、删除数据、
-  上传文件、输入敏感凭据等高风险操作。
+- 不按页面文案或业务含义增加 Agent 操作风控、拦截或二次确认。
 - 不向局域网或互联网提供浏览器画面流。
 
 ## 四、现状
@@ -155,7 +154,7 @@ describe  按名称返回一个操作的完整 Input Schema
 call      按名称和 arguments 调用该操作
 ~~~
 
-类目内部保留 6 个聚合操作：
+类目内部保留 8 个聚合操作：
 
 ~~~text
 browser_tabs
@@ -167,8 +166,14 @@ browser_navigate
 browser_snapshot
   返回紧凑的可访问性树和稳定元素引用
 
+browser_read_text
+  从当前快照的元素分页读取文本
+
 browser_interact
   action: click | type | press | scroll
+
+browser_batch
+  actions: 1–50 条 click | type | press | scroll，按顺序执行
 
 browser_screenshot
   返回视口或整页截图
@@ -177,18 +182,40 @@ browser_console
   action: read | clear
 ~~~
 
-选择 1 个类目入口和 6 个内部聚合操作的原因：
+选择 1 个类目入口和 8 个内部聚合操作的原因：
 
 - 常驻上下文只有类目说明和入口 Schema；
 - 模型只在需要时读取一个具体操作的完整 Schema；
-- 6 个语义操作仍比十几个按钮级操作更稳定；
+- 8 个语义操作仍比十几个按钮级操作更稳定；
 - Action 枚举较小，参数校验更明确；
-- 后续容易单独限制高风险操作。
+- 大页面定位、分页和控件操作由本地浏览器完成，不依赖 JEV。
 
 所有页面操作都携带明确的 <code>tab_id</code>，结果也必须返回
 <code>tab_id</code>。创建标签页只能通过 <code>browser_tabs</code>，其他操作不会
 隐式跟随用户当前标签页。Snapshot 返回 <code>snapshot_id</code>，click/type 必须
 回传该 ID；页面变化后旧引用立即失效。
+
+批量调用使用 `ekko_studio_browser_batch`，一次提交同一标签页的多条指令：
+
+~~~json
+{
+  "tab_id": "tab-id",
+  "snapshot_id": "current-snapshot-id",
+  "actions": [
+    { "action": "type", "ref": "@e2", "text": "example" },
+    { "action": "click", "ref": "@e4" },
+    { "action": "click", "ref": "@e7" },
+    { "action": "scroll", "direction": "down", "pixels": 400 }
+  ]
+}
+~~~
+
+- click/type 的所有 ref 都来自提交时的同一份最新快照。只有按键/滚动时可以省略 snapshot_id。
+- 执行前验证全部参数和初始引用；每步重新获取快照并按原始 DOM 节点身份定位，不复用可能已变号的 ref，也不猜测替代元素。
+- 整批占用同一标签页的操作队列；其他标签页仍可并发。单步工具保持兼容。
+- 首次失败、目标消失、页面导航/刷新、用户接管或 30 秒执行预算耗尽时，停止后续动作。浏览器不按操作文案进行风险分类或添加确认弹窗；每一步仍检查取消状态与执行预算。
+- 返回 `completed`、`total` 和 `results`；每项带从 0 开始的 `index`、动作类型及 `completed` / `failed` / `skipped` 状态。成功的步骤不会回滚，失败步骤也可能已产生部分效果，请根据结果决定是否重试。
+- 能读取时返回执行后的 `snapshot`；无法读取时返回 `snapshotError`。部分执行会在 MCP 结果标记 `isError: true`，仍保留逐步结果。页面跳转后的操作需要根据新快照再次提交。
 
 ### 6.3 MCP 配置统一注入，能力由桌面 Broker 决定
 
@@ -313,7 +340,7 @@ bin/hermes-studio-mcp.mjs
   现有 MCP stdio 入口；识别新的 browser toolset。
 
 bin/mcp/browser-tools.mjs
-  1 个类目入口、6 个内部操作 Schema、参数规范化、Broker 描述文件读取、
+  1 个类目入口、8 个内部操作 Schema、参数规范化、Broker 描述文件读取、
   Broker RPC Client 和 MCP 图片结果转换。
   这里不包含 Electron 或 CDP 权限。
 ~~~
@@ -407,7 +434,9 @@ interface DesktopBrowserTab {
 }
 ~~~
 
-第一版最多 8 个标签页。关闭标签页时：
+每个 Profile 最多保留 12 个标签页。达到上限后继续创建标签页时，自动关闭
+最早创建的标签页；切换或访问标签页不会改变淘汰顺序。手动创建、MCP 创建
+和页面弹窗共用此规则，保存和恢复也只保留最新的 12 个标签页。关闭标签页时：
 
 - 销毁对应 <code>WebContentsView</code>；
 - 删除内部 Target Record；
@@ -961,7 +990,7 @@ browserSession.setDownloadPath(profile.downloadPath)
   Clipboard、屏幕捕获和文件权限。
 - 显式处理 Popup、新窗口、协议处理和下载。
 - Browser Broker 不支持 CORS，拒绝网页 Origin，所有请求必须认证。
-- MCP 类目入口只能发现和调用固定 6 个浏览器语义操作。
+- MCP 类目入口只能发现和调用固定 8 个浏览器语义操作。
 - MCP 和模型不能看到 Broker Token、CDP URL、Cookie、Storage、IndexedDB、
   Authorization Header 或密码。
 - 注入脚本固定在 Desktop 代码中，IPC 只允许 element/region 枚举。
@@ -993,7 +1022,7 @@ browserSession.setDownloadPath(profile.downloadPath)
 - Preload 只暴露文档中的 Browser API；
 - IPC Sender 校验；
 - 普通 Web UI 无浏览器路由、Store 和 Lazy Import 激活；
-- 标签页创建、切换、关闭、状态保留和 8 个上限；
+- 标签页创建、切换、关闭、状态保留、12 个上限和超限时按创建顺序淘汰（含并发创建）；
 - Profile 创建、重命名、切换、删除和目录冲突校验；
 - 浏览器路由只在完整 Desktop Browser Bridge 存在时动态注册；
 - 普通 Web UI 没有浏览器路由和侧边栏入口；
@@ -1007,7 +1036,7 @@ browserSession.setDownloadPath(profile.downloadPath)
 - Broker 文件 PID、Token、地址、过期时间和权限校验；
 - Broker 拒绝非法 Origin 和未认证请求；
 - MCP 仅在有效 Desktop Broker 存在时暴露 1 个 browser 类目入口；
-- browser 类目只能列出、描述和调用固定 6 个内部操作；
+- browser 类目只能列出、描述和调用固定 8 个内部操作；
 - 模型参数不能覆盖 Launcher 注入的 Caller ID；
 - MCP 结果不包含 Token 和 CDP 地址；
 - 同一标签页并发租约冲突；
@@ -1090,7 +1119,7 @@ browserSession.setDownloadPath(profile.downloadPath)
 
 - 实现 Browser Broker；
 - 实现 Broker 描述文件和认证；
-- 实现 1 个 Browser MCP 类目入口和 6 个内部操作；
+- 实现 1 个 Browser MCP 类目入口和 8 个内部操作；
 - 向 Web UI、Ekko、Hermes、Codex、Claude Code 统一注入 browser MCP 配置；
 - 没有有效 Desktop Browser Broker 时返回空工具列表；
 - 实现 Caller ID、Tab Binding、Lease、Abort 和 Action Status；
@@ -1140,6 +1169,5 @@ browserSession.setDownloadPath(profile.downloadPath)
 ## 二十一、后续增强
 
 - 标签页是否永久独立于 Chat，还是后续按 Chat 分组？
-- 哪些高风险站点或操作必须二次确认？
 - 各模型 Provider 对 MCP Image Content 的兼容方式是什么？
 - 是否在当前明确“接管”按钮之外，增加用户在页面内点击时自动接管。

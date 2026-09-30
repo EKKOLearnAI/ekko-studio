@@ -9,6 +9,8 @@ lerna-debug.log*
 node_modules
 dist
 playwright-report
+blob-report
+all-blob-reports
 test-results
 dist-ssr
 coverage
@@ -26,6 +28,7 @@ packages/server/node_modules/
 .hermes-web-ui/
 packages/desktop/dist/
 packages/desktop/release/
+packages/desktop/release-update-test/
 packages/desktop/resources/
 packages/desktop/resources/python/
 packages/desktop/node_modules/
