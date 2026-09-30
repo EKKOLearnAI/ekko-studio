@@ -68,7 +68,7 @@ export function selectProfilesForGatewayAutostart(
   policy?: GatewayAutoStartConfig,
 ): string[] {
   const known = new Set(profiles)
-  if (policy?.enabled === false) return []
+  if (policy?.enabled !== true) return []
 
   const hasIncludePolicy = Array.isArray(policy?.include)
   const include = normalizedProfileList(policy?.include).filter(name => known.has(name))
@@ -683,11 +683,13 @@ export async function restartGatewayForProfile(profile: string): Promise<{
 }
 
 export async function ensureProfileGatewaysRunning(): Promise<void> {
+  const { gatewayAutoStart } = await readAppConfig()
+  if (gatewayAutoStart?.enabled !== true) return
+
   await recoverWindowsDesktopGatewayOrphansOnce()
 
   const hermesBin = resolveHermesBin()
   const discoveredProfiles = listProfileNamesFromDisk()
-  const { gatewayAutoStart } = await readAppConfig()
   const unified = shouldUseUnifiedGatewayManagement(gatewayAutoStart)
   const profiles = selectGatewayProfilesForAutostart(discoveredProfiles, gatewayAutoStart, unified)
   const skippedProfiles = discoveredProfiles.filter(profile => !profiles.includes(profile))
@@ -698,6 +700,7 @@ export async function ensureProfileGatewaysRunning(): Promise<void> {
       unified,
     )
   }
+  if (profiles.length === 0) return
   let gatewayStatuses: Map<string, string> | undefined
   try {
     gatewayStatuses = await listGatewayStatusesFromProfileList(hermesBin)

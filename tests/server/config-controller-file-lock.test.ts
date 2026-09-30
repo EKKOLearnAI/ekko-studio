@@ -46,6 +46,10 @@ async function loadController() {
   return import('../../packages/server/src/modules/hermes/controllers/config')
 }
 
+async function enableGatewayAutoStart() {
+  await writeFile(join(hermesHome, 'config.json'), JSON.stringify({ gatewayAutoStart: { enabled: true } }), 'utf-8')
+}
+
 function makeCtx(body: unknown, profile?: string): any {
   return {
     request: { body },
@@ -92,7 +96,18 @@ afterEach(async () => {
 })
 
 describe('config controller locked file updates', () => {
+  it('returns gateway auto-start disabled when no policy has been saved', async () => {
+    const { getConfig } = await loadController()
+    const ctx = makeCtx({})
+    ctx.query.section = 'gatewayAutoStart'
+
+    await getConfig(ctx)
+
+    expect(ctx.body.gatewayAutoStart).toEqual({ enabled: false, management: 'per_profile' })
+  })
+
   it('deep merges a config section and restarts the gateway through hermes-cli', async () => {
+    await enableGatewayAutoStart()
     await writeFile(join(hermesHome, 'config.yaml'), [
       'telegram:',
       '  enabled: false',
@@ -116,15 +131,13 @@ describe('config controller locked file updates', () => {
     expect(config.model.default).toBe('glm-5.1')
   })
 
-  it('does not auto-restart gateway for channel config when gateway auto-start is disabled', async () => {
+  it.each([undefined, false])('does not auto-restart gateway for channel config when gateway auto-start is disabled: %s', async enabled => {
     await writeFile(join(hermesHome, 'config.yaml'), [
       'telegram:',
       '  enabled: false',
       '',
     ].join('\n'), 'utf-8')
-    await writeFile(join(hermesHome, 'config.json'), JSON.stringify({
-      gatewayAutoStart: { enabled: false },
-    }), 'utf-8')
+    await writeFile(join(hermesHome, 'config.json'), JSON.stringify(enabled === undefined ? {} : { gatewayAutoStart: { enabled } }), 'utf-8')
     const { updateConfig } = await loadController()
     const ctx = makeCtx({ section: 'telegram', values: { enabled: true } })
 
@@ -137,6 +150,7 @@ describe('config controller locked file updates', () => {
   })
 
   it('does not auto-restart gateway for channel config when gateway autostart is disabled by env', async () => {
+    await enableGatewayAutoStart()
     mockGatewayAutostartDisabledByEnv.mockReturnValue(true)
     await writeFile(join(hermesHome, 'config.yaml'), [
       'telegram:',
@@ -183,6 +197,7 @@ describe('config controller locked file updates', () => {
     })
     expect(mockRestartGateway).not.toHaveBeenCalled()
     expect(mockReconcileGatewayManagement).toHaveBeenCalledWith({
+      enabled: false,
       management: 'per_profile',
     }, {
       enabled: true,
@@ -213,14 +228,14 @@ describe('config controller locked file updates', () => {
     })
   })
 
-  it('does not reconcile gateway management when Web UI gateway auto-start is disabled', async () => {
+  it.each([undefined, false])('does not reconcile gateway management without explicit opt-in: %s', async enabled => {
     await writeFile(join(hermesHome, 'config.yaml'), 'model:\n  default: keep-model\n', 'utf-8')
     const { updateConfig } = await loadController()
 
     const ctx = makeCtx({
       section: 'gatewayAutoStart',
       values: {
-        enabled: false,
+        enabled,
         management: 'unified',
       },
     })
@@ -321,16 +336,14 @@ describe('config controller locked file updates', () => {
     expect(config.model.default).toBe('glm-5.1')
   })
 
-  it('does not auto-restart gateway after credential updates when gateway auto-start is disabled', async () => {
+  it.each([undefined, false])('does not auto-restart gateway after credential updates when gateway auto-start is disabled: %s', async enabled => {
     await writeFile(join(hermesHome, 'config.yaml'), [
       'platforms:',
       '  weixin:',
       '    token: old-token',
       '',
     ].join('\n'), 'utf-8')
-    await writeFile(join(hermesHome, 'config.json'), JSON.stringify({
-      gatewayAutoStart: { enabled: false },
-    }), 'utf-8')
+    await writeFile(join(hermesHome, 'config.json'), JSON.stringify(enabled === undefined ? {} : { gatewayAutoStart: { enabled } }), 'utf-8')
     const { updateCredentials } = await loadController()
     const ctx = makeCtx({ platform: 'weixin', values: { token: 'new-token' } })
 
@@ -343,6 +356,7 @@ describe('config controller locked file updates', () => {
   })
 
   it('does not auto-restart gateway after credential updates when gateway autostart is disabled by env', async () => {
+    await enableGatewayAutoStart()
     mockGatewayAutostartDisabledByEnv.mockReturnValue(true)
     await writeFile(join(hermesHome, 'config.yaml'), 'platforms: {}\n', 'utf-8')
     const { updateCredentials } = await loadController()
@@ -538,6 +552,7 @@ describe('config controller locked file updates', () => {
   })
 
   it('round-trips global proxy env settings and restarts the gateway', async () => {
+    await enableGatewayAutoStart()
     await writeFile(join(hermesHome, 'config.yaml'), 'model:\n  default: glm-5.1\n', 'utf-8')
     await writeFile(join(hermesHome, '.env'), 'OPENROUTER_API_KEY=keep\nHTTP_PROXY=http://old.example:8080\n', 'utf-8')
     const { updateConfig, getConfig } = await loadController()
@@ -573,6 +588,7 @@ describe('config controller locked file updates', () => {
   })
 
   it('reads and writes channel settings in the request-scoped profile only', async () => {
+    await enableGatewayAutoStart()
     const researchDir = join(hermesHome, 'profiles', 'research')
     await mkdir(researchDir, { recursive: true })
     await writeFile(join(hermesHome, 'config.yaml'), [
@@ -806,6 +822,7 @@ describe('config controller locked file updates', () => {
   })
 
   it('clears only allowlisted channel credentials and keeps access controls and endpoints', async () => {
+    await enableGatewayAutoStart()
     await writeFile(join(hermesHome, 'config.yaml'), [
       'platforms:',
       '  telegram:',
@@ -872,6 +889,7 @@ describe('config controller locked file updates', () => {
   })
 
   it('clears credentials only in the requested profile', async () => {
+    await enableGatewayAutoStart()
     const researchDir = join(hermesHome, 'profiles', 'research')
     await mkdir(researchDir, { recursive: true })
     await writeFile(join(hermesHome, 'config.yaml'), 'platforms:\n  telegram:\n    token: default-config-token\n', 'utf-8')
@@ -902,6 +920,7 @@ describe('config controller locked file updates', () => {
   })
 
   it('reports a restart warning without restoring cleared credentials', async () => {
+    await enableGatewayAutoStart()
     await writeFile(join(hermesHome, 'config.yaml'), 'platforms:\n  discord:\n    token: config-token\n', 'utf-8')
     await writeFile(join(hermesHome, '.env'), 'DISCORD_BOT_TOKEN=discord-token\n', 'utf-8')
     mockRestartGateway.mockRejectedValueOnce(new Error('restart failed'))

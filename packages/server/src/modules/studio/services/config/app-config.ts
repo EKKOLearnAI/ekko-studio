@@ -12,6 +12,7 @@ export interface ModelVisibilityRule {
 }
 
 export interface GatewayAutoStartConfig {
+  // Only explicit true enables automatic gateway startup and restarts.
   enabled?: boolean
   include?: string[]
   exclude?: string[]
@@ -34,11 +35,10 @@ function normalizeProfileList(values: unknown): string[] {
 }
 
 export function normalizeGatewayAutoStartConfig(value: unknown): GatewayAutoStartConfig {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { enabled: false }
   const raw = value as Record<string, unknown>
-  const normalized: GatewayAutoStartConfig = {}
+  const normalized: GatewayAutoStartConfig = { enabled: raw.enabled === true }
 
-  if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled
   if (Array.isArray(raw.include)) normalized.include = normalizeProfileList(raw.include)
   if (Array.isArray(raw.exclude)) normalized.exclude = normalizeProfileList(raw.exclude)
 
@@ -81,7 +81,7 @@ export interface AppConfig {
   providerPreferredModels?: Record<string, Record<string, string>>
 
   // Web UI startup policy for automatically starting Hermes API gateways.
-  // Defaults to legacy behavior: all local profiles are eligible. This is a
+  // Disabled by default; users must explicitly enable it. This is a
   // Web UI-level setting, not the active Hermes profile's config.yaml.
   gatewayAutoStart?: GatewayAutoStartConfig
 }

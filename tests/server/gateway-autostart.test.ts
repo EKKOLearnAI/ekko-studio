@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import * as appConfig from '../../packages/server/src/modules/studio/public/app-config'
+import * as profiles from '../../packages/server/src/modules/hermes/services/profiles/profile'
+import * as runtime from '../../packages/server/src/modules/hermes/services/runtime/process'
 import {
+  ensureProfileGatewaysRunning,
   gatewayAutostartDisabledByEnv,
   gatewayAutoStartManagementMode,
   gatewayMultiplexConfigEnabledForDefaultProfile,
@@ -23,38 +27,62 @@ import {
 } from '../../packages/server/src/modules/hermes/services/gateway/autostart'
 
 describe('gateway autostart status parsing', () => {
-  it('selects all profiles by default for gateway autostart', () => {
-    expect(selectProfilesForGatewayAutostart(['default', 'work', 'test'])).toEqual(['default', 'work', 'test'])
+  it('requires explicit opt-in before selecting gateway profiles', () => {
+    const names = ['default', 'work', 'test']
+    expect(selectProfilesForGatewayAutostart(names)).toEqual([])
+    expect(selectProfilesForGatewayAutostart(names, {})).toEqual([])
+    expect(selectProfilesForGatewayAutostart(names, { include: ['work'] })).toEqual([])
+    expect(selectProfilesForGatewayAutostart(names, { enabled: true })).toEqual(names)
+  })
+
+  it.each([undefined, null, {}, [], { enabled: 'true' }])('normalizes missing or invalid enablement to off: %j', value => {
+    expect(appConfig.normalizeGatewayAutoStartConfig(value)).toEqual({ enabled: false })
+  })
+
+  it.each([undefined, {}, { enabled: false }, { include: ['default'] }])('skips gateway discovery and CLI calls without opt-in: %j', async policy => {
+    const readConfig = vi.spyOn(appConfig, 'readAppConfig').mockResolvedValue({ gatewayAutoStart: policy })
+    const discoverProfiles = vi.spyOn(profiles, 'listProfileNamesFromDisk').mockReturnValue(['default'])
+    const exec = vi.spyOn(runtime, 'execHermesWithBin').mockRejectedValue(new Error('Unexpected Hermes command'))
+    try {
+      await ensureProfileGatewaysRunning()
+      expect(discoverProfiles).not.toHaveBeenCalled()
+      expect(exec).not.toHaveBeenCalled()
+    } finally {
+      readConfig.mockRestore()
+      discoverProfiles.mockRestore()
+      exec.mockRestore()
+    }
   })
 
   it('honors gateway autostart include, exclude, disabled, and unknown profiles', () => {
     const profiles = ['default', 'work', 'reviewer', 'scratch']
 
-    expect(selectProfilesForGatewayAutostart(profiles, { include: ['work', 'missing', 'work', ' reviewer '] })).toEqual([
+    expect(selectProfilesForGatewayAutostart(profiles, { enabled: true, include: ['work', 'missing', 'work', ' reviewer '] })).toEqual([
       'work',
       'reviewer',
     ])
-    expect(selectProfilesForGatewayAutostart(profiles, { exclude: ['scratch', 'missing'] })).toEqual([
+    expect(selectProfilesForGatewayAutostart(profiles, { enabled: true, exclude: ['scratch', 'missing'] })).toEqual([
       'default',
       'work',
       'reviewer',
     ])
-    expect(selectProfilesForGatewayAutostart(profiles, { include: ['work', 'scratch'], exclude: ['scratch'] })).toEqual([
+    expect(selectProfilesForGatewayAutostart(profiles, { enabled: true, include: ['work', 'scratch'], exclude: ['scratch'] })).toEqual([
       'work',
     ])
-    expect(selectProfilesForGatewayAutostart(profiles, { include: ['missing'] })).toEqual([])
-    expect(selectProfilesForGatewayAutostart(profiles, { include: [] })).toEqual([])
+    expect(selectProfilesForGatewayAutostart(profiles, { enabled: true, include: ['missing'] })).toEqual([])
+    expect(selectProfilesForGatewayAutostart(profiles, { enabled: true, include: [] })).toEqual([])
     expect(selectProfilesForGatewayAutostart(profiles, { enabled: false, include: ['default'] })).toEqual([])
   })
 
   it('selects only the default gateway target in unified gateway management', () => {
     const profiles = ['default', 'work', 'reviewer']
 
-    expect(selectGatewayProfilesForAutostart(profiles, undefined, true)).toEqual(['default'])
-    expect(selectGatewayProfilesForAutostart(profiles, { include: ['work'] }, true)).toEqual(['default'])
-    expect(selectGatewayProfilesForAutostart(profiles, { include: [] }, true)).toEqual([])
+    expect(selectGatewayProfilesForAutostart(profiles, undefined, true)).toEqual([])
+    expect(selectGatewayProfilesForAutostart(profiles, { enabled: true }, true)).toEqual(['default'])
+    expect(selectGatewayProfilesForAutostart(profiles, { enabled: true, include: ['work'] }, true)).toEqual(['default'])
+    expect(selectGatewayProfilesForAutostart(profiles, { enabled: true, include: [] }, true)).toEqual([])
     expect(selectGatewayProfilesForAutostart(profiles, { enabled: false }, true)).toEqual([])
-    expect(selectGatewayProfilesForAutostart(profiles, { include: ['work'] }, false)).toEqual(['work'])
+    expect(selectGatewayProfilesForAutostart(profiles, { enabled: true, include: ['work'] }, false)).toEqual(['work'])
   })
 
   it('resolves gateway target profile for unified management', () => {
@@ -125,7 +153,7 @@ describe('gateway autostart status parsing', () => {
 
     const result = await reconcileGatewayManagementTransition(
       { management: 'per_profile' },
-      { management: 'unified' },
+      { enabled: true, management: 'unified' },
       {
         profiles: ['default', 'work', 'reviewer'],
         stopGateway: async profile => { events.push(`stop:${profile}`) },
@@ -148,8 +176,8 @@ describe('gateway autostart status parsing', () => {
     const events: string[] = []
 
     const result = await reconcileGatewayManagementTransition(
-      { management: 'unified' },
-      { management: 'per_profile', exclude: ['reviewer'] },
+      { enabled: true, management: 'unified' },
+      { enabled: true, management: 'per_profile', exclude: ['reviewer'] },
       {
         profiles: ['default', 'work', 'reviewer'],
         stopGateway: async profile => { events.push(`stop:${profile}`) },
