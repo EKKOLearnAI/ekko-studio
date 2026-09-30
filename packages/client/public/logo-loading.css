@@ -13,13 +13,11 @@
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.85) 48%, transparent 66%);
-  transform: translateX(-140%);
-  mix-blend-mode: screen;
+  /* Move the highlight inside a fixed mask without a blended compositor layer. */
+  background: linear-gradient(105deg, transparent 44%, rgba(255, 255, 255, 0.85) 50%, transparent 56%) 120% 0 / 300% 100% no-repeat;
   pointer-events: none;
   -webkit-mask: url("/logo.png") center / contain no-repeat;
   mask: url("/logo.png") center / contain no-repeat;
-  will-change: transform;
   animation: studio-logo-shimmer 1.8s cubic-bezier(0.45, 0, 0.25, 1) infinite;
 }
 
@@ -32,13 +30,23 @@
 }
 
 @keyframes studio-logo-shimmer {
-  0% { transform: translateX(-140%); }
-  52%, 100% { transform: translateX(140%); }
+  0% { background-position: 120% 0; }
+  52%, 100% { background-position: -20% 0; }
+}
+
+@keyframes studio-logo-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .studio-loading-logo::after {
+    display: none;
     animation: none;
-    will-change: auto;
+  }
+
+  .studio-loading-logo img {
+    /* Keep loading feedback without sweeping or moving the logo. */
+    animation: studio-logo-breathe 2.4s ease-in-out infinite;
   }
 }
