@@ -18897,7 +18897,7 @@
           "Sessions"
         ],
         "summary": "Get session-categories",
-        "description": "GET /api/studio/session-categories",
+        "description": "GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace and the folder check finished in time, and preset_status.base_url_dropped (true) when the stored Base URL failed the credential filter and was dropped on read together with its API mode.",
         "operationId": "listCategories",
         "security": [
           {
@@ -18937,6 +18937,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "A non-null preset was sent by a user who is not a super admin."
+          },
+          "409": {
+            "description": "A category with this name already exists (strict create only)."
           }
         },
         "requestBody": {
@@ -18945,14 +18951,94 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string"
-                  }
-                },
                 "required": [
                   "name"
-                ]
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "preset": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Validation mirrors the New Chat panel. Credential fields (API keys, tokens, secrets) are rejected with 400. Only super admins may write a preset (403 otherwise). Stored presets are read leniently: unknown or invalid fields are dropped.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "agent": {
+                        "type": "string",
+                        "enum": [
+                          "hermes",
+                          "ekko-agent",
+                          "claude-code",
+                          "codex",
+                          "pi",
+                          "grok",
+                          "opencode",
+                          "dsh",
+                          "cursor"
+                        ]
+                      },
+                      "agentMode": {
+                        "type": "string",
+                        "enum": [
+                          "global",
+                          "scoped"
+                        ],
+                        "description": "Launch mode for external coding agents. Ignored like in the New Chat panel for agents with a fixed mode: ekko-agent always runs scoped, cursor always runs global."
+                      },
+                      "agentPreset": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "DeepSeek Harness session preset id (agent=dsh only)."
+                      },
+                      "profile": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "modelKind": {
+                        "type": "string",
+                        "enum": [
+                          "model",
+                          "moa"
+                        ],
+                        "description": "moa requires agent=hermes."
+                      },
+                      "provider": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "model": {
+                        "type": "string",
+                        "maxLength": 300
+                      },
+                      "apiMode": {
+                        "type": "string",
+                        "enum": [
+                          "chat_completions",
+                          "codex_responses",
+                          "anthropic_messages"
+                        ]
+                      },
+                      "baseUrl": {
+                        "type": "string",
+                        "maxLength": 2048,
+                        "description": "Used only by scoped coding agents, and only with the preset provider while it has no base URL of its own. Rejected with 400 when it carries credentials: userinfo (user:password@, also without //), a query parameter whose name contains key, token, secret, password, passwd, sig, auth or credential (case-, dash- and underscore-insensitive, percent-decoded; api-version is fine), or any non-empty #fragment."
+                      },
+                      "workspace": {
+                        "type": "string",
+                        "maxLength": 4096,
+                        "description": "Folder path stored as entered, like the New Chat panel. A relative path resolves where a chat run resolves it (the server working directory)."
+                      }
+                    }
+                  },
+                  "unique": {
+                    "type": "boolean",
+                    "description": "Reject an existing case-insensitive name with 409 instead of returning it. Implied when preset is sent."
+                  }
+                }
               }
             }
           }
@@ -18981,6 +19067,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "preset was sent (including null to clear) by a user who is not a super admin."
+          },
+          "409": {
+            "description": "A category with this name already exists."
           }
         },
         "parameters": [
@@ -18999,14 +19091,88 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "description": "Send name to rename, preset to replace (null clears it), or both. Omitting both is a 400.",
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "preset": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Validation mirrors the New Chat panel. Credential fields (API keys, tokens, secrets) are rejected with 400. Only super admins may write a preset (403 otherwise). Stored presets are read leniently: unknown or invalid fields are dropped.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "agent": {
+                        "type": "string",
+                        "enum": [
+                          "hermes",
+                          "ekko-agent",
+                          "claude-code",
+                          "codex",
+                          "pi",
+                          "grok",
+                          "opencode",
+                          "dsh",
+                          "cursor"
+                        ]
+                      },
+                      "agentMode": {
+                        "type": "string",
+                        "enum": [
+                          "global",
+                          "scoped"
+                        ],
+                        "description": "Launch mode for external coding agents. Ignored like in the New Chat panel for agents with a fixed mode: ekko-agent always runs scoped, cursor always runs global."
+                      },
+                      "agentPreset": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "DeepSeek Harness session preset id (agent=dsh only)."
+                      },
+                      "profile": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "modelKind": {
+                        "type": "string",
+                        "enum": [
+                          "model",
+                          "moa"
+                        ],
+                        "description": "moa requires agent=hermes."
+                      },
+                      "provider": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "model": {
+                        "type": "string",
+                        "maxLength": 300
+                      },
+                      "apiMode": {
+                        "type": "string",
+                        "enum": [
+                          "chat_completions",
+                          "codex_responses",
+                          "anthropic_messages"
+                        ]
+                      },
+                      "baseUrl": {
+                        "type": "string",
+                        "maxLength": 2048,
+                        "description": "Used only by scoped coding agents, and only with the preset provider while it has no base URL of its own. Rejected with 400 when it carries credentials: userinfo (user:password@, also without //), a query parameter whose name contains key, token, secret, password, passwd, sig, auth or credential (case-, dash- and underscore-insensitive, percent-decoded; api-version is fine), or any non-empty #fragment."
+                      },
+                      "workspace": {
+                        "type": "string",
+                        "maxLength": 4096,
+                        "description": "Folder path stored as entered, like the New Chat panel. A relative path resolves where a chat run resolves it (the server working directory)."
+                      }
+                    }
                   }
-                },
-                "required": [
-                  "name"
-                ]
+                }
               }
             }
           }

@@ -104,6 +104,59 @@ describe('plan session command', () => {
     })
   })
 
+  it('keeps the New Chat workspace and category when /plan is the first message (#2800)', async () => {
+    getSessionMock.mockReturnValue(undefined)
+    const state = { messages: [], isWorking: false, events: [], queue: [] }
+    const { bridge, nsp, runQueuedItem, sessionMap, socket } = makeContext(state)
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
+    const command = parseSessionCommand('/plan outline the next step')!
+
+    await handleSessionCommand('session-1', command, {
+      nsp: nsp as any,
+      socket: socket as any,
+      sessionMap,
+      bridge: bridge as any,
+      profile: 'default',
+      model: 'claude-opus-5-5',
+      workspace: '/projects/ai-passport',
+      categoryId: 4,
+      runQueuedItem,
+    })
+
+    expect(createSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'session-1',
+      workspace: '/projects/ai-passport',
+      category_id: 4,
+    }))
+    expect(runQueuedItem).toHaveBeenCalledWith(socket, 'session-1', expect.objectContaining({
+      displayInput: '/plan outline the next step',
+      workspace: '/projects/ai-passport',
+      categoryId: 4,
+    }), 'default')
+  })
+
+  it('creates command sessions without workspace or category when the run has none', async () => {
+    getSessionMock.mockReturnValue(undefined)
+    const state = { messages: [], isWorking: false, events: [], queue: [] }
+    const { bridge, nsp, runQueuedItem, sessionMap, socket } = makeContext(state)
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
+
+    await handleSessionCommand('session-1', parseSessionCommand('/plan x')!, {
+      nsp: nsp as any,
+      socket: socket as any,
+      sessionMap,
+      bridge: bridge as any,
+      profile: 'default',
+      runQueuedItem,
+    })
+
+    const created = createSessionMock.mock.calls[0][0]
+    expect(created).not.toHaveProperty('workspace')
+    expect(created).not.toHaveProperty('category_id')
+    expect(runQueuedItem.mock.calls[0][2]).not.toHaveProperty('workspace')
+    expect(runQueuedItem.mock.calls[0][2]).not.toHaveProperty('categoryId')
+  })
+
   it('queues running plan commands once without visible command echo', async () => {
     const state = { messages: [], isWorking: true, events: [], queue: [] }
     const { bridge, namespaceEmit, nsp, runQueuedItem, sessionMap, socket } = makeContext(state)

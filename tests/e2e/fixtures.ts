@@ -49,7 +49,14 @@ interface MockHermesApiOptions {
   tokenValidationStatus?: number
   initialProfileName?: 'default' | 'research'
   sessions?: unknown[]
-  sessionCategories?: Array<{ id: number; name: string; created_at?: number; updated_at?: number }>
+  sessionCategories?: Array<{
+    id: number
+    name: string
+    preset?: Record<string, unknown> | null
+    preset_status?: { workspace_exists?: boolean; base_url_dropped?: true }
+    created_at?: number
+    updated_at?: number
+  }>
   journey?: MockJourneyPayload
   skills?: MockSkillsPayload
   bundles?: MockSkillBundlePayload[]
@@ -498,11 +505,20 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
         return
       }
       if (request.method() === 'POST') {
-        const body = JSON.parse(request.postData() || '{}') as { name?: string }
+        const body = JSON.parse(request.postData() || '{}') as { name?: string; preset?: Record<string, unknown> | null; unique?: boolean }
+        const name = String(body.name || '').trim()
+        // Server names are COLLATE NOCASE, which folds ASCII letters only.
+        const fold = (value: string) => value.replace(/[A-Z]/g, char => char.toLowerCase())
+        const existing = sessionCategories.find(item => fold(item.name) === fold(name))
+        if (existing && (body.unique || body.preset !== undefined)) {
+          await route.fulfill(jsonResponse({ error: 'A category with this name already exists' }, 409))
+          return
+        }
         const now = Math.floor(Date.now() / 1000)
         const category = {
           id: Math.max(0, ...sessionCategories.map(item => item.id)) + 1,
-          name: String(body.name || '').trim(),
+          name,
+          ...(body.preset !== undefined ? { preset: body.preset } : {}),
           created_at: now,
           updated_at: now,
         }
@@ -520,10 +536,13 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
         return
       }
       if (request.method() === 'PATCH') {
-        const body = JSON.parse(request.postData() || '{}') as { name?: string }
+        const body = JSON.parse(request.postData() || '{}') as { name?: string; preset?: Record<string, unknown> | null }
+        const current = sessionCategories[categoryIndex]
+        const presetChanged = Object.prototype.hasOwnProperty.call(body, 'preset')
         sessionCategories[categoryIndex] = {
-          ...sessionCategories[categoryIndex],
-          name: String(body.name || '').trim(),
+          ...current,
+          name: body.name !== undefined || !presetChanged ? String(body.name || '').trim() : current.name,
+          ...(presetChanged ? { preset: body.preset ?? null, preset_status: undefined } : {}),
           updated_at: Math.floor(Date.now() / 1000),
         }
         await route.fulfill(jsonResponse({ category: sessionCategories[categoryIndex] }))

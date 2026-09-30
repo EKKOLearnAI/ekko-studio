@@ -921,6 +921,59 @@ openapi.paths['/api/studio/sessions/{id}/pin'].post.requestBody = {
   } } },
 }
 
+// Preset agent ids follow the runtime registry (SESSION_CATEGORY_PRESET_AGENTS in
+// session-category-preset.ts): every AGENT_RUNTIMES id, with `ekko` named `ekko-agent`.
+function sessionCategoryPresetAgents() {
+  const source = readFileSync(join(serverSourceDir, 'modules/studio/contracts/agents/runtime.ts'), 'utf-8')
+  const list = source.match(/export const AGENT_RUNTIMES = \[([^\]]*)\] as const/)
+  if (!list) throw new Error('AGENT_RUNTIMES not found in contracts/agents/runtime.ts')
+  const runtimes = [...list[1].matchAll(/'([^']+)'/g)].map(match => match[1])
+  return runtimes.map(runtime => (runtime === 'ekko' ? 'ekko-agent' : runtime))
+}
+
+// Session categories may carry one shared, optional New Chat preset (never an API key).
+const sessionCategoryPresetSchema = {
+  type: ['object', 'null'],
+  description: 'Optional New Chat preset shared by everyone who can see categories. All fields are optional; empty means the New Chat default. Validation mirrors the New Chat panel. Credential fields (API keys, tokens, secrets) are rejected with 400. Only super admins may write a preset (403 otherwise). Stored presets are read leniently: unknown or invalid fields are dropped.',
+  additionalProperties: false,
+  properties: {
+    agent: { type: 'string', enum: sessionCategoryPresetAgents() },
+    agentMode: { type: 'string', enum: ['global', 'scoped'], description: 'Launch mode for external coding agents. Ignored like in the New Chat panel for agents with a fixed mode: ekko-agent always runs scoped, cursor always runs global.' },
+    agentPreset: { type: 'string', maxLength: 200, description: 'DeepSeek Harness session preset id (agent=dsh only).' },
+    profile: { type: 'string', maxLength: 200 },
+    modelKind: { type: 'string', enum: ['model', 'moa'], description: 'moa requires agent=hermes.' },
+    provider: { type: 'string', maxLength: 200 },
+    model: { type: 'string', maxLength: 300 },
+    apiMode: { type: 'string', enum: ['chat_completions', 'codex_responses', 'anthropic_messages'] },
+    baseUrl: { type: 'string', maxLength: 2048, description: 'Used only by scoped coding agents, and only with the preset provider while it has no base URL of its own. Rejected with 400 when it carries credentials: userinfo (user:password@, also without //), a query parameter whose name contains key, token, secret, password, passwd, sig, auth or credential (case-, dash- and underscore-insensitive, percent-decoded; api-version is fine), or any non-empty #fragment.' },
+    workspace: { type: 'string', maxLength: 4096, description: 'Folder path stored as entered, like the New Chat panel. A relative path resolves where a chat run resolves it (the server working directory).' },
+  },
+}
+openapi.paths['/api/studio/session-categories'].post.requestBody = {
+  required: true,
+  content: { 'application/json': { schema: {
+    type: 'object', required: ['name'],
+    properties: {
+      name: { type: 'string', maxLength: 40 },
+      preset: sessionCategoryPresetSchema,
+      unique: { type: 'boolean', description: 'Reject an existing case-insensitive name with 409 instead of returning it. Implied when preset is sent.' },
+    },
+  } } },
+}
+openapi.paths['/api/studio/session-categories'].post.responses[409] = { description: 'A category with this name already exists (strict create only).' }
+openapi.paths['/api/studio/session-categories'].post.responses[403] = { description: 'A non-null preset was sent by a user who is not a super admin.' }
+openapi.paths['/api/studio/session-categories/{id}'].patch.requestBody = {
+  required: true,
+  content: { 'application/json': { schema: {
+    type: 'object',
+    description: 'Send name to rename, preset to replace (null clears it), or both. Omitting both is a 400.',
+    properties: { name: { type: 'string', maxLength: 40 }, preset: sessionCategoryPresetSchema },
+  } } },
+}
+openapi.paths['/api/studio/session-categories/{id}'].patch.responses[409] = { description: 'A category with this name already exists.' }
+openapi.paths['/api/studio/session-categories/{id}'].patch.responses[403] = { description: 'preset was sent (including null to clear) by a user who is not a super admin.' }
+openapi.paths['/api/studio/session-categories'].get.description = 'GET /api/studio/session-categories. Each category may include preset (object or null) and preset_status.workspace_exists when the preset has a workspace and the folder check finished in time, and preset_status.base_url_dropped (true) when the stored Base URL failed the credential filter and was dropped on read together with its API mode.'
+
 // Shared task planning is bound to an authenticated, active turn capability.
 openapi.paths['/api/studio/task-plans/update'] = {
   post: {

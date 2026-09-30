@@ -1,6 +1,7 @@
 import { request, getApiKey, getBaseUrlValue } from '../client'
 import type { ProviderApiMode } from './provider-api-mode'
 import { fetchAuthenticatedBlob, saveBlob } from './binary-content'
+import type { ChatCodingAgentId } from '../coding-agents'
 
 export interface SessionSummary {
   id: string
@@ -44,9 +45,35 @@ export interface SessionSummary {
   webui_imported?: boolean
 }
 
+/**
+ * Shared New Chat preset stored on a category. Every field is optional; an
+ * empty field means "use today's New Chat default". Never carries an API key.
+ */
+export interface SessionCategoryPreset {
+  agent?: 'hermes' | ChatCodingAgentId
+  agentMode?: 'global' | 'scoped'
+  agentPreset?: string
+  profile?: string
+  modelKind?: 'model' | 'moa'
+  provider?: string
+  model?: string
+  apiMode?: 'chat_completions' | 'codex_responses' | 'anthropic_messages'
+  baseUrl?: string
+  workspace?: string
+}
+
+export interface SessionCategoryPresetStatus {
+  /** false when the preset workspace folder no longer exists on the server. */
+  workspace_exists?: boolean
+  /** true when the stored Base URL failed the credential filter and was dropped with its API mode. */
+  base_url_dropped?: true
+}
+
 export interface SessionCategory {
   id: number
   name: string
+  preset?: SessionCategoryPreset | null
+  preset_status?: SessionCategoryPresetStatus
   created_at: number
   updated_at: number
 }
@@ -187,6 +214,33 @@ export async function createSessionCategory(name: string): Promise<SessionCatego
     method: 'POST',
     body: JSON.stringify({ name }),
   })
+  return res.category
+}
+
+/** Strict create for the "+ New Category" form: rejects an existing name with 409. */
+export async function createSessionCategoryWithPreset(
+  name: string,
+  preset: SessionCategoryPreset | null,
+): Promise<SessionCategory> {
+  const res = await request<{ category: SessionCategory }>('/api/studio/session-categories', {
+    method: 'POST',
+    body: JSON.stringify({ name, preset, unique: true }),
+  })
+  return res.category
+}
+
+/** Replaces (or clears, with null) a category's shared New Chat preset. */
+export async function updateSessionCategoryPreset(
+  id: number,
+  preset: SessionCategoryPreset | null,
+): Promise<SessionCategory> {
+  const res = await request<{ category: SessionCategory }>(
+    `/api/studio/session-categories/${encodeURIComponent(String(id))}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ preset }),
+    },
+  )
   return res.category
 }
 
