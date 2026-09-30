@@ -500,7 +500,7 @@ async function createWindow(): Promise<void> {
       ? {
           titleBarStyle: 'hiddenInset' as const,
           // Keep all three native buttons above the 64px navigation rail avatar.
-          trafficLightPosition: { x: 8, y: 13 },
+          trafficLightPosition: { x: 8, y: 12 },
         }
       : process.platform === 'win32'
         ? {

@@ -518,7 +518,7 @@ useKeyboard();
   --studio-header-inset: #{$navigation-rail-width};
   --studio-content-gutter: 5px;
   --studio-content-radius: #{$radius-lg};
-  --desktop-window-controls-width: 139px;
+  --desktop-window-controls-width: 138px;
   flex-direction: row;
   background-color: $bg-sidebar;
 
@@ -625,7 +625,7 @@ useKeyboard();
     }
   }
 
-  // Three 46px window buttons and their 1px separator.
+  // Three 46px window buttons.
   &.desktop-platform-win32 .studio-page-header,
   &.desktop-platform-linux .studio-page-header {
     padding-right: var(--desktop-window-controls-width); // rtl-physical: window controls stay on the physical right in every locale.
