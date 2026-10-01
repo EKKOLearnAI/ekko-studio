@@ -610,6 +610,47 @@ assert process_registry_module.process_registry.completion_queue.get_nowait() ==
 `)
   })
 
+  it('accepts Hermes plugin notices only for loaded sessions and drains each once', () => {
+    runPython(String.raw`
+${harness}
+
+hosts = {}
+plugins_module = types.ModuleType("hermes_cli.plugins")
+plugins_module.publish_tui_message_host = lambda owner, injector: hosts.update({owner: injector})
+plugins_module.clear_published_tui_message_host = lambda owner: hosts.pop(owner, None)
+hermes_cli_pkg = types.ModuleType("hermes_cli")
+hermes_cli_pkg.__path__ = []
+hermes_cli_pkg.plugins = plugins_module
+sys.modules["hermes_cli"] = hermes_cli_pkg
+sys.modules["hermes_cli.plugins"] = plugins_module
+
+pool, _fake_db = make_pool()
+pool.install_plugin_message_host()
+[inject] = hosts.values()
+pool._sessions["session-1"] = bridge.AgentSession(session_id="session-1", agent=types.SimpleNamespace())
+notice = '<system-notice run="car_0123456789abcdef" source="coding-agent">Run finished.</system-notice>'
+
+assert inject(session_key="session-1", content=notice, plugin_id="coding-agent-mcp-companion") is True
+assert inject(session_key="session-unknown", content=notice, plugin_id="coding-agent-mcp-companion") is False
+assert inject(session_key="session-1", content="  ", plugin_id="coding-agent-mcp-companion") is False
+
+polled = pool.poll_background()
+assert [(n["session_id"], n["content"], n["plugin_id"]) for n in polled["plugin_notices"]] == [
+    ("session-1", notice, "coding-agent-mcp-companion"),
+]
+assert pool.poll_background()["plugin_notices"] == []
+
+# A notice whose session was unloaded stays queued until a poll owns that session again.
+assert inject(session_key="session-1", content=notice) is True
+del pool._sessions["session-1"]
+assert pool.poll_background()["plugin_notices"] == []
+assert [n["content"] for n in pool.poll_background(["session-1"])["plugin_notices"]] == [notice]
+
+pool.clear_plugin_message_host()
+assert hosts == {}
+`)
+  })
+
   it('acknowledges a user-cancelled delegation completion without starting a new parent turn', () => {
     runPython(String.raw`
 ${harness}

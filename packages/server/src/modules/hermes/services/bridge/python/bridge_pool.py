@@ -191,6 +191,9 @@ class AgentPool:
         self._compression_requests: dict[str, queue.Queue[dict[str, Any]]] = {}
         self._background_notification_claims: dict[tuple[str, str], dict[str, Any]] = {}
         self._suppressed_background_delegations: set[str] = set()
+        # Hermes plugin notices (ctx.inject_message) accepted for loaded sessions, drained by poll_background.
+        self._plugin_notices: list[dict[str, Any]] = []
+        self._plugin_host_owner = object()
         self._clarify_requests: dict[str, queue.Queue[str]] = {}
         self._run_context = threading.local()
         self._approval_handlers: dict[str, Callable[..., str]] = {}
@@ -1106,6 +1109,38 @@ class AgentPool:
                     session.background_tasks.pop(stale_id, None)
         return payload
 
+    def inject_plugin_message(self, *, session_key: str, content: str, plugin_id: str = "") -> bool:
+        """Hermes TUI-host injector: accept a plugin notice only for a session loaded in this pool."""
+        if not isinstance(content, str) or not content.strip():
+            return False
+        with self._lock:
+            if session_key not in self._sessions:
+                return False
+            self._plugin_notices.append({
+                "session_id": session_key,
+                "content": content,
+                "plugin_id": str(plugin_id or ""),
+                "received_at": time.time(),
+            })
+        return True
+
+    def install_plugin_message_host(self) -> None:
+        """Publish this worker as the process TUI host so plugin notices reach bridge sessions."""
+        try:
+            from hermes_cli.plugins import publish_tui_message_host
+
+            publish_tui_message_host(self._plugin_host_owner, self.inject_plugin_message)
+        except Exception as exc:
+            print(f"[hermes_bridge] failed to install plugin message host: {exc}", file=sys.stderr, flush=True)
+
+    def clear_plugin_message_host(self) -> None:
+        try:
+            from hermes_cli.plugins import clear_published_tui_message_host
+
+            clear_published_tui_message_host(self._plugin_host_owner)
+        except Exception:
+            pass
+
     def poll_background(self, recover_session_ids: list[Any] | None = None) -> dict[str, Any]:
         """Drain worker-level UI telemetry and claim owned async completions."""
         with self._lock:
@@ -1127,6 +1162,9 @@ class AgentPool:
                         "tasks": _jsonable(tasks),
                         "running_count": sum(1 for task in tasks if task.get("status") == "running"),
                     })
+            # Same ownership rule as delegation events; notices for other sessions stay queued.
+            plugin_notices = [notice for notice in self._plugin_notices if notice["session_id"] in loaded_session_ids]
+            self._plugin_notices = [notice for notice in self._plugin_notices if notice["session_id"] not in loaded_session_ids]
 
         notifications: list[dict[str, Any]] = []
         pending_notification_count = 0
@@ -1199,6 +1237,7 @@ class AgentPool:
         return {
             "sessions": session_payloads,
             "notifications": notifications,
+            "plugin_notices": plugin_notices,
             "pending_count": pending_notification_count,
         }
 
