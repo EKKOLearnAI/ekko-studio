@@ -3,6 +3,9 @@ import { normalizeTokenUsage, normalizeUsageCost, type UsageCost, type Normalize
 
 export interface NativeUsageRow {
   id: string
+  /** Stable native request identity, independent of a Studio process or replay. */
+  ledgerId?: string
+  createdAt?: number
   model: string
   provider?: string
   usage: NormalizedTokenUsage
@@ -37,6 +40,8 @@ function sameTotals(rows: NativeUsageRow[], usage: NormalizedTokenUsage): boolea
 export class NativeTurnUsage {
   model = ''
   provider?: string
+  codexRows?: NativeUsageRow[]
+  codexResumed = false
   private readonly messages = new Map<string, NativeUsageRow>()
   private claudeMessage?: { id: string; model: string; usage: Record<string, unknown> }
   private readonly claudeModels = new Set<string>()
@@ -47,7 +52,10 @@ export class NativeTurnUsage {
   private readonly grokResponses = new Map<string, unknown>()
 
   observeClaude(event: any) {
-    if (event.type === 'system' && event.subtype === 'init') this.model = modelName(event.model)
+    if (event.type === 'system' && event.subtype === 'init') {
+      this.model = modelName(event.model)
+      this.provider = modelName(event.provider) || this.provider
+    }
     const message = event.type === 'assistant' ? event.message : undefined
     if (message && !event.isApiErrorMessage) {
       const model = modelName(message.model)
@@ -56,7 +64,7 @@ export class NativeTurnUsage {
       // Some CLIs emit placeholder zero-usage top-level messages before the
       // authoritative message_delta. Do not overwrite a completed stream row.
       if (message.id && usage && !this.messages.has(message.id)) {
-        this.messages.set(message.id, { id: message.id, model, usage, apiCalls: 1, scope: 'model_call' })
+        this.messages.set(message.id, { id: message.id, model, provider: this.provider, usage, apiCalls: 1, scope: 'model_call' })
       }
     }
     if (event.type === 'stream_event') {
@@ -67,10 +75,13 @@ export class NativeTurnUsage {
         this.claudeMessage = { id: String(frame.message?.id || ''), model, usage: { ...frame.message?.usage } }
       } else if (frame.type === 'message_delta' && this.claudeMessage) {
         Object.assign(this.claudeMessage.usage, frame.usage)
+        const { id, model, usage: raw } = this.claudeMessage
+        const usage = measured(raw)
+        if (id && usage) this.messages.set(id, { id, model, provider: this.provider, usage, apiCalls: 1, scope: 'model_call' })
       } else if (frame.type === 'message_stop' && this.claudeMessage) {
         const { id, model, usage: raw } = this.claudeMessage
         const usage = measured(raw)
-        if (id && usage) this.messages.set(id, { id, model, usage, apiCalls: 1, scope: 'model_call' })
+        if (id && usage) this.messages.set(id, { id, model, provider: this.provider, usage, apiCalls: 1, scope: 'model_call' })
         this.claudeMessage = undefined
       }
     }
@@ -130,6 +141,10 @@ export class NativeTurnUsage {
   private buildRows(agent: string, finalUsage: unknown, fallbackModel = ''): NativeUsageRow[] {
     if (agent === 'pi') return [...this.messages.values()]
     if (agent === 'codex') {
+      if (this.codexRows) return this.codexRows
+      // exec resume may report the thread total. Without a native per-turn
+      // ledger it is not safe to charge that total again.
+      if (this.codexResumed) return []
       const raw = finalUsage as any
       const usage = normalizeTokenUsage(raw && {
         ...raw,
@@ -155,6 +170,16 @@ export class NativeTurnUsage {
     const cost = this.pendingCost || (agent === 'grok' && !this.pendingUsage && this.grokResponses.size
       ? observedCost : normalizeUsageCost(finalUsage, 'estimated'))
     const hasModelCost = Object.values(this.modelUsage || {}).some(row => normalizeUsageCost(row, 'estimated'))
+    if (agent === 'grok' && !cost && !hasModelCost && this.grokResponses.size) {
+      const names = Object.keys(this.modelUsage || {})
+      const model = names.length === 1 ? modelName(names[0]) : names.length > 1 ? '' : this.model || fallbackModel
+      const calls = [...this.grokResponses].map(([id, raw]) => {
+        const tokens = measured(raw)
+        return tokens ? { id, model, provider: this.provider, usage: tokens, apiCalls: 1,
+          scope: 'model_call' as const, cost: normalizeUsageCost(raw, 'estimated') } : undefined
+      }).filter((row): row is NonNullable<typeof row> => !!row)
+      if (calls.length === this.grokResponses.size && sameTotals(calls, usage)) return calls
+    }
     if (agent === 'claude-code' && !cost && !hasModelCost && this.messages.size && sameTotals([...this.messages.values()], usage)) {
       return [...this.messages.values()]
     }

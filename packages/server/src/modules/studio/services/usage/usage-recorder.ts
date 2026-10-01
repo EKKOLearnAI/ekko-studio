@@ -18,6 +18,7 @@ export interface RecordSessionUsageInput {
   runId?: string | null
   /** The foreground run, separate from the deduplication key for each API call. */
   parentRunId?: string
+  createdAt?: number
   /** Model request duration in seconds, excluding tool execution. */
   apiDuration?: number
   source: 'hermes' | 'coding_agent' | 'ekko_agent'
@@ -138,6 +139,7 @@ export function recordSessionUsage(input: RecordSessionUsageInput): NormalizedTo
     }
     const row = updateUsage(input.sessionId, {
       runId: input.runId || '',
+      ...(input.createdAt != null ? { createdAt: input.createdAt } : {}),
       ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
       ...(input.apiDuration != null ? { apiDuration: input.apiDuration } : {}),
       source: input.source,

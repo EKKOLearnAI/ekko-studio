@@ -35,6 +35,7 @@ import { isolatedCodingAgentChildEnv } from './child-env'
 import { NativeTurnUsage, type NativeUsageRow } from './native-usage'
 import { RunToolTiming } from './tool-timing'
 import { readCodexTurnModel, readOpenCodeMessageModel } from './native-model'
+import { readCodexTurnUsage } from './codex-usage'
 import { getCodingAgentGlobalHome } from '../../../studio/public/coding-agent-global-home'
 import { isContextWindowExceededError, nativeContextRecoveryMessage, resetNativeSessionAfterContextOverflow } from '../context-recovery'
 
@@ -851,6 +852,7 @@ export class CodingAgentRunManager {
     // choose a different model each turn, including during a resumed session.
     if (!childIsRunning(run.currentChild) || (run.launch.agentId === 'pi' && !run.turnActive)) {
       run.nativeUsage = new NativeTurnUsage()
+      run.nativeUsage.codexResumed = Boolean(run.launch.agentNativeSessionId)
       run.nativeTurnStartedAt = Date.now()
     }
     const systemPrompt = String(options.systemPrompt || '').trim()
@@ -1126,7 +1128,7 @@ export class CodingAgentRunManager {
   }
 
   handleProxyUsageEvent(agentSessionId: string | undefined, event: CanonicalResponsesEvent, apiDuration?: number) {
-    if (!agentSessionId || event.type !== 'response.completed') return
+    if (!agentSessionId || !['response.completed', 'response.failed', 'response.incomplete'].includes(event.type)) return
     const run = this.runs.get(agentSessionId)
     if (!run || run.launch.mode !== 'scoped') return
     const final = (event.data as any).response || event.data
@@ -1284,8 +1286,9 @@ export class CodingAgentRunManager {
     for (const row of rows) {
       recordSessionUsage({
         sessionId: run.launch.sessionId,
-        runId: `${responseId}:${row.id}`,
+        runId: row.ledgerId || `${responseId}:${row.id}`,
         parentRunId: run.usageRunId || run.id,
+        ...(row.createdAt != null ? { createdAt: row.createdAt } : {}),
         source: 'coding_agent',
         agent: usageCodingAgent(run.launch.agentId),
         usageScope: row.scope,
@@ -1295,7 +1298,7 @@ export class CodingAgentRunManager {
         cost: row.cost,
         profile: run.launch.profile,
         model: row.model,
-        provider: row.provider || run.launch.provider,
+        provider: row.provider || run.nativeUsage?.provider || run.launch.provider,
         isEstimated: false,
       })
     }
@@ -1485,6 +1488,12 @@ export class CodingAgentRunManager {
       if (childIsRunning(run.currentChild)) {
         run.currentChildKillTimer = setTimeout(() => forceKillChildProcess(run.currentChild), 1500)
       }
+    }
+    // Preserve completed model calls already observed before cancellation.
+    // Codex is reconciled after stdout/file writes drain on child close.
+    if (run.launch.mode === 'global' && !['codex', 'pi', 'opencode', 'dsh'].includes(run.launch.agentId) && !run.terminalEventHandled) {
+      const rows = run.nativeUsage?.rows(run.launch.agentId, run.codexPendingUsage, run.launch.model) || []
+      this.recordNativeUsage(run, rows, run.printResponseId || run.id)
     }
     run.exited = true
     run.state.isWorking = false
@@ -3106,10 +3115,20 @@ export class CodingAgentRunManager {
       if (run.launch.mode === 'global' && nativeSessionId && run.nativeTurnStartedAt) {
         const home = run.launch.env?.CODEX_HOME || process.env.CODEX_HOME || join(getCodingAgentGlobalHome(), '.codex')
         run.nativeCompletionPending = true
-        void readCodexTurnModel(home, nativeSessionId, run.nativeTurnStartedAt).then(metadata => {
+        void Promise.all([
+          readCodexTurnModel(home, nativeSessionId, run.nativeTurnStartedAt),
+          readCodexTurnUsage(home, nativeSessionId, run.nativeTurnStartedAt),
+        ]).then(([metadata, rows]) => {
           run.nativeCompletionPending = false
-          if (run.exited || run.stoppedByUser) return
           if (metadata && run.nativeUsage) Object.assign(run.nativeUsage, metadata)
+          if (rows && run.nativeUsage) run.nativeUsage.codexRows = rows
+          if (run.exited || run.stoppedByUser) {
+            if (rows) {
+              this.recordNativeUsage(run, rows, run.printResponseId || run.id)
+              this.completeUsage(run)
+            }
+            return
+          }
           this.finishCodexExecTurn(run, code)
         }).catch(err => {
           run.nativeCompletionPending = false

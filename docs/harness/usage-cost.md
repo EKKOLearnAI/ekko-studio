@@ -65,6 +65,65 @@ selected context threshold. `cost_source` remains `estimated`, so existing
 Studio/App coverage and total-cost displays work without a new API contract.
 Catalog refreshes never reprice previously stored records.
 
+## Coding Agent accounting boundaries
+
+Every scoped agent uses the provider proxy's measured terminal usage, including
+failed/incomplete responses that contain counters. Native events must never add
+a second ledger entry to those calls. In global mode, the adapters use:
+
+| Agent | Authoritative boundary | Deduplication / fallback |
+| --- | --- | --- |
+| Codex | Rollout `token_usage_record` for this thread and turn, including compaction | Native response ID; validate the per-turn total. Older rollouts use distinct `token_count.last_token_usage` records. Resumed CLI cumulative totals are never inserted as a new turn. |
+| Claude Code | Native result usage and USD estimate, with streamed assistant message counters | One result per turn; complete message counters survive cancellation. Per-message pricing when the final counters match and no native cost is available. |
+| Grok | Native turn/model cost, otherwise distinct response usage | Message ID; price individual calls only when they reconcile with the final aggregate. |
+| Cursor | Current invocation's result usage (disjoint input/cache), including explicit native USD fields | One result per turn; older versions without usage stay unknown. |
+| Pi | Assistant `message_end` usage | Native message ID or stable message hash; repeated terminal messages are excluded. |
+| OpenCode | `step_finish` part tokens/cost plus its exact assistant message model | Native part ID; ordinary input/cache are disjoint and reasoning is added to output once. |
+| DSH | Private ACP plugin's `llm/stream` usage chunk for each model call, including compaction and child calls | Generated request ID; record before turn completion. The context-window `usage_update` is not billing usage. |
+
+Persisted `parent_run_id` connects each request to its Studio run. Native Codex
+request timestamps preserve daily attribution. Session totals sum the same
+ledger that populates completed run cards; a run's cost stays NULL if any of its
+recorded calls has no price. Cancellation retains measured completed calls,
+but tokens not reported by an interrupted upstream cannot be reconstructed.
+Separate native threads are not charged merely because they appear nearby in
+a file; they need an identified accounting owner.
+
+Native USD catalog estimates remain estimates. Aggregate-only CLI versions
+cannot supply per-request context tiers; missing model/provider/price metadata
+remains unknown. Configure exact provider/model manual rates where appropriate.
+Do not infer a zero, official-provider price or account invoice from missing data.
+
+## Explicit legacy Codex repair
+
+`scripts/repair-codex-usage.ts` is an offline maintenance command. It defaults to
+a read-only preview, does not fetch prices, and never runs on server startup.
+Use an explicit database path, Studio session ID and the native CODEX_HOME for
+that session. Start with a SQLite backup/copy; close the app before applying to
+its database. The catalog is optional: without known rates, costs stay NULL.
+
+```bash
+npx vite-node scripts/repair-codex-usage.ts \
+  --db /absolute/path/hermes-web-ui.db \
+  --session STUDIO_SESSION_ID \
+  --codex-home /absolute/path/native-codex-home \
+  --catalog /absolute/path/models.dev.json
+```
+
+After reviewing the preview, repeat it with `--apply --expect FINGERPRINT
+--backup /absolute/path/new-backup.db`. The command creates a SQLite backup,
+rechecks the session ledger under a write lock and atomically replaces only
+uniquely matched, completed legacy turns. It refreshes existing run snapshots,
+retains assistant links and native dates, and is idempotent. Concurrent ledger
+changes abort the operation. Restore the backup with the app stopped to undo it.
+
+Reported costs, ambiguous/missing logs, incomplete turns and already recorded
+request IDs are skipped. Saved manual price contracts are retained; catalog
+tiers are selected again per request using the explicitly supplied snapshot.
+The preview fingerprint covers both old records and planned replacement costs.
+This is an explicit historical estimate, not invoice reconciliation or automatic
+recovery for agents that never persisted native usage.
+
 Hermes token deduplication and cost recovery are separate. A native session bill
 can supplement a local session only if all its local rows are unpriced and the
 whole session falls inside the period. It cannot be added to a partly priced

@@ -10,7 +10,7 @@ import { CodingAgentRunManager } from '../../packages/server/src/modules/coding-
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
 import { getSession } from '../../packages/server/src/modules/studio/repositories/session-store'
 import { getRecordedUsageTotals } from '../../packages/server/src/modules/studio/repositories/usage-store'
-import { DSH_STREAM_METHOD } from '../../packages/server/src/modules/coding-agents/services/dsh/stream-plugin'
+import { DSH_STREAM_METHOD, DSH_USAGE_METHOD } from '../../packages/server/src/modules/coding-agents/services/dsh/stream-plugin'
 
 vi.mock('child_process', async original => ({ ...await original<typeof import('child_process')>(), spawn: vi.fn() }))
 
@@ -66,6 +66,29 @@ describe('DSH chat runner', () => {
   function finish(child: ReturnType<typeof createChild>) {
     child.stdout.write(`${JSON.stringify({ id: child.sent.find(message => message.method === 'session/prompt').id, result: { stopReason: 'end_turn' } })}\n`)
   }
+  it.each(['global', 'scoped'])('accounts DSH calls once across resumed turns in %s mode', async mode => {
+    ;(manager as any).getBySession(sessionId).launch.mode = mode
+    const native = (child: ReturnType<typeof createChild>, requestId: string) => child.stdout.write(`${JSON.stringify({
+      method: DSH_USAGE_METHOD, params: { requestId, sessionId: 'child-or-compaction', model: 'actual-model', provider: 'actual-provider',
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 20 }, apiDuration: 0.5 },
+    })}\n`)
+    const child = await prompt('first')
+    native(child, 'one'); native(child, 'one')
+    native(child, 'two')
+    expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: mode === 'global' ? 20 : 0 })
+    finish(child)
+    await vi.waitFor(() => expect(child.exitCode).toBe(0))
+    const next = await prompt('second')
+    native(next, 'three')
+    finish(next)
+    await vi.waitFor(() => expect(next.exitCode).toBe(0))
+    expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject(mode === 'global'
+      ? { inputTokens: 30, outputTokens: 15, cacheReadTokens: 60, apiCalls: 3 }
+      : { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 })
+    if (mode === 'global') expect(emitted).toHaveBeenCalledWith(sessionId, 'run.completed', expect.objectContaining({
+      run_usage: expect.objectContaining({ inputTokens: 30, outputTokens: 5, tokensPerSecond: 10, speedSource: 'model' }),
+    }))
+  })
   it('maps ACP text, reasoning and tools and uses proxy billing without duplicate output', async () => {
     const child = await prompt('work')
     expect(child.sent.find(message => message.method === 'session/new').params._meta).toEqual({ agentPreset: 'minimal' })

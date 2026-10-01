@@ -92,4 +92,20 @@ describe('native usage normalization', () => {
     tracker.observeGrok({ type: 'error', usage: { input_tokens: 30, output_tokens: 5 }, modelUsage: { actual: { inputTokens: 30, outputTokens: 5, modelCalls: 2 } } })
     expect(tracker.rows('grok', { input_tokens: 10, output_tokens: 2 })).toMatchObject([{ model: 'actual', apiCalls: 2, usage: { inputTokens: 30, outputTokens: 5 } }])
   })
+
+  it.each(['claude-code', 'grok'])('keeps unpriced %s request boundaries when the final aggregate reconciles', agent => {
+    const tracker = new NativeTurnUsage()
+    for (const [id, input] of [['a', 150000], ['b', 180000]] as const) {
+      const usage = { input_tokens: input, output_tokens: 5 }
+      if (agent === 'grok') tracker.observeGrok({ type: 'usage', messageId: id, usage })
+      else tracker.observeClaude({ type: 'assistant', message: { id, model: 'actual', usage } })
+    }
+    const final = { usage: { input_tokens: 330000, output_tokens: 10 }, modelUsage: { actual: { inputTokens: 330000, outputTokens: 10 } } }
+    if (agent === 'grok') tracker.observeGrok({ type: 'end', ...final })
+    else tracker.observeClaude({ type: 'result', ...final })
+    expect(tracker.rows(agent, undefined)).toMatchObject([
+      { model: 'actual', apiCalls: 1, scope: 'model_call', usage: { inputTokens: 150000 } },
+      { model: 'actual', apiCalls: 1, scope: 'model_call', usage: { inputTokens: 180000 } },
+    ])
+  })
 })

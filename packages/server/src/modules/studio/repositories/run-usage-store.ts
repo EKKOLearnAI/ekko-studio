@@ -48,8 +48,8 @@ function readSummaries(sessionId: string, assistantIds: string[]): RunUsageSumma
 }
 
 /** Deduct the union of tool intervals only when their timing is complete. */
-function applyRunSpeedFallback(sessionId: string, runId: string): void {
-  getDb()?.prepare(`UPDATE ${RUN_USAGE_TABLE} SET tokens_per_second =
+function applyRunSpeedFallback(sessionId: string, runId: string, database = getDb()): void {
+  database?.prepare(`UPDATE ${RUN_USAGE_TABLE} SET tokens_per_second =
     CASE WHEN run_duration_seconds > COALESCE(tool_duration_seconds, 0)
       THEN ROUND(1.0 * output_tokens / (run_duration_seconds - COALESCE(tool_duration_seconds, 0)), 1) END
     WHERE session_id = ? AND run_id = ? AND model_duration_seconds IS NULL AND run_duration_seconds > 0`)
@@ -57,12 +57,12 @@ function applyRunSpeedFallback(sessionId: string, runId: string): void {
 }
 
 /** Late usage or pricing can refresh an existing completed run, never create one. */
-export function refreshCompletedRunUsage(sessionId: string, runId: string): void {
+export function refreshCompletedRunUsage(sessionId: string, runId: string, database = getDb()): void {
   if (!runId || !isSqliteAvailable()) return
-  getDb()?.prepare(`UPDATE ${RUN_USAGE_TABLE} SET (${metricColumns.join(', ')}, updated_at) = (
+  database?.prepare(`UPDATE ${RUN_USAGE_TABLE} SET (${metricColumns.join(', ')}, updated_at) = (
     SELECT ${aggregateMetrics}, ? FROM ${USAGE_TABLE} WHERE session_id = ? AND parent_run_id = ?
   ) WHERE session_id = ? AND run_id = ?`).run(Date.now(), sessionId, runId, sessionId, runId)
-  applyRunSpeedFallback(sessionId, runId)
+  applyRunSpeedFallback(sessionId, runId, database)
 }
 
 /** Save one completed run, deduplicated by its session and run identity. */

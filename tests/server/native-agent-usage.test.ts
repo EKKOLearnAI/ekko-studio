@@ -127,6 +127,58 @@ describe('global native usage accounting', () => {
     expect(getUsage(sessionId)).toBeUndefined()
   })
 
+  it('keeps Cursor native explicit USD cost alongside measured tokens', async () => {
+    start('cursor')
+    emit({ type: 'result', subtype: 'success', session_id: 'cursor-cost', result: 'done',
+      actual_cost_usd: 0.12, usage: { inputTokens: 10, outputTokens: 5 } })
+    close()
+    await vi.waitFor(() => expect(getLocalUsageStats(sessionId).cost).toBeCloseTo(0.12))
+    expect(getLocalUsageStats(sessionId).cost_coverage).toEqual({ reported: 1, estimated: 0, unknown: 0 })
+  })
+
+  it('attributes Codex requests to each resumed run and includes compression without replaying cumulative totals', async () => {
+    start('codex')
+    const dir = join(workspace, 'sessions', '2026', '10', '01')
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, 'rollout-native-thread.jsonl')
+    const events: any[] = [{ type: 'session_meta', payload: { id: 'native-thread', model_provider: 'openai' } }]
+    const turn = (id: string, counts: number[]) => {
+      const timestamp = new Date().toISOString()
+      events.push({ type: 'event_msg', timestamp, payload: { type: 'task_started', turn_id: id } },
+        { type: 'turn_context', timestamp, payload: { model: 'actual-model' } })
+      let total = 0
+      counts.forEach((input, index) => {
+        total += input
+        events.push({ type: 'token_usage_record', timestamp, payload: { thread_id: 'native-thread', turn_id: id,
+          response_id: `${id}-${index}`, usage: { input_tokens: input, output_tokens: 2, cached_input_tokens: 5 },
+          turn_token_usage: { input_tokens: total, output_tokens: (index + 1) * 2, cached_input_tokens: (index + 1) * 5 } } })
+      })
+      writeFileSync(file, events.map(row => JSON.stringify(row)).join('\n'))
+      emit({ type: 'thread.started', thread_id: 'native-thread' })
+      emit({ type: 'turn.completed', usage: { input_tokens: 999999, output_tokens: 999 } })
+      close()
+    }
+    turn('first', [10])
+    await vi.waitFor(() => expect(getRecordedUsageTotals(sessionId, 'coding_agent').apiCalls).toBe(1))
+    await new Promise(resolve => setTimeout(resolve, 2))
+    child.exitCode = null
+    manager.send(sessionId, 'next')
+    turn('second', [20, 30])
+    await vi.waitFor(() => expect(getRecordedUsageTotals(sessionId, 'coding_agent').apiCalls).toBe(3))
+    expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: 45, outputTokens: 6, cacheReadTokens: 15 })
+    expect(emitted).toHaveBeenCalledWith(sessionId, 'run.completed', expect.objectContaining({
+      run_usage: expect.objectContaining({ inputTokens: 50, outputTokens: 4 }),
+    }))
+  })
+
+  it.each(['response.failed', 'response.incomplete'] as const)('retains measured scoped usage on %s and deduplicates terminal events', type => {
+    start('codex', 'scoped')
+    const data = { response: { id: 'request-error', usage: { input_tokens: 20, output_tokens: 4, input_tokens_details: { cached_tokens: 10 } } } }
+    manager.handleProxyUsageEvent(sessionId, { type, data } as any)
+    manager.handleProxyUsageEvent(sessionId, { type: 'response.completed', data } as any)
+    expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: 10, outputTokens: 4, cacheReadTokens: 10, apiCalls: 1 })
+  })
+
   it('identifies Cursor when its executable is missing', async () => {
     start('cursor')
     child.emit('error', Object.assign(new Error('missing'), { code: 'ENOENT' }))
@@ -229,6 +281,19 @@ describe('global native usage accounting', () => {
     emit({ type: 'error', message: 'upstream failed' })
     close(1)
     expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: 30, outputTokens: 5 })
+  })
+
+  it.each(['claude-code', 'grok'])('persists measured %s calls when cancelled before a final result', agent => {
+    start(agent)
+    if (agent === 'claude-code') {
+      emit({ type: 'stream_event', event: { type: 'message_start', message: {
+        id: 'finished-call', model: 'actual', usage: { input_tokens: 10, output_tokens: 0, cache_read_input_tokens: 20 },
+      } } })
+      emit({ type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 5 } } })
+    } else emit({ type: 'usage', messageId: 'finished-call', usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 20 } })
+    manager.stop(sessionId)
+    close()
+    expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: 10, outputTokens: 5, cacheReadTokens: 20, apiCalls: 1 })
   })
 
   it('waits for native Codex stdout to drain and retains measured usage on a failed exit', () => {

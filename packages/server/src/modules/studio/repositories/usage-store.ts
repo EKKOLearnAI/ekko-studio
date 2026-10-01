@@ -46,6 +46,7 @@ export function updateUsage(
   data: {
     runId?: string
     parentRunId?: string
+    createdAt?: number
     apiDuration?: number
     source?: string
     agent?: string
@@ -69,7 +70,8 @@ export function updateUsage(
   const cacheReadTokens = data.cacheReadTokens ?? 0
   const cacheWriteTokens = data.cacheWriteTokens ?? 0
   const reasoningTokens = data.reasoningTokens ?? 0
-  const now = Date.now()
+  const now = typeof data.createdAt === 'number' && Number.isSafeInteger(data.createdAt) && data.createdAt > 0
+    ? data.createdAt : Date.now()
   const model = data.model || ''
   const provider = data.provider || ''
   const profile = data.profile || 'default'
@@ -130,7 +132,7 @@ export function updateUsage(
     if (hasUpdatedAtColumn()) {
       columns.push('updated_at')
       values.push('?')
-      params.push(now)
+      params.push(Date.now())
     }
     const result = db.prepare(
       `INSERT OR IGNORE INTO ${TABLE} (${columns.join(', ')}) VALUES (${values.join(', ')})`,

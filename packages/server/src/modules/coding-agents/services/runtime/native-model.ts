@@ -4,7 +4,7 @@ import { join } from 'path'
 import { createInterface } from 'readline'
 import { DatabaseSync } from 'node:sqlite'
 
-async function findRollout(root: string, sessionId: string, depth = 0): Promise<string | undefined> {
+export async function findRollout(root: string, sessionId: string, depth = 0): Promise<string | undefined> {
   if (depth > 3) return
   let entries
   try { entries = await readdir(root, { withFileTypes: true }) } catch { return }

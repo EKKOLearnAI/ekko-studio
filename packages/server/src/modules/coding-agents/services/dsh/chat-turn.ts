@@ -7,6 +7,7 @@ import { updateManagedPromptFileSync } from '../prompt-file'
 import { isolatedCodingAgentChildEnv } from '../runtime/child-env'
 import { DshAcpTurn } from './acp-turn'
 import { DSH_MODEL_PROVIDER } from './runtime-config'
+import { normalizeTokenUsage, recordSessionUsage } from '../../../studio/public/usage'
 
 export interface DshTurnHost {
   spawn(command: string, args: string[], options: { cwd: string; pipeStdin: boolean; env: NodeJS.ProcessEnv }): ChildProcess
@@ -50,6 +51,20 @@ export function startDshChatTurn(run: ManagedCodingAgentRun, input: string, syst
   run.currentChild = child
   const turn = new DshAcpTurn(child, {
     permissionRequired: run.launch.approvalRequired,
+    usage: event => {
+      // Scoped calls are already owned by the provider proxy ledger.
+      if (run.launch.mode !== 'global' || !event || typeof event.requestId !== 'string' || !event.requestId) return
+      const usage = normalizeTokenUsage(event.usage)
+      if (usage.isEstimated) return
+      recordSessionUsage({
+        sessionId: run.launch.sessionId, runId: `dsh:${event.requestId}`,
+        parentRunId: run.usageRunId || run.id, source: 'coding_agent', agent: 'dsh',
+        profile: run.launch.profile, usageScope: 'model_call', apiCalls: 1,
+        apiDuration: event.apiDuration, usage,
+        model: typeof event.model === 'string' ? event.model : '',
+        provider: typeof event.provider === 'string' ? event.provider : '', isEstimated: false,
+      })
+    },
     session: id => {
       run.launch.agentNativeSessionId = id
       run.nativeResumeReady = true
