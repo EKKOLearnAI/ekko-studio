@@ -598,6 +598,9 @@ export async function handleBridgeRun(
   const storageRole = shouldStoreInputInsteadOfDisplay ? 'user' : displayRole
   const displayRoleForStorage = shouldStoreInputInsteadOfDisplay ? displayRole : null
   const displayContentForStorage = shouldStoreInputInsteadOfDisplay ? inputStr : null
+  // Only a turn that stored its input as a user row may cut the latest user row from history;
+  // otherwise that row is the previous human turn (plugin notices, background callbacks, plain commands).
+  const currentInputStoredAsUser = shouldPersistUserMessage && storageRole === 'user'
   let messageId: number | string | undefined
 
   if (shouldPersistUserMessage) {
@@ -751,6 +754,7 @@ export async function handleBridgeRun(
         return contextTokens
       },
       currentInputTokens,
+      currentInputStoredAsUser,
     )
   const bridgeHistory = history
   let backgroundNotificationAccepted = false
@@ -883,6 +887,7 @@ export async function handleBridgeRun(
         shouldPersistUserMessage && displayRole === 'user',
         data.model_groups,
         runMetadata,
+        currentInputStoredAsUser,
       )
       if (chunk.done) {
         sawTerminalChunk = true
@@ -929,6 +934,7 @@ export async function handleBridgeRun(
         shouldPersistUserMessage && displayRole === 'user',
         data.model_groups,
         runMetadata,
+        currentInputStoredAsUser,
       )
     }
   } catch (err: any) {
@@ -1273,6 +1279,7 @@ async function applyBridgeChunkAsync(
   currentInputIncludedInDb = true,
   modelGroups?: RunModelGroup[],
   runMetadata?: BridgeRunMetadata,
+  currentInputStoredAsUser = true,
 ): Promise<void> {
   if (state.activeRunMarker !== runMarker) {
     bridgeLogger.info({
@@ -1548,7 +1555,7 @@ async function applyBridgeChunkAsync(
       const bridgeHistory = await buildDbSnapshotAwareHistory(
         sessionId,
         profile,
-        { excludeLastUser: true },
+        { excludeLastUser: currentInputStoredAsUser },
         { model: modelContext.model, provider: modelContext.provider },
       )
       const bridgeUsage = estimateUsageTokensFromMessages(bridgeHistory)
@@ -1587,6 +1594,7 @@ async function applyBridgeChunkAsync(
             profile,
             ev.messages as ChatMessage[],
             tokenCount,
+            currentInputStoredAsUser,
           )
           state.bridgeCompressionResults = state.bridgeCompressionResults || {}
           state.bridgeCompressionResults[String(ev.request_id)] = compressed
