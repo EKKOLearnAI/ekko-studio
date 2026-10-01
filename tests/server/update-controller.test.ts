@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { delimiter, dirname, join } from 'path'
 
+// Keep periodic log rotation outside the updater's restart-timer assertions.
+vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({
+  logger: { warn: vi.fn() },
+}))
+
 type UpdateControllerMocks = {
   execFile: ReturnType<typeof vi.fn>
   execFileSync: ReturnType<typeof vi.fn>
