@@ -17,6 +17,84 @@ const execOpts = { windowsHide: true }
 // Backend command timeout (default 30s)
 const BACKEND_TIMEOUT = 30_000
 
+/**
+ * Upper bound for a single local filesystem operation, in milliseconds. `0` disables
+ * the bound, which is what macOS and Windows keep.
+ *
+ * Linux is where an uninterruptible mount parks a libuv worker forever: a path can sit
+ * on a FUSE or network mount (rclone mount, sshfs, a WebDAV mount, a disk that spun
+ * down) that stops answering mid-syscall, and Node cannot cancel a pending `fs` call:
+ *
+ *   ksys_read -> vfs_read -> fuse_file_read_iter -> filemap_read -> folio_wait_bit_common
+ *
+ * With the default pool of four threads a handful of unresponsive files starve every
+ * other file operation in the process: the port is still listening, `/health` is
+ * silent, and `kill -9` does not help because the process sits in `D` state.
+ *
+ * The file routes already map `backend_timeout` to HTTP 504 for the docker/ssh
+ * backends; this lets the local provider report the same condition. Other platforms
+ * keep their previous unbounded behaviour and can opt in with `LOCAL_FS_TIMEOUT_MS`.
+ */
+export const LOCAL_FS_TIMEOUT_MS = resolveLocalFsTimeoutMs()
+
+function resolveLocalFsTimeoutMs(): number {
+  const configured = Number.parseInt(process.env.LOCAL_FS_TIMEOUT_MS || '', 10)
+  if (Number.isFinite(configured) && configured >= 0) return configured
+  return process.platform === 'linux' ? 30_000 : 0
+}
+
+/** How many directory entries are stat'ed in parallel while the bound is armed. */
+const LIST_DIR_STAT_CONCURRENCY = 8
+
+/**
+ * Resolve `operation`, but reject with `backend_timeout` if it takes longer than
+ * `timeoutMs`. The underlying syscall keeps running — this bounds the caller, not the
+ * kernel — but the request no longer hangs forever. `timeoutMs <= 0` returns the
+ * operation untouched.
+ *
+ * @internal — exported for tests
+ */
+export function withLocalFsTimeout<T>(
+  operation: Promise<T>,
+  action: string,
+  timeoutMs: number = LOCAL_FS_TIMEOUT_MS,
+): Promise<T> {
+  if (!(timeoutMs > 0)) return operation
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(Object.assign(
+        new Error(`Local filesystem ${action} timed out after ${timeoutMs}ms; the path may be on an unresponsive mount`),
+        { code: 'backend_timeout' },
+      ))
+    }, timeoutMs)
+    timer.unref?.()
+  })
+  return Promise.race([operation, timedOut]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
+/** Run `worker` over `items` with at most `limit` in flight, preserving order. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = cursor++
+      if (index >= items.length) return
+      results[index] = await worker(items[index])
+    }
+  })
+  await Promise.all(runners)
+  return results
+}
+
 export interface FileEntry {
   name: string
   path: string       // relative to hermes home
@@ -129,22 +207,34 @@ export function resolveProfileFilePath(relativePath: string, profile?: string): 
 
 export class LocalFileProvider implements FileProvider {
   type: BackendType = 'local'
-  constructor(private homeDir = getActiveProfileDir()) {}
+  private operationTimeoutMs: number
+
+  constructor(
+    private homeDir = getActiveProfileDir(),
+    options: { operationTimeoutMs?: number } = {},
+  ) {
+    this.operationTimeoutMs = options.operationTimeoutMs ?? LOCAL_FS_TIMEOUT_MS
+  }
+
+  /** Bound a filesystem call so an unresponsive mount cannot park the request forever. */
+  private run<T>(operation: Promise<T>, action: string): Promise<T> {
+    return withLocalFsTimeout(operation, action, this.operationTimeoutMs)
+  }
 
   async readFile(filePath: string): Promise<Buffer> {
     const p = validatePath(filePath)
-    const s = await fsStat(p)
+    const s = await this.run(fsStat(p), `stat ${p}`)
     if (!s.isFile()) throw Object.assign(new Error('Not a file'), { code: 'not_found' })
     if (s.size > MAX_DOWNLOAD_SIZE) {
       throw Object.assign(new Error(`File too large: ${s.size} bytes`), { code: 'file_too_large' })
     }
-    return readFile(p)
+    return this.run(readFile(p), `read ${p}`)
   }
 
   async exists(filePath: string): Promise<boolean> {
     try {
       const p = validatePath(filePath)
-      const s = await fsStat(p)
+      const s = await this.run(fsStat(p), `stat ${p}`)
       return s.isFile()
     } catch {
       return false
@@ -153,30 +243,34 @@ export class LocalFileProvider implements FileProvider {
 
   async listDir(dirPath: string): Promise<FileEntry[]> {
     const p = validatePath(dirPath)
-    const entries = await readdir(p, { withFileTypes: true })
-    const results: FileEntry[] = []
-    for (const entry of entries) {
+    const entries = await this.run(readdir(p, { withFileTypes: true }), `readdir ${p}`)
+    // While the bound is armed, stat a bounded number of entries at once so one
+    // unresponsive entry cannot serialize the whole listing. With the bound disabled
+    // (macOS/Windows default) this stays the original one-entry-at-a-time walk.
+    const limit = this.operationTimeoutMs > 0 ? LIST_DIR_STAT_CONCURRENCY : 1
+    const results = await mapWithConcurrency(entries, limit, async entry => {
       try {
         const fullPath = resolve(p, entry.name)
-        const s = await fsStat(fullPath)
+        const s = await this.run(fsStat(fullPath), `stat ${fullPath}`)
         const relPath = relativePathFromBase(fullPath, this.homeDir) ?? entry.name
-        results.push({
+        return {
           name: entry.name,
           path: relPath,
           isDir: s.isDirectory(),
           size: s.size,
           modTime: s.mtime.toISOString(),
-        })
+        }
       } catch {
         // skip entries that fail to stat
+        return null
       }
-    }
-    return results
+    })
+    return results.filter((entry): entry is FileEntry => entry !== null)
   }
 
   async stat(filePath: string): Promise<FileStat> {
     const p = validatePath(filePath)
-    const s = await fsStat(p)
+    const s = await this.run(fsStat(p), `stat ${p}`)
     const relPath = relativePathFromBase(p, this.homeDir) ?? basename(p)
     return {
       name: basename(p),
@@ -189,38 +283,38 @@ export class LocalFileProvider implements FileProvider {
 
   async writeFile(filePath: string, content: Buffer): Promise<void> {
     const p = validatePath(filePath)
-    await fsWriteFile(p, content)
+    await this.run(fsWriteFile(p, content), `write ${p}`)
   }
 
   async deleteFile(filePath: string): Promise<void> {
     const p = validatePath(filePath)
-    const s = await fsStat(p)
+    const s = await this.run(fsStat(p), `stat ${p}`)
     if (!s.isFile()) throw Object.assign(new Error('Not a file'), { code: 'not_found' })
-    await rm(p)
+    await this.run(rm(p), `delete ${p}`)
   }
 
   async deleteDir(dirPath: string): Promise<void> {
     const p = validatePath(dirPath)
-    const s = await fsStat(p)
+    const s = await this.run(fsStat(p), `stat ${p}`)
     if (!s.isDirectory()) throw Object.assign(new Error('Not a directory'), { code: 'not_found' })
-    await rm(p, { recursive: true })
+    await this.run(rm(p, { recursive: true }), `delete ${p}`)
   }
 
   async renameFile(oldPath: string, newPath: string): Promise<void> {
     const op = validatePath(oldPath)
     const np = validatePath(newPath)
-    await rename(op, np)
+    await this.run(rename(op, np), `rename ${op}`)
   }
 
   async mkDir(dirPath: string): Promise<void> {
     const p = validatePath(dirPath)
-    await mkdir(p, { recursive: true })
+    await this.run(mkdir(p, { recursive: true }), `mkdir ${p}`)
   }
 
   async copyFile(srcPath: string, destPath: string): Promise<void> {
     const sp = validatePath(srcPath)
     const dp = validatePath(destPath)
-    await fsCopyFile(sp, dp)
+    await this.run(fsCopyFile(sp, dp), `copy ${sp}`)
   }
 }
 
