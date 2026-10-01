@@ -1550,6 +1550,42 @@ describe('coding agent launch preparation', () => {
     expect(readFileSync(second.promptFile!, 'utf8')).toContain('ROLE_second')
   })
 
+  it('maps credential_pool Codex OAuth into ephemeral OpenCode native auth content', async () => {
+    const home = makeHome()
+    const profileDir = join(home, 'profiles', 'default')
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, 'auth.json'), JSON.stringify({
+      providers: {
+        'openai-codex': { tokens: { refresh_token: 'refresh-token' } },
+      },
+      credential_pool: {
+        'openai-codex': [{ access_token: 'access-token', refresh_token: 'refresh-token' }],
+      },
+    }))
+
+    const result = await prepareCodingAgentLaunch('opencode', {
+      mode: 'scoped', profile: 'default', provider: 'openai-codex', model: 'gpt-5-codex',
+      baseUrl: 'https://chatgpt.com/backend-api/codex', apiMode: 'codex_responses',
+      sessionId: 'native-oauth', agentSessionId: 'native-oauth-run',
+    })
+
+    expect(JSON.parse(result.env.OPENCODE_AUTH_CONTENT)).toEqual({
+      'openai-codex': { type: 'oauth', access: 'access-token', refresh: 'refresh-token' },
+    })
+    expect(result.env.HERMES_OPENCODE_API_KEY).toBeUndefined()
+    expect(result.env.OPENCODE_CONFIG_CONTENT).not.toContain('access-token')
+    expect(result.env.OPENCODE_CONFIG_CONTENT).not.toContain('refresh-token')
+  })
+
+  it('fails closed when native OpenCode OAuth credentials are missing', async () => {
+    makeHome()
+    await expect(prepareCodingAgentLaunch('opencode', {
+      mode: 'scoped', profile: 'default', provider: 'openai-codex', model: 'gpt-5-codex',
+      baseUrl: 'https://chatgpt.com/backend-api/codex', apiMode: 'codex_responses',
+      sessionId: 'missing-native-oauth', agentSessionId: 'missing-native-oauth-run',
+    })).rejects.toThrow('OpenCode native OAuth credentials are incomplete')
+  })
+
   it('launches scoped OpenCode through the Responses proxy without writing the upstream key', async () => {
     const home = makeHome()
     const globalOpenCodeHome = join(home, 'global-home', '.config', 'opencode')
