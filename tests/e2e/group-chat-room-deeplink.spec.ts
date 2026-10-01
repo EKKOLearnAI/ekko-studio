@@ -627,6 +627,195 @@ test('keeps populated group header actions within the available window width', a
   }
 })
 
+for (const { label, platform, width } of [
+  { label: 'browser', width: 1280 },
+  { label: 'macOS', platform: 'darwin' as const, width: 1280 },
+  { label: 'Windows', platform: 'win32' as const, width: 1280 },
+  { label: 'mobile', width: 390 },
+]) {
+  test(`keeps the Agent drawer header above the application header on ${label}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await setup(page, '/#/hermes/group-chat/room/room-alpha', platform)
+
+    for (const editing of [false, true]) {
+      await page.locator(editing ? '.agent-avatar-rail-agent' : '.agent-avatar-rail-add').first().click()
+      const drawer = page.locator('.n-drawer').filter({ hasText: editing ? 'Edit Worker' : 'Add Agent' })
+      await expect(drawer).toBeVisible()
+      for (const selector of ['.n-drawer-header__main', '.n-drawer-header__close']) {
+        await expect.poll(() => drawer.locator(selector).evaluate(element => {
+          const box = element.getBoundingClientRect()
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+          return hit !== null && element.contains(hit)
+        })).toBe(true)
+      }
+
+      await drawer.getByRole('button', { name: editing ? 'Manage presets' : 'Choose preset' }).click()
+      const presetDialog = page.locator('.agent-preset-dialog')
+      await expect(presetDialog).toBeVisible()
+      await presetDialog.getByPlaceholder('Search presets').fill('Reviewer')
+      await presetDialog.getByRole('button', { name: /Preset Reviewer/ }).click()
+      await presetDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(presetDialog).toBeHidden()
+      await expect(drawer).toBeVisible()
+      await expect.poll(() => drawer.evaluate(element => Math.round(element.getBoundingClientRect().right))).toBe(width)
+      if (!editing && label === 'browser') {
+        await page.screenshot({ path: test.info().outputPath('agent-drawer-header.png'), animations: 'disabled' })
+      }
+      await drawer.locator('.n-drawer-header__close').click()
+      await expect(drawer).toBeHidden()
+    }
+  })
+}
+
+for (const editing of [false, true]) {
+  for (const width of [1280, 390]) {
+    test(`keeps the Agent drawer mounted when ${editing ? 'managing' : 'choosing'} presets at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 })
+      await setup(page, '/#/hermes/group-chat/room/room-alpha')
+      await page.locator(editing ? '.agent-avatar-rail-agent' : '.agent-avatar-rail-add').first().click()
+      const drawer = page.locator('.n-drawer').filter({ hasText: editing ? 'Edit Worker' : 'Add Agent' })
+      await expect(drawer).toBeVisible()
+      await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+      const nameInput = drawer.getByPlaceholder('Custom name (leave empty to use profile name)')
+      await nameInput.fill('Keep this draft')
+      await drawer.evaluate(element => { (window as any).__PW_AGENT_DRAWER_NODE__ = element })
+      const presetTrigger = drawer.getByRole('button', { name: editing ? 'Manage presets' : 'Choose preset' })
+      await presetTrigger.click()
+      const presetDialog = page.locator('.agent-preset-dialog')
+      await expect(presetDialog).toBeVisible()
+      expect(await drawer.evaluate(element => element === (window as any).__PW_AGENT_DRAWER_NODE__)).toBe(true)
+
+      const searchInput = presetDialog.getByPlaceholder('Search presets')
+      await searchInput.fill('Reviewer')
+      await expect(searchInput).toBeFocused()
+      await page.keyboard.press('Tab')
+      expect(await presetDialog.evaluate(element => element.contains(document.activeElement))).toBe(true)
+      await page.keyboard.press('Escape')
+      await expect(presetDialog).toBeHidden()
+      await expect(drawer).toBeVisible()
+      expect(await drawer.evaluate(element => element === (window as any).__PW_AGENT_DRAWER_NODE__)).toBe(true)
+      await expect(nameInput).toHaveValue('Keep this draft')
+      await expect(presetTrigger).toBeFocused()
+
+      await presetTrigger.click()
+      await expect(presetDialog).toBeVisible()
+      await presetDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(presetDialog).toBeHidden()
+      expect(await drawer.evaluate(element => element === (window as any).__PW_AGENT_DRAWER_NODE__)).toBe(true)
+      await expect(nameInput).toHaveValue('Keep this draft')
+      await page.keyboard.press('Escape')
+      await expect(drawer).toBeHidden()
+    })
+  }
+}
+
+for (const endpoint of ['/api/hermes/profiles', '/api/hermes/available-models', '/api/agents/status']) {
+  test(`opens the Agent drawer before ${endpoint} finishes and preserves a reopened edit`, async ({ page }) => {
+    await setup(page, '/#/hermes/group-chat/room/room-alpha')
+    await page.locator('.agent-avatar-rail-add').click()
+    const addDrawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+    await expect(addDrawer).toBeVisible()
+    await expect(addDrawer.locator('.agent-form-loading')).toBeHidden()
+    await addDrawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(addDrawer).toBeHidden()
+    await page.clock.setFixedTime(Date.now() + 31_000)
+
+    let releaseRequest!: () => void
+    const responseGate = new Promise<void>(resolve => { releaseRequest = resolve })
+    let requests = 0
+    await page.route(`**${endpoint}`, async route => {
+      requests++
+      await responseGate
+      await route.fallback()
+    })
+    try {
+      await page.locator('.agent-avatar-rail-add').click()
+      await expect.poll(() => requests).toBe(1)
+      await expect(addDrawer).toBeVisible({ timeout: 1000 })
+      await expect(addDrawer.locator('.agent-form-loading')).toBeVisible()
+      await expect(addDrawer.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
+      await addDrawer.getByPlaceholder('Custom name (leave empty to use profile name)').fill('Draft while loading')
+      if (endpoint === '/api/hermes/profiles') {
+        await page.screenshot({ path: test.info().outputPath('agent-drawer-loading.png'), animations: 'disabled' })
+      }
+      await addDrawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(addDrawer).toBeHidden()
+
+      await page.getByRole('button', { name: 'Worker', exact: true }).click()
+      const editDrawer = page.locator('.n-drawer').filter({ hasText: 'Edit Worker' })
+      await expect(editDrawer).toBeVisible({ timeout: 1000 })
+      await expect(editDrawer.locator('.agent-form-loading')).toBeVisible()
+      const nameInput = editDrawer.getByPlaceholder('Custom name (leave empty to use profile name)')
+      await expect(nameInput).toHaveValue('Worker')
+      await nameInput.fill('Edited while loading')
+      releaseRequest()
+      await expect(editDrawer.locator('.agent-form-loading')).toBeHidden()
+      await expect(nameInput).toHaveValue('Edited while loading')
+      await expect(editDrawer.getByRole('button', { name: 'Update', exact: true })).toBeEnabled()
+      expect(requests).toBe(1)
+      await editDrawer.locator('.n-drawer-header__close').click()
+      await expect(editDrawer).toBeHidden()
+      await expect(addDrawer).toBeHidden()
+    } finally {
+      releaseRequest()
+    }
+  })
+}
+
+test('loads Agent presets only when the preset dialog is opened', async ({ page }) => {
+  await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  let releaseRequest!: () => void
+  const responseGate = new Promise<void>(resolve => { releaseRequest = resolve })
+  let requests = 0
+  await page.route('**/api/studio/group-chat/agent-presets', async route => {
+    requests++
+    await responseGate
+    await route.fallback()
+  })
+  try {
+    await page.locator('.agent-avatar-rail-add').click()
+    const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+    await expect(drawer).toBeVisible({ timeout: 1000 })
+    await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+    expect(requests).toBe(0)
+    const nameInput = drawer.getByPlaceholder('Custom name (leave empty to use profile name)')
+    await nameInput.fill('Draft Agent')
+    await drawer.getByRole('button', { name: 'Choose preset' }).click()
+    const presetDialog = page.locator('.agent-preset-dialog')
+    await expect.poll(() => requests).toBe(1)
+    await expect(presetDialog.getByText('Loading presets…', { exact: true })).toBeVisible()
+    await presetDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(nameInput).toHaveValue('Draft Agent')
+    await drawer.getByRole('button', { name: 'Choose preset' }).click()
+    await expect(presetDialog.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled()
+    releaseRequest()
+    await presetDialog.getByRole('button', { name: /Preset Reviewer/ }).click()
+    await presetDialog.getByRole('button', { name: 'Apply', exact: true }).click()
+    await expect(nameInput).toHaveValue('Preset Reviewer')
+    expect(requests).toBe(1)
+  } finally {
+    releaseRequest()
+  }
+})
+
+test('keeps the Agent drawer closable when Agent status fails to load', async ({ page }) => {
+  await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  await page.locator('.agent-avatar-rail-add').click()
+  const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await expect(drawer).toBeVisible()
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(drawer).toBeHidden()
+  await page.route('**/api/agents/status', route => route.fulfill({ status: 500, json: { error: 'Status unavailable' } }))
+  await page.locator('.agent-avatar-rail-add').click()
+  await expect(drawer).toBeVisible()
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+  await expect(drawer.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
+  await drawer.getByPlaceholder('Custom name (leave empty to use profile name)').fill('Draft Agent')
+  await drawer.locator('.n-drawer-header__close').click()
+  await expect(drawer).toBeHidden()
+})
+
 test.describe('group chat room deep links', () => {
   // This file already covers multi-tab behavior explicitly; keeping the deep-link/socket fixture serial
   // avoids local fullyParallel races where early tests see the room list before route-room selection settles.
@@ -1272,6 +1461,7 @@ test.describe('group chat room deep links', () => {
     const api = await setup(page, '/#/hermes/group-chat/room/room-alpha')
     await page.locator('.agent-avatar-rail-add').click()
     const modal = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+    await expect(modal.locator('.agent-form-loading')).toBeHidden()
     await modal.locator('.n-select').first().click()
     await page.getByText('DeepSeek Harness', { exact: true }).last().click()
     await expect(modal.locator('img[src="/coding-agents/deepseek.svg"]')).toBeVisible()
@@ -1849,6 +2039,7 @@ test('group-chat Agent picker follows the single-chat order', async ({ page }) =
   await setup(page, '/#/hermes/group-chat/room/room-alpha')
   await page.locator('.agent-avatar-rail-add').click()
   const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
   await drawer.locator('.n-select').first().click()
   await expect.poll(async () => (await page.locator('.n-base-select-option__content:visible').allTextContents())
     .map(label => label.split(' · ')[0])).toEqual(['Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor'])
