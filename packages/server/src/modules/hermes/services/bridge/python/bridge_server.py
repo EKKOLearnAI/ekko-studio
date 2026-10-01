@@ -755,6 +755,7 @@ class BridgeServer:
         )
         try:
             server.listen(16)
+            self.pool.install_plugin_message_host()
             server.settimeout(0.2)
             print(json.dumps({"event": "ready", "endpoint": self.endpoint}), flush=True)
 
@@ -788,6 +789,7 @@ class BridgeServer:
                         except OSError:
                             pass
         finally:
+            self.pool.clear_plugin_message_host()
             restore_signals()
             server.close()
             if self.endpoint.startswith("ipc://"):
