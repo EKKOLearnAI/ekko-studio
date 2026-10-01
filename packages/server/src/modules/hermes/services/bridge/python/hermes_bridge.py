@@ -84,6 +84,7 @@ _POOL_PATCH_NAMES = (
     "_install_execute_code_approval_memory_patch",
     "_jsonable",
     "_load_cfg",
+    "_load_disabled_toolsets",
     "_load_enabled_toolsets",
     "_load_reasoning_config",
     "_load_service_tier",
