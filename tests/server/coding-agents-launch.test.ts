@@ -12,7 +12,6 @@ import {
   codexProxyModels,
   codexProxyResponses,
   isAuthorizedCodexProxyRequest,
-  normalizeGrokChatCompletionsRequest,
   normalizeGrokResponsesRequest,
   registerCodexProxyTarget,
 } from '../../packages/server/src/modules/coding-agents/services/codex/proxy'
@@ -349,25 +348,6 @@ describe('coding agent launch preparation', () => {
     })
     expect(body.input[0].role).toBe('system')
     expect(body.max_output_tokens).toBe(4096)
-  })
-
-  it('maps Grok Chat Completions system messages to developer messages', () => {
-    const body = {
-      model: 'grok-test',
-      messages: [
-        { role: 'system', content: 'Project rules' },
-        { role: 'user', content: 'Hello' },
-      ],
-    }
-
-    expect(normalizeGrokChatCompletionsRequest(body)).toEqual({
-      ...body,
-      messages: [
-        { role: 'developer', content: 'Project rules' },
-        body.messages[1],
-      ],
-    })
-    expect(body.messages[0].role).toBe('system')
   })
 
   it('gates Codex tool_search feature flags by CLI version', () => {
@@ -3353,40 +3333,75 @@ describe('coding agent launch preparation', () => {
     expect(forwarded).not.toHaveProperty('max_output_tokens')
   })
 
-  it('normalizes Grok requests before forwarding to Chat Completions providers', async () => {
-    const target = registerCodexProxyTarget({
-      profile: 'default',
-      provider: 'custom',
-      model: 'grok-chat-test',
-      baseUrl: 'https://api.example.com/v1',
-      apiKey: 'sk-upstream',
-      apiMode: 'chat_completions',
-      agentId: 'grok',
-    })
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      id: 'chatcmpl_grok',
-      choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }],
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-    vi.stubGlobal('fetch', fetchMock)
+  it.each([
+    { provider: 'deepseek', model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com' },
+    { provider: 'custom:relay', model: 'relay-model', baseUrl: 'https://api.example.com/v1' },
+  ].flatMap(target => [false, true].map(stream => ({ ...target, stream }))))(
+    'keeps Grok instructions as system messages for $provider Chat Completions (stream=$stream)',
+    async ({ provider, model, baseUrl, stream }) => {
+      const target = registerCodexProxyTarget({
+        profile: 'default',
+        provider,
+        model,
+        baseUrl,
+        apiKey: 'sk-upstream',
+        apiMode: 'chat_completions',
+        agentId: 'grok',
+      })
+      const fetchMock = vi.fn(async (_url: string, init: any) => {
+        const request = JSON.parse(init.body)
+        if (request.messages.some((message: any) => message.role === 'developer')) {
+          return new Response(JSON.stringify({ error: { message: 'messages[0].role: unknown variant `developer`' } }), {
+            status: 422, headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        const choice = { role: 'assistant', content: 'ok' }
+        const response = {
+          id: 'chatcmpl_grok', model,
+          choices: [{ index: 0, finish_reason: 'stop', ...(stream ? { delta: choice } : { message: choice }) }],
+        }
+        return new Response(stream ? `data: ${JSON.stringify(response)}\n\ndata: [DONE]\n\n` : JSON.stringify(response), {
+          status: 200, headers: { 'Content-Type': stream ? 'text/event-stream' : 'application/json' },
+        })
+      })
+      vi.stubGlobal('fetch', fetchMock)
 
-    await codexProxyResponses(makeProxyContext(target.routeKey, target.token, {
-      instructions: 'Top-level rules',
-      max_output_tokens: 4096,
-      input: [
-        { role: 'system', content: [{ type: 'input_text', text: 'Project rules' }] },
-        { role: 'user', content: [{ type: 'input_text', text: 'Hello' }] },
-      ],
-    }))
+      const body = {
+        stream,
+        instructions: 'Top-level rules',
+        max_output_tokens: 4096,
+        input: [
+          { role: 'system', content: [{ type: 'input_text', text: 'Project rules' }] },
+          { role: 'user', content: [{ type: 'input_text', text: 'Hello' }] },
+          { role: 'developer', content: [{ type: 'input_text', text: 'Follow-up rules' }] },
+        ],
+      }
+      const originalBody = structuredClone(body)
+      const ctx = makeProxyContext(target.routeKey, target.token, body)
+      await codexProxyResponses(ctx)
 
-    const forwarded = JSON.parse(fetchMock.mock.calls[0][1].body)
-    expect(forwarded.messages[0]).toMatchObject({
-      role: 'developer',
-      content: expect.stringContaining('Top-level rules'),
-    })
-    expect(forwarded.messages[0].content).toContain('Project rules')
-    expect(forwarded).not.toHaveProperty('max_tokens')
-    expect(forwarded).not.toHaveProperty('max_output_tokens')
-  })
+      expect(ctx.status).not.toBe(422)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const forwarded = JSON.parse(fetchMock.mock.calls[0][1].body)
+      expect(forwarded).toMatchObject({ model, stream, messages: [
+        { role: 'system', content: 'Top-level rules\n\nProject rules\n\nFollow-up rules' },
+        { role: 'user', content: 'Hello' },
+      ] })
+      expect(forwarded).not.toHaveProperty('max_tokens')
+      expect(forwarded).not.toHaveProperty('max_output_tokens')
+      expect(body).toEqual(originalBody)
+      if (stream) {
+        const chunks: string[] = []
+        for await (const chunk of ctx.body) chunks.push(String(chunk))
+        expect(chunks.join('')).toContain('event: response.completed')
+        expect(chunks.join('')).toContain('"text":"ok"')
+      } else {
+        expect(ctx.body).toMatchObject({ status: 'completed', output: [
+          { role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] },
+        ] })
+      }
+    },
+  )
 
   it('normalizes image response annotations before streaming them to Grok', async () => {
     const target = registerCodexProxyTarget({

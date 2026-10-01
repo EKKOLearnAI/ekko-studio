@@ -125,17 +125,6 @@ export function normalizeGrokResponsesRequest(body: any): any {
   return withoutMaxOutputTokens
 }
 
-export function normalizeGrokChatCompletionsRequest(body: any): any {
-  if (!body || typeof body !== 'object' || !Array.isArray(body.messages)) return body
-  let changed = false
-  const messages = body.messages.map((message: any) => {
-    if (!message || typeof message !== 'object' || message.role !== 'system') return message
-    changed = true
-    return { ...message, role: 'developer' }
-  })
-  return changed ? { ...body, messages } : body
-}
-
 function nativeResponsesBody(target: CodexProxyTarget, body: any, stream?: boolean): any {
   const normalized = target.agentId === 'grok' ? normalizeGrokResponsesRequest(body) : body
   return truncateResponsesToolOutputs({
@@ -152,8 +141,9 @@ async function callOpenAiChat(target: CodexProxyTarget, body: any): Promise<any>
     ;(err as any).status = 501
     throw err
   }
-  const adapted = responsesToOpenAiChat(body, target)
-  const chatBody = target.agentId === 'grok' ? normalizeGrokChatCompletionsRequest(adapted) : adapted
+  // Keep the adapter's system role: Chat Completions providers such as
+  // DeepSeek reject developer messages, regardless of the originating agent.
+  const chatBody = responsesToOpenAiChat(body, target)
   const response = await agentRunGateway.completeJson({
     url: chatCompletionsUrl(target),
     apiKey: target.apiKey,
@@ -276,8 +266,7 @@ async function openAiChatToResponsesSseStream(target: CodexProxyTarget, body: an
     throw err
   }
 
-  const adapted = responsesToOpenAiChat(body, target, true)
-  const chatBody = target.agentId === 'grok' ? normalizeGrokChatCompletionsRequest(adapted) : adapted
+  const chatBody = responsesToOpenAiChat(body, target, true)
   const stream = await agentRunGateway.streamBytes({
     url: chatCompletionsUrl(target),
     apiKey: target.apiKey,
