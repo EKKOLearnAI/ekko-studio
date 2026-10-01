@@ -146,6 +146,7 @@ function nativeResponsesBody(target: CodexProxyTarget, body: any, stream?: boole
 }
 
 async function callOpenAiChat(target: CodexProxyTarget, body: any): Promise<any> {
+  const startedAt = performance.now()
   if (target.apiMode !== 'chat_completions') {
     const err = new Error(`Codex proxy only supports chat_completions targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -153,23 +154,26 @@ async function callOpenAiChat(target: CodexProxyTarget, body: any): Promise<any>
   }
   const adapted = responsesToOpenAiChat(body, target)
   const chatBody = target.agentId === 'grok' ? normalizeGrokChatCompletionsRequest(adapted) : adapted
-  return agentRunGateway.completeJson({
+  const response = await agentRunGateway.completeJson({
     url: chatCompletionsUrl(target),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: chatBody,
   })
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000)
+  return response
 }
 
 async function callAnthropicMessages(target: CodexProxyTarget, body: any): Promise<any> {
+  const startedAt = performance.now()
   if (target.apiMode !== 'anthropic_messages') {
     const err = new Error(`Codex proxy Anthropic adapter only supports anthropic_messages targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
   const anthropicBody = responsesToAnthropicMessages(body, target)
-  return agentRunGateway.completeJson({
+  const response = await agentRunGateway.completeJson({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
@@ -180,22 +184,27 @@ async function callAnthropicMessages(target: CodexProxyTarget, body: any): Promi
     },
     body: anthropicBody,
   })
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000)
+  return response
 }
 
 async function callOpenAiResponses(target: CodexProxyTarget, body: any): Promise<any> {
+  const startedAt = performance.now()
   if (target.apiMode !== 'codex_responses') {
     const err = new Error(`Codex proxy Responses adapter only supports codex_responses targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
   const responsesBody = nativeResponsesBody(target, body)
-  return agentRunGateway.completeJson({
+  const response = await agentRunGateway.completeJson({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: responsesBody,
   })
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000)
+  return response
 }
 
 function responsesEventStream(events: AsyncIterable<CanonicalResponsesEvent>): Readable {
@@ -243,10 +252,10 @@ function responseEventForCodexClient(target: CodexProxyTarget, event: CanonicalR
   }
 }
 
-function observableResponsesEvents(target: CodexProxyTarget, events: AsyncIterable<CanonicalResponsesEvent>): AsyncIterable<CanonicalResponsesEvent> {
+function observableResponsesEvents(target: CodexProxyTarget, events: AsyncIterable<CanonicalResponsesEvent>, startedAt: number): AsyncIterable<CanonicalResponsesEvent> {
 async function* observe() {
     for await (const event of normalizeResponsesSseEvents(events)) {
-      codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event)
+      codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event, (performance.now() - startedAt) / 1000)
       const clientEvent = responseEventForCodexClient(target, event)
       // Grok, OpenCode and DSH report the same model activity through their native
       // stdout streams. The proxy remains responsible for transport and usage
@@ -260,7 +269,7 @@ async function* observe() {
   return observe()
 }
 
-async function openAiChatToResponsesSseStream(target: CodexProxyTarget, body: any): Promise<Readable> {
+async function openAiChatToResponsesSseStream(target: CodexProxyTarget, body: any, startedAt = performance.now()): Promise<Readable> {
   if (target.apiMode !== 'chat_completions') {
     const err = new Error(`Codex proxy only supports chat_completions targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -279,10 +288,10 @@ async function openAiChatToResponsesSseStream(target: CodexProxyTarget, body: an
   return responsesEventStream(observableResponsesEvents(target, openAiChatSseToResponsesEvents(stream, {
     ...target,
     annotateMcpToolNamespaces: true,
-  })))
+  }), startedAt))
 }
 
-async function anthropicMessagesToResponsesSseStream(target: CodexProxyTarget, body: any): Promise<Readable> {
+async function anthropicMessagesToResponsesSseStream(target: CodexProxyTarget, body: any, startedAt = performance.now()): Promise<Readable> {
   if (target.apiMode !== 'anthropic_messages') {
     const err = new Error(`Codex proxy Anthropic adapter only supports anthropic_messages targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -304,10 +313,10 @@ async function anthropicMessagesToResponsesSseStream(target: CodexProxyTarget, b
   return responsesEventStream(observableResponsesEvents(target, anthropicMessagesSseToResponsesEvents(stream, {
     ...target,
     annotateMcpToolNamespaces: true,
-  })))
+  }), startedAt))
 }
 
-async function openAiResponsesSseStream(target: CodexProxyTarget, body: any): Promise<Readable> {
+async function openAiResponsesSseStream(target: CodexProxyTarget, body: any, startedAt = performance.now()): Promise<Readable> {
   if (target.apiMode !== 'codex_responses') {
     const err = new Error(`Codex proxy Responses adapter only supports codex_responses targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -322,7 +331,7 @@ async function openAiResponsesSseStream(target: CodexProxyTarget, body: any): Pr
     provider: target.provider,
     body: responsesBody,
   })
-  return responsesEventStream(observableResponsesEvents(target, openAiResponsesSseToResponsesEvents(stream)))
+  return responsesEventStream(observableResponsesEvents(target, openAiResponsesSseToResponsesEvents(stream), startedAt))
 }
 
 export async function codexProxyResponses(ctx: Context) {

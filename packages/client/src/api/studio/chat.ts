@@ -57,6 +57,7 @@ export interface StartRunResponse {
 
 // SSE event types from /v1/runs/{id}/events
 export interface RunEvent {
+  run_usage?: import('@/utils/run-usage').RunUsageSummary
   event: string
   run_id?: string
   run_marker?: string

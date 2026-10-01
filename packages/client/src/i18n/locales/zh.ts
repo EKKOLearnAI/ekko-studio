@@ -1002,6 +1002,19 @@ export default {
 
   // 对话
   chat: {
+    runUsageOutput: "输出 token",
+    runUsageInput: "输入 token",
+    runUsageCacheRate: "缓存命中率",
+    runUsageCacheRateHint: "命中缓存的输入 token ÷ 本轮全部输入 token（含缓存读取和写入）",
+    runUsageCache: "缓存命中",
+    runUsageCost: "预估费用",
+    runUsageSpeed: "Token 速度",
+    runUsageSpeedHint: "本轮输出 token ÷ 模型请求总耗时（含首 token 等待，不含工具执行）",
+    runUsageAverageSpeed: "平均速度",
+    runUsageAverageSpeedHint: "本轮输出 token / 整轮耗时，包含工具执行和等待时间；CLI 未提供模型请求耗时。",
+    runUsageEstimatedSpeed: "估算速度",
+    runUsageEstimatedSpeedHint: "输出 token /（本轮耗时 − 工具占用时间）。并行工具重叠时间只扣一次；仍包含启动、网络等开销，非实测模型速度。",
+
     contextRemaining: '剩余',
     contextClickToEdit: '点击编辑上下文长度',
     contextEditTitle: '编辑上下文长度',

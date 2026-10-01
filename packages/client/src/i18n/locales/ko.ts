@@ -981,6 +981,19 @@ export default {
 
   // 채팅
   chat: {
+    runUsageOutput: "출력 토큰",
+    runUsageInput: "입력 토큰",
+    runUsageCacheRate: "캐시 적중률",
+    runUsageCacheRateHint: "캐시 읽기 토큰 ÷ 이번 실행의 전체 입력 토큰 (캐시 읽기 및 쓰기 포함).",
+    runUsageCache: "캐시 적중",
+    runUsageCost: "예상 비용",
+    runUsageSpeed: "토큰 속도",
+    runUsageSpeedHint: "실행 출력 토큰 ÷ 모델 요청 총 시간. 첫 토큰 대기를 포함하고 도구 실행은 제외합니다.",
+    runUsageAverageSpeed: "평균 속도",
+    runUsageAverageSpeedHint: "실행 출력 토큰 / 도구 실행과 대기를 포함한 전체 시간. CLI가 모델 요청 시간을 제공하지 않았습니다.",
+    runUsageEstimatedSpeed: "추정 속도",
+    runUsageEstimatedSpeedHint: "출력 토큰 / (실행 시간 − 도구 시간). 병렬 도구의 겹치는 시간은 한 번만 제외합니다. 시작 및 네트워크 시간이 포함되어 모델 실측 속도는 아닙니다.",
+
     contextRemaining: '남음',
     contextClickToEdit: '클릭하여 컨텍스트 길이 편집',
     contextEditTitle: '컨텍스트 길이 편집',

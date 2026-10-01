@@ -109,6 +109,7 @@ export interface HermesSessionPage {
 }
 
 export interface HermesMessage {
+  run_usage?: import('@/utils/run-usage').RunUsageSummary
   id: number
   session_id: string
   role: 'user' | 'assistant' | 'system' | 'tool' | 'command' | 'moa'

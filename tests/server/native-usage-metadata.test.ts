@@ -47,6 +47,22 @@ describe('native model metadata', () => {
 })
 
 describe('native usage normalization', () => {
+  it('uses native model request milliseconds and never substitutes total tool-inclusive time', () => {
+    const tracker = new NativeTurnUsage()
+    tracker.observeClaude({ type: 'result', duration_api_ms: 2500, duration_ms: 30000, usage: { input_tokens: 10, output_tokens: 25 } })
+    expect(tracker.rows('claude-code', undefined)[0].apiDuration).toBe(2.5)
+    expect(new NativeTurnUsage().rows('cursor', { inputTokens: 10, outputTokens: 25, duration_api_ms: 2000, duration_ms: 20000 })[0].apiDuration).toBe(2)
+    expect(new NativeTurnUsage().rows('cursor', { inputTokens: 10, outputTokens: 25, duration_ms: 20000 })[0].apiDuration).toBeUndefined()
+  })
+  it('does not duplicate an aggregate API duration across several models', () => {
+    const tracker = new NativeTurnUsage()
+    tracker.observeClaude({ type: 'result', duration_api_ms: 2500, usage: { input_tokens: 30, output_tokens: 5 }, modelUsage: {
+      first: { inputTokens: 10, outputTokens: 2 }, second: { inputTokens: 20, outputTokens: 3 },
+    } })
+    const rows = tracker.rows('claude-code', undefined)
+    expect(rows).toHaveLength(2)
+    expect(rows.every(row => row.apiDuration == null)).toBe(true)
+  })
   it('separates all Codex input buckets and preserves native reasoning output', () => {
     const tracker = new NativeTurnUsage()
     expect(tracker.rows('codex', { input_tokens: 100, cached_input_tokens: 40, cache_write_input_tokens: 10, output_tokens: 20, reasoning_output_tokens: 15 })[0].usage).toMatchObject({

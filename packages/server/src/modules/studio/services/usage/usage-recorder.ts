@@ -16,6 +16,10 @@ export interface NormalizedTokenUsage {
 export interface RecordSessionUsageInput {
   sessionId: string
   runId?: string | null
+  /** The foreground run, separate from the deduplication key for each API call. */
+  parentRunId?: string
+  /** Model request duration in seconds, excluding tool execution. */
+  apiDuration?: number
   source: 'hermes' | 'coding_agent' | 'ekko_agent'
   agent: 'hermes' | 'claude_code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'ekko_agent'
   profile?: string | null
@@ -134,6 +138,8 @@ export function recordSessionUsage(input: RecordSessionUsageInput): NormalizedTo
     }
     const row = updateUsage(input.sessionId, {
       runId: input.runId || '',
+      ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
+      ...(input.apiDuration != null ? { apiDuration: input.apiDuration } : {}),
       source: input.source,
       agent: input.agent,
       usageScope: input.usageScope,

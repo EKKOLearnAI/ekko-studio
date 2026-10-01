@@ -1,6 +1,7 @@
 import { isSqliteAvailable, getDb, jsonSet, jsonGet, jsonGetAll, jsonDelete } from '../infrastructure/database'
 import { randomUUID } from 'crypto'
-import { USAGE_TABLE as TABLE } from '../infrastructure/database/schemas'
+import { USAGE_TABLE as TABLE, RUN_USAGE_TABLE } from '../infrastructure/database/schemas'
+import { refreshCompletedRunUsage } from './run-usage-store'
 import { finiteCost, emptyCostCoverage, type UsageCost, type UsagePriceSnapshot } from '../services/usage/usage-cost'
 import type {
   LocalUsageStats,
@@ -44,6 +45,8 @@ export function updateUsage(
   sessionId: string,
   data: {
     runId?: string
+    parentRunId?: string
+    apiDuration?: number
     source?: string
     agent?: string
     usageScope?: 'model_call' | 'run'
@@ -78,6 +81,8 @@ export function updateUsage(
     const columns = [
       'session_id',
       'run_id',
+      'parent_run_id',
+      'api_duration',
       'source',
       'agent',
       'usage_scope',
@@ -101,6 +106,8 @@ export function updateUsage(
     const params = [
       sessionId,
       data.runId || '',
+      data.parentRunId || '',
+      typeof data.apiDuration === 'number' && Number.isFinite(data.apiDuration) && data.apiDuration > 0 ? data.apiDuration : null,
       data.source || '',
       data.agent || '',
       data.usageScope || 'run',
@@ -128,12 +135,15 @@ export function updateUsage(
     const result = db.prepare(
       `INSERT OR IGNORE INTO ${TABLE} (${columns.join(', ')}) VALUES (${values.join(', ')})`,
     ).run(...params)
+    if (result?.changes && data.parentRunId) refreshCompletedRunUsage(sessionId, data.parentRunId)
     return result?.changes ? { id: Number(result.lastInsertRowid) } : undefined
   } else {
     const id = randomUUID()
     jsonSet(TABLE, sessionId, {
       id,
       run_id: data.runId || '',
+      parent_run_id: data.parentRunId || '',
+      api_duration: data.apiDuration ?? null,
       source: data.source || '',
       agent: data.agent || '',
       usage_scope: data.usageScope || 'run',
@@ -163,8 +173,14 @@ export function fillMissingUsageCost(row: UsageRowRef, cost: UsageCost): void {
   if (amount === undefined) return
   const pricing = cost.costPricing ? JSON.stringify(cost.costPricing) : null
   if (!('sessionId' in row)) {
-    getDb()?.prepare(`UPDATE ${TABLE} SET cost_usd = ?, cost_source = ?, cost_pricing = ? WHERE id = ? AND cost_usd IS NULL`)
+    const db = getDb()
+    const result = db?.prepare(`UPDATE ${TABLE} SET cost_usd = ?, cost_source = ?, cost_pricing = ? WHERE id = ? AND cost_usd IS NULL`)
       .run(amount, cost.costSource, pricing, row.id)
+    if (result?.changes) {
+      const usage = db!.prepare(`SELECT session_id, parent_run_id FROM ${TABLE} WHERE id = ?`).get(row.id) as
+        { session_id: string; parent_run_id: string } | undefined
+      if (usage?.parent_run_id) refreshCompletedRunUsage(usage.session_id, usage.parent_run_id)
+    }
   } else {
     const saved = jsonGet(TABLE, row.sessionId)
     if (saved?.id === row.id && saved.cost_usd == null) {
@@ -295,6 +311,7 @@ export function getUsageBatch(sessionIds: string[]): Record<string, UsageRecord>
 export function deleteUsage(sessionId: string): void {
   if (isSqliteAvailable()) {
     getDb()!.prepare(`DELETE FROM ${TABLE} WHERE session_id = ?`).run(sessionId)
+    getDb()!.prepare(`DELETE FROM ${RUN_USAGE_TABLE} WHERE session_id = ?`).run(sessionId)
   } else {
     jsonDelete(TABLE, sessionId)
   }

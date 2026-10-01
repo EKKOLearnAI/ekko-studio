@@ -8,7 +8,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import { createSession, addMessage, getSession, updateSession, updateSessionStats } from '../../../studio/public/sessions'
 import type { ApiMode, CodingAgentImageInput } from '../../protocol/types'
 import { logger } from '../../../studio/public/logging'
-import { normalizeTokenUsage, normalizeUsageCost, recordSessionUsage } from '../../../studio/public/usage'
+import { normalizeTokenUsage, normalizeUsageCost, recordSessionUsage, completeRunUsage } from '../../../studio/public/usage'
 import {
   applyResponseStreamEvent,
   calcAndUpdateUsage,
@@ -33,6 +33,7 @@ import { CURSOR_COMPACT_UNSUPPORTED, startCursorTurnProcess } from '../cursor/tu
 import { applyCursorStreamEvent } from '../cursor/event-adapter'
 import { isolatedCodingAgentChildEnv } from './child-env'
 import { NativeTurnUsage, type NativeUsageRow } from './native-usage'
+import { RunToolTiming } from './tool-timing'
 import { readCodexTurnModel, readOpenCodeMessageModel } from './native-model'
 import { getCodingAgentGlobalHome } from '../../../studio/public/coding-agent-global-home'
 import { isContextWindowExceededError, nativeContextRecoveryMessage, resetNativeSessionAfterContextOverflow } from '../context-recovery'
@@ -164,6 +165,13 @@ interface PiRpcPendingRequest {
 }
 
 export interface ManagedCodingAgentRun {
+  /** A CLI process can serve several foreground turns. Keep their usage separate. */
+  usageRunId?: string
+  usageStartedAt?: number
+  usageDurationSeconds?: number
+  usageToolTiming?: RunToolTiming
+  usageToolDurationSeconds?: number
+  usagePendingClaudeTools?: Set<string>
   id: string
   launch: CodingAgentRunLaunch
   pty?: { pid: number; write: (data: string) => void; kill: (signal?: string) => void; onData: (cb: (data: string) => void) => void; onExit: (cb: (event: { exitCode: number }) => void) => void }
@@ -849,6 +857,12 @@ export class CodingAgentRunManager {
     this.ensureDbSession(run)
     run.assistantMessageId = undefined
     const messageId = this.addUserMessage(run, options.storageInput ?? text)
+    run.usageRunId = `${run.id}:turn:${messageId ?? Date.now()}`
+    run.usageStartedAt = performance.now()
+    run.usageDurationSeconds = undefined
+    run.usageToolDurationSeconds = undefined
+    run.usageToolTiming = new RunToolTiming(run.usageStartedAt)
+    run.usagePendingClaudeTools = undefined
     this.touch(run)
     this.emitTerminalStatus(run, 'Input sent to coding agent.')
     this.startWorkspaceRunDiff(run)
@@ -1022,6 +1036,7 @@ export class CodingAgentRunManager {
       ...(run.assistantMessageId ? { message_id: run.assistantMessageId } : {}),
       ...(queueRemaining > 0 ? { queue_remaining: queueRemaining } : {}),
       workspace_run_change: workspaceRunChange,
+      run_usage: this.completeUsage(run),
     })
     this.markChatRunCompleted(sessionId, 'run.failed')
     return { status: 'interrupted', runId: run.id, responseId }
@@ -1110,7 +1125,7 @@ export class CodingAgentRunManager {
     if (run) this.touch(run)
   }
 
-  handleProxyUsageEvent(agentSessionId: string | undefined, event: CanonicalResponsesEvent) {
+  handleProxyUsageEvent(agentSessionId: string | undefined, event: CanonicalResponsesEvent, apiDuration?: number) {
     if (!agentSessionId || event.type !== 'response.completed') return
     const run = this.runs.get(agentSessionId)
     if (!run || run.launch.mode !== 'scoped') return
@@ -1131,11 +1146,13 @@ export class CodingAgentRunManager {
     }
     recordSessionUsage({
       sessionId: run.launch.sessionId,
+      parentRunId: run.usageRunId || run.id,
       runId: final?.id,
       source: 'coding_agent',
       agent: usageCodingAgent(run.launch.agentId),
       usageScope: 'model_call',
       apiCalls: 1,
+      apiDuration,
       usage,
       profile: run.launch.profile,
       cost: normalizeUsageCost(final),
@@ -1203,6 +1220,7 @@ export class CodingAgentRunManager {
     if (isTerminalEvent) {
       if (run.terminalEventHandled) return
       run.terminalEventHandled = true
+      this.finishUsageTiming(run)
     }
     this.touch(run)
     this.ensureDbSession(run)
@@ -1267,10 +1285,12 @@ export class CodingAgentRunManager {
       recordSessionUsage({
         sessionId: run.launch.sessionId,
         runId: `${responseId}:${row.id}`,
+        parentRunId: run.usageRunId || run.id,
         source: 'coding_agent',
         agent: usageCodingAgent(run.launch.agentId),
         usageScope: row.scope,
         apiCalls: row.apiCalls,
+        apiDuration: row.apiDuration,
         usage: row.usage,
         cost: row.cost,
         profile: run.launch.profile,
@@ -1279,6 +1299,19 @@ export class CodingAgentRunManager {
         isEstimated: false,
       })
     }
+  }
+
+  private finishUsageTiming(run: ManagedCodingAgentRun) {
+    if (run.usageDurationSeconds == null && run.usageStartedAt != null) {
+      const timing = run.usageToolTiming?.finish()
+      run.usageDurationSeconds = timing?.runDurationSeconds ?? (performance.now() - run.usageStartedAt) / 1000
+      run.usageToolDurationSeconds = timing?.toolDurationSeconds
+    }
+  }
+
+  private completeUsage(run: ManagedCodingAgentRun) {
+    this.finishUsageTiming(run)
+    return completeRunUsage(run.launch.sessionId, run.usageRunId || run.id, run.assistantMessageId, run.usageDurationSeconds, run.usageToolDurationSeconds)
   }
 
   private schedulePiTerminalUsageRefresh(run: ManagedCodingAgentRun) {
@@ -1462,6 +1495,7 @@ export class CodingAgentRunManager {
         event: 'run.failed',
         error: 'Coding agent session closed',
         workspace_run_change: workspaceRunChange,
+        run_usage: this.completeUsage(run),
       })
       this.markChatRunCompleted(run.launch.sessionId, 'run.failed')
     }
@@ -1813,6 +1847,7 @@ export class CodingAgentRunManager {
 
     if (event.type === 'tool_execution_start') {
       const id = String(event.toolCallId || `pi_tool_${Date.now()}`)
+      run.usageToolTiming?.start(id)
       const block = {
         id,
         name: String(event.toolName || 'tool'),
@@ -1841,6 +1876,7 @@ export class CodingAgentRunManager {
 
     if (event.type === 'tool_execution_end') {
       const id = String(event.toolCallId || '')
+      run.usageToolTiming?.end(id)
       const block = run.piToolBlocks?.get(id)
       if (block) block.done = true
       this.handleClaudePrintResponseEvent(run, {
@@ -2160,6 +2196,8 @@ export class CodingAgentRunManager {
           done: false,
         }
         run.printToolBlocks?.set(index, toolBlock)
+        if (run.usagePendingClaudeTools) run.usagePendingClaudeTools.add(toolBlock.id)
+        else run.usageToolTiming?.start(toolBlock.id)
         this.handleClaudePrintResponseEvent(run, {
           type: 'response.output_item.added',
           data: {
@@ -2195,6 +2233,7 @@ export class CodingAgentRunManager {
       for (const [index, block] of content.entries()) {
         if (block?.type !== 'tool_result') continue
         const callId = String(block.tool_use_id || block.id || `toolu_${index}`)
+        run.usageToolTiming?.end(callId)
         const output = claudeContentToText(block.content)
         this.handleClaudePrintResponseEvent(run, {
           type: 'response.output_item.done',
@@ -2216,9 +2255,16 @@ export class CodingAgentRunManager {
   private handleClaudeAnthropicStreamEvent(run: ManagedCodingAgentRun, event: any) {
     const type = String(event?.type || '')
     if (type === 'message_start') {
+      run.usagePendingClaudeTools = new Set()
       const id = String(event?.message?.id || run.printResponseId || `resp_${Date.now()}`)
       run.printResponseId = id
       run.printMessageId = `msg_${id}`
+      return
+    }
+
+    if (type === 'message_stop') {
+      for (const id of run.usagePendingClaudeTools || []) run.usageToolTiming?.start(id)
+      run.usagePendingClaudeTools = undefined
       return
     }
 
@@ -2312,6 +2358,7 @@ export class CodingAgentRunManager {
       const toolBlock = run.printToolBlocks?.get(index)
       if (!toolBlock || toolBlock.done) return
       toolBlock.done = true
+      run.usagePendingClaudeTools?.add(toolBlock.id)
       this.handleClaudePrintResponseEvent(run, {
         type: 'response.output_item.done',
         data: {
@@ -2855,6 +2902,7 @@ export class CodingAgentRunManager {
           recordSessionUsage({
             sessionId: run.launch.sessionId,
             runId: String(part.id),
+            parentRunId: run.usageRunId || run.id,
             source: 'coding_agent',
             agent: 'opencode',
             usageScope: 'model_call',
@@ -2904,6 +2952,7 @@ export class CodingAgentRunManager {
     if (event.type !== 'tool_use' || part.type !== 'tool') return
     const state = part.state || {}
     const callId = String(part.callID || part.callId || part.id || `opencode_tool_${Date.now()}`)
+    run.usageToolTiming?.recordWallInterval(callId, state.time?.start, state.time?.end)
     const name = String(part.tool || 'tool')
     const argumentsJson = JSON.stringify(state.input || {})
     this.handleClaudePrintResponseEvent(run, {
@@ -3233,8 +3282,9 @@ export class CodingAgentRunManager {
   private handleCodexItemStarted(run: ManagedCodingAgentRun, item: any) {
     const itemType = this.codexItemType(item)
     if (!this.isCodexToolItem(itemType)) return
-    if (this.isRedundantCodexExecToolItem(item, itemType)) return
     const toolBlock = this.codexToolBlock(item, itemType)
+    run.usageToolTiming?.start(toolBlock.id)
+    if (this.isRedundantCodexExecToolItem(item, itemType)) return
     run.codexToolBlocks?.set(toolBlock.id, toolBlock)
     this.handleClaudePrintResponseEvent(run, {
       type: 'response.output_item.added',
@@ -3268,6 +3318,7 @@ export class CodingAgentRunManager {
       return
     }
     if (!this.isCodexToolItem(itemType)) return
+    run.usageToolTiming?.end(String(item.id || item.call_id || item.callId || ''))
     if (this.isRedundantCodexExecToolItem(item, itemType)) return
     let toolBlock = run.codexToolBlocks?.get(String(item.id || item.call_id || item.callId || itemType))
     if (!toolBlock) {
@@ -3538,6 +3589,7 @@ export class CodingAgentRunManager {
       ...(run.assistantMessageId ? { message_id: run.assistantMessageId } : {}),
       ...(queueRemaining > 0 ? { queue_remaining: queueRemaining } : {}),
       workspace_run_change: workspaceRunChange,
+      run_usage: this.completeUsage(run),
     })
     if (queueRemaining === 0) {
       try {

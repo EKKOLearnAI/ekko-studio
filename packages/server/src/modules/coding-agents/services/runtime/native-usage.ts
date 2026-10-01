@@ -7,11 +7,18 @@ export interface NativeUsageRow {
   provider?: string
   usage: NormalizedTokenUsage
   apiCalls?: number
+  apiDuration?: number
   scope: 'run' | 'model_call'
   cost?: UsageCost
 }
 
 const tokenKeys = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const
+
+function apiDurationSeconds(value: any): number | undefined {
+  const milliseconds = value?.duration_api_ms
+  return typeof milliseconds === 'number' && Number.isFinite(milliseconds) && milliseconds > 0
+    ? milliseconds / 1000 : undefined
+}
 
 function measured(value: unknown): NormalizedTokenUsage | undefined {
   const usage = normalizeTokenUsage(value)
@@ -36,6 +43,7 @@ export class NativeTurnUsage {
   private modelUsage?: Record<string, any>
   private pendingUsage?: unknown
   private pendingCost?: UsageCost
+  private apiDuration?: number
   private readonly grokResponses = new Map<string, unknown>()
 
   observeClaude(event: any) {
@@ -67,6 +75,7 @@ export class NativeTurnUsage {
       }
     }
     if (event.type === 'result') {
+      this.apiDuration = apiDurationSeconds(event)
       this.pendingUsage = event.usage
       this.modelUsage = event.modelUsage
       this.pendingCost = normalizeUsageCost(event, 'estimated')
@@ -111,6 +120,14 @@ export class NativeTurnUsage {
   }
 
   rows(agent: string, finalUsage: unknown, fallbackModel = ''): NativeUsageRow[] {
+    const rows = this.buildRows(agent, finalUsage, fallbackModel)
+    const apiDuration = this.apiDuration ?? apiDurationSeconds(finalUsage)
+    // A native turn total must be counted once, never once per model.
+    if (rows.length === 1 && apiDuration != null) rows[0] = { ...rows[0], apiDuration }
+    return rows
+  }
+
+  private buildRows(agent: string, finalUsage: unknown, fallbackModel = ''): NativeUsageRow[] {
     if (agent === 'pi') return [...this.messages.values()]
     if (agent === 'codex') {
       const raw = finalUsage as any

@@ -1,3 +1,4 @@
+import { completeRunUsage } from '../../repositories/run-usage-store'
 import { hermesStudioMcpCapabilities } from './studio-mcp'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 /**
@@ -1282,6 +1283,8 @@ function recordBridgeModelUsage(
   recordSessionUsage({
     sessionId,
     runId: `${bridgeRunId}:api:${requestKey}`,
+    parentRunId: bridgeRunId,
+    apiDuration: typeof event.api_duration === 'number' ? event.api_duration : undefined,
     source: 'hermes',
     agent: 'hermes',
     usageScope: 'model_call',
@@ -1891,6 +1894,7 @@ async function applyBridgeChunkAsync(
     delegation_id: runMetadata?.delegationId,
     queue_id: runMetadata?.queueId,
     workspace_run_change: workspaceRunChange,
+    run_usage: completeRunUsage(sessionId, chunk.run_id, state.bridgeAssistantMessageId),
   }
   emit(eventName, payload)
 

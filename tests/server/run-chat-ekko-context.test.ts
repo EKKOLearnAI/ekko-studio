@@ -843,6 +843,8 @@ describe('ekko-agent context usage events', () => {
     expect(recordSessionUsageMock).toHaveBeenCalledWith({
       sessionId: 'session-1',
       runId: 'run-1:step:2:call:1',
+      parentRunId: 'run-1',
+      apiDuration: undefined,
       source: 'ekko_agent',
       agent: 'ekko_agent',
       usageScope: 'model_call',

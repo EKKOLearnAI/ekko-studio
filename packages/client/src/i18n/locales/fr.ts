@@ -981,6 +981,19 @@ export default {
 
   // Chat
   chat: {
+    runUsageOutput: "Tokens de sortie",
+    runUsageInput: "Tokens d’entrée",
+    runUsageCacheRate: "Taux de cache",
+    runUsageCacheRateHint: "Tokens lus en cache / tous les tokens d’entrée de cette exécution, lectures et écritures en cache incluses.",
+    runUsageCache: "Cache",
+    runUsageCost: "Coût estimé",
+    runUsageSpeed: "Vitesse",
+    runUsageSpeedHint: "Tokens de sortie / durée totale des requêtes au modèle, attente initiale incluse, outils exclus.",
+    runUsageAverageSpeed: "Vitesse moyenne",
+    runUsageAverageSpeedHint: "Tokens de sortie / durée totale, outils et attente inclus. La CLI ne fournit pas la durée des requêtes au modèle.",
+    runUsageEstimatedSpeed: "Vitesse estimée",
+    runUsageEstimatedSpeedHint: "Tokens de sortie / (durée totale − outils). Les chevauchements comptent une fois. Inclut démarrage et réseau ; vitesse du modèle non mesurée.",
+
     contextRemaining: 'restant',
     contextClickToEdit: 'Cliquez pour modifier la longueur du contexte',
     contextEditTitle: 'Modifier la longueur du contexte',

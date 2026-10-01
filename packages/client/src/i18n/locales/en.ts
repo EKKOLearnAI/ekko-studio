@@ -1002,6 +1002,19 @@ export default {
 
   // Chat
   chat: {
+    runUsageOutput: "Output tokens",
+    runUsageInput: "Input tokens",
+    runUsageCacheRate: "Cache hit rate",
+    runUsageCacheRateHint: "Cache-read tokens / all input tokens in this run, including cache reads and writes.",
+    runUsageCache: "Cache hits",
+    runUsageCost: "Est. cost",
+    runUsageSpeed: "Token speed",
+    runUsageSpeedHint: "Run output tokens / total model request time, including first-token latency and excluding tools.",
+    runUsageAverageSpeed: "Average speed",
+    runUsageAverageSpeedHint: "Run output tokens / total run time, including tools and waiting. The CLI did not provide model request time.",
+    runUsageEstimatedSpeed: "Est. speed",
+    runUsageEstimatedSpeedHint: "Output tokens / (run time − tool time). Overlapping tools count once. Includes startup and network overhead; not measured model speed.",
+
     contextRemaining: 'remaining',
     contextClickToEdit: 'Click to edit context length',
     contextEditTitle: 'Edit Context Length',

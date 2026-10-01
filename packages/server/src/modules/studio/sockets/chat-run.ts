@@ -1,3 +1,4 @@
+import { withRunUsage } from '../repositories/run-usage-store'
 import { recordSessionUploadAttachments } from '../services/files/session-uploads'
 import { authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
 import { bindSessionShareSocket } from '../services/session-shares/socket-access'
@@ -2053,7 +2054,7 @@ export class ChatRunSocket {
         .map(message => message.id),
     )
     const taskPlans = getSessionTaskPlans(sid, messagePage.messages, true, state.runId)
-    const resumePage = { ...messagePage, workspaceRunChanges, taskPlans }
+    const resumePage = { ...messagePage, messages: withRunUsage(sid, messagePage.messages), workspaceRunChanges, taskPlans }
     const appMessagePage = options
       ? buildAppResumeMessagePage(resumePage, options.cachedId)
       : null

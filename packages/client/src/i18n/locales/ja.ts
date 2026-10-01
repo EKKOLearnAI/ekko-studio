@@ -981,6 +981,19 @@ export default {
 
   // チャット
   chat: {
+    runUsageOutput: "出力 token",
+    runUsageInput: "入力 token",
+    runUsageCacheRate: "キャッシュ命中率",
+    runUsageCacheRateHint: "キャッシュ読み取り token ÷ この実行の全入力 token（キャッシュの読み書きを含む）。",
+    runUsageCache: "キャッシュヒット",
+    runUsageCost: "推定費用",
+    runUsageSpeed: "Token 速度",
+    runUsageSpeedHint: "実行の出力 token ÷ モデル要求の合計時間。最初の token の待機を含み、ツール実行を除きます。",
+    runUsageAverageSpeed: "平均速度",
+    runUsageAverageSpeedHint: "この実行の出力トークン数 / ツール実行と待機を含む合計時間。CLI はモデルのリクエスト時間を提供していません。",
+    runUsageEstimatedSpeed: "推定速度",
+    runUsageEstimatedSpeedHint: "出力トークン /（実行時間 − ツール時間）。並列ツールの重複時間は一度だけ除外。起動や通信の時間を含むため、モデルの実測速度ではありません。",
+
     contextRemaining: '残り',
     contextClickToEdit: 'クリックしてコンテキスト長を編集',
     contextEditTitle: 'コンテキスト長を編集',

@@ -214,7 +214,8 @@ function hasRenderableAssistantContent(message: Message): boolean {
   return !!(
     assistantMessageBody(message) ||
     message.attachments?.length ||
-    message.workspaceChanges?.length
+    message.workspaceChanges?.length ||
+    message.runUsage
   );
 }
 

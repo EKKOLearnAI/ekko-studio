@@ -188,6 +188,8 @@ describe('Usage Store (SQLite path)', () => {
     expect(runMock).toHaveBeenCalledWith(
       's1',
       '', // runId
+      '', // parentRunId
+      null, // apiDuration
       '', // source
       '', // agent
       'run', // usageScope
@@ -221,6 +223,8 @@ describe('Usage Store (SQLite path)', () => {
     expect(runMock).toHaveBeenCalledWith(
       's1',
       '', // runId
+      '', // parentRunId
+      null, // apiDuration
       '', // source
       '', // agent
       'run', // usageScope

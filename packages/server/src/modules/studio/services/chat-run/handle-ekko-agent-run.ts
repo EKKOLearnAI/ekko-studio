@@ -1,3 +1,4 @@
+import { completeRunUsage } from '../../repositories/run-usage-store'
 import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
 import { leaseEkkoMcpServers } from './ekko-mcp-lease'
 import { studioMcpCapabilities } from '../../public/runs/mcp-capabilities'
@@ -663,6 +664,7 @@ export async function handleEkkoAgentRun(
   let usageInput = 0
   let usageOutput = 0
   let usageCallIndex = 0
+  let modelStartedAt: number | undefined
   let contextEstimate: any
   let parentUsagePersisted = false
   const pendingToolGroups = new Map<string, PendingToolGroup>()
@@ -951,6 +953,8 @@ export async function handleEkkoAgentRun(
         run_id: event.runId,
         delta: event.text,
       })
+    } else if (event.type === 'model.started') {
+      modelStartedAt = performance.now()
     } else if (event.type === 'model.usage') {
       usageInput += event.usage.inputTokens || 0
       usageOutput += event.usage.outputTokens || 0
@@ -958,6 +962,8 @@ export async function handleEkkoAgentRun(
       recordSessionUsage({
         sessionId,
         runId: `${event.runId}:step:${event.step}:call:${usageCallIndex}`,
+        parentRunId: event.runId,
+        apiDuration: modelStartedAt == null ? undefined : (performance.now() - modelStartedAt) / 1000,
         source: 'ekko_agent',
         agent: 'ekko_agent',
         usageScope: 'model_call',
@@ -1120,6 +1126,7 @@ export async function handleEkkoAgentRun(
           recordSessionUsage({
             sessionId,
             runId: `${event.runId}:subagent:${event.subagentId}`,
+            parentRunId: event.background ? undefined : event.runId,
             source: 'ekko_agent',
             agent: 'ekko_agent',
             usageScope: 'run',
@@ -1537,6 +1544,7 @@ export async function handleEkkoAgentRun(
         autonomous: data.autonomous === true,
         delegation_id: data.background_delegation_id,
         workspace_run_change: completeWorkspaceRunDiff(),
+        run_usage: completeRunUsage(sessionId, runId, assistantMessageId),
       })
       return
     }
@@ -1611,6 +1619,7 @@ export async function handleEkkoAgentRun(
       autonomous: data.autonomous === true,
       delegation_id: data.background_delegation_id,
       workspace_run_change: workspaceRunChange,
+      run_usage: completeRunUsage(sessionId, runId || result.runId, assistantMessageId),
     })
   } catch (err) {
     if (abortController.signal.aborted || isAbortError(err)) {
@@ -1640,6 +1649,7 @@ export async function handleEkkoAgentRun(
       autonomous: data.autonomous === true,
       delegation_id: data.background_delegation_id,
       workspace_run_change: completeWorkspaceRunDiff(),
+      run_usage: completeRunUsage(sessionId, runId, assistantMessageId),
     })
   } finally {
     foregroundEnded = true

@@ -981,6 +981,19 @@ export default {
 
   // Chat
   chat: {
+    runUsageOutput: "Ausgabe-Tokens",
+    runUsageInput: "Eingabe-Tokens",
+    runUsageCacheRate: "Cache-Trefferquote",
+    runUsageCacheRateHint: "Aus dem Cache gelesene Tokens / alle Eingabe-Tokens dieses Laufs, einschließlich Cache-Lese- und Schreibzugriffen.",
+    runUsageCache: "Cache-Treffer",
+    runUsageCost: "Geschätzte Kosten",
+    runUsageSpeed: "Token-Tempo",
+    runUsageSpeedHint: "Ausgabe-Tokens / gesamte Modellanfragezeit, einschließlich Wartezeit auf das erste Token, ohne Werkzeuglaufzeit.",
+    runUsageAverageSpeed: "Mittleres Tempo",
+    runUsageAverageSpeedHint: "Ausgabetokens / gesamte Laufzeit, einschließlich Werkzeugen und Wartezeiten. Die CLI liefert keine Modellanfragedauer.",
+    runUsageEstimatedSpeed: "Geschätzt",
+    runUsageEstimatedSpeedHint: "Ausgabetokens / (Laufzeit − Werkzeugzeit). Überlappungen zählen einmal. Enthält Start- und Netzwerkaufwand; kein gemessenes Modelltempo.",
+
     contextRemaining: 'übrig',
     contextClickToEdit: 'Klicken zum Bearbeiten der Kontextlänge',
     contextEditTitle: 'Kontextlänge bearbeiten',

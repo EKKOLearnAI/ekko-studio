@@ -995,6 +995,19 @@ export default {
 
   // Chat
   chat: {
+    runUsageOutput: "رموز الإخراج",
+    runUsageInput: "رموز الإدخال",
+    runUsageCacheRate: "نسبة إصابة التخزين",
+    runUsageCacheRateHint: "رموز القراءة من التخزين المؤقت ÷ جميع رموز إدخال التشغيل، بما فيها قراءات وكتابات التخزين المؤقت.",
+    runUsageCache: "إصابات التخزين",
+    runUsageCost: "التكلفة المقدرة",
+    runUsageSpeed: "سرعة الرموز",
+    runUsageSpeedHint: "رموز إخراج التشغيل ÷ إجمالي وقت طلبات النموذج، بما فيه انتظار الرمز الأول، دون وقت الأدوات.",
+    runUsageAverageSpeed: "متوسط السرعة",
+    runUsageAverageSpeedHint: "رموز الإخراج / مدة التشغيل الكاملة، بما فيها الأدوات والانتظار. لا توفر واجهة الأوامر مدة طلبات النموذج.",
+    runUsageEstimatedSpeed: "السرعة التقديرية",
+    runUsageEstimatedSpeedHint: "رموز الإخراج / (وقت التشغيل − وقت الأدوات). تُحسب الفترات المتداخلة مرة واحدة. يشمل البدء والشبكة؛ ليست سرعة نموذج مقاسة.",
+
     contextRemaining: 'متبقٍ',
     contextClickToEdit: 'اضغط لتعديل طول السياق',
     contextEditTitle: 'تعديل طول السياق',

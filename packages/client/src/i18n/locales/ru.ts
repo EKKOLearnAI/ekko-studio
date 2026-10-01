@@ -904,6 +904,19 @@ export default {
 
 
   chat: {
+    runUsageOutput: "Выходные токены",
+    runUsageInput: "Входные токены",
+    runUsageCacheRate: "Попадания в кэш",
+    runUsageCacheRateHint: "Токены чтения из кэша / все входные токены запуска, включая чтение и запись кэша.",
+    runUsageCache: "Кэш",
+    runUsageCost: "Оценка цены",
+    runUsageSpeed: "Скорость",
+    runUsageSpeedHint: "Выходные токены / суммарное время запросов к модели, включая ожидание первого токена, без времени инструментов.",
+    runUsageAverageSpeed: "Средняя скорость",
+    runUsageAverageSpeedHint: "Выходные токены / полное время выполнения, включая инструменты и ожидание. CLI не передаёт время запросов к модели.",
+    runUsageEstimatedSpeed: "Оценка скорости",
+    runUsageEstimatedSpeedHint: "Выходные токены / (время запуска − время инструментов). Пересечения учитываются один раз. Включает запуск и сеть; это не измеренная скорость модели.",
+
     contextRemaining: 'Осталось',
     contextClickToEdit: 'Нажмите, чтобы изменить размер контекста',
     contextEditTitle: 'Изменить размер контекста',

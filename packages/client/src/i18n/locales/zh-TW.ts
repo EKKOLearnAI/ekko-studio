@@ -995,6 +995,19 @@ export default {
 
   // 對話
   chat: {
+    runUsageOutput: "輸出 token",
+    runUsageInput: "輸入 token",
+    runUsageCacheRate: "快取命中率",
+    runUsageCacheRateHint: "命中快取的輸入 token ÷ 本輪全部輸入 token（含快取讀取和寫入）",
+    runUsageCache: "快取命中",
+    runUsageCost: "預估費用",
+    runUsageSpeed: "Token 速度",
+    runUsageSpeedHint: "本輪輸出 token ÷ 模型請求總耗時（含首 token 等待，不含工具執行）",
+    runUsageAverageSpeed: "平均速度",
+    runUsageAverageSpeedHint: "本輪輸出 token / 整輪耗時，包含工具執行與等待時間；CLI 未提供模型請求耗時。",
+    runUsageEstimatedSpeed: "估算速度",
+    runUsageEstimatedSpeedHint: "輸出 token /（本輪耗時 − 工具占用時間）。並行工具重疊時間只扣一次；仍包含啟動、網路等開銷，非實測模型速度。",
+
     contextRemaining: '剩餘',
     contextClickToEdit: '點擊編輯上下文長度',
     contextEditTitle: '編輯上下文長度',

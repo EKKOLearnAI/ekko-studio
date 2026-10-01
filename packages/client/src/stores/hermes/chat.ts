@@ -1,3 +1,4 @@
+import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
 import { startRunViaSocket, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
 import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
@@ -94,6 +95,7 @@ export interface Message {
   toolStatus?: 'running' | 'done' | 'error'
   toolDuration?: number  // 工具执行时长（秒）
   workspaceChanges?: WorkspaceRunChangeSummary[]
+  runUsage?: RunUsageSummary
   isStreaming?: boolean
   attachments?: Attachment[]
   // 思考/推理文本。两条来源：
@@ -902,7 +904,7 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
   // needed to name later tool result rows when resuming persisted history.
   const filteredMsgs = msgs.filter(m => {
     if (m.role === 'assistant') {
-      return (m.tool_calls?.length || 0) > 0 || runtimePayloadText((m as any).content).trim() !== ''
+      return (m.tool_calls?.length || 0) > 0 || runtimePayloadText((m as any).content).trim() !== '' || !!m.run_usage
     }
     return true
   })
@@ -943,7 +945,7 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
           runMarker: readRunMarker(msg),
         })
       }
-      continue
+      if (!msg.run_usage) continue
     }
 
     // Tool result messages. MoA display rows are persisted with role "moa"
@@ -1111,6 +1113,7 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
       id: String(msg.id),
       role: displayRole === 'moa' ? 'system' : displayRole,
       content: displayContent || '',
+      runUsage: normalizeRunUsage(msg.run_usage),
       timestamp: Math.round(msg.timestamp * 1000),
       reasoning: msg.reasoning ? msg.reasoning : undefined,
       systemType: displayRole === 'command' ? 'command' : undefined,
@@ -1732,6 +1735,19 @@ export const useChatStore = defineStore('chat', () => {
     const target = sessions.value.find(session => session.id === sessionId)
     if (target) alignWorkspaceChangeAssistantMessage(target.messages, change, assistantMessageId)
     upsertWorkspaceRunChange(sessionId, change)
+    const summary = normalizeRunUsage(evt?.run_usage)
+    if (target && summary) {
+      let message = target.messages.find(m => m.role === 'assistant' && m.id === summary.assistantMessageId)
+        || target.messages.find(m => m.role === 'assistant' && m.id === assistantMessageId)
+      if (!message && summary.assistantMessageId) {
+        message = { id: summary.assistantMessageId, role: 'assistant', content: '', timestamp: Date.now() }
+        target.messages.push(message)
+      }
+      if (message) {
+        if (summary.assistantMessageId && !target.messages.some(m => m !== message && m.id === summary.assistantMessageId)) message.id = summary.assistantMessageId
+        message.runUsage = summary
+      }
+    }
   }
 
   async function loadWorkspaceRunChangeFile(sessionId: string, toolCallId: string, fileId: number): Promise<WorkspaceRunChangeFileDetail | null> {

@@ -89,6 +89,20 @@ describe('chat workspace diff turn association', () => {
     }
   })
 
+  it('restores each completed run summary on its own reply, including a summary-only assistant', async () => {
+    const usage = { runId: 'first', assistantMessageId: '2', inputTokens: 100, outputTokens: 20, cacheReadTokens: 50, cacheHitRate: 0.5, costUsd: 0.001, tokensPerSecond: 10, speedSource: 'run', isEstimated: false }
+    chatApi.resumePayload.messages[1].run_usage = usage
+    chatApi.resumePayload.messages[3].run_usage = { ...usage, runId: 'second', assistantMessageId: '4', outputTokens: 0, tokensPerSecond: null }
+    chatApi.resumePayload.messages[3].content = ''
+    chatApi.resumePayload.messages[3].tool_calls = [{ id: 'last-tool', function: { name: 'read_file', arguments: '{}' } }]
+    const store = useChatStore()
+    await store.loadSessions()
+    expect(store.activeSession?.messages.find(message => message.id === '2')?.runUsage).toEqual(usage)
+    expect(store.activeSession?.messages.find(message => message.id === '4')?.runUsage).toMatchObject({ runId: 'second', outputTokens: 0, tokensPerSecond: null })
+    expect(store.activeSession?.messages.filter(message => message.role === 'user').every(message => !message.runUsage)).toBe(true)
+    expect(store.activeSession?.messages.find(message => message.toolCallId === 'last-tool')?.toolName).toBe('read_file')
+  })
+
   it('attaches each persisted change to its exact assistant turn without synthetic cards', async () => {
     chatApi.resumePayload.workspaceRunChanges = [
       change('change-1', '2'),

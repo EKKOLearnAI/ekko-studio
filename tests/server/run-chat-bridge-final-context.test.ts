@@ -755,6 +755,7 @@ describe('bridge run final context usage', () => {
           events: [{
             event: 'model.usage',
             api_request_id: 'request-1',
+            api_duration: 2.5,
             turn_id: 'turn-1',
             api_call_count: 1,
             model: 'moa-aggregator',
@@ -795,6 +796,8 @@ describe('bridge run final context usage', () => {
     }))
     expect(updateUsageMock).toHaveBeenCalledWith('session-1', expect.objectContaining({
       runId: 'run-1:api:request-1',
+      parentRunId: 'run-1',
+      apiDuration: 2.5,
       source: 'hermes',
       usageScope: 'model_call',
       apiCalls: 1,

@@ -81,6 +81,34 @@ afterEach(() => {
 })
 
 describe('coding agent Windows process launch', () => {
+  it('gives every submitted turn its own usage identity when the CLI process is reused', () => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(1000)
+    const manager = new CodingAgentRunManager()
+    const run: any = { id: 'persistent-cli', launch: { agentId: 'codex' }, state: {} }
+    vi.spyOn(manager, 'getBySession').mockReturnValue(run)
+    let messageId = 0
+    ;(manager as any).ensureDbSession = vi.fn()
+    ;(manager as any).addUserMessage = () => ++messageId
+    ;(manager as any).touch = vi.fn()
+    ;(manager as any).emitTerminalStatus = vi.fn()
+    ;(manager as any).startWorkspaceRunDiff = vi.fn()
+    ;(manager as any).startCodexExecTurn = vi.fn()
+    manager.send('s', 'first')
+    const firstId = run.usageRunId
+    clock.mockReturnValue(4000)
+    ;(manager as any).finishUsageTiming(run)
+    expect(run.usageDurationSeconds).toBe(3)
+    clock.mockReturnValue(12000)
+    manager.send('s', 'second')
+    expect(run.usageDurationSeconds).toBeUndefined()
+    clock.mockReturnValue(14000)
+    ;(manager as any).finishUsageTiming(run)
+    expect(run.usageDurationSeconds).toBe(2)
+    expect(run.id).toBe('persistent-cli')
+    expect(firstId).toBe('persistent-cli:turn:1')
+    expect(run.usageRunId).toBe('persistent-cli:turn:2')
+  })
+
   it('keeps Grok prompts out of Windows command arguments and settles after process close', () => {
     const grokHome = mkdtempSync(join(tmpdir(), 'hermes-grok-windows-'))
     const originalDatabaseUrl = process.env.DATABASE_URL
