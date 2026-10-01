@@ -33,5 +33,11 @@ describe('DSH usage stream', () => {
     async function* missing() { yield { type: 'text-delta', text: 'no usage' } }
     for await (const _ of hooks.get('llm/stream')(input, missing)) { /* drain */ }
     expect(write).toHaveBeenCalledTimes(2)
+    // A telemetry failure must neither truncate text nor hide the model error.
+    write.mockImplementation(() => { throw new Error('usage notification failed') })
+    const stillDelivered = []
+    for await (const chunk of hooks.get('llm/stream')(input, source)) stillDelivered.push(chunk)
+    expect(stillDelivered).toEqual(delivered)
+    await expect(async () => { for await (const _ of hooks.get('llm/stream')(input, interrupted)) { /* drain */ } }).rejects.toThrow('aborted')
   })
 })

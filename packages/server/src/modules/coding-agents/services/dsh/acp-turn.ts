@@ -4,6 +4,7 @@ import { StringDecoder } from 'node:string_decoder'
 import type { CodingAgentImageInput } from '../../protocol/types'
 import { dshReasoningEffort } from './runtime-config'
 import { DSH_STREAM_METHOD, DSH_USAGE_METHOD } from './stream-plugin'
+import { logger } from '../../../studio/public/logging'
 
 interface StreamedText { agent_message_chunk: string; agent_thought_chunk: string }
 
@@ -74,7 +75,8 @@ export class DshAcpTurn {
     if (this.closed) return
     if (message.method) {
       if (message.method === DSH_USAGE_METHOD && this.sessionId) {
-        this.callbacks.usage?.(message.params)
+        try { this.callbacks.usage?.(message.params) }
+        catch (err) { logger.warn({ err }, '[dsh] failed to record native usage') }
       } else if (message.method === 'session/update' && message.params?.sessionId === this.sessionId) {
         this.receiveUpdate(message.params.update)
       } else if (message.method === DSH_STREAM_METHOD && message.params?.sessionId === this.sessionId) {

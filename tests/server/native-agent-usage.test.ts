@@ -8,6 +8,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '../../packages/server/src/bootstrap/coding-agent-adapters'
 import { CodingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
+import { NativeTurnUsage } from '../../packages/server/src/modules/coding-agents/services/runtime/native-usage'
+import * as nativeModel from '../../packages/server/src/modules/coding-agents/services/runtime/native-model'
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
 import { getRecordedUsageTotals, getUsage, getLocalUsageStats, updateUsage } from '../../packages/server/src/modules/studio/repositories/usage-store'
 import { withRunUsage } from '../../packages/server/src/modules/studio/repositories/run-usage-store'
@@ -44,6 +46,7 @@ describe('global native usage accounting', () => {
     rmSync(workspace, { recursive: true, force: true })
     vi.clearAllMocks()
     vi.restoreAllMocks()
+    vi.useRealTimers()
   })
   function start(agentId: string, mode: 'global' | 'scoped' = 'global') {
     manager.start({
@@ -60,6 +63,60 @@ describe('global native usage accounting', () => {
     child.emit('exit', code)
     child.emit('close', code)
   }
+
+  it.each(['codex', 'claude-code', 'grok', 'cursor'])('settles %s output once even when native accounting throws', async agent => {
+    start(agent)
+    vi.spyOn(NativeTurnUsage.prototype, 'rows').mockImplementation(() => { throw new Error('bad native usage') })
+    const usage = { input_tokens: 10, output_tokens: 2 }
+    const events: Record<string, unknown[]> = {
+      codex: [{ type: 'item.completed', item: { id: 'a', type: 'agent_message', text: 'done' } }, { type: 'turn.completed', usage }],
+      'claude-code': [{ type: 'assistant', message: { id: 'a', role: 'assistant', content: [{ type: 'text', text: 'done' }] } }, { type: 'result', subtype: 'success', result: 'done', usage }],
+      grok: [{ type: 'text', data: 'done' }, { type: 'end', usage }],
+      cursor: [{ type: 'assistant', timestamp_ms: 1, message: { content: [{ type: 'text', text: 'done' }] } }, { type: 'result', subtype: 'success', result: 'done', usage }],
+    }
+    for (const event of events[agent]) emit(event)
+    close()
+    await vi.waitFor(() => expect(emitted.mock.calls.filter(([, event]) => event === 'run.completed')).toHaveLength(1))
+    expect(emitted.mock.calls.filter(([, event]) => event === 'run.failed')).toHaveLength(0)
+    expect(getSessionDetail(sessionId)?.messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('done')
+  })
+
+  it('still stops and removes the run when cancellation accounting throws', () => {
+    start('claude-code')
+    vi.spyOn(NativeTurnUsage.prototype, 'rows').mockImplementation(() => { throw new Error('bad native usage') })
+    expect(manager.stop(sessionId)).toBe(true)
+    expect(manager.getRunInfo(sessionId)).toBeNull()
+    expect(emitted.mock.calls.filter(([, event]) => event === 'run.failed')).toHaveLength(1)
+  })
+
+  it('keeps scoped chat output intact when a provider returns malformed usage', async () => {
+    start('codex', 'scoped')
+    expect(() => manager.handleProxyUsageEvent(sessionId, { type: 'response.completed', data: { response: {
+      id: 'bad-usage', usage: { input_tokens: { valueOf: null, toString: null }, output_tokens: 2 },
+    } } } as any)).not.toThrow()
+    emit({ type: 'item.completed', item: { id: 'a', type: 'agent_message', text: 'done' } })
+    emit({ type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 2 } })
+    close()
+    await vi.waitFor(() => expect(emitted.mock.calls.filter(([, event]) => event === 'run.completed')).toHaveLength(1))
+    expect(getSessionDetail(sessionId)?.messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('done')
+    expect(getRecordedUsageTotals(sessionId, 'coding_agent').apiCalls).toBe(0)
+  })
+
+  it('releases Codex completion and permits the next turn when usage discovery never resolves', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    vi.spyOn(nativeModel, 'findRollout').mockImplementation(() => new Promise(() => {}))
+    start('codex')
+    emit({ type: 'thread.started', thread_id: 'native-thread' })
+    emit({ type: 'item.completed', item: { id: 'a', type: 'agent_message', text: 'done' } })
+    emit({ type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 2 } })
+    close()
+    expect(() => manager.send(sessionId, 'too early')).toThrow('still completing')
+    await vi.advanceTimersByTimeAsync(2_500)
+    await vi.waitFor(() => expect(emitted.mock.calls.filter(([, event]) => event === 'run.completed')).toHaveLength(1))
+    expect(getSessionDetail(sessionId)?.messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('done')
+    child.exitCode = null
+    expect(() => manager.send(sessionId, 'next')).not.toThrow()
+  })
 
   it.each(['cursor', 'codex', 'pi', 'claude-code', 'claude', 'claude_code', 'grok', 'opencode', 'dsh'])('hydrates %s session summaries from cumulative native usage across turns and models', agent => {
     // Workflow sessions use the same native ledger, despite having a different source.

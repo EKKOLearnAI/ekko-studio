@@ -89,6 +89,14 @@ but tokens not reported by an interrupted upstream cannot be reconstructed.
 Separate native threads are not charged merely because they appear nearby in
 a file; they need an identified accounting owner.
 
+Accounting is isolated from chat lifecycle errors: native/proxy usage failures
+must not suppress text, tool results, terminal events or cancellation cleanup.
+DSH usage notification/callback failures must not replace the model's original
+result/error or dispose the ACP connection. Codex's end-of-turn discovery and
+file reads share a two-second wait budget; on timeout the run settles with
+available/unknown accounting and releases the next input. Fault-injection tests
+exercise these guarantees alongside resume and queue-interruption tests.
+
 Native USD catalog estimates remain estimates. Aggregate-only CLI versions
 cannot supply per-request context tiers; missing model/provider/price metadata
 remains unknown. Configure exact provider/model manual rates where appropriate.

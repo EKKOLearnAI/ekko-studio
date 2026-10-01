@@ -34,8 +34,8 @@ import { applyCursorStreamEvent } from '../cursor/event-adapter'
 import { isolatedCodingAgentChildEnv } from './child-env'
 import { NativeTurnUsage, type NativeUsageRow } from './native-usage'
 import { RunToolTiming } from './tool-timing'
-import { readCodexTurnModel, readOpenCodeMessageModel } from './native-model'
-import { readCodexTurnUsage } from './codex-usage'
+import { readOpenCodeMessageModel } from './native-model'
+import { readCodexTurnAccounting } from './codex-usage'
 import { getCodingAgentGlobalHome } from '../../../studio/public/coding-agent-global-home'
 import { isContextWindowExceededError, nativeContextRecoveryMessage, resetNativeSessionAfterContextOverflow } from '../context-recovery'
 
@@ -1131,36 +1131,38 @@ export class CodingAgentRunManager {
     if (!agentSessionId || !['response.completed', 'response.failed', 'response.incomplete'].includes(event.type)) return
     const run = this.runs.get(agentSessionId)
     if (!run || run.launch.mode !== 'scoped') return
-    const final = (event.data as any).response || event.data
-    if (!final?.usage) return
-    const usage = normalizeTokenUsage(final.usage, {}, {
-      inputIncludesCache: run.launch.apiMode !== 'anthropic_messages',
-    })
-    if (usage.isEstimated) {
-      logger.warn({
-        runId: run.id,
+    this.captureUsage(run, () => {
+      const final = (event.data as any).response || event.data
+      if (!final?.usage) return
+      const usage = normalizeTokenUsage(final.usage, {}, {
+        inputIncludesCache: run.launch.apiMode !== 'anthropic_messages',
+      })
+      if (usage.isEstimated) {
+        logger.warn({
+          runId: run.id,
+          sessionId: run.launch.sessionId,
+          responseId: final?.id,
+          provider: run.launch.provider,
+          model: final?.model || run.launch.model,
+        }, '[coding-agent-run] scoped proxy response omitted token usage')
+        return
+      }
+      recordSessionUsage({
         sessionId: run.launch.sessionId,
-        responseId: final?.id,
-        provider: run.launch.provider,
+        parentRunId: run.usageRunId || run.id,
+        runId: final?.id,
+        source: 'coding_agent',
+        agent: usageCodingAgent(run.launch.agentId),
+        usageScope: 'model_call',
+        apiCalls: 1,
+        apiDuration,
+        usage,
+        profile: run.launch.profile,
+        cost: normalizeUsageCost(final),
         model: final?.model || run.launch.model,
-      }, '[coding-agent-run] scoped proxy response omitted token usage')
-      return
-    }
-    recordSessionUsage({
-      sessionId: run.launch.sessionId,
-      parentRunId: run.usageRunId || run.id,
-      runId: final?.id,
-      source: 'coding_agent',
-      agent: usageCodingAgent(run.launch.agentId),
-      usageScope: 'model_call',
-      apiCalls: 1,
-      apiDuration,
-      usage,
-      profile: run.launch.profile,
-      cost: normalizeUsageCost(final),
-      model: final?.model || run.launch.model,
-      provider: run.launch.provider,
-      isEstimated: false,
+        provider: run.launch.provider,
+        isEstimated: false,
+      })
     })
   }
 
@@ -1243,8 +1245,10 @@ export class CodingAgentRunManager {
       run.assistantMessageId = this.persistTerminalResponse(run)
       const final = (storageSafeResponseEvent.data as any).response || storageSafeResponseEvent.data
       if (run.launch.mode !== 'scoped' && !['opencode', 'pi'].includes(run.launch.agentId)) {
-        const rows = (run.nativeUsage || new NativeTurnUsage()).rows(run.launch.agentId, final?.usage, final?.model || run.launch.model)
-        this.recordNativeUsage(run, rows, final?.id || run.printResponseId || run.runMarker || run.id)
+        this.captureUsage(run, () => {
+          const rows = (run.nativeUsage || new NativeTurnUsage()).rows(run.launch.agentId, final?.usage, final?.model || run.launch.model)
+          this.recordNativeUsage(run, rows, final?.id || run.printResponseId || run.runMarker || run.id)
+        })
       }
       const deferPiUsageRefresh = run.launch.agentId === 'pi'
       run.terminalUsageRefresh = deferPiUsageRefresh
@@ -1280,6 +1284,11 @@ export class CodingAgentRunManager {
     run.state.responseRun = undefined
     updateSessionStats(run.launch.sessionId)
     return assistantMessageId
+  }
+
+  private captureUsage(run: ManagedCodingAgentRun, capture: () => void) {
+    try { capture() }
+    catch (err) { logger.warn({ err, runId: run.id, agent: run.launch.agentId }, '[coding-agent-run] failed to capture usage') }
   }
 
   private recordNativeUsage(run: ManagedCodingAgentRun, rows: NativeUsageRow[], responseId: string) {
@@ -1492,8 +1501,10 @@ export class CodingAgentRunManager {
     // Preserve completed model calls already observed before cancellation.
     // Codex is reconciled after stdout/file writes drain on child close.
     if (run.launch.mode === 'global' && !['codex', 'pi', 'opencode', 'dsh'].includes(run.launch.agentId) && !run.terminalEventHandled) {
-      const rows = run.nativeUsage?.rows(run.launch.agentId, run.codexPendingUsage, run.launch.model) || []
-      this.recordNativeUsage(run, rows, run.printResponseId || run.id)
+      this.captureUsage(run, () => {
+        const rows = run.nativeUsage?.rows(run.launch.agentId, run.codexPendingUsage, run.launch.model) || []
+        this.recordNativeUsage(run, rows, run.printResponseId || run.id)
+      })
     }
     run.exited = true
     run.state.isWorking = false
@@ -1772,8 +1783,10 @@ export class CodingAgentRunManager {
 
     if (run.printCompleted) return
     if (run.launch.mode === 'global') {
-      const row = run.nativeUsage?.observePi(event)
-      if (row) this.recordNativeUsage(run, [row], run.printResponseId || run.id)
+      this.captureUsage(run, () => {
+        const row = run.nativeUsage?.observePi(event)
+        if (row) this.recordNativeUsage(run, [row], run.printResponseId || run.id)
+      })
     }
     if (event.type === 'auto_retry_start') {
       run.piWillRetry = true
@@ -2112,7 +2125,7 @@ export class CodingAgentRunManager {
     }
 
     if (run.printCompleted) return
-    if (run.launch.mode === 'global') run.nativeUsage?.observeClaude(event)
+    if (run.launch.mode === 'global') this.captureUsage(run, () => { run.nativeUsage?.observeClaude(event) })
 
     if (event.type === 'stream_event' && event.event) {
       this.handleClaudeAnthropicStreamEvent(run, event.event)
@@ -2591,7 +2604,7 @@ export class CodingAgentRunManager {
       images,
       onEvent: (event) => {
         this.touch(run)
-        if (run.launch.mode === 'global') run.nativeUsage?.observeGrok(event)
+        if (run.launch.mode === 'global') this.captureUsage(run, () => { run.nativeUsage?.observeGrok(event) })
         applyGrokStreamEvent(event, {
           text: value => this.appendCodexText(run, value),
           thought: value => this.appendCodexReasoning(run, value),
@@ -3115,16 +3128,13 @@ export class CodingAgentRunManager {
       if (run.launch.mode === 'global' && nativeSessionId && run.nativeTurnStartedAt) {
         const home = run.launch.env?.CODEX_HOME || process.env.CODEX_HOME || join(getCodingAgentGlobalHome(), '.codex')
         run.nativeCompletionPending = true
-        void Promise.all([
-          readCodexTurnModel(home, nativeSessionId, run.nativeTurnStartedAt),
-          readCodexTurnUsage(home, nativeSessionId, run.nativeTurnStartedAt),
-        ]).then(([metadata, rows]) => {
+        void readCodexTurnAccounting(home, nativeSessionId, run.nativeTurnStartedAt).then(([metadata, rows]) => {
           run.nativeCompletionPending = false
           if (metadata && run.nativeUsage) Object.assign(run.nativeUsage, metadata)
           if (rows && run.nativeUsage) run.nativeUsage.codexRows = rows
           if (run.exited || run.stoppedByUser) {
             if (rows) {
-              this.recordNativeUsage(run, rows, run.printResponseId || run.id)
+              this.captureUsage(run, () => this.recordNativeUsage(run, rows, run.printResponseId || run.id))
               this.completeUsage(run)
             }
             return

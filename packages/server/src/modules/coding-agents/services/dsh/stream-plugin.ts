@@ -18,7 +18,9 @@ export function apply(ctx) {
         yield chunk
       }
     } finally {
-      if (usage) process.stdout.write(JSON.stringify({
+      // Accounting must not turn a successful model stream into a failure, or
+      // replace its original error if serialization/the notification fails.
+      try { if (usage) process.stdout.write(JSON.stringify({
         jsonrpc: '2.0', method: '${DSH_USAGE_METHOD}', params: {
           requestId, sessionId: options.sessionId, model: options.model, provider: options.provider,
           usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
@@ -26,7 +28,7 @@ export function apply(ctx) {
             reasoningTokens: usage.reasoningTokens },
           apiDuration: (performance.now() - started) / 1000,
         },
-      }) + '\\n')
+      }) + '\\n') } catch { /* Usage stays unknown when reporting fails. */ }
     }
   })
   const attempts = new WeakMap()

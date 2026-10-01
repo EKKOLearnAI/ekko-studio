@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { normalizeUsageCost } from '../../../studio/public/usage'
 import type { NativeUsageRow } from './native-usage'
-import { findRollout } from './native-model'
+import { findRollout, readCodexTurnModel } from './native-model'
 
 export interface CodexUsageTurn {
   id: string
@@ -120,4 +120,18 @@ export async function readCodexTurnUsage(home: string, sessionId: string, starte
   if (selected.length !== 1) return []
   if (selected.some(turn => !turn.complete)) return []
   return selected.flatMap(turn => turn.rows)
+}
+
+/** Bound discovery as well as file reads so accounting cannot hold a chat open. */
+export async function readCodexTurnAccounting(home: string, sessionId: string, startedAt: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.all([readCodexTurnModel(home, sessionId, startedAt), readCodexTurnUsage(home, sessionId, startedAt)]),
+      new Promise<[undefined, undefined]>(resolve => {
+        timer = setTimeout(() => resolve([undefined, undefined]), 2_000)
+        timer.unref()
+      }),
+    ])
+  } finally { if (timer) clearTimeout(timer) }
 }
