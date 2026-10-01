@@ -18,6 +18,7 @@ import { refreshProviderModels, restoreProviderModels } from '../services/provid
 import { appendProviderAuditEvent } from '../../studio/public/provider-audit'
 import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
 import { OPENCODE_FREE_PROVIDER, OPENCODE_FREE_BASE_URL, isOpenCodeFreeModel } from '../../studio/contracts/opencode-free'
+import { preservedModelKeys } from '../services/models/model-section'
 
 const OPTIONAL_API_KEY_PROVIDERS = new Set(['cliproxyapi', 'xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth', OPENCODE_FREE_PROVIDER])
 const DIRECT_CONFIG_PROVIDERS = new Set(['xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth', OPENCODE_FREE_PROVIDER])
@@ -476,7 +477,7 @@ export async function remove(ctx: any) {
           delete config.model.base_url
           delete config.model.api_key
         } else {
-          config.model = {}
+          config.model = preservedModelKeys(config.model)
         }
       }
       return { data: config, result: true }
