@@ -40,6 +40,7 @@ const { t } = useI18n()
 .run-usage-card {
   box-sizing: border-box;
   width: 100%;
+  min-width: 200px;
   margin-top: 12px;
   padding: 12px 14px;
   display: grid;
