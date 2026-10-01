@@ -1204,3 +1204,47 @@ describe('session upload provenance at the socket boundary', () => {
     expect((server as any).sessionMap.get('session-1').queue).toHaveLength(1)
   })
 })
+
+
+describe('cross-profile session resume', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getSessionMock.mockImplementation((sessionId?: string) => sessionId
+      ? { id: sessionId, profile: 'research', source: 'cli', model: 'gpt-test', provider: 'openai' }
+      : undefined)
+  })
+
+  it('resumes a session owned by another profile the user can access', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const resumeSession = vi.spyOn(server as any, 'resumeSession').mockResolvedValue(undefined)
+
+    ;(server as any).onConnection(socket)
+    await handlers.get('resume')!({ session_id: 'research-session' })
+
+    // The connection was handshaked as `default`, but reading a session the user can
+    // access must not be pinned to the handshake profile: otherwise the client gets
+    // `run.failed` instead of `resumed` and the conversation stays blank.
+    expect(socket.emit).not.toHaveBeenCalledWith('run.failed', expect.anything())
+    expect(socket.join).toHaveBeenCalledWith('session:research-session')
+    expect(resumeSession).toHaveBeenCalledWith(socket, 'research-session')
+  })
+
+  it('still rejects a session from a profile the user cannot access', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    socket.data = { user: { id: 7, role: 'user' } as any }
+    userCanAccessProfileMock.mockReturnValueOnce(false)
+    const server = new ChatRunSocket(io as any)
+    const resumeSession = vi.spyOn(server as any, 'resumeSession').mockResolvedValue(undefined)
+
+    ;(server as any).onConnection(socket)
+    await handlers.get('resume')!({ session_id: 'research-session' })
+
+    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({
+      error: 'Profile "research" is not available for this user',
+    }))
+    expect(resumeSession).not.toHaveBeenCalled()
+  })
+})
