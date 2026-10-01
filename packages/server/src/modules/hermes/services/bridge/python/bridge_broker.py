@@ -277,6 +277,7 @@ class BridgeBroker:
                 workers = list(self._workers.values())
             sessions: list[dict[str, Any]] = []
             notifications: list[dict[str, Any]] = []
+            plugin_notices: list[dict[str, Any]] = []
             pending_count = 0
             for worker in workers:
                 profile = getattr(worker, "profile", "default") or "default"
@@ -297,11 +298,15 @@ class BridgeBroker:
                 for notification in response.get("notifications") or []:
                     if isinstance(notification, dict):
                         notifications.append({**notification, "profile": profile})
+                for notice in response.get("plugin_notices") or []:
+                    if isinstance(notice, dict):
+                        plugin_notices.append({**notice, "profile": profile})
             return {
                 "broker_id": str(os.getpid()),
                 "pending_count": pending_count,
                 "sessions": sessions,
                 "notifications": notifications,
+                "plugin_notices": plugin_notices,
             }
 
         if action in {"background_notification_complete", "background_notification_release"}:
