@@ -17,6 +17,8 @@ from typing import Any, Callable
 from bridge_runtime import (
     APPROVAL_TIMEOUT_MS,
     APPROVAL_TIMEOUT_SECONDS,
+    CLARIFY_TIMEOUT_MS,
+    CLARIFY_TIMEOUT_SECONDS,
     _approval_pattern_keys,
     _base_hermes_home,
     _bridge_platform,
@@ -27,6 +29,7 @@ from bridge_runtime import (
     _install_execute_code_approval_memory_patch,
     _jsonable,
     _load_cfg,
+    _load_disabled_toolsets,
     _load_enabled_toolsets,
     _load_fallback_model,
     _load_reasoning_config,
@@ -500,6 +503,7 @@ class AgentPool:
                     reasoning_config=_load_reasoning_config(resolved_model),
                     service_tier=_load_service_tier(),
                     enabled_toolsets=_load_enabled_toolsets(),
+                    disabled_toolsets=_load_disabled_toolsets(),
                     platform=_bridge_platform(),
                     session_id=session_id,
                     session_db=self._db.get_for_profile(profile),
@@ -1433,28 +1437,98 @@ class AgentPool:
         return callback
 
     def _clarify_callback(self, session_id: str):
-        def callback(question: str, choices: list[str] | None = None) -> str:
-            clarify_id = uuid.uuid4().hex
-            response_queue: queue.Queue[str] = queue.Queue(maxsize=1)
-            with self._lock:
-                self._clarify_requests[clarify_id] = response_queue
-            self._append_event(session_id, {
-                "event": "clarify.requested",
-                "clarify_id": clarify_id,
-                "question": str(question or ""),
-                "choices": list(choices) if choices else None,
-                "timeout_ms": 300_000,
-            })
-            try:
-                user_response = response_queue.get(timeout=300)
-            except queue.Empty:
-                user_response = "[user did not respond within 5m]"
-            finally:
-                with self._lock:
-                    self._clarify_requests.pop(clarify_id, None)
-            return user_response
+        """Answer the clarify tool's batch contract: one card per question, in order.
+
+        ``clarify_tool`` calls ``callback(normalized_questions)`` and merges the reply's
+        ``answers`` (keyed by ``qid``) into its result JSON. This bridge kept the retired
+        ``(question, choices)`` signature, so ``question`` was the whole normalized list and
+        the card rendered ``[{'qid': 'q0', ...}]`` as its question text, while every answer
+        missed its ``qid``. A question the user never answers stops the batch (gateway
+        parity) instead of asking on; a blank response is the surface's dismiss/skip and
+        locks that question as ``skipped``.
+        """
+        def callback(questions: list[dict]) -> dict[str, Any]:
+            # Coerce rather than drop: a bare-string entry used to be the whole signature, so
+            # treating it as an unparseable item would report "submitted" with no answers and
+            # read to the agent as "the user skipped everything".
+            entries = []
+            for item in (questions or []):
+                if isinstance(item, dict):
+                    entries.append(item)
+                elif isinstance(item, str) and item.strip():
+                    entries.append({"question": item})
+            answers: dict[str, Any] = {}
+            if not entries:
+                return {"answers": answers, "outcome": "undelivered",
+                        "notice": "The clarify call carried no questions."}
+            reply: dict[str, Any] = {"answers": answers, "outcome": "submitted"}
+            for index, entry in enumerate(entries):
+                qid = str(entry.get("qid") or f"q{index}")
+                response, answered, undelivered = self._ask_clarify_question(
+                    session_id, entry.get("question"), entry.get("choices"))
+                if undelivered:
+                    reply.update(outcome="undelivered",
+                                 notice="No Studio client is attached to this session.")
+                    break
+                if not answered:
+                    reply.update(outcome="timed_out",
+                                 notice=f"The user did not respond within {CLARIFY_TIMEOUT_SECONDS // 60}m.")
+                    break
+                answers[qid] = response or None
+            return reply
 
         return callback
+
+    def _ask_clarify_question(
+        self, session_id: str, question: Any, choices: Any,
+    ) -> tuple[str, bool, bool]:
+        """Publish one clarify card and wait for it: ``(response, answered, undelivered)``.
+
+        ``answered`` is False only on timeout — a received-but-blank response is the user
+        dismissing the card, which locks the question as skipped rather than unanswered.
+        """
+        if not session_id:
+            return "", False, True
+        # Defensive: a non-string question used to reach the card as a Python repr, which is
+        # the failure this callback exists to not repeat.
+        text = question
+        if not isinstance(text, str):
+            text = str(text.get("question") if isinstance(text, dict) else (text or ""))
+        clarify_id = uuid.uuid4().hex
+        response_queue: queue.Queue[str] = queue.Queue(maxsize=1)
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return "", False, True
+            run_id = str(session.current_run_id or "")
+            self._clarify_requests[clarify_id] = response_queue
+        self._append_event(session_id, {
+            "event": "clarify.requested",
+            "run_id": run_id,
+            "clarify_id": clarify_id,
+            "question": text,
+            "choices": [str(choice) for choice in choices] if isinstance(choices, list) and choices else None,
+            "timeout_ms": CLARIFY_TIMEOUT_MS,
+        })
+        answered = True
+        try:
+            user_response = response_queue.get(timeout=CLARIFY_TIMEOUT_SECONDS)
+        except queue.Empty:
+            user_response = ""
+            answered = False
+        finally:
+            with self._lock:
+                self._clarify_requests.pop(clarify_id, None)
+        # Retire the card for every attached client: a timeout would otherwise leave it
+        # looking answerable. Mirrors the approval callback's resolved event.
+        self._append_event(session_id, {
+            "event": "clarify.resolved",
+            "run_id": run_id,
+            "clarify_id": clarify_id,
+            "resolved": True,
+            "reason": "timeout" if not answered else ("response" if user_response else "dismissed"),
+        })
+        return user_response, answered, False
 
     def _approval_dispatcher(self, command: str, description: str, *, allow_permanent: bool = True) -> str:
         session_id = str(getattr(self._run_context, "session_id", "") or "")
