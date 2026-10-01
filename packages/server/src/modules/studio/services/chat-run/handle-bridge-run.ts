@@ -604,6 +604,9 @@ export async function handleBridgeRun(
   const storageRole = shouldStoreInputInsteadOfDisplay ? 'user' : displayRole
   const displayRoleForStorage = shouldStoreInputInsteadOfDisplay ? displayRole : null
   const displayContentForStorage = shouldStoreInputInsteadOfDisplay ? inputStr : null
+  // Only a turn that stored its input as a user row may cut the latest user row from history;
+  // otherwise that row is the previous human turn (plugin notices, background callbacks, plain commands).
+  const currentInputStoredAsUser = shouldPersistUserMessage && storageRole === 'user'
   let messageId: number | string | undefined
 
   if (shouldPersistUserMessage) {
@@ -762,6 +765,7 @@ export async function handleBridgeRun(
           return contextTokens
         },
         currentInputTokens,
+        currentInputStoredAsUser,
       )
     const bridgeHistory = history
     const originalBridgeInput = isContentBlockArray(input)
@@ -895,6 +899,7 @@ export async function handleBridgeRun(
         shouldPersistUserMessage && displayRole === 'user',
         data.model_groups,
         runMetadata,
+        currentInputStoredAsUser,
       )
       if (chunk.done) {
         sawTerminalChunk = true
@@ -941,6 +946,7 @@ export async function handleBridgeRun(
         shouldPersistUserMessage && displayRole === 'user',
         data.model_groups,
         runMetadata,
+        currentInputStoredAsUser,
       )
     }
   } catch (err: any) {
@@ -1302,6 +1308,7 @@ async function applyBridgeChunkAsync(
   currentInputIncludedInDb = true,
   modelGroups?: RunModelGroup[],
   runMetadata?: BridgeRunMetadata,
+  currentInputStoredAsUser = true,
 ): Promise<void> {
   if (sessionMap.get(sessionId) !== state || state.activeRunMarker !== runMarker) {
     bridgeLogger.info({
@@ -1578,7 +1585,7 @@ async function applyBridgeChunkAsync(
       const bridgeHistory = await buildDbSnapshotAwareHistory(
         sessionId,
         profile,
-        { excludeLastUser: true },
+        { excludeLastUser: currentInputStoredAsUser },
         { model: modelContext.model, provider: modelContext.provider },
       )
       const bridgeUsage = estimateUsageTokensFromMessages(bridgeHistory)
@@ -1619,7 +1626,7 @@ async function applyBridgeChunkAsync(
             tokenCount,
             // Hermes requests compression when it measured the context over budget; the debug
             // force-compress path reuses the event below threshold and keeps its old behaviour.
-            { overBudget: ev.focus_topic !== 'debug_force_compress' },
+            { excludeLastUser: currentInputStoredAsUser, overBudget: ev.focus_topic !== 'debug_force_compress' },
           )
           state.bridgeCompressionResults = state.bridgeCompressionResults || {}
           state.bridgeCompressionResults[String(ev.request_id)] = compressed
