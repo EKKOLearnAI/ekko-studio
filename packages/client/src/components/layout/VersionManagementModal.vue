@@ -271,7 +271,7 @@ async function removeRuntime(version: string) {
   <NDrawer
     :show="props.show"
     placement="right"
-    :width="'min(860px, calc(100vw - 24px))'"
+    width="var(--studio-drawer-width)"
     @update:show="updateShow"
   >
     <NDrawerContent :title="t('runtimeVersions.title')" closable>
@@ -493,7 +493,7 @@ async function removeRuntime(version: string) {
   <NDrawer
     :show="cliDetailsShow"
     placement="right"
-    :width="'min(620px, calc(100vw - 24px))'"
+    width="var(--studio-drawer-width)"
     @update:show="cliDetailsShow = $event"
   >
     <NDrawerContent :title="t('runtimeVersions.cliDetailsTitle')" closable>

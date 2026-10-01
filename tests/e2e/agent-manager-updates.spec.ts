@@ -1,6 +1,46 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockHermesApi } from './fixtures'
 
+test('keeps Runtime management readable at the shared desktop and mobile drawer widths', async ({ page }, testInfo) => {
+  await authenticate(page)
+  await mockHermesApi(page)
+  await page.route('**/api/agents/status', route => route.fulfill({ json: {
+    revision: 1,
+    updatedAt: '2026-10-01T00:00:00.000Z',
+    agents: [{ id: 'hermes', installed: true, source: 'managed-runtime', version: '0.21.0', path: '/runtime/hermes' }],
+  } }))
+  const directory = '/Users/studio/Library/Application Support/Ekko Studio/runtimes/hermes/0.21.0/linux-x64'
+  await page.route('**/api/hermes/runtime-versions', route => route.fulfill({ json: {
+    active: null,
+    platform: 'linux-x64',
+    activeVersionPath: directory,
+    remoteManifestUrl: '',
+    remoteError: '',
+    hermes: {
+      source: 'managed-runtime', activeVersion: '0.21.0', agentVersion: '0.21.0', activeDirectory: directory,
+      storageDirectory: directory, defaultStorageDirectory: directory, pendingStorageDirectory: '',
+      migrationError: '', activationError: '', cliInstallations: [],
+      installed: [{ version: '0.21.0', platform: 'linux-x64', directory, active: true }],
+      remoteVersions: ['0.21.0', '0.21.1'],
+    },
+    webui: { currentVersion: '0.7.0', activeVersion: '0.7.0', activeDirectory: '', installed: [], remoteVersions: [] },
+  } }))
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/#/studio/agents')
+  await page.getByRole('button', { name: 'Manage Runtime', exact: true }).click()
+  const drawer = page.locator('.n-drawer').filter({ has: page.locator('.version-management') })
+  await expect(drawer.getByText('0.21.1', { exact: true })).toBeVisible()
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect(drawer).toHaveCSS('width', `${width > 768 ? 520 : width}px`)
+    await expect.poll(() => drawer.locator('.n-drawer-body-content-wrapper').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+    await expect(drawer.getByRole('button', { name: 'Refresh', exact: true })).toBeInViewport()
+    await drawer.screenshot({ path: testInfo.outputPath(`runtime-drawer-${width}.png`), animations: 'disabled' })
+  }
+  await drawer.locator('.n-drawer-header__close').click()
+  await expect(drawer).toBeHidden()
+})
+
 test('shows disabled Cursor updates without stale failures and preserves supported update controls', async ({ page }) => {
   await authenticate(page)
   await mockHermesApi(page)

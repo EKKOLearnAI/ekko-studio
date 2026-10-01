@@ -2803,7 +2803,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
             </div>
         </div>
 
-        <NDrawer v-model:show="showCreateModal" placement="right" :width="workspacePanelMobile ? '100%' : 520">
+        <NDrawer v-model:show="showCreateModal" placement="right" width="var(--studio-drawer-width)">
             <NDrawerContent :title="t('groupChat.createRoom')" closable>
                 <CreateRoomForm @submit="handleCreateRoom" @cancel="showCreateModal = false" />
             </NDrawerContent>
@@ -2812,7 +2812,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
         <NDrawer
             :show="showAddAgentDrawer"
             placement="right"
-            :width="workspacePanelMobile ? '100%' : 520"
+            width="var(--studio-drawer-width)"
             :z-index="1100"
             :mask-closable="!isSavingAgent"
             :close-on-esc="!isSavingAgent && !showAgentPresetDialog"
@@ -3228,7 +3228,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                 preset="dialog"
                 :title="t('chat.setWorkspaceTitle')"
                 class="workspace-modal"
-                style="width: 520px; max-width: 92vw"
+                style="width: var(--studio-workspace-picker-width)"
             >
                 <FolderPicker v-model="workspaceValue" />
                 <template #action>
@@ -3281,7 +3281,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
             <NDrawer
                 v-model:show="showRoomSettingsModal"
                 placement="right"
-                :width="workspacePanelMobile ? '100%' : 520"
+                width="var(--studio-drawer-width)"
             >
                 <NDrawerContent :title="t('groupChat.roomSettings')" closable>
                     <div class="room-settings-drawer">

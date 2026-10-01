@@ -14,7 +14,7 @@ const { t } = useI18n()
 <template>
   <NDrawer
     :show="show"
-    :width="hasSidebar ? 'min(360px, calc(100vw - 24px))' : 64"
+    :width="hasSidebar ? 'var(--studio-drawer-width)' : 64"
     placement="left"
     display-directive="show"
     class="studio-mobile-drawer"
@@ -40,6 +40,9 @@ const { t } = useI18n()
   height: 100%;
   min-height: 0;
   background: $bg-sidebar-surface;
+  border-top-right-radius: 5px;
+  border-bottom-right-radius: 5px;
+  overflow: hidden;
 
   :deep(.studio-navigation-rail) {
     padding-top: max(12px, env(safe-area-inset-top, 0px));
@@ -71,7 +74,7 @@ const { t } = useI18n()
   background: transparent;
   cursor: pointer;
 
-  &:hover { background: rgba(var(--accent-primary-rgb), 0.08); }
+  &:hover { color: $text-primary; }
   &:focus-visible { outline: 2px solid $accent-primary; }
 }
 .studio-mobile-navigation .studio-mobile-navigation__content {

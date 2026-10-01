@@ -441,7 +441,7 @@ function handleNavigateTask(taskId: string) {
 </script>
 
 <template>
-  <NDrawer :show="!!taskId" :width="420" placement="right" @update:show="(v: boolean) => { if (!v) emit('close') }">
+  <NDrawer :show="!!taskId" width="var(--studio-drawer-width)" placement="right" @update:show="(v: boolean) => { if (!v) emit('close') }">
     <NDrawerContent :title="detail?.task.title || ''" closable>
       <NSpin :show="loading">
         <template v-if="detail">

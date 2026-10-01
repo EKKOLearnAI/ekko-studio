@@ -641,6 +641,8 @@ for (const { label, platform, width } of [
       await page.locator(editing ? '.agent-avatar-rail-agent' : '.agent-avatar-rail-add').first().click()
       const drawer = page.locator('.n-drawer').filter({ hasText: editing ? 'Edit Worker' : 'Add Agent' })
       await expect(drawer).toBeVisible()
+      await expect(drawer).toHaveCSS('width', `${width < 769 ? width : 520}px`)
+      await expect(drawer).toHaveCSS('border-top-left-radius', '5px')
       for (const selector of ['.n-drawer-header__main', '.n-drawer-header__close']) {
         await expect.poll(() => drawer.locator(selector).evaluate(element => {
           const box = element.getBoundingClientRect()
@@ -1389,7 +1391,10 @@ test.describe('group chat room deep links', () => {
     await expect(folderButton).toHaveAttribute('title', '/tmp/alpha-new')
     await folderButton.click()
     await expect(pathInput).toHaveValue('/tmp/alpha-new')
+    await expect(picker).toHaveCSS('transform', 'none')
+    await expect(picker).toHaveCSS('width', '520px')
     await picker.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(picker).toBeHidden()
 
     const workspaceButton = toolbar.locator('.workspace-panel-toggle')
     const settingsButton = toolbar.locator('.compression-settings-button')

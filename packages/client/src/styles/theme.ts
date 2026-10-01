@@ -77,6 +77,12 @@ export const lightThemeOverrides: GlobalThemeOverrides = {
   Modal: {
     color: '#ffffff',
   },
+  Drawer: {
+    borderRadius: '5px',
+    closeBorderRadius: '5px',
+    closeColorHover: 'transparent',
+    closeColorPressed: 'transparent',
+  },
   Tag: {
     borderRadius: '6px',
   },
@@ -154,6 +160,12 @@ export const darkThemeOverrides: GlobalThemeOverrides = {
   },
   Modal: {
     color: '#2a2a2a',
+  },
+  Drawer: {
+    borderRadius: '5px',
+    closeBorderRadius: '5px',
+    closeColorHover: 'transparent',
+    closeColorPressed: 'transparent',
   },
   Tag: {
     borderRadius: '6px',

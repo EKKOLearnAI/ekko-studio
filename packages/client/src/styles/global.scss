@@ -141,6 +141,11 @@ body {
   color: $accent-primary;
 }
 
+.n-drawer-header__close:focus-visible {
+  outline: 2px solid $accent-primary;
+  outline-offset: 2px;
+}
+
 .hermes-desktop-pet-window,
 .hermes-desktop-pet-window body,
 .hermes-desktop-pet-window #app {

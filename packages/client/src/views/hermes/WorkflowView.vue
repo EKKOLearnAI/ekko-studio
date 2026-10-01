@@ -3664,7 +3664,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
       v-model:show="workspaceModalVisible"
       preset="card"
       :title="t('workflow.workspace.title')"
-      :style="{ width: 'min(720px, calc(100vw - 32px))' }"
+      style="width: var(--studio-workspace-picker-width)"
     >
       <FolderPicker v-model="workspacePickerValue" />
       <template #footer>
@@ -4184,7 +4184,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
       </div>
     </NModal>
 
-    <NDrawer v-model:show="createWorkflowDrawerVisible" placement="right" :width="420">
+    <NDrawer v-model:show="createWorkflowDrawerVisible" placement="right" width="var(--studio-drawer-width)">
       <NDrawerContent :title="t('workflow.actions.newWorkflow')" closable>
         <div class="workflow-create-form">
           <label class="workflow-field">

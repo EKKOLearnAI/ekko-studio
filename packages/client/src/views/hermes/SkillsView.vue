@@ -252,7 +252,7 @@ function handleSkillSaved() {
       @close="showExternalDirsModal = false" @saved="handleExternalDirsSaved" />
     <NDrawer
       v-model:show="showWriteApprovalDrawer"
-      width="min(960px, calc(100vw - 32px))"
+      width="var(--studio-drawer-width)"
       placement="right"
       class="write-approval-drawer"
     >
