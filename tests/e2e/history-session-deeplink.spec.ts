@@ -445,7 +445,13 @@ for (const width of [1440, 390]) {
     if (width < 769) await page.getByRole('button', { name: 'Menu', exact: true }).click()
     const sidebar = page.locator(width < 769 ? '.studio-mobile-drawer .session-list' : '.history-panel .session-list')
     await expect(sidebar.getByRole('button', { name: 'New Chat', exact: true })).toHaveCount(0)
-    await expect(sidebar).toHaveCSS('width', width < 769 ? '295px' : '240px')
+    if (width < 769) {
+      await expect(page.locator('.studio-mobile-drawer')).toHaveCSS('width', `${width}px`)
+      const content = page.locator('.studio-mobile-navigation__content')
+      expect((await sidebar.boundingBox())!.width).toBe((await content.boundingBox())!.width)
+    } else {
+      await expect(sidebar).toHaveCSS('width', '240px')
+    }
     const more = sidebar.getByRole('button', { name: 'Session list actions', exact: true })
     await expect(sidebar.locator('.session-list-toolbar')).toHaveCount(0)
     await expect(sidebar.locator('.page-sidebar-top')).toHaveCSS('border-bottom-width', '0px')
