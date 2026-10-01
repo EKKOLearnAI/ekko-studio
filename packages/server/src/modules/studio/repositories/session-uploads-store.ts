@@ -1,5 +1,6 @@
 import { getDb } from '../infrastructure/database'
 import { MESSAGES_TABLE, SESSION_SHARES_TABLE, SESSION_UPLOADS_TABLE } from '../infrastructure/database/schemas'
+import { HIDDEN_DISPLAY_ROLE } from './session-store'
 
 export const sessionUploadsStore = {
   record(sessionId: string, profile: string, path: string, realPath: string): void {
@@ -14,7 +15,9 @@ export const sessionUploadsStore = {
   legacyContents(sessionId: string): string[] {
     // Old messages have no sender provenance. Only history predating the first
     // share can be used; later recipient-authored paths cannot grant access.
+    // Hidden automatic-turn rows are not user-authored, so they never grant access either.
     return (getDb()?.prepare(`SELECT content FROM ${MESSAGES_TABLE} WHERE session_id = ? AND role = 'user'
+      AND COALESCE(display_role, '') <> '${HIDDEN_DISPLAY_ROLE}'
       AND timestamp < (SELECT MIN(created_at) / 1000 FROM ${SESSION_SHARES_TABLE} WHERE session_id = ?)
       AND substr(ltrim(content), 1, 1) = '['`).all(sessionId, sessionId) || [])
       .map(row => String(row.content || ''))

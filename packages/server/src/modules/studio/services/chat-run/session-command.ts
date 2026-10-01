@@ -1,5 +1,5 @@
 import type { Server, Socket } from 'socket.io'
-import { addMessage, clearSessionMessages, createBranchedSession, createSession, getSession, getSessionDetail, renameSession, updateSessionStats } from '../../repositories/session-store'
+import { HIDDEN_DISPLAY_ROLE, addMessage, clearSessionMessages, createBranchedSession, createSession, getSession, getSessionDetail, renameSession, updateSessionStats } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
 import type { PrimaryAgentBridgeClient as AgentBridgeClient } from '../../public/chat-agent-runtime'
 import { readConfigYamlForProfile } from '../../public/profile-config'
@@ -1295,10 +1295,10 @@ function normalizeBranchSource(source: string | null | undefined): ChatRunSource
   return 'cli'
 }
 
-function getLastVisibleMessage(messages: Array<{ role: string; content: string }>): { role: string; content: string } | null {
+function getLastVisibleMessage(messages: Array<{ role: string; content: string; display_role?: string | null }>): { role: string; content: string } | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i]
-    if (message.role !== 'user' && message.role !== 'assistant') continue
+    if ((message.role !== 'user' && message.role !== 'assistant') || message.display_role === HIDDEN_DISPLAY_ROLE) continue
     const content = String(message.content || '').replace(/\s+/g, ' ').trim()
     if (!content) continue
     return {

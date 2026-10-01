@@ -10,6 +10,7 @@ const getRecordedUsageTotalsMock = vi.fn()
 const getUsageMock = vi.fn()
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
+  HIDDEN_DISPLAY_ROLE: 'hidden',
   getSessionDetail: getSessionDetailMock,
   getSession: getSessionMock,
   getSessionContextMessages: getSessionContextMessagesMock,

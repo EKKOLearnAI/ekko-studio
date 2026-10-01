@@ -39,7 +39,7 @@ import {
   updateSessionStats as localUpdateSessionStats,
 } from '../public/sessions'
 import { buildDbExportHistory, ExportCompressor } from '../services/context-compressor/export-compressor'
-import { getUnpricedHermesUsageSessions, getLocalUsageStats, getRecordedUsageSessionIds, getUsage, getUsageBatch } from '../public/sessions'
+import { HIDDEN_DISPLAY_ROLE, getUnpricedHermesUsageSessions, getLocalUsageStats, getRecordedUsageSessionIds, getUsage, getUsageBatch } from '../public/sessions'
 import {
   SESSION_CATEGORY_NAME_MAX_LENGTH,
   createSessionCategory,
@@ -464,6 +464,7 @@ export async function getConversationMessages(ctx: any) {
   if (denySessionAccess(ctx, detail)) return
   const messages = (detail.messages || [])
     .filter(m => {
+      if (m.display_role === HIDDEN_DISPLAY_ROLE) return false
       if (humanOnly && m.role !== 'user' && m.role !== 'assistant') return false
       if (!m.content) return false
       return true
@@ -1090,7 +1091,7 @@ function cleanSessionContextMessages(messages: any[]): Array<{
   reasoning_content?: string | null
 }> {
   return messages
-    .filter(message => message?.role === 'user' || message?.role === 'assistant')
+    .filter(message => (message?.role === 'user' || message?.role === 'assistant') && message.display_role !== HIDDEN_DISPLAY_ROLE)
     .map(message => {
       const content = typeof message.content === 'string'
         ? message.content
