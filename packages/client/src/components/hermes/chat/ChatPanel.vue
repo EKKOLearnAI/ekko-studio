@@ -2705,7 +2705,6 @@ async function handleSessionModelCustomSubmit() {
         ref="renameInputRef"
         v-model:value="renameValue"
         :placeholder="t('chat.enterNewTitle')"
-        @keydown.enter="handleRenameConfirm"
       />
     </NModal>
 
