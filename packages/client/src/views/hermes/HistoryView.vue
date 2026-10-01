@@ -174,7 +174,9 @@ function parseHistoryMoaToolPayload(toolName: string | null, value: unknown): { 
 }
 
 function mapHistoryMessages(messages: HermesMessage[]): Session['messages'] {
-  return messages.map(m => {
+  return messages.flatMap(m => {
+    // Automatic-turn input: stored for the model, never rendered.
+    if (m.display_role === 'hidden') return []
     const displayRole = isHistoryMoaToolDisplay(m) ? 'tool' : (m.display_role || m.role)
     const msg: Session['messages'][number] = {
       id: String(m.id),
@@ -199,7 +201,7 @@ function mapHistoryMessages(messages: HermesMessage[]): Session['messages'] {
       msg.content = ''
     }
 
-    return msg
+    return [msg]
   })
 }
 
