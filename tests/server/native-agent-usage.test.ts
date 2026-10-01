@@ -20,6 +20,13 @@ vi.mock('child_process', async importOriginal => ({
   ...await importOriginal<typeof import('child_process')>(), spawn: vi.fn(),
 }))
 
+// Captured-event costs must not depend on a live catalog download or local cache.
+vi.mock('../../packages/server/src/modules/studio/public/model-catalog', () => ({
+  getModelCatalog: vi.fn(() => null),
+  getModelCatalogSnapshot: vi.fn(() => undefined),
+  refreshModelCatalog: vi.fn(async () => undefined),
+}))
+
 describe('global native usage accounting', () => {
   let manager: CodingAgentRunManager
   let workspace: string
