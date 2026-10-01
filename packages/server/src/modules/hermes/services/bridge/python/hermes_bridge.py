@@ -74,6 +74,8 @@ _RUNTIME_PATCH_NAMES = (
 _POOL_PATCH_NAMES = (
     "APPROVAL_TIMEOUT_MS",
     "APPROVAL_TIMEOUT_SECONDS",
+    "CLARIFY_TIMEOUT_MS",
+    "CLARIFY_TIMEOUT_SECONDS",
     "_approval_pattern_keys",
     "_base_hermes_home",
     "_bridge_platform",
@@ -84,6 +86,7 @@ _POOL_PATCH_NAMES = (
     "_install_execute_code_approval_memory_patch",
     "_jsonable",
     "_load_cfg",
+    "_load_disabled_toolsets",
     "_load_enabled_toolsets",
     "_load_reasoning_config",
     "_load_service_tier",
