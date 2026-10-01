@@ -111,6 +111,8 @@ read after process close. Late request usage and price fills publish
 `run.usage.updated` with the exact run/message IDs; the client updates that card
 independently of the active turn. Hermes and Ekko cancellation use the same
 persisted summary contract. Missing native measurements remain unknown.
+Late Coding Agent updates also carry current ledger totals for the session and
+refresh cached resume counters, without changing the active run or its context.
 
 Native USD catalog estimates remain estimates. Aggregate-only CLI versions
 cannot supply per-request context tiers; missing model/provider/price metadata

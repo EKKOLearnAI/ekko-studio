@@ -112,12 +112,14 @@ describe('chat workspace diff turn association', () => {
     const usage = { runId: 'first', assistantMessageId: '4', inputTokens: 100, outputTokens: 20,
       cacheReadTokens: 50, cacheHitRate: 0.5, costUsd: 0.001, tokensPerSecond: 10, isEstimated: false }
     const update = vi.mocked(onRunUsageUpdated).mock.calls.at(-1)![0]
-    update({ event: 'run.usage.updated', session_id: 'session-1', run_usage: usage } as any)
+    update({ event: 'run.usage.updated', session_id: 'session-1', run_usage: usage,
+      inputTokens: 300, outputTokens: 50, cacheReadTokens: 70, cacheWriteTokens: 5 } as any)
     const handlers = vi.mocked(registerSessionHandlers).mock.calls.at(-1)![1]
     handlers.onAbortCompleted({ event: 'abort.completed', session_id: 'session-1', run_id: 'first',
       run_usage: { runId: 'first', assistantMessageId: '4' } } as any)
     expect(store.activeSession?.messages.find(message => message.id === '4')?.runUsage).toMatchObject(usage)
     expect(store.activeSession?.messages.filter(message => message.runUsage)).toHaveLength(1)
+    expect(store.activeSession).toMatchObject({ inputTokens: 300, outputTokens: 50, cacheReadTokens: 70, cacheWriteTokens: 5 })
   })
 
   it('attaches each persisted change to its exact assistant turn without synthetic cards', async () => {

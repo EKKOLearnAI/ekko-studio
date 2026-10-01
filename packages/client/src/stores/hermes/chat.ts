@@ -5321,6 +5321,7 @@ export const useChatStore = defineStore('chat', () => {
     const summary = normalizeRunUsage((evt as any).run_usage)
     const session = sessions.value.find(item => item.id === sid)
     if (!sid || !session || !summary?.assistantMessageId) return
+    applySessionTokenUsage(session, evt as any)
     // Late native logs and prices belong to this exact run, even when another
     // turn is already streaming. Never fall back to the newest assistant.
     const message = session.messages.find(item => item.role === 'assistant'

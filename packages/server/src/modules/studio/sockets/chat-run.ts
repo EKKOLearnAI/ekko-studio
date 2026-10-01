@@ -1,4 +1,5 @@
 import { withRunUsage, onRunUsageUpdated } from '../repositories/run-usage-store'
+import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
 import { recordSessionUploadAttachments } from '../services/files/session-uploads'
 import { authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
 import { bindSessionShareSocket } from '../services/session-shares/socket-access'
@@ -442,9 +443,19 @@ export class ChatRunSocket {
   constructor(io: Server) {
     this.nsp = io.of('/chat-run')
     this.stopUsageUpdates = onRunUsageUpdated((sessionId, summary) => {
+      const session = getSession(sessionId)
+      const isCoding = session && session.agent !== 'ekko-agent' && (session.source === 'coding_agent'
+        || (isAgentRuntime(session.agent) && agentFamilyForRuntime(session.agent) === 'coding')
+        || session.agent === 'claude' || session.agent === 'claude_code')
+      const totals = isCoding ? {
+        inputTokens: session.input_tokens, outputTokens: session.output_tokens,
+        cacheReadTokens: session.cache_read_tokens, cacheWriteTokens: session.cache_write_tokens,
+      } : undefined
+      const state = this.sessionMap.get(sessionId)
+      if (state && totals) Object.assign(state, totals)
       this.emitExternalEvent(sessionId, 'run.usage.updated', {
         event: 'run.usage.updated', session_id: sessionId, run_id: summary.runId,
-        message_id: summary.assistantMessageId, run_usage: summary,
+        message_id: summary.assistantMessageId, run_usage: summary, ...totals,
       })
     })
   }

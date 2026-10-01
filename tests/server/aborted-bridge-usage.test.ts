@@ -1,4 +1,4 @@
-import { withRunUsage } from '../../packages/server/src/modules/studio/repositories/run-usage-store'
+import { completeRunUsage, withRunUsage } from '../../packages/server/src/modules/studio/repositories/run-usage-store'
 import { describe, expect, it, vi } from 'vitest'
 import '../../packages/server/src/bootstrap/coding-agent-adapters'
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
@@ -8,6 +8,40 @@ import { handleAbort } from '../../packages/server/src/modules/studio/services/c
 import { onRunUsageUpdated } from '../../packages/server/src/modules/studio/repositories/run-usage-store'
 import { recordBridgeToolStarted } from '../../packages/server/src/modules/studio/services/chat-run/bridge-message'
 import * as chatRuntime from '../../packages/server/src/modules/studio/public/chat-agent-runtime'
+import { ChatRunSocket } from '../../packages/server/src/modules/studio/sockets/chat-run'
+
+describe('late usage socket updates', () => {
+  it.each(['codex', 'hermes', 'ekko-agent'])('updates %s cards without changing the active run or context', agent => {
+    initAllHermesTables()
+    const sid = `late-${agent}-${Date.now()}`
+    const source = agent === 'codex' ? 'coding_agent' : agent === 'hermes' ? 'hermes' : 'ekko_agent'
+    createSession({ id: sid, profile: 'default', source: agent === 'hermes' ? 'cli' : 'coding_agent', agent })
+    vi.spyOn(chatRuntime, 'createPrimaryAgentBridge').mockReturnValue({} as any)
+    const server = new ChatRunSocket({ of: () => ({}) } as any)
+    const emit = vi.spyOn(server, 'emitExternalEvent').mockImplementation(() => {})
+    const active = { runId: 'next', isWorking: true, inputTokens: 500, contextTokens: 999 }
+    ;(server as any).sessionMap.set(sid, active)
+    try {
+      updateUsage(sid, { source, runId: 'first-request', parentRunId: 'first', inputTokens: 10, outputTokens: 4 })
+      completeRunUsage(sid, 'first', 'reply-1')
+      updateUsage(sid, { source, runId: 'next-request', parentRunId: 'next', inputTokens: 20, outputTokens: 6 })
+      updateUsage(sid, { source, runId: 'late-request', parentRunId: 'first', inputTokens: 30, outputTokens: 8 })
+      const payload = emit.mock.calls.at(-1)![2]
+      expect(payload).toMatchObject({ run_id: 'first', run_usage: { assistantMessageId: 'reply-1', inputTokens: 40, outputTokens: 12 } })
+      if (agent === 'codex') {
+        expect(payload).toMatchObject({ inputTokens: 60, outputTokens: 18 })
+        expect(active.inputTokens).toBe(60)
+      } else {
+        expect(payload).not.toHaveProperty('inputTokens')
+        expect(active.inputTokens).toBe(500)
+      }
+      expect(active).toMatchObject({ runId: 'next', isWorking: true, contextTokens: 999 })
+    } finally {
+      ;(server as any).stopUsageUpdates()
+      vi.restoreAllMocks()
+    }
+  })
+})
 
 describe('Hermes interrupted usage cards', () => {
   it.each(['text', 'reasoning', 'tool-only', 'no-output'])('persists a stopped %s reply and updates its card when usage arrives late', async kind => {

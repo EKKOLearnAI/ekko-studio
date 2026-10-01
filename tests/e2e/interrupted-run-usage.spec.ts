@@ -38,14 +38,16 @@ for (const agent of ['codex', 'claude', 'pi', 'grok', 'cursor', 'opencode', 'dsh
     await page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)').fill('Next turn')
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.some((item: any) => item.event === 'run'))).toBe(true)
-    await page.evaluate(({ sid, usage }) => {
+    await page.evaluate(({ sid, usage, coding }) => {
       const socket = (window as any).__PW_CHAT_SOCKET__.latest
       socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'second' })
       socket.__trigger('message.delta', { event: 'message.delta', session_id: sid, run_id: 'second', delta: 'Interrupted reply' })
-      socket.__trigger('run.usage.updated', { event: 'run.usage.updated', session_id: sid, run_id: 'first', run_usage: usage })
-    }, { sid, usage: first })
+      socket.__trigger('run.usage.updated', { event: 'run.usage.updated', session_id: sid, run_id: 'first', run_usage: usage,
+        ...(coding ? { inputTokens: 60, outputTokens: 12, cacheReadTokens: 40, cacheWriteTokens: 0 } : {}) })
+    }, { sid, usage: first, coding: agent !== 'hermes' && agent !== 'ekko-agent' })
     await expect(cards).toHaveCount(1)
     await expect(cards.first().locator('.run-usage-value').first()).toHaveText('12')
+    if (agent !== 'hermes' && agent !== 'ekko-agent') await expect(page.locator('.context-info')).toHaveText('Session usage: 112')
     await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
     await page.evaluate(({ sid, usage, empty }) => {
       const socket = (window as any).__PW_CHAT_SOCKET__.latest
