@@ -851,6 +851,23 @@ export class ChatRunSocket {
       }
       return sessionProfile
     }
+    // Read-only access to a session. A connection may read sessions from any profile the
+    // user can access: the UI switches between profiles without always reconnecting (see
+    // #1884), so pinning every read to the handshake profile made `resume` fail and left
+    // the conversation permanently blank. Mutating operations keep the stricter
+    // connection-scoped check above (see the attachment provenance boundary in `run`).
+    const requireSocketSessionReadAccess = (sessionId: string) => {
+      const session = getSession(sessionId)
+      if (!session) throw new Error('Session not found')
+      const sessionProfile = String(session.profile || 'default').trim() || 'default'
+      if (!profileExists(sessionProfile)) {
+        throw new Error(`Profile "${sessionProfile}" does not exist`)
+      }
+      if (socketUser && !this.canAccessProfile(socketUser, sessionProfile)) {
+        throw new Error(`Profile "${sessionProfile}" is not available for this user`)
+      }
+      return sessionProfile
+    }
 
     socket.on('run', async (data: {
       push_snapshot?: unknown
@@ -1121,7 +1138,7 @@ export class ChatRunSocket {
       if (!data.session_id) return
       const sid = data.session_id
       try {
-        requireSocketSessionAccess(sid)
+        requireSocketSessionReadAccess(sid)
       } catch (err) {
         socket.emit('run.failed', {
           event: 'run.failed',
@@ -1138,7 +1155,7 @@ export class ChatRunSocket {
       if (!data.session_id || typeof data.id !== 'string' || data.id.length > 128) return
       const sid = data.session_id
       try {
-        requireSocketSessionAccess(sid)
+        requireSocketSessionReadAccess(sid)
       } catch (err) {
         socket.emit('run.failed', {
           event: 'run.failed',
