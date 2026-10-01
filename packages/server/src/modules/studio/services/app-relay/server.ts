@@ -183,7 +183,7 @@ export class LocalAppRelayServer {
         const role = String(auth.role || '').trim().toLowerCase()
         const machineId = normalizeIdentifier(auth.machineId || auth.machine_id || auth.instanceId)
         const localMachineId = this.configuredMachineId || await getDeviceId()
-        const token = String(auth.token || '').trim()
+        const token = normalizeBearerToken(auth.token)
         const entitlementToken = String(
           auth.entitlementToken
           || auth.entitlement_token
@@ -845,6 +845,11 @@ function normalizeRelayPath(value: unknown): string | null {
     return `${parsed.pathname}${parsed.search}`
   }
   return null
+}
+
+function normalizeBearerToken(value: unknown): string {
+  const token = String(value || '').trim()
+  return token.replace(/^Bearer\s+/i, '').trim()
 }
 
 function normalizeHeaders(input: AppRelayHttpRequest['headers']): Headers {

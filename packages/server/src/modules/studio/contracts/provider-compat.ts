@@ -257,8 +257,17 @@ export function isScopedCodingAgentAuthProvider(provider: unknown): boolean {
   return SCOPED_CODING_AGENT_AUTH_PROVIDERS.has(String(provider || '').trim().toLowerCase())
 }
 
-export function assertScopedCodingAgentProviderAllowed(mode: 'scoped' | 'global', provider: unknown): void {
+export function assertScopedCodingAgentProviderAllowed(
+  mode: 'scoped' | 'global',
+  provider: unknown,
+  agentId?: unknown,
+): void {
   if (mode === 'global' || !isScopedCodingAgentAuthProvider(provider)) return
+  // OpenCode owns its native provider login (including the OpenAI Codex
+  // subscription), so preserve that narrowly scoped native-auth path while
+  // keeping every other OAuth/subscription combination fail-closed.
+  if (String(agentId || '').trim().toLowerCase() === 'opencode'
+    && String(provider || '').trim().toLowerCase() === 'openai-codex') return
   const error = new Error('Coding agent scoped mode does not support OAuth/subscription providers. Use global mode or select an API-key provider.')
   ;(error as any).status = 400
   throw error

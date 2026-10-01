@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import {
+  assertScopedCodingAgentProviderAllowed,
   getCompatibleCustomProviders,
   normalizeCustomProviderEntry,
 } from '../../packages/server/src/modules/studio/contracts/provider-compat'
+
+describe('scoped coding-agent provider policy', () => {
+  it('admits native OpenCode OpenAI Codex subscription auth', () => {
+    expect(() => assertScopedCodingAgentProviderAllowed('scoped', 'openai-codex', 'opencode')).not.toThrow()
+  })
+
+  it.each([
+    ['codex', 'openai-codex'],
+    ['opencode', 'claude-oauth'],
+    ['opencode', 'xai-oauth'],
+  ])('rejects unsupported scoped OAuth/subscription path %s/%s', (agent, provider) => {
+    expect(() => assertScopedCodingAgentProviderAllowed('scoped', provider, agent)).toThrow(
+      'Coding agent scoped mode does not support OAuth/subscription providers',
+    )
+  })
+})
 
 describe('normalizeCustomProviderEntry', () => {
   it('returns null for non-objects', () => {

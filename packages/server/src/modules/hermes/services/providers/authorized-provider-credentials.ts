@@ -60,6 +60,7 @@ export const AUTHORIZED_RUNTIME_PROVIDERS = new Set<AuthorizedProvider>([
 export interface AuthorizedProviderRuntimeCredentials {
   provider: string
   apiKey: string
+  refreshToken?: string
   baseUrl?: string
   apiMode?: string
   source?: string
@@ -428,6 +429,7 @@ function runtimeCredentials(
   return {
     provider: snapshot.provider,
     apiKey: selected.token,
+    ...(snapshot.refreshToken ? { refreshToken: snapshot.refreshToken } : {}),
     ...(snapshot.baseUrl ? { baseUrl: snapshot.baseUrl } : {}),
     ...(snapshot.apiMode ? { apiMode: snapshot.apiMode } : {}),
     ...(snapshot.source ? { source: snapshot.source } : {}),

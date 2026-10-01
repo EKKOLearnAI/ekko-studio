@@ -1,6 +1,7 @@
 export interface AuthorizedProviderRuntimeCredentials {
   provider: string
   apiKey: string
+  refreshToken?: string
   baseUrl?: string
   apiMode?: string
   source?: string
