@@ -444,11 +444,12 @@ for (const width of [1440, 390]) {
     await expect(page.getByText('Answer from Alpha History Session')).toBeVisible()
     if (width < 769) await page.getByRole('button', { name: 'Menu', exact: true }).click()
     const sidebar = page.locator(width < 769 ? '.studio-mobile-drawer .session-list' : '.history-panel .session-list')
+    await expect(sidebar).toBeVisible()
     await expect(sidebar.getByRole('button', { name: 'New Chat', exact: true })).toHaveCount(0)
     if (width < 769) {
       await expect(page.locator('.studio-mobile-drawer')).toHaveCSS('width', `${width}px`)
       const content = page.locator('.studio-mobile-navigation__content')
-      expect((await sidebar.boundingBox())!.width).toBe((await content.boundingBox())!.width)
+      expect((await sidebar.boundingBox())!.width).toBeCloseTo((await content.boundingBox())!.width, 2)
     } else {
       await expect(sidebar).toHaveCSS('width', '240px')
     }

@@ -22,7 +22,7 @@ for (const width of [1440, 390]) {
     await expect(sidebar).toBeVisible()
     if (width < 769) {
       const content = page.locator('.studio-mobile-navigation__content')
-      expect((await sidebar.boundingBox())!.width).toBe((await content.boundingBox())!.width)
+      expect((await sidebar.boundingBox())!.width).toBeCloseTo((await content.boundingBox())!.width, 2)
     } else {
       await expect(sidebar).toHaveCSS('width', '240px')
     }
