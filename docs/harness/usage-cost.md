@@ -103,6 +103,15 @@ listeners; its deferred usage/context refresh does not delay completion. Error,
 cancellation and queue-interruption events retain already measured usage, while
 a session without ledger entries leaves cumulative usage unknown.
 
+Interrupted turns are finalized through their owning runtime before
+`abort.completed` releases the UI listener. The summary is attached to a persisted
+assistant message, including reasoning-only and empty replies, so resume keeps
+the same card. Codex queue insertion waits for the bounded native accounting
+read after process close. Late request usage and price fills publish
+`run.usage.updated` with the exact run/message IDs; the client updates that card
+independently of the active turn. Hermes and Ekko cancellation use the same
+persisted summary contract. Missing native measurements remain unknown.
+
 Native USD catalog estimates remain estimates. Aggregate-only CLI versions
 cannot supply per-request context tiers; missing model/provider/price metadata
 remains unknown. Configure exact provider/model manual rates where appropriate.

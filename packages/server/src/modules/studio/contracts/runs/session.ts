@@ -1,6 +1,7 @@
 import type { AgentRuntime } from '../agents/runtime'
 import type { ChatMessage } from './messages'
 import type { RunMode } from './surface'
+import type { RunUsageSummary } from './run-usage'
 
 export interface EkkoBackgroundContinuationContext {
   version: 1
@@ -133,6 +134,9 @@ export interface QueueInsertionControl {
 }
 
 export interface SessionState {
+  /** Snapshot the owning runtime's interrupted turn without waiting for model IO. */
+  finalizeRunUsage?: () => RunUsageSummary | undefined
+  nativeUsageSource?: 'coding_agent'
   pushTargetId?: string
   messages: SessionMessage[]
   messageTotal?: number

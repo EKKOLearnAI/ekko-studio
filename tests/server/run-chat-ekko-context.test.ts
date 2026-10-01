@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { respondToEkkoToolApproval } from '../../packages/server/src/modules/ekko/services/approvals'
 import { respondToEkkoClarification } from '../../packages/server/src/modules/ekko/services/clarifications'
+import * as runUsageStore from '../../packages/server/src/modules/studio/repositories/run-usage-store'
 
 const saveTaskPlanMock = vi.hoisted(() => vi.fn())
 vi.mock('../../packages/server/src/modules/studio/repositories/task-plan-store', () => ({ saveTaskPlan: saveTaskPlanMock }))
@@ -1632,6 +1633,29 @@ describe('ekko-agent context usage events', () => {
         turnId: expect.any(String),
       },
     }))
+  })
+
+  it('persists interrupted Ekko text and completes the same usage card before and after abort settlement', async () => {
+    const complete = vi.spyOn(runUsageStore, 'completeRunUsage')
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap, state } = makeHarness()
+    let interrupted: any
+    agentRunMock.mockImplementationOnce(async (input: any) => {
+      input.onEvent({ type: 'run.started', runId: 'ekko-interrupted', maxSteps: 3 })
+      input.onEvent({ type: 'model.delta', runId: 'ekko-interrupted', step: 1, text: 'partial Ekko answer' })
+      interrupted = state.finalizeRunUsage!()
+      expect(interrupted.assistantMessageId).toBeTruthy()
+      const error = new Error('Run aborted.')
+      error.name = 'AbortError'
+      throw error
+    })
+    try {
+      await handleEkkoAgentRun(nsp as any, socket as any, {
+        session_id: 'session-1', input: 'work', coding_agent_id: 'ekko-agent',
+      }, 'default', sessionMap, vi.fn(() => false))
+      expect(addMessageMock.mock.calls.filter(([message]) => message.role === 'assistant' && message.content === 'partial Ekko answer')).toHaveLength(1)
+      expect(complete).toHaveBeenLastCalledWith('session-1', 'ekko-interrupted', interrupted.assistantMessageId)
+    } finally { complete.mockRestore() }
   })
 
   it('incrementally persists a completed tool group before an aborted run exits', async () => {

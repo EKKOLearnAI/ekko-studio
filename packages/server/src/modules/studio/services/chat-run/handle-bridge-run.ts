@@ -578,6 +578,8 @@ export async function handleBridgeRun(
   state.bridgeOutput = ''
   state.bridgePendingAssistantContent = ''
   state.bridgeAssistantMessageId = undefined
+  state.finalizeRunUsage = undefined
+  state.nativeUsageSource = undefined
   state.bridgePendingReasoningContent = ''
   state.bridgePendingToolCallMarkup = ''
   state.bridgeToolCounter = 0

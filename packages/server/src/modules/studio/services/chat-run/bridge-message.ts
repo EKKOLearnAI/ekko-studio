@@ -10,7 +10,7 @@ import type { SessionMessage, SessionState } from './types'
 export function flushBridgePendingToDb(state: SessionState, sessionId: string, runMarker?: string): string | undefined {
   const content = state.bridgePendingAssistantContent || ''
   const reasoning = state.bridgePendingReasoningContent || ''
-  if (!content.trim()) return state.bridgeAssistantMessageId
+  if (!content.trim() && !reasoning.trim()) return state.bridgeAssistantMessageId
   const effectiveRunMarker = runMarker || state.activeRunMarker
   const assistantMessage = effectiveRunMarker
     ? findOpenBridgeAssistantMessage(state, effectiveRunMarker)

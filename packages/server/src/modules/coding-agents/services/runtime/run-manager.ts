@@ -168,6 +168,7 @@ interface PiRpcPendingRequest {
 export interface ManagedCodingAgentRun {
   /** A CLI process can serve several foreground turns. Keep their usage separate. */
   usageRunId?: string
+  nativeUsageCompletion?: Promise<void>
   usageStartedAt?: number
   usageDurationSeconds?: number
   usageToolTiming?: RunToolTiming
@@ -864,6 +865,9 @@ export class CodingAgentRunManager {
     run.usageDurationSeconds = undefined
     run.usageToolDurationSeconds = undefined
     run.usageToolTiming = new RunToolTiming(run.usageStartedAt)
+    run.nativeUsageCompletion = undefined
+    run.state.nativeUsageSource = 'coding_agent'
+    run.state.finalizeRunUsage = () => this.finalizeInterruptedUsage(run)
     run.usagePendingClaudeTools = undefined
     this.touch(run)
     this.emitTerminalStatus(run, 'Input sent to coding agent.')
@@ -1015,6 +1019,7 @@ export class CodingAgentRunManager {
     const childClosed = waitForChildProcessClose(interruptedChild)
     this.cleanupRun(run, { kill: true, reportClosed: false })
     await childClosed
+    await run.nativeUsageCompletion
     for (const message of run.state.messages) {
       if (
         message.runMarker === run.runMarker
@@ -1024,7 +1029,7 @@ export class CodingAgentRunManager {
         message.finish_reason = 'interrupted'
       }
     }
-    run.assistantMessageId = this.persistTerminalResponse(run)
+    run.assistantMessageId = run.assistantMessageId || this.persistTerminalResponse(run)
     const workspaceRunChange = this.completeWorkspaceRunDiff(run)
     const queueRemaining = run.state.queue.length
     this.emitToChat(sessionId, 'run.failed', {
@@ -1281,7 +1286,17 @@ export class CodingAgentRunManager {
   }
 
   private persistTerminalResponse(run: ManagedCodingAgentRun): string | undefined {
-    const assistantMessageId = flushResponseRunToDb(run.state, run.launch.sessionId)
+    let assistantMessageId = flushResponseRunToDb(run.state, run.launch.sessionId)
+    if (!assistantMessageId && run.usageRunId) {
+      const timestamp = nowSeconds()
+      const runMarker = run.runMarker || run.usageRunId
+      const id = addMessage({ session_id: run.launch.sessionId, role: 'assistant', content: '',
+        timestamp, run_marker: runMarker })
+      if (id != null) {
+        assistantMessageId = String(id)
+        run.state.messages.push({ id, session_id: run.launch.sessionId, role: 'assistant', content: '', timestamp, runMarker })
+      }
+    }
     run.state.responseRun = undefined
     updateSessionStats(run.launch.sessionId)
     return assistantMessageId
@@ -1325,6 +1340,14 @@ export class CodingAgentRunManager {
   private completeUsage(run: ManagedCodingAgentRun) {
     this.finishUsageTiming(run)
     return completeRunUsage(run.launch.sessionId, run.usageRunId || run.id, run.assistantMessageId, run.usageDurationSeconds, run.usageToolDurationSeconds)
+  }
+
+  private finalizeInterruptedUsage(run: ManagedCodingAgentRun) {
+    if (!run.usageRunId || !run.state.finalizeRunUsage) return undefined
+    this.captureUsage(run, () => {
+      run.assistantMessageId ||= this.persistTerminalResponse(run)
+    })
+    return this.completeUsage(run)
   }
 
   private terminalSessionUsage(run: ManagedCodingAgentRun) {
@@ -1519,6 +1542,7 @@ export class CodingAgentRunManager {
         this.recordNativeUsage(run, rows, run.printResponseId || run.id)
       })
     }
+    const interruptedUsage = this.finalizeInterruptedUsage(run)
     run.exited = true
     run.state.isWorking = false
     run.turnActive = false
@@ -1529,7 +1553,7 @@ export class CodingAgentRunManager {
         error: 'Coding agent session closed',
         ...this.terminalSessionUsage(run),
         workspace_run_change: workspaceRunChange,
-        run_usage: this.completeUsage(run),
+        run_usage: interruptedUsage,
       })
       this.markChatRunCompleted(run.launch.sessionId, 'run.failed')
     }
@@ -3142,7 +3166,7 @@ export class CodingAgentRunManager {
       if (run.launch.mode === 'global' && nativeSessionId && run.nativeTurnStartedAt) {
         const home = run.launch.env?.CODEX_HOME || process.env.CODEX_HOME || join(getCodingAgentGlobalHome(), '.codex')
         run.nativeCompletionPending = true
-        void readCodexTurnAccounting(home, nativeSessionId, run.nativeTurnStartedAt).then(([metadata, rows]) => {
+        run.nativeUsageCompletion = readCodexTurnAccounting(home, nativeSessionId, run.nativeTurnStartedAt).then(([metadata, rows]) => {
           run.nativeCompletionPending = false
           if (metadata && run.nativeUsage) Object.assign(run.nativeUsage, metadata)
           if (rows && run.nativeUsage) run.nativeUsage.codexRows = rows

@@ -7,6 +7,19 @@ const metricColumns = [
   'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens',
   'cache_hit_rate', 'cost_usd', 'model_duration_seconds', 'tokens_per_second', 'is_estimated',
 ]
+const listeners = new Set<(sessionId: string, summary: RunUsageSummary) => void>()
+export function onRunUsageUpdated(listener: (sessionId: string, summary: RunUsageSummary) => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
+function notifyUsageUpdated(sessionId: string, row: Record<string, any> | undefined) {
+  if (!row?.assistant_message_id) return
+  for (const listener of listeners) {
+    try { listener(sessionId, mapSummary(row)) }
+    catch (err) { logger.warn({ err, sessionId }, '[run-usage] update listener failed') }
+  }
+}
 // Ledger input buckets are disjoint. Weight the whole run by token counts, not
 // by averaging individual request hit rates. Cache writes are input, not hits.
 const totalInput = 'SUM(input_tokens + cache_read_tokens + cache_write_tokens)'
@@ -63,6 +76,9 @@ export function refreshCompletedRunUsage(sessionId: string, runId: string, datab
     SELECT ${aggregateMetrics}, ? FROM ${USAGE_TABLE} WHERE session_id = ? AND parent_run_id = ?
   ) WHERE session_id = ? AND run_id = ?`).run(Date.now(), sessionId, runId, sessionId, runId)
   applyRunSpeedFallback(sessionId, runId, database)
+  // Offline repairs use their own transaction and must not publish live state.
+  if (database === getDb() && listeners.size) notifyUsageUpdated(sessionId,
+    database?.prepare(`SELECT * FROM ${RUN_USAGE_TABLE} WHERE session_id = ? AND run_id = ?`).get(sessionId, runId) as any)
 }
 
 /** Save one completed run, deduplicated by its session and run identity. */

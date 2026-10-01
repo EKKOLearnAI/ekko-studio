@@ -1,3 +1,4 @@
+import { withRunUsage } from '../../packages/server/src/modules/studio/repositories/run-usage-store'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -8,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '../../packages/server/src/bootstrap/coding-agent-adapters'
 import { CodingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
-import { getSession } from '../../packages/server/src/modules/studio/repositories/session-store'
+import { getSession, getSessionDetail } from '../../packages/server/src/modules/studio/repositories/session-store'
 import { getRecordedUsageTotals } from '../../packages/server/src/modules/studio/repositories/usage-store'
 import { DSH_STREAM_METHOD, DSH_USAGE_METHOD } from '../../packages/server/src/modules/coding-agents/services/dsh/stream-plugin'
 
@@ -66,6 +67,20 @@ describe('DSH chat runner', () => {
   function finish(child: ReturnType<typeof createChild>) {
     child.stdout.write(`${JSON.stringify({ id: child.sent.find(message => message.method === 'session/prompt').id, result: { stopReason: 'end_turn' } })}\n`)
   }
+  it('keeps a stopped DSH turn usage card attached to its persisted reply', async () => {
+    const child = await prompt('stop after usage')
+    update(child, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial DSH reply' } })
+    manager.handleProxyUsageEvent(sessionId, { type: 'response.completed', data: { response: {
+      id: 'dsh-request', usage: { input_tokens: 20, output_tokens: 5 },
+    } } } as any, 1)
+    const state = (manager as any).getBySession(sessionId).state
+    manager.stop(sessionId, { reportClosed: false })
+    const summary = state.finalizeRunUsage()
+    expect(summary).toMatchObject({ inputTokens: 20, outputTokens: 5, tokensPerSecond: 5 })
+    expect(summary.assistantMessageId).toBeTruthy()
+    expect(withRunUsage(sessionId, getSessionDetail(sessionId)!.messages).find(message => String(message.id) === summary.assistantMessageId))
+      .toHaveProperty('run_usage', summary)
+  })
   it.each(['global', 'scoped'])('accounts DSH calls once across resumed turns in %s mode', async mode => {
     ;(manager as any).getBySession(sessionId).launch.mode = mode
     const native = (child: ReturnType<typeof createChild>, requestId: string) => child.stdout.write(`${JSON.stringify({

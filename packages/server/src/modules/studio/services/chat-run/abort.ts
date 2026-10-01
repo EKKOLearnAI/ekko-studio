@@ -14,6 +14,7 @@ import { flushBridgePendingToDb } from './bridge-message'
 import { flushResponseRunToDb } from './response-stream'
 import { replaceState } from './compression'
 import { calcAndUpdateUsage } from './usage'
+import { finalizeAbortedRunUsage } from './terminal-usage'
 import type { QueuedRun, SessionState } from './types'
 
 const ABORT_BRIDGE_SYNC_TIMEOUT_MESSAGE = 'Hermes Agent did not confirm stop before timeout. Local run state was released so you can continue.'
@@ -226,11 +227,13 @@ export async function markAbortCompleted(
   if (!state) return
 
   const profile = state.profile
+  const runUsage = finalizeAbortedRunUsage(sessionId, runId, state)
+  const usagePayload = runUsage ? { run_usage: runUsage, message_id: runUsage.assistantMessageId } : {}
   updateSessionStats(sessionId)
   const emit = (event: string, payload: any) => {
     nsp.to(`session:${sessionId}`).emit(event, { ...payload, session_id: sessionId })
   }
-  await calcAndUpdateUsage(sessionId, state, emit)
+  await calcAndUpdateUsage(sessionId, state, emit, { nativeSource: state.nativeUsageSource })
 
   state.isWorking = false
   state.isAborting = false
@@ -239,6 +242,8 @@ export async function markAbortCompleted(
   state.runId = undefined
   state.responseRun = undefined
   state.activeRunMarker = undefined
+  state.finalizeRunUsage = undefined
+  state.nativeUsageSource = undefined
 
   // Process queued messages after abort completes
   if (state.queue.length > 0) {
@@ -253,12 +258,14 @@ export async function markAbortCompleted(
       run_id: runId,
       synced,
       queue_length: state.queue.length + 1,
+      ...usagePayload,
     })
     emitToSession(nsp, socket, sessionId, 'abort.completed', {
       event: 'abort.completed',
       run_id: runId,
       synced,
       queue_length: state.queue.length + 1,
+      ...usagePayload,
     })
     emitToSession(nsp, socket, sessionId, 'run.queued', {
       event: 'run.queued',
@@ -283,6 +290,7 @@ export async function markAbortCompleted(
     event: 'abort.completed',
     run_id: runId,
     synced,
+    ...usagePayload,
   })
   logger.info({ sessionId, runId, synced }, '[chat-run-socket][abort] completed')
 }

@@ -261,6 +261,17 @@ const sessionCommandHandlers = new Set<(event: RunEvent) => void>()
 const sessionTitleUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionWorkspaceUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionSettingsUpdatedHandlers = new Set<(event: RunEvent) => void>()
+const runUsageUpdatedHandlers = new Set<(event: RunEvent) => void>()
+
+export function onRunUsageUpdated(handler: (event: RunEvent) => void): () => void {
+  runUsageUpdatedHandlers.add(handler)
+  return () => { runUsageUpdatedHandlers.delete(handler) }
+}
+
+function globalRunUsageUpdatedHandler(event: RunEvent): void {
+  if (!event.session_id) return
+  for (const handler of runUsageUpdatedHandlers) handler(event)
+}
 
 /**
  * Global message.delta event handler
@@ -872,6 +883,7 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
 
     // Usage and task-plan events
     on('usage.updated', globalUsageUpdatedHandler)
+    on('run.usage.updated', globalRunUsageUpdatedHandler)
     on('plan.updated', globalAgentEventHandler)
     on('agent.event', globalAgentEventHandler)
     on('run.reattach_failed', globalRunReattachFailedHandler)

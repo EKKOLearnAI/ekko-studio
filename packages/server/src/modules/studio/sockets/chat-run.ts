@@ -1,4 +1,4 @@
-import { withRunUsage } from '../repositories/run-usage-store'
+import { withRunUsage, onRunUsageUpdated } from '../repositories/run-usage-store'
 import { recordSessionUploadAttachments } from '../services/files/session-uploads'
 import { authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
 import { bindSessionShareSocket } from '../services/session-shares/socket-access'
@@ -437,9 +437,16 @@ export class ChatRunSocket {
   private backgroundPollRetryAt = 0
   private backgroundActivityGraceUntil = 0
   private closing = false
+  private stopUsageUpdates: () => void
 
   constructor(io: Server) {
     this.nsp = io.of('/chat-run')
+    this.stopUsageUpdates = onRunUsageUpdated((sessionId, summary) => {
+      this.emitExternalEvent(sessionId, 'run.usage.updated', {
+        event: 'run.usage.updated', session_id: sessionId, run_id: summary.runId,
+        message_id: summary.assistantMessageId, run_usage: summary,
+      })
+    })
   }
 
   getLiveActivityPlans() {
@@ -2808,6 +2815,8 @@ export class ChatRunSocket {
           .catch((err: unknown) => logger.warn(err, '[chat-run-socket] failed to interrupt bridge run while clearing session %s', sessionId))
       }
       state.messages = []
+      state.finalizeRunUsage = undefined
+      state.nativeUsageSource = undefined
       state.messageTotal = 0
       state.messageLoadedCount = 0
       state.messageStateBaselineCount = 0
@@ -3118,6 +3127,7 @@ export class ChatRunSocket {
   async close() {
     if (this.closing) return
     this.closing = true
+    this.stopUsageUpdates()
     for (const sessionId of this.sessionMap.keys()) this.finishTaskPlanRun(sessionId, 'abort.completed')
     if (this.backgroundPollTimer) {
       clearInterval(this.backgroundPollTimer)

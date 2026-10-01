@@ -11,6 +11,11 @@ import { CodingAgentRunManager } from '../../packages/server/src/modules/coding-
 import { NativeTurnUsage } from '../../packages/server/src/modules/coding-agents/services/runtime/native-usage'
 import * as nativeModel from '../../packages/server/src/modules/coding-agents/services/runtime/native-model'
 import * as usageLedger from '../../packages/server/src/modules/studio/public/usage'
+import * as codexAccounting from '../../packages/server/src/modules/coding-agents/services/runtime/codex-usage'
+import { chatCodingAgentRunManager } from '../../packages/server/src/modules/studio/public/chat-agent-runtime'
+import * as chatRuntime from '../../packages/server/src/modules/studio/public/chat-agent-runtime'
+import { handleAbort } from '../../packages/server/src/modules/studio/services/chat-run/abort'
+import { onRunUsageUpdated } from '../../packages/server/src/modules/studio/repositories/run-usage-store'
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
 import { getRecordedUsageTotals, getUsage, getLocalUsageStats, updateUsage } from '../../packages/server/src/modules/studio/repositories/usage-store'
 import { withRunUsage } from '../../packages/server/src/modules/studio/repositories/run-usage-store'
@@ -71,6 +76,63 @@ describe('global native usage accounting', () => {
     child.emit('exit', code)
     child.emit('close', code)
   }
+
+  async function abortThroughSocket() {
+    vi.spyOn(chatRuntime, 'hasChatEkkoBackgroundTasks').mockReturnValue(false)
+    const run = (manager as any).getBySession(sessionId)
+    vi.spyOn(chatCodingAgentRunManager, 'hasSession').mockImplementation(id => manager.hasSession(id))
+    vi.spyOn(chatCodingAgentRunManager, 'stop').mockImplementation((id, options) => manager.stop(id, options))
+    const events = vi.fn()
+    await handleAbort({ to: () => ({ emit: events }), adapter: { rooms: new Map([[`session:${sessionId}`, new Set(['socket'])]]) } } as any,
+      { connected: true, emit: events } as any, sessionId, new Map([[sessionId, run.state]]), {}, vi.fn())
+    return events.mock.calls.find(([event]) => event === 'abort.completed')![1]
+  }
+
+  it.each(['codex', 'claude-code', 'pi', 'grok', 'cursor', 'opencode'])('persists a stopped %s card through the actual socket abort path', async agent => {
+    start(agent, 'scoped')
+    const state = (manager as any).getBySession(sessionId).state
+    manager.handleProxyUsageEvent(sessionId, { type: 'response.completed', data: { response: {
+      id: 'request-before-stop', usage: { input_tokens: 20, output_tokens: 4, input_tokens_details: { cached_tokens: 5 } },
+    } } } as any, 2)
+    const terminal = await abortThroughSocket()
+    expect(terminal.run_usage).toMatchObject({ inputTokens: 20, outputTokens: 4, cacheReadTokens: 5, tokensPerSecond: 2 })
+    expect(terminal.run_usage.assistantMessageId).toBeTruthy()
+    expect(withRunUsage(sessionId, getSessionDetail(sessionId)!.messages).find(message => String(message.id) === terminal.run_usage.assistantMessageId))
+      .toHaveProperty('run_usage', terminal.run_usage)
+    expect(withRunUsage(sessionId, state.messages).filter((message: any) => message.run_usage)).toHaveLength(1)
+    expect(manager.hasSession(sessionId)).toBe(false)
+  })
+
+  it.each(['queue', 'stop', 'stop-before-text'] as const)('reconciles delayed Codex usage on %s without losing the persisted card', async action => {
+    let finish!: (value: any) => void
+    vi.spyOn(codexAccounting, 'readCodexTurnAccounting').mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const updates: any[] = []
+    const unsubscribe = onRunUsageUpdated((sid, summary) => { if (sid === sessionId) updates.push(summary) })
+    try {
+      start('codex')
+      emit({ type: 'thread.started', thread_id: 'native-thread' })
+      if (action !== 'stop-before-text') emit({ type: 'item.completed', item: { id: 'partial', type: 'agent_message', text: 'partial answer' } })
+      let terminal: any
+      const interrupted = action === 'queue' ? manager.interruptForQueueInsertion(sessionId) : undefined
+      if (!interrupted) terminal = await abortThroughSocket()
+      close()
+      expect(finish).toBeTypeOf('function')
+      if (interrupted) expect(emitted.mock.calls.filter(([, event]) => event === 'run.failed')).toHaveLength(0)
+      else expect(terminal.run_usage).toMatchObject({ inputTokens: null, outputTokens: null })
+      finish([{ model: 'actual', provider: 'openai' }, [{ id: 'request', scope: 'model_call', model: 'actual', provider: 'openai', apiCalls: 1,
+        usage: { inputTokens: 10, outputTokens: 4, cacheReadTokens: 5, cacheWriteTokens: 0, reasoningTokens: 0 }, apiDuration: 2 }]])
+      if (interrupted) {
+        await interrupted
+        terminal = emitted.mock.calls.find(([, event]) => event === 'run.failed')![2]
+        expect(terminal.run_usage).toMatchObject({ inputTokens: 15, outputTokens: 4 })
+      }
+      await vi.waitFor(() => expect(updates.at(-1)).toMatchObject({ assistantMessageId: terminal.run_usage.assistantMessageId,
+        inputTokens: 15, outputTokens: 4, tokensPerSecond: 2 }))
+      const resumed = withRunUsage(sessionId, getSessionDetail(sessionId)!.messages).filter(message => (message as any).run_usage)
+      expect(resumed).toHaveLength(1)
+      expect(resumed![0]).toHaveProperty('run_usage', updates.at(-1))
+    } finally { unsubscribe() }
+  })
 
   it.each(['codex', 'claude-code', 'grok', 'cursor'])('settles %s output once even when native accounting throws', async agent => {
     start(agent)

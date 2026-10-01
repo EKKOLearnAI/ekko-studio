@@ -655,10 +655,27 @@ export async function handleEkkoAgentRun(
     created_at: plan.createdAt,
     updated_at: plan.updatedAt,
   })
+  state.nativeUsageSource = undefined
+  let interruptedMessagePersisted = false
   let assistantText = ''
   let assistantReasoning = ''
   let assistantMessageId: string | null = null
   let runId = ''
+  const finalizeInterruptedUsage = () => {
+    if (!runId) return undefined
+    if (!interruptedMessagePersisted && state.finalizeRunUsage !== finalizeInterruptedUsage) return undefined
+    if (!interruptedMessagePersisted) {
+      if (assistantText.trim() || assistantReasoning.trim() || !assistantMessageId) {
+        const { ids } = persistRunMessages(state, { sessionId, runMarker: runId, appendToState: true,
+          messages: [{ role: 'assistant', content: assistantText, reasoning: assistantReasoning || null,
+            reasoning_content: assistantReasoning || null, finish_reason: 'interrupted' }] })
+        if (ids[0] != null) assistantMessageId = String(ids[0])
+      }
+      interruptedMessagePersisted = true
+    }
+    return completeRunUsage(sessionId, runId, assistantMessageId)
+  }
+  state.finalizeRunUsage = finalizeInterruptedUsage
   let workspaceDiffRunId = ''
   let workspaceDiffCompleted = false
   let usageInput = 0
@@ -1624,6 +1641,8 @@ export async function handleEkkoAgentRun(
   } catch (err) {
     if (abortController.signal.aborted || isAbortError(err)) {
       logger.info('[chat-run-socket] ekko-agent run aborted for session %s', sessionId)
+      try { finalizeInterruptedUsage() }
+      catch (usageError) { logger.warn({ err: usageError, sessionId }, '[run-usage] interrupted Ekko usage failed') }
       completeWorkspaceRunDiff()
       return
     }

@@ -7,7 +7,7 @@ vi.mock('../../packages/server/src/modules/studio/infrastructure/database', () =
 }))
 vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({ logger: { warn: vi.fn() } }))
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
-import { completeRunUsage, withRunUsage } from '../../packages/server/src/modules/studio/repositories/run-usage-store'
+import { completeRunUsage, withRunUsage, onRunUsageUpdated } from '../../packages/server/src/modules/studio/repositories/run-usage-store'
 import { updateUsage, fillMissingUsageCost, deleteUsage } from '../../packages/server/src/modules/studio/repositories/usage-store'
 import { buildAppResumeMessagePage, buildResumeMessagePage } from '../../packages/server/src/modules/studio/services/chat-run/resume-payload'
 
@@ -23,6 +23,34 @@ beforeEach(() => {
 afterEach(() => state.db.close())
 
 describe('completed run usage', () => {
+  it('publishes late tokens and prices for the exact completed run without replaying duplicates', () => {
+    const updates = vi.fn()
+    const off = onRunUsageUpdated(updates)
+    try {
+      call('r', 'a', 20, 2)
+      expect(updates).not.toHaveBeenCalled()
+      completeRunUsage('s', 'r', 'assistant-1')
+      const late = call('r', 'late', 10, 1)
+      expect(updates).toHaveBeenLastCalledWith('s', expect.objectContaining({ runId: 'r', assistantMessageId: 'assistant-1', outputTokens: 30, tokensPerSecond: 10 }))
+      const count = updates.mock.calls.length
+      call('r', 'late', 10, 1)
+      expect(updates).toHaveBeenCalledTimes(count)
+      fillMissingUsageCost(late, { costUsd: 0.2, costSource: 'estimated' })
+      expect(updates).toHaveBeenCalledTimes(count + 1)
+      call('next', 'another', 100)
+      expect(updates).toHaveBeenCalledTimes(count + 1)
+    } finally { off() }
+  })
+
+  it('isolates update subscribers from ledger persistence', () => {
+    const off = onRunUsageUpdated(() => { throw new Error('disconnected client') })
+    try {
+      completeRunUsage('s', 'r', 'assistant-1')
+      expect(() => call('r', 'late', 5)).not.toThrow()
+      expect(withRunUsage('s', [{ id: 'assistant-1', role: 'assistant' }])[0]).toHaveProperty('run_usage.outputTokens', 5)
+    } finally { off() }
+  })
+
   it('restores missing run indexes through the real startup path, then persists and resumes usage', () => {
     state.db.exec('DROP INDEX idx_run_usage_session_run; DROP INDEX idx_run_usage_assistant')
     initAllHermesTables()
