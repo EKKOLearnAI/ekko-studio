@@ -97,6 +97,12 @@ file reads share a two-second wait budget; on timeout the run settles with
 available/unknown accounting and releases the next input. Fault-injection tests
 exercise these guarantees alongside resume and queue-interruption tests.
 
+Terminal events carry the recorded session totals as well as the per-run card.
+This keeps Pi's cumulative display current before the client releases its run
+listeners; its deferred usage/context refresh does not delay completion. Error,
+cancellation and queue-interruption events retain already measured usage, while
+a session without ledger entries leaves cumulative usage unknown.
+
 Native USD catalog estimates remain estimates. Aggregate-only CLI versions
 cannot supply per-request context tiers; missing model/provider/price metadata
 remains unknown. Configure exact provider/model manual rates where appropriate.

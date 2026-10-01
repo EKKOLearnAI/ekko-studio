@@ -10,6 +10,7 @@ import '../../packages/server/src/bootstrap/coding-agent-adapters'
 import { CodingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
 import { NativeTurnUsage } from '../../packages/server/src/modules/coding-agents/services/runtime/native-usage'
 import * as nativeModel from '../../packages/server/src/modules/coding-agents/services/runtime/native-model'
+import * as usageLedger from '../../packages/server/src/modules/studio/public/usage'
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
 import { getRecordedUsageTotals, getUsage, getLocalUsageStats, updateUsage } from '../../packages/server/src/modules/studio/repositories/usage-store'
 import { withRunUsage } from '../../packages/server/src/modules/studio/repositories/run-usage-store'
@@ -335,6 +336,78 @@ describe('global native usage accounting', () => {
     emit({ type: 'agent_settled' })
     expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: 455, outputTokens: 35, apiCalls: 2 })
     expect(getUsage(sessionId)?.model).toBe('second-model')
+  })
+
+  it.each(['global', 'scoped'] as const)('includes cumulative Pi %s usage in each terminal event before deferred refresh', mode => {
+    vi.spyOn(manager as any, 'refreshCodingAgentUsage').mockImplementation(() => new Promise(() => {}))
+    updateUsage(sessionId, { source: 'hermes', inputTokens: 9999, outputTokens: 9999 })
+    for (const index of [1, 2]) {
+      if (index === 2) {
+        child = Object.assign(new EventEmitter(), {
+          stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+          exitCode: null, signalCode: null, kill: vi.fn(),
+        })
+        vi.mocked(spawn).mockReturnValue(child)
+      }
+      start('pi', mode)
+      if (mode === 'scoped') manager.handleProxyUsageEvent(sessionId, { type: 'response.completed', data: { response: {
+        id: `proxy-${index}`, usage: { input_tokens: 15, output_tokens: 2, input_tokens_details: { cached_tokens: 5 } },
+      } } } as any)
+      const message = { type: 'message_end', message: {
+        id: `message-${index}`, role: 'assistant', model: 'pi-model', provider: 'test',
+        content: [{ type: 'text', text: 'done' }], usage: { input: 10, output: 2, cacheRead: 5 },
+      } }
+      emit(message)
+      emit(message)
+      emit({ type: 'agent_settled' })
+      close()
+      const completed = emitted.mock.calls.filter(([, event]) => event === 'run.completed')
+      expect(completed).toHaveLength(index)
+      expect(completed.at(-1)![2]).toMatchObject({
+        inputTokens: 10 * index, outputTokens: 2 * index, cacheReadTokens: 5 * index, cacheWriteTokens: 0,
+      })
+      expect(getRecordedUsageTotals(sessionId, 'coding_agent').apiCalls).toBe(index)
+      expect(manager.hasSession(sessionId)).toBe(false)
+    }
+  })
+
+  it.each(['error', 'stop', 'queue'] as const)('includes measured Pi usage when a turn ends with %s', async outcome => {
+    start('pi')
+    emit({ type: 'message_end', message: { role: 'assistant', model: 'pi-model',
+      content: [{ type: 'text', text: 'partial' }], usage: { input: 10, output: 2, cacheRead: 5, cacheWrite: 3 },
+      ...(outcome === 'error' ? { stopReason: 'error', errorMessage: 'provider failure' } : {}),
+    } })
+    if (outcome === 'error') { emit({ type: 'agent_settled' }); close() }
+    if (outcome === 'stop') manager.stop(sessionId)
+    if (outcome === 'queue') {
+      const interrupted = manager.interruptForQueueInsertion(sessionId)
+      close()
+      await interrupted
+    }
+    expect(emitted.mock.calls.filter(([, event]) => event === 'run.failed')).toHaveLength(1)
+    expect(emitted).toHaveBeenCalledWith(sessionId, 'run.failed', expect.objectContaining({
+      inputTokens: 10, outputTokens: 2, cacheReadTokens: 5, cacheWriteTokens: 3,
+    }))
+  })
+
+  it('leaves missing Pi usage unknown in the terminal event', () => {
+    start('pi')
+    emit({ type: 'agent_settled' })
+    close()
+    const completed = emitted.mock.calls.find(([, event]) => event === 'run.completed')![2]
+    expect(completed).not.toHaveProperty('inputTokens')
+  })
+
+  it('still completes Pi when the terminal cumulative usage read throws', () => {
+    start('pi')
+    emit(fixtures.pi[0])
+    vi.spyOn(usageLedger, 'getRecordedUsageTotals').mockImplementation(() => { throw new Error('ledger unavailable') })
+    emit({ type: 'agent_settled' })
+    close()
+    const completed = emitted.mock.calls.filter(([, event]) => event === 'run.completed')
+    expect(completed).toHaveLength(1)
+    expect(completed[0][2]).not.toHaveProperty('inputTokens')
+    expect(manager.hasSession(sessionId)).toBe(false)
   })
 
   it('retains all completed Grok response usage on error, without counting a final aggregate twice', () => {

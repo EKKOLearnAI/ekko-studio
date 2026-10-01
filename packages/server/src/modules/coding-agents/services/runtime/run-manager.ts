@@ -8,7 +8,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import { createSession, addMessage, getSession, updateSession, updateSessionStats } from '../../../studio/public/sessions'
 import type { ApiMode, CodingAgentImageInput } from '../../protocol/types'
 import { logger } from '../../../studio/public/logging'
-import { normalizeTokenUsage, normalizeUsageCost, recordSessionUsage, completeRunUsage } from '../../../studio/public/usage'
+import { normalizeTokenUsage, normalizeUsageCost, recordSessionUsage, completeRunUsage, getUsage, getRecordedUsageTotals } from '../../../studio/public/usage'
 import {
   applyResponseStreamEvent,
   calcAndUpdateUsage,
@@ -1035,6 +1035,7 @@ export class CodingAgentRunManager {
       interrupted: true,
       stop_reason: 'queue_insertion',
       interruption_mode: 'immediate',
+      ...this.terminalSessionUsage(run),
       ...(run.assistantMessageId ? { message_id: run.assistantMessageId } : {}),
       ...(queueRemaining > 0 ? { queue_remaining: queueRemaining } : {}),
       workspace_run_change: workspaceRunChange,
@@ -1326,6 +1327,18 @@ export class CodingAgentRunManager {
     return completeRunUsage(run.launch.sessionId, run.usageRunId || run.id, run.assistantMessageId, run.usageDurationSeconds, run.usageToolDurationSeconds)
   }
 
+  private terminalSessionUsage(run: ManagedCodingAgentRun) {
+    let usage: Pick<SessionState, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'> | undefined
+    this.captureUsage(run, () => {
+      if (!getUsage(run.launch.sessionId, 'coding_agent')) return
+      const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = getRecordedUsageTotals(run.launch.sessionId, 'coding_agent')
+      usage = { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }
+    })
+    // The client releases run listeners on completion. Pi's deferred refresh
+    // arrives too late, so carry the durable session totals in the terminal event.
+    return usage
+  }
+
   private schedulePiTerminalUsageRefresh(run: ManagedCodingAgentRun) {
     // Pi RPC's agent_settled event is the authoritative lifecycle boundary.
     // Tokenizer/provider initialization can be CPU-heavy on a cold host and
@@ -1514,6 +1527,7 @@ export class CodingAgentRunManager {
       this.emitToChat(run.launch.sessionId, 'run.failed', {
         event: 'run.failed',
         error: 'Coding agent session closed',
+        ...this.terminalSessionUsage(run),
         workspace_run_change: workspaceRunChange,
         run_usage: this.completeUsage(run),
       })
@@ -3614,6 +3628,7 @@ export class CodingAgentRunManager {
     const workspaceRunChange = this.completeWorkspaceRunDiff(run)
     this.emitToChat(run.launch.sessionId, event, {
       ...(payload || { event }),
+      ...this.terminalSessionUsage(run),
       run_id: typeof payload?.run_id === 'string' && payload.run_id ? payload.run_id : run.id,
       ...(run.assistantMessageId ? { message_id: run.assistantMessageId } : {}),
       ...(queueRemaining > 0 ? { queue_remaining: queueRemaining } : {}),
