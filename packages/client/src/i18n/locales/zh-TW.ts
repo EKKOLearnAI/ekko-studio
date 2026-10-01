@@ -3525,6 +3525,8 @@ export default {
     },
     pricing: {
       title: "模型單價",
+      selectionHelp: "可選擇已設定的供應商及其模型，也可輸入 ID 後按 Enter。",
+      catalogError: "無法載入已設定的供應商和模型，仍可手動輸入 ID。",
       help: "未設定自訂單價時，自動使用 models.dev 中相符模型的價格估算。單位為美元／百萬 Token。依供應商和模型 ID 精確匹配（例如 global），僅在上游未回傳費用時估算。快取單價留空表示未知。修改從後續呼叫生效，不重算歷史費用。",
       provider: "供應商 ID",
       model: "模型 ID",

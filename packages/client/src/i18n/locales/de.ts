@@ -2839,6 +2839,8 @@ jobTriggered: 'Job ausgelost',
     },
     pricing: {
       title: "Modellpreise",
+      selectionHelp: "Wähle einen konfigurierten Anbieter und ein Modell oder gib eine ID ein und drücke Enter.",
+      catalogError: "Die konfigurierten Anbieter und Modelle konnten nicht geladen werden. IDs können weiterhin manuell eingegeben werden.",
       help: "Ohne eigene Preise werden passende Modelle anhand von models.dev geschätzt. USD pro Million Tokens. Anbieter- und Modell-ID müssen genau passen (z. B. global). Schätzung nur ohne gemeldete Kosten. Leere Cachepreise bedeuten unbekannt. Änderungen gelten für künftige Aufrufe; frühere Kosten werden nicht neu berechnet.",
       provider: "Anbieter-ID",
       model: "Modell-ID",

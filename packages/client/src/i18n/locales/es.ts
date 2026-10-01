@@ -2839,6 +2839,8 @@ jobTriggered: 'Job ejecutado',
     },
     pricing: {
       title: "Precios de modelos",
+      selectionHelp: "Selecciona un proveedor y modelo configurados, o escribe un ID y pulsa Intro.",
+      catalogError: "No se pudieron cargar los proveedores y modelos configurados. Puedes introducir los ID manualmente.",
       help: "Sin precios personalizados, se estima el coste con los precios del modelo correspondiente en models.dev. USD por millón de tokens. Coincidencia exacta de ID de proveedor y modelo (p. ej. global). Solo se estima si no se recibe un coste. Caché sin precio significa desconocido. Cambios para futuras llamadas, sin recalcular el historial.",
       provider: "ID del proveedor",
       model: "ID del modelo",
