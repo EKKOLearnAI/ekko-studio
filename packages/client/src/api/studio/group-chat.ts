@@ -203,6 +203,7 @@ export interface AgentAddResult {
 
 export interface ChatMessage {
     taskPlan?: import('@/utils/task-plan').TaskPlanSnapshot
+    runUsage?: import('@/utils/run-usage').RunUsageSummary
     id: string
     roomId: string
     senderId: string

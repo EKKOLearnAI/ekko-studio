@@ -34,6 +34,7 @@ export function publishDomainEvent(type: 'workflow.run.completed' | 'workflow.ru
 }
 
 export function publishGroupMessage(room: { id: string; name: string; summaryProfile: string }, message: Record<string, unknown>, agents: unknown[]): void {
+  if (message.tool_name === 'run_usage') return
   if (message.tool_name === 'task_plan') {
     if (message.senderType !== 'agent' || message.role !== 'tool') return
     let content: unknown

@@ -829,6 +829,7 @@ onBeforeUnmount(() => {
                     <MarkdownRenderer v-if="parsedMessageReference.reply" :content="parsedMessageReference.reply" :mention-names="mentionNames" :resolve-image-url="resolveGroupImageUrl" />
                 </template>
                 <MarkdownRenderer v-else-if="renderedDisplayBody" :content="renderedDisplayBody" :mention-names="mentionNames" :resolve-image-url="resolveGroupImageUrl" :defer-images="!!message.isStreaming" />
+                <slot name="before-workspace-changes" />
                 <ToolChangeCard
                     v-for="change in assistantWorkspaceChanges"
                     :key="change.change_id"

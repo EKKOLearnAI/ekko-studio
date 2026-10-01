@@ -32,6 +32,14 @@ export function formatRunTokens(value: number | null): string {
   return value.toLocaleString()
 }
 
+export function parseGroupRunUsageMessage(message: { role?: string; tool_name?: string | null; content: unknown; run_id?: string | null }): RunUsageSummary | undefined {
+  if (message.role !== 'tool' || message.tool_name !== 'run_usage') return undefined
+  try {
+    const usage = normalizeRunUsage(typeof message.content === 'string' ? JSON.parse(message.content) : message.content)
+    return usage?.runId === message.run_id ? usage : undefined
+  } catch { return undefined }
+}
+
 export function formatRunCost(value: number | null): string {
   if (value == null) return '—'
   if (value > 0 && value < 0.0001) return '< $0.0001'

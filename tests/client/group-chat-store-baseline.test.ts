@@ -184,6 +184,21 @@ describe('group chat store baseline lifecycle', () => {
     groupChatApiMock.socket.disconnect.mockClear()
   })
 
+  it('keeps group usage cards visible when tool traces are hidden and updates their existing identity', async () => {
+    const store = await loadStore()
+    await store.connect()
+    store.currentRoomId = 'room-1'
+    const usage = { runId: 'group-run', assistantMessageId: 'reply', inputTokens: 1200, outputTokens: 200,
+      cacheReadTokens: 300, cacheHitRate: 0.25, costUsd: 0.0123, tokensPerSecond: 50, isEstimated: false }
+    const message = { id: 'usage', roomId: 'room-1', senderId: 'agent-1', senderName: 'Worker', role: 'tool',
+      tool_name: 'run_usage', tool_call_id: 'usage', run_id: 'group-run', timestamp: 2, content: JSON.stringify(usage) }
+    emitSocket('message', message)
+    expect(store.sortedMessages[0]).toMatchObject({ role: 'assistant', content: '', runUsage: { outputTokens: 200 } })
+    emitSocket('message', { ...message, content: JSON.stringify({ ...usage, outputTokens: 250 }) })
+    expect(store.sortedMessages).toHaveLength(1)
+    expect(store.sortedMessages[0].runUsage?.outputTokens).toBe(250)
+  })
+
   it('connects with stored user data and registers realtime handlers', async () => {
     const store = await loadStore()
 
