@@ -669,10 +669,20 @@ export async function startWebUiServer(port = DEFAULT_PORT): Promise<string> {
     + `version=${hermesSelection.version || '-'} path=${hermesSelection.path || '-'}`,
   )
 
-  // Run via Electron's "run as Node" mode — Electron binary doubles as Node.
+  // Electron's binary doubles as Node, but on Linux it is a poor host for native
+  // addons: Electron links the system glib/gtk, and that hijacks the global symbol
+  // lookup for addons that bundle their own glib. sharp's libvips statically links
+  // glib and exports its `g_*` symbols, so the first `g_object_unref` from a bundled
+  // GObject resolves into the system glib, finds no such type, and jumps to a null
+  // pointer — a SIGSEGV that takes the whole Web UI server down (sharp docs:
+  // "Known conflicts → Electron and Linux"; macOS and Windows do not have this
+  // conflict, so they keep the Electron host). The Web UI server is a plain Node
+  // program (the standalone CLI runs the same entry with `node`), so on Linux run it
+  // on the bundled Node runtime and keep "run as Node" mode as the fallback.
+  const serverHost = resolveWebUiServerHost(runtimeSupport)
   const env = withDesktopHermesSelection({
     ...process.env,
-    ELECTRON_RUN_AS_NODE: '1',
+    ...(serverHost.electronRunAsNode ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
     NODE_ENV: 'production',
     HERMES_DESKTOP: 'true',
     ...(runtimeSupport && existsSync(runtimeSupport.nodePath) ? {
@@ -727,6 +737,11 @@ export async function startWebUiServer(port = DEFAULT_PORT): Promise<string> {
     // available after selection without influencing which Hermes wins.
     PATH: runtimePath,
   }, hermesSelection)
+  // Never leak an inherited ELECTRON_RUN_AS_NODE into a real Node runtime.
+  if (!serverHost.electronRunAsNode) delete env.ELECTRON_RUN_AS_NODE
+  console.log(
+    `[webui] server host=${serverHost.electronRunAsNode ? `electron-runtime ${process.execPath}` : serverHost.command}`,
+  )
 
   const released = await releaseOccupiedWebUiPort(port, token)
   if (released) {
@@ -735,7 +750,7 @@ export async function startWebUiServer(port = DEFAULT_PORT): Promise<string> {
 
   const fallbackWebUiDir = defaultWebuiDir()
   try {
-    return await launchWebUiServer(primaryWebUiDir, primaryEntry, env, port)
+    return await launchWebUiServer(primaryWebUiDir, primaryEntry, env, serverHost, port)
   } catch (err) {
     if (resolve(primaryWebUiDir) === resolve(fallbackWebUiDir)) throw err
 
@@ -744,12 +759,53 @@ export async function startWebUiServer(port = DEFAULT_PORT): Promise<string> {
 
     console.warn(`[webui] startup failed for active Web UI at ${primaryWebUiDir}; retrying bundled Web UI at ${fallbackWebUiDir}: ${err instanceof Error ? err.message : String(err)}`)
     clearActiveWebUiDirectory(primaryWebUiDir)
-    return await launchWebUiServer(fallbackWebUiDir, fallbackEntry, env, port)
+    return await launchWebUiServer(fallbackWebUiDir, fallbackEntry, env, serverHost, port)
   }
 }
 
-async function launchWebUiServer(webUiDirectory: string, entry: string, env: NodeJS.ProcessEnv, port: number): Promise<string> {
-  serverProc = spawn(process.execPath, [entry], {
+interface WebUiServerHost {
+  command: string
+  electronRunAsNode: boolean
+}
+
+/**
+ * Pick the runtime that hosts the Web UI server process.
+ *
+ * Only Linux leaves the Electron host: the sharp/libvips symbol clash documented as
+ * "Electron and Linux" is a Linux-only conflict, so macOS and Windows keep hosting
+ * the server with the Electron binary exactly as before.
+ *
+ * @internal — exported for tests
+ */
+export function pickWebUiServerHost(
+  nodeCandidates: (string | undefined)[],
+  electronFallback: string,
+  platform: NodeJS.Platform = process.platform,
+): WebUiServerHost {
+  if (platform !== 'linux') {
+    return { command: electronFallback, electronRunAsNode: true }
+  }
+  for (const candidate of nodeCandidates) {
+    if (candidate && existsSync(candidate)) {
+      return { command: candidate, electronRunAsNode: false }
+    }
+  }
+  return { command: electronFallback, electronRunAsNode: true }
+}
+
+/** Prefer the bundled managed Node runtime, then Electron's "run as Node" mode. */
+function resolveWebUiServerHost(runtimeSupport?: ManagedRuntimeCandidate): WebUiServerHost {
+  return pickWebUiServerHost([runtimeSupport?.nodePath, bundledNode()], process.execPath)
+}
+
+async function launchWebUiServer(
+  webUiDirectory: string,
+  entry: string,
+  env: NodeJS.ProcessEnv,
+  host: WebUiServerHost,
+  port: number,
+): Promise<string> {
+  serverProc = spawn(host.command, [entry], {
     cwd: webUiDirectory,
     env,
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
