@@ -2791,7 +2791,7 @@ describe('Claude Code stream-json mapping', () => {
       state: { messages: [], isWorking: false, events: [], queue: [] },
       currentChild: { exitCode: null, signalCode: null, killed: false },
       printText: '', printTextStarted: false, printCompleted: false,
-      printToolBlocks: new Map(), claudeTextBlocks: new Map(),
+      printToolBlocks: new Map(), claudeMessageText: new Map(),
     }
     ;(manager as any).runs.set(run.id, run)
     const line = (event: any) => (manager as any).handleClaudePrintLine(run, JSON.stringify(event))
@@ -2810,6 +2810,59 @@ describe('Claude Code stream-json mapping', () => {
     expect(emitted.mock.calls.filter(c => c[1] === 'message.delta').map(c => c[2].delta).join('')).toBe('The complete answer.')
     expect(run.printCompleted).toBe(false)
     expect(run.terminalEventHandled).not.toBe(true)
+  })
+
+  it.each([1, 2])('deduplicates full text when native snapshot omits %s preceding non-text blocks', (textIndex) => {
+    const manager = new CodingAgentRunManager()
+    const emitted = vi.fn()
+    ;(manager as any).emitToChat = emitted
+    ;(manager as any).ensureDbSession = () => {}
+    ;(manager as any).touch = () => {}
+    const run: any = {
+      id: 'claude-reindexed', launch: { agentId: 'claude-code', sessionId: 'claude-reindexed', profile: 'default' },
+      state: { messages: [], isWorking: false, events: [], queue: [] },
+      currentChild: { exitCode: null, signalCode: null }, printText: '', printTextStarted: false,
+      claudeMessageText: new Map(), printToolBlocks: new Map(),
+    }
+    ;(manager as any).runs.set(run.id, run)
+    const line = (event: any) => (manager as any).handleClaudePrintLine(run, JSON.stringify(event))
+    const stream = (event: any) => line({ type: 'stream_event', event })
+    stream({ type: 'message_start', message: { id: 'msg-reindexed' } })
+    stream({ type: 'content_block_delta', index: textIndex, delta: { type: 'text_delta', text: 'GitHub is ready.' } })
+    line({ type: 'assistant', message: { id: 'msg-reindexed', role: 'assistant', content: [
+      { type: 'text', text: 'GitHub is ready.' },
+    ] } })
+    line({ type: 'result', result: 'GitHub is ready.' })
+    expect(run.printText).toBe('GitHub is ready.')
+    expect(run.state.messages.at(-1)?.content).toBe('GitHub is ready.')
+    expect(emitted.mock.calls.filter(c => c[1] === 'message.delta').map(c => c[2].delta).join('')).toBe('GitHub is ready.')
+  })
+
+  it('reconciles multiple text blocks and preserves identical text in different messages', () => {
+    const manager = new CodingAgentRunManager()
+    ;(manager as any).emitToChat = () => {}
+    ;(manager as any).ensureDbSession = () => {}
+    ;(manager as any).touch = () => {}
+    const run: any = {
+      id: 'claude-multi', launch: { agentId: 'claude-code', sessionId: 'claude-multi', profile: 'default' },
+      state: { messages: [], isWorking: false, events: [], queue: [] },
+      currentChild: { exitCode: null, signalCode: null }, printText: '',
+      claudeMessageText: new Map(), printToolBlocks: new Map(),
+    }
+    ;(manager as any).runs.set(run.id, run)
+    const line = (event: any) => (manager as any).handleClaudePrintLine(run, JSON.stringify(event))
+    line({ type: 'stream_event', event: { type: 'message_start', message: { id: 'first' } } })
+    line({ type: 'stream_event', event: { type: 'content_block_delta', index: 2,
+      delta: { type: 'text_delta', text: 'Same ' } } })
+    const snapshot = (id: string) => ({ type: 'assistant', message: { id, role: 'assistant', content: [
+      { type: 'text', text: 'Same ' }, { type: 'text', text: 'answer.' },
+    ] } })
+    line(snapshot('first'))
+    line(snapshot('first'))
+    expect(run.printText).toBe('Same answer.')
+    // Repeated content in a different model message is not a transport duplicate.
+    line(snapshot('second'))
+    expect(run.printText).toBe('Same answer.Same answer.')
   })
 
   it('recovers result-only text after an empty started text block', () => {

@@ -201,7 +201,7 @@ export interface ManagedCodingAgentRun {
   printText?: string
   claudeResultUsage?: any
   claudeStreamMessageId?: string
-  claudeTextBlocks?: Map<string, string>
+  claudeMessageText?: Map<string, string>
   printCompleted?: boolean
   responseStartEmitted?: boolean
   terminalEventHandled?: boolean
@@ -2026,7 +2026,7 @@ export class CodingAgentRunManager {
     run.printToolBlocks = new Map()
     run.claudeResultUsage = undefined
     run.claudeStreamMessageId = undefined
-    run.claudeTextBlocks = new Map()
+    run.claudeMessageText = new Map()
     run.currentChildStderr = ''
     run.runMarker = undefined
     run.memoryExportStarted = false
@@ -2257,16 +2257,18 @@ export class CodingAgentRunManager {
     if (!content.length) return
 
     if (role === 'assistant') {
+      // Native snapshots may remove thinking/redacted blocks and reindex text.
+      // Reconcile the complete message's text, not provider block positions.
+      const messageId = String(message.id || run.claudeStreamMessageId || run.printMessageId)
+      const text = content.filter((block: any) => block?.type === 'text')
+        .map((block: any) => String(block.text || '')).join('')
+      run.claudeMessageText ??= new Map()
+      const previous = run.claudeMessageText.get(messageId) || ''
+      if (text.startsWith(previous)) {
+        this.appendClaudeText(run, text.slice(previous.length))
+        run.claudeMessageText.set(messageId, text)
+      }
       for (const [index, block] of content.entries()) {
-        if (block?.type === 'text') {
-          const key = `${message.id || run.claudeStreamMessageId || run.printMessageId}:${index}`
-          const text = String(block.text || '')
-          run.claudeTextBlocks ??= new Map()
-          const previous = run.claudeTextBlocks.get(key) || ''
-          if (text.startsWith(previous)) this.appendClaudeText(run, text.slice(previous.length))
-          run.claudeTextBlocks.set(key, text)
-          continue
-        }
         if (block?.type !== 'tool_use') continue
         const toolBlock = {
           id: String(block.id || `toolu_${index}`),
@@ -2399,9 +2401,9 @@ export class CodingAgentRunManager {
       if (delta.type === 'text_delta' && delta.text) {
         this.ensureClaudePrintText(run)
         const text = String(delta.text)
-        const key = `${run.claudeStreamMessageId || run.printMessageId}:${index}`
-        run.claudeTextBlocks ??= new Map()
-        run.claudeTextBlocks.set(key, `${run.claudeTextBlocks.get(key) || ''}${text}`)
+        const key = String(run.claudeStreamMessageId || run.printMessageId)
+        run.claudeMessageText ??= new Map()
+        run.claudeMessageText.set(key, `${run.claudeMessageText.get(key) || ''}${text}`)
         this.appendClaudeText(run, text)
         return
       }
