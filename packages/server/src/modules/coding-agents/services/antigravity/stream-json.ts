@@ -39,7 +39,7 @@ export function createAntigravityStreamParser(): (line: string) => AntigravityEv
         started.add(id)
         events.push({ type: 'tool_started', toolCallId: id, toolName: String(info.name || step.tool_name || 'tool'), input: info.parameters ?? {} })
       }
-      if (step.state === 'DONE' && !finished.has(id)) {
+      if ((step.state === 'DONE' || step.state === 'ERROR') && !finished.has(id)) {
         finished.add(id)
         events.push({ type: 'tool_completed', toolCallId: id, output: info.error ?? info.output ?? '', failed: Boolean(info.error) })
       }

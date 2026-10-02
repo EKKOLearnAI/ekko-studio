@@ -99,3 +99,27 @@ refreshes installed versions. This is installed-version detection, not an
 automatic upstream-update check. No automatic installation/update/removal. Future
 LPK builds must not preinstall agy; the earlier test image bundled it and is not
 automatically modified by this policy change.
+
+## Actual external endpoint probe (CLI 1.2.14)
+
+A clean temporary HOME with modelProvider=gemini, a dummy GEMINI_API_KEY and a
+loopback GOOGLE_GEMINI_BASE_URL successfully executed an NDJSON headless turn.
+The actual CLI POSTed Gemini streamGenerateContent requests, emitted text and
+nonzero usage, and returned SUCCESS without Google account login. A second probe
+executed model → tool attempt → functionResponse → model; the synthetic list_dir
+call returned native TOOL_ERROR (unknown tool), not a successful filesystem action.
+The parser now handles native tool state ERROR as terminal for that tool card.
+
+Observed endpoints included gemini-3.1-flash-lite-preview for title generation and
+gemini-3.1-pro-preview for the main model. Directly passing the API ID
+gemini-3.1-pro-preview to --model was rejected by CLI model selection; arbitrary
+custom-model and gateway environment probes were not successful. No arbitrary
+OpenAI/Responses/Anthropic protocol compatibility is established by these probes.
+
+To use the verified native channel with the current global integration, configure
+modelProvider=gemini in the native CLI settings and provide GEMINI_API_KEY plus
+GOOGLE_GEMINI_BASE_URL to the Studio service environment. An export in a separate
+terminal is not inherited by the running service. No real key/service configuration
+was changed during this probe. Scoped UI provider selection, mapping every
+auxiliary request to a selected upstream model, and protocol conversion remain
+pending; the mock result is not production external-provider acceptance.

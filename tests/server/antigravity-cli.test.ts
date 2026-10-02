@@ -28,6 +28,15 @@ describe('Antigravity official CLI protocol', () => {
     expect(rows[0].usage).toMatchObject({ inputTokens: 100, outputTokens: 20, reasoningTokens: 8, cacheReadTokens: 30 })
     expect(parse(line(final))).toEqual([])
   })
+  it('closes failed tool cards for the actual CLI ERROR step state', () => {
+    const parse = createAntigravityStreamParser()
+    const events = parse(JSON.stringify({ event: 'step_update', step_update: {
+      conversation_id: 'native', step_index: 2, step_type: 'tool', state: 'ERROR',
+      tool_info: { name: 'tool', parameters: {}, error: { type: 'TOOL_ERROR', message: 'failed' } },
+    } }))
+    expect(events.map(event => event.type)).toEqual(['tool_started', 'tool_completed'])
+    expect(events.at(-1)).toMatchObject({ failed: true, output: { message: 'failed' } })
+  })
   it.each(['ERROR', 'CANCELED', 'INTERRUPTED', undefined])('does not treat %s as success', status => {
     const events = createAntigravityStreamParser()(line({ event: 'result', result: { status, error: 'failed' } }))
     expect(events).toEqual([{ type: 'error', message: 'failed', usage: undefined }])
