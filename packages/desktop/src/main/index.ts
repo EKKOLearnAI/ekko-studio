@@ -26,6 +26,7 @@ import {
   stopWebUiServer,
 } from './webui-server'
 import { bundledNode, desktopIcon, desktopLinuxTrayIcon, desktopMacTrayIcon, desktopRuntimeVersion, desktopWindowsTrayIcon, runtimeStorageRoot, webuiDir, webUiHome } from './paths'
+import { isPortableMode } from './portable'
 import { cancelDesktopUpdateDownload, checkForDesktopUpdates, downloadDesktopUpdate, getDesktopUpdateState, initAutoUpdater, installDesktopUpdate } from './updater'
 import { DESKTOP_UPDATE_STATE_CHANNEL, type DesktopUpdateState } from './updater-types'
 import { t } from './desktop-i18n'
@@ -429,6 +430,7 @@ function updateTrayMenu() {
     },
     {
       label: t('tray.checkForUpdates'),
+      visible: !isPortableMode(),
       click: () => {
         checkForDesktopUpdates(true).catch(err => {
           console.error('[tray] update check failed:', err)
@@ -446,6 +448,7 @@ function updateTrayMenu() {
     },
     {
       label: t('tray.openAtLogin'),
+      visible: !isPortableMode(),
       type: 'checkbox',
       checked: getOpenAtLogin(),
       click: (item) => {
@@ -917,6 +920,10 @@ function updateSplash(progress: RuntimeProgress) {
 
 async function installPackagedCommandShims(): Promise<void> {
   if (!app.isPackaged) return
+  if (isPortableMode()) {
+    // Portable runs must not touch the host: the shims write ~/bin and PATH.
+    return
+  }
 
   const installs = [
     installHermesStudioCliShim({
@@ -1362,10 +1369,12 @@ function runDesktopApp() {
     // visual clutter. macOS keeps a menu (system requirement) but Electron's
     // default is fine there.
     if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
-    try {
-      migrateWindowsLoginItem(app, APP_USER_MODEL_ID)
-    } catch (error) {
-      console.warn('[desktop] failed to migrate the Windows login item:', error)
+    if (!isPortableMode()) {
+      try {
+        migrateWindowsLoginItem(app, APP_USER_MODEL_ID)
+      } catch (error) {
+        console.warn('[desktop] failed to migrate the Windows login item:', error)
+      }
     }
     installMicrophonePermissionHandler()
     createTray()
@@ -1374,16 +1383,21 @@ function runDesktopApp() {
       console.error('[desktop-browser] failed to initialize:', error)
     })
     void bootstrap()
-    initAutoUpdater({
-      beforeQuitAndInstall: prepareAppShutdown,
-      onInstallFailure: async () => {
-        await prepareAppShutdown()
-        app.relaunch()
-        appLifecycle.finalizeExit(0)
-      },
-      onStateChange: broadcastDesktopUpdateState,
-      onShowProgress: showMainWindow,
-    })
+    if (isPortableMode()) {
+      // An upstream update installed here would replace this portable build.
+      console.log('[desktop] portable mode: desktop auto-update disabled')
+    } else {
+      initAutoUpdater({
+        beforeQuitAndInstall: prepareAppShutdown,
+        onInstallFailure: async () => {
+          await prepareAppShutdown()
+          app.relaunch()
+          appLifecycle.finalizeExit(0)
+        },
+        onStateChange: broadcastDesktopUpdateState,
+        onShowProgress: showMainWindow,
+      })
+    }
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         void createWindow()

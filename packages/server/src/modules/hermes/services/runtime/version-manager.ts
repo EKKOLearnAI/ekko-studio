@@ -90,6 +90,7 @@ export interface RuntimeVersionStatus {
   activeVersionPath: string
   remoteManifestUrl: string
   remoteError: string
+  portable: boolean
   hermes: {
     activeVersion: string
     agentVersion: string
@@ -516,6 +517,8 @@ export async function getRuntimeVersionStatus(
     : selectedInstallation?.source || 'none'
 
   const status: RuntimeVersionStatus = {
+    // Portable builds ship no `ekko-studio` shim, so the CLI upgrade hint must stay hidden.
+    portable: Boolean(process.env.EKKO_STUDIO_PORTABLE_ROOT?.trim()),
     active,
     platform: runtimePlatformKey(),
     activeVersionPath: probeRuntime ? activeVersionPath() : '',

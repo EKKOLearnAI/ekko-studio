@@ -72,6 +72,7 @@ jobs:
               write_common_outputs "Windows x64" "windows-latest" "--win nsis --x64" "desktop-win32-x64" \
                 "packages/desktop/release/*.exe" \
                 "packages/desktop/release/*.exe.blockmap" \
+                "packages/desktop/release/EkkoStudio-Portable-*.zip" \
                 "packages/desktop/release/latest*.yml"
               ;;
             darwin-arm64)
@@ -171,6 +172,34 @@ jobs:
             echo "File descriptor limit: $(ulimit -n)"
           fi
           npm --prefix packages/desktop run dist -- ${{ needs.validate.outputs.electron_target }} ${MAC_BUILD_EXTRA_ARGS:-} --publish never
+
+      # The packaged app is portable when ekko-portable.json sits next to the
+      # executable: every writable root moves to ekko-data next to it.
+      - name: Pack portable zip
+        if: needs.validate.outputs.target_os == 'win32'
+        shell: pwsh
+        run: |
+          $unpacked = 'packages/desktop/release/win-unpacked'
+          if (-not (Test-Path $unpacked)) { throw "missing $unpacked" }
+          $version = (Get-Content packages/desktop/package.json -Raw | ConvertFrom-Json).version
+          $arch = "${{ needs.validate.outputs.target_arch }}"
+          $zip = "packages/desktop/release/EkkoStudio-Portable-$version-win-$arch.zip"
+          New-Item -ItemType File -Force -Path (Join-Path $unpacked 'ekko-portable.json') | Out-Null
+          Set-Content -Path (Join-Path $unpacked 'README-PORTABLE.txt') -Value @(
+            'Portable (green) build. Keep this whole folder together, on the drive you run it from.',
+            'Everything writable lives in ekko-data\: Studio state, Hermes home, runtime, Electron userData.',
+            'First launch downloads the Hermes runtime (~550 MB) unless ekko-data\\studio\\desktop-runtime\\hermes is pre-seeded.',
+            'Quit the app before unplugging the drive.'
+          )
+          $sevenZip = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
+          if (Test-Path $sevenZip) {
+            Push-Location $unpacked
+            & $sevenZip a -tzip -mx=5 (Join-Path '..' (Split-Path $zip -Leaf)) .
+            Pop-Location
+          } else {
+            Compress-Archive -Path (Join-Path $unpacked '*') -DestinationPath $zip
+          }
+          Get-Item $zip | Select-Object Name, Length
 
       - name: Remove macOS signing keychain
         if: always() && needs.validate.outputs.target_os == 'darwin'

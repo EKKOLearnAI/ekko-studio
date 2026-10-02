@@ -71,6 +71,7 @@ export interface RuntimeVersionStatus {
   activeVersionPath: string
   remoteManifestUrl: string
   remoteError: string
+  portable?: boolean
   hermes: {
     activeVersion: string
     agentVersion: string
