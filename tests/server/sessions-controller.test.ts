@@ -98,6 +98,7 @@ vi.mock('../../packages/server/src/modules/hermes/services/history/sessions-db',
 }))
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
+  HIDDEN_DISPLAY_ROLE: 'hidden',
   listSessions: localListSessionsMock,
   countSessions: localCountSessionsMock,
   searchSessions: localSearchSessionsMock,

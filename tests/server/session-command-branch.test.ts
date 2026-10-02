@@ -18,6 +18,7 @@ const getOrCreateSessionMock = vi.fn((sessionMap: Map<string, any>, sessionId: s
 })
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
+  HIDDEN_DISPLAY_ROLE: 'hidden',
   addMessage: addMessageMock,
   addMessages: addMessagesMock,
   clearSessionMessages: clearSessionMessagesMock,

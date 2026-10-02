@@ -929,6 +929,8 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
 
   const result: Message[] = []
   for (const msg of filteredMsgs) {
+    // Automatic-turn input: stored for the model, never rendered.
+    if (msg.display_role === 'hidden') continue
     // Skip assistant messages that only contain tool_calls (no meaningful content)
     if (msg.role === 'assistant' && msg.tool_calls?.length && !runtimePayloadText((msg as any).content).trim()) {
       // Emit a tool.started message for each tool call

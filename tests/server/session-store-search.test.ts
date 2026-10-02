@@ -97,6 +97,17 @@ describe('session store filtering', () => {
     }))
   })
 
+  it('does not match text that only appears in a hidden automatic-turn row', async () => {
+    const { addMessage, createSession, searchSessions } = await import(
+      '../../packages/server/src/modules/studio/repositories/session-store'
+    )
+    createSession({ id: 'notice-session', profile: 'default', source: 'cli', title: 'Deploy' })
+    addMessage({ session_id: 'notice-session', role: 'user', content: 'Deploy it.', timestamp: 100 })
+    addMessage({ session_id: 'notice-session', role: 'user', display_role: 'hidden', content: '[plugin-notice:n-1] zebrafinch build finished', timestamp: 101 })
+
+    expect(searchSessions(undefined, 'zebrafinch', 10, { sources: ['cli'], profiles: ['default'], includeArchived: false })).toEqual([])
+  })
+
   it('ranks an exact coding-agent title before newer body matches and filters before limiting', async () => {
     const { addMessage, createSession, searchSessions } = await import(
       '../../packages/server/src/modules/studio/repositories/session-store'

@@ -541,6 +541,7 @@ export async function forceCompressBridgeHistory(
   profile: string,
   _messages: ChatMessage[],
   beforeTokenOverride?: number | null,
+  excludeLastUser = true,
 ): Promise<BridgeCompressionResult> {
   const initialSnapshot = getCompressionSnapshot(sessionId)
   const session = getSession(sessionId)
@@ -548,10 +549,10 @@ export async function forceCompressBridgeHistory(
     ? await buildDbSnapshotAwareHistory(
         sessionId,
         profile,
-        { excludeLastUser: true },
+        { excludeLastUser },
         { model: session?.model, provider: session?.provider },
       )
-    : await buildDbHistory(sessionId, { excludeLastUser: true })
+    : await buildDbHistory(sessionId, { excludeLastUser })
 
   if (history.length === 0) {
     return {
