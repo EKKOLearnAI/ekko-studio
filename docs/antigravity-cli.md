@@ -89,3 +89,13 @@ GOOGLE_GEMINI_BASE_URL for Gemini-compatible endpoints; it does not establish
 support for arbitrary Studio OpenAI/Responses/Anthropic providers. Gemini-scoped
 configuration/protocol adaptation is a separate pending feature, not a proven
 CLI impossibility.
+
+## Installation policy
+
+Antigravity is manually installed by the user, matching Cursor's installation
+policy. Studio detects executable path and installed version; opening the Agent
+Manager probes missing native CLIs and returning to the page (focus/visibility)
+refreshes installed versions. This is installed-version detection, not an
+automatic upstream-update check. No automatic installation/update/removal. Future
+LPK builds must not preinstall agy; the earlier test image bundled it and is not
+automatically modified by this policy change.

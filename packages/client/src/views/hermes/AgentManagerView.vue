@@ -277,7 +277,7 @@ async function loadCachedStatus() {
     loadError.value = errorMessage(error)
   } finally {
     loading.value = false
-    void checkExternalCursorInstallation()
+    void checkExternalCliInstallation()
   }
 }
 
@@ -285,16 +285,19 @@ let checkingExternalInstallation = false
 let managerMounted = false
 let externalInstallationRefreshPending = false
 
-async function checkExternalCursorInstallation() {
-  // Cursor is installed outside Studio. Returning from its guide or a terminal
+async function checkExternalCliInstallation(event?: Event) {
+  // Native CLIs are installed outside Studio. Returning from a guide or terminal
   // must probe the CLI again instead of reusing the startup inventory.
   if (!managerMounted || document.visibilityState === 'hidden') return
-  if (loading.value || installing.value.cursor || checkingExternalInstallation) {
+  if (loading.value || installing.value.cursor || installing.value.antigravity || checkingExternalInstallation) {
     externalInstallationRefreshPending = true
     return
   }
   externalInstallationRefreshPending = false
-  if (!toolStatus('cursor') || toolStatus('cursor')?.installed) return
+  const nativeTools = ['cursor', 'antigravity'] as const
+  const knownTools = nativeTools.filter(id => toolStatus(id))
+  // On entry only probe missing tools; on return also refresh installed versions.
+  if (!knownTools.length || (!event && knownTools.every(id => toolStatus(id)?.installed))) return
   checkingExternalInstallation = true
   try {
     const result = await fetchCodingAgentsStatus()
@@ -306,7 +309,7 @@ async function checkExternalCursorInstallation() {
     if (managerMounted) loadError.value = errorMessage(error)
   } finally {
     checkingExternalInstallation = false
-    if (externalInstallationRefreshPending) void checkExternalCursorInstallation()
+    if (externalInstallationRefreshPending) void checkExternalCliInstallation()
   }
 }
 
@@ -329,7 +332,7 @@ async function refreshAll() {
   }
   if (errors.length) loadError.value = errors.join('\n')
   loading.value = false
-  if (externalInstallationRefreshPending) void checkExternalCursorInstallation()
+  if (externalInstallationRefreshPending) void checkExternalCliInstallation()
 }
 
 async function openHermesCliDetails() {
@@ -414,7 +417,7 @@ async function handleInstall(id: CodingAgentId) {
     handleMutationError(id, 'install', error)
   } finally {
     installing.value[id] = false
-    if (externalInstallationRefreshPending) void checkExternalCursorInstallation()
+    if (externalInstallationRefreshPending) void checkExternalCliInstallation()
   }
 }
 
@@ -449,8 +452,8 @@ async function handleCheckUpdate(id: CodingAgentId) {
 
 onMounted(() => {
   managerMounted = true
-  window.addEventListener('focus', checkExternalCursorInstallation)
-  document.addEventListener('visibilitychange', checkExternalCursorInstallation)
+  window.addEventListener('focus', checkExternalCliInstallation)
+  document.addEventListener('visibilitychange', checkExternalCliInstallation)
   if (route.query.runtime === 'install') {
     runtimeManagerVisible.value = true
     const query = { ...route.query }
@@ -464,8 +467,8 @@ onMounted(() => {
 onUnmounted(() => {
   managerMounted = false
   externalInstallationRefreshPending = false
-  window.removeEventListener('focus', checkExternalCursorInstallation)
-  document.removeEventListener('visibilitychange', checkExternalCursorInstallation)
+  window.removeEventListener('focus', checkExternalCliInstallation)
+  document.removeEventListener('visibilitychange', checkExternalCliInstallation)
 })
 </script>
 
