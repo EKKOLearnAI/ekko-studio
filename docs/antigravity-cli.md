@@ -143,3 +143,40 @@ Actual agy 1.2.14 + real Studio adapter + local OpenAI-compatible mock passed a
 view_file tool read → function result → final SUCCESS cycle without account login.
 Selected-model routing covered title and main calls. This validates the CLI/bridge
 path, not Axonhub paid inference, all models, restart/resume or mobile binaries.
+
+## Interactive permission probe (pending integration)
+
+Actual CLI 1.2.14 NDJSON supports user inputs, not a documented permission-reply
+frame. Workspace `.agents/hooks.json` PreToolUse was confirmed to run. Returning
+deny blocks a synthetic command with its supplied reason. Returning allow or
+permissionOverrides does not grant headless command permission in the tested
+version; writing a precise allow rule during the hook also did not refresh the
+CLI permission cache for the in-flight command. Global-hook discovery did not
+trigger in this isolated probe. These are observations, not universal claims.
+
+Do not expose a success-looking Studio approval without a proven one-shot native
+authorization path. Do not enable blanket skip-permissions or command(*) just to
+make the hook pass. Studio/App permission integration remains outstanding. The
+local probes used only a new synthetic printf command in a temporary workspace,
+not a retry of the user's denied command.
+
+## Studio approvals: precise native grant + unified approval gate
+
+The CLI hook location is `~/.gemini/antigravity-cli/hooks.json` (not the generic
+config directory in this tested CLI). Runtime-generated hooks invoke a private
+local socket helper; failed connections return deny. Existing native hooks and
+permission deny rules remain authoritative. No command(*) or skip-permissions
+argument is generated. Native permissions must preauthorize the exact operation.
+
+Studio uses Hermes/Ekko-compatible approval.requested/respond/resolved with
+once/session/always/deny. Session memory lasts for the active runner. Always
+grants are keyed by exact tool name/arguments and scoped to owner/profile/workspace
+in private Studio state. They do not modify CLI permission rules. Removing that
+scoped approvals file revokes remembered always grants. Invalid persistence,
+timeout, child exit, cancellation and shutdown deny unresolved requests.
+
+Actual CLI1.2.14 + loopback provider + the Studio socket gate executed a synthetic
+printf command after once approval and denied it after deny approval. Unit tests
+cover session/permanent scope, changed arguments, corrupt state, timeout/close.
+App/Web reuse their existing four-choice approval cards; full real-device UI
+interaction, Windows pipes and cancellation on a real remote task remain not run.

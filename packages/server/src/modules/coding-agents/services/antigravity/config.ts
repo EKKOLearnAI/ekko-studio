@@ -1,3 +1,4 @@
+import { ANTIGRAVITY_APPROVAL_HOOK } from './approvals'
 import { mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeManagedPromptFile } from '../prompt-file'
@@ -44,7 +45,7 @@ export async function prepareAntigravityRuntime(input: {
     await mkdir(join(shadow, directory), { recursive: true })
     for (const entry of await readdir(join(source, directory), { withFileTypes: true }).catch(() => [])) {
       if (input.externalModel && directory === 'antigravity-cli') continue
-      if (entry.name === 'mcp_config.json' || entry.name === 'settings.json' || entry.name === 'AGENTS.md' || entry.name === 'skills') continue
+      if (entry.name === 'mcp_config.json' || entry.name === 'settings.json' || entry.name === 'hooks.json' || entry.name === 'AGENTS.md' || entry.name === 'skills') continue
       await symlink(join(source, directory, entry.name), join(shadow, directory, entry.name), entry.isDirectory() ? 'junction' : 'file').catch((error: NodeJS.ErrnoException) => {
         if (error.code !== 'EEXIST') throw error
       })
@@ -93,6 +94,19 @@ export async function prepareAntigravityRuntime(input: {
   }))
   await writeFile(mcpPath, JSON.stringify({ ...root, mcpServers: { ...(root.mcpServers || {}), ...managedMcp } }, null, 2), { mode: 0o600 })
   await writeManagedPromptFile(promptFile, input.systemPrompt, userRules)
+  const hooksPath = join(shadow, 'antigravity-cli', 'hooks.json')
+  const hookScript = join(input.rootDir, 'studio-approval-hook.mjs')
+  const hooksContent = await readFile(join(source, 'antigravity-cli', 'hooks.json'), 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error
+    return '{}'
+  })
+  const hooks = parseAntigravityConfig(hooksContent)
+  if (hooks['ekko-studio-approval']) throw new Error('Reserved Antigravity hook name already exists')
+  const quote = (value: string) => process.platform === 'win32' ? `"${value.replace(/"/g, '\\"')}"` : `'${value.replace(/'/g, `'\\''`)}'`
+  hooks['ekko-studio-approval'] = { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `${quote(process.execPath)} ${quote(hookScript)}`, timeout: 310 }] }] }
+  await writeFile(hookScript, ANTIGRAVITY_APPROVAL_HOOK, { mode: 0o600 })
+  await writeFile(hooksPath, JSON.stringify(hooks, null, 2), { mode: 0o600 })
+
   return {
     env: { HOME: input.rootDir, USERPROFILE: input.rootDir,
       ...(input.externalModel ? { GEMINI_API_KEY: input.externalModel.token, GOOGLE_GEMINI_BASE_URL: input.externalModel.baseUrl } : {}) },
@@ -100,6 +114,7 @@ export async function prepareAntigravityRuntime(input: {
     files: [
       { key: 'settings', path: '.gemini/antigravity-cli/settings.json', absolutePath: settingsPath },
       { key: 'mcp', path: '.gemini/config/mcp_config.json', absolutePath: mcpPath },
+      { key: 'hooks', path: '.gemini/antigravity-cli/hooks.json', absolutePath: hooksPath },
       { key: 'prompt', path: '.gemini/config/AGENTS.md', absolutePath: promptFile },
     ],
   }

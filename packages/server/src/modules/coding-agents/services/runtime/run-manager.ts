@@ -1,3 +1,6 @@
+import { AntigravityApprovalGate } from '../antigravity/approvals'
+import { getWebUiHome } from '../../../studio/public/config'
+import { createHash, randomUUID } from 'node:crypto'
 import type { DshAcpTurn } from '../dsh/acp-turn'
 import { startDshChatTurn } from '../dsh/chat-turn'
 import { agentUpdateLocked, noteAgentActivity } from '../update-lock'
@@ -173,6 +176,8 @@ interface PiRpcPendingRequest {
 }
 
 export interface ManagedCodingAgentRun {
+  antigravityApprovals?: AntigravityApprovalGate
+
   /** A CLI process can serve several foreground turns. Keep their usage separate. */
   usageRunId?: string
   nativeUsageCompletion?: Promise<void>
@@ -1101,6 +1106,7 @@ export class CodingAgentRunManager {
 
   resolveApproval(sessionId: string, approvalId: string, choice = 'deny'): { handled: boolean; resolved: boolean } {
     const run = this.getBySession(sessionId)
+    if (run?.launch.agentId === 'antigravity') return run.antigravityApprovals?.respond(approvalId, choice) || { handled: false, resolved: false }
     const request = run?.piUiRequests?.get(approvalId)
     if (!run || !request) return { handled: false, resolved: false }
     const normalizedChoice = String(choice || 'deny').trim().toLowerCase()
@@ -1537,6 +1543,8 @@ export class CodingAgentRunManager {
     run.piUiRequests?.clear()
     this.flushTerminalOutput(run)
     if (run.terminalFlushTimer) clearTimeout(run.terminalFlushTimer)
+    run.antigravityApprovals?.close()
+    run.antigravityApprovals = undefined
     this.runs.delete(run.id)
     if (this.sessionIndex.get(run.launch.sessionId) === run.id) this.sessionIndex.delete(run.launch.sessionId)
     if (options.kill && !run.exited) {
@@ -2790,13 +2798,25 @@ export class CodingAgentRunManager {
     const turnInput = systemPrompt.trim()
       ? `${systemPrompt.trim()}\n\n${input}`
       : input
+    if (!run.antigravityApprovals) {
+      const socketId = randomUUID()
+      const endpoint = process.platform === 'win32' ? `\\\\.\\pipe\\ekko-agy-${socketId}` : join('/tmp', `ekko-agy-${socketId}.sock`)
+      const owner = String(getSession(run.launch.sessionId)?.user_id || 'local')
+      const scope = createHash('sha256').update(JSON.stringify([owner, run.launch.profile, workspaceDir])).digest('hex')
+      const grantsPath = join(getWebUiHome(), 'coding-agent', 'antigravity-approvals', `${scope}.json`)
+      run.antigravityApprovals = new AntigravityApprovalGate(endpoint, grantsPath, (event, payload) => {
+        this.touch(run)
+        this.emitToChat(run.launch.sessionId, event, { event, session_id: run.launch.sessionId, run_id: run.id, source: 'antigravity', ...payload })
+      })
+    }
+    const approvalEnv = { EKKO_AGY_APPROVAL_ENDPOINT: run.antigravityApprovals.endpoint, EKKO_AGY_APPROVAL_TOKEN: run.antigravityApprovals.token }
     const child = startAntigravityTurnProcess({
       command: run.launch.command,
       baseArgs: run.launch.args,
       workspaceDir,
       env: run.launch.mode === 'global'
-        ? { ...process.env, ...(run.launch.env || {}) }
-        : isolatedCodingAgentChildEnv(run.launch.env),
+        ? { ...process.env, ...(run.launch.env || {}), ...approvalEnv }
+        : { ...isolatedCodingAgentChildEnv(run.launch.env), ...approvalEnv },
       nativeSessionId,
       resume: run.nativeResumeReady === true && Boolean(nativeSessionId),
       input: turnInput,
@@ -2843,11 +2863,13 @@ export class CodingAgentRunManager {
         if (text) logger.debug({ runId: run.id, sessionId: run.launch.sessionId, text }, '[coding-agent-run] antigravity stderr')
       },
       onError: (err) => {
+        run.antigravityApprovals?.denyPending()
         run.currentChild = undefined
         logger.warn({ err, runId: run.id, sessionId: run.launch.sessionId }, '[coding-agent-run] antigravity failed to start')
         if (!run.printCompleted) this.failAntigravityTurn(run, childProcessErrorMessage(err, run.launch.agentId))
       },
       onClose: (code) => {
+        run.antigravityApprovals?.denyPending()
         if (run.currentChildKillTimer) clearTimeout(run.currentChildKillTimer)
         run.currentChildKillTimer = undefined
         run.currentChild = undefined
