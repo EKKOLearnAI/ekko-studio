@@ -5,13 +5,18 @@ import { writeManagedPromptFile } from '../prompt-file'
 export const ANTIGRAVITY_INSTALL_URL = 'https://antigravity.google/docs/cli/install'
 export const ANTIGRAVITY_DEFAULT_SETTINGS = '{\n  "toolPermission": "request-review"\n}\n'
 
-export function validateAntigravitySettings(content: string): void {
+export function parseAntigravityConfig(content: string): Record<string, any> {
   try {
-    const value = JSON.parse(content)
+    const value = JSON.parse(content.replace(/^\uFEFF/, "").trim() || "{}")
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected object')
+    return value
   } catch {
     throw Object.assign(new Error('Antigravity configuration must be a valid JSON object'), { status: 400 })
   }
+}
+
+export function validateAntigravitySettings(content: string): void {
+  parseAntigravityConfig(content)
 }
 
 /** Keep per-run MCP/instructions private, while native authentication and sessions
@@ -52,7 +57,7 @@ export async function prepareAntigravityRuntime(input: {
     return '{}'
   })
   validateAntigravitySettings(userMcp)
-  const root = JSON.parse(userMcp)
+  const root = parseAntigravityConfig(userMcp)
   const skillRoot = join(shadow, 'config', 'skills')
   await mkdir(skillRoot, { recursive: true })
   for (const skills of [join(source, 'config', 'skills'), join(input.home, '.agents', 'skills')]) {
@@ -67,7 +72,7 @@ export async function prepareAntigravityRuntime(input: {
   const settingsPath = join(shadow, 'antigravity-cli', 'settings.json')
   const promptFile = join(shadow, 'config', 'AGENTS.md')
   const userRules = await readFile(join(source, 'config', 'AGENTS.md'), 'utf8').catch(() => '')
-  const runtimeSettings = JSON.parse(settings)
+  const runtimeSettings = parseAntigravityConfig(settings)
   // Only grant Studio's injected MCP servers, not shell/file tools. Existing
   // deny rules are preserved and remain authoritative.
   const permissions = runtimeSettings.permissions || {}

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAntigravityStreamParser } from '../../packages/server/src/modules/coding-agents/services/antigravity/stream-json'
 import { buildAntigravityTurnArgs, createAntigravityStdoutReader } from '../../packages/server/src/modules/coding-agents/services/antigravity/turn-process'
-import { prepareAntigravityRuntime, validateAntigravitySettings } from '../../packages/server/src/modules/coding-agents/services/antigravity/config'
+import { prepareAntigravityRuntime, validateAntigravitySettings, parseAntigravityConfig } from '../../packages/server/src/modules/coding-agents/services/antigravity/config'
 import { NativeTurnUsage } from '../../packages/server/src/modules/coding-agents/services/runtime/native-usage'
 
 const roots: string[] = []
@@ -67,6 +67,21 @@ describe('Antigravity official CLI protocol', () => {
     expect(await readFile(join(home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8')).toBe('{"permissions":{"allow":[]}}')
     await writeFile(join(runtime, '.gemini', 'antigravity', 'native-session'), 'persisted')
     expect(await readFile(join(home, '.gemini', 'antigravity', 'native-session'), 'utf8')).toBe('persisted')
+  })
+  it('treats empty native configuration as default and accepts a BOM', () => {
+    expect(parseAntigravityConfig('')).toEqual({})
+    expect(parseAntigravityConfig('  \n')).toEqual({})
+    expect(parseAntigravityConfig('\uFEFF{"permissions":{}}')).toEqual({ permissions: {} })
+    expect(() => parseAntigravityConfig('null')).toThrow()
+  })
+  it('prepares a runtime when the native CLI has created zero-byte config files', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agy-empty-config-')); roots.push(home)
+    await mkdir(join(home, '.gemini', 'config'), { recursive: true })
+    await mkdir(join(home, '.gemini', 'antigravity-cli'), { recursive: true })
+    await writeFile(join(home, '.gemini', 'config', 'mcp_config.json'), '')
+    await writeFile(join(home, '.gemini', 'antigravity-cli', 'settings.json'), '')
+    const runtime = await prepareAntigravityRuntime({ home, rootDir: join(home, 'runtime'), systemPrompt: 'rules', managedMcp: {} })
+    expect(JSON.parse(await readFile(runtime.files.find(file => file.key === 'mcp')!.absolutePath, 'utf8'))).toEqual({ mcpServers: {} })
   })
   it('fails closed on malformed settings', () => {
     expect(() => validateAntigravitySettings('[]')).toThrow()

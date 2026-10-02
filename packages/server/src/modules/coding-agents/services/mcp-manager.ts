@@ -1,3 +1,4 @@
+import { parseAntigravityConfig } from './antigravity/config'
 import { readDshMcpServers, updateDshMcpServer, validateDshMcpServer, assertDshMcpProbeIsLiteral } from './dsh/config'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -290,7 +291,7 @@ async function readServers(id: string, scope: CodingAgentConfigScope): Promise<{
   const file = await readCodingAgentConfigFile(id, configKey(id), scope)
   let servers: Map<string, Record<string, any>>
   if (id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')) {
-    servers = parseJsonDocument(file.content).servers
+    servers = parseJsonDocument(id === 'antigravity' ? JSON.stringify(parseAntigravityConfig(file.content)) : file.content).servers
   } else if (id === 'dsh') {
     servers = readDshMcpServers(file.content)
   } else if (id === 'opencode') {
@@ -322,7 +323,7 @@ async function writeServer(
     return
   }
   if (id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')) {
-    const { root } = parseJsonDocument(originalContent)
+    const { root } = parseJsonDocument(id === 'antigravity' ? JSON.stringify(parseAntigravityConfig(originalContent)) : originalContent)
     const persistedServers = isRecord(root.mcpServers) ? { ...root.mcpServers } : {}
     for (const managedName of STUDIO_MANAGED_NAMES) delete persistedServers[managedName]
     if (config) {
