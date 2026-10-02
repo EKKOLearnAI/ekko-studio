@@ -243,10 +243,10 @@ const isCodingAgentSession = computed(() => {
     || session.agent === 'pi'
     || session.agent === 'grok'
     || session.agent === 'opencode'
-    || session.agent === 'cursor'
+    || (session.agent === 'cursor' || session.agent === 'antigravity')
   )
 })
-const isCursorSession = computed(() => chatStore.activeSession?.codingAgentId === 'cursor' || chatStore.activeSession?.agent === 'cursor')
+const isCursorSession = computed(() => (chatStore.activeSession?.codingAgentId === 'cursor' || chatStore.activeSession?.codingAgentId === 'antigravity') || (chatStore.activeSession?.agent === 'cursor' || chatStore.activeSession?.agent === 'antigravity'))
 const showSessionUsage = computed(() => {
   const session = chatStore.activeSession
   return isCodingAgentSession.value && session?.codingAgentId !== 'ekko-agent' && session?.agent !== 'ekko-agent'

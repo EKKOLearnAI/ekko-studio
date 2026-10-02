@@ -31,7 +31,7 @@ const statusTip = computed(() => (
     : ''
 ))
 const isCodingAgent = computed(() => props.data.agent !== 'hermes')
-const supportsGlobalMode = computed(() => ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(props.data.agent))
+const supportsGlobalMode = computed(() => ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(props.data.agent))
 const usesScopedModel = computed(() => !supportsGlobalMode.value || props.data.agentMode !== 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -191,7 +191,7 @@ async function uploadImages(files: File[]) {
       <DshSessionPresetSelect v-if="data.agent === 'dsh'" :model-value="data.agentPreset" :disabled="data.readonly"
         @update:model-value="updateField('agentPreset', $event)" @valid="updateField('agentPresetReady', $event)" />
       <NSelect
-        v-if="supportsGlobalMode && data.agent !== 'cursor'"
+        v-if="supportsGlobalMode && (data.agent !== 'cursor' && data.agent !== 'antigravity')"
         :value="data.agentMode"
         :options="agentModeOptions"
         size="small"

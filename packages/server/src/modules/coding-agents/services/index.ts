@@ -26,6 +26,8 @@ import { getModelContextLength, getModelRuntimeCapabilities } from '../../studio
 import { getSystemPrompt, studioMcpUsageGuidelines } from '../../studio/public/runs/prompt'
 import { codingAgentRunManager } from './runtime/run-manager'
 import { mergePiSettings, userSettingsProvidesPiMcpAdapter } from './pi/settings'
+import { ANTIGRAVITY_CAPABILITIES } from './antigravity/capabilities'
+import { ANTIGRAVITY_DEFAULT_SETTINGS, ANTIGRAVITY_INSTALL_URL, prepareAntigravityRuntime, validateAntigravitySettings } from './antigravity/config'
 import { CURSOR_DEFAULT_SETTINGS, cursorSettingsPath, validateCursorSettings } from './cursor/settings'
 import { PI_EXTENDED_THINKING_LEVEL_MAP, piModelSupportsThinking } from './pi/thinking'
 import { GROK_API_KEY_ENV, GROK_CODING_AGENT_DEFINITION, GROK_PROVIDER_ID } from './grok/definition'
@@ -261,6 +263,7 @@ export interface CodingAgentDefinition {
   provider: string
   command: string
   packageName: string
+  capabilities?: typeof ANTIGRAVITY_CAPABILITIES
 }
 
 export interface CodingAgentToolStatus extends CodingAgentDefinition {
@@ -360,6 +363,7 @@ export interface CodingAgentRunStartResult extends CodingAgentLaunchResult {
 }
 
 const TOOL_DEFINITIONS: CodingAgentDefinition[] = [
+  { id: 'antigravity', name: 'Antigravity', provider: 'Google', command: 'agy', packageName: '', capabilities: ANTIGRAVITY_CAPABILITIES },
   {
     id: 'claude-code',
     name: 'Claude Code',
@@ -442,6 +446,11 @@ const CONFIG_FILE_DEFINITIONS: Record<CodingAgentId, Array<Omit<CodingAgentConfi
     // Keep the native names as compatibility aliases for older clients.
     { key: 'config', path: '~/.config/opencode/opencode.json', scopedPath: OPENCODE_CONFIG_FILE, language: 'json' },
     { key: 'agents', path: '~/.config/opencode/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
+  ],
+  antigravity: [
+    { key: 'settings', path: '~/.gemini/antigravity-cli/settings.json', scopedPath: 'settings.json', language: 'json' },
+    { key: 'mcp', path: '~/.gemini/config/mcp_config.json', scopedPath: 'mcp_config.json', language: 'json' },
+    { key: 'memory', path: '~/.gemini/config/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
   ],
   cursor: [
     { key: 'settings', path: '~/.cursor/cli-config.json', scopedPath: 'cli-config.json', language: 'json' },
@@ -882,7 +891,7 @@ function normalizeLaunchApiMode(value: unknown, fallback: ApiMode): ApiMode {
 }
 
 function resolvedCodingAgentLaunchMode(id: string, mode?: string | null): 'global' | 'scoped' {
-  if (id === 'cursor') return 'global'
+  if (id === 'cursor' || id === 'antigravity') return 'global'
   return mode === 'global' ? 'global' : 'scoped'
 }
 
@@ -891,12 +900,13 @@ function storedCodingAgentMode(session: HermesSessionRow | null): 'scoped' | 'gl
   return session?.provider === 'global' ? 'global' : 'scoped'
 }
 
-function persistedAgentId(id: string): 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' {
+function persistedAgentId(id: string): 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' {
   if (id === 'codex') return 'codex'
   if (id === 'pi') return 'pi'
   if (id === 'grok') return 'grok'
   if (id === 'dsh') return 'dsh'
   if (id === 'opencode') return 'opencode'
+  if (id === 'antigravity') return 'antigravity'
   if (id === 'cursor') return 'cursor'
   return 'claude'
 }
@@ -1245,7 +1255,7 @@ function managedHermesMcpServerConfig(
     if (env?.[HERMES_MCP_MANAGED_ENV_KEY] === '1') {
       server.env = { ...env, HERMES_MCP_SERVER_NAME: serverName, HERMES_MCP_USER_CLARIFICATION: '1' }
     }
-    if (agentId === 'claude-code' || agentId === 'opencode' || agentId === 'cursor') server.timeout = Math.max(360_000, Number(server.timeout) || 0)
+    if (agentId === 'claude-code' || agentId === 'opencode' || agentId === 'cursor' || agentId === 'antigravity') server.timeout = Math.max(360_000, Number(server.timeout) || 0)
     if (agentId === 'dsh') server.toolCallTimeoutMs = Math.max(360_000, Number(server.toolCallTimeoutMs) || 0)
   }
   return server
@@ -1913,7 +1923,7 @@ export function getCodingAgentManagedMcpServerConfigs(
   profile = 'default',
   runTokenFile?: string,
 ): Record<string, Record<string, unknown>> {
-  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(id)) return {}
+  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(id)) return {}
   const disabledManaged = getDisabledManagedMcpServers(id, profile)
   return Object.fromEntries(HERMES_MCP_SERVERS.map((item) => {
     const server = managedHermesMcpServerConfig(id, profile || 'default', item.name, item.toolset, runTokenFile)
@@ -1941,7 +1951,7 @@ export function getCodingAgentManagedMcpServerConfigs(
     }
     return [item.name, {
       ...server,
-      ...(disabledManaged.has(item.name) ? { enabled: false } : {}),
+      ...(disabledManaged.has(item.name) ? (id === 'antigravity' ? { disabled: true } : { enabled: false }) : {}),
     }]
   }))
 }
@@ -2662,7 +2672,7 @@ async function npmExecution(args: string[], env: NodeJS.ProcessEnv): Promise<Com
 let npmInvocationCount = 0
 
 function codingAgentUsesNpm(id: CodingAgentId): boolean {
-  return id !== 'cursor'
+  return id !== 'cursor' && id !== 'antigravity'
 }
 
 export function getCodingAgentNpmInvocationCount(): number {
@@ -2998,7 +3008,7 @@ export async function checkUpdateAgent(id: string): Promise<CodingAgentUpdateRes
       tool: status,
       latestVersion: '',
       updateAvailable: false,
-      message: `Cursor CLI updates are not managed by Studio. Use ${CURSOR_CLI_INSTALL_URL}`,
+      message: `${tool.name} CLI updates are not managed by Studio. Use ${tool.id === 'antigravity' ? ANTIGRAVITY_INSTALL_URL : CURSOR_CLI_INSTALL_URL}`,
     }
   }
   try {
@@ -3054,10 +3064,12 @@ export async function installCodingAgent(id: string): Promise<CodingAgentMutatio
       tools: allStatus.tools,
       message: status.installed
         ? 'Installed'
+        : tool.id === 'antigravity'
+          ? `Install the Antigravity CLI from ${ANTIGRAVITY_INSTALL_URL}`
         : tool.id === 'cursor'
           ? `Install the Cursor CLI from ${CURSOR_CLI_INSTALL_URL}`
           : status.error || 'Install completed but the command was not found',
-      code: !status.installed && tool.id === 'cursor' ? 'MANUAL_INSTALL' : undefined,
+      code: !status.installed && (tool.id === 'cursor' || tool.id === 'antigravity') ? 'MANUAL_INSTALL' : undefined,
     }
   } catch (err: any) {
     const status = await getCodingAgentStatus(tool)
@@ -3087,7 +3099,7 @@ export async function deleteCodingAgent(id: string): Promise<CodingAgentMutation
     throw err
   }
 
-  if (tool.id === 'cursor') {
+  if (tool.id === 'cursor' || tool.id === 'antigravity') {
     const status = await getCodingAgentStatus(tool)
     const allStatus = await getCodingAgentsStatus()
     return {
@@ -3095,7 +3107,7 @@ export async function deleteCodingAgent(id: string): Promise<CodingAgentMutation
       code: 'UNSUPPORTED',
       tool: status,
       tools: allStatus.tools,
-      message: 'Cursor CLI removal is not managed by Studio',
+      message: `${tool.name} CLI removal is not managed by Studio`,
     }
   }
 
@@ -3196,6 +3208,7 @@ export async function readCodingAgentConfigFile(id: string, key: string, scope: 
     if (err?.code !== 'ENOENT') throw err
     const defaultContent = id === 'grok' && key === 'mcp'
       ? mergeGrokConfigWithManagedMcp('', codexMcpConfigToml(normalizedScope.profile, 'grok', undefined))
+      : id === 'antigravity' && key === 'settings' ? ANTIGRAVITY_DEFAULT_SETTINGS
       : id === 'cursor' && key === 'settings' ? CURSOR_DEFAULT_SETTINGS
       : id === 'pi'
         ? piLiveConfigDefault(key, normalizedScope.profile) || ''
@@ -3227,6 +3240,7 @@ export async function writeCodingAgentConfigFile(id: string, key: string, conten
     throw err
   }
   if (id === 'dsh' && key === 'settings') validateDshSettings(content)
+  if (id === 'antigravity' && (key === 'settings' || key === 'mcp')) validateAntigravitySettings(content)
   if (id === 'cursor' && key === 'settings') validateCursorSettings(content)
   if (id === 'dsh' && key === 'mcp') readDshMcpServers(content)
   let persistedContent = content || ''
@@ -3406,6 +3420,14 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       files = prepared.files
       args = prepared.args
       env = prepared.env
+    } else if (tool.id === 'antigravity') {
+      const prepared = await prepareAntigravityRuntime({ home: getGlobalConfigHome(), rootDir, systemPrompt, managedMcp: getCodingAgentManagedMcpServerConfigs('antigravity', scope.profile, input.studioMcpTokenFile) })
+      files = prepared.files
+      promptFile = prepared.promptFile
+      env = prepared.env
+      const effort = String(input.reasoningEffort || '').trim()
+      if (effort && !['low', 'medium', 'high', 'max'].includes(effort)) throw Object.assign(new Error('Antigravity effort must be low, medium, high or max'), { status: 400 })
+      args = effort ? ['--effort', effort] : []
     } else if (tool.id === 'cursor') {
       const prepared = await prepareCursorMcp(rootDir, scope.profile, input.studioMcpTokenFile)
       files = prepared.files
@@ -3474,6 +3496,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       shellCommand,
       files,
       promptFile,
+      ...(tool.id === 'antigravity' ? { reasoningEffort: String(input.reasoningEffort || '').trim() } : {}),
     }
   }
 
@@ -3975,7 +3998,7 @@ async function startCodingAgentRunInternal(
   const requestedMode = resolvedCodingAgentLaunchMode(id, resolvedInput.mode)
   const requestedProvider = String(resolvedInput.provider || '').trim().toLowerCase()
   assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider)
-  if (id !== 'cursor' && requestedMode !== 'global' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
+  if (id !== 'cursor' && id !== 'antigravity' && requestedMode !== 'global' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
     const err = new Error('Coding agent provider credentials are missing. Re-select the provider/model or update the provider API key before continuing this session.')
     ;(err as any).status = 400
     throw err
@@ -3984,6 +4007,7 @@ async function startCodingAgentRunInternal(
   const canResumeNativeSession = existingSession
     ? resolvedCodingAgentLaunchMode(id, storedCodingAgentMode(existingSession)) === requestedMode &&
       (existingSession.agent === persistedAgentId(id) || !existingSession.agent) &&
+      (id !== 'antigravity' || !resolvedInput.workspace || resolvedInput.workspace === existingSession.workspace) &&
       (requestedMode === 'global' || (
         String(existingSession.provider || '').trim() === String(resolvedInput.provider || '').trim() &&
         String(existingSession.model || '').trim() === String(resolvedInput.model || '').trim() &&
@@ -4023,7 +4047,7 @@ async function startCodingAgentRunInternal(
     ? await resolveCommandForExecution(launch.command, commandExecutionEnv)
     : launch.command
   const runtimeEnv = launch.agentId === 'pi' ? launch.env : commandExecutionEnv
-  const persistedProvider = id === 'cursor'
+  const persistedProvider = id === 'cursor' || id === 'antigravity'
     ? String(launch.provider || 'global').trim() || 'global'
     : String(resolvedInput.provider || launch.provider || '').trim() || launch.provider
   const started = codingAgentRunManager.start({

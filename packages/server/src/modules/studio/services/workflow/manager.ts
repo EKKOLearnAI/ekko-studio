@@ -51,13 +51,13 @@ export type { WorkflowCreateInput, WorkflowRecord, WorkflowUpdateInput }
 
 export type WorkflowRuntimeState = 'idle' | 'queued' | 'running' | 'pending_approval' | 'completed' | 'skipped' | 'failed' | 'approval_rejected' | 'canceled'
 export type WorkflowRunType = 'workflow'
-export type WorkflowNodeAgent = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
+export type WorkflowNodeAgent = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
 
 export interface WorkflowNodeRunTarget {
   type: WorkflowRunType
   source: 'workflow'
-  agent: 'hermes' | 'ekko-agent' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
-  codingAgentId?: 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
+  agent: 'hermes' | 'ekko-agent' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
+  codingAgentId?: 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
 }
 
 export interface WorkflowRuntimeStatus {
@@ -278,12 +278,12 @@ export function resolveWorkflowNodeRunTarget(agent?: string | null): WorkflowNod
       codingAgentId: 'grok',
     }
   }
-  if (agent === 'cursor') {
+  if ((agent === 'cursor' || agent === 'antigravity')) {
     return {
       type: 'workflow',
       source: 'workflow',
-      agent: 'cursor',
-      codingAgentId: 'cursor',
+      agent,
+      codingAgentId: agent,
     }
   }
   if (agent === 'opencode' || agent === 'dsh') {
@@ -327,11 +327,11 @@ export function normalizeWorkflowNode(raw: unknown): WorkflowNodeSnapshot | null
     join = orchestration.join
   }
   const agent = typeof data.agent === 'string' && data.agent.trim() ? data.agent.trim() : 'hermes'
-  if (agent !== 'hermes' && agent !== 'ekko-agent' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && agent !== 'cursor' && (agent !== 'opencode' && agent !== 'dsh')) {
+  if (agent !== 'hermes' && agent !== 'ekko-agent' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && agent !== 'antigravity') && (agent !== 'opencode' && agent !== 'dsh')) {
     throw new Error(`workflow node ${id} has unsupported agent runtime`)
   }
-  const agentMode = agent === 'cursor' ? 'global' : data.agentMode === 'global' ? 'global' : 'scoped'
-  if (agentMode === 'global' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && agent !== 'cursor' && (agent !== 'opencode' && agent !== 'dsh')) {
+  const agentMode = (agent === 'cursor' || agent === 'antigravity') ? 'global' : data.agentMode === 'global' ? 'global' : 'scoped'
+  if (agentMode === 'global' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && agent !== 'antigravity') && (agent !== 'opencode' && agent !== 'dsh')) {
     throw new Error(`workflow node ${id} cannot use global mode with this agent runtime`)
   }
   const provider = typeof data.provider === 'string' ? data.provider.trim() : ''
@@ -953,7 +953,7 @@ function workflowOutputConditionContext(output: string, edges: WorkflowEdgeSnaps
 
 function isWorkflowCodingAgentSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null } | null): boolean {
   const agent = String(session?.agent || '').trim()
-  return agent === 'ekko-agent' || agent === 'claude' || agent === 'codex' || agent === 'pi' || agent === 'grok' || agent === 'cursor' || (agent === 'opencode' || agent === 'dsh') || Boolean(session?.agent_session_id)
+  return agent === 'ekko-agent' || agent === 'claude' || agent === 'codex' || agent === 'pi' || agent === 'grok' || (agent === 'cursor' || agent === 'antigravity') || (agent === 'opencode' || agent === 'dsh') || Boolean(session?.agent_session_id)
 }
 
 async function deleteHermesSessionIfPresent(sessionId: string, profile: string): Promise<void> {

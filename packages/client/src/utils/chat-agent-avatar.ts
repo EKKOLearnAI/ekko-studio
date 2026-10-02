@@ -1,5 +1,5 @@
 export interface ChatAgentAvatar {
-  label: 'Hermes' | 'Ekko' | 'Claude' | 'Codex' | 'Pi' | 'Grok' | 'OpenCode' | 'DeepSeek Harness' | 'Cursor'
+  label: 'Hermes' | 'Ekko' | 'Claude' | 'Codex' | 'Pi' | 'Grok' | 'OpenCode' | 'DeepSeek Harness' | 'Cursor' | 'Antigravity'
   src: string
 }
 
@@ -19,6 +19,7 @@ const AGENT_AVATARS = {
   opencode: { label: 'OpenCode', src: '/coding-agents/opencode.png' },
   dsh: { label: 'DeepSeek Harness', src: '/coding-agents/deepseek.svg' },
   cursor: { label: 'Cursor', src: '/coding-agents/cursor-logo.png' },
+  antigravity: { label: 'Antigravity', src: '/coding-agents/antigravity.svg' },
 } as const satisfies Record<string, ChatAgentAvatar>
 
 export function chatSessionAgentAvatar(session?: ChatAgentSessionIdentity | null): ChatAgentAvatar {
@@ -31,6 +32,7 @@ export function chatSessionAgentAvatar(session?: ChatAgentSessionIdentity | null
   if (runtime === 'grok') return AGENT_AVATARS.grok
   if (runtime === 'dsh') return AGENT_AVATARS.dsh
   if (runtime === 'opencode') return AGENT_AVATARS.opencode
+  if (runtime === 'antigravity') return AGENT_AVATARS.antigravity
   if (runtime === 'cursor') return AGENT_AVATARS.cursor
   if (session?.source === 'coding_agent') return AGENT_AVATARS['claude-code']
   return AGENT_AVATARS.hermes

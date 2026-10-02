@@ -240,6 +240,21 @@ function makeProxyContext(routeKey: string, token: string, body: any): any {
 }
 
 describe('coding agent launch preparation', () => {
+  it('prepares Antigravity only in global mode with private MCP configuration and supported effort', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'studio-antigravity-launch-'))
+    homes.push(home)
+    process.env.HERMES_CODING_AGENT_GLOBAL_HOME = home
+    const launch = await prepareCodingAgentLaunch('antigravity', { profile: 'default', mode: 'scoped', sessionId: 'agy-test', reasoningEffort: 'high' })
+    expect(launch).toMatchObject({ agentId: 'antigravity', mode: 'global', command: 'agy', reasoningEffort: 'high' })
+    expect(launch.args).toEqual(['--effort', 'high'])
+    expect(launch.env.HOME).not.toBe(home)
+    const mcp = launch.files.find(file => file.key === 'mcp')!
+    const config = JSON.parse(readFileSync(mcp.absolutePath, 'utf8'))
+    expect(config.mcpServers['ekko-studio-interaction'].env.ELECTRON_RUN_AS_NODE).toBe('1')
+    expect(existsSync(join(home, '.gemini', 'config', 'mcp_config.json'))).toBe(false)
+    await expect(prepareCodingAgentLaunch('antigravity', { reasoningEffort: 'xhigh' })).rejects.toThrow('Antigravity effort')
+  })
+
   it('refreshes all scoped agent kinds only within the changed profile', () => {
     const predicate = vi.spyOn(codingAgentRunManager, 'invalidateMatching').mockReturnValue({ invalidated: 6, deferred: 2 })
     expect(invalidateCodingAgentProviderRuntime('research')).toEqual({ invalidatedRuns: 6, deferredRuns: 2 })

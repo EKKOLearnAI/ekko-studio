@@ -14,6 +14,11 @@ const testState = vi.hoisted(() => {
       return this
     }
 
+    once(event: string, handler: (...args: any[]) => void) {
+      const wrapped = (...args: any[]) => { this.off(event, wrapped); handler(...args) }
+      return this.on(event, wrapped)
+    }
+
     off(event: string, handler: (...args: any[]) => void) {
       const handlers = this.handlers.get(event) || []
       this.handlers.set(event, handlers.filter(item => item !== handler))
@@ -107,6 +112,44 @@ describe('coding agent Windows process launch', () => {
     expect(run.id).toBe('persistent-cli')
     expect(firstId).toBe('persistent-cli:turn:1')
     expect(run.usageRunId).toBe('persistent-cli:turn:2')
+  })
+
+  it('Antigravity waits for the agent result and process close, not a model step, and fails on missing result', () => {
+    const manager = new CodingAgentRunManager()
+    ;(manager as any).handleClaudePrintResponseEvent = vi.fn()
+    ;(manager as any).appendCodexText = vi.fn()
+    ;(manager as any).recordNativeCliSessionId = vi.fn()
+    ;(manager as any).completeClaudePrintTurn = vi.fn((run: any, usage: unknown) => {
+      run.printCompleted = true
+      run.pendingChatCompletionEvent = 'run.completed'
+      run.pendingChatCompletionPayload = { usage }
+    })
+    ;(manager as any).emitAndMarkPrintChatRunCompletedAfterUsage = vi.fn()
+    ;(manager as any).failCodexExecTurn = vi.fn()
+    const run: any = {
+      id: 'antigravity-test', launch: {
+        agentId: 'antigravity', mode: 'global', profile: 'default', provider: 'global',
+        sessionId: 'agy-session', command: 'C:\\Tools\\agy.exe', args: [],
+        workspaceDir: process.cwd(), env: {},
+      }, state: { messages: [], events: [], queue: [] },
+      lastActiveAt: Date.now(), startedAt: Date.now(), exited: false,
+    }
+    ;(manager as any).startAntigravityPrintTurn(run, 'hello')
+    const child = testState.spawnCalls.at(-1)!.child
+    expect(child.stdin.end).toHaveBeenCalledWith('hello')
+    expect(testState.spawnCalls.at(-1)!.args).not.toContain('hello')
+    child.stdout.emit('data', Buffer.from(JSON.stringify({ event: 'step_update', step_update: { step_type: 'agent_response', state: 'DONE', text_delta: 'answer' } }) + '\n'))
+    expect((manager as any).completeClaudePrintTurn).not.toHaveBeenCalled()
+    child.stdout.emit('data', Buffer.from(JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: 'answer', usage: { input_tokens: 2 } } }) + '\n'))
+    expect((manager as any).completeClaudePrintTurn).toHaveBeenCalledOnce()
+    expect((manager as any).appendCodexText).toHaveBeenCalledTimes(1)
+    expect((manager as any).emitAndMarkPrintChatRunCompletedAfterUsage).not.toHaveBeenCalled()
+    child.emit('close', 0)
+    expect((manager as any).emitAndMarkPrintChatRunCompletedAfterUsage).toHaveBeenCalledOnce()
+    const missing: any = { ...run, printCompleted: false, pendingChatCompletionEvent: undefined, currentChild: undefined }
+    ;(manager as any).startAntigravityPrintTurn(missing, 'hello')
+    testState.spawnCalls.at(-1)!.child.emit('close', 0)
+    expect((manager as any).failCodexExecTurn).toHaveBeenCalledWith(missing, 'Antigravity exited without a terminal result event', undefined)
   })
 
   it('keeps Grok prompts out of Windows command arguments and settles after process close', () => {

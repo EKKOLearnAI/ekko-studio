@@ -13,12 +13,13 @@ import {
 import type { GroupChatRunService } from '../../packages/server/src/modules/studio/services/group-chat/agent-clients'
 
 describe('Studio agent contracts', () => {
-  it('keeps the three families distinct from the nine runtimes', () => {
+  it('keeps the three families distinct from the ten runtimes', () => {
     expect(AGENT_FAMILIES).toEqual(['hermes', 'ekko', 'coding'])
-    expect(AGENT_RUNTIMES).toEqual(['hermes', 'ekko', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'])
+    expect(AGENT_RUNTIMES).toEqual(['hermes', 'ekko', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'])
     expect(AGENT_RUNTIMES.map(agentFamilyForRuntime)).toEqual([
       'hermes',
       'ekko',
+      'coding',
       'coding',
       'coding',
       'coding',

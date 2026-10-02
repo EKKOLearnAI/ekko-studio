@@ -41,6 +41,7 @@ const settingsKeys: Record<CodingAgentId, Partial<Record<SettingsEditor, string>
   opencode: { preference: 'memory', configuration: 'settings' },
   dsh: { preference: 'memory', configuration: 'settings' },
   cursor: { configuration: 'settings' },
+  antigravity: { preference: 'memory', configuration: 'settings' },
 }
 
 const skillTargets: Record<CodingAgentId, SkillTarget> = {
@@ -51,6 +52,7 @@ const skillTargets: Record<CodingAgentId, SkillTarget> = {
   opencode: 'opencode',
   dsh: 'dsh',
   cursor: 'cursor',
+  antigravity: 'antigravity',
 }
 
 const editorKinds: SettingsEditor[] = ['preference', 'configuration']

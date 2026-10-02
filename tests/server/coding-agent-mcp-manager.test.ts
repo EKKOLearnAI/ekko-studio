@@ -76,7 +76,7 @@ afterEach(() => {
 })
 
 describe('coding Agent MCP manager', () => {
-  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'] as const)('gives %s a shared plan/clarification MCP with enough time for a user answer', async agent => {
+  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'] as const)('gives %s a shared plan/clarification MCP with enough time for a user answer', async agent => {
     makeHome()
     const { servers } = await listCodingAgentMcpServers(agent)
     expect(servers.some(server => server.name === 'ekko-studio-plan')).toBe(false)
@@ -89,6 +89,17 @@ describe('coding Agent MCP manager', () => {
     else expect(config.timeout).toBeGreaterThanOrEqual(360_000)
     expect((config.env || config.environment).ELECTRON_RUN_AS_NODE).toBe('1')
     expect((config.env || config.environment).HERMES_MCP_USER_CLARIFICATION).toBe('1')
+  })
+
+  it('round-trips Antigravity remote URL and enable state in the native schema', async () => {
+    const home = makeHome()
+    await upsertCodingAgentMcpServer('antigravity', 'remote', { url: 'https://example.test/mcp', enabled: false })
+    const path = join(home, '.gemini', 'config', 'mcp_config.json')
+    expect(JSON.parse(readFileSync(path, 'utf8')).mcpServers.remote).toMatchObject({ serverUrl: 'https://example.test/mcp', disabled: true })
+    const { servers } = await listCodingAgentMcpServers('antigravity')
+    expect(servers.find(server => server.name === 'remote')?.raw_config).toMatchObject({ url: 'https://example.test/mcp', enabled: false })
+    await removeCodingAgentMcpServer('antigravity', 'remote')
+    expect(JSON.parse(readFileSync(path, 'utf8')).mcpServers).not.toHaveProperty('remote')
   })
 
   it('manages DSH native patches without persisting Studio-managed entries', async () => {

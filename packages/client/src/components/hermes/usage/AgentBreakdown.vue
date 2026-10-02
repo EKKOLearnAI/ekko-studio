@@ -16,6 +16,7 @@ const agentLabels: Record<string, string> = {
   opencode: 'opencode',
   dsh: 'dsh',
   cursor: 'cursor',
+  antigravity: 'antigravity',
   ekko_agent: 'ekkoAgent',
 }
 

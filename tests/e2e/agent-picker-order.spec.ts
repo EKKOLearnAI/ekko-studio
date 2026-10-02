@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
-const agentLabels = ['Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor']
+const agentLabels = ['Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor', 'Antigravity']
 
 for (const mobile of [false, true]) {
   test(`single-chat Agent order includes Cursor (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {

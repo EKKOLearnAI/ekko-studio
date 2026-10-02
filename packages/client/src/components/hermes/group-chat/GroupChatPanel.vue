@@ -250,7 +250,7 @@ const profileOptions = computed(() =>
     profilesStore.profiles.map(p => ({ label: p.name, value: p.name }))
 )
 
-type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
+type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
 
 const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
 
@@ -266,7 +266,7 @@ const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.map((opti
 const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
     groupAgentTypeOptions.value.find(option => !option.disabled)?.value || null
 )
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
     { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -310,7 +310,7 @@ function getAgentModelGroups(profile: string) {
                         ? 'pi'
                         : selectedAgentType.value === 'grok'
                             ? 'grok'
-                            : selectedAgentType.value === 'cursor'
+                            : (selectedAgentType.value === 'cursor' || selectedAgentType.value === 'antigravity')
                                 ? 'cursor'
                             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
                                 ? 'opencode'
@@ -2891,7 +2891,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     <DshSessionPresetSelect v-if="selectedAgentType === 'dsh'" class="form-group"
                         v-model="selectedRuntimePreset" :disabled="isSavingAgent || isLoadingAgentForm"
                         @valid="selectedRuntimePresetReady = $event" />
-                    <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="form-group">
+                    <div v-if="supportsGlobalAgentMode && (selectedAgentType !== 'cursor' && selectedAgentType !== 'antigravity')" class="form-group">
                         <label class="form-label">{{ t('codingAgents.launchModeScope') }}</label>
                         <NSelect
                             :value="selectedAgentMode"

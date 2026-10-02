@@ -52,7 +52,7 @@ const selectedSkillData = computed(() => {
 })
 
 const isHermesTarget = computed(() => skillTarget.value === 'hermes')
-const canManageTarget = computed(() => isHermesTarget.value || skillTarget.value === 'dsh' || skillTarget.value === 'cursor')
+const canManageTarget = computed(() => isHermesTarget.value || skillTarget.value === 'dsh' || (skillTarget.value === 'cursor' || skillTarget.value === 'antigravity'))
 const selectedSkillReadonly = computed(() => {
   if (!selectedSkillData.value) return true
   if (selectedSkillData.value.readonly) return true

@@ -1,4 +1,4 @@
-export type AgentStatusId = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
+export type AgentStatusId = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
 
 export type AgentStatusSource =
   | 'managed-runtime'
@@ -46,7 +46,7 @@ export interface AgentAvailabilitySnapshot {
   agents: AgentAvailabilityRecord[]
 }
 
-const AGENT_ORDER: AgentStatusId[] = ['hermes', 'ekko-agent', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor']
+const AGENT_ORDER: AgentStatusId[] = ['hermes', 'ekko-agent', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity']
 
 const DEFAULTS: Record<AgentStatusId, Omit<AgentStatusRecord, 'updatedAt'>> = {
   hermes: {
@@ -141,6 +141,18 @@ const DEFAULTS: Record<AgentStatusId, Omit<AgentStatusRecord, 'updatedAt'>> = {
     id: 'cursor',
     name: 'Cursor',
     provider: 'Cursor',
+    kind: 'coding-agent',
+    installed: false,
+    version: '',
+    source: 'not-installed',
+    path: '',
+    error: '',
+    installations: [],
+  },
+  antigravity: {
+    id: 'antigravity',
+    name: 'Antigravity',
+    provider: 'Antigravity',
     kind: 'coding-agent',
     installed: false,
     version: '',

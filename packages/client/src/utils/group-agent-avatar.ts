@@ -11,6 +11,7 @@ const DEFAULT_AGENT_ICONS: Record<RoomAgent['agent'], string> = {
     opencode: '/coding-agents/opencode.png',
     dsh: '/coding-agents/deepseek.svg',
     cursor: '/coding-agents/cursor-logo.png',
+    antigravity: '/coding-agents/antigravity.svg',
 }
 
 export function parseStoredAvatar(raw: unknown): ProfileAvatar | null {

@@ -22,11 +22,11 @@ const ALLOWED_FIELDS = new Set([
   'agent', 'agentMode', 'priorAgentMode', 'profile', 'provider', 'model', 'apiMode', 'reasoningEffort', 'agentPreset',
   'name', 'description', 'avatar',
 ])
-const AGENTS = new Set<GroupAgentPresetAgent>(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor'])
+const AGENTS = new Set<GroupAgentPresetAgent>(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'])
 const API_MODES = new Set(['chat_completions', 'codex_responses', 'anthropic_messages'])
 const REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 const AVATAR_MAX_LENGTH = 1_500_000
-const GLOBAL_MODE_AGENTS = new Set<GroupAgentPresetAgent>(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor'])
+const GLOBAL_MODE_AGENTS = new Set<GroupAgentPresetAgent>(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'])
 
 function requiredText(value: unknown, field: string, max = 200): string {
   const normalized = typeof value === 'string' ? value.trim() : ''
@@ -75,7 +75,7 @@ export function normalizeGroupAgentPresetInput(input: unknown): Omit<GroupAgentP
   }
   const agent = requiredText(record.agent || 'hermes', 'agent', 20) as GroupAgentPresetAgent
   if (!AGENTS.has(agent)) throw Object.assign(new Error('Invalid agent'), { status: 400 })
-  const agentMode = agent === 'cursor' ? 'global' : record.agentMode === 'global' ? 'global' : 'scoped'
+  const agentMode = (agent === 'cursor' || agent === 'antigravity') ? 'global' : record.agentMode === 'global' ? 'global' : 'scoped'
   if (record.priorAgentMode != null && record.priorAgentMode !== '' && record.priorAgentMode !== 'global' && record.priorAgentMode !== 'scoped') {
     throw Object.assign(new Error('Invalid priorAgentMode'), { status: 400 })
   }

@@ -15,6 +15,7 @@ const AGENT_ALIASES: Record<string, AgentStatusId> = {
   opencode: 'opencode',
   dsh: 'dsh',
   cursor: 'cursor',
+  antigravity: 'antigravity',
 }
 
 const AGENT_NAMES: Record<AgentStatusId, string> = {
@@ -27,6 +28,7 @@ const AGENT_NAMES: Record<AgentStatusId, string> = {
   opencode: 'OpenCode',
   dsh: 'DeepSeek Harness',
   cursor: 'Cursor',
+  antigravity: 'Antigravity',
 }
 
 export const AGENT_NOT_INSTALLED = 'AGENT_NOT_INSTALLED'

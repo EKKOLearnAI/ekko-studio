@@ -1,7 +1,7 @@
 import { request } from './client'
 import type { ProviderApiMode } from './studio/provider-api-mode'
 
-export type CodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
+export type CodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
 export type ChatCodingAgentId = CodingAgentId | 'ekko-agent'
 export const CODING_AGENT_API_MODES = [
   'chat_completions',
@@ -54,6 +54,7 @@ export interface CodingAgentToolStatus {
   name: string
   provider: string
   command: string
+  capabilities?: { modes: string[]; installation: string; images: boolean; nativeCompact: boolean; automaticUpdates: boolean }
   packageName: string
   installed: boolean
   version: string

@@ -34,7 +34,7 @@ describe('workflow reasoning effort authoring contract', () => {
     const node = read('packages/client/src/components/hermes/workflow/WorkflowAgentNode.vue')
     const view = read('packages/client/src/views/hermes/WorkflowView.vue')
     expect(types).toMatch(/agentMode:\s*'scoped' \| 'global'/)
-    expect(node).toContain("['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(props.data.agent)")
+    expect(node).toContain("['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(props.data.agent)")
     expect(node).toContain("updateField('agentMode'")
     expect(node).toContain('v-if="usesScopedModel"')
     expect(view).toContain('agentMode: node.data.agentMode')

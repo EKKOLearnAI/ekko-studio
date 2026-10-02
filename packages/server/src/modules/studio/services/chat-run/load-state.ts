@@ -80,7 +80,7 @@ export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<strin
     inputTokens = hasPersistedUsage ? totals.inputTokens : pageUsage.inputTokens
     outputTokens = hasPersistedUsage ? totals.outputTokens : pageUsage.outputTokens
     // Cursor reports aggregate turn usage, not a current context snapshot.
-    if (latestUsage && session?.agent !== 'cursor') {
+    if (latestUsage && (session?.agent !== 'cursor' && session?.agent !== 'antigravity')) {
       contextTokens = Number(latestUsage.input_tokens || 0) + Number(latestUsage.output_tokens || 0)
     }
 

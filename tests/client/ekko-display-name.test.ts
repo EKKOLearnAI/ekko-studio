@@ -36,7 +36,7 @@ describe('Ekko display name', () => {
     expect(source).toMatch(new RegExp(`import\\s+\\{\\s*${exportName}\\s*\\}\\s+from\\s+['"]@/utils/agent-options['"]`))
     expect(source).toContain(binding)
     expect(options.map(option => option.label)).toEqual([
-      'Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor',
+      'Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor', 'Antigravity',
     ])
   })
 

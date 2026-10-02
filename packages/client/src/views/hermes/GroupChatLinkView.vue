@@ -131,7 +131,7 @@ function getAgentModelGroups(profile: string) {
             ? 'pi'
             : selectedAgentType.value === 'grok'
               ? 'grok'
-            : selectedAgentType.value === 'cursor'
+            : (selectedAgentType.value === 'cursor' || selectedAgentType.value === 'antigravity')
               ? 'cursor'
             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
               ? 'opencode'
@@ -182,7 +182,7 @@ const agentReasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
   { label: t('chat.reasoningEffort.options.max'), value: 'max' },
 ])
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -686,7 +686,7 @@ onUnmounted(() => {
               @update:value="handleAgentProfileChange"
             />
           </div>
-          <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="field">
+          <div v-if="supportsGlobalAgentMode && (selectedAgentType !== 'cursor' && selectedAgentType !== 'antigravity')" class="field">
             <label>{{ t('codingAgents.launchModeScope') }}</label>
             <NSelect
               v-model:value="selectedAgentMode"
