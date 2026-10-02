@@ -490,7 +490,6 @@ export default {
     apiCompatible: "Compatível com as APIs oficiais",
     usageTitle: "Uso por chave",
     usageScope: "Inclui os perfis acessíveis. O mesmo serviço e chave compartilham um cartão; chaves diferentes são exibidas separadamente.",
-    notConfigured: "Nenhuma chave APIKEY.FAN está configurada nos seus perfis acessíveis.",
     loadFailed: "Não foi possível carregar o uso. Atualize para tentar novamente.",
     remaining: "Cota restante",
     sources: "Configurada em",

@@ -88,7 +88,7 @@ onBeforeUnmount(() => { requestController?.abort() })
           </div>
         </div>
       </section>
-      <section class="api-relay-usage" aria-labelledby="api-relay-usage-heading" :aria-busy="usageLoading">
+      <section v-if="accounts.length || loadFailed" class="api-relay-usage" aria-labelledby="api-relay-usage-heading" :aria-busy="usageLoading">
         <div class="api-relay-usage-header">
           <div>
             <h3 id="api-relay-usage-heading">{{ t('apiRelay.usageTitle') }}</h3>
@@ -102,7 +102,6 @@ onBeforeUnmount(() => { requestController?.abort() })
         <div v-else-if="accounts.length" class="api-relay-usage-grid">
           <ApiRelayUsageCard v-for="account in accounts" :key="account.id" :account="account" />
         </div>
-        <p v-else-if="!usageLoading" class="api-relay-usage-message">{{ t('apiRelay.notConfigured') }}</p>
       </section>
     </div>
   </PageLoading>

@@ -144,7 +144,7 @@ test('shows separate keys with merged profile sources, zero balance and model us
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
-test('keeps shared loading until usage is fetched and shows the unconfigured state', async ({ page }) => {
+test('keeps shared loading until usage is fetched and only shows the partner card without keys', async ({ page }) => {
   let releaseUsage!: () => void
   const gate = new Promise<void>(resolve => { releaseUsage = resolve })
   await page.route('**/api/hermes/api-relay/usage', async route => {
@@ -156,8 +156,27 @@ test('keeps shared loading until usage is fetched and shows the unconfigured sta
   await expect(page.locator('.api-relay-hero')).not.toBeVisible()
   releaseUsage()
   await expect(page.locator('.api-relay-view')).toHaveAttribute('aria-busy', 'false')
-  await expect(page.locator('.api-relay-usage')).toContainText('No APIKEY.FAN key is configured')
+  await expect(page.locator('.api-relay-hero')).toBeVisible()
+  await expect(page.locator('.api-relay-usage')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Key usage', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0)
   await expect(page.locator('.relay-usage-card')).toHaveCount(0)
+  await page.setViewportSize({ width: 390, height: 800 })
+  await expect(page.locator('.api-relay-hero')).toBeVisible()
+  await expect(page.locator('.api-relay-usage')).toHaveCount(0)
+})
+
+test('hides the usage section after refresh confirms all keys have been removed', async ({ page }) => {
+  let attempts = 0
+  await page.route('**/api/hermes/api-relay/usage', route => route.fulfill({ json: ++attempts === 1
+    ? { configured: true, accounts: [relayAccount] }
+    : { configured: false, accounts: [] },
+  }))
+  await page.goto('/#/hermes/api-relay')
+  await expect(page.locator('.relay-usage-card')).toBeVisible()
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(page.locator('.api-relay-usage')).toHaveCount(0)
+  await expect(page.locator('.api-relay-hero')).toBeVisible()
 })
 
 test('shows request failure, recovers on refresh and keeps successful keys on partial failure', async ({ page }) => {

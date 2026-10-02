@@ -478,7 +478,6 @@ export default {
     apiCompatible: "官方 API 兼容",
     usageTitle: "密钥用量",
     usageScope: "涵盖有权限访问的 Profile。同一服务和密钥合并展示，不同密钥分别统计。",
-    notConfigured: "可访问的 Profile 中尚未配置 APIKEY.FAN 密钥。",
     loadFailed: "用量加载失败，请点击刷新重试。",
     remaining: "剩余额度",
     sources: "配置来源",

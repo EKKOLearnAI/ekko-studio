@@ -478,7 +478,6 @@ export default {
     apiCompatible: "相容官方 API",
     usageTitle: "金鑰用量",
     usageScope: "涵蓋有權限存取的 Profile。同一服務和金鑰合併顯示，不同金鑰分別統計。",
-    notConfigured: "可存取的 Profile 中尚未設定 APIKEY.FAN 金鑰。",
     loadFailed: "用量載入失敗，請點擊重新整理重試。",
     remaining: "剩餘額度",
     sources: "設定來源",

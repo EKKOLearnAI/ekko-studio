@@ -478,7 +478,6 @@ export default {
     apiCompatible: "Official API compatibility",
     usageTitle: "Key usage",
     usageScope: "Includes your accessible profiles. The same service and key share one card; different keys are shown separately.",
-    notConfigured: "No APIKEY.FAN key is configured in your accessible profiles.",
     loadFailed: "Unable to load usage. Refresh to try again.",
     remaining: "Remaining quota",
     sources: "Configured in",

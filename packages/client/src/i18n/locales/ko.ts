@@ -490,7 +490,6 @@ export default {
     apiCompatible: "공식 API 호환",
     usageTitle: "키 사용량",
     usageScope: "접근 가능한 프로필을 포함합니다. 같은 서비스와 키는 한 카드로 합치고 다른 키는 별도로 표시합니다.",
-    notConfigured: "접근 가능한 프로필에 APIKEY.FAN 키가 설정되지 않았습니다.",
     loadFailed: "사용량을 불러오지 못했습니다. 새로고침하여 다시 시도하세요.",
     remaining: "남은 할당량",
     sources: "설정 출처",

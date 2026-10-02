@@ -490,7 +490,6 @@ export default {
     apiCompatible: "Compatible avec les API officielles",
     usageTitle: "Utilisation par clé",
     usageScope: "Inclut les profils accessibles. Un même service et une même clé partagent une carte ; les clés différentes sont affichées séparément.",
-    notConfigured: "Aucune clé APIKEY.FAN n’est configurée dans vos profils accessibles.",
     loadFailed: "Impossible de charger l’utilisation. Actualisez pour réessayer.",
     remaining: "Quota restant",
     sources: "Configurée dans",

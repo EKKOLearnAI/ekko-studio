@@ -490,7 +490,6 @@ export default {
     apiCompatible: "公式API互換",
     usageTitle: "キーの使用量",
     usageScope: "アクセス可能なプロファイルが対象です。同じサービスとキーは1枚のカードにまとめ、異なるキーは個別に表示します。",
-    notConfigured: "アクセス可能なプロファイルに APIKEY.FAN キーが設定されていません。",
     loadFailed: "使用量を読み込めません。更新して再試行してください。",
     remaining: "残りの割り当て",
     sources: "設定元",

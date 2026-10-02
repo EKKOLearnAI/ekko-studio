@@ -490,7 +490,6 @@ export default {
     apiCompatible: "Mit offiziellen APIs kompatibel",
     usageTitle: "Schlüsselnutzung",
     usageScope: "Umfasst zugängliche Profile. Derselbe Dienst und Schlüssel werden zusammengefasst; unterschiedliche Schlüssel werden separat angezeigt.",
-    notConfigured: "In Ihren zugänglichen Profilen ist kein APIKEY.FAN-Schlüssel konfiguriert.",
     loadFailed: "Nutzung konnte nicht geladen werden. Aktualisieren Sie zum erneuten Versuch.",
     remaining: "Verbleibendes Kontingent",
     sources: "Konfiguriert in",
