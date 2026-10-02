@@ -32,13 +32,16 @@ Private skills: `~/.gemini/config/skills`; shared Studio skills: `~/.agents/skil
 Each Studio runtime gets a shadow HOME under its own runtime directory. User
 settings are copied, Studio MCP definitions are merged into a private MCP file,
 and skills/native state are linked. Native authentication and session state stay
-owned by the official CLI. User settings, MCP and permission files are not mutated
+owned by the official CLI. Global mode on macOS links `Library/Keychains` and
+`Library/Preferences/com.apple.security.plist` into the shadow HOME so native
+`security` lookups retain the login keychain. Credentials are not copied, and
+external-provider mode does not add these links. User settings, MCP and permission files are not mutated
 by launch. Studio MCP servers receive explicit `ELECTRON_RUN_AS_NODE=1` and the
 current turn credential file. Only Studio's injected MCP servers are added to the
 shadow permissions allow list; user permission files remain unchanged, but CLI permission prompts are bypassed by the launch flag. Antigravity launches use `--dangerously-skip-permissions` by explicit user-selected policy.
 
-Google keyring authentication with shadow HOME, Windows link privileges and
-native state compatibility still require real-platform acceptance testing.
+Windows/Linux native credential access, Windows link privileges and native state
+compatibility still require real-platform acceptance testing.
 
 ## Wire protocol and lifecycle
 
@@ -72,10 +75,18 @@ global/scoped picker and continuing unloaded search results with the same agent.
 and harness checks cover the server and Web/Electron client. App Node tests cover
 its source/runtime contracts, not an APK/IPA build.
 
-No Google login, paid inference, real workspace coding turn, native keyring or
-cross-platform packaging acceptance was performed. A release must additionally
+Initial integration testing did not include Google login, paid inference, a real
+workspace coding turn, native keyring or cross-platform packaging acceptance.
+A release must additionally
 verify login, two-turn restart/resume, actual MCP plan+clarify, stop during a tool,
 permission denial, workspace diff, and App/server version compatibility.
+
+On 2026-10-02, an actual macOS host reproduced authentication failure with the
+shadow HOME: `security default-keychain -d user` could not find the default
+keychain. Linking both native paths restored that lookup and `agy models` returned
+the model list. A headless turn using native authentication reached Google but
+returned HTTP 403 with a location eligibility error; model-list success does not
+establish that the account can run inference. This is not cross-platform acceptance.
 
 ## Feedback fixes
 

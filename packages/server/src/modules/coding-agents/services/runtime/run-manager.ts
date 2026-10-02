@@ -2768,7 +2768,7 @@ export class CodingAgentRunManager {
     if (run.printCompleted) return
     const safeMessage = sanitizeCodingAgentTerminalOutput(message)
     const guidance = /authentication|not logged|log in/i.test(safeMessage)
-      ? `${safeMessage}\nAntigravity CLI authentication is unavailable to this Studio runtime. Complete agy login on the Studio host; if already logged in, verify native credential access from the isolated runtime.`
+      ? `${safeMessage}\nAntigravity CLI authentication is unavailable to this Studio runtime. Run agy interactively on the Studio host to complete sign-in; if already signed in, verify native credential access from the isolated runtime.`
       : safeMessage
     // Persist visible failure text before the failed terminal event. Otherwise
     // refresh leaves an empty assistant row with only a zero-token usage card.

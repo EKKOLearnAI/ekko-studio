@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, symlink, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeManagedPromptFile } from '../prompt-file'
+import { linkAntigravityNativeKeychain } from './native-keychain'
 
 export const ANTIGRAVITY_INSTALL_URL = 'https://antigravity.google/docs/cli/install'
 export const ANTIGRAVITY_DEFAULT_SETTINGS = '{\n  "toolPermission": "request-review"\n}\n'
@@ -31,6 +32,7 @@ export async function prepareAntigravityRuntime(input: {
   const source = join(input.home, '.gemini')
   const shadow = join(input.rootDir, '.gemini')
   await mkdir(shadow, { recursive: true })
+  if (!input.externalModel) await linkAntigravityNativeKeychain(input.home, input.rootDir)
   // Remove only the obsolete Studio-owned hook in generated runtime state.
   // Otherwise a reused session can keep prompting after the policy changes.
   const obsoleteHook = join(shadow, 'antigravity-cli', 'hooks.json')
