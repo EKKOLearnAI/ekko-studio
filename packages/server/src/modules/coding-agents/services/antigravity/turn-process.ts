@@ -30,19 +30,19 @@ export function buildAntigravityTurnArgs(
   baseArgs: string[],
   nativeSessionId: string,
   resume: boolean,
-  prompt: string,
+  _prompt: string,
 ): string[] {
   const resumeArgs = resume && String(nativeSessionId || '').trim()
     ? ['--conversation', String(nativeSessionId).trim()]
     : []
   return [
-    '-p',
+    '--input-format',
+    'stream-json',
     '--output-format',
     'stream-json',
     ...resumeArgs,
     ...baseArgs,
     '--print-timeout', '0',
-    prompt,
   ]
 }
 
@@ -91,9 +91,11 @@ function spawnAntigravity(command: string, args: string[], input: AntigravityTur
 export function startAntigravityTurnProcess(input: AntigravityTurnProcessInput): ChildProcess {
   const prompt = antigravityPrompt(input.input, input.images)
   const args = buildAntigravityTurnArgs(input.baseArgs, input.nativeSessionId, input.resume, prompt)
-  const child = spawnAntigravity(input.command, args.slice(0, -1), input)
+  const child = spawnAntigravity(input.command, args, input)
   child.stdin?.on('error', () => { /* startup/close handlers own lifecycle errors */ })
-  child.stdin?.end(prompt)
+  // Stream-json explicitly activates headless mode without the value-taking
+  // -p flag. Send one turn and EOF, so final usage remains per-process/per-turn.
+  child.stdin?.end(`${JSON.stringify({ event: 'user', message: { content: prompt } })}\n`)
   const stdout = createAntigravityStdoutReader()
   const parse = createAntigravityStreamParser()
   child.stdout?.on('data', (chunk: Buffer) => {

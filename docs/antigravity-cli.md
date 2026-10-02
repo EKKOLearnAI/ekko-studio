@@ -43,8 +43,8 @@ native state compatibility still require real-platform acceptance testing.
 
 ## Wire protocol and lifecycle
 
-A fresh CLI process is used per turn, with `-p --output-format stream-json
---print-timeout 0`; prompt text is UTF-8 stdin, not a command argument. Resumption
+A fresh CLI process is used per turn, with `--input-format stream-json --output-format stream-json
+--print-timeout 0`; one user NDJSON event is written to UTF-8 stdin followed by EOF, not a command argument. Resumption
 uses `--conversation <native-id>`, never `--continue` (which can select another
 conversation). Studio persists native IDs from `init` and final `result`.
 
@@ -72,3 +72,20 @@ No Google login, paid inference, real workspace coding turn, native keyring or
 cross-platform packaging acceptance was performed. A release must additionally
 verify login, two-turn restart/resume, actual MCP plan+clarify, stop during a tool,
 permission denial, workspace diff, and App/server version compatibility.
+
+## Feedback fixes
+
+The initial LPK had a value-taking `-p` flag followed by `--output-format`; official
+CLI 1.2.14 rejected it with exit 2. The adapter now uses explicit stream-json input
+and sends one NDJSON user event followed by EOF. Actual CLI validation with a
+clean temporary HOME reaches authentication-required rather than flag parsing
+error. No authenticated inference is claimed. Antigravity is also excluded from
+Studio's npm auto-update scheduler, like other manually installed native CLIs.
+
+The test LPK bundled agy for convenience; ordinary Studio still allows manual
+installation on its host. Native installation is not inherently global-only.
+Current official API-key documentation accepts modelProvider=gemini and
+GOOGLE_GEMINI_BASE_URL for Gemini-compatible endpoints; it does not establish
+support for arbitrary Studio OpenAI/Responses/Anthropic providers. Gemini-scoped
+configuration/protocol adaptation is a separate pending feature, not a proven
+CLI impossibility.

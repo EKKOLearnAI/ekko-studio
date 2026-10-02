@@ -136,7 +136,7 @@ describe('coding agent Windows process launch', () => {
     }
     ;(manager as any).startAntigravityPrintTurn(run, 'hello')
     const child = testState.spawnCalls.at(-1)!.child
-    expect(child.stdin.end).toHaveBeenCalledWith('hello')
+    expect(child.stdin.end).toHaveBeenCalledWith(`${JSON.stringify({ event: 'user', message: { content: 'hello' } })}\n`)
     expect(testState.spawnCalls.at(-1)!.args).not.toContain('hello')
     child.stdout.emit('data', Buffer.from(JSON.stringify({ event: 'step_update', step_update: { step_type: 'agent_response', state: 'DONE', text_delta: 'answer' } }) + '\n'))
     expect((manager as any).completeClaudePrintTurn).not.toHaveBeenCalled()

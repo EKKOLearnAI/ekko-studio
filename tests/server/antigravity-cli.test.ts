@@ -39,7 +39,7 @@ describe('Antigravity official CLI protocol', () => {
     expect(parse(line({ event: 'result', result: { status: 'SUCCESS', response: 'answer' } })).map(e => e.type)).toEqual(['text', 'complete'])
   })
   it('uses explicit native conversation identity without granting blanket permissions', () => {
-    expect(buildAntigravityTurnArgs([], 'native-id', true, 'prompt')).toEqual(['-p', '--output-format', 'stream-json', '--conversation', 'native-id', '--print-timeout', '0', 'prompt'])
+    expect(buildAntigravityTurnArgs([], 'native-id', true, 'prompt')).toEqual(['--input-format', 'stream-json', '--output-format', 'stream-json', '--conversation', 'native-id', '--print-timeout', '0'])
     expect(buildAntigravityTurnArgs([], 'native-id', false, 'prompt')).not.toContain('--conversation')
     expect(buildAntigravityTurnArgs([], '', false, 'prompt')).not.toContain('--dangerously-skip-permissions')
   })
@@ -81,5 +81,24 @@ describe('Antigravity product routing', () => {
     expect(resolveWorkflowNodeRunTarget('antigravity')).toMatchObject({ agent: 'antigravity', codingAgentId: 'antigravity' })
     expect(normalizeWorkflowNode({ id: 'a', data: { agent: 'antigravity', agentMode: 'scoped' } })?.data.agentMode).toBe('global')
     expect(normalizeGroupAgentPresetInput({ agent: 'antigravity', agentMode: 'scoped', name: 'A', profile: 'default' })).toMatchObject({ agent: 'antigravity', agentMode: 'global' })
+  })
+})
+
+// Opt-in actual CLI check: empty temporary HOME, no credentials, no inference.
+describe('Antigravity actual CLI argument acceptance', () => {
+  it.skipIf(!process.env.ANTIGRAVITY_TEST_CLI)('accepts the adapter NDJSON flags and reaches authentication, not argument parsing', async () => {
+    const { spawnSync } = await import('node:child_process')
+    const home = await mkdtemp(join(tmpdir(), 'studio-agy-no-auth-')); roots.push(home)
+    const result = spawnSync(process.env.ANTIGRAVITY_TEST_CLI!, buildAntigravityTurnArgs([], '', false, ''), {
+      env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home },
+      input: `${JSON.stringify({ event: 'user', message: { content: 'argument acceptance test' } })}\n`,
+      encoding: 'utf8', timeout: 15000,
+    })
+    expect(result.error).toBeUndefined()
+    expect(result.status).not.toBe(2)
+    expect(result.stderr).not.toContain('took "--output-format"')
+    expect(result.stderr).toMatch(/authentication required|authentication failed/i)
+    const terminal = result.stdout.split('\n').filter(Boolean).map(line => JSON.parse(line)).find(event => event.event === 'result')
+    expect(terminal.result.status).toBe('ERROR')
   })
 })
