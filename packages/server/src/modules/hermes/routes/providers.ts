@@ -1,8 +1,12 @@
 import Router from '@koa/router'
 import * as ctrl from '../controllers/providers'
 import { requireAdmin, requireUserProfile } from '../../studio/public/auth'
+import * as apiRelayCtrl from '../controllers/api-relay'
 
 export const providerRoutes = new Router()
+
+/** Read APIKEY.FAN usage, deduplicated across the current user's accessible profiles. */
+providerRoutes.get('/api/hermes/api-relay/usage', apiRelayCtrl.getRelayUsage)
 
 providerRoutes.post('/api/hermes/config/providers', ctrl.create)
 // Backward-compatible legacy update route. New clients should use the editor

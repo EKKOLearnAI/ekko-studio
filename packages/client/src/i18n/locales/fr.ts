@@ -481,6 +481,35 @@ export default {
   },
 
   // Sidebar
+  apiRelay: {
+    title: "Relais API",
+    headline: "Les principaux modèles IA, une seule passerelle",
+    description: "APIKEY.FAN est la passerelle API partenaire d’Ekko Studio. Elle offre un accès unifié à Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek et MiniMax, et est compatible avec les API et SDK officiels.",
+    zhipu: "Zhipu",
+    viewNow: "Voir maintenant",
+    apiCompatible: "Compatible avec les API officielles",
+    usageTitle: "Utilisation par clé",
+    usageScope: "Inclut les profils accessibles. Un même service et une même clé partagent une carte ; les clés différentes sont affichées séparément.",
+    notConfigured: "Aucune clé APIKEY.FAN n’est configurée dans vos profils accessibles.",
+    loadFailed: "Impossible de charger l’utilisation. Actualisez pour réessayer.",
+    remaining: "Quota restant",
+    sources: "Configurée dans",
+    keyActive: "Clé active",
+    keyInactive: "Clé inactive",
+    requests: "Requêtes",
+    spend: "Coût",
+    today: "Aujourd’hui",
+    total: "Total",
+    modelUsage: "Utilisation par modèle",
+    model: "Modèle",
+    errors: {
+      unauthorized: "Échec de l’authentification. Vérifiez la clé configurée.",
+      timeout: "La requête a expiré. Actualisez pour réessayer.",
+      unavailable: "Le service est indisponible. Actualisez pour réessayer.",
+      invalid_response: "Le format de la réponse du service n’est pas reconnu.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "Préparation de la mise à jour",
     desktopUpdateStopping: "Arrêt du téléchargement…",

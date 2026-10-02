@@ -26,11 +26,12 @@ const activeKey = computed(() => {
   if (['hermes.chat', 'hermes.session', 'hermes.globalAgent', 'hermes.globalAgentSession'].includes(name)) return 'chat'
   if (name.startsWith('hermes.groupChat')) return 'group'
   if (name.startsWith('hermes.history')) return 'history'
+  if (name === 'hermes.apiRelay') return 'apiRelay'
   return entries.value.find(entry => entry.route === name)?.key || 'settings'
 })
 const mobileNavigation = useMobileNavigation()
 function handleNavigate(key: string) {
-  if (mobileNavigation && ['connections', 'agents', 'models'].includes(key)) {
+  if (mobileNavigation && ['connections', 'agents', 'models', 'apiRelay'].includes(key)) {
     mobileNavigation.open.value = false
   }
 }
@@ -48,16 +49,16 @@ function handleNavigate(key: string) {
         </template>
         {{ t(entry.label) }}
       </NTooltip>
-    </nav>
-    <div class="studio-navigation-rail__bottom">
       <NTooltip placement="right" trigger="hover">
         <template #trigger>
-          <a class="studio-navigation-rail__item" href="https://apikey.fan/register?aff=LIBAPI" target="_blank" rel="noopener noreferrer" :aria-label="t('sidebar.apiRelay')">
-            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3" /></svg>
-          </a>
+          <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: 'hermes.apiRelay' }" :active="activeKey === 'apiRelay'" :aria-label="t('sidebar.apiRelay')" @click="handleNavigate('apiRelay')">
+            <img class="api-relay-logo" src="/relay-logo.png" width="24" height="24" alt="" aria-hidden="true" />
+          </RouteLinkItem>
         </template>
         {{ t('sidebar.apiRelay') }}
       </NTooltip>
+    </nav>
+    <div class="studio-navigation-rail__bottom">
       <NTooltip placement="right" trigger="hover">
         <template #trigger>
           <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: 'hermes.settings' }" :active="activeKey === 'settings'" :aria-label="t('sidebar.settings')">
@@ -100,6 +101,7 @@ function handleNavigate(key: string) {
   scrollbar-width: none;
 }
 .studio-navigation-rail__bottom { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; }
+.api-relay-logo { border-radius: 4px; }
 .studio-navigation-rail__item {
   display: grid;
   place-items: center;

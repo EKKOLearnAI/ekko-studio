@@ -395,6 +395,35 @@ export default {
   },
 
 
+  apiRelay: {
+    title: "API-реле",
+    headline: "Ведущие модели ИИ через единый шлюз",
+    description: "APIKEY.FAN — партнёрский API-шлюз Ekko Studio. Он предоставляет единый доступ к Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek и MiniMax и совместим с официальными API и SDK.",
+    zhipu: "Zhipu",
+    viewNow: "Посмотреть",
+    apiCompatible: "Совместимость с официальными API",
+    usageTitle: "Использование ключей",
+    usageScope: "Включает доступные профили. Одинаковый сервис и ключ объединяются в одну карточку; разные ключи показаны отдельно.",
+    notConfigured: "В доступных профилях не настроен ключ APIKEY.FAN.",
+    loadFailed: "Не удалось загрузить статистику. Обновите страницу и повторите попытку.",
+    remaining: "Оставшаяся квота",
+    sources: "Настроен в",
+    keyActive: "Ключ активен",
+    keyInactive: "Ключ неактивен",
+    requests: "Запросы",
+    spend: "Расходы",
+    today: "Сегодня",
+    total: "Всего",
+    modelUsage: "Использование по моделям",
+    model: "Модель",
+    errors: {
+      unauthorized: "Ошибка аутентификации. Проверьте настроенный ключ.",
+      timeout: "Время запроса истекло. Обновите и повторите попытку.",
+      unavailable: "Сервис статистики недоступен. Обновите и повторите попытку.",
+      invalid_response: "Сервис вернул неизвестный формат статистики.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "Подготовка обновления",
     desktopUpdateStopping: "Остановка загрузки…",

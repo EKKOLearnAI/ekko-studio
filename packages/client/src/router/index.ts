@@ -89,6 +89,11 @@ const router = createRouter({
       component: () => import('@/views/hermes/ChatView.vue'),
     },
     {
+      path: '/hermes/api-relay',
+      name: 'hermes.apiRelay',
+      component: () => import('@/views/hermes/ApiRelayView.vue'),
+    },
+    {
       path: '/hermes/profiles',
       name: 'hermes.profiles',
       component: () => import('@/views/hermes/ProfilesView.vue'),
