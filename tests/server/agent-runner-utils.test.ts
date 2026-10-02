@@ -249,6 +249,54 @@ describe('coding agent completion errors', () => {
     manager.shutdown()
   })
 
+  it('keeps consuming Claude stdout after an early empty result and persists the later answer', async () => {
+    initAllHermesTables()
+    const fixtureDir = mkdtempSync(join(tmpdir(), 'claude-early-result-'))
+    const fixturePath = join(fixtureDir, 'stream.cjs')
+    const records = [
+      { type: 'result', result: '', usage: { input_tokens: 1, output_tokens: 0 } },
+      { type: 'assistant', message: { id: 'msg-tool', role: 'assistant', content: [
+        { type: 'tool_use', id: 'tool-late', name: 'Bash', input: { command: 'pwd' } },
+      ] } },
+      { type: 'user', message: { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'tool-late', content: '/tmp/fixture' },
+      ] } },
+      { type: 'assistant', message: { id: 'msg-answer', role: 'assistant', content: [
+        { type: 'text', text: 'The complete answer.' },
+      ] } },
+      { type: 'result', result: 'The complete answer.' },
+    ]
+    writeFileSync(fixturePath, `process.stdin.resume(); process.stdin.on('end', () => {
+      process.stdout.write(${JSON.stringify(JSON.stringify(records[0]) + '\n')});
+      setTimeout(() => { process.stdout.write(${JSON.stringify(records.slice(1).map(r => JSON.stringify(r)).join('\n') + '\n')}); }, 80);
+    });`)
+    const manager = new CodingAgentRunManager()
+    const sessionId = `claude-early-result-${Date.now()}`
+    const emitted = vi.fn()
+    ;(manager as any).emitToChat = emitted
+    ;(manager as any).refreshCodingAgentUsage = async () => {}
+    try {
+      manager.start({ agentSessionId: sessionId, sessionId, agentId: 'claude-code', mode: 'scoped',
+        profile: 'default', provider: 'test', model: 'test', command: process.execPath,
+        args: [fixturePath], shellCommand: process.execPath, workspaceDir: fixtureDir,
+        state: { messages: [], isWorking: false, events: [], queue: [] } })
+      manager.send(sessionId, 'test')
+      const run = (manager as any).runs.get(sessionId)
+      await vi.waitFor(() => expect(run.claudeResultUsage).toEqual({ input_tokens: 1, output_tokens: 0 }), { interval: 5 })
+      expect(run.printCompleted).toBe(false)
+      expect(run.terminalEventHandled).toBe(false)
+      expect(emitted.mock.calls.filter(call => call[1] === 'run.completed')).toHaveLength(0)
+      await vi.waitFor(() => expect(emitted).toHaveBeenCalledWith(sessionId, 'run.completed', expect.anything()))
+      const messages = getSessionDetail(sessionId)?.messages || []
+      expect(messages.at(-1)?.content).toBe('The complete answer.')
+      expect(messages.some(m => m.role === 'tool' && m.content === '/tmp/fixture')).toBe(true)
+      expect(emitted.mock.calls.filter(call => call[1] === 'run.completed')).toHaveLength(1)
+    } finally {
+      manager.shutdown()
+      rmSync(fixtureDir, { recursive: true, force: true })
+    }
+  })
+
   it('waits for Claude stdout to close before settling a zero-exit child', async () => {
     initAllHermesTables()
     const fixtureDir = mkdtempSync(join(tmpdir(), 'claude-api-error-close-'))
@@ -2726,6 +2774,58 @@ describe('Claude Code stream-json mapping', () => {
     expect(run.state.messages).not.toContainEqual(expect.objectContaining({
       tool_calls: [expect.objectContaining({ id: 'call-proxy-web-search' })],
     }))
+  })
+
+  it.each([
+    ['complete-only', []],
+    ['partial', ['The ']],
+    ['streamed', ['The ', 'complete answer.']],
+  ])('reconciles %s assistant text without duplicating stream or result text', (_name, chunks) => {
+    const manager = new CodingAgentRunManager()
+    const emitted = vi.fn()
+    ;(manager as any).emitToChat = emitted
+    ;(manager as any).ensureDbSession = () => {}
+    ;(manager as any).touch = () => {}
+    const run: any = {
+      id: 'claude-text', launch: { agentId: 'claude-code', sessionId: 'claude-text', profile: 'default' },
+      state: { messages: [], isWorking: false, events: [], queue: [] },
+      currentChild: { exitCode: null, signalCode: null, killed: false },
+      printText: '', printTextStarted: false, printCompleted: false,
+      printToolBlocks: new Map(), claudeTextBlocks: new Map(),
+    }
+    ;(manager as any).runs.set(run.id, run)
+    const line = (event: any) => (manager as any).handleClaudePrintLine(run, JSON.stringify(event))
+    const stream = (event: any) => line({ type: 'stream_event', event })
+    stream({ type: 'message_start', message: { id: 'msg-answer' } })
+    // Even an empty text block must not suppress full-message/result fallback.
+    stream({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })
+    for (const text of chunks) stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })
+    const answer = { type: 'assistant', message: { id: 'msg-answer', role: 'assistant', content: [
+      { type: 'text', text: 'The complete answer.' },
+    ] } }
+    line(answer)
+    line(answer)
+    line({ type: 'result', result: 'The complete answer.' })
+    expect(run.printText).toBe('The complete answer.')
+    expect(emitted.mock.calls.filter(c => c[1] === 'message.delta').map(c => c[2].delta).join('')).toBe('The complete answer.')
+    expect(run.printCompleted).toBe(false)
+    expect(run.terminalEventHandled).not.toBe(true)
+  })
+
+  it('recovers result-only text after an empty started text block', () => {
+    const manager = new CodingAgentRunManager()
+    ;(manager as any).emitToChat = () => {}
+    ;(manager as any).ensureDbSession = () => {}
+    ;(manager as any).touch = () => {}
+    const run: any = {
+      id: 'claude-result', launch: { agentId: 'claude-code', sessionId: 'claude-result', profile: 'default' },
+      state: { messages: [], isWorking: false, events: [], queue: [] },
+      currentChild: { exitCode: null, signalCode: null }, printText: '', printTextStarted: true,
+    }
+    ;(manager as any).runs.set(run.id, run)
+    ;(manager as any).handleClaudePrintLine(run, JSON.stringify({ type: 'result', result: 'Recovered answer' }))
+    expect(run.printText).toBe('Recovered answer')
+    expect(run.state.messages.at(-1)?.content).toBe('Recovered answer')
   })
 
   it('maps top-level tool_result messages to tool.completed', () => {

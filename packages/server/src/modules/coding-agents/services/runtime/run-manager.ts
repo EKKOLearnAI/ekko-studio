@@ -199,6 +199,9 @@ export interface ManagedCodingAgentRun {
   printMessageId?: string
   printTextStarted?: boolean
   printText?: string
+  claudeResultUsage?: any
+  claudeStreamMessageId?: string
+  claudeTextBlocks?: Map<string, string>
   printCompleted?: boolean
   responseStartEmitted?: boolean
   terminalEventHandled?: boolean
@@ -2021,6 +2024,9 @@ export class CodingAgentRunManager {
     run.responseStartEmitted = false
     run.terminalEventHandled = false
     run.printToolBlocks = new Map()
+    run.claudeResultUsage = undefined
+    run.claudeStreamMessageId = undefined
+    run.claudeTextBlocks = new Map()
     run.currentChildStderr = ''
     run.runMarker = undefined
     run.memoryExportStarted = false
@@ -2123,7 +2129,7 @@ export class CodingAgentRunManager {
         return
       }
       if (code === 0) {
-        this.completeClaudePrintTurn(run)
+        this.completeClaudePrintTurn(run, run.claudeResultUsage)
         return
       }
       this.handleClaudePrintResponseEvent(run, {
@@ -2216,21 +2222,20 @@ export class CodingAgentRunManager {
     if (event.type === 'result') {
       if (run.printCompleted) return
       const resultText = String(event.result || '')
-      if (resultText && !run.printTextStarted) {
-        this.ensureClaudePrintText(run)
-        run.printText = `${run.printText || ''}${resultText}`
-        this.handleClaudePrintResponseEvent(run, {
-          type: 'response.output_text.delta',
-          data: {
-            type: 'response.output_text.delta',
-            item_id: run.printMessageId,
-            output_index: 0,
-            content_index: 0,
-            delta: resultText,
-          },
-        })
+      // The process can still emit native messages after a result (for example
+      // resumed background notifications). Do not latch printCompleted until
+      // close has drained stdout; otherwise all subsequent records are lost.
+      if (resultText && !(run.printText || '').endsWith(resultText)) {
+        const delta = appendedTextDelta(run.printText || '', resultText)
+        this.appendClaudeText(run, delta)
       }
-      this.completeClaudePrintTurn(run, event.usage)
+      run.claudeResultUsage = event.usage ?? run.claudeResultUsage
+      logger.debug({
+        runId: run.id, sessionId: run.launch.sessionId,
+        subtype: event.subtype, textChars: (run.printText || '').length,
+        waitingForClose: Boolean(run.currentChild),
+      }, '[coding-agent-run] Claude result received; waiting for stdout close')
+      if (!run.currentChild) this.completeClaudePrintTurn(run, run.claudeResultUsage)
     }
   }
 
@@ -2253,6 +2258,15 @@ export class CodingAgentRunManager {
 
     if (role === 'assistant') {
       for (const [index, block] of content.entries()) {
+        if (block?.type === 'text') {
+          const key = `${message.id || run.claudeStreamMessageId || run.printMessageId}:${index}`
+          const text = String(block.text || '')
+          run.claudeTextBlocks ??= new Map()
+          const previous = run.claudeTextBlocks.get(key) || ''
+          if (text.startsWith(previous)) this.appendClaudeText(run, text.slice(previous.length))
+          run.claudeTextBlocks.set(key, text)
+          continue
+        }
         if (block?.type !== 'tool_use') continue
         const toolBlock = {
           id: String(block.id || `toolu_${index}`),
@@ -2322,6 +2336,7 @@ export class CodingAgentRunManager {
     if (type === 'message_start') {
       run.usagePendingClaudeTools = new Set()
       const id = String(event?.message?.id || run.printResponseId || `resp_${Date.now()}`)
+      run.claudeStreamMessageId = id
       run.printResponseId = id
       run.printMessageId = `msg_${id}`
       return
@@ -2384,17 +2399,10 @@ export class CodingAgentRunManager {
       if (delta.type === 'text_delta' && delta.text) {
         this.ensureClaudePrintText(run)
         const text = String(delta.text)
-        run.printText = `${run.printText || ''}${text}`
-        this.handleClaudePrintResponseEvent(run, {
-          type: 'response.output_text.delta',
-          data: {
-            type: 'response.output_text.delta',
-            item_id: run.printMessageId,
-            output_index: 0,
-            content_index: 0,
-            delta: text,
-          },
-        })
+        const key = `${run.claudeStreamMessageId || run.printMessageId}:${index}`
+        run.claudeTextBlocks ??= new Map()
+        run.claudeTextBlocks.set(key, `${run.claudeTextBlocks.get(key) || ''}${text}`)
+        this.appendClaudeText(run, text)
         return
       }
       if (delta.type === 'input_json_delta' && delta.partial_json) {
@@ -2439,6 +2447,19 @@ export class CodingAgentRunManager {
         },
       })
     }
+  }
+
+  private appendClaudeText(run: ManagedCodingAgentRun, text: string) {
+    if (!text) return
+    this.ensureClaudePrintText(run)
+    run.printText = `${run.printText || ''}${text}`
+    this.handleClaudePrintResponseEvent(run, {
+      type: 'response.output_text.delta',
+      data: {
+        type: 'response.output_text.delta', item_id: run.printMessageId,
+        output_index: 0, content_index: 0, delta: text,
+      },
+    })
   }
 
   private ensureClaudePrintText(run: ManagedCodingAgentRun) {
