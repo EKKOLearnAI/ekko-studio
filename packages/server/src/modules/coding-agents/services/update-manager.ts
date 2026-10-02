@@ -35,11 +35,5 @@ export async function getAgentUpdateManager():Promise<AgentUpdatePolicy>{
 
 export async function installAgentAndPublish(id: string) {
   await loadPolicy()
-  return policy.installAndRefresh(id, async () => {
-    const release = lockAgentUpdate(id)
-    try {
-      if (codingAgentRunManager.isAgentBusyForUpdate(id)) throw Object.assign(new Error('Agent session is active; stop it before updating'), { status: 409 })
-      return await installCodingAgent(id)
-    } finally { release() }
-  })
+  return policy.installAndRefresh(id, () => installCodingAgent(id))
 }
