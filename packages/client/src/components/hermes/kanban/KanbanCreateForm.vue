@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NCheckbox, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useKanbanStore } from '@/stores/hermes/kanban'
-import { withDefaultAssignee } from '@/utils/hermes/kanban-assignees'
+import { useProfilesStore } from '@/stores/hermes/profiles'
 import { fetchSkills } from '@/api/hermes/skills'
 import type { SkillInfo } from '@/api/hermes/skills'
 
@@ -15,6 +15,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const message = useMessage()
 const kanbanStore = useKanbanStore()
+const profilesStore = useProfilesStore()
 
 // Task text is written by people in whatever language they think in, while the
 // UI language is a separate choice. `dir="auto"` lets each field follow its own
@@ -46,8 +47,12 @@ const priorityOptions = computed(() => [
 ])
 
 const assigneeOptions = computed(() => {
-  return withDefaultAssignee(kanbanStore.assignees, kanbanStore.stats?.by_assignee || {})
-    .map(a => ({ label: a.name, value: a.name }))
+  // profilesStore.profiles 是全集；kanbanStore.assignees 仅作"已被使用过"的标记
+  return profilesStore.profiles.map(p => ({
+    label: p.alias || p.name,
+    value: p.name,
+    used: kanbanStore.assignees.includes(p.name),
+  }))
 })
 
 const workspaceOptions = computed(() => [

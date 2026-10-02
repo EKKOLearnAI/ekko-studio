@@ -1,12 +1,18 @@
 import Router from '@koa/router'
 import * as ctrl from '../controllers/kanban'
+import * as dingTalkApprovalCtrl from '../controllers/kanban-dingtalk-approval'
 
 export const kanbanRoutes = new Router()
+export const kanbanPublicRoutes = new Router()
+
+kanbanPublicRoutes.post('/api/hermes/kanban/dingtalk/card-callback', dingTalkApprovalCtrl.receiveDingTalkKanbanApproval)
 
 kanbanRoutes.get('/api/hermes/kanban/boards', ctrl.listBoards)
 kanbanRoutes.post('/api/hermes/kanban/boards', ctrl.createBoard)
 kanbanRoutes.delete('/api/hermes/kanban/boards/:slug', ctrl.archiveBoard)
 kanbanRoutes.get('/api/hermes/kanban/capabilities', ctrl.capabilities)
+kanbanRoutes.get('/api/hermes/kanban/approval/capabilities', ctrl.approvalCapabilities)
+
 kanbanRoutes.get('/api/hermes/kanban/stats', ctrl.stats)
 kanbanRoutes.get('/api/hermes/kanban/assignees', ctrl.assignees)
 kanbanRoutes.get('/api/hermes/kanban/diagnostics', ctrl.diagnostics)
@@ -30,3 +36,8 @@ kanbanRoutes.get('/api/hermes/kanban/:id/log', ctrl.taskLog)
 kanbanRoutes.post('/api/hermes/kanban/:id/reclaim', ctrl.reclaim)
 kanbanRoutes.post('/api/hermes/kanban/:id/reassign', ctrl.reassign)
 kanbanRoutes.post('/api/hermes/kanban/:id/specify', ctrl.specify)
+kanbanRoutes.post('/api/hermes/kanban/:id/claim', ctrl.claimTask)
+kanbanRoutes.post('/api/hermes/kanban/:id/request-review', ctrl.requestTaskReview)
+kanbanRoutes.post('/api/hermes/kanban/:id/approve', ctrl.approveTask)
+kanbanRoutes.post('/api/hermes/kanban/:id/request-changes', ctrl.requestTaskChanges)
+kanbanRoutes.post('/api/hermes/kanban/:id/archive', ctrl.archiveApprovalTask)
