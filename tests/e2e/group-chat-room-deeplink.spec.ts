@@ -2047,5 +2047,5 @@ test('group-chat Agent picker follows the single-chat order', async ({ page }) =
   await expect(drawer.locator('.agent-form-loading')).toBeHidden()
   await drawer.locator('.n-select').first().click()
   await expect.poll(async () => (await page.locator('.n-base-select-option__content:visible').allTextContents())
-    .map(label => label.split(' · ')[0])).toEqual(['Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor'])
+    .map(label => label.split(' · ')[0])).toEqual(['Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor', 'Antigravity'])
 })

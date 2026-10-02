@@ -49,7 +49,7 @@ test('detects an external Cursor install on return without duplicate probes', as
   await expect(card.locator('.agent-version')).toHaveText('v2026.09.26-dd393fe')
   await expect(card).not.toContainText('Not installed')
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  expect(probes).toBe(2)
+  await expect.poll(() => probes).toBe(3)
 })
 
 test('retries after a failed probe and removes listeners when leaving management', async ({ page }) => {

@@ -7,7 +7,7 @@ describe('ChatPanel Pi effective mode', () => {
 
     expect(source).toContain('{ label: t("codingAgents.launchModeGlobal"), value: "global" }')
     expect(source).toContain('if (agent === "ekko-agent") return "scoped";')
-    expect(source).toContain('if (agent === "cursor" || agent === "antigravity") return "global";')
+    expect(source).toContain('if (agent === "cursor") return "global";')
     expect(source).toContain('const mode = effectiveNewChatMode(newChatAgent.value, newChatAgentMode.value);')
     expect(source).not.toContain('newChatAgent.value === "pi" && newChatAgentMode.value !== "scoped"')
   })

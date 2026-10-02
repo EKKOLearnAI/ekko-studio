@@ -41,7 +41,10 @@ for (const target of [
       request.pathname === '/api/hermes/skills' && new URLSearchParams(request.search).get('target') === 'cursor'
     ))).toBe(true)
     await node.locator('.n-select').first().click()
-    await page.getByText(target.label, { exact: true }).last().click()
+    // NSelect restores scroll around Cursor; the first Hermes option is outside
+    // the virtual list until the dropdown is scrolled back to the top.
+    await page.locator('.n-base-select-menu:visible .n-virtual-list').evaluate(element => { element.scrollTop = 0 })
+    await page.locator('.n-base-select-option:visible').filter({ has: page.locator('.n-base-select-option__content', { hasText: new RegExp(`^${target.label}(?: ·|$)`) }) }).click()
     await expect(node.locator('.n-select').first()).toContainText(target.label)
     if (target.mode === 'scoped') {
       await expect(node.locator('.model-trigger')).toContainText('test-model')

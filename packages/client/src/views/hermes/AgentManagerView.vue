@@ -302,7 +302,11 @@ async function checkExternalCliInstallation(event?: Event) {
   try {
     const result = await fetchCodingAgentsStatus()
     if (managerMounted) {
-      tools.value = result.tools
+      // An older server or partial inventory may omit an Agent. Preserve its
+      // cached status instead of turning an installed tool into Not installed.
+      const detected = new Map(result.tools.map(tool => [tool.id, tool]))
+      tools.value = tools.value.map(tool => detected.get(tool.id) || tool)
+      for (const tool of result.tools) if (!tools.value.some(existing => existing.id === tool.id)) tools.value.push(tool)
       loadError.value = ''
     }
   } catch (error) {
