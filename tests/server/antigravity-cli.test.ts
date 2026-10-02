@@ -37,6 +37,47 @@ describe('Antigravity official CLI protocol', () => {
     expect(events.map(event => event.type)).toEqual(['tool_started', 'tool_completed'])
     expect(events.at(-1)).toMatchObject({ failed: true, output: { message: 'failed' } })
   })
+  it.each(['SUCCESS', 'ERROR'])('sums completed model steps once instead of the cumulative %s result', status => {
+    const parse = createAntigravityStreamParser({ resumed: true })
+    parse(line({ event: 'init', conversation_id: 'native' }))
+    const step = (index: number, state: string, input: number, output: number, thinking: number, cache: number) => line({
+      event: 'step_update', step_update: { conversation_id: 'native', step_index: index,
+        step_type: 'agent_response', state,
+        usage: { input_tokens: input, output_tokens: output, thinking_tokens: thinking, cache_read_tokens: cache },
+      },
+    })
+    parse(step(3, 'RUNNING', 50, 10, 2, 5))
+    parse(step(3, 'DONE', 100, 20, 4, 10))
+    parse(step(3, 'DONE', 100, 20, 4, 10))
+    parse(line({ event: 'step_update', step_update: { conversation_id: 'native', step_index: 4,
+      step_type: 'tool', state: 'DONE', tool_info: { name: 'read', output: 'data' } } }))
+    parse(step(5, 'DONE', 200, 30, 6, 20))
+    const terminal = { event: 'result', result: { status, num_turns: 4,
+      error: 'failed', duration_seconds: 2, usage: { input_tokens: 900, output_tokens: 100 } } }
+    const event = parse(line(terminal)).at(-1) as any
+    expect(event.type).toBe(status === 'SUCCESS' ? 'complete' : 'error')
+    expect(event.usage).toMatchObject({ inputTokens: 300, outputTokens: 50, reasoningTokens: 10, cacheReadTokens: 30, duration_ms: 2000 })
+    expect(parse(line(terminal))).toEqual([])
+  })
+  it('replaces later usage for the same completed model step', () => {
+    const parse = createAntigravityStreamParser({ resumed: true })
+    for (const input of [10, 12]) parse(line({ event: 'step_update', step_update: {
+      conversation_id: 'native', step_index: 1, step_type: 'agent_response', state: 'DONE',
+      usage: { input_tokens: input, output_tokens: 3 },
+    } }))
+    expect(parse(line({ event: 'result', result: { status: 'SUCCESS' } })).at(-1))
+      .toMatchObject({ usage: { inputTokens: 12, outputTokens: 3 } })
+  })
+  it.each([
+    { resumed: true, numTurns: 2 },
+    { resumed: true, numTurns: undefined },
+    { resumed: false, numTurns: 2 },
+  ])('does not charge a result-only resumed conversation ($resumed, $numTurns)', ({ resumed, numTurns }) => {
+    const events = createAntigravityStreamParser({ resumed })(line({ event: 'result', result: {
+      status: 'SUCCESS', num_turns: numTurns, usage: { input_tokens: 100, output_tokens: 20 },
+    } }))
+    expect(events).toEqual([{ type: 'complete', usage: undefined }])
+  })
   it.each(['ERROR', 'CANCELED', 'INTERRUPTED', undefined])('does not treat %s as success', status => {
     const events = createAntigravityStreamParser()(line({ event: 'result', result: { status, error: 'failed' } }))
     expect(events).toEqual([{ type: 'error', message: 'failed', usage: undefined }])

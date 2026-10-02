@@ -46,12 +46,15 @@ describe('global native usage accounting', () => {
     manager = new CodingAgentRunManager()
     emitted = vi.fn()
     ;(manager as any).emitToChat = emitted
+    mockChild()
+  })
+  function mockChild() {
     child = Object.assign(new EventEmitter(), {
       stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
       exitCode: null, signalCode: null, kill: vi.fn(),
     })
     vi.mocked(spawn).mockReturnValue(child)
-  })
+  }
   afterEach(async () => {
     child.exitCode = 0
     manager.shutdown()
@@ -76,6 +79,43 @@ describe('global native usage accounting', () => {
     child.emit('exit', code)
     child.emit('close', code)
   }
+
+  it.each([false, true])('counts only new Antigravity steps on resume (restart: %s)', async restart => {
+    start('antigravity')
+    const turn = (index: number, cumulative: number) => {
+      emit({ event: 'init', conversation_id: 'native-agy', init: { model: 'test-model' } })
+      const step = { event: 'step_update', step_update: {
+        conversation_id: 'native-agy', step_index: index, step_type: 'agent_response', state: 'DONE',
+        text_delta: 'answer', usage: { input_tokens: 10, output_tokens: 3 },
+      } }
+      emit(step)
+      emit({ ...step, step_update: { ...step.step_update, text_delta: '' } })
+      const result = { event: 'result', result: { conversation_id: 'native-agy', status: 'SUCCESS',
+        response: 'answer', num_turns: cumulative / 10, usage: { input_tokens: cumulative, output_tokens: cumulative * 0.3 } } }
+      emit(result)
+      emit(result)
+      close()
+    }
+    turn(1, 10)
+    await vi.waitFor(() => expect(emitted.mock.calls.filter(([, event]) => event === 'run.completed')).toHaveLength(1))
+    expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: 10, outputTokens: 3 })
+    mockChild()
+    if (restart) {
+      manager.shutdown()
+      manager = new CodingAgentRunManager()
+      ;(manager as any).emitToChat = emitted
+      manager.start({ agentSessionId: sessionId, sessionId, agentId: 'antigravity', mode: 'global',
+        agentNativeSessionId: 'native-agy', nativeResume: true, profile: sessionId, provider: 'global', model: '',
+        command: 'agy', args: [], shellCommand: 'agy', workspaceDir: workspace, env: {} })
+    }
+    manager.send(sessionId, 'second turn')
+    turn(4, 20)
+    await vi.waitFor(() => expect(emitted.mock.calls.filter(([, event]) => event === 'run.completed')).toHaveLength(2))
+    expect(getRecordedUsageTotals(sessionId, 'coding_agent')).toMatchObject({ inputTokens: 20, outputTokens: 6 })
+    const cards = emitted.mock.calls.filter(([, event]) => event === 'run.completed').map(([, , payload]) => payload.run_usage)
+    expect(cards).toHaveLength(2)
+    for (const card of cards) expect(card).toMatchObject({ inputTokens: 10, outputTokens: 3 })
+  })
 
   async function abortThroughSocket() {
     vi.spyOn(chatRuntime, 'hasChatEkkoBackgroundTasks').mockReturnValue(false)

@@ -95,10 +95,10 @@ export function startAntigravityTurnProcess(input: AntigravityTurnProcessInput):
   const child = spawnAntigravity(input.command, args, input)
   child.stdin?.on('error', () => { /* startup/close handlers own lifecycle errors */ })
   // Stream-json explicitly activates headless mode without the value-taking
-  // -p flag. Send one turn and EOF, so final usage remains per-process/per-turn.
+  // -p flag. Send one turn and EOF; model-step usage belongs to this input.
   child.stdin?.end(`${JSON.stringify({ event: 'user', message: { content: prompt } })}\n`)
   const stdout = createAntigravityStdoutReader()
-  const parse = createAntigravityStreamParser()
+  const parse = createAntigravityStreamParser({ resumed: input.resume })
   child.stdout?.on('data', (chunk: Buffer) => {
     for (const line of stdout.push(chunk)) {
       for (const event of parse(line)) input.onEvent(event)

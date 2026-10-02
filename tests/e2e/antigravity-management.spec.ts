@@ -35,3 +35,46 @@ test('Antigravity picker offers scoped provider selection and global config', as
   await expect(drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first()).toContainText('Antigravity')
   await expect(drawer.locator('.new-chat-field').filter({ hasText: 'Global config' })).toHaveCount(1)
 })
+
+for (const mode of ['global', 'scoped']) {
+  test(`search resumes unloaded Antigravity history with the correct agent (${mode})`, async ({ page }) => {
+    await authenticate(page, TEST_ACCESS_KEY, 'research')
+    const api = await mockHermesApi(page, { sessions: [] })
+    await mockChatSocket(page)
+    const session = {
+      id: `agy-search-${mode}`, profile: 'research', source: 'coding_agent',
+      agent: 'antigravity', agent_mode: mode, agent_native_session_id: 'native-agy',
+      provider: mode === 'global' ? 'global' : 'test-provider', model: 'test-model',
+      title: 'Antigravity search history', started_at: 100, last_active: 101,
+      ended_at: null, message_count: 1, input_tokens: 0, output_tokens: 0,
+    }
+    await page.addInitScript(sid => {
+      ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = {
+        [sid]: { session_id: sid, messages: [{ id: 1, role: 'assistant', content: 'Previous agy answer', timestamp: 101 }],
+          isWorking: false, events: [] },
+      }
+    }, session.id)
+    await page.route('**/api/hermes/write-gate/pending', route => route.fulfill({ json: { pending: [] } }))
+    await page.route('**/api/studio/search/sessions?**', route => route.fulfill({ json: {
+      results: [{ ...session, matched_message_id: null, snippet: 'Previous agy answer', rank: 1 }],
+    } }))
+    await page.route('**/api/studio/sessions/conversations/*/messages/paginated?**', route => route.fulfill({ json: {
+      session, messages: [{ id: 1, session_id: session.id, role: 'assistant', content: 'Previous agy answer', timestamp: 101 }],
+      total: 1, offset: 0, limit: 150, hasMore: false,
+    } }))
+    await page.goto('/#/hermes/skills')
+    await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible()
+    await page.keyboard.press('Control+k')
+    await page.locator('.session-search-modal input').fill('Antigravity')
+    await page.locator('.session-search-modal .result-item').filter({ hasText: session.title }).click()
+    await expect(page).toHaveURL(new RegExp(`/hermes/session/${session.id}$`))
+    await expect(page.getByText('Previous agy answer', { exact: true })).toBeVisible()
+    await page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)').fill('Continue this conversation')
+    await page.getByRole('button', { name: 'Send', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted
+      .filter((item: any) => item.event === 'run').at(-1)?.payload)).toMatchObject({
+      session_id: session.id, coding_agent_id: 'antigravity', mode,
+    })
+    expect(api.unexpectedRequests).toEqual([])
+  })
+}

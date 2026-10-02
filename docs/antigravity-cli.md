@@ -51,8 +51,12 @@ conversation). Studio persists native IDs from `init` and final `result`.
 repeated starts/completions suppressed. Model-step DONE is not a turn boundary.
 Only terminal `result.status=SUCCESS` can complete a turn. Missing result, unknown
 status and error/cancel/interruption fail closed, including when exit code is 0.
-Final response text is fallback-only to avoid replaying streamed text. Final
-usage is counted once; per-step usage is not added to it. Usage costs are estimates
+Final response text is fallback-only to avoid replaying streamed text. Global
+usage sums completed model-step usage once per conversation + step_index; the
+terminal result reports cumulative conversation usage on resume. Result-only
+usage is a fallback for a fresh single-turn conversation. Resumed streams without
+model-step usage leave the turn's usage unknown rather than recounting history.
+Scoped usage continues to come from the provider proxy. Usage costs are estimates
 where catalog pricing applies, not a claim about Google subscription charges.
 
 A native SUCCESS still does not prove that every requested tool action occurred:
@@ -62,8 +66,9 @@ answer; do not present process success as a verified filesystem change.
 ## Verification boundaries
 
 Unit/mocked-process tests cover stream parsing, UTF-8, result fallback, tools,
-usage, terminal boundaries, missing results, schema normalization and isolation.
-Playwright tests cover native settings and the global/scoped picker. Compilation
+usage across resume/restart, repeated steps, terminal boundaries, missing results,
+schema normalization and isolation. Playwright tests cover native settings, the
+global/scoped picker and continuing unloaded search results with the same agent. Compilation
 and harness checks cover the server and Web/Electron client. App Node tests cover
 its source/runtime contracts, not an APK/IPA build.
 

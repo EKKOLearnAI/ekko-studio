@@ -142,7 +142,7 @@ async function openItem(item: SearchItem) {
       : item.agent === 'grok'
         ? 'grok'
       : (item.agent === 'cursor' || item.agent === 'antigravity')
-        ? 'cursor'
+        ? item.agent
       : item.agent === 'dsh' ? 'dsh' : item.agent === 'opencode'
         ? 'opencode'
       : item.agent === 'claude'
