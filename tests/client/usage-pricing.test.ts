@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent } from 'vue'
+import { defineComponent, h } from 'vue'
 import { enableAutoUnmount, flushPromises, shallowMount } from '@vue/test-utils'
 import { NAlert, NButton, NInputNumber, NSelect } from 'naive-ui'
 
@@ -27,8 +27,10 @@ function mountPricing() {
       renderStubDefaultSlot: true,
       stubs: {
         NModal: defineComponent({
-          props: ['show'],
-          template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          props: { show: Boolean },
+          setup(props, { slots }) {
+            return () => props.show ? h('div', [slots.default?.(), slots.footer?.()]) : null
+          },
         }),
       },
     },
@@ -38,7 +40,9 @@ function mountPricing() {
 type PricingWrapper = ReturnType<typeof mountPricing>
 
 async function clickButton(wrapper: PricingWrapper, label: string) {
-  wrapper.findAllComponents(NButton).find(button => button.text() === label)!.vm.$emit('click')
+  const button = wrapper.findAllComponents(NButton).find(button => button.text() === label)
+  expect(button, `Expected pricing button ${label}`).toBeDefined()
+  button!.vm.$emit('click')
   await flushPromises()
 }
 

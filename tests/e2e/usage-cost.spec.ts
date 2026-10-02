@@ -96,10 +96,16 @@ test('shows translated pricing help and catalog errors in Chinese', async ({ pag
     model_usage: [], agent_usage: [], daily_usage: [],
   } }))
   await page.route('**/api/studio/usage/pricing', route => route.fulfill({ json: { rates: [] } }))
-  await page.route('**/api/hermes/available-models?*', route => route.fulfill({ status: 503, json: { error: 'Unavailable' } }))
   await page.goto('/#/hermes/usage')
   await page.getByRole('button', { name: '模型单价', exact: true }).click()
   const dialog = page.getByRole('dialog')
+  await expect(dialog.locator('.pricing-help')).toContainText('可选择已配置的供应商及其模型，也可输入 ID 后按回车。')
+  await expect(dialog.getByText('无法加载已配置的供应商和模型，仍可手动输入 ID。', { exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  // Fail only after startup has loaded providers, so the unrelated setup prompt stays closed.
+  await page.route('**/api/hermes/available-models?*', route => route.fulfill({ status: 503, json: { error: 'Unavailable' } }))
+  await page.getByRole('button', { name: '模型单价', exact: true }).click()
   await expect(dialog.locator('.pricing-help')).toContainText('可选择已配置的供应商及其模型，也可输入 ID 后按回车。')
   await expect(dialog.getByText('无法加载已配置的供应商和模型，仍可手动输入 ID。', { exact: true })).toBeVisible()
   await expect(dialog).not.toContainText('usage.pricing.')
