@@ -2741,6 +2741,18 @@ export class CodingAgentRunManager {
     }
   }
 
+  private failAntigravityTurn(run: ManagedCodingAgentRun, message: string, usage?: unknown) {
+    if (run.printCompleted) return
+    const safeMessage = sanitizeCodingAgentTerminalOutput(message)
+    const guidance = /authentication|not logged|log in/i.test(safeMessage)
+      ? `${safeMessage}\nAntigravity CLI authentication is unavailable to this Studio runtime. Complete agy login on the Studio host; if already logged in, verify native credential access from the isolated runtime.`
+      : safeMessage
+    // Persist visible failure text before the failed terminal event. Otherwise
+    // refresh leaves an empty assistant row with only a zero-token usage card.
+    this.appendCodexText(run, `Error: ${guidance}`, true)
+    this.failCodexExecTurn(run, guidance, usage)
+  }
+
   private startAntigravityPrintTurn(
     run: ManagedCodingAgentRun,
     input: string,
@@ -2819,7 +2831,7 @@ export class CodingAgentRunManager {
           },
           error: (message, usage) => {
             run.codexPendingUsage = usage || run.codexPendingUsage
-            this.failCodexExecTurn(run, message, run.codexPendingUsage)
+            this.failAntigravityTurn(run, message, run.codexPendingUsage)
           },
           status: message => this.emitTerminalStatus(run, message),
         })
@@ -2833,7 +2845,7 @@ export class CodingAgentRunManager {
       onError: (err) => {
         run.currentChild = undefined
         logger.warn({ err, runId: run.id, sessionId: run.launch.sessionId }, '[coding-agent-run] antigravity failed to start')
-        if (!run.printCompleted) this.failCodexExecTurn(run, childProcessErrorMessage(err, run.launch.agentId))
+        if (!run.printCompleted) this.failAntigravityTurn(run, childProcessErrorMessage(err, run.launch.agentId))
       },
       onClose: (code) => {
         if (run.currentChildKillTimer) clearTimeout(run.currentChildKillTimer)
@@ -2846,7 +2858,7 @@ export class CodingAgentRunManager {
           return
         }
         if (run.printCompleted) return
-        this.failCodexExecTurn(run, run.codexPendingError || (code === 0 ? 'Antigravity exited without a terminal result event' : exitErrorMessage('Antigravity', code, run.currentChildStderr)), run.codexPendingUsage)
+        this.failAntigravityTurn(run, run.codexPendingError || (code === 0 ? 'Antigravity exited without a terminal result event' : exitErrorMessage('Antigravity', code, run.currentChildStderr)), run.codexPendingUsage)
       },
     })
     run.currentChild = child

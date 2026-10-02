@@ -150,6 +150,7 @@ describe('coding agent Windows process launch', () => {
     ;(manager as any).startAntigravityPrintTurn(missing, 'hello')
     testState.spawnCalls.at(-1)!.child.emit('close', 0)
     expect((manager as any).failCodexExecTurn).toHaveBeenCalledWith(missing, 'Antigravity exited without a terminal result event', undefined)
+    expect((manager as any).appendCodexText).toHaveBeenLastCalledWith(missing, 'Error: Antigravity exited without a terminal result event', true)
   })
 
   it('keeps Grok prompts out of Windows command arguments and settles after process close', () => {
