@@ -7,6 +7,8 @@ import { delimiter, dirname, extname, join, resolve } from 'path'
 export interface UpdateRuntimeDependencies {
   getWebUiHome: () => string
   isDockerContainer: () => boolean
+  isGitCloneDeployment: () => boolean
+  getGitCloneRoot: () => string | null
 }
 
 let runtimeDependencies: UpdateRuntimeDependencies | null = null
@@ -25,9 +27,27 @@ function isDockerContainer(): boolean {
   return runtimeDependencies.isDockerContainer()
 }
 
+function isGitCloneDeployment(): boolean {
+  if (!runtimeDependencies) throw new Error('Studio update runtime has not been configured')
+  return runtimeDependencies.isGitCloneDeployment()
+}
+
+function getGitCloneCwd(): string {
+  const root = runtimeDependencies?.getGitCloneRoot?.()
+  if (!root) throw new Error('Studio git checkout root is not available')
+  return root
+}
+
 let updateInProgress = false
 const NODE_ENVIRONMENT_MISSING_CODE = 'node_environment_missing'
 const DOCKER_ENVIRONMENT_CODE = 'docker_environment'
+const GIT_CLONE_ENVIRONMENT_CODE = 'git_clone_environment'
+const GIT_CLONE_UPDATE_STASH_LABEL = 'ekko-studio-auto-update'
+const GIT_MERGE_REF = 'origin/main'
+const SYSTEMD_SERVICE_PATTERN = /(?:^|\/)([A-Za-z0-9@._-]+\.service)(?=\/|$)/g
+const SYSTEMD_USER_SLICE_HINT = /\/user\.slice\/|user@\d+\.service/
+
+type SystemdService = { name: string; userScoped: boolean }
 
 const PREVIEW_DIR_NAME = 'hermes-web-ui-pereview'
 const PREVIEW_HOME_DIR_NAME = 'hermes-web-ui-pereview-home'
@@ -361,14 +381,14 @@ function getUpdateCommandCwd() {
   return cwd
 }
 
-function runNpmSync(args: string[], options: { timeout?: number; env?: NodeJS.ProcessEnv } = {}) {
+function runNpmSync(args: string[], options: { timeout?: number; env?: NodeJS.ProcessEnv; cwd?: string } = {}) {
   const env = {
     ...getCurrentNodeEnv(),
     ...options.env,
   }
   const execution = npmExecution(args, env)
   return execFileSync(execution.command, execution.args, {
-    cwd: getUpdateCommandCwd(),
+    cwd: options.cwd ?? getUpdateCommandCwd(),
     encoding: 'utf-8',
     timeout: options.timeout,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -1028,6 +1048,174 @@ function runUpdateInstall(packageName: StudioPackageName) {
   return runNpmSync(['install', '-g', `${packageName}@latest`], { timeout: 10 * 60 * 1000 })
 }
 
+function runGitSync(args: string[], cwd: string, timeout = 10 * 60 * 1000) {
+  const env = {
+    ...getCurrentNodeEnv(),
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: 'echo',
+  }
+  const command = findCommandPath('git', env) || 'git'
+  return execFileSync(command, args, {
+    cwd,
+    encoding: 'utf-8',
+    timeout,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env,
+    windowsHide: true,
+  }).trim()
+}
+
+function hasGitWorktreeChanges(cwd: string): boolean {
+  return runGitSync(['status', '--porcelain'], cwd, 60 * 1000) !== ''
+}
+
+function stashLocalChanges(cwd: string): boolean {
+  if (!hasGitWorktreeChanges(cwd)) return false
+  // No --include-untracked: `npm run build` writes build output into the checkout,
+  // so stashing untracked files would make the post-build restore enormous.
+  runGitSync(['stash', 'push', '-m', GIT_CLONE_UPDATE_STASH_LABEL], cwd, 2 * 60 * 1000)
+  return true
+}
+
+/**
+ * Resolve the systemd unit that owns the current process, if any.
+ *
+ * cgroup v2 reports `0::/system.slice/hermes-webui.service`; cgroup v1 uses a
+ * longer path ending in the same unit name. Docker and bare-metal runs have no
+ * `.service` segment, so they fall through to the spawn-based restart.
+ */
+function getOwnSystemdService(): SystemdService | null {
+  try {
+    // Trim first: `/proc/self/cgroup` ends with a newline, and an untrimmed `$`
+    // anchor would fail to match the trailing unit name, silently yielding the
+    // wrong (inner) slice unit instead of the one that owns this process.
+    const cgroup = readFileSync('/proc/self/cgroup', 'utf-8').trim()
+    const matches = [...cgroup.matchAll(SYSTEMD_SERVICE_PATTERN)].map(match => match[1])
+    if (matches.length === 0) return null
+    // The owning unit is the deepest service in the cgroup path.
+    return {
+      name: matches[matches.length - 1],
+      userScoped: SYSTEMD_USER_SLICE_HINT.test(cgroup),
+    }
+  } catch {
+    return null
+  }
+}
+
+let cachedSystemdService: SystemdService | null | undefined
+
+function getSystemdService(): SystemdService | null {
+  if (cachedSystemdService === undefined) {
+    cachedSystemdService = getOwnSystemdService()
+  }
+  return cachedSystemdService
+}
+
+function isSystemctlAvailable(): boolean {
+  try {
+    execFileSync('systemctl', ['--version'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 10 * 1000,
+      windowsHide: true,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Update a git checkout in place: pull the latest main, reinstall, rebuild.
+ *
+ * The local diff is stashed across the merge and restored before building, because
+ * `git merge` refuses to run when incoming commits touch locally modified files and
+ * these deployments always carry uncommitted customizations. Restoration happens
+ * before the build on purpose: if it fails, the checkout is still on the new commit
+ * and the running build is untouched, so the caller's error path stays safe and
+ * `git stash pop` can recover the work manually.
+ */
+function runGitUpdateInstall(): string {
+  const cwd = getGitCloneCwd()
+  const log: string[] = []
+
+  runGitSync(['fetch', 'origin', 'main', '--prune'], cwd, 5 * 60 * 1000)
+  log.push('fetched origin/main')
+
+  const stashed = stashLocalChanges(cwd)
+  if (stashed) log.push('stashed local changes')
+
+  let mergeError: unknown = null
+  try {
+    runGitSync(['merge', '--ff-only', GIT_MERGE_REF], cwd)
+    log.push(`merged ${GIT_MERGE_REF}`)
+  } catch (err) {
+    mergeError = err
+  }
+
+  let restoreError: unknown = null
+  if (stashed) {
+    try {
+      runGitSync(['stash', 'pop'], cwd, 2 * 60 * 1000)
+      log.push('restored local changes')
+    } catch (err) {
+      restoreError = err
+    }
+  }
+
+  if (mergeError) {
+    throw new Error(`git merge failed and the update was aborted: ${errorMessage(mergeError)}`)
+  }
+  if (restoreError) {
+    throw new Error(
+      'Local changes could not be restored after the update and remain in the git stash '
+      + `(label: ${GIT_CLONE_UPDATE_STASH_LABEL}). The application was NOT rebuilt. `
+      + `Recover them with \`git stash pop\` in ${cwd}. `
+      + `Cause: ${errorMessage(restoreError)}`,
+    )
+  }
+
+  runNpmSync(['install', '--include=dev'], { cwd, timeout: 15 * 60 * 1000 })
+  log.push('installed dependencies')
+
+  runNpmSync(['run', 'build'], { cwd, timeout: 30 * 60 * 1000 })
+  log.push('rebuilt the application')
+
+  return log.join('; ')
+}
+
+function spawnGitRestart(port: string, cwd: string) {
+  const env = getCurrentNodeEnv()
+  const service = getSystemdService()
+
+  // `Restart=always` on a systemd unit fights a detached respawn: the unit brings
+  // the old build back and the new process loses the port. Ask systemd to restart
+  // the unit instead, which re-reads the freshly built `dist/`.
+  if (service && isSystemctlAvailable()) {
+    // A user-scoped unit is only visible to the user manager, so `--user` is required
+    // or the restart silently targets nothing and the old build keeps serving.
+    const args = service.userScoped
+      ? ['--user', 'restart', service.name]
+      : ['restart', service.name]
+    return spawn('systemctl', args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env,
+    })
+  }
+
+  // Bare-metal checkout outside systemd: fall back to the CLI respawn path.
+  const cli = getGlobalCliScript(readStudioPackageInfo()?.name as StudioPackageName)
+  return spawn(process.execPath, [cli, 'restart', '--port', port], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    env,
+    cwd,
+  })
+}
+
 function spawnRestart(port: string, packageName: StudioPackageName) {
   const cli = getGlobalCliScript(packageName)
 
@@ -1049,27 +1237,30 @@ export async function handleUpdate(ctx: any) {
     return
   }
 
-  // Docker 环境中 npm 全局安装方式不可用，引导用户使用 docker pull 升级
-  if (isDockerContainer()) {
-    ctx.status = 400
-    ctx.body = {
-      success: false,
-      code: DOCKER_ENVIRONMENT_CODE,
-      message: 'Ekko Studio update is not available inside Docker. '
-        + 'Please pull a new image and recreate the container:\n\n'
-        + '  docker compose pull\n'
-        + '  docker compose up -d --force-recreate',
-    }
-    return
-  }
-
   updateInProgress = true
   let keepUpdateLockForRestart = false
 
   try {
+    if (isDockerContainer()) {
+      ctx.status = 400
+      ctx.body = {
+        success: false,
+        code: DOCKER_ENVIRONMENT_CODE,
+        message: 'Ekko Studio update is not available inside Docker. '
+          + 'Please pull a new image and recreate the container:\n\n'
+          + '  docker compose pull\n'
+          + '  docker compose up -d --force-recreate',
+      }
+      return
+    }
+
+    const gitClone = isGitCloneDeployment()
     const packageName = readStudioPackageInfo()?.name
     if (!packageName) throw new Error('Cannot identify the installed Studio npm package')
-    const output = runUpdateInstall(packageName)
+
+    const output = gitClone
+      ? runGitUpdateInstall()
+      : runUpdateInstall(packageName)
 
     ctx.body = {
       success: true,
@@ -1080,7 +1271,9 @@ export async function handleUpdate(ctx: any) {
     setTimeout(() => {
       let restart
       try {
-        restart = spawnRestart(process.env.PORT || '8648', packageName)
+        restart = gitClone
+          ? spawnGitRestart(process.env.PORT || '8648', getGitCloneCwd())
+          : spawnRestart(process.env.PORT || '8648', packageName)
       } catch (err) {
         updateInProgress = false
         console.error('[update] failed to spawn restart:', err)
