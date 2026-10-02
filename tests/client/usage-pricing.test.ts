@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, h } from 'vue'
-import { enableAutoUnmount, flushPromises, shallowMount } from '@vue/test-utils'
-import { NAlert, NButton, NInputNumber, NSelect } from 'naive-ui'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { NAlert, NInputNumber, NSelect } from 'naive-ui'
 
 const api = vi.hoisted(() => ({ request: vi.fn(), fetchAvailableModelsForProfile: vi.fn() }))
 const profile = vi.hoisted(() => ({ activeProfileName: 'research' }))
@@ -11,6 +10,42 @@ vi.mock('@/api/client', () => ({ request: api.request }))
 vi.mock('@/api/hermes/system', () => ({ fetchAvailableModelsForProfile: api.fetchAvailableModelsForProfile }))
 vi.mock('@/stores/hermes/profiles', () => ({ useProfilesStore: () => profile }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('naive-ui', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    NModal: defineComponent({
+      props: { show: Boolean },
+      setup(props, { slots }) {
+        return () => props.show ? h('div', [slots.default?.(), slots.footer?.()]) : null
+      },
+    }),
+    NButton: defineComponent({
+      props: { disabled: Boolean, loading: Boolean },
+      emits: ['click'],
+      setup(props, { emit, slots }) {
+        return () => h('button', {
+          disabled: props.disabled || props.loading,
+          onClick: () => emit('click'),
+        }, slots.default?.())
+      },
+    }),
+    NAlert: defineComponent({
+      setup(_props, { slots }) {
+        return () => h('div', slots.default?.())
+      },
+    }),
+    NSelect: defineComponent({
+      props: { value: String, options: Array, tag: Boolean },
+      emits: ['update:value'],
+      setup: () => () => h('div'),
+    }),
+    NInputNumber: defineComponent({
+      props: { value: Number },
+      emits: ['update:value'],
+      setup: () => () => h('input'),
+    }),
+  }
+})
 
 import UsagePricing from '@/components/hermes/usage/UsagePricing.vue'
 
@@ -22,27 +57,16 @@ const groups = [
 ]
 
 function mountPricing() {
-  return shallowMount(UsagePricing, {
-    global: {
-      renderStubDefaultSlot: true,
-      stubs: {
-        NModal: defineComponent({
-          props: { show: Boolean },
-          setup(props, { slots }) {
-            return () => props.show ? h('div', [slots.default?.(), slots.footer?.()]) : null
-          },
-        }),
-      },
-    },
-  })
+  return mount(UsagePricing)
 }
 
 type PricingWrapper = ReturnType<typeof mountPricing>
 
 async function clickButton(wrapper: PricingWrapper, label: string) {
-  const button = wrapper.findAllComponents(NButton).find(button => button.text() === label)
+  const buttons = wrapper.findAll('button')
+  const button = buttons.find(button => button.text() === label)
   expect(button, `Expected pricing button ${label}`).toBeDefined()
-  button!.vm.$emit('click')
+  await button!.trigger('click')
   await flushPromises()
 }
 
