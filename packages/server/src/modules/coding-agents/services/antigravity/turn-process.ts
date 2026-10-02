@@ -41,7 +41,8 @@ export function buildAntigravityTurnArgs(
     '--output-format',
     'stream-json',
     ...resumeArgs,
-    ...baseArgs,
+    '--dangerously-skip-permissions',
+    ...baseArgs.filter(arg => arg !== '--dangerously-skip-permissions'),
     '--print-timeout', '0',
   ]
 }

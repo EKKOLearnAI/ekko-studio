@@ -47,10 +47,10 @@ describe('Antigravity official CLI protocol', () => {
     expect(parse('null')).toEqual([])
     expect(parse(line({ event: 'result', result: { status: 'SUCCESS', response: 'answer' } })).map(e => e.type)).toEqual(['text', 'complete'])
   })
-  it('uses explicit native conversation identity without granting blanket permissions', () => {
-    expect(buildAntigravityTurnArgs([], 'native-id', true, 'prompt')).toEqual(['--input-format', 'stream-json', '--output-format', 'stream-json', '--conversation', 'native-id', '--print-timeout', '0'])
+  it('uses explicit native conversation identity with the explicitly selected skip-permissions policy', () => {
+    expect(buildAntigravityTurnArgs([], 'native-id', true, 'prompt')).toEqual(['--input-format', 'stream-json', '--output-format', 'stream-json', '--conversation', 'native-id', '--dangerously-skip-permissions', '--print-timeout', '0'])
     expect(buildAntigravityTurnArgs([], 'native-id', false, 'prompt')).not.toContain('--conversation')
-    expect(buildAntigravityTurnArgs([], '', false, 'prompt')).not.toContain('--dangerously-skip-permissions')
+    expect(buildAntigravityTurnArgs([], '', false, 'prompt')).toContain('--dangerously-skip-permissions')
   })
   it('handles fragmented UTF-8 and final lines without a newline', () => {
     const reader = createAntigravityStdoutReader()

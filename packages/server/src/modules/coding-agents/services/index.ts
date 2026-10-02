@@ -3427,7 +3427,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       env = prepared.env
       const effort = String(input.reasoningEffort || '').trim()
       if (effort && !['low', 'medium', 'high', 'max'].includes(effort)) throw Object.assign(new Error('Antigravity effort must be low, medium, high or max'), { status: 400 })
-      args = effort ? ['--effort', effort] : []
+      args = ['--dangerously-skip-permissions', ...(effort ? ['--effort', effort] : [])]
     } else if (tool.id === 'cursor') {
       const prepared = await prepareCursorMcp(rootDir, scope.profile, input.studioMcpTokenFile)
       files = prepared.files
@@ -3562,6 +3562,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       externalModel: { baseUrl: target.baseUrl.replace(/\/v1$/, '/gemini'), token: target.token } })
     files.push(...prepared.files)
     env = prepared.env
+    args = ['--dangerously-skip-permissions']
   } else if (tool.id === 'claude-code') {
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerClaudeCodeProxyTarget({

@@ -246,7 +246,7 @@ describe('coding agent launch preparation', () => {
     process.env.HERMES_CODING_AGENT_GLOBAL_HOME = home
     const launch = await prepareCodingAgentLaunch('antigravity', { profile: 'default', mode: 'global', sessionId: 'agy-test', reasoningEffort: 'high' })
     expect(launch).toMatchObject({ agentId: 'antigravity', mode: 'global', command: 'agy', reasoningEffort: 'high' })
-    expect(launch.args).toEqual(['--effort', 'high'])
+    expect(launch.args).toEqual(['--dangerously-skip-permissions', '--effort', 'high'])
     expect(launch.env.HOME).not.toBe(home)
     const mcp = launch.files.find(file => file.key === 'mcp')!
     const config = JSON.parse(readFileSync(mcp.absolutePath, 'utf8'))
