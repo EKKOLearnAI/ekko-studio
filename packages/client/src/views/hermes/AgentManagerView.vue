@@ -447,6 +447,12 @@ async function handleCheckUpdate(id: CodingAgentId) {
     if (!result.success) throw new Error(result.message || t('codingAgents.checkUpdateFailed'))
     replaceTool(result.tool)
     updateInfo.value[id] = result
+    const previous = updatePolicies.value[id]
+    if (previous) updatePolicies.value[id] = {
+      ...previous, currentVersion: result.tool.version, latestVersion: result.latestVersion,
+      checkedAt: new Date().toISOString(),
+      status: result.tool.installed && result.updateAvailable ? 'available' : 'current', error: undefined,
+    }
   } catch (error) {
     message.error(errorMessage(error))
   } finally {

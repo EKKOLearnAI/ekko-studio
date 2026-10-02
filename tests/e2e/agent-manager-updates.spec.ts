@@ -91,3 +91,24 @@ test('shows disabled Cursor updates without stale failures and preserves support
   await expect(cursorSwitch).toHaveClass(/n-switch--disabled/)
   await expect(cursor.locator('.agent-update-error')).toHaveCount(0)
 })
+
+
+test('manual check reveals an available update even when the last policy poll was current', async ({ page }) => {
+  await authenticate(page)
+  await mockHermesApi(page)
+  await page.route('**/api/agents/status', route => route.fulfill({ json: { revision: 1, agents: [
+    { id: 'grok', installed: true, source: 'user-cli', version: '1.0.30', path: '/test/grok' },
+    { id: 'cursor', installed: true, source: 'user-cli', version: '1', path: '/test/agent' },
+    { id: 'antigravity', installed: true, source: 'user-cli', version: '1', path: '/test/agy' },
+  ] } }))
+  await page.route('**/api/coding-agents/update-policies', route => route.fulfill({ json: { agents: {
+    grok: { autoUpdate: false, autoUpdateSupported: true, status: 'current', currentVersion: '1.0.30', latestVersion: '1.0.30' },
+  } } }))
+  await page.route('**/api/coding-agents/grok/check-update', route => route.fulfill({ json: {
+    success: true, tool: { id: 'grok', installed: true, version: '1.0.30' }, latestVersion: '1.0.46', updateAvailable: true,
+  } }))
+  await page.goto('/#/studio/agents')
+  const card = page.getByTestId('agent-card-grok')
+  await card.getByRole('button', { name: 'Check for update', exact: true }).click()
+  await expect(card.getByRole('button', { name: /1.0.46/ })).toBeVisible()
+})
