@@ -3724,6 +3724,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_27_1: 'Added persisted per-turn usage cards showing tokens, cache hits, costs, and token speed (#3241)',
+    new_0_7_27_2: 'Fixed Coding Agent usage attribution, per-call costs, and cumulative totals; retained interrupted-run usage and updated late accounting (#3246)',
+    new_0_7_27_3: 'Added per-turn usage cards inside group chat reply bubbles, with usage restored when loading history (#3248)',
+    new_0_7_27_4: 'Added configured provider and model selection for custom pricing, with manual ID entry and clearer loading errors (#3253)',
+    new_0_7_27_5: 'Recovered Codex sessions after context overflow: the next message starts with fresh context while keeping Studio history and the workspace (#3204)',
+    new_0_7_27_6: 'Fixed Grok message role compatibility when using DeepSeek Chat Completions (#3244)',
+    new_0_7_27_7: 'Fixed blank conversation history when switching profiles on the same connection (#3242)',
+    new_0_7_27_8: 'Unified Studio drawer sizes and workspace picker layouts, fixed group Agent settings drawer layering and loading, and prevented accidental session renaming with Enter (#3247)',
     new_0_7_26_1: 'Unified Studio navigation, page headers, and list actions, with improved mobile layouts (#3232)',
     new_0_7_26_2: 'Unified page loading feedback and improved logo loading visibility, including reduced-motion mode (#3232, #3236)',
     new_0_7_26_3: 'Improved custom backgrounds and glass layers, fixed window edges and rounded corners, and made microphone buttons follow theme colors (#3236)',
