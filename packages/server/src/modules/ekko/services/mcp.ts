@@ -15,6 +15,7 @@ const MANAGED_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
   { name: 'ekko-studio-browser', toolset: 'browser' },
   { name: 'ekko-studio-devices', toolset: 'devices' },
   { name: 'ekko-studio-use', toolset: 'use' },
+  { name: 'ekko-studio-interaction', toolset: 'plan' },
 ]
 const MANAGED_SERVER_NAMES = new Set(MANAGED_SERVERS.map(server => server.name))
 const LEGACY_MANAGED_SERVER_NAMES = new Set([
