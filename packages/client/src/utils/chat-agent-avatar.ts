@@ -19,7 +19,7 @@ const AGENT_AVATARS = {
   opencode: { label: 'OpenCode', src: '/coding-agents/opencode.png' },
   dsh: { label: 'DeepSeek Harness', src: '/coding-agents/deepseek.svg' },
   cursor: { label: 'Cursor', src: '/coding-agents/cursor-logo.png' },
-  antigravity: { label: 'Antigravity', src: '/coding-agents/antigravity.svg' },
+  antigravity: { label: 'Antigravity', src: '/coding-agents/antigravity.png' },
 } as const satisfies Record<string, ChatAgentAvatar>
 
 export function chatSessionAgentAvatar(session?: ChatAgentSessionIdentity | null): ChatAgentAvatar {

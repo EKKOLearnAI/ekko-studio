@@ -3595,7 +3595,7 @@ export const useChatStore = defineStore('chat', () => {
     if (codingAgentId === 'opencode') {
       return { icon: '/coding-agents/opencode.png' }
     }
-    if (codingAgentId === 'antigravity') return { icon: '/coding-agents/antigravity.svg' }
+    if (codingAgentId === 'antigravity') return { icon: '/coding-agents/antigravity.png' }
     if (codingAgentId === 'cursor') {
       return { icon: '/coding-agents/cursor-logo.png' }
     }

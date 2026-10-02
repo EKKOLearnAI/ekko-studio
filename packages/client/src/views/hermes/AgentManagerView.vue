@@ -88,7 +88,7 @@ const codingAgents: CodingAgentCard[] = [
     command: 'agent',
     packageName: 'cursor-agent',
   },
-  { id: 'antigravity', name: 'Antigravity', provider: 'Google', logo: '/coding-agents/antigravity.svg', command: 'agy', packageName: '' },
+  { id: 'antigravity', name: 'Antigravity', provider: 'Google', logo: '/coding-agents/antigravity.png', command: 'agy', packageName: '' },
 ]
 
 const updatePolicies = ref<Record<string, AgentUpdatePolicyState>>({})
