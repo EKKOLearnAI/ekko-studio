@@ -17,8 +17,13 @@ it('update button formats target version with the same v prefix as installed ver
  expect(s).toContain('if (result.updateState) updatePolicies.value[id] = result.updateState')
 })
 
-
 it('does not schedule npm update checks for the native Antigravity CLI', () => {
  const source = readFileSync('packages/server/src/modules/coding-agents/services/update-manager.ts', 'utf8')
  expect(source).toContain("safelyManaged:id=>id!=='cursor' && id!=='antigravity'")
+})
+
+it('manual version checks update the policy used to render the update button', () => {
+ const source = readFileSync('packages/client/src/views/hermes/AgentManagerView.vue', 'utf8')
+ expect(source).toContain('latestVersion: result.latestVersion')
+ expect(source).toContain("status: result.tool.installed && result.updateAvailable ? 'available' : 'current'")
 })

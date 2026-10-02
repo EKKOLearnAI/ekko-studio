@@ -1,3 +1,4 @@
+import { prioritizeManagedNpmBin } from './managed-command-path'
 import { readTomlAssignment } from './toml-assignment'
 import { studioMcpCapabilities } from '../../studio/public/runs/mcp-capabilities'
 import { prepareDshRuntime, DSH_API_KEY_ENV } from './dsh/runtime-config'
@@ -2821,6 +2822,7 @@ async function commandEnv(): Promise<NodeJS.ProcessEnv> {
     ...(loginShellPath ? loginShellPath.split(':') : []),
     ...getDesktopCommonBinPaths(),
   ])
+  prioritizeManagedNpmBin(env, npmBin)
   return env
 }
 

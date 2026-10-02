@@ -469,6 +469,34 @@ export default {
   },
 
   // Sidebar
+  apiRelay: {
+    title: "بوابة API",
+    headline: "نماذج الذكاء الاصطناعي الرائدة عبر بوابة واحدة",
+    description: "APIKEY.FAN هي بوابة API الشريكة لـ Ekko Studio. توفر وصولًا موحدًا إلى Claude وChatGPT وGrok وGemini وZhipu وKimi وDeepSeek وMiniMax، وهي متوافقة مع واجهات API وحزم SDK الرسمية.",
+    zhipu: "Zhipu",
+    viewNow: "عرض الآن",
+    apiCompatible: "متوافقة مع واجهات API الرسمية",
+    usageTitle: "استخدام المفاتيح",
+    usageScope: "يشمل الملفات الشخصية المتاحة لك. تُدمج الخدمة والمفتاح نفسهما في بطاقة واحدة، وتُعرض المفاتيح المختلفة بشكل منفصل.",
+    loadFailed: "تعذر تحميل الاستخدام. حدّث لإعادة المحاولة.",
+    remaining: "الحصة المتبقية",
+    sources: "مصادر الإعداد",
+    keyActive: "المفتاح نشط",
+    keyInactive: "المفتاح غير نشط",
+    requests: "الطلبات",
+    spend: "التكلفة",
+    today: "اليوم",
+    total: "الإجمالي",
+    modelUsage: "الاستخدام حسب النموذج",
+    model: "النموذج",
+    errors: {
+      unauthorized: "فشلت مصادقة المفتاح. تحقق من المفتاح المُعدّ.",
+      timeout: "انتهت مهلة طلب الاستخدام. حدّث لإعادة المحاولة.",
+      unavailable: "خدمة الاستخدام غير متاحة. حدّث لإعادة المحاولة.",
+      invalid_response: "أعادت الخدمة استجابة استخدام بتنسيق غير معروف.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "جارٍ تجهيز التحديث",
     desktopUpdateStopping: "جارٍ إيقاف التنزيل…",

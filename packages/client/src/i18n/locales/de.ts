@@ -481,6 +481,34 @@ export default {
   },
 
   // Sidebar
+  apiRelay: {
+    title: "API-Relay",
+    headline: "Führende KI-Modelle über ein Gateway",
+    description: "APIKEY.FAN ist das API-Gateway von Ekko Studios Partner. Es bietet einheitlichen Zugriff auf Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek und MiniMax und ist mit offiziellen APIs und SDKs kompatibel.",
+    zhipu: "Zhipu",
+    viewNow: "Jetzt ansehen",
+    apiCompatible: "Mit offiziellen APIs kompatibel",
+    usageTitle: "Schlüsselnutzung",
+    usageScope: "Umfasst zugängliche Profile. Derselbe Dienst und Schlüssel werden zusammengefasst; unterschiedliche Schlüssel werden separat angezeigt.",
+    loadFailed: "Nutzung konnte nicht geladen werden. Aktualisieren Sie zum erneuten Versuch.",
+    remaining: "Verbleibendes Kontingent",
+    sources: "Konfiguriert in",
+    keyActive: "Schlüssel aktiv",
+    keyInactive: "Schlüssel inaktiv",
+    requests: "Anfragen",
+    spend: "Kosten",
+    today: "Heute",
+    total: "Gesamt",
+    modelUsage: "Nutzung nach Modell",
+    model: "Modell",
+    errors: {
+      unauthorized: "Schlüsselauthentifizierung fehlgeschlagen. Prüfen Sie den konfigurierten Schlüssel.",
+      timeout: "Zeitüberschreitung bei der Nutzungsabfrage. Bitte aktualisieren.",
+      unavailable: "Nutzungsdienst nicht verfügbar. Bitte aktualisieren.",
+      invalid_response: "Der Dienst lieferte ein unbekanntes Antwortformat.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "Update wird vorbereitet",
     desktopUpdateStopping: "Download wird gestoppt…",
