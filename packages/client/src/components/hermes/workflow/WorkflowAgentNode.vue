@@ -191,7 +191,7 @@ async function uploadImages(files: File[]) {
       <DshSessionPresetSelect v-if="data.agent === 'dsh'" :model-value="data.agentPreset" :disabled="data.readonly"
         @update:model-value="updateField('agentPreset', $event)" @valid="updateField('agentPresetReady', $event)" />
       <NSelect
-        v-if="supportsGlobalMode && (data.agent !== 'cursor' && data.agent !== 'antigravity')"
+        v-if="supportsGlobalMode && data.agent !== 'cursor'"
         :value="data.agentMode"
         :options="agentModeOptions"
         size="small"

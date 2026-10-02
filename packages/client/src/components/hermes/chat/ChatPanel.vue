@@ -993,7 +993,7 @@ function effectiveNewChatMode(
   requestedMode: typeof newChatAgentMode.value,
 ) {
   if (agent === "ekko-agent") return "scoped";
-  if (agent === "cursor" || agent === "antigravity") return "global";
+  if (agent === "cursor") return "global";
   return requestedMode;
 }
 
@@ -2920,7 +2920,7 @@ async function handleSessionModelCustomSubmit() {
             v-if="showNewChatModal && newChatAgent === 'dsh'"
             v-model="newChatAgentPreset" :disabled="newChatLoading" @valid="newChatPresetReady = $event"
           />
-          <label v-if="isNewChatExternalCodingAgent && (newChatAgent !== 'cursor' && newChatAgent !== 'antigravity')" class="new-chat-field">
+          <label v-if="isNewChatExternalCodingAgent && newChatAgent !== 'cursor'" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.launchModeScope") }}</span>
             <NRadioGroup v-model:value="newChatAgentMode" name="new-chat-coding-agent-mode">
               <NRadioButton

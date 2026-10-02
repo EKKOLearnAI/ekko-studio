@@ -75,7 +75,7 @@ export function normalizeGroupAgentPresetInput(input: unknown): Omit<GroupAgentP
   }
   const agent = requiredText(record.agent || 'hermes', 'agent', 20) as GroupAgentPresetAgent
   if (!AGENTS.has(agent)) throw Object.assign(new Error('Invalid agent'), { status: 400 })
-  const agentMode = (agent === 'cursor' || agent === 'antigravity') ? 'global' : record.agentMode === 'global' ? 'global' : 'scoped'
+  const agentMode = agent === 'cursor' ? 'global' : record.agentMode === 'global' ? 'global' : 'scoped'
   if (record.priorAgentMode != null && record.priorAgentMode !== '' && record.priorAgentMode !== 'global' && record.priorAgentMode !== 'scoped') {
     throw Object.assign(new Error('Invalid priorAgentMode'), { status: 400 })
   }

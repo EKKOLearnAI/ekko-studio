@@ -25,13 +25,13 @@ export function nextCodingAgentMode(input: {
   if (input.previousAgent === input.nextAgent) {
     return { agentMode: input.agentMode, priorAgentMode: input.priorAgentMode }
   }
-  if ((input.nextAgent === 'cursor' || input.nextAgent === 'antigravity')) {
+  if (input.nextAgent === 'cursor') {
     return {
       agentMode: 'global',
-      priorAgentMode: (input.previousAgent === 'cursor' || input.previousAgent === 'antigravity') ? input.priorAgentMode : input.agentMode,
+      priorAgentMode: input.previousAgent === 'cursor' ? input.priorAgentMode : input.agentMode,
     }
   }
-  if ((input.previousAgent === 'cursor' || input.previousAgent === 'antigravity')) {
+  if (input.previousAgent === 'cursor') {
     return {
       agentMode: input.priorAgentMode === 'global' ? 'global' : 'scoped',
       priorAgentMode: undefined,
@@ -78,7 +78,7 @@ export function workflowSavedAgentFields(data: {
 } {
   return {
     agent: data.agent,
-    agentMode: (data.agent === 'cursor' || data.agent === 'antigravity') ? 'global' : data.agentMode,
+    agentMode: data.agent === 'cursor' ? 'global' : data.agentMode,
     priorAgentMode: storedPriorAgentMode(data.priorAgentMode),
     provider: data.provider,
     model: data.model,

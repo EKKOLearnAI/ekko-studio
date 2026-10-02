@@ -571,7 +571,7 @@ export default {
     ekkoDescription: 'Ekko 隨 Studio 提供，無需單獨安裝、升級或刪除。',
     version: '版本',
     codingAgentDescription: '可由 Studio 安裝、檢查更新及刪除。',
-    antigravityDescription: '通过官方安装指南安装 Antigravity CLI（agy）并在终端完成登录，再刷新。当前仅支持全局模式；Studio 不托管安装、更新或卸载。',
+    antigravityDescription: '通过官方安装指南安装 Antigravity CLI（agy）并在终端完成登录，再刷新。支持全局和模型隔离模式；Studio 不托管安装、更新或卸载。',
     cursorDescription: '請從 https://cursor.com/install 安裝 Cursor CLI（`agent`），然後重新整理。Studio 不會用 npm 安裝。',
     cursorNoManagedConfig: '啟動不會改寫 ~/.cursor/mcp.json。託管服務寫在本次工作階段的執行時副本裡。',
     updateToVersion: '更新至 {version}',

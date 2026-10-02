@@ -330,8 +330,8 @@ export function normalizeWorkflowNode(raw: unknown): WorkflowNodeSnapshot | null
   if (agent !== 'hermes' && agent !== 'ekko-agent' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && agent !== 'antigravity') && (agent !== 'opencode' && agent !== 'dsh')) {
     throw new Error(`workflow node ${id} has unsupported agent runtime`)
   }
-  const agentMode = (agent === 'cursor' || agent === 'antigravity') ? 'global' : data.agentMode === 'global' ? 'global' : 'scoped'
-  if (agentMode === 'global' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && agent !== 'antigravity') && (agent !== 'opencode' && agent !== 'dsh')) {
+  const agentMode = agent === 'cursor' ? 'global' : data.agentMode === 'global' ? 'global' : 'scoped'
+  if (agentMode === 'global' && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && agent !== 'cursor' && (agent !== 'opencode' && agent !== 'dsh')) {
     throw new Error(`workflow node ${id} cannot use global mode with this agent runtime`)
   }
   const provider = typeof data.provider === 'string' ? data.provider.trim() : ''

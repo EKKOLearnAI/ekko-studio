@@ -686,7 +686,7 @@ onUnmounted(() => {
               @update:value="handleAgentProfileChange"
             />
           </div>
-          <div v-if="supportsGlobalAgentMode && (selectedAgentType !== 'cursor' && selectedAgentType !== 'antigravity')" class="field">
+          <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="field">
             <label>{{ t('codingAgents.launchModeScope') }}</label>
             <NSelect
               v-model:value="selectedAgentMode"

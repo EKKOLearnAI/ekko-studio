@@ -2,7 +2,7 @@
 
 ## Supported scope
 
-Agent ID `antigravity`, executable `agy`. The initial integration is **global-only**:
+Agent ID `antigravity`, executable `agy`. The integration supports **global and scoped** modes. In global mode:
 model selection and authentication remain owned by the official CLI. Studio does
 not install, update, uninstall, log in, or convert Google subscriptions into model
 APIs. Use https://antigravity.google/docs/cli/install and run `agy` interactively
@@ -64,7 +64,7 @@ answer; do not present process success as a verified filesystem change.
 
 Unit/mocked-process tests cover stream parsing, UTF-8, result fallback, tools,
 usage, terminal boundaries, missing results, schema normalization and isolation.
-Playwright tests cover native settings and the global-only picker. Compilation
+Playwright tests cover native settings and the global/scoped picker. Compilation
 and harness checks cover the server and Web/Electron client. App Node tests cover
 its source/runtime contracts, not an APK/IPA build.
 
@@ -123,3 +123,23 @@ terminal is not inherited by the running service. No real key/service configurat
 was changed during this probe. Scoped UI provider selection, mapping every
 auxiliary request to a selected upstream model, and protocol conversion remain
 pending; the mock result is not production external-provider acceptance.
+
+## Scoped Studio Provider integration
+
+Scoped launches now use Studio's existing Provider/model/API-mode selection and
+credential policy. The native CLI receives a per-run proxy token, not the upstream
+key, and modelProvider=gemini in its shadow configuration. Native account state is
+not linked for scoped execution. A protected Gemini endpoint uses the existing
+Responses adapters to call Chat Completions, Responses or Anthropic Messages. Both
+main and auxiliary/title requests are pinned to the selected Studio model.
+
+Initial bridge behavior buffers each provider response (stream=false upstream)
+and emits one Gemini SSE chunk. Thus token-by-token upstream streaming is not
+implemented yet. Provider accounting is owned by the proxy; CLI stdout exclusively
+owns tool cards and turn completion. Images remain unsupported. OAuth/plan
+providers retain the same scoped restrictions as other external coding agents.
+
+Actual agy 1.2.14 + real Studio adapter + local OpenAI-compatible mock passed a
+view_file tool read → function result → final SUCCESS cycle without account login.
+Selected-model routing covered title and main calls. This validates the CLI/bridge
+path, not Axonhub paid inference, all models, restart/resume or mobile binaries.

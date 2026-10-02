@@ -26,13 +26,15 @@ export async function prepareAntigravityRuntime(input: {
   rootDir: string
   systemPrompt: string
   managedMcp: Record<string, unknown>
+  externalModel?: { baseUrl: string; token: string }
 }): Promise<{ env: Record<string, string>; files: Array<{ key: string; path: string; absolutePath: string }>; promptFile: string }> {
   const source = join(input.home, '.gemini')
   const shadow = join(input.rootDir, '.gemini')
   await mkdir(shadow, { recursive: true })
-  await mkdir(join(source, 'antigravity'), { recursive: true })
+  if (!input.externalModel) await mkdir(join(source, 'antigravity'), { recursive: true })
   // Preserve native state/auth paths; do not copy secrets into generated config.
   for (const entry of await readdir(source, { withFileTypes: true }).catch(() => [])) {
+    if (input.externalModel) continue
     if (entry.name === 'config' || entry.name === 'antigravity-cli') continue
     await symlink(join(source, entry.name), join(shadow, entry.name), entry.isDirectory() ? 'junction' : 'file').catch((error: NodeJS.ErrnoException) => {
       if (error.code !== 'EEXIST') throw error
@@ -41,6 +43,7 @@ export async function prepareAntigravityRuntime(input: {
   for (const directory of ['config', 'antigravity-cli']) {
     await mkdir(join(shadow, directory), { recursive: true })
     for (const entry of await readdir(join(source, directory), { withFileTypes: true }).catch(() => [])) {
+      if (input.externalModel && directory === 'antigravity-cli') continue
       if (entry.name === 'mcp_config.json' || entry.name === 'settings.json' || entry.name === 'AGENTS.md' || entry.name === 'skills') continue
       await symlink(join(source, directory, entry.name), join(shadow, directory, entry.name), entry.isDirectory() ? 'junction' : 'file').catch((error: NodeJS.ErrnoException) => {
         if (error.code !== 'EEXIST') throw error
@@ -73,6 +76,7 @@ export async function prepareAntigravityRuntime(input: {
   const promptFile = join(shadow, 'config', 'AGENTS.md')
   const userRules = await readFile(join(source, 'config', 'AGENTS.md'), 'utf8').catch(() => '')
   const runtimeSettings = parseAntigravityConfig(settings)
+  if (input.externalModel) runtimeSettings.modelProvider = 'gemini'
   // Only grant Studio's injected MCP servers, not shell/file tools. Existing
   // deny rules are preserved and remain authoritative.
   const permissions = runtimeSettings.permissions || {}
@@ -90,7 +94,8 @@ export async function prepareAntigravityRuntime(input: {
   await writeFile(mcpPath, JSON.stringify({ ...root, mcpServers: { ...(root.mcpServers || {}), ...managedMcp } }, null, 2), { mode: 0o600 })
   await writeManagedPromptFile(promptFile, input.systemPrompt, userRules)
   return {
-    env: { HOME: input.rootDir, USERPROFILE: input.rootDir },
+    env: { HOME: input.rootDir, USERPROFILE: input.rootDir,
+      ...(input.externalModel ? { GEMINI_API_KEY: input.externalModel.token, GOOGLE_GEMINI_BASE_URL: input.externalModel.baseUrl } : {}) },
     promptFile,
     files: [
       { key: 'settings', path: '.gemini/antigravity-cli/settings.json', absolutePath: settingsPath },

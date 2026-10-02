@@ -1,6 +1,6 @@
 /** Explicit initial support boundary; do not infer features from CLI flags alone. */
 export const ANTIGRAVITY_CAPABILITIES = {
-  modes: ['global'],
+  modes: ['global', 'scoped'],
   installation: 'manual',
   automaticUpdates: false,
   nativeResume: true,

@@ -42,7 +42,7 @@ export function normalizeRemoteGroupAgentDescriptor(
   const input = value as Record<string, unknown>
   const agent = String(input.agent || 'hermes').trim() as RemoteGroupAgentDescriptor['agent']
   if (!REMOTE_AGENT_TYPES.has(agent)) throw new Error('Invalid remote Agent type')
-  const agentMode = (agent === 'cursor' || agent === 'antigravity') ? 'global' : input.agentMode === 'global' ? 'global' : 'scoped'
+  const agentMode = agent === 'cursor' ? 'global' : input.agentMode === 'global' ? 'global' : 'scoped'
   if (agentMode === 'global' && !REMOTE_GLOBAL_MODE_AGENTS.has(agent)) {
     throw new Error('Remote Agent global mode is only available for Claude, Codex, Pi, Grok, and OpenCode')
   }

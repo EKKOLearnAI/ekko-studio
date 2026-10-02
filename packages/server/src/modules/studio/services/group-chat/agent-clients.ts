@@ -387,9 +387,9 @@ export class AgentClient implements GroupAgentExecutor {
     constructor(config: AgentConfig, handlers: AgentEventHandler = {}, eventSink: GroupAgentEventSink | null = null) {
         this.agentId = config.agentId || Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
         this.agent = config.agent || 'hermes'
-        this.agentMode = (this.agent === 'cursor' || this.agent === 'antigravity')
+        this.agentMode = this.agent === 'cursor'
             ? 'global'
-            : config.agentMode === 'global' && (this.agent === 'claude' || this.agent === 'codex' || this.agent === 'pi' || this.agent === 'grok' || (this.agent === 'opencode' || this.agent === 'dsh'))
+            : config.agentMode === 'global' && (this.agent === 'claude' || this.agent === 'codex' || this.agent === 'pi' || this.agent === 'grok' || this.agent === 'antigravity' || (this.agent === 'opencode' || this.agent === 'dsh'))
             ? 'global'
             : 'scoped'
         this.profile = config.profile

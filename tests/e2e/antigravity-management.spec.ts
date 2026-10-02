@@ -23,7 +23,7 @@ test('Antigravity native settings are editable and unmanaged installation is exp
   await expect.poll(() => settings).toBe('{"toolPermission":"strict"}')
 })
 
-test('Antigravity picker uses global config without offering scoped mode', async ({ page }) => {
+test('Antigravity picker offers scoped provider selection and global config', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await mockHermesApi(page)
   await mockChatSocket(page)
@@ -33,5 +33,5 @@ test('Antigravity picker uses global config without offering scoped mode', async
   await drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first().locator('.n-base-selection').click()
   await page.locator('.n-base-select-option:visible').filter({ hasText: /^Antigravity$/ }).click()
   await expect(drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first()).toContainText('Antigravity')
-  await expect(drawer.locator('.new-chat-field').filter({ hasText: 'Global config' })).toHaveCount(0)
+  await expect(drawer.locator('.new-chat-field').filter({ hasText: 'Global config' })).toHaveCount(1)
 })

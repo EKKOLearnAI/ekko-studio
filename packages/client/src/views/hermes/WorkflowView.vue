@@ -653,7 +653,7 @@ function makeNode(
     data: {
       title,
       agent,
-      agentMode: (agent === 'cursor' || agent === 'antigravity') || (data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(agent)) ? 'global' : 'scoped',
+      agentMode: agent === 'cursor' || (data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(agent)) ? 'global' : 'scoped',
       priorAgentMode: data.priorAgentMode === 'global' || data.priorAgentMode === 'scoped' ? data.priorAgentMode : undefined,
       provider: data.provider || defaultModelSelection.value.provider,
       model: data.model || defaultModelSelection.value.model,

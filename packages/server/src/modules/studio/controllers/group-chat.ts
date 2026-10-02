@@ -312,7 +312,7 @@ async function connectAndPersistRoomAgent(server: GroupChatServer, roomId: strin
         throw new Error('Invalid agentMode')
     }
     const profile = input.profile.trim()
-    const agentMode = (agent === 'cursor' || agent === 'antigravity') ? 'global' : input.agentMode === 'global' ? 'global' : 'scoped'
+    const agentMode = agent === 'cursor' ? 'global' : input.agentMode === 'global' ? 'global' : 'scoped'
     if (agentMode === 'global' && !GLOBAL_MODE_GROUP_AGENTS.has(agent || '')) {
         throw new Error('Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor')
     }
@@ -761,7 +761,7 @@ export async function addRoomAgent(ctx: any) {
     }
     const normalizedProfile = typeof profile === 'string' ? profile.trim() : ''
     const normalizedAgent = typeof agent === 'string' ? agent.trim() : 'hermes'
-    const normalizedAgentMode = (normalizedAgent === 'cursor' || normalizedAgent === 'antigravity') || agentMode === 'global' ? 'global' : 'scoped'
+    const normalizedAgentMode = normalizedAgent === 'cursor' || agentMode === 'global' ? 'global' : 'scoped'
     const normalizedProvider = normalizedAgentMode === 'global' ? '' : typeof provider === 'string' ? provider.trim() : ''
     const normalizedModel = normalizedAgentMode === 'global' ? '' : typeof model === 'string' ? model.trim() : ''
     const normalizedApiMode = normalizedAgent === 'hermes' || normalizedAgentMode === 'global'
@@ -882,7 +882,7 @@ export async function updateRoomAgent(ctx: any) {
     }
     const normalizedProfile = typeof profile === 'string' ? profile.trim() : ''
     const normalizedAgent = typeof agent === 'string' ? agent.trim() : 'hermes'
-    const normalizedAgentMode = (normalizedAgent === 'cursor' || normalizedAgent === 'antigravity') || agentMode === 'global' ? 'global' : 'scoped'
+    const normalizedAgentMode = normalizedAgent === 'cursor' || agentMode === 'global' ? 'global' : 'scoped'
     const normalizedProvider = normalizedAgentMode === 'global' ? '' : typeof provider === 'string' ? provider.trim() : ''
     const normalizedModel = normalizedAgentMode === 'global' ? '' : typeof model === 'string' ? model.trim() : ''
     const normalizedApiMode = normalizedAgent === 'hermes' || normalizedAgentMode === 'global'

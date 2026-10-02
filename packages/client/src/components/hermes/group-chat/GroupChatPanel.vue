@@ -2891,7 +2891,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     <DshSessionPresetSelect v-if="selectedAgentType === 'dsh'" class="form-group"
                         v-model="selectedRuntimePreset" :disabled="isSavingAgent || isLoadingAgentForm"
                         @valid="selectedRuntimePresetReady = $event" />
-                    <div v-if="supportsGlobalAgentMode && (selectedAgentType !== 'cursor' && selectedAgentType !== 'antigravity')" class="form-group">
+                    <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="form-group">
                         <label class="form-label">{{ t('codingAgents.launchModeScope') }}</label>
                         <NSelect
                             :value="selectedAgentMode"

@@ -583,7 +583,7 @@ export default {
     ekkoDescription: 'Ekko は Studio に同梱されているため、個別のインストール、更新、削除は不要です。',
     version: 'バージョン',
     codingAgentDescription: 'Studio からインストール、更新確認、削除ができます。',
-    antigravityDescription: 'Install Antigravity CLI (agy) using the official guide and sign in from a terminal, then refresh. Global mode only; installation, updates and removal are managed outside Studio.',
+    antigravityDescription: 'Install Antigravity CLI (agy) using the official guide and sign in from a terminal, then refresh. Global and scoped modes; installation, updates and removal are managed outside Studio.',
     cursorDescription: 'Cursor CLI（`agent`）は https://cursor.com/install からインストールし、その後更新してください。Studio は npm ではインストールしません。',
     cursorNoManagedConfig: '起動時に ~/.cursor/mcp.json は書き換えられません。管理対象サーバーは今回のセッションのランタイムコピーにあります。',
     updateToVersion: '{version} に更新',

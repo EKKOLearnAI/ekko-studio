@@ -99,12 +99,12 @@ describe('Antigravity official CLI protocol', () => {
 })
 
 describe('Antigravity product routing', () => {
-  it('retains Antigravity identity in workflow and group presets, forcing global mode', async () => {
+  it('retains Antigravity identity in workflow and group presets, preserving scoped mode', async () => {
     const { resolveWorkflowNodeRunTarget, normalizeWorkflowNode } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const { normalizeGroupAgentPresetInput } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-presets')
     expect(resolveWorkflowNodeRunTarget('antigravity')).toMatchObject({ agent: 'antigravity', codingAgentId: 'antigravity' })
-    expect(normalizeWorkflowNode({ id: 'a', data: { agent: 'antigravity', agentMode: 'scoped' } })?.data.agentMode).toBe('global')
-    expect(normalizeGroupAgentPresetInput({ agent: 'antigravity', agentMode: 'scoped', name: 'A', profile: 'default' })).toMatchObject({ agent: 'antigravity', agentMode: 'global' })
+    expect(normalizeWorkflowNode({ id: 'a', data: { agent: 'antigravity', agentMode: 'scoped' } })?.data.agentMode).toBe('scoped')
+    expect(normalizeGroupAgentPresetInput({ agent: 'antigravity', agentMode: 'scoped', name: 'A', profile: 'default', provider: 'external', model: 'chosen-model', apiMode: 'chat_completions' })).toMatchObject({ agent: 'antigravity', agentMode: 'scoped' })
   })
 })
 

@@ -240,11 +240,11 @@ function makeProxyContext(routeKey: string, token: string, body: any): any {
 }
 
 describe('coding agent launch preparation', () => {
-  it('prepares Antigravity only in global mode with private MCP configuration and supported effort', async () => {
+  it('prepares Antigravity in global mode with private MCP configuration and supported effort', async () => {
     const home = mkdtempSync(join(tmpdir(), 'studio-antigravity-launch-'))
     homes.push(home)
     process.env.HERMES_CODING_AGENT_GLOBAL_HOME = home
-    const launch = await prepareCodingAgentLaunch('antigravity', { profile: 'default', mode: 'scoped', sessionId: 'agy-test', reasoningEffort: 'high' })
+    const launch = await prepareCodingAgentLaunch('antigravity', { profile: 'default', mode: 'global', sessionId: 'agy-test', reasoningEffort: 'high' })
     expect(launch).toMatchObject({ agentId: 'antigravity', mode: 'global', command: 'agy', reasoningEffort: 'high' })
     expect(launch.args).toEqual(['--effort', 'high'])
     expect(launch.env.HOME).not.toBe(home)
@@ -252,7 +252,7 @@ describe('coding agent launch preparation', () => {
     const config = JSON.parse(readFileSync(mcp.absolutePath, 'utf8'))
     expect(config.mcpServers['ekko-studio-interaction'].env.ELECTRON_RUN_AS_NODE).toBe('1')
     expect(existsSync(join(home, '.gemini', 'config', 'mcp_config.json'))).toBe(false)
-    await expect(prepareCodingAgentLaunch('antigravity', { reasoningEffort: 'xhigh' })).rejects.toThrow('Antigravity effort')
+    await expect(prepareCodingAgentLaunch('antigravity', { mode: 'global', reasoningEffort: 'xhigh' })).rejects.toThrow('Antigravity effort')
   })
 
   it('refreshes all scoped agent kinds only within the changed profile', () => {
@@ -3966,4 +3966,17 @@ describe('OpenCode Free coding agents', () => {
     expect(readFileSync(other.promptFile!, 'utf8')).toContain('ekko_studio_api_openapi_get')
   })
 
+})
+
+describe('Antigravity scoped launch', () => {
+  it('configures a local provider bridge without passing the upstream key to the CLI', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'agy-scoped-launch-')); homes.push(home)
+    process.env.HERMES_CODING_AGENT_GLOBAL_HOME = home
+    const launch = await prepareCodingAgentLaunch('antigravity', { mode: 'scoped', profile: 'default', provider: 'custom:test', model: 'selected', apiMode: 'chat_completions', baseUrl: 'https://example.test/v1', apiKey: 'upstream-test-secret', sessionId: 'scope-chat', agentSessionId: 'scope-run' })
+    expect(launch).toMatchObject({ mode: 'scoped', provider: 'custom:test', model: 'selected' })
+    expect(launch.env.GEMINI_API_KEY).toMatch(/^hwui_/)
+    expect(launch.env.GOOGLE_GEMINI_BASE_URL).toContain('/gemini')
+    expect(JSON.stringify(launch.env)).not.toContain('upstream-test-secret')
+    expect(JSON.parse(readFileSync(launch.files.find(file => file.key === 'settings')!.absolutePath, 'utf8')).modelProvider).toBe('gemini')
+  })
 })

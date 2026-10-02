@@ -891,7 +891,7 @@ function normalizeLaunchApiMode(value: unknown, fallback: ApiMode): ApiMode {
 }
 
 function resolvedCodingAgentLaunchMode(id: string, mode?: string | null): 'global' | 'scoped' {
-  if (id === 'cursor' || id === 'antigravity') return 'global'
+  if (id === 'cursor') return 'global'
   return mode === 'global' ? 'global' : 'scoped'
 }
 
@@ -3523,7 +3523,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     : groupSystemPrompt
       ? [groupSystemPrompt, studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
       : getSystemPrompt(undefined, { mcpCapabilities })
-  const isolatedInput = tool.id === 'pi' || tool.id === 'dsh'
+  const isolatedInput = tool.id === 'pi' || tool.id === 'dsh' || tool.id === 'antigravity'
     ? {
         ...input,
         sessionId: input.sessionId || randomUUID(),
@@ -3553,7 +3553,16 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   let args: string[] = []
   let env: Record<string, string> = {}
 
-  if (tool.id === 'claude-code') {
+  if (tool.id === 'antigravity') {
+    if (!['chat_completions', 'codex_responses', 'anthropic_messages'].includes(apiMode)) throw Object.assign(new Error('Antigravity scoped API mode is unsupported'), { status: 400 })
+    const target = registerCodexProxyTarget({ profile: scope.profile, provider, model, baseUrl, apiKey, apiMode, reasoningEffort,
+      agentId: tool.id, agentSessionId: isolatedInput.agentSessionId, chatSessionId: isolatedInput.sessionId })
+    const prepared = await prepareAntigravityRuntime({ home: getGlobalConfigHome(), rootDir, systemPrompt: scopedSystemPrompt,
+      managedMcp: getCodingAgentManagedMcpServerConfigs('antigravity', scope.profile, input.studioMcpTokenFile),
+      externalModel: { baseUrl: target.baseUrl.replace(/\/v1$/, '/gemini'), token: target.token } })
+    files.push(...prepared.files)
+    env = prepared.env
+  } else if (tool.id === 'claude-code') {
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerClaudeCodeProxyTarget({
           provider,
@@ -3998,7 +4007,7 @@ async function startCodingAgentRunInternal(
   const requestedMode = resolvedCodingAgentLaunchMode(id, resolvedInput.mode)
   const requestedProvider = String(resolvedInput.provider || '').trim().toLowerCase()
   assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider)
-  if (id !== 'cursor' && id !== 'antigravity' && requestedMode !== 'global' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
+  if (id !== 'cursor' && requestedMode !== 'global' && (!String(resolvedInput.baseUrl || '').trim() || (!String(resolvedInput.apiKey || '').trim() && requestedProvider !== OPENCODE_FREE_PROVIDER))) {
     const err = new Error('Coding agent provider credentials are missing. Re-select the provider/model or update the provider API key before continuing this session.')
     ;(err as any).status = 400
     throw err

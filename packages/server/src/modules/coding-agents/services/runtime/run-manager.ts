@@ -936,7 +936,7 @@ export class CodingAgentRunManager {
         ? run.turnActive === true
         : childIsRunning(run.currentChild) || run.turnActive === true,
       agentId: run.launch.agentId,
-      model: (run.launch.agentId === 'cursor' || run.launch.agentId === 'antigravity') ? run.nativeUsage?.model || '' : run.launch.model,
+      model: (run.launch.agentId === 'cursor' || (run.launch.agentId === 'antigravity' && run.launch.mode === 'global')) ? run.nativeUsage?.model || '' : run.launch.model,
       provider: run.launch.provider,
       workspaceDir: run.launch.workspaceDir,
       nativeSessionId: String(run.launch.agentNativeSessionId || '').trim(),
@@ -1201,7 +1201,7 @@ export class CodingAgentRunManager {
       // for transport and usage accounting only.
       return
     }
-    if ((run.launch.agentId === 'opencode' || run.launch.agentId === 'dsh') && !run.acceptingPrintEvent) {
+    if ((run.launch.agentId === 'opencode' || run.launch.agentId === 'dsh' || run.launch.agentId === 'antigravity') && !run.acceptingPrintEvent) {
       // Native JSON/ACP stdout is the authoritative turn stream. A single
       // turn can contain several provider requests, so treating each
       // proxy response.completed event as the turn boundary duplicates output

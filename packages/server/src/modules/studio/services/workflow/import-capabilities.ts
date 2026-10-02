@@ -24,7 +24,7 @@ export function assertWorkflowImportCapabilities(nodes: unknown[], groups: Capab
     const node = raw && typeof raw === 'object' ? raw as Record<string, any> : {}
     const data = node.data && typeof node.data === 'object' ? node.data as Record<string, any> : {}
     const agent = typeof data.agent === 'string' ? data.agent.trim() : ''
-    if (data.agentMode === 'global' && (agent === 'codex' || agent === 'claude-code' || agent === 'pi' || agent === 'grok' || (agent === 'cursor' || agent === 'antigravity') || (agent === 'opencode' || agent === 'dsh'))) continue
+    if (data.agentMode === 'global' && (agent === 'codex' || agent === 'claude-code' || agent === 'pi' || agent === 'grok' || agent === 'antigravity' || agent === 'cursor' || (agent === 'opencode' || agent === 'dsh'))) continue
     const provider = typeof data.provider === 'string' ? data.provider.trim() : ''
     const model = typeof data.model === 'string' ? data.model.trim() : ''
     const apiMode = typeof data.apiMode === 'string' ? data.apiMode.trim() : ''
