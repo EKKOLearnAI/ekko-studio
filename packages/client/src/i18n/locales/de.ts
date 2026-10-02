@@ -3335,6 +3335,12 @@ jobTriggered: 'Job ausgelost',
   },
 
   changelog: {
+    new_0_7_28_1: 'Antigravity CLI für Chats, Gruppenchats und Workflows im globalen und isolierten Modus ergänzt, mit nativen Einstellungen, MCP und Skill-Verwaltung (#3256)',
+    new_0_7_28_2: 'APIKEY.FAN-Relay-Seite mit Guthaben, Tages- und Gesamtnutzung sowie Aufschlüsselung nach Modell für konfigurierte API-Schlüssel ergänzt (#3257)',
+    new_0_7_28_3: 'Status manueller Update-Prüfungen und Erkennung aktualisierter CLI-Versionen für Coding Agents korrigiert und aktive Sitzungen geschützt (#3261)',
+    new_0_7_28_4: 'Vorzeitigen Abschluss, fehlenden Text und doppelte Claude-Code-Antworten behoben; die vollständige finale Ausgabe wird gespeichert (#3260, #3263)',
+    new_0_7_28_5: 'Zugriff auf native Anmeldedaten für Antigravity im globalen Modus unter macOS wiederhergestellt und den Anmeldehinweis korrigiert (#3266)',
+    new_0_7_28_6: 'Navigation zu Geräteverbindungen mit einem Monitor-und-Smartphone-Symbol zur klareren Kennzeichnung aktualisiert (#3262)',
     new_0_7_27_1: 'Dauerhaft gespeicherte Nutzungskarten pro Gesprächsrunde mit Tokens, Cache-Treffern, Kosten und Ausgabegeschwindigkeit ergänzt (#3241)',
     new_0_7_27_2: 'Zuordnung der Coding-Agent-Nutzung, Kosten pro Aufruf und Gesamtsummen korrigiert; Nutzung unterbrochener Läufe bleibt erhalten und verspätete Daten werden nachgetragen (#3246)',
     new_0_7_27_3: 'Nutzungskarten pro Runde in den Antwortblasen von Gruppenchats ergänzt und beim Laden des Verlaufs wiederhergestellt (#3248)',

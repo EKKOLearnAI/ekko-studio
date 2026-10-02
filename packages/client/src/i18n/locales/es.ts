@@ -3335,6 +3335,12 @@ jobTriggered: 'Job ejecutado',
   },
 
   changelog: {
+    new_0_7_28_1: 'Añadido Antigravity CLI para chats, chats de grupo y flujos de trabajo en modos global y aislado, con ajustes nativos, MCP y gestión de habilidades (#3256)',
+    new_0_7_28_2: 'Añadida una página de intermediación APIKEY.FAN con saldo, uso diario y total, y desglose por modelo para las claves API configuradas (#3257)',
+    new_0_7_28_3: 'Corregidos el estado de comprobación manual de actualizaciones y la detección de versiones CLI actualizadas en Coding Agents, protegiendo las sesiones activas (#3261)',
+    new_0_7_28_4: 'Corregidos la finalización anticipada, el texto faltante y las respuestas duplicadas de Claude Code, conservando la salida final completa (#3260, #3263)',
+    new_0_7_28_5: 'Corregido el acceso a las credenciales nativas en el modo global de Antigravity en macOS y la indicación de inicio de sesión (#3266)',
+    new_0_7_28_6: 'Actualizada la navegación de conexiones de dispositivos con un icono de monitor y teléfono para identificar mejor el acceso (#3262)',
     new_0_7_27_1: 'Añadidas tarjetas persistentes por turno con tokens, aciertos de caché, costes y velocidad de salida (#3241)',
     new_0_7_27_2: 'Corregidas la atribución del uso de Coding Agents, los costes por llamada y los totales acumulados; se conserva el uso de ejecuciones interrumpidas y se actualizan los datos tardíos (#3246)',
     new_0_7_27_3: 'Añadidas tarjetas de uso por turno dentro de las respuestas del chat grupal, que se restauran al cargar el historial (#3248)',
