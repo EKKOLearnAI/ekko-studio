@@ -6,6 +6,7 @@ import { defineComponent } from 'vue'
 
 const workspaceMocks = vi.hoisted(() => ({
   fetchSessionWorkspaceFileDiff: vi.fn(),
+  downloadSessionWorkspaceFile: vi.fn(),
   readSessionWorkspaceFile: vi.fn(),
 }))
 
@@ -29,6 +30,7 @@ vi.mock('@/api/studio/sessions', async importOriginal => {
   return {
     ...actual,
     fetchSessionWorkspaceFileDiff: workspaceMocks.fetchSessionWorkspaceFileDiff,
+    downloadSessionWorkspaceFile: workspaceMocks.downloadSessionWorkspaceFile,
     readSessionWorkspaceFile: workspaceMocks.readSessionWorkspaceFile,
   }
 })
@@ -100,4 +102,11 @@ describe('WorkspaceFileDiff', () => {
     expect(editButton.find('svg[data-icon="edit"]').exists()).toBe(true)
     expect(closeButton.find('svg[data-icon="close"]').exists()).toBe(true)
   })
+  it('offers a scoped download in the HTML Diff toolbar', async () => {
+    const wrapper = mount(WorkspaceFileDiff, { props: { entry: { ...markdownEntry, name: 'page.html', path: 'page.html' }, workspaceSessionId: 'session-1' } })
+    await flushPromises()
+    await wrapper.get('button[aria-label="files.download"]').trigger('click'); await flushPromises()
+    expect(workspaceMocks.downloadSessionWorkspaceFile).toHaveBeenCalledWith('session-1', 'page.html', 'page.html')
+  })
+
 })
