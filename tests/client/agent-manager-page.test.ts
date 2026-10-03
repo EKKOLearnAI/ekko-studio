@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Release PageLoading timers and native-installation listeners before jsdom closes.
+enableAutoUnmount(afterEach)
 
 const api = vi.hoisted(() => ({
   checkCodingAgentUpdate: vi.fn(),
