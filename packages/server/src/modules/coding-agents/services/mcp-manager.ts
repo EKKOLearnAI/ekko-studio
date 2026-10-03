@@ -1,3 +1,4 @@
+import { isNativeCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
 import { parseAntigravityConfig } from './antigravity/config'
 import { readDshMcpServers, updateDshMcpServer, validateDshMcpServer, assertDshMcpProbeIsLiteral } from './dsh/config'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
@@ -15,7 +16,7 @@ import { setManagedMcpServerEnabled, setManagedMcpServerOverride } from './mcp-o
 import { getWebUiHome } from '../../studio/public/config'
 import { probeCodingAgentMcpConfig } from './mcp-runtime-isolation'
 
-const CODING_AGENT_IDS = new Set(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'])
+const CODING_AGENT_IDS = new Set(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])
 const STUDIO_MANAGED_NAMES = new Set([
   'hermes-studio-api',
   'hermes-studio-browser',
@@ -290,7 +291,7 @@ async function readServers(id: string, scope: CodingAgentConfigScope): Promise<{
   assertAgentId(id)
   const file = await readCodingAgentConfigFile(id, configKey(id), scope)
   let servers: Map<string, Record<string, any>>
-  if (id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')) {
+  if (isNativeCodingAgent(id) || id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')) {
     servers = parseJsonDocument(id === 'antigravity' ? JSON.stringify(parseAntigravityConfig(file.content)) : file.content).servers
   } else if (id === 'dsh') {
     servers = readDshMcpServers(file.content)
@@ -322,7 +323,7 @@ async function writeServer(
     await writeCodingAgentConfigFile(id, configKey(id), updateDshMcpServer(originalContent, name, config), scope)
     return
   }
-  if (id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')) {
+  if (isNativeCodingAgent(id) || id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')) {
     const { root } = parseJsonDocument(id === 'antigravity' ? JSON.stringify(parseAntigravityConfig(originalContent)) : originalContent)
     const persistedServers = isRecord(root.mcpServers) ? { ...root.mcpServers } : {}
     for (const managedName of STUDIO_MANAGED_NAMES) delete persistedServers[managedName]
@@ -360,7 +361,7 @@ async function writeServer(
 
 function removeServerFromContent(id: string, content: string, name: string): string | null {
   if (id === 'dsh') return readDshMcpServers(content).has(name) ? updateDshMcpServer(content, name, null) : null
-  if (id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')) {
+  if (isNativeCodingAgent(id) || id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')) {
     const { root } = parseJsonDocument(content)
     const persistedServers = isRecord(root.mcpServers) ? { ...root.mcpServers } : {}
     if (!Object.prototype.hasOwnProperty.call(persistedServers, name)) return null
@@ -385,7 +386,7 @@ function removeServerFromContent(id: string, content: string, name: string): str
 
 async function pruneScopedServerCopies(id: string, name: string): Promise<number> {
   const modelRoot = join(getWebUiHome(), 'coding-agent', 'model')
-  const fileName = id === 'dsh' ? 'cordis.patch.yml' : id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')
+  const fileName = id === 'dsh' ? 'cordis.patch.yml' : isNativeCodingAgent(id) || id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')
     ? 'mcp.json'
     : id === 'opencode'
       ? 'opencode.json'

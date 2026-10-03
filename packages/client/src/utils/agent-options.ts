@@ -10,6 +10,13 @@ export const AGENT_OPTIONS = [
   { label: 'DeepSeek Harness', value: 'dsh' },
   { label: 'Cursor', value: 'cursor' },
   { label: 'Antigravity', value: 'antigravity' },
+  { label: 'Qwen Code', value: 'qwen' },
+  { label: 'Kimi Code', value: 'kimi' },
+  { label: 'CodeBuddy', value: 'codebuddy' },
+  { label: 'Qoder', value: 'qoder' },
+  { label: 'GitHub Copilot', value: 'copilot' },
+  { label: 'ZCode', value: 'zcode' },
+
 ] as const
 
 export const GROUP_AGENT_OPTIONS = AGENT_OPTIONS.map(option => ({

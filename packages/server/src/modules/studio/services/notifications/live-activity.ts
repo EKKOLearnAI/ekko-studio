@@ -51,7 +51,7 @@ function agent(event: BusinessEvent): string {
   const raw = bounded(event.chat?.agent || (runKind(event) === 'chat' ? getSession(event.subject.session_id || '')?.agent : ''), 32).toLowerCase()
   const aliases: Record<string, string> = { 'claude-code': 'claude', 'ekko-agent': 'ekko', bridge: 'hermes', dsh: 'deepseek' }
   const normalized = aliases[raw] || raw
-  return ['claude', 'codex', 'hermes', 'ekko', 'pi', 'grok', 'opencode', 'deepseek', 'cursor', 'antigravity'].includes(normalized) ? normalized : 'ekko'
+  return ['claude', 'codex', 'hermes', 'ekko', 'pi', 'grok', 'opencode', 'deepseek', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(normalized) ? normalized : 'ekko'
 }
 function title(event: BusinessEvent): string {
   if (runKind(event) === 'chat') {

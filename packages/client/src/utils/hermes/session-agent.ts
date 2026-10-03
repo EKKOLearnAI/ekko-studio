@@ -21,6 +21,12 @@ export function sessionAgentFields(summary: SessionSummary): Pick<Session, 'agen
   const ids: Record<string, Session['codingAgentId']> = {
     claude: 'claude-code', 'claude-code': 'claude-code', claude_code: 'claude-code',
     codex: 'codex', pi: 'pi', grok: 'grok', cursor: 'cursor',
+    qwen: 'qwen',
+    kimi: 'kimi',
+    codebuddy: 'codebuddy',
+    qoder: 'qoder',
+    copilot: 'copilot',
+    zcode: 'zcode',
     antigravity: 'antigravity', dsh: 'dsh', opencode: 'opencode',
   }
   const providerAgent = builtin || isExternalCodingAgentSession(summary)
@@ -39,5 +45,5 @@ export function sessionAgentFields(summary: SessionSummary): Pick<Session, 'agen
 export function isExternalCodingAgentSession(session?: SessionAgentIdentity | null): boolean {
   if (!session || isBuiltinEkkoSession(session)) return false
   return session.source === 'coding_agent' || Boolean(session.codingAgentId)
-    || ['claude', 'claude-code', 'claude_code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(session.agent || '')
+    || ['claude', 'claude-code', 'claude_code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(session.agent || '')
 }

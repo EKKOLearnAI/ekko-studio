@@ -19,13 +19,16 @@ Do not use one `source` or `agent` field for all of these concepts:
 | Concept | Allowed values | Meaning |
 | --- | --- | --- |
 | `AgentFamily` | `hermes`, `ekko`, `coding` | Product/domain owner of an agent implementation. |
-| `AgentRuntime` | `hermes`, `ekko`, `claude-code`, `codex`, `pi`, `grok`, `opencode`, `dsh`, `cursor` | Concrete runtime selected for a run. |
+| `AgentRuntime` | `hermes`, `ekko`, `claude-code`, `codex`, `pi`, `grok`, `opencode`, `dsh`, `cursor`, `antigravity`, `qwen`, `kimi`, `codebuddy`, `qoder`, `copilot`, `zcode` | Concrete runtime selected for a run. |
 | `RunSurface` | `chat`, `workflow`, `group-chat`, `global-agent`, `api` | Studio surface that initiated a run. |
 | `RunMode` | `scoped`, `global` | Whether the run is workspace/profile scoped or global. |
 
 Hermes and Ekko are both a family and a runtime. Claude Code, Codex, Pi, Grok,
-OpenCode, DSH, and Cursor are seven runtimes in the Coding family. Persist and
+OpenCode, DSH, Cursor, Antigravity, Qwen Code, Kimi Code, CodeBuddy, Qoder,
+GitHub Copilot, and ZCode are fourteen runtimes in the Coding family. Persist and
 transport these concepts separately whenever a schema is introduced or revised.
+The six native CLI adapters and App catalog publication are described in
+[`native-coding-agents.md`](../native-coding-agents.md).
 
 ## Target Directory
 
@@ -286,7 +289,7 @@ packages/server/src/
       sockets/
         chat.ts
 
-    coding-agents/                 # Claude Code, Codex, Pi, Grok, OpenCode, DSH, and Cursor family
+    coding-agents/                 # Coding-family CLI runtimes
       index.ts
       public/
         runner.ts

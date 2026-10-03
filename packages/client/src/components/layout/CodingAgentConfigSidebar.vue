@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { agentMetadata } from "@/utils/agent-catalog"
 import PageSidebar from "./PageSidebar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import { computed, watch } from 'vue'
@@ -19,9 +20,9 @@ const activeSection = computed(() => String(route.params.section || 'settings'))
 
 const items = computed(() => [
     ...(agentId.value === 'dsh' ? [{ section: 'plugins', label: t('sidebar.plugins'), icon: 'plugins' }, { section: 'presets', label: t('dshPresets.title'), icon: 'presets' }] : []),
-    { section: 'skills', label: t('sidebar.skills'), icon: 'skills' },
-    { section: 'mcp', label: t('sidebar.mcp'), icon: 'mcp' },
-    { section: 'settings', label: t('sidebar.settings'), icon: 'settings' },
+    ...(agentMetadata(agentId.value)?.config.skillsTarget ? [{ section: 'skills', label: t('sidebar.skills'), icon: 'skills' }] : []),
+    ...(agentMetadata(agentId.value)?.config.mcp ? [{ section: 'mcp', label: t('sidebar.mcp'), icon: 'mcp' }] : []),
+    ...(agentMetadata(agentId.value)?.config.settings || agentMetadata(agentId.value)?.config.memory ? [{ section: 'settings', label: t('sidebar.settings'), icon: 'settings' }] : []),
   ])
 
 function setExpanded(value: boolean) {

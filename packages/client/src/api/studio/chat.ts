@@ -138,7 +138,7 @@ export interface RunEvent {
   }>
   generation?: string
   queue_id?: string
-  runtime?: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
+  runtime?: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
   phase?: 'requesting' | 'waiting_for_tool_batch' | 'stopping_current_turn' | 'starting_queued_message' | 'cancelled'
   guarantee?: 'strict' | 'immediate'
   requested_at?: number
@@ -194,7 +194,7 @@ export interface ResumeSessionPayload {
     generation: string
     run_id?: string
     queue_id: string
-    runtime: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
+    runtime: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     phase: 'requesting' | 'waiting_for_tool_batch' | 'stopping_current_turn' | 'starting_queued_message'
     guarantee: 'strict' | 'immediate'
     requested_at: number

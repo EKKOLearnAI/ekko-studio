@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isGlobalOnlyCodingAgent } from "@/utils/agent-catalog"
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
 import { computed, ref } from 'vue'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
@@ -31,8 +32,8 @@ const statusTip = computed(() => (
     : ''
 ))
 const isCodingAgent = computed(() => props.data.agent !== 'hermes')
-const supportsGlobalMode = computed(() => ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(props.data.agent))
-const usesScopedModel = computed(() => !supportsGlobalMode.value || props.data.agentMode !== 'global')
+const supportsGlobalMode = computed(() => ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(props.data.agent))
+const usesScopedModel = computed(() => !isGlobalOnlyCodingAgent(props.data.agent) && (!supportsGlobalMode.value || props.data.agentMode !== 'global'))
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
   { label: t('codingAgents.launchModeScoped'), value: 'scoped' },
@@ -191,7 +192,7 @@ async function uploadImages(files: File[]) {
       <DshSessionPresetSelect v-if="data.agent === 'dsh'" :model-value="data.agentPreset" :disabled="data.readonly"
         @update:model-value="updateField('agentPreset', $event)" @valid="updateField('agentPresetReady', $event)" />
       <NSelect
-        v-if="supportsGlobalMode && data.agent !== 'cursor'"
+        v-if="supportsGlobalMode && !isGlobalOnlyCodingAgent(data.agent)"
         :value="data.agentMode"
         :options="agentModeOptions"
         size="small"

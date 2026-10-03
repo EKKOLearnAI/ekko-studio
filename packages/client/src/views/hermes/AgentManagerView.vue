@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { agentMetadata } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import { getAgentUpdatePolicies, setAgentAutoUpdate, type AgentUpdatePolicyState } from '@/api/coding-agents'
@@ -89,6 +90,12 @@ const codingAgents: CodingAgentCard[] = [
     packageName: 'cursor-agent',
   },
   { id: 'antigravity', name: 'Antigravity', provider: 'Google', logo: '/coding-agents/antigravity.png', command: 'agy', packageName: '' },
+  { id: 'qwen', name: 'Qwen Code', provider: 'Alibaba', logo: '/coding-agents/qwen-logo.svg', command: 'qwen', packageName: '@qwen-code/qwen-code' },
+  { id: 'kimi', name: 'Kimi Code', provider: 'Moonshot AI', logo: '/coding-agents/kimi-logo.png', command: 'kimi', packageName: '@moonshot-ai/kimi-code' },
+  { id: 'codebuddy', name: 'CodeBuddy', provider: 'Tencent', logo: '/coding-agents/codebuddy-logo.svg', command: 'codebuddy', packageName: '@tencent-ai/codebuddy-code' },
+  { id: 'qoder', name: 'Qoder', provider: 'Qoder', logo: '/coding-agents/qoder-logo.svg', command: 'qoder', packageName: '@qoder-ai/qodercli' },
+  { id: 'copilot', name: 'GitHub Copilot', provider: 'GitHub', logo: '/coding-agents/copilot-logo.svg', command: 'copilot', packageName: '@github/copilot' },
+  { id: 'zcode', name: 'ZCode', provider: 'Z.ai', logo: '/coding-agents/zcode-logo.png', command: 'zcode', packageName: '' },
 ]
 
 const updatePolicies = ref<Record<string, AgentUpdatePolicyState>>({})
@@ -125,9 +132,9 @@ const hermesRuntimeStatus = ref<RuntimeVersionStatus | null>(null)
 const aiHelpDrawerVisible = ref(false)
 const aiHelpPrompt = ref('')
 const legacyDataMigrationChecked = ref(false)
-const installing = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false, antigravity: false })
-const deleting = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false, antigravity: false })
-const checkingUpdate = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false, antigravity: false })
+const installing = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false, antigravity: false, qwen: false, kimi: false, codebuddy: false, qoder: false, copilot: false, zcode: false })
+const deleting = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false, antigravity: false, qwen: false, kimi: false, codebuddy: false, qoder: false, copilot: false, zcode: false })
+const checkingUpdate = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false, antigravity: false, qwen: false, kimi: false, codebuddy: false, qoder: false, copilot: false, zcode: false })
 const updateInfo = ref<Record<CodingAgentId, CodingAgentUpdateResult | null>>({
   'claude-code': null,
   codex: null,
@@ -137,6 +144,13 @@ const updateInfo = ref<Record<CodingAgentId, CodingAgentUpdateResult | null>>({
   dsh: null,
   cursor: null,
   antigravity: null,
+  qwen: null,
+  kimi: null,
+  codebuddy: null,
+  qoder: null,
+  copilot: null,
+  zcode: null,
+
 })
 
 const hermesStatus = computed(() => agentStatusSnapshot.value?.agents.find(agent => agent.id === 'hermes'))
@@ -294,7 +308,7 @@ async function checkExternalCliInstallation(event?: Event) {
     return
   }
   externalInstallationRefreshPending = false
-  const nativeTools = ['cursor', 'antigravity'] as const
+  const nativeTools = (['cursor', 'antigravity', 'zcode'] as const).filter(id => id === 'cursor' || id === 'antigravity' || agentStatusSnapshot.value?.agents.some(agent => agent.id === id))
   const knownTools = nativeTools.filter(id => toolStatus(id))
   // On entry only probe missing tools; on return also refresh installed versions.
   if (!knownTools.length || (!event && knownTools.every(id => toolStatus(id)?.installed))) return
@@ -404,14 +418,14 @@ async function maybePromptLegacyWindowsDataMigration() {
 async function handleInstall(id: CodingAgentId) {
   installing.value[id] = true
   try {
-    if ((id === 'cursor' || id === 'antigravity') && typeof window !== 'undefined') {
-      window.open(id === 'antigravity' ? 'https://antigravity.google/docs/cli/install' : 'https://cursor.com/install', '_blank', 'noopener,noreferrer')
+    if ((id === 'cursor' || id === 'antigravity' || agentMetadata(id)?.installation.method === 'manual') && typeof window !== 'undefined') {
+      window.open(agentMetadata(id)?.installation.docsUrl || (id === 'antigravity' ? 'https://antigravity.google/docs/cli/install' : 'https://cursor.com/install'), '_blank', 'noopener,noreferrer')
     }
     const result = await installCodingAgent(id)
     tools.value = result.tools
     if (result.updateState) updatePolicies.value[id] = result.updateState
-    if ((id === 'cursor' || id === 'antigravity') && !result.success) {
-      message.info(t(id === 'antigravity' ? 'agentManager.antigravityDescription' : 'agentManager.cursorDescription'))
+    if ((id === 'cursor' || id === 'antigravity' || agentMetadata(id)?.installation.method === 'manual') && !result.success) {
+      message.info(result.message || t('agentManager.codingAgentDescription'))
       return
     }
     if (!result.success) throw new Error(result.message || t('codingAgents.installFailed'))
@@ -621,10 +635,11 @@ onUnmounted(() => {
                 <NButton
                   secondary
                   size="small"
+                  v-if="agentMetadata(agent.id)?.config.mcp || agentMetadata(agent.id)?.config.settings"
                   :data-testid="`agent-settings-${agent.id}`"
                   @click="router.push({
                     name: 'codingAgent.config',
-                    params: { agentId: agent.id, section: 'settings' },
+                    params: { agentId: agent.id, section: agentMetadata(agent.id)?.config.settings || agentMetadata(agent.id)?.config.memory ? 'settings' : 'mcp' },
                   })"
                 >
                   {{ t('sidebar.settings') }}
@@ -637,10 +652,10 @@ onUnmounted(() => {
                   :loading="installing[agent.id]"
                   @click="handleInstall(agent.id)"
                 >
-                  {{ (agent.id === 'cursor' || agent.id === 'antigravity') ? t('codingAgents.cursorInstallGuide') : t('codingAgents.installNow') }}
+                  {{ (agentMetadata(agent.id)?.installation.method === 'manual') ? t('codingAgents.cursorInstallGuide') : t('codingAgents.installNow') }}
                 </NButton>
                 <NButton
-                  v-else-if="(agent.id !== 'cursor' && agent.id !== 'antigravity') && availableUpdateVersion(agent.id)"
+                  v-else-if="(agentMetadata(agent.id)?.installation.updates) && availableUpdateVersion(agent.id)"
                   type="primary"
                   secondary
                   size="small"
@@ -650,7 +665,7 @@ onUnmounted(() => {
                   {{ t('agentManager.updateToVersion', { version: formatVersion(availableUpdateVersion(agent.id)) }) }}
                 </NButton>
                 <NButton
-                  v-if="(agent.id !== 'cursor' && agent.id !== 'antigravity') && toolStatus(agent.id)?.installed && !availableUpdateVersion(agent.id)"
+                  v-if="(agentMetadata(agent.id)?.installation.updates) && toolStatus(agent.id)?.installed && !availableUpdateVersion(agent.id)"
                   secondary
                   size="small"
                   :loading="checkingUpdate[agent.id]"
@@ -661,7 +676,7 @@ onUnmounted(() => {
                 </NButton>
 
                 <NPopconfirm
-                  v-if="(agent.id !== 'cursor' && agent.id !== 'antigravity') && toolStatus(agent.id)?.installed"
+                  v-if="(agentMetadata(agent.id)?.installation.updates) && toolStatus(agent.id)?.installed"
                   @positive-click="handleDelete(agent.id)"
                 >
                   <template #trigger>

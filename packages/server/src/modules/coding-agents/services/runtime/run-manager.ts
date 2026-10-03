@@ -1,3 +1,6 @@
+import { isNativeCodingAgent, NATIVE_CODING_AGENTS } from '../../../studio/contracts/agents/native-coding-agents'
+import { startNativeChatTurn } from '../native/chat-turn'
+import type { NativeAcpTurn } from '../native/acp-turn'
 import type { DshAcpTurn } from '../dsh/acp-turn'
 import { startDshChatTurn } from '../dsh/chat-turn'
 import { agentUpdateLocked, noteAgentActivity } from '../update-lock'
@@ -114,6 +117,8 @@ export interface CodingAgentRunLaunch {
   reasoningEffort?: string
   approvalRequired?: boolean
   studioMcpTokenFile?: string
+  nativeSystemPrompt?: string
+  nativeMcpServers?: Record<string, any>
 }
 
 export interface CodingAgentRunInfo {
@@ -193,6 +198,7 @@ export interface ManagedCodingAgentRun {
   apiKeyPromptAnswered?: boolean
   startedAt: number
   exited: boolean
+  nativeAcpTurn?: NativeAcpTurn
   dshTurn?: DshAcpTurn
   currentChild?: ChildProcess
   currentChildKillTimer?: ReturnType<typeof setTimeout>
@@ -341,10 +347,11 @@ function truncateCodingAgentToolOutputEvent(event: CanonicalResponsesEvent): Can
 }
 
 function isPrintAgent(agentId: string): boolean {
-  return agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || agentId === 'antigravity' || agentId === 'cursor' || (agentId === 'opencode' || agentId === 'dsh')
+  return isNativeCodingAgent(agentId) || agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || agentId === 'antigravity' || agentId === 'cursor' || (agentId === 'opencode' || agentId === 'dsh')
 }
 
-function persistedCodingAgent(agentId: string): 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' {
+function persistedCodingAgent(agentId: string): 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode' {
+  if (isNativeCodingAgent(agentId)) return agentId
   if (agentId === 'codex') return 'codex'
   if (agentId === 'pi') return 'pi'
   if (agentId === 'grok') return 'grok'
@@ -355,7 +362,8 @@ function persistedCodingAgent(agentId: string): 'claude' | 'codex' | 'pi' | 'gro
   return 'claude'
 }
 
-export function usageCodingAgent(agentId: string): 'claude_code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' {
+export function usageCodingAgent(agentId: string): 'claude_code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode' {
+  if (isNativeCodingAgent(agentId)) return agentId
   if (agentId === 'codex') return 'codex'
   if (agentId === 'pi') return 'pi'
   if (agentId === 'grok') return 'grok'
@@ -519,6 +527,7 @@ function piAssistantMessageText(message: any): string {
 }
 
 function codingAgentDisplayName(agentId: string): string {
+  if (isNativeCodingAgent(agentId)) return NATIVE_CODING_AGENTS.find(agent => agent.id === agentId)!.name
   if (agentId === 'antigravity') return 'Antigravity'
   if (agentId === 'cursor') return 'Cursor'
   if (agentId === 'codex') return 'Codex'
@@ -769,7 +778,7 @@ export class CodingAgentRunManager {
           throw err
         }
       }
-      const agentName = launch.agentId === 'codex'
+      const agentName = isNativeCodingAgent(launch.agentId) ? NATIVE_CODING_AGENTS.find(agent => agent.id === launch.agentId)!.name : launch.agentId === 'codex'
         ? 'Codex'
         : launch.agentId === 'pi'
           ? 'Pi'
@@ -865,6 +874,7 @@ export class CodingAgentRunManager {
     const images = Array.isArray(options.images) ? options.images : []
     if (!text && images.length === 0) throw new Error('Input is required')
     if (run.launch.agentId === 'antigravity' && images.length) throw Object.assign(new Error('Antigravity CLI image input is not supported; send a file path as text instead'), { status: 400 })
+    if (isNativeCodingAgent(run.launch.agentId) && images.length) throw Object.assign(new Error('This coding agent integration accepts text and file paths; image input is not supported'), { status: 400 })
     // Keep native metadata separate from launch configuration: global CLIs can
     // choose a different model each turn, including during a resumed session.
     if (!childIsRunning(run.currentChild) || (run.launch.agentId === 'pi' && !run.turnActive)) {
@@ -888,6 +898,10 @@ export class CodingAgentRunManager {
     this.touch(run)
     this.emitTerminalStatus(run, 'Input sent to coding agent.')
     this.startWorkspaceRunDiff(run)
+    if (isNativeCodingAgent(run.launch.agentId)) {
+      this.startNativeTurn(run, text, systemPrompt)
+      return { runId: run.id, messageId }
+    }
     if (run.launch.agentId === 'claude-code') {
       this.startClaudePrintTurn(run, text, systemPrompt, images)
       return { runId: run.id, messageId }
@@ -1204,7 +1218,7 @@ export class CodingAgentRunManager {
       // for transport and usage accounting only.
       return
     }
-    if ((run.launch.agentId === 'opencode' || run.launch.agentId === 'dsh' || run.launch.agentId === 'antigravity') && !run.acceptingPrintEvent) {
+    if ((run.launch.agentId === 'opencode' || run.launch.agentId === 'dsh' || run.launch.agentId === 'antigravity' || isNativeCodingAgent(run.launch.agentId)) && !run.acceptingPrintEvent) {
       // Native JSON/ACP stdout is the authoritative turn stream. A single
       // turn can contain several provider requests, so treating each
       // proxy response.completed event as the turn boundary duplicates output
@@ -1517,6 +1531,8 @@ export class CodingAgentRunManager {
     const shouldReportClosed = options.reportClosed !== false && (run.state.isWorking || Boolean(run.currentChild && !run.currentChild.killed))
     if (run.idleTimer) clearTimeout(run.idleTimer)
     if (run.currentChildKillTimer) clearTimeout(run.currentChildKillTimer)
+    run.nativeAcpTurn?.cancel()
+    run.nativeAcpTurn?.dispose()
     run.dshTurn?.cancel()
     run.dshTurn?.dispose()
     run.piDetachJsonl?.()
@@ -1615,9 +1631,11 @@ export class CodingAgentRunManager {
     child.on('close', (code) => {
       if (run.currentChildKillTimer) clearTimeout(run.currentChildKillTimer)
       run.currentChildKillTimer = undefined
+      run.nativeAcpTurn?.cancel()
+      run.nativeAcpTurn?.dispose()
       run.dshTurn?.cancel()
-    run.dshTurn?.dispose()
-    run.piDetachJsonl?.()
+      run.dshTurn?.dispose()
+      run.piDetachJsonl?.()
       run.piDetachJsonl = undefined
       run.currentChild = undefined
       if (run.exited || run.stoppedByUser) return
@@ -2628,6 +2646,20 @@ export class CodingAgentRunManager {
           usage,
         },
       },
+    })
+  }
+
+  private startNativeTurn(run: ManagedCodingAgentRun, input: string, systemPrompt: string) {
+    startNativeChatTurn(run, input, systemPrompt, {
+      spawn: spawnCodingAgentChild, isRunning: childIsRunning,
+      terminate: terminateChildProcess, forceKill: forceKillChildProcess,
+      processError: error => childProcessErrorMessage(error, run.launch.agentId), exitError: (code, stderr) => exitErrorMessage(run.launch.agentId, code, stderr),
+      stderr: chunk => { appendChildStderr(run, chunk) }, touch: () => this.touch(run),
+      response: event => this.handleClaudePrintResponseEvent(run, event),
+      text: (text, live) => this.appendCodexText(run, text, live), reasoning: text => this.appendCodexReasoning(run, text),
+      toolStarted: item => this.handleCodexItemStarted(run, item), toolCompleted: item => this.handleCodexItemCompleted(run, item),
+      completeAfterUsage: (event, payload) => this.emitAndMarkPrintChatRunCompletedAfterUsage(run, event, payload),
+      complete: usage => this.completeClaudePrintTurn(run, usage), fail: message => this.failClaudePrintTurn(run, message),
     })
   }
 

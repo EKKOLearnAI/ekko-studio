@@ -1,4 +1,4 @@
-export type AgentStatusId = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
+export type AgentStatusId = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
 
 export type AgentStatusSource =
   | 'managed-runtime'
@@ -46,9 +46,15 @@ export interface AgentAvailabilitySnapshot {
   agents: AgentAvailabilityRecord[]
 }
 
-const AGENT_ORDER: AgentStatusId[] = ['hermes', 'ekko-agent', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity']
+const AGENT_ORDER: AgentStatusId[] = ['hermes', 'ekko-agent', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode']
 
 const DEFAULTS: Record<AgentStatusId, Omit<AgentStatusRecord, 'updatedAt'>> = {
+  qwen: { id: 'qwen', name: 'Qwen Code', provider: 'Alibaba', kind: 'coding-agent', installed: false, version: '', source: 'not-installed', path: '', error: '', installations: [] },
+  kimi: { id: 'kimi', name: 'Kimi Code', provider: 'Moonshot AI', kind: 'coding-agent', installed: false, version: '', source: 'not-installed', path: '', error: '', installations: [] },
+  codebuddy: { id: 'codebuddy', name: 'CodeBuddy', provider: 'Tencent', kind: 'coding-agent', installed: false, version: '', source: 'not-installed', path: '', error: '', installations: [] },
+  qoder: { id: 'qoder', name: 'Qoder', provider: 'Qoder', kind: 'coding-agent', installed: false, version: '', source: 'not-installed', path: '', error: '', installations: [] },
+  copilot: { id: 'copilot', name: 'GitHub Copilot', provider: 'GitHub', kind: 'coding-agent', installed: false, version: '', source: 'not-installed', path: '', error: '', installations: [] },
+  zcode: { id: 'zcode', name: 'ZCode', provider: 'Z.ai', kind: 'coding-agent', installed: false, version: '', source: 'not-installed', path: '', error: '', installations: [] },
   hermes: {
     id: 'hermes',
     name: 'Hermes',

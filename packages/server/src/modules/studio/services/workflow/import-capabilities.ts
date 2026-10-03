@@ -1,3 +1,4 @@
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
 import { createHash } from 'crypto'
 import { isScopedCodingAgentAuthProvider } from '../../contracts/provider-compat'
 
@@ -24,7 +25,8 @@ export function assertWorkflowImportCapabilities(nodes: unknown[], groups: Capab
     const node = raw && typeof raw === 'object' ? raw as Record<string, any> : {}
     const data = node.data && typeof node.data === 'object' ? node.data as Record<string, any> : {}
     const agent = typeof data.agent === 'string' ? data.agent.trim() : ''
-    if (data.agentMode === 'global' && (agent === 'codex' || agent === 'claude-code' || agent === 'pi' || agent === 'grok' || agent === 'antigravity' || agent === 'cursor' || (agent === 'opencode' || agent === 'dsh'))) continue
+    if (isGlobalOnlyCodingAgent(agent)) continue
+    if (data.agentMode === 'global' && (agent === 'codex' || agent === 'claude-code' || agent === 'pi' || agent === 'grok' || (agent === 'antigravity' || isNativeCodingAgent(agent)) || agent === 'cursor' || (agent === 'opencode' || agent === 'dsh'))) continue
     const provider = typeof data.provider === 'string' ? data.provider.trim() : ''
     const model = typeof data.model === 'string' ? data.model.trim() : ''
     const apiMode = typeof data.apiMode === 'string' ? data.apiMode.trim() : ''
@@ -33,7 +35,7 @@ export function assertWorkflowImportCapabilities(nodes: unknown[], groups: Capab
     const providerModel = `${provider}\u0000${model}`
     const hermesTargetAvailable = agent === 'hermes' && configuredProviderModels.has(providerModel)
     const ekkoAgent = agent === 'ekko-agent'
-    const scopedExternalCodingAgent = agent === 'codex' || agent === 'claude-code' || agent === 'pi' || agent === 'grok' || (agent === 'cursor' || agent === 'antigravity') || (agent === 'opencode' || agent === 'dsh')
+    const scopedExternalCodingAgent = agent === 'codex' || agent === 'claude-code' || agent === 'pi' || agent === 'grok' || (agent === 'cursor' || (agent === 'antigravity' || isNativeCodingAgent(agent))) || (agent === 'opencode' || agent === 'dsh')
     const scopedCodingAgentProviderBlocked = scopedExternalCodingAgent && isScopedCodingAgentAuthProvider(provider)
     const codingAgentTargetAvailable = (ekkoAgent || scopedExternalCodingAgent)
       && !scopedCodingAgentProviderBlocked

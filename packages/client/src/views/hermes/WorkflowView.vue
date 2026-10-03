@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import PageLoading from '@/components/common/PageLoading.vue'
@@ -653,7 +654,7 @@ function makeNode(
     data: {
       title,
       agent,
-      agentMode: agent === 'cursor' || (data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(agent)) ? 'global' : 'scoped',
+      agentMode: isGlobalOnlyCodingAgent(agent) || (data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(agent)) ? 'global' : 'scoped',
       priorAgentMode: data.priorAgentMode === 'global' || data.priorAgentMode === 'scoped' ? data.priorAgentMode : undefined,
       provider: data.provider || defaultModelSelection.value.provider,
       model: data.model || defaultModelSelection.value.model,
@@ -2576,7 +2577,7 @@ function workflowValidationError(): string | null {
     const label = workflowNodeLabel(node)
     if (node.data.agent === 'dsh' && (!node.data.agentPreset || node.data.agentPresetReady === false)) return t('dshPresets.selectMode')
     if (!node.data.title.trim()) return t('workflow.validation.nodeNameRequired', { node: node.id })
-    const usesGlobalCodingAgent = ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(node.data.agent)
+    const usesGlobalCodingAgent = ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(node.data.agent)
       && node.data.agentMode === 'global'
     if (!usesGlobalCodingAgent && !node.data.provider.trim()) return t('workflow.validation.providerRequired', { node: label })
     if (!usesGlobalCodingAgent && !node.data.model.trim()) return t('workflow.validation.modelRequired', { node: label })

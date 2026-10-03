@@ -1,4 +1,6 @@
 import { geminiToResponses, responsesToGemini } from '../antigravity/gemini-adapter'
+import { isNativeCodingAgent } from '../../../studio/contracts/agents/native-coding-agents'
+import { chatCompletionsToResponses, responsesToChatCompletion, responsesToChatCompletionSse } from '../../protocol/adapters/chat-completions'
 import { Readable } from 'stream'
 import type { Context } from 'koa'
 import { config } from '../../../studio/public/config'
@@ -256,7 +258,7 @@ async function* observe() {
       // Grok, OpenCode and DSH report the same model activity through their native
       // stdout streams. The proxy remains responsible for transport and usage
       // accounting, but must not become a second chat lifecycle source.
-      if (target.agentId !== 'grok' && target.agentId !== 'opencode' && target.agentId !== 'dsh' && target.agentId !== 'antigravity') {
+      if (!isNativeCodingAgent(target.agentId) && target.agentId !== 'grok' && target.agentId !== 'opencode' && target.agentId !== 'dsh' && target.agentId !== 'antigravity') {
         codingAgentRunManager.handleResponseEvent(target.agentSessionId, clientEvent)
       }
       yield clientEvent
@@ -378,6 +380,29 @@ export async function codexProxyModels(ctx: Context) {
       created: 0,
       owned_by: target.provider,
     }],
+  }
+}
+
+export async function codingAgentProxyChatCompletions(ctx: Context) {
+  const target = requireTarget(ctx)
+  if (!target) return
+  const requestBody = ctx.request.body as any || {}
+  try {
+    ctx.request.body = chatCompletionsToResponses(requestBody)
+    await codexProxyResponses(ctx)
+    if (ctx.status >= 400) return
+    if (requestBody.stream === true) {
+      const source = ctx.body as AsyncIterable<Uint8Array | string>
+      async function* bytes() { for await (const chunk of source) yield typeof chunk === 'string' ? Buffer.from(chunk) : chunk }
+      const stream = bytes()
+      ctx.body = Readable.from(responsesToChatCompletionSse(openAiResponsesSseToResponsesEvents(stream), target.model,
+        requestBody.stream_options?.include_usage === true))
+    } else ctx.body = responsesToChatCompletion(ctx.body, target.model)
+  } catch (err: any) {
+    ctx.status = err.status || 502
+    ctx.body = { error: { type: 'api_error', message: err.message || 'Coding agent proxy request failed' } }
+  } finally {
+    ctx.request.body = requestBody
   }
 }
 

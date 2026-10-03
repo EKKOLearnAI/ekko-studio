@@ -3936,3 +3936,114 @@ describe('Antigravity scoped launch', () => {
     expect(JSON.parse(readFileSync(launch.files.find(file => file.key === 'settings')!.absolutePath, 'utf8')).modelProvider).toBe('gemini')
   })
 })
+
+it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('prepares %s with native auth and truthful global capabilities', async id => {
+  const home = makeHome()
+  const tokenFile = join(home, 'group-auth.json')
+  const launch = await prepareCodingAgentLaunch(id, {
+    mode: 'global', profile: 'research', workspace: join(home, 'workspace'),
+    studioMcpTokenFile: tokenFile, groupSystemPrompt: 'Review the repository',
+    provider: 'custom:test', model: 'must-not-override-native-model', apiKey: 'must-not-write-upstream-key',
+  })
+  expect(launch).toMatchObject({ agentId: id, mode: 'global', provider: 'global', model: '', args: [], env: {} })
+  expect(launch.nativeSystemPrompt).toContain('Review the repository')
+  expect(JSON.stringify(launch)).not.toContain('must-not-write-upstream-key')
+  expect(launch.command).toBe(id)
+  if (id === 'zcode') expect(launch.nativeMcpServers).toEqual({})
+  else {
+    const server = launch.nativeMcpServers!['ekko-studio-interaction']
+    expect(server.env.ELECTRON_RUN_AS_NODE).toBe('1')
+    expect(Object.values(server.env)).toContain(tokenFile)
+  }
+})
+
+it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot'])('loads %s supplemental MCP configuration from Studio state', async id => {
+  const home = makeHome()
+  await upsertCodingAgentMcpServer(id, 'project-tools', {
+    command: 'node', args: ['project-mcp.mjs'], env: { PROJECT: 'fixture' }, enabled: true,
+  }, { profile: 'research', provider: 'global' })
+  const file = join(home, 'coding-agent', 'native', id, 'mcp.json')
+  expect(JSON.parse(readFileSync(file, 'utf8')).mcpServers['project-tools'].env).toEqual({ PROJECT: 'fixture' })
+  const launch = await prepareCodingAgentLaunch(id, { mode: 'global', profile: 'research', workspace: join(home, 'workspace') })
+  expect(launch.nativeMcpServers!['project-tools']).toMatchObject({ command: 'node', args: ['project-mcp.mjs'], env: { PROJECT: 'fixture' } })
+  expect(launch.nativeMcpServers!['ekko-studio-interaction']).toBeDefined()
+})
+
+
+it.each(['qwen', 'kimi', 'codebuddy', 'copilot', 'zcode'].flatMap(id =>
+  ['chat_completions', 'codex_responses', 'anthropic_messages'].map(apiMode => [id, apiMode] as const)
+))('isolates %s scoped model with %s upstream API', async (id, apiMode) => {
+  const home = makeHome()
+  const globalFile = join(home, 'global-home', '.native-fixture')
+  mkdirSync(dirname(globalFile), { recursive: true })
+  writeFileSync(globalFile, 'original native account')
+  const input = { mode: 'scoped' as const, profile: 'research', provider: 'custom:test',
+    model: 'model-a', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-secret-upstream', apiMode,
+    sessionId: 'session-a', agentSessionId: `run-${id}`, workspace: join(home, 'workspace'),
+    groupSystemPrompt: 'Scoped instructions' }
+  const launch = await prepareCodingAgentLaunch(id, input)
+  expect(launch).toMatchObject({ agentId: id, mode: 'scoped', provider: 'custom:test', model: 'model-a', apiMode })
+  expect(launch.nativeSystemPrompt).toContain('Scoped instructions')
+  expect(JSON.stringify(launch)).not.toContain('sk-secret-upstream')
+  const contents = launch.files.map(file => readFileSync(file.absolutePath, 'utf8')).join('\n')
+  expect(contents).not.toContain('sk-secret-upstream')
+  expect(contents).toContain('model-a')
+  expect(JSON.stringify(launch.env) + contents).toContain(id === 'codebuddy' || id === 'copilot' ? '/api/codex-proxy/' : '/api/claude-code-proxy/')
+  const second = await prepareCodingAgentLaunch(id, { ...input, sessionId: 'session-b', model: 'model-b' })
+  expect(second.rootDir).not.toBe(launch.rootDir)
+  expect(launch.files.map(file => readFileSync(file.absolutePath, 'utf8')).join('\n')).toBe(contents)
+  expect(readFileSync(globalFile, 'utf8')).toBe('original native account')
+  if (id === 'codebuddy') {
+    // ACP authenticates before looking up the selected custom model.
+    expect(launch.env.CODEBUDDY_API_KEY).toBe(launch.env.EKKO_SCOPED_MODEL_TOKEN)
+    expect(launch.env.CODEBUDDY_API_KEY).toMatch(/^hwui_/)
+    expect(launch.env.CODEBUDDY_BASE_URL).toContain('/api/codex-proxy/')
+  }
+  if (id !== 'zcode') expect(launch.nativeMcpServers!['ekko-studio-interaction']).toBeDefined()
+  else {
+    expect(launch.args).toEqual([]) // Official headless parser has no --model flag.
+    const config = JSON.parse(readFileSync(launch.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE, 'utf8'))
+    expect(config.config.defaultModelSelection).toMatchObject({ providerId: 'ekko-scoped', modelId: 'model-a' })
+  }
+})
+
+
+it.each(['chat_completions', 'codex_responses', 'anthropic_messages'] as const)(
+  'uses the generic Copilot BYOK client for scoped GLM with %s upstream', async apiMode => {
+    const home = makeHome()
+    const launch = await prepareCodingAgentLaunch('copilot', {
+      mode: 'scoped', profile: 'research', provider: 'custom:test', model: 'glm-5.3-flash',
+      baseUrl: 'https://api.example.com/v1', apiKey: 'sk-secret-upstream', apiMode,
+      sessionId: `glm-${apiMode}`, workspace: join(home, 'workspace'),
+    })
+    expect(launch.env).toMatchObject({
+      COPILOT_PROVIDER_TYPE: 'openai', COPILOT_PROVIDER_WIRE_API: 'completions',
+      COPILOT_PROVIDER_TRANSPORT: 'http', COPILOT_PROVIDER_MODEL_ID: 'glm-5.3-flash',
+      COPILOT_PROVIDER_WIRE_MODEL: 'glm-5.3-flash', COPILOT_MODEL: 'glm-5.3-flash',
+      COPILOT_HOME: launch.rootDir, COPILOT_OFFLINE: 'true',
+      COPILOT_PROVIDERS_CONFIG: '', COPILOT_PROVIDER_API_KEY_COMMAND: '',
+      COPILOT_PROVIDER_BEARER_TOKEN: '', COPILOT_PROVIDER_HEADERS: '',
+      COPILOT_GITHUB_TOKEN: '', GH_TOKEN: '', GITHUB_TOKEN: '',
+    })
+    expect(launch.env.COPILOT_PROVIDER_BASE_URL).toContain('/api/codex-proxy/')
+    expect(launch.env.COPILOT_PROVIDER_API_KEY).toMatch(/^hwui_/)
+    expect(Number(launch.env.COPILOT_PROVIDER_MAX_PROMPT_TOKENS)).toBeGreaterThan(0)
+    expect(Number(launch.env.COPILOT_PROVIDER_MAX_OUTPUT_TOKENS)).toBeGreaterThan(0)
+    expect(launch.args).toEqual(['--model', 'glm-5.3-flash'])
+    expect(JSON.parse(readFileSync(join(launch.rootDir, 'config.json'), 'utf8'))).toEqual({ model: 'glm-5.3-flash' })
+    expect(JSON.stringify(launch)).not.toContain('sk-secret-upstream')
+  },
+)
+
+it('retains the Anthropic BYOK client for scoped Copilot Claude models', async () => {
+  const home = makeHome()
+  const launch = await prepareCodingAgentLaunch('copilot', {
+    mode: 'scoped', profile: 'research', provider: 'custom:test', model: 'claude-sonnet-4-6',
+    baseUrl: 'https://api.example.com/v1', apiKey: 'sk-secret-upstream', apiMode: 'anthropic_messages',
+    sessionId: 'copilot-claude', workspace: join(home, 'workspace'),
+  })
+  expect(launch.env).toMatchObject({ COPILOT_PROVIDER_TYPE: 'anthropic',
+    COPILOT_PROVIDER_MODEL_ID: 'claude-sonnet-4-6', COPILOT_PROVIDER_WIRE_MODEL: 'claude-sonnet-4-6',
+    COPILOT_PROVIDER_WIRE_API: '', COPILOT_PROVIDER_TRANSPORT: 'http' })
+  expect(launch.env.COPILOT_PROVIDER_BASE_URL).toContain('/api/claude-code-proxy/')
+})
