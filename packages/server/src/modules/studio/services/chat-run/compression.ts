@@ -20,6 +20,48 @@ import {
 } from './context-history'
 import type { ChatMessage, CompressionConfig as CompressorConfig } from '../context-compressor'
 import type { SessionState, BridgeCompressionResult } from './types'
+import { createPrimaryAgentBridge, getPrimaryAgentBridgeManager } from '../../public/chat-agent-runtime'
+import { ensureBiliConversation, resolveStudioContextManager, type StudioContextManagerBinding } from '../context-manager/runtime'
+
+export interface SessionCompressionOwner extends StudioContextManagerBinding {
+  selectedManager?: 'native' | 'bili'
+  independentPlugin?: boolean
+}
+
+export async function getSessionCompressionOwner(sessionId: string, profile: string, family?: 'hermes' | 'ekko'): Promise<SessionCompressionOwner> {
+  const sessionFamily = family || (getSession(sessionId)?.agent === 'ekko-agent' ? 'ekko' : 'hermes')
+  const binding = await resolveStudioContextManager(profile, sessionFamily, sessionId)
+
+  let owner: SessionCompressionOwner = binding
+  if (sessionFamily === 'hermes') {
+    let manager
+    try {
+      manager = getPrimaryAgentBridgeManager()
+    } catch (error) {
+      if (binding.manager !== 'native' || !(error instanceof Error)
+        || error.message !== 'Studio chat Agent runtime has not been configured') throw error
+    }
+    if (manager) {
+      await manager.start()
+      await manager.ensureReady()
+      const bridge = createPrimaryAgentBridge({ endpoint: manager.endpoint })
+      const response = await bridge.contextManagerStatus(sessionId, profile, { context_manager: binding })
+      const observed = response.context_manager as SessionCompressionOwner | undefined
+      if (!observed || observed.conversationId !== sessionId) throw new Error('Context manager returned a different conversation identity')
+      if (!['native', 'bili'].includes(observed.manager) || observed.allowNativeFallback !== binding.allowNativeFallback
+        || (binding.manager === 'bili' && observed.manager !== 'bili')
+        || (observed.selectedManager && observed.selectedManager !== binding.manager)) {
+        throw new Error('Context manager ownership could not be verified')
+      }
+      owner = { ...binding, ...observed }
+    }
+  }
+  if (owner.manager === 'bili' && getCompressionSnapshot(sessionId)) {
+    throw new Error('Native Studio compression snapshot requires explicit migration or raw-history recovery before switching to bili; history was preserved')
+  }
+  if (owner.manager === 'bili') await ensureBiliConversation(profile, sessionFamily, sessionId, owner)
+  return owner
+}
 
 interface RunChatCompressionConfig {
   enabled: boolean
@@ -31,6 +73,7 @@ interface CompressionModelContext {
   model?: string | null
   provider?: string | null
   allowHermesFallback?: boolean
+  contextOwner?: SessionCompressionOwner
 }
 
 export class ContextWindowTooSmallError extends Error {
@@ -82,8 +125,10 @@ export async function buildSnapshotAwareHistory(
   sessionId: string,
   profile: string,
   history: ChatMessage[],
-  modelContext: { model?: string | null; provider?: string | null } = {},
+  modelContext: CompressionModelContext = {},
 ): Promise<ChatMessage[]> {
+  const owner = modelContext.contextOwner || await getSessionCompressionOwner(sessionId, profile)
+  if (owner.manager === 'bili') return history
   const snapshot = getCompressionSnapshot(sessionId)
   if (!snapshot) return history
   const cursorRead = readCursorSnapshotParts(sessionId, snapshot)
@@ -112,8 +157,10 @@ export async function buildDbSnapshotAwareHistory(
   sessionId: string,
   profile: string,
   options: { excludeLastUser?: boolean; truncateToolResults?: boolean } = {},
-  modelContext: { model?: string | null; provider?: string | null } = {},
+  modelContext: CompressionModelContext = {},
 ): Promise<ChatMessage[]> {
+  const owner = modelContext.contextOwner || await getSessionCompressionOwner(sessionId, profile)
+  if (owner.manager === 'bili') return buildDbHistory(sessionId, { ...options, truncateToolResults: false })
   const snapshot = getCompressionSnapshot(sessionId)
   if (snapshot) {
     const cursorRead = readCursorSnapshotParts(sessionId, snapshot, options)
@@ -130,7 +177,7 @@ export async function buildDbSnapshotAwareHistory(
     }
   }
   const history = await buildDbHistory(sessionId, options)
-  return buildSnapshotAwareHistory(sessionId, profile, history, modelContext)
+  return buildSnapshotAwareHistory(sessionId, profile, history, { ...modelContext, contextOwner: owner })
 }
 
 function readDefaultModelContext(config: Record<string, any>, fallback: CompressionModelContext): CompressionModelContext {
@@ -227,6 +274,11 @@ export async function buildCompressedHistory(
   currentInputTokens = 0,
   excludeLastUser = true,
 ): Promise<ChatMessage[]> {
+  const owner = modelContext.contextOwner || await getSessionCompressionOwner(sessionId, profile)
+  modelContext = { ...modelContext, contextOwner: owner }
+  if (owner.manager === 'bili') {
+    return buildDbHistory(sessionId, { excludeLastUser, truncateToolResults: false })
+  }
   try {
     let snapshot = getCompressionSnapshot(sessionId)
     let cursorParts: CursorSnapshotParts | null = null
@@ -440,6 +492,8 @@ export async function compressHistory(
   compressionConfig?: Partial<CompressorConfig>,
   currentInputTokens = 0,
 ): Promise<ChatMessage[]> {
+  const profile = getSession(sessionId)?.profile || 'default'
+  if ((modelContext.contextOwner || await getSessionCompressionOwner(sessionId, profile)).manager === 'bili') return history
   const msgCount = newMessagesOnly ? newMessagesOnly.length : history.length
   const currentRunInputTokens = typeof currentInputTokens === 'number' && Number.isFinite(currentInputTokens) && currentInputTokens > 0
     ? Math.floor(currentInputTokens)
@@ -549,9 +603,13 @@ export async function forceCompressBridgeHistory(
     force?: boolean
   } = {},
 ): Promise<BridgeCompressionResult> {
+  const owner = options.contextOwner || await getSessionCompressionOwner(sessionId, profile)
+  if (owner.manager === 'bili') {
+    throw new Error('bili owns context compression; native overflow compression is disabled. Use session-scoped compact')
+  }
   const initialSnapshot = getCompressionSnapshot(sessionId)
   const session = getSession(sessionId)
-  const modelContext = { model: options.model || session?.model, provider: options.provider || session?.provider }
+  const modelContext = { model: options.model || session?.model, provider: options.provider || session?.provider, contextOwner: owner }
   const historyOptions = { excludeLastUser: options.excludeLastUser ?? true }
   const history = initialSnapshot?.compressedThroughMessageId != null
     ? await buildDbSnapshotAwareHistory(

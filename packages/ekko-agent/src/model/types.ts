@@ -90,6 +90,8 @@ export type OpenAIChatReasoningReplayFormat =
   | 'none'
 
 export interface ModelRequest {
+  /** Runtime-owned HTTP routing; never serialized into the provider payload. */
+  transport?: { proxyOrigin: string; headers: Record<string, string> }
   model?: string
   messages: AgentMessage[]
   signal?: AbortSignal
@@ -154,6 +156,9 @@ export interface ModelProviderConfig {
 }
 
 export interface ModelClient {
+  /** Explicit support for runtime-owned HTTP proxy routing. */
+  supportsContextTransport?: boolean
+  defaultModel?: string
   provider: string
   requestStyle: ModelRequestStyle
   capabilities: ModelCapabilities

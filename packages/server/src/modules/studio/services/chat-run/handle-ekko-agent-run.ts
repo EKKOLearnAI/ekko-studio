@@ -1,4 +1,5 @@
 import { completeRunUsage } from '../../repositories/run-usage-store'
+import { isBuiltinEkkoAgent } from '../../contracts/history-source'
 import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
 import { leaseEkkoMcpServers } from './ekko-mcp-lease'
 import { studioMcpCapabilities } from '../../public/runs/mcp-capabilities'
@@ -10,6 +11,8 @@ import {
   chatEkkoAgentReasoningText as agentReasoningText,
   createChatEkkoAuthorizedProviderFetch as createAuthorizedProviderFetch,
   createChatEkkoModelClient as createModelClient,
+  createChatBillionContextManager,
+  type ChatContextManager,
   getChatEkkoAgent as getGlobalEkkoAgent,
   getChatEkkoModelRequestTimeoutMs,
   normalizeChatEkkoAgentReasoning as normalizeAgentReasoning,
@@ -46,7 +49,8 @@ import { logger } from '../../public/logging'
 import { recordSessionUsage } from '../usage/usage-recorder'
 import { observeRunChatPetEvent } from '../../public/pet-events'
 import { contentBlocksToString, convertContentBlocksForAgent, extractTextForPreview } from './content-blocks'
-import { buildCompressedHistory, getOrCreateSession } from './compression'
+import { buildCompressedHistory, buildDbSnapshotAwareHistory, getOrCreateSession } from './compression'
+import { ensureBiliConversation, refreshExternalContextUsage, resolveStudioContextManager } from '../context-manager/runtime'
 import { handleEkkoSessionCommand, parseEkkoRunCommand } from './ekko-session-command'
 import { resolveBridgeRunModelConfig, type RunModelGroup } from './model-config'
 import { persistRunMessages, type RunMessageDraft } from './message-persistence'
@@ -384,6 +388,8 @@ function createProviderModelClient(
     ...client,
     provider: client.provider,
     requestStyle: client.requestStyle,
+    supportsContextTransport: client.supportsContextTransport,
+    defaultModel: client.defaultModel,
     capabilities: client.capabilities,
     requestTarget: (request: any) => client.requestTarget?.(request) || '',
     async create(request: ModelRequest): Promise<ModelResponse> {
@@ -438,7 +444,15 @@ export async function handleEkkoAgentRun(
     return
   }
   const storedSession = getSession(sessionId)
+  if (storedSession && storedSession.profile !== profile) {
+    socket.emit('run.failed', { event: 'run.failed', session_id: sessionId, error: 'Context manager session belongs to another profile.' })
+    return
+  }
   const command = parseEkkoRunCommand(data, storedSession?.source)
+  if (storedSession && !isBuiltinEkkoAgent(storedSession.agent)) {
+    socket.emit('run.failed', { event: 'run.failed', session_id: sessionId, error: 'Context manager session belongs to another agent family.' })
+    return
+  }
   if (command && !backgroundContinuationContext) {
     await handleEkkoSessionCommand(nsp, socket, data, command, profile, sessionMap, dequeueNextQueuedRun)
     return
@@ -461,31 +475,68 @@ export async function handleEkkoAgentRun(
   state.events = []
   const abortController = new AbortController()
   state.abortController = abortController
+  const emit = (event: string, payload: any) => {
+    const tagged = { ...payload, session_id: sessionId }
+    observeRunChatPetEvent(profile, event, tagged)
+    data.onEvent?.(event, tagged)
+    appendStateEvent(state, event, tagged)
+    const outbound = buildOutboundRunEvent(event, tagged)
+    nsp.to(`session:${sessionId}`).emit(event, outbound)
+    if (!data.onEvent && !nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
+      socket.emit(event, outbound)
+    }
+  }
 
   if (storedSession && !storedSession.user_id && authenticatedUserId) {
     updateSession(sessionId, { user_id: authenticatedUserId })
   }
-  const modelConfig = await resolveBridgeRunModelConfig({
-    profile,
-    sessionModel: storedSession?.model,
-    sessionProvider: storedSession?.provider,
-    requestedModel: data.model,
-    requestedProvider: data.provider,
-    modelGroups: data.model_groups,
-    preferRequested: true,
-  })
-  const requestedApiMode = data.apiMode || data.api_mode
-  const storedApiMode = storedSession?.provider === modelConfig.provider
-    ? storedSession.api_mode || undefined
-    : undefined
-  const runtimeConfig = await resolveEkkoProviderRuntimeConfig({
-    profile,
-    provider: modelConfig.provider,
-    model: modelConfig.model,
-    baseUrl: data.baseUrl || data.base_url,
-    apiKey: data.apiKey || data.api_key,
-    apiMode: requestedApiMode || storedApiMode,
-  })
+  let modelConfig: Awaited<ReturnType<typeof resolveBridgeRunModelConfig>>
+  let runtimeConfig: Awaited<ReturnType<typeof resolveEkkoProviderRuntimeConfig>>
+  try {
+    modelConfig = await resolveBridgeRunModelConfig({
+      profile,
+      sessionModel: storedSession?.model,
+      sessionProvider: storedSession?.provider,
+      requestedModel: data.model,
+      requestedProvider: data.provider,
+      modelGroups: data.model_groups,
+      preferRequested: true,
+    })
+    const requestedApiMode = data.apiMode || data.api_mode
+    const storedApiMode = storedSession?.provider === modelConfig.provider
+      ? storedSession.api_mode || undefined
+      : undefined
+    runtimeConfig = await resolveEkkoProviderRuntimeConfig({
+      profile,
+      provider: modelConfig.provider,
+      model: modelConfig.model,
+      baseUrl: data.baseUrl || data.base_url,
+      apiKey: data.apiKey || data.api_key,
+      apiMode: requestedApiMode || storedApiMode,
+    })
+    abortController.signal.throwIfAborted()
+  } catch (error) {
+    try {
+      if (!abortController.signal.aborted) emit('run.failed', {
+        event: 'run.failed', error: error instanceof Error ? error.message : String(error),
+        queue_remaining: state.queue.length, queue_id: data.queue_id,
+        autonomous: data.autonomous === true, delegation_id: data.background_delegation_id,
+      })
+    } finally {
+      if (state.abortController === abortController) {
+        state.isWorking = false
+        state.isAborting = false
+        state.runId = undefined
+        state.abortController = undefined
+        state.activeRunMarker = undefined
+        state.responseRun = undefined
+        state.profile = undefined
+        state.events = []
+        if (state.queue.length > 0) dequeueNextQueuedRun(socket, sessionId, profile)
+      }
+    }
+    return
+  }
   const baseUrl = runtimeConfig.baseUrl || ''
   const apiMode = runtimeConfig.apiMode
   const apiKey = runtimeConfig.apiKey
@@ -520,18 +571,6 @@ export async function handleEkkoAgentRun(
       : data.session_source === 'workflow' || data.source === 'workflow'
         ? 'workflow'
         : 'builtin_agent'
-  const emit = (event: string, payload: any) => {
-    const tagged = { ...payload, session_id: sessionId }
-    observeRunChatPetEvent(profile, event, tagged)
-    data.onEvent?.(event, tagged)
-    appendStateEvent(state, event, tagged)
-    const outbound = buildOutboundRunEvent(event, tagged)
-    nsp.to(`session:${sessionId}`).emit(event, outbound)
-    if (!data.onEvent && !nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
-      socket.emit(event, outbound)
-    }
-  }
-
   if (!storedSession) {
     const previewText = extractTextForPreview(displayInput === null ? data.input : displayInput || data.input)
     const title = previewText.replace(/[\r\n]/g, ' ').substring(0, 100)
@@ -693,6 +732,9 @@ export async function handleEkkoAgentRun(
   let usageCallIndex = 0
   let modelStartedAt: number | undefined
   let contextEstimate: any
+  let contextBinding: Awaited<ReturnType<typeof resolveStudioContextManager>> | undefined
+  let contextManager: ChatContextManager | undefined
+  let externalUsageRefreshed = false
   let parentUsagePersisted = false
   const pendingToolGroups = new Map<string, PendingToolGroup>()
   const toolCallGroupKeys = new Map<string, string>()
@@ -948,6 +990,7 @@ export async function handleEkkoAgentRun(
         delegation_id: data.background_delegation_id,
       })
     } else if (event.type === 'context.estimated') {
+      if (contextBinding?.manager === 'bili') return
       contextEstimate = event.estimate
       emit('context.estimated', {
         event: 'context.estimated',
@@ -1184,8 +1227,8 @@ export async function handleEkkoAgentRun(
             input_tokens: state.inputTokens || 0,
             output_tokens: state.outputTokens || 0,
             total_tokens: (state.inputTokens || 0) + (state.outputTokens || 0),
-            contextTokens: state.contextTokens,
-            context_tokens: state.contextTokens,
+            contextTokens: contextBinding?.manager === 'bili' ? state.externalContext?.tokens ?? null : state.contextTokens,
+            context_tokens: contextBinding?.manager === 'bili' ? state.externalContext?.tokens ?? null : state.contextTokens,
           })
         }
       }
@@ -1278,6 +1321,28 @@ export async function handleEkkoAgentRun(
   }
 
   try {
+    contextBinding = await resolveStudioContextManager(profile, 'ekko', sessionId)
+    state.contextFallback = false
+    if (contextBinding.manager === 'bili') {
+      state.contextOwner = { manager: 'bili', proxyUrl: contextBinding.proxyUrl, conversationId: sessionId }
+      state.externalContext = undefined
+      state.contextTokens = undefined
+      state.contextManagerStatus = 'unavailable'
+      // Branch recovery must complete even when native fallback is explicitly allowed.
+      await ensureBiliConversation(profile, 'ekko', sessionId)
+      if (modelClient.supportsContextTransport !== true) {
+        if (!contextBinding.allowNativeFallback) throw new Error(`Billion-context transport is unsupported by ${modelClient.requestStyle}.`)
+        contextBinding = { ...contextBinding, manager: 'native' }
+        state.contextFallback = true
+        emit('context.manager', { manager: 'native', selectedManager: 'bili', fallback: true, reason: 'unsupported_transport' })
+      } else {
+        contextManager = createChatBillionContextManager({ proxyOrigin: contextBinding.proxyUrl, agent: 'ekko-agent' })
+        await contextManager.tools(abortController.signal)
+      }
+    }
+    state.contextOwner = { manager: contextBinding.manager, proxyUrl: contextBinding.proxyUrl, conversationId: sessionId }
+    state.externalContext = undefined
+    state.contextManagerStatus = contextBinding.manager === 'bili' ? 'unavailable' : 'native'
     const mcpLease = await leaseEkkoMcpServers(mcpServers, { sessionId, profile,
       userId: socket.data?.user?.id, signal: abortController.signal })
     releaseMcp = mcpLease.dispose
@@ -1371,7 +1436,12 @@ export async function handleEkkoAgentRun(
     let fixedContextEstimate: Promise<number> | undefined
     const compressedHistory = callbackContext
       ? []
-      : data.context_compression_enabled === false ? [] : await buildCompressedHistory(
+      : contextBinding.manager === 'bili'
+        ? await buildDbSnapshotAwareHistory(sessionId, profile, {
+          excludeLastUser: shouldPersistUserMessage && data.display_role !== 'command',
+          truncateToolResults: false,
+        }, { model: modelConfig.model, provider: modelConfig.provider })
+        : data.context_compression_enabled === false ? [] : await buildCompressedHistory(
         sessionId,
         profile,
         baseUrl,
@@ -1438,6 +1508,7 @@ export async function handleEkkoAgentRun(
           defaultWriteScope: data.memory_default_write_scope ?? (isGroupMemory ? contextScope : profileScope),
         }
     const result = await agent.run({
+      ...(contextManager ? { contextManager, contextKey: contextBinding.conversationId } : {}),
       modelClient,
       model: modelConfig.model,
       reasoningEffort,
@@ -1483,7 +1554,7 @@ export async function handleEkkoAgentRun(
       metadata,
       ...(callbackContext
         ? {
-            contextKey: `${sessionId}:background-callback:${callbackContext.subagentId}`,
+            contextKey: contextBinding.manager === 'bili' ? sessionId : `${sessionId}:background-callback:${callbackContext.subagentId}`,
             memoryEnabled: false,
             ephemeralContext: true,
             skillReviewEnabled: false,
@@ -1607,7 +1678,15 @@ export async function handleEkkoAgentRun(
     state.inputTokens = (state.inputTokens || 0) + usageInput
     state.outputTokens = (state.outputTokens || 0) + usageOutput
     parentUsagePersisted = true
-    if (contextEstimate?.contextTokens != null) state.contextTokens = contextEstimate.contextTokens
+    let effectiveContextTokens: number | undefined
+    if (contextBinding.manager === 'bili') {
+      const available = await refreshExternalContextUsage({ sessionId, profile, agent: 'ekko', model: modelConfig.model, state, emit, owner: state.contextOwner })
+      externalUsageRefreshed = true
+      effectiveContextTokens = available ? (state as SessionState).externalContext?.tokens : undefined
+    } else {
+      if (contextEstimate?.contextTokens != null) state.contextTokens = contextEstimate.contextTokens
+      effectiveContextTokens = contextEstimate?.contextTokens ?? state.contextTokens
+    }
     updateSessionStats(sessionId)
     if (state.queue.length === 0) {
       try {
@@ -1625,8 +1704,8 @@ export async function handleEkkoAgentRun(
       input_tokens: state.inputTokens || 0,
       output_tokens: state.outputTokens || 0,
       total_tokens: (state.inputTokens || 0) + (state.outputTokens || 0),
-      contextTokens: contextEstimate?.contextTokens ?? state.contextTokens,
-      context_tokens: contextEstimate?.contextTokens ?? state.contextTokens,
+      contextTokens: effectiveContextTokens ?? null,
+      context_tokens: effectiveContextTokens ?? null,
     })
     const workspaceRunChange = completeWorkspaceRunDiff()
     emit('run.completed', {
@@ -1635,8 +1714,8 @@ export async function handleEkkoAgentRun(
       message_id: assistantMessageId || undefined,
       output: assistantText,
       context: result.context,
-      contextTokens: contextEstimate?.contextTokens,
-      context_tokens: contextEstimate?.contextTokens,
+      contextTokens: contextBinding.manager === 'bili' ? effectiveContextTokens ?? null : contextEstimate?.contextTokens,
+      context_tokens: contextBinding.manager === 'bili' ? effectiveContextTokens ?? null : contextEstimate?.contextTokens,
       contextEstimate,
       usage: {
         input_tokens: usageInput,
@@ -1684,6 +1763,13 @@ export async function handleEkkoAgentRun(
       run_usage: completeRunUsage(sessionId, runId, assistantMessageId),
     })
   } finally {
+    if (contextBinding?.manager === 'bili' && !externalUsageRefreshed) {
+      try {
+        await refreshExternalContextUsage({ sessionId, profile, agent: 'ekko', model: modelConfig.model, state, emit, owner: contextBinding })
+      } catch (error) {
+        logger.warn(error, '[chat-run-socket] failed to refresh bili usage for %s', sessionId)
+      }
+    }
     foregroundEnded = true
     releaseIdleMcp()
     if (!abortController.signal.aborted || state.abortController === abortController) {

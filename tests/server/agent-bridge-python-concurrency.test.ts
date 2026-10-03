@@ -1598,6 +1598,17 @@ broker._approval_worker_key["approval-a"] = "default"
 broker._compression_profile["compression-a"] = "default"
 broker._compression_worker_key["compression-a"] = "default"
 
+try:
+    broker.handle({"action": "destroy_profile", "profile": "default"})
+    raise AssertionError("running profile was destroyed")
+except ValueError as exc:
+    assert "running or starting" in str(exc)
+assert not profile_worker.stopped
+assert broker._workers["default"] is profile_worker
+assert broker._running_run_profile == {"run-session-a": "default"}
+broker._running_run_profile.clear()
+broker._running_run_worker_key.clear()
+
 destroy_profile_result = broker.handle({"action": "destroy_profile", "profile": "default"})
 assert destroy_profile_result == {"profile": "default", "destroyed": 2}
 assert profile_worker.stopped
@@ -1957,6 +1968,8 @@ assert prod_worker.endpoint != preview_worker.endpoint
     runPython(String.raw`
 ${harness}
 
+# Keep transport selection independent of the long TMPDIR socket-path fallback.
+bridge.tempfile.gettempdir = lambda: "/tmp"
 os.environ.pop("HERMES_AGENT_BRIDGE_WORKER_TRANSPORT", None)
 os.environ.pop("HERMES_AGENT_BRIDGE_WORKER_PORT_BASE", None)
 

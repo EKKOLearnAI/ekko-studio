@@ -8,6 +8,8 @@ function runPython(script: string): any {
       cwd: process.cwd(),
       encoding: 'utf-8',
       stdio: 'pipe',
+      env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('HERMES_')
+        && !key.startsWith('BILI_') && !key.startsWith('BILLION_CONTEXT_') && key !== 'PYTHONPATH')),
     }))
   }
   catch (error) {
@@ -24,10 +26,20 @@ const reasoningHarness = String.raw`
 import contextlib
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import types
 from pathlib import Path
+
+for key in list(os.environ):
+    if key.startswith(("HERMES_", "BILI_", "BILLION_CONTEXT_")):
+        os.environ.pop(key)
+sys.path.insert(0, str(Path("packages/server/src/modules/hermes/services/bridge/python").resolve()))
+
+hermes_plugins = types.ModuleType("hermes_cli.plugins")
+hermes_plugins.get_plugin_manager = lambda: types.SimpleNamespace(discover_and_load=lambda: None, list_plugins=lambda: [])
+sys.modules["hermes_cli.plugins"] = hermes_plugins
 
 config = {
     "model": "gpt-5.6-luna",

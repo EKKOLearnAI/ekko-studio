@@ -8,6 +8,10 @@ import { useSettingsStore } from '@/stores/hermes/settings'
 import ChatInput from '@/components/hermes/chat/ChatInput.vue'
 
 enableAutoUnmount(afterEach)
+afterEach(() => {
+  if (vi.isMockFunction(Date.now)) vi.mocked(Date.now).mockRestore()
+  vi.useRealTimers()
+})
 
 const fetchSkillsMock = vi.hoisted(() => vi.fn())
 const fetchSkillBundlesMock = vi.hoisted(() => vi.fn())
@@ -345,7 +349,7 @@ describe('ChatInput draft persistence', () => {
     await nextTick()
     expect(wrapper.get('.context-info').text()).toBe('chat.sessionUsage 45.2k')
     Object.assign(chatStore.activeSession!, { inputTokens: 1200, outputTokens: 800, contextTokens: 2000 })
-    Object.assign(chatStore.activeSession!, { agent: 'ekko-agent', codingAgentId: 'ekko-agent' })
+    Object.assign(chatStore.activeSession!, { agent: 'ekko-agent', codingAgentId: 'ekko-agent', contextManager: 'native', contextSource: 'estimate', contextManagerStatus: 'native' })
     await flushPromises()
 
     expect(wrapper.get('.context-info').text()).toMatch(/2\.0k\s+\//)
@@ -375,6 +379,80 @@ describe('ChatInput draft persistence', () => {
     useChatStore().activeSession!.contextTokens = 0
     await nextTick()
     expect(wrapper.get('.context-info').text()).toBe('chat.sessionUsage 1857.2M')
+  })
+
+  it('shows context source and degradation without substituting billing counters', async () => {
+    const wrapper = mountForSession('session-context', {
+      inputTokens: 900000, outputTokens: 100000, cacheReadTokens: 700000,
+      contextTokens: 0, contextManager: 'bili', contextSource: 'usage', contextManagerStatus: 'active',
+      model: 'test-model', contextWindow: 32000, contextObservedAt: Date.now(), contextGeneration: 'g2', contextModel: 'test-model',
+    })
+    await flushPromises()
+    expect(wrapper.get('.context-info').text()).toMatch(/^0\s+\//)
+    expect(wrapper.get('.context-info').text()).toContain('32.0k')
+    expect(wrapper.get('.context-status').attributes('title')).toContain('contextManager.sourceUsage')
+    expect(wrapper.get('.context-status').attributes('title')).toContain('test-model')
+    Object.assign(useChatStore().activeSession!, { contextSource: 'unavailable', contextManagerStatus: 'unavailable' })
+    await nextTick()
+    expect(wrapper.get('.context-info').text()).toContain('contextManager.unavailable')
+    expect(wrapper.find('.context-bar').exists()).toBe(false)
+    Object.assign(useChatStore().activeSession!, { contextManager: 'native', contextFallback: true, contextSource: 'estimate', contextManagerStatus: 'native', contextTokens: 1200 })
+    await nextTick()
+    expect(wrapper.get('.context-status').text()).toContain('contextManager.fallback')
+    expect(wrapper.get('.context-status').attributes('title')).toContain('contextManager.sourceEstimate')
+    expect(wrapper.get('.context-info').text()).toMatch(/^1.2k\s+\//)
+  })
+
+  it('shows unknown native context rather than legacy or cumulative billing tokens', async () => {
+    const wrapper = mountForSession('session-native-unknown', {
+      agent: 'hermes', contextTokens: 2000, inputTokens: 900000, outputTokens: 100000,
+    })
+    await flushPromises()
+    expect(wrapper.get('.context-info').text()).toBe('contextManager.unknown')
+    expect(wrapper.find('.context-bar').exists()).toBe(false)
+    expect(wrapper.find('.context-limit-editable').exists()).toBe(false)
+    useChatStore().activeSession!.contextTokens = undefined
+    await nextTick()
+    expect(wrapper.get('.context-info').text()).toBe('contextManager.unknown')
+  })
+
+  it.each([
+    ['expired', { contextObservedAt: Date.now() - 900001 }],
+    ['future', { contextObservedAt: Date.now() + 60001 }],
+    ['other model', { contextModel: 'other-model' }],
+    ['missing generation', { contextGeneration: undefined }],
+    ['missing window', { contextWindow: undefined }],
+    ['wrong generation type', { contextGeneration: 2 }],
+  ])('hides %s external observations without leaking their limit or source', async (_name, invalid) => {
+    const now = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(now)
+    if (_name === 'future') invalid.contextObservedAt = now + 60001
+    if (_name === 'expired') invalid.contextObservedAt = now - 900001
+    const wrapper = mountForSession('session-invalid-context', {
+      model: 'test-model', inputTokens: 900000, contextManager: 'bili', contextSource: 'usage', contextManagerStatus: 'active',
+      contextTokens: 1200, contextObservedAt: Date.now(), contextGeneration: 'g2', contextModel: 'test-model', contextWindow: 32000,
+      ...invalid as any,
+    })
+    await flushPromises()
+    expect(wrapper.get('.context-info').text()).toBe('contextManager.unknown')
+    expect(wrapper.get('.context-status').text()).toContain('contextManager.unavailable')
+    expect(wrapper.get('.context-status').attributes('title')).toContain('contextManager.sourceUnavailable')
+    expect(wrapper.find('.context-limit-observed').exists()).toBe(false)
+    expect(wrapper.find('.context-bar').exists()).toBe(false)
+  })
+
+  it('expires a visible observation without waiting for another usage event', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountForSession('session-expiring-context', {
+      model: 'test-model', contextManager: 'bili', contextSource: 'usage', contextManagerStatus: 'active',
+      contextTokens: 1200, contextObservedAt: Date.now() - 900000, contextGeneration: 'g2', contextModel: 'test-model', contextWindow: 32000,
+    })
+    await nextTick()
+    expect(wrapper.get('.context-info').text()).toMatch(/^1.2k/)
+    await vi.advanceTimersByTimeAsync(1000)
+    await nextTick()
+    expect(wrapper.get('.context-info').text()).toBe('contextManager.unknown')
+    expect(wrapper.find('.context-bar').exists()).toBe(false)
   })
 
   it('shows reasoning effort selector for coding-agent sessions', async () => {
@@ -563,8 +641,12 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.findAll('.slash-command-item').length).toBeGreaterThan(0)
 
     await textarea.setValue('/ter')
+    textarea.element.setSelectionRange(4, 4)
+    await textarea.trigger('input')
     await nextTick()
 
-    expect(wrapper.find('.slash-command-dropdown').exists()).toBe(false)
+    await vi.waitFor(() => {
+      expect(wrapper.find('.slash-command-dropdown').exists()).toBe(false)
+    })
   })
 })

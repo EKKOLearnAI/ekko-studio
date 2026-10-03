@@ -219,10 +219,46 @@ JavaScript 运行时也会为不与根字段冲突的 Profile 安装直接属性
 | `backgroundDelegationEnabled?`, `subtaskMaxSteps?` | 后台委派开关和子任务步数。 |
 | `modelDefaults?` | 除 messages/tools/stream 外的默认模型请求字段。 |
 | `contextKey?` | Runtime 上下文缓存键。 |
+| `contextManager?` | 异步 `AgentContextManager` 扩展；省略时 `contextManagement` 为 `native`，不发送 bili 请求。 |
 | `memory?` | 自定义 MemoryService；默认使用共享服务并由运行身份限定 Profile。 |
 | `logWriter?`, `logProfile?` | 自定义结构化日志写入器和 Profile 标签。 |
 
-`AgentRuntime.run(input)` 的 `input` 字段包括：必填 `messages`；可选 `signal`、`systemPrompt`、`skills`、`maxSteps`、`maxModelRetries`、`toolFailureRecoveryThreshold`、兼容字段 `maxConsecutiveToolFailures`、`toolContext`、`model`、`temperature`、`maxTokens`、`reasoningEffort`、`reasoningSummary`、`metadata`、`modelClient`、`modelDefaults`、`contextKey`、`context`、`memoryEnabled`、`memoryInput`、`backgroundDelegationEnabled`、`logContext`、`onSkillReviewUsage`、`onEvent`。同一工具连续失败达到阈值时，runtime 注入纠错指令并继续运行，不会因该阈值终止。完整方法签名见文末自动清单。
+`AgentRuntime.run(input)` 的 `input` 字段包括：必填 `messages`；可选 `signal`、`systemPrompt`、`skills`、`maxSteps`、`maxModelRetries`、`toolFailureRecoveryThreshold`、兼容字段 `maxConsecutiveToolFailures`、`toolContext`、`model`、`temperature`、`maxTokens`、`reasoningEffort`、`reasoningSummary`、`metadata`、`modelClient`、`modelDefaults`、`contextKey`、`contextManager`、`context`、`memoryEnabled`、`memoryInput`、`backgroundDelegationEnabled`、`logContext`、`onSkillReviewUsage`、`onEvent`。同一工具连续失败达到阈值时，runtime 注入纠错指令并继续运行，不会因该阈值终止。完整方法签名见文末自动清单。
+
+### 可选 billion-context 上下文管理器
+
+```ts
+import { BillionContextManager } from 'ekko-agent'
+
+const manager = new BillionContextManager({
+  proxyOrigin: 'http://127.0.0.1:8787',
+  contextWindow: 128000,
+})
+const runtime = profileAgent.runtime.create()
+const result = await runtime.run({
+  messages,
+  contextManager: manager,
+  contextKey: conversationId,
+  maxTokens: 4096,
+})
+const proxyStatus = await manager.client.status(conversationId)
+```
+
+此扩展不写入全局配置，也不启动/停止代理。宿主根据 Profile 的策略选择是否注入管理器，仍保留原始上游模型 URL。OpenAI Chat、OpenAI Responses 和 Anthropic Messages 的流式/非流式请求经公开 `/bili/<上游 URL>` 路由发送，已经使用同一代理路由的 URL 不会重复包装。自定义 ModelClient 必须明确声明 `supportsContextTransport: true` 并实际处理 `ModelRequest.transport`，否则 bili 管理器抛错。
+
+`AgentContextManager` 的接口是 `strategy: string`、`tools(signal?: AbortSignal): Promise<AgentTool[]>`、`prepareRequest(request: ModelRequest, binding: AgentContextManagerRequest): Promise<ModelRequest>`。Binding 提供当前 `conversationId`、`profileId?`、`modelClient`。Runtime 在估算和运行前异步注册管理器工具，在每次模型请求前调用 `prepareRequest`。宿主可向 `tools` 传入取消信号；`prepareRequest` 使用请求自带的信号，包括首次 manifest 请求。共享管理器的并发 manifest 调用不会因另一个调用取消而失败。bili 工具定义来自公开 manifest，必须具备 `compress`、`decompress`、`search_context`、`acp_status`、`acp_cache` 的完整 function/object schema；没有内置替代 schema。工具禁用、同名工具冲突、协议/HTTP 失败和不支持的模型传输不会静默降级为原生。
+
+宿主应为每次运行传入稳定的 `contextKey`；未提供任何会话身份时，管理器使用当前 runtime 生命周期内稳定的随机 ID。bili 子 agent 使用独立随机 UUID，不拼接父会话 ID，也不复制父 bili 状态；其后续工具和模型请求保持相同子会话身份。普通宿主工具的 `AgentToolContext.sessionId` 保持原身份，只有 context 工具使用 runtime 绑定的 `contextConversationId`，不接受工具参数中的会话 ID 覆盖。原生子 agent 保留既有派生 ID 行为。
+
+`runtime.contextManagement` 和 `runtime.contextManager` 表示构造时的策略和实例。`run({ contextManager })` 创建隔离运行实例和 registry，不修改共享 runtime 的策略；动态工具、context 工具及 code-exec 分发不会串到其他会话。共享 runtime 仍可按宿主 session 查询/停止后台子任务和请求前台边界中断。Context 工具名称受到 registry 独占保护，provider、skill 或 built-in 冲突时失败关闭。
+
+非 `native` 策略下，宿主必须跳过原生自动、手动及超窗压缩，不能同时改写历史再让 bili 管理上下文。Runtime 本身不会自动调用 `/compact`。`BillionContextClient.compact(conversationId, signal?)` 仅通知已经发生的原生历史改写，不是压缩命令；需要主动 bili 压缩时调用公开 `tool` 并传入该 manifest 规定的参数。
+
+Studio 按 Profile 校验会话归属，以原始全局唯一 `sessionId` 作为主会话 `conversationId`，不添加 agent/Profile 前缀。首个真实请求前必须完成公共生命周期检查；pending branch/fork、manifest、工具冲突和运行错误不得切换原生。只有不支持 bili transport 的预检允许显式配置的原生 fallback。bili 路径加载 DB 已有原文和旧摘要，不创建新的原生摘要，也不声称旧摘要可恢复；手动压缩使用公共 `compress` 工具并验证提交，不使用 notifier 冒充压缩。
+
+`BillionContextClient` 也可独立使用，提供 `manifest(signal?)`、`register(body, signal?)`、`runtimeInfo(body, signal?)`、`tool(conversationId, tool, args, signal?)`、`status(conversationId, signal?)`、`compact(conversationId, signal?)` 及 `callPublic<T>(path, { method?, body?, signal? })`。`callPublic` 限定到配置代理的 `/__bili/`，拒绝跨源及重定向；可用于宿主的公开 fork/注册协议扩展。注册内容由宿主依据其代理公开协议显式提供，runtime 不猜测注册 payload。HTTP 响应必须包含 `ok: true`；已绑定 context 工具的 `result` 文本原样进入运行循环，不经本地 JSON 重排或文本截断，其他工具保留 sanitizer。
+
+`ModelUsage` 仍是模型供应商账单用量，`contextEstimate` 仍是压缩前本地估算，不能将累计 input/output token 当作压缩后上下文。宿主应独立读取 `manager.client.status(conversationId)` 的公开上下文状态；读取失败时应展示未知/错误，不能声称接管成功或用账单数字冒充实际上下文。
 
 ## Profile `memory` 模块
 
@@ -1010,6 +1046,69 @@ export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHE
 
 export function serializeDefaultEkkoConfig(): string
 ```
+### `src/context/billion-context.ts`
+
+```ts
+export interface BillionContextClientOptions {
+  proxyOrigin: string
+  fetch?: FetchLike
+  timeoutMs?: number
+}
+
+export interface BillionContextPublicRequest {
+  method?: 'GET' | 'POST'
+  body?: Record<string, unknown>
+  signal?: AbortSignal
+}
+
+export interface BillionContextManifest {
+  ok: true
+  protocolVersion: number
+  toolNames: string[]
+  tools: { openai: Array<{ type: string; function: AgentToolDefinition }> }
+  [key: string]: unknown
+}
+
+export class BillionContextClient {
+  readonly proxyOrigin: string
+  constructor(options: BillionContextClientOptions)
+  async callPublic<T = Record<string, unknown>>(path: string, options: BillionContextPublicRequest = {}): Promise<T>
+  async manifest(signal?: AbortSignal): Promise<BillionContextManifest>
+  register(body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>>
+  runtimeInfo(body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>>
+  async tool(conversationId: string, tool: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string>
+  status(conversationId: string, signal?: AbortSignal): Promise<Record<string, unknown>>
+  compact(conversationId: string, signal?: AbortSignal): Promise<Record<string, unknown>>
+}
+
+export interface BillionContextManagerOptions extends BillionContextClientOptions {
+  agent?: string
+  contextWindow?: number
+}
+
+export class BillionContextManager implements AgentContextManager {
+  readonly strategy = 'billion-context'
+  readonly client: BillionContextClient
+  constructor(options: BillionContextManagerOptions)
+  async tools(signal?: AbortSignal): Promise<AgentTool[]>
+  async prepareRequest(request: ModelRequest, binding: AgentContextManagerRequest): Promise<ModelRequest>
+}
+```
+### `src/context/types.ts`
+
+```ts
+export interface AgentContextManagerRequest {
+  conversationId: string
+  profileId?: string
+  modelClient: ModelClient
+}
+
+export interface AgentContextManager {
+  readonly strategy: string
+  tools(signal?: AbortSignal): Promise<AgentTool[]>
+  prepareRequest(request: ModelRequest, binding: AgentContextManagerRequest): Promise<ModelRequest>
+}
+```
 ### `src/conversations/schema.ts`
 
 ```ts
@@ -1350,6 +1449,10 @@ export interface EkkoAgentInfo {
 export function createEkkoAgentInfo(): EkkoAgentInfo
 
 export * from './model/errors'
+
+export * from './context/types'
+
+export * from './context/billion-context'
 
 export * from './agent/manager'
 
@@ -2260,6 +2363,8 @@ export interface AuthorizedModelClientOptions {
 }
 
 export class AuthorizedModelClient implements ModelClient {
+  get supportsContextTransport(): boolean
+  get defaultModel(): string | undefined
   readonly provider: string
   readonly requestStyle: ModelRequestStyle
   readonly capabilities: ModelCapabilities
@@ -2308,6 +2413,8 @@ export function isRetryableStatus(statusCode: number): boolean
 
 ```ts
 export function modelRequestHeaders( config: ModelProviderConfig, request: ModelRequest, defaults: Record<string, string> = {}, ): HeadersInit
+
+export function modelRequestUrl(url: string, request: ModelRequest): string
 
 export function requestHeaders(config: ModelProviderConfig, defaults: Record<string, string> = {}): HeadersInit
 
@@ -2507,6 +2614,8 @@ export function requestStyleToModelApiMode(requestStyle: ModelRequestStyle): Ekk
 
 ```ts
 export class AnthropicMessagesModelClient implements ModelClient {
+  readonly supportsContextTransport = true
+  get defaultModel(): string
   readonly provider: string
   readonly requestStyle = 'anthropic-messages'
   readonly capabilities: ModelCapabilities
@@ -2554,6 +2663,8 @@ export function normalizeGeminiResponse(response: GeminiResponse, model?: string
 
 ```ts
 export class OpenAICompatibleModelClient implements ModelClient {
+  readonly supportsContextTransport = true
+  get defaultModel(): string
   readonly provider: string
   readonly requestStyle = 'openai-chat'
   readonly capabilities: ModelCapabilities
@@ -2571,6 +2682,8 @@ export function normalizeOpenAIChatResponse(provider: string, response: OpenAICh
 
 ```ts
 export class OpenAIResponsesModelClient implements ModelClient {
+  readonly supportsContextTransport = true
+  get defaultModel(): string
   readonly provider: string
   readonly requestStyle = 'openai-responses'
   readonly capabilities: ModelCapabilities
@@ -2685,6 +2798,7 @@ export type ModelReasoningSummary = 'auto' | 'concise' | 'detailed'
 export type OpenAIChatReasoningReplayFormat = | 'reasoning' | 'reasoning_content' | 'reasoning_details' | 'none'
 
 export interface ModelRequest {
+  transport?: { proxyOrigin: string; headers: Record<string, string> }
   model?: string
   messages: AgentMessage[]
   signal?: AbortSignal
@@ -2738,6 +2852,8 @@ export interface ModelProviderConfig {
 }
 
 export interface ModelClient {
+  supportsContextTransport?: boolean
+  defaultModel?: string
   provider: string
   requestStyle: ModelRequestStyle
   capabilities: ModelCapabilities
@@ -2813,6 +2929,8 @@ export class EkkoRuntimeManager {
 
 ```ts
 export class AgentRuntime {
+  readonly contextManager?: AgentRuntimeOptions['contextManager']
+  get contextManagement(): string
   readonly jev: EkkoJevClient
   constructor(options: AgentRuntimeOptions)
   registerSkill(skill: AgentSkill): void
@@ -2886,6 +3004,7 @@ export interface AgentRuntimeRecoveryDirective {
 }
 
 export interface AgentRuntimeOptions {
+  contextManager?: import('../context/types').AgentContextManager
   jev?: EkkoJevOverrides
   profileId?: string
   modelClient?: ModelClient
@@ -2918,6 +3037,7 @@ export interface AgentRuntimeOptions {
 }
 
 export interface AgentRuntimeRunInput {
+  contextManager?: import('../context/types').AgentContextManager
   messages: AgentMessageInput[]
   signal?: AbortSignal
   systemPrompt?: string
@@ -3283,7 +3403,8 @@ export interface CodeExecToolOptions {
 
 export class CodeExecTool implements AgentTool<CodeExecInput> {
   readonly definition: AgentTool['definition']
-  constructor(options: CodeExecToolOptions = {})
+  constructor(private readonly options: CodeExecToolOptions = {})
+  fork(dispatch: CodeExecToolDispatcher): CodeExecTool
   async execute(input: CodeExecInput, context: AgentToolContext = {}): Promise<AgentToolResult>
 }
 ```
@@ -3438,6 +3559,8 @@ export class AgentToolRegistry {
   constructor(private authorizer?: AgentToolAuthorizer)
   setAuthorizer(authorizer?: AgentToolAuthorizer): void
   register(tool: AgentTool): void
+  registerExclusive(tool: AgentTool, previous?: AgentTool): void
+  fork(excludedNames: string[] = []): AgentToolRegistry
   registerMany(tools: AgentTool[]): void
   unregister(name: string): boolean
   registerProvider(provider: AgentToolProvider): void
@@ -3645,6 +3768,7 @@ export interface AgentToolContext {
   workspaceId?: string
   userId?: string
   sessionId?: string
+  contextConversationId?: string
   profileId?: string
   sourceMessageIds?: string[]
   memoryWritePolicy?: import('../memory/types').MemoryWritePolicy

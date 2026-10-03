@@ -8,6 +8,7 @@ import { OPENROUTER_APP_HEADERS } from '../../../studio/public/openrouter-attrib
 import { resolveHermesInstallationEnvironment } from '../runtime/installation'
 import { detectHermesHome, getHermesBin } from '../runtime/path'
 import { AgentBridgeClient, DEFAULT_AGENT_BRIDGE_ENDPOINT } from './client'
+import { assertBridgeContextCapabilities } from './context-manager'
 
 const DEFAULT_AGENT_BRIDGE_STARTUP_TIMEOUT_MS = 120000
 const DEFAULT_AGENT_BRIDGE_RESTART_DELAY_MS = 1000
@@ -732,7 +733,7 @@ export class AgentBridgeManager {
         timeoutMs: options.timeoutMs ?? 1000,
         connectRetryMs: options.connectRetryMs ?? 0,
       })
-      await client.ping()
+      assertBridgeContextCapabilities(await client.ping())
       return {
         ...readiness,
         status: 'ready',
@@ -1081,7 +1082,7 @@ export class AgentBridgeManager {
         })
         while (!startupSettled && !child.killed) {
           try {
-            await client.ping()
+            assertBridgeContextCapabilities(await client.ping())
             markReady()
             return
           } catch {
@@ -1105,7 +1106,7 @@ export class AgentBridgeManager {
         timeoutMs: envPositiveInt('HERMES_AGENT_BRIDGE_ATTACH_TIMEOUT_MS') ?? 5000,
         connectRetryMs: envPositiveInt('HERMES_AGENT_BRIDGE_ATTACH_RETRY_MS') ?? 5000,
       })
-      await client.ping()
+      assertBridgeContextCapabilities(await client.ping())
       this.child = null
       this.attached = true
       this.ready = true

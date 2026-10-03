@@ -24,6 +24,7 @@ import {
 import { configureChatAgentRuntime } from '../modules/studio/public/chat-agent-runtime'
 import {
   agentReasoningText,
+  BillionContextManager,
   createModelClient,
   DEFAULT_MODEL_REQUEST_TIMEOUT_MS,
   normalizeAgentReasoning,
@@ -46,6 +47,7 @@ configureChatAgentRuntime({
   abortEkkoBackgroundTasks: abortGlobalEkkoBackgroundTasks,
   hasEkkoBackgroundTasks: hasGlobalEkkoBackgroundTasks,
   createEkkoModelClient: createModelClient,
+  createBillionContextManager: options => new BillionContextManager(options),
   resolveEkkoModelProviderConfigs: resolveModelProviderConfigs,
   ekkoModelRequestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS,
   ekkoAgentReasoningText: agentReasoningText,

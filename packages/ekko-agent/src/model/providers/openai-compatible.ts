@@ -9,6 +9,7 @@ import {
   providerHttpError,
   providerUrl,
   modelRequestHeaders,
+  modelRequestUrl,
 } from '../http'
 import type {
   AgentMessage,
@@ -131,6 +132,8 @@ const TEXT_ONLY_CHAT_TARGET_LIMIT = 512
 const textOnlyChatTargets = new Set<string>()
 
 export class OpenAICompatibleModelClient implements ModelClient {
+  readonly supportsContextTransport = true
+  get defaultModel(): string { return this.config.defaultModel }
   readonly provider: string
   readonly requestStyle = 'openai-chat'
   readonly capabilities: ModelCapabilities
@@ -289,7 +292,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
   }
 
   private async post(payload: OpenAIChatPayload, request: ModelRequest, signal?: AbortSignal): Promise<Response> {
-    const response = await this.fetchImpl(chatCompletionsUrl(this.config), {
+    const response = await this.fetchImpl(modelRequestUrl(chatCompletionsUrl(this.config), request), {
       method: 'POST',
       headers: modelRequestHeaders(this.config, request),
       body: JSON.stringify(payload),

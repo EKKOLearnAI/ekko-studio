@@ -4,7 +4,8 @@ import { logger } from '../../public/logging'
 import type { PrimaryAgentBridgeClient as AgentBridgeClient } from '../../public/chat-agent-runtime'
 import { readConfigYamlForProfile } from '../../public/profile-config'
 import { flushBridgePendingToDb } from './bridge-message'
-import { buildDbSnapshotAwareHistory, forceCompressBridgeHistory, getOrCreateSession, replaceState } from './compression'
+import { buildDbSnapshotAwareHistory, forceCompressBridgeHistory, getOrCreateSession, getSessionCompressionOwner, replaceState } from './compression'
+import { compactBiliConversation, forkBiliConversation } from '../context-manager/runtime'
 import { handleAbort } from './abort'
 import { calcAndUpdateUsage, contextTokensWithCachedOverhead, estimateUsageTokensFromMessages, updateMessageContextTokenUsage } from './usage'
 import { contentBlocksToString } from './content-blocks'
@@ -58,6 +59,7 @@ interface BranchSessionSummary {
   id: string
   profile: string
   source: ChatRunSource
+  agent: string
   title: string
   model: string | null
   provider: string | null
@@ -737,13 +739,24 @@ export async function handleSessionCommand(
       }
       clearTransientRunState(state)
       const emit = (event: string, payload: any) => emitToSession(ctx.nsp, ctx.socket, sessionId, event, payload)
+      state.isWorking = true
       try {
+        const owner = await getSessionCompressionOwner(sessionId, ctx.profile, 'hermes')
+        state.contextOwner = owner
+        if (owner.manager === 'bili') {
+          emit('compression.started', { event: 'compression.started', source: 'command', manager: 'bili' })
+          const session = getSession(sessionId)
+          const result = await compactBiliConversation({ sessionId, profile: ctx.profile, agent: 'hermes', model: session?.model || ctx.model, state, emit })
+          emit('compression.completed', { event: 'compression.completed', source: 'command', manager: 'bili', compressed: true, ...result })
+          emitCommand({ action: 'compress', terminal: true, manager: 'bili', ...result, message: `Compression completed: ${result.beforeTokens} -> ${result.afterTokens} tokens.` })
+          return
+        }
         const session = getSession(sessionId)
         const history = await buildDbSnapshotAwareHistory(
           sessionId,
           ctx.profile,
           { excludeLastUser: true },
-          { model: session?.model, provider: session?.provider },
+          { model: session?.model, provider: session?.provider, contextOwner: owner },
         )
         const historyUsage = estimateUsageTokensFromMessages(history)
         const beforeMessageTokens = historyUsage.inputTokens + historyUsage.outputTokens
@@ -758,6 +771,8 @@ export async function handleSessionCommand(
           sessionId,
           ctx.profile,
           [],
+          undefined,
+          { contextOwner: owner },
         )
         state.bridgeCompressionResults = state.bridgeCompressionResults || {}
         const usage = await calcAndUpdateUsage(sessionId, state, emit)
@@ -779,6 +794,7 @@ export async function handleSessionCommand(
         updateMessageContextTokenUsage(sessionId, state, emit, result.afterTokens, usage)
         emitCommand({
           action: 'compress',
+          terminal: true,
           message: `Compression completed: ${result.beforeMessages} -> ${result.resultMessages} messages, ${beforeContextTokens} -> ${afterContextTokens} tokens.`,
           beforeMessages: result.beforeMessages,
           resultMessages: result.resultMessages,
@@ -803,61 +819,95 @@ export async function handleSessionCommand(
         emitCommand({
           ok: false,
           action: 'compress',
+          terminal: true,
           message: `Compression failed: ${err instanceof Error ? err.message : String(err)}`,
         })
+      } finally {
+        state.isWorking = false
+        const next = state.queue.shift()
+        if (next) {
+          emitQueuedState(ctx, sessionId, state)
+          ctx.runQueuedItem(ctx.socket, sessionId, next, ctx.profile)
+        }
       }
       return
     }
 
     case 'branch': {
-      const bridgeStatus = await getBridgeSessionStatus(ctx, sessionId)
-      if (state.isWorking || bridgeStatus?.running === true) {
-        emitCommand({
-          ok: false,
-          action: 'branch',
-          terminal: false,
-          message: 'Cannot branch while the session is running. Wait for it to finish or use /abort first.',
-        })
+      if (state.isWorking) {
+        emitCommand({ ok: false, action: 'branch', terminal: false, message: 'Cannot branch while the session is running. Wait for it to finish or use /abort first.' })
         return
       }
+      const previousMarker = state.activeRunMarker
+      const branchMarker = `branch:${generateBranchSessionId()}`
+      state.activeRunMarker = branchMarker
+      state.isWorking = true
+      const ownsReservation = () => ctx.sessionMap.get(sessionId) === state && state.activeRunMarker === branchMarker && state.isWorking
+      const assertReservation = () => {
+        if (!ownsReservation()) throw new Error('Branch preparation was superseded by another run.')
+      }
+      let resumeQueue = false
+      try {
+        const bridgeStatus = await getBridgeSessionStatus(ctx, sessionId, true)
+        assertReservation()
+        if (bridgeStatus?.running === true) {
+          emitCommand({
+            ok: false,
+            action: 'branch',
+            terminal: false,
+            message: 'Cannot branch while the session is running. Wait for it to finish or use /abort first.',
+          })
+          return
+        }
 
-      const parent = getSession(sessionId)
-      if (isCodingAgentBranchSource(parent)) {
+        resumeQueue = true
+        const parent = getSession(sessionId)
+        if (isCodingAgentBranchSource(parent)) {
+          emitCommand({
+            ok: false,
+            action: 'branch',
+            terminal: true,
+            message: 'Cannot branch coding agent sessions.',
+          })
+          return
+        }
+
+        const fork = await createBranchSession(sessionId, command.args, ctx, assertReservation)
+        if (!fork) {
+          emitCommand({
+            ok: false,
+            action: 'branch',
+            terminal: true,
+            message: 'Cannot branch: no conversation messages found to copy.',
+          })
+          return
+        }
+
+        // Let the first child resume hydrate its copied transcript from SQLite.
+        ctx.sessionMap.delete(fork.id)
+
         emitCommand({
-          ok: false,
           action: 'branch',
           terminal: true,
-          message: 'Cannot branch coding agent sessions.',
+          parentSessionId: sessionId,
+          newSessionId: fork.id,
+          newSessionTitle: fork.title,
+          branchSession: fork,
+          message: `Branched session "${fork.title || fork.id}" from ${sessionId}.`,
         })
-        return
+      } catch (error) {
+        emitCommand({ ok: false, action: 'branch', terminal: ownsReservation() || !state.isWorking, message: `Cannot branch: ${error instanceof Error ? error.message : String(error)}` })
+      } finally {
+        if (ownsReservation()) {
+          state.isWorking = false
+          state.activeRunMarker = previousMarker
+          const next = resumeQueue ? state.queue.shift() : undefined
+          if (next) {
+            emitQueuedState(ctx, sessionId, state)
+            ctx.runQueuedItem(ctx.socket, sessionId, next, ctx.profile)
+          }
+        }
       }
-
-      const fork = createBranchSession(sessionId, command.args, ctx)
-      if (!fork) {
-        emitCommand({
-          ok: false,
-          action: 'branch',
-          terminal: true,
-          message: 'Cannot branch: no conversation messages found to copy.',
-        })
-        return
-      }
-
-      // Do not seed an empty in-memory child state here. The child transcript has
-      // just been copied into SQLite, and the immediate client switch/resume must
-      // hydrate it from the DB so the fork opens with copied messages plus
-      // lineage metadata instead of an empty "new conversation" view.
-      ctx.sessionMap.delete(fork.id)
-
-      emitCommand({
-        action: 'branch',
-        terminal: true,
-        parentSessionId: sessionId,
-        newSessionId: fork.id,
-        newSessionTitle: fork.title,
-        branchSession: fork,
-        message: `Branched session "${fork.title || fork.id}" from ${sessionId}.`,
-      })
       return
     }
 
@@ -1068,9 +1118,10 @@ type BridgeSessionStatus = {
   messageCount: number
 }
 
-async function getBridgeSessionStatus(ctx: SessionCommandContext, sessionId: string): Promise<BridgeSessionStatus | null> {
+async function getBridgeSessionStatus(ctx: SessionCommandContext, sessionId: string, required = false): Promise<BridgeSessionStatus | null> {
   try {
     const raw = await ctx.bridge.status(sessionId, ctx.profile) as Record<string, unknown>
+    if (required && typeof raw.running !== 'boolean') throw new Error('Bridge running status unavailable.')
     return {
       exists: raw.exists === true,
       running: raw.running === true,
@@ -1082,6 +1133,7 @@ async function getBridgeSessionStatus(ctx: SessionCommandContext, sessionId: str
         : 0,
     }
   } catch (err) {
+    if (required) throw err
     logger.debug({ err, sessionId }, '[chat-run-socket] bridge status lookup failed')
     return null
   }
@@ -1193,79 +1245,166 @@ function persistCommandMessage(sessionId: string, state: SessionState, content: 
   updateSessionStats(sessionId)
 }
 
-function createBranchSession(parentSessionId: string, requestedTitle: string, ctx: SessionCommandContext): BranchSessionSummary | null {
+async function createBranchSession(parentSessionId: string, requestedTitle: string, ctx: SessionCommandContext, assertReservation: () => void): Promise<BranchSessionSummary | null> {
   const parent = getSession(parentSessionId)
   if (!parent || isCodingAgentBranchSource(parent)) return null
+  if (parent.profile && parent.profile !== (ctx.profile || 'default')) throw new Error('Parent session belongs to another profile.')
 
   const detail = getSessionDetail(parentSessionId)
-  const sourceMessages = detail?.messages || []
+  const allMessages = detail?.messages || []
+  let sourceMessages = allMessages
+  const point = requestedTitle.match(/^--at\s+(\S+)(?:\s+([\s\S]*))?$/)
+  if (requestedTitle.startsWith('--at') && !point) throw new Error('Usage: /fork --at <branch message id> [title]')
+  if (point) {
+    const index = allMessages.findIndex(message => String(message.id) === point[1])
+    if (index < 0) throw new Error('Unknown branch message in this conversation.')
+    sourceMessages = allMessages.slice(0, index + 1)
+    requestedTitle = point[2] || ''
+  }
   const parentLast = getLastVisibleMessage(sourceMessages)
   if (!parentLast) return null
+  validateBranchToolHistory(sourceMessages)
 
   const nowSeconds = Math.floor(Date.now() / 1000)
   const newSessionId = generateBranchSessionId()
   const title = buildBranchTitle(requestedTitle, parent.title || parent.preview || '')
   const source = normalizeBranchSource(parent.source)
+  const profile = parent.profile || ctx.profile || 'default'
+  const agent = parent.agent === 'ekko-agent' ? 'ekko' : 'hermes'
+  const owner = await getSessionCompressionOwner(parentSessionId, profile, agent)
+  assertReservation()
 
-  const persisted = createBranchedSession({
-    id: newSessionId,
-    profile: parent.profile || ctx.profile || 'default',
-    source,
-    agent: parent.agent || (source === 'cli' ? 'hermes' : ''),
-    agent_mode: parent.agent_mode || '',
-    agent_session_id: parent.agent_session_id || '',
-    agent_native_session_id: parent.agent_native_session_id || '',
-    agent_preset: parent.agent_preset || '',
-    model: parent.model || ctx.model || '',
-    provider: parent.provider || ctx.provider || '',
-    api_mode: parent.api_mode || '',
-    reasoning_effort: parent.reasoning_effort || '',
-    title,
-    parent_session_id: parentSessionId,
-    workspace: parent.workspace || undefined,
-    category_id: parent.category_id ?? null,
-    ended_at: nowSeconds,
-    last_active: nowSeconds,
-    messages: sourceMessages.map(message => ({
-      role: message.role,
-      content: message.content,
-      display_role: message.display_role,
-      display_content: message.display_content,
-      tool_call_id: message.tool_call_id,
-      tool_calls: message.tool_calls,
-      tool_name: message.tool_name,
-      timestamp: message.timestamp,
-      token_count: message.token_count,
-      finish_reason: message.finish_reason,
-      reasoning: message.reasoning,
-      reasoning_details: message.reasoning_details,
-      reasoning_content: message.reasoning_content,
-    })),
-  })
-  if (!persisted) return null
+  // The external receipt must exist before a local child is made resumable.
+  try {
+    const receipt = await forkBiliConversation({
+      profile,
+      agent,
+      parentSessionId,
+      childSessionId: newSessionId,
+      messages: sourceMessages,
+      owner,
+    })
+    if (owner.manager === 'bili' && !receipt) throw new Error('Bili fork receipt is unavailable.')
+    assertReservation()
+    if (JSON.stringify(getSessionDetail(parentSessionId)?.messages || []) !== JSON.stringify(allMessages)) {
+      throw new Error('Parent history changed while preparing the branch. Retry from a fresh snapshot.')
+    }
 
-  return {
-    id: newSessionId,
-    profile: parent.profile || ctx.profile || 'default',
-    source,
-    title,
-    model: parent.model || ctx.model || null,
-    provider: parent.provider || ctx.provider || null,
-    parentSessionId,
-    forkPointMessageId: persisted.fork_point_message_id || null,
-    parentTitle: parent.title || parent.preview || null,
-    parentLastMessage: parentLast?.content || null,
-    parentLastMessageRole: parentLast?.role || null,
-    createdAt: nowSeconds * 1000,
-    updatedAt: nowSeconds * 1000,
-    messageCount: sourceMessages.length,
-    workspace: parent.workspace || null,
+    const persisted = createBranchedSession({
+      id: newSessionId,
+      profile: parent.profile || ctx.profile || 'default',
+      source,
+      agent: parent.agent || (source === 'cli' ? 'hermes' : ''),
+      agent_mode: parent.agent_mode || '',
+      agent_session_id: '',
+      agent_native_session_id: '',
+      agent_preset: parent.agent_preset || '',
+      model: parent.model || ctx.model || '',
+      provider: parent.provider || ctx.provider || '',
+      api_mode: parent.api_mode || '',
+      reasoning_effort: parent.reasoning_effort || '',
+      title,
+      parent_session_id: parentSessionId,
+      copyCompression: owner.manager === 'native' && sourceMessages.length === allMessages.length,
+      expectedHistoryRevision: parent.history_revision,
+      expectedHistoryMessages: allMessages,
+      workspace: parent.workspace || undefined,
+      category_id: parent.category_id ?? null,
+      ended_at: nowSeconds,
+      last_active: nowSeconds,
+      messages: sourceMessages.map(message => ({
+        role: message.role,
+        content: message.content,
+        display_role: message.display_role,
+        display_content: message.display_content,
+        tool_call_id: message.tool_call_id,
+        tool_calls: message.tool_calls,
+        tool_name: message.tool_name,
+        timestamp: message.timestamp,
+        token_count: message.token_count,
+        finish_reason: message.finish_reason,
+        reasoning: message.reasoning,
+        reasoning_details: message.reasoning_details,
+        reasoning_content: message.reasoning_content,
+      })),
+    })
+    if (!persisted) throw new Error('Local branch storage is unavailable.')
+
+    return {
+      id: newSessionId,
+      profile: parent.profile || ctx.profile || 'default',
+      source,
+      title,
+      agent: parent.agent || (source === 'cli' ? 'hermes' : ''),
+      model: parent.model || ctx.model || null,
+      provider: parent.provider || ctx.provider || null,
+      parentSessionId,
+      forkPointMessageId: persisted.fork_point_message_id || null,
+      parentTitle: parent.title || parent.preview || null,
+      parentLastMessage: parentLast?.content || null,
+      parentLastMessageRole: parentLast?.role || null,
+      createdAt: nowSeconds * 1000,
+      updatedAt: nowSeconds * 1000,
+      messageCount: sourceMessages.length,
+      workspace: parent.workspace || null,
+    }
+  } catch (error) {
+    // SQLite rollback cannot undo bili. Keep its idempotent journal for recovery;
+    // never delete parent state or attach this uncommitted child to a run.
+    if (owner.manager === 'bili') logger.warn({ err: error, profile, parentSessionId, childSessionId: newSessionId }, 'Uncommitted bili branch may require orphan recovery; fork journal retained')
+    throw error
   }
 }
 
 
+function validateBranchToolHistory(messages: Array<{ role: string; content: string; tool_calls?: unknown[] | null; tool_call_id?: string | null; tool_name?: string | null }>): void {
+  const seen = new Set<string>()
+  const pending = new Map<string, string>()
+  const addCall = (id: unknown, name: unknown) => {
+    if (typeof id !== 'string' || !id || typeof name !== 'string' || !name || seen.has(id)) {
+      throw new Error('Cannot branch history with invalid or duplicate tool calls.')
+    }
+    seen.add(id)
+    pending.set(id, name)
+  }
+  const addResult = (id: unknown, name?: unknown) => {
+    if (typeof id !== 'string' || !pending.has(id) || (name != null && name !== pending.get(id))) {
+      throw new Error('Cannot branch history with unmatched or duplicate tool results.')
+    }
+    pending.delete(id)
+  }
+  for (const message of messages) {
+    if (message.role === 'system' || message.role === 'command') continue
+    let blocks: Array<Record<string, unknown>> = []
+    if (message.content.trimStart().startsWith('[')) {
+      try {
+        const parsed: unknown = JSON.parse(message.content)
+        if (Array.isArray(parsed) && parsed.every(part => part && typeof part.type === 'string')) blocks = parsed
+      } catch { /* Plain text is not a content-block array. */ }
+    }
+    const isResult = message.role === 'tool' || (message.role === 'user' && blocks.some(part => part.type === 'tool_result'))
+    if (pending.size && !isResult) throw new Error('Cannot branch history with an unfinished tool exchange.')
+    if (message.role === 'tool') addResult(message.tool_call_id, message.tool_name)
+    for (const part of blocks) {
+      if (part.type === 'tool_use') {
+        if (message.role !== 'assistant') throw new Error('Cannot branch history with invalid tool call role.')
+        addCall(part.id, part.name)
+      } else if (part.type === 'tool_result') {
+        if (message.role !== 'user') throw new Error('Cannot branch history with invalid tool result role.')
+        addResult(part.tool_use_id)
+      }
+    }
+    for (const value of message.tool_calls || []) {
+      if (message.role !== 'assistant' || !value || typeof value !== 'object') throw new Error('Cannot branch history with invalid tool calls.')
+      const call = value as { id?: unknown; name?: unknown; function?: { name?: unknown } }
+      addCall(call.id, call.function?.name ?? call.name)
+    }
+  }
+  if (pending.size) throw new Error('Cannot branch at an unfinished tool exchange. Choose a message after all tool results.')
+}
+
 function isCodingAgentBranchSource(session: { source?: string | null; agent?: string | null } | null | undefined): boolean {
-  return session?.source === 'coding_agent' || session?.agent === 'claude' || session?.agent === 'codex' || session?.agent === 'pi' || session?.agent === 'grok' || (session?.agent === 'cursor' || session?.agent === 'antigravity') || (session?.agent === 'opencode' || session?.agent === 'dsh') || session?.agent === 'ekko-agent'
+  return session?.source === 'coding_agent' || session?.agent === 'claude' || session?.agent === 'codex' || session?.agent === 'pi' || session?.agent === 'grok' || (session?.agent === 'cursor' || session?.agent === 'antigravity') || (session?.agent === 'opencode' || session?.agent === 'dsh') || (session?.agent === 'ekko-agent' && session?.source !== 'builtin_agent')
 }
 
 function generateBranchSessionId(): string {
@@ -1291,7 +1430,7 @@ function buildBranchTitle(requestedTitle: string, parentTitle: string): string {
 }
 
 function normalizeBranchSource(source: string | null | undefined): ChatRunSource {
-  if (source === 'api_server' || source === 'cli' || source === 'global_agent' || source === 'workflow' || source === 'group_chat') return source
+  if (source === 'api_server' || source === 'cli' || source === 'builtin_agent' || source === 'global_agent' || source === 'workflow' || source === 'group_chat') return source
   return 'cli'
 }
 

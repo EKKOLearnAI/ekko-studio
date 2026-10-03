@@ -81,7 +81,7 @@ export class CodeExecTool implements AgentTool<CodeExecInput> {
   private readonly maxStderrBytes: number
   private readonly maxSourceBytes: number
 
-  constructor(options: CodeExecToolOptions = {}) {
+  constructor(private readonly options: CodeExecToolOptions = {}) {
     this.dispatch = options.dispatch
     this.allowedLanguages = normalizedAllowedLanguages(options.allowedLanguages)
     this.definition = codeExecDefinition(this.allowedLanguages)
@@ -92,6 +92,11 @@ export class CodeExecTool implements AgentTool<CodeExecInput> {
     this.maxOutputBytes = positiveInteger(options.maxOutputBytes, DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES)
     this.maxStderrBytes = positiveInteger(options.maxStderrBytes, DEFAULT_CODE_EXEC_MAX_STDERR_BYTES)
     this.maxSourceBytes = positiveInteger(options.maxSourceBytes, DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES)
+  }
+
+  /** Rebind RPC dispatch when the owning registry is isolated for a run. */
+  fork(dispatch: CodeExecToolDispatcher): CodeExecTool {
+    return new CodeExecTool({ ...this.options, dispatch })
   }
 
   async execute(input: CodeExecInput, context: AgentToolContext = {}): Promise<AgentToolResult> {

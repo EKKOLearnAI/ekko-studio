@@ -54,7 +54,8 @@ import { handleCodingAgentRun } from '../services/chat-run/handle-coding-agent-r
 import { handleEkkoAgentRun, type EkkoAgentRunSocketData } from '../services/chat-run/handle-ekko-agent-run'
 import { handleEkkoSessionCommand, parseEkkoRunCommand } from '../services/chat-run/ekko-session-command'
 import { handleAbort } from '../services/chat-run/abort'
-import { getOrCreateSession } from '../services/chat-run/compression'
+import { getOrCreateSession, getSessionCompressionOwner } from '../services/chat-run/compression'
+import { refreshExternalContextUsage } from '../services/context-manager/runtime'
 import { loadSessionStateFromDb, resolveRunSource } from '../services/chat-run/load-state'
 import { handleSessionCommand, isSessionCommand, parseSessionCommand } from '../services/chat-run/session-command'
 import { contentBlocksToString } from '../services/chat-run/content-blocks'
@@ -2092,6 +2093,20 @@ export class ChatRunSocket {
       ? state.events
       : (state.events || []).filter(evt => evt?.event === 'run.reattach_failed')
     const sessionDetail = getSessionMetadata(sid)
+    if (sessionDetail && (isBuiltinEkkoAgent(sessionDetail.agent) || !sessionDetail.agent || sessionDetail.agent === 'hermes')) {
+      const agent = isBuiltinEkkoAgent(sessionDetail.agent) ? 'ekko' : 'hermes'
+      try {
+        state.contextOwner = await getSessionCompressionOwner(sid, sessionDetail.profile, agent)
+        await refreshExternalContextUsage({ sessionId: sid, profile: sessionDetail.profile, agent,
+          model: sessionDetail.model, state, owner: state.contextOwner, emit: () => undefined })
+        if (state.contextManagerStatus === 'unavailable') state.contextTokens = undefined
+      } catch (error) {
+        state.externalContext = undefined
+        state.contextManagerStatus = 'unavailable'
+        state.contextTokens = undefined
+        logger.warn(error, '[chat-run-socket] context owner unavailable while resuming %s', sid)
+      }
+    }
     const messagePage = buildResumeMessagePage(state.messages, {
       limit: state.messagePageLimit,
       messageTotal: state.messageTotal,
@@ -2135,6 +2150,14 @@ export class ChatRunSocket {
       cacheReadTokens: state.cacheReadTokens,
       cacheWriteTokens: state.cacheWriteTokens,
       contextTokens: state.contextTokens,
+      contextManager: state.contextOwner?.manager ?? 'native',
+      contextSource: state.externalContext?.source ?? (state.contextManagerStatus === 'unavailable' ? 'unavailable' : 'estimate'),
+      contextObservedAt: state.externalContext?.observedAt,
+      contextGeneration: state.externalContext?.generation,
+      contextModel: state.externalContext?.model,
+      contextWindow: state.externalContext?.window,
+      contextManagerStatus: state.contextManagerStatus ?? 'native',
+      contextFallback: state.contextFallback === true,
       queueLength: state.queue?.length || 0,
       queueMessages: this.serializeQueuedMessages(state.queue || []),
       queueInsertion: state.queueInsertion ? {

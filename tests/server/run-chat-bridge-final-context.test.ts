@@ -83,6 +83,9 @@ vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/compression', () => ({
+  getSessionCompressionOwner: vi.fn(async (conversationId: string) => ({
+    manager: 'native', conversationId, allowNativeFallback: false,
+  })),
   buildCompressedHistory: buildCompressedHistoryMock,
   buildDbHistory: buildDbHistoryMock,
   buildSnapshotAwareHistory: buildSnapshotAwareHistoryMock,
@@ -90,6 +93,14 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/compression'
   pushState: pushStateMock,
   replaceState: replaceStateMock,
   forceCompressBridgeHistory: forceCompressBridgeHistoryMock,
+}))
+
+vi.mock('../../packages/server/src/modules/studio/services/context-manager/runtime', () => ({
+  resolveStudioContextManager: vi.fn(async (_profile: string, _agent: string, conversationId: string) => ({
+    manager: 'native', conversationId, allowNativeFallback: false,
+  })),
+  ensureBiliConversation: vi.fn(),
+  refreshExternalContextUsage: vi.fn(async () => false),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () => ({

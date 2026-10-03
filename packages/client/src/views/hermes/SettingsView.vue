@@ -12,6 +12,7 @@ import { useSettingsStore } from "@/stores/hermes/settings";
 import DisplaySettings from "@/components/hermes/settings/DisplaySettings.vue";
 import ProxySettings from "@/components/hermes/settings/ProxySettings.vue";
 import CompressionSettings from "@/components/hermes/settings/CompressionSettings.vue";
+import ContextManagerSettings from "@/components/hermes/settings/ContextManagerSettings.vue";
 import PrivacySettings from "@/components/hermes/settings/PrivacySettings.vue";
 import ModelSettings from "@/components/hermes/settings/ModelSettings.vue";
 import AccountSettings from "@/components/hermes/settings/AccountSettings.vue";
@@ -35,6 +36,7 @@ const validTabs = computed(() => new Set([
   "display",
   "proxy",
   "compression",
+  "contextManager",
   "privacy",
   "models",
 ]));
@@ -120,6 +122,9 @@ onMounted(() => {
           </NTabPane>
           <NTabPane name="compression" :tab="t('settings.tabs.compression')">
             <CompressionSettings />
+          </NTabPane>
+          <NTabPane name="contextManager" :tab="t('contextManager.title')">
+            <ContextManagerSettings />
           </NTabPane>
           <NTabPane name="privacy" :tab="t('settings.tabs.privacy')">
             <PrivacySettings />

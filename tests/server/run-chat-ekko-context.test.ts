@@ -30,6 +30,11 @@ const getGlobalEkkoAgentMock = vi.hoisted(() => vi.fn(() => ({
   sessionWorkspaceDirectory: agentSessionWorkspaceDirectoryMock,
 })))
 const buildCompressedHistoryMock = vi.hoisted(() => vi.fn())
+const contextMocks = vi.hoisted(() => ({ owner: vi.fn(), ensure: vi.fn(), refresh: vi.fn(), factory: vi.fn(), history: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/services/context-manager/runtime', () => ({
+  resolveStudioContextManager: contextMocks.owner, ensureBiliConversation: contextMocks.ensure,
+  refreshExternalContextUsage: contextMocks.refresh,
+}))
 const recordSessionUsageMock = vi.hoisted(() => vi.fn())
 const startWorkspaceRunCheckpointMock = vi.hoisted(() => vi.fn())
 const completeWorkspaceRunCheckpointMock = vi.hoisted(() => vi.fn())
@@ -53,6 +58,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/compression'
   return {
     ...actual,
     buildCompressedHistory: buildCompressedHistoryMock,
+    buildDbSnapshotAwareHistory: contextMocks.history,
   }
 })
 
@@ -91,10 +97,12 @@ vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', as
   return {
     createChatEkkoAuthorizedProviderFetch: vi.fn(() => vi.fn()),
     getChatEkkoAgent: getGlobalEkkoAgentMock,
+    createChatBillionContextManager: contextMocks.factory,
     resolveChatEkkoMcpServers: vi.fn(() => undefined),
     resolveChatEkkoProviderRuntimeConfig: resolveEkkoProviderRuntimeConfigMock,
     createChatEkkoModelClient: vi.fn(() => ({
       provider: 'test',
+      supportsContextTransport: true,
       requestStyle: 'custom-runtime',
       capabilities: {
         streaming: false,
@@ -178,6 +186,11 @@ function continuationContext(subagentId = 'child-background') {
 describe('ekko-agent context usage events', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    contextMocks.owner.mockResolvedValue({ manager: 'native', conversationId: 'session-1', proxyUrl: 'http://localhost:8787', allowNativeFallback: false })
+    contextMocks.ensure.mockResolvedValue(undefined)
+    contextMocks.refresh.mockResolvedValue(false)
+    contextMocks.factory.mockReturnValue({ strategy: 'billion-context', tools: async () => [], prepareRequest: async (request: unknown) => request })
+    contextMocks.history.mockResolvedValue([{ role: 'assistant', content: 'Existing DB summary, not a bili block' }])
     agentEstimateContextMock.mockResolvedValue({ contextTokens: 5_000 })
     buildCompressedHistoryMock.mockImplementation(async (
       sessionId: string,
@@ -226,6 +239,100 @@ describe('ekko-agent context usage events', () => {
     completeWorkspaceRunCheckpointMock.mockReturnValue(null)
   })
 
+  it('binds bili per run, bypasses native compression and preserves authoritative public usage', async () => {
+    contextMocks.owner.mockResolvedValue({ manager: 'bili', conversationId: 'session-1', proxyUrl: 'http://localhost:8787', allowNativeFallback: false })
+    contextMocks.refresh.mockImplementation(async ({ state }: any) => {
+      state.externalContext = { tokens: 321, model: 'ekko-test-model' }
+      state.contextTokens = 321
+      return true
+    })
+    agentRunMock.mockImplementationOnce(async (input: any) => {
+      expect(contextMocks.ensure).toHaveBeenCalledWith('default', 'ekko', 'session-1')
+      input.onEvent({ type: 'context.estimated', runId: 'run-bili', estimate: { contextTokens: 99999 } })
+      return { runId: 'run-bili', output: { role: 'assistant', content: 'Bili result' }, steps: [] }
+    })
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const f = makeHarness()
+    await handleEkkoAgentRun(f.nsp as any, f.socket as any, {
+      session_id: 'session-1', input: 'Hello', agent_id: 'ekko-agent', onEvent: (event, payload) => f.events.push({ event, payload }),
+    }, 'default', f.sessionMap, vi.fn(() => false))
+    expect(buildCompressedHistoryMock).not.toHaveBeenCalled()
+    expect(contextMocks.history).toHaveBeenCalledWith('session-1', 'default', { excludeLastUser: true, truncateToolResults: false }, { model: 'ekko-test-model', provider: 'test-provider' })
+    expect(agentRunMock.mock.calls[0][0]).toMatchObject({ contextKey: 'session-1', contextManager: contextMocks.factory.mock.results[0].value })
+    expect(f.events.find(e => e.event === 'run.completed')?.payload).toMatchObject({ contextTokens: 321, context_tokens: 321 })
+    expect(f.events.filter(e => e.event === 'context.estimated')).toHaveLength(0)
+    expect(f.state).toMatchObject({ contextTokens: 321 })
+  })
+  it('rejects another agent family before joining, relabeling or calling a model', async () => {
+    getSessionMock.mockReturnValue({ id: 'session-1', profile: 'default', agent: 'hermes', source: 'cli' })
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const f = makeHarness()
+    await handleEkkoAgentRun(f.nsp as any, f.socket as any, { session_id: 'session-1', input: 'Hello', agent_id: 'ekko-agent' }, 'default', f.sessionMap, vi.fn(() => false))
+    expect(f.socket.join).not.toHaveBeenCalled()
+    expect(f.socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: expect.stringContaining('family') }))
+    expect(updateSessionMock).not.toHaveBeenCalled()
+    expect(contextMocks.owner).not.toHaveBeenCalled()
+    expect(agentRunMock).not.toHaveBeenCalled()
+  })
+  it.each(['model', 'provider'])('releases startup state when %s configuration fails', async stage => {
+    const failure = new Error(`${stage} startup unavailable`)
+    if (stage === 'model') resolveBridgeRunModelConfigMock.mockRejectedValueOnce(failure)
+    else resolveEkkoProviderRuntimeConfigMock.mockRejectedValueOnce(failure)
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const f = makeHarness()
+    const dequeue = vi.fn(() => false)
+    f.state.queue.push({ input: 'queued' } as never)
+    await handleEkkoAgentRun(f.nsp as any, f.socket as any, { session_id: 'session-1', input: 'Hello', agent_id: 'ekko-agent' }, 'default', f.sessionMap, dequeue)
+    expect(f.state).toMatchObject({ isWorking: false, abortController: undefined, profile: undefined })
+    expect(f.nsp.to().emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: failure.message }))
+    expect(dequeue).toHaveBeenCalledOnce()
+    expect(agentRunMock).not.toHaveBeenCalled()
+  })
+  it('reports unknown bili usage rather than retaining native tokens when public status is unavailable', async () => {
+    contextMocks.owner.mockResolvedValue({ manager: 'bili', conversationId: 'session-1', proxyUrl: 'http://localhost:8787', allowNativeFallback: false })
+    agentRunMock.mockImplementationOnce(async (input: any) => {
+      input.onEvent({ type: 'context.estimated', runId: 'run-bili', estimate: { contextTokens: 99999 } })
+      return { runId: 'run-bili', output: { role: 'assistant', content: 'Bili result' }, steps: [] }
+    })
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const f = makeHarness()
+    Object.assign(f.state, { contextTokens: 9876 })
+    await handleEkkoAgentRun(f.nsp as any, f.socket as any, {
+      session_id: 'session-1', input: 'Hello', agent_id: 'ekko-agent', onEvent: (event, payload) => f.events.push({ event, payload }),
+    }, 'default', f.sessionMap, vi.fn(() => false))
+    expect(f.events.find(e => e.event === 'run.completed')?.payload).toMatchObject({ contextTokens: null, context_tokens: null })
+    expect(f.state).not.toMatchObject({ contextTokens: 9876 })
+  })
+  it('allows explicit native fallback only for unsupported model transport', async () => {
+    contextMocks.owner.mockResolvedValue({ manager: 'bili', conversationId: 'session-1', proxyUrl: 'http://localhost:8787', allowNativeFallback: true })
+    const { createChatEkkoModelClient } = await import('../../packages/server/src/modules/studio/public/chat-agent-runtime')
+    vi.mocked(createChatEkkoModelClient).mockReturnValueOnce({ provider: 'test', requestStyle: 'custom-runtime', capabilities: {} } as any)
+    agentRunMock.mockResolvedValueOnce({ runId: 'native-fallback', output: { role: 'assistant', content: 'Native result' }, steps: [] })
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const f = makeHarness()
+    await handleEkkoAgentRun(f.nsp as any, f.socket as any, {
+      session_id: 'session-1', input: 'Hello', agent_id: 'ekko-agent', onEvent: (event, payload) => f.events.push({ event, payload }),
+    }, 'default', f.sessionMap, vi.fn(() => false))
+    expect(contextMocks.ensure).toHaveBeenCalledOnce()
+    expect(contextMocks.factory).not.toHaveBeenCalled()
+    expect(buildCompressedHistoryMock).toHaveBeenCalledOnce()
+    expect(agentRunMock.mock.calls[0][0].contextManager).toBeUndefined()
+    expect(f.events.find(e => e.event === 'context.manager')?.payload).toMatchObject({ manager: 'native', selectedManager: 'bili', fallback: true })
+    expect(f.state.contextFallback).toBe(true)
+    expect(contextMocks.refresh).not.toHaveBeenCalled()
+  })
+  it('blocks a pending bili lifecycle before any model call without native fallback', async () => {
+    contextMocks.owner.mockResolvedValue({ manager: 'bili', conversationId: 'session-1', proxyUrl: 'http://localhost:8787', allowNativeFallback: true })
+    contextMocks.ensure.mockRejectedValueOnce(new Error('Bili branch mapping unavailable.'))
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const f = makeHarness()
+    await handleEkkoAgentRun(f.nsp as any, f.socket as any, {
+      session_id: 'session-1', input: 'Hello', agent_id: 'ekko-agent', onEvent: (event, payload) => f.events.push({ event, payload }),
+    }, 'default', f.sessionMap, vi.fn(() => false))
+    expect(agentRunMock).not.toHaveBeenCalled()
+    expect(buildCompressedHistoryMock).not.toHaveBeenCalled()
+    expect(f.events.find(e => e.event === 'run.failed')?.payload.error).toBe('Bili branch mapping unavailable.')
+  })
   it('persists plan snapshots before broadcasting and records update_plan calls in chat history', async () => {
     const plan = {
       runId: 'run-plan', planId: 'run-plan', revision: 1, executionState: 'running',
@@ -1325,7 +1432,7 @@ describe('ekko-agent context usage events', () => {
     }))
   })
 
-  it('migrates an existing Hermes MCU session to Ekko metadata', async () => {
+  it('rejects an existing Hermes MCU session instead of migrating its family', async () => {
     getSessionMock.mockReturnValue({
       id: 'session-1',
       profile: 'default',
@@ -1337,14 +1444,6 @@ describe('ekko-agent context usage events', () => {
       model: 'ekko-test-model',
       provider: 'test-provider',
       workspace: '/tmp/existing-mcu-workspace',
-    })
-    agentRunMock.mockResolvedValueOnce({
-      runId: 'run-1',
-      output: { role: 'assistant', content: 'done', usage: { inputTokens: 3, outputTokens: 2 } },
-      steps: [],
-      messages: [],
-      events: [],
-      contextEstimate: { contextTokens: 12_000 },
     })
     const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
     const { nsp, socket, sessionMap } = makeHarness()
@@ -1358,19 +1457,10 @@ describe('ekko-agent context usage events', () => {
     }, 'default', sessionMap, vi.fn(() => false))
 
     expect(createSessionMock).not.toHaveBeenCalled()
-    expect(updateSessionMock).toHaveBeenCalledWith('session-1', {
-      source: 'global_agent',
-      agent: 'ekko-agent',
-      agent_mode: 'scoped',
-      agent_session_id: '',
-      agent_native_session_id: '',
-    })
-    expect(agentRunMock).toHaveBeenCalledWith(expect.objectContaining({
-      toolContext: expect.objectContaining({
-        cwd: '/tmp/existing-mcu-workspace',
-        workspaceRoot: '/tmp/existing-mcu-workspace',
-      }),
-    }))
+    expect(updateSessionMock).not.toHaveBeenCalled()
+    expect(agentRunMock).not.toHaveBeenCalled()
+    expect(socket.join).not.toHaveBeenCalled()
+    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'Context manager session belongs to another agent family.' }))
   })
 
   it('uses the profile-scoped Ekko session workspace by default', async () => {

@@ -121,6 +121,32 @@ describe('compression cursor persistence', () => {
     expect(getCompressionSnapshot('child')).toBeNull()
   })
 
+  it('rejects stale branch preparation without changing the parent or creating a child', async () => {
+    const { addMessage, clearSessionMessages, createBranchedSession, createSession, getSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    createSession({ id: 'branch-parent', source: 'cli' })
+    addMessage({ session_id: 'branch-parent', role: 'user', content: 'before clear' })
+    clearSessionMessages('branch-parent')
+    expect(() => createBranchedSession({
+      id: 'stale-child', parent_session_id: 'branch-parent', ended_at: 10, last_active: 10,
+      expectedHistoryRevision: 0, messages: [{ role: 'user', content: 'before clear' }],
+    })).toThrow('Parent history changed')
+    expect(getSession('stale-child')).toBeNull()
+    expect(getSession('branch-parent')).toMatchObject({ history_revision: 1, ended_at: null, end_reason: null })
+  })
+
+  it('does not copy a summary beyond an explicit partial branch point', async () => {
+    const { addMessage, createBranchedSession, createSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    const { getCompressionSnapshot, saveCompressionSnapshot } = await import('../../packages/server/src/modules/studio/repositories/compression-snapshot')
+    createSession({ id: 'partial-parent', source: 'cli' })
+    addMessage({ session_id: 'partial-parent', role: 'user', content: 'first', timestamp: 1 })
+    const last = addMessage({ session_id: 'partial-parent', role: 'assistant', content: 'future', timestamp: 2 })!
+    saveCompressionSnapshot('partial-parent', 'contains future', 1, 2, { compressedThroughMessageId: last, expectedHistoryRevision: 0 })
+    createBranchedSession({ id: 'partial-branch', parent_session_id: 'partial-parent', ended_at: 3, last_active: 3,
+      copyCompression: false, expectedHistoryRevision: 0, messages: [{ role: 'user', content: 'first', timestamp: 1 }] })
+    expect(getCompressionSnapshot('partial-branch')).toBeNull()
+    expect(getCompressionSnapshot('partial-parent')?.summary).toBe('contains future')
+  })
+
   it('keeps legacy rows unchanged when the cursor columns are introduced', async () => {
     db.exec('DROP TABLE chat_compression_snapshots')
     db.exec(`CREATE TABLE chat_compression_snapshots (

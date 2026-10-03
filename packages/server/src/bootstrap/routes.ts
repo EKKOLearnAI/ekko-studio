@@ -6,6 +6,7 @@ import './workflow-runtime-adapter'
 import './chat-agent-runtime-adapter'
 import './group-chat-agent-runtime-adapter'
 import './session-agent-runtime-adapter'
+import './context-manager-worker-adapter'
 import { apiDocsRoutes } from '../modules/studio'
 import { healthRoutes } from './health'
 import { updateRoutes } from './update'
@@ -53,6 +54,7 @@ import { workflowRoutes } from '../modules/studio/routes/workflows'
 import { ttsRoutes, ttsProtectedRoutes } from '../modules/studio/routes/tts'
 import { sttProtectedRoutes } from '../modules/studio/routes/stt'
 import { jevRoutes } from '../modules/studio/routes/jev'
+import { contextManagerRoutes } from '../modules/studio/routes/context-manager'
 import { mcuFirmwareRoutes } from '../modules/studio/routes/mcu-firmware'
 import { mediaRoutes } from '../modules/studio/routes/media'
 import { groupChatPublicRoutes, groupChatRoutes } from '../modules/studio/routes/group-chat'
@@ -145,6 +147,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(ttsProtectedRoutes.routes())
   app.use(sttProtectedRoutes.routes())
   app.use(jevRoutes.routes())
+  app.use(contextManagerRoutes.routes())
   app.use(mcuFirmwareRoutes.routes())
   app.use(mediaRoutes.routes())
   app.use(performanceMonitorRoutes.routes())

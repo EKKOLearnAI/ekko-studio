@@ -1,10 +1,11 @@
 import type { Server, Socket } from 'socket.io'
 import { addMessage, createSession, getSession, updateSession, updateSessionStats } from '../../repositories/session-store'
-import { historySessionSource } from '../../contracts/history-source'
+import { historySessionSource, isBuiltinEkkoAgent } from '../../contracts/history-source'
 import { getRecordedUsageTotals, getUsage } from '../../repositories/usage-store'
 import { getModelContextLength } from '../../public/provider-runtime'
 import { resolveChatEkkoProviderRuntimeConfig } from '../../public/chat-agent-runtime'
 import { buildDbSnapshotAwareHistory, forceCompressBridgeHistory, getOrCreateSession } from './compression'
+import { compactBiliConversation, refreshExternalContextUsage, resolveStudioContextManager } from '../context-manager/runtime'
 import { resolveBridgeRunModelConfig } from './model-config'
 import { estimateUsageTokensFromMessages, updateContextTokenUsage } from './usage'
 import type { EkkoAgentRunSocketData } from './handle-ekko-agent-run'
@@ -44,6 +45,18 @@ export async function handleEkkoSessionCommand(
 ): Promise<void> {
   const sessionId = String(data.session_id || '').trim()
   if (!sessionId) return
+  const storedSession = getSession(sessionId)
+  const boundaryError = storedSession?.profile && storedSession.profile !== profile
+    ? 'Context manager session belongs to another profile.'
+    : storedSession && !isBuiltinEkkoAgent(storedSession.agent)
+      ? 'Context manager session belongs to another agent family.'
+      : undefined
+  if (boundaryError) {
+    const payload = { event: 'session.command', session_id: sessionId, command: command.rawName, action: command.name, source: 'ekko', ok: false, terminal: true, message: boundaryError }
+    data.onEvent?.('session.command', payload)
+    socket.emit('session.command', payload)
+    return
+  }
   socket.join(`session:${sessionId}`)
   const state = getOrCreateSession(sessionMap, sessionId)
   const emit = (event: string, payload: Record<string, unknown>) => {
@@ -64,7 +77,7 @@ export async function handleEkkoSessionCommand(
   const ownsCompression = command.name === 'compact'
   if (ownsCompression) state.isWorking = true
   try {
-    let row = getSession(sessionId)
+    let row = storedSession
     if (!row) {
       const model = await resolveBridgeRunModelConfig({
         profile, requestedModel: data.model, requestedProvider: data.provider, preferRequested: true,
@@ -107,6 +120,25 @@ export async function handleEkkoSessionCommand(
       return
     }
     const modelContext = { model: row?.model || data.model, provider: row?.provider || data.provider }
+    const owner = await resolveStudioContextManager(profile, 'ekko', sessionId)
+    if (owner.manager === 'bili') {
+      state.contextOwner = { manager: 'bili', proxyUrl: owner.proxyUrl, conversationId: sessionId }
+      if (command.name === 'compact') {
+        emit('compression.started', { source: 'command', manager: 'bili' })
+        const result = await compactBiliConversation({ sessionId, profile, agent: 'ekko', model: modelContext.model, state, emit })
+        emit('compression.completed', { source: 'command', manager: 'bili', compressed: true, ...result, contextTokens: result.afterTokens })
+        reply({ terminal: true, manager: 'bili', compressed: true, ...result, contextTokens: result.afterTokens,
+          message: `Compression completed: ${result.beforeTokens} -> ${result.afterTokens} tokens.` })
+        return
+      }
+      const available = await refreshExternalContextUsage({ sessionId, profile, agent: 'ekko', model: modelContext.model, state, emit, owner: state.contextOwner })
+      const usage = available ? state.externalContext : undefined
+      reply({ manager: 'bili', available, estimated: false, contextTokens: usage?.tokens ?? null,
+        contextWindow: usage?.window ?? null,
+        contextPercent: usage && usage.window > 0 ? Math.round(usage.tokens / usage.window * 1000) / 10 : null,
+        message: usage ? `Context: ${usage.tokens} / ${usage.window} tokens.` : 'Context: unknown. Bili effective usage is unavailable.' })
+      return
+    }
     const history = await buildDbSnapshotAwareHistory(sessionId, profile, { excludeLastUser: false }, modelContext)
     const historyUsage = estimateUsageTokensFromMessages(history)
     const fixedContextTokens = state.ekkoContext?.fixedContextTokens || 0

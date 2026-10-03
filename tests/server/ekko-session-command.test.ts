@@ -4,6 +4,10 @@ import type { SessionState } from '../../packages/server/src/modules/studio/serv
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(), createSession: vi.fn(), updateSession: vi.fn(), addMessage: vi.fn(() => 9), updateSessionStats: vi.fn(),
   totals: vi.fn(), latest: vi.fn(), history: vi.fn(), compact: vi.fn(), runtime: vi.fn(),
+  owner: vi.fn(), biliCompact: vi.fn(), refresh: vi.fn(),
+}))
+vi.mock('../../packages/server/src/modules/studio/services/context-manager/runtime', () => ({
+  resolveStudioContextManager: mocks.owner, compactBiliConversation: mocks.biliCompact, refreshExternalContextUsage: mocks.refresh,
 }))
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   getSession: mocks.getSession, createSession: mocks.createSession, updateSession: mocks.updateSession, addMessage: mocks.addMessage, updateSessionStats: mocks.updateSessionStats,
@@ -28,12 +32,14 @@ function fixture(working = false) {
     session_id: 'ekko-1', coding_agent_id: 'ekko-agent', input, model: 'requested-model', provider: 'requested-provider',
   }, parseEkkoSessionCommand(input)!, 'default', sessionMap, dequeue)
   const response = () => emit.mock.calls.filter(([event]) => event === 'session.command').at(-1)?.[1]
-  return { run, state, emit, response, dequeue }
+  return { run, state, emit, response, dequeue, socket, sessionMap }
 }
 
 describe('Ekko built-in session commands', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.owner.mockResolvedValue({ manager: 'native', conversationId: 'ekko-1', proxyUrl: 'http://localhost:8787', allowNativeFallback: false })
+    mocks.refresh.mockResolvedValue(false)
     mocks.getSession.mockReturnValue({ id: 'ekko-1', agent: 'ekko-agent', source: 'coding_agent', model: 'stored-model', provider: 'openai' })
     mocks.history.mockResolvedValue([{ role: 'user', content: 'hello' }, { role: 'assistant', content: 'world' }])
     mocks.totals.mockReturnValue({ inputTokens: 12000, outputTokens: 3000, cacheReadTokens: 4000, cacheWriteTokens: 0 })
@@ -47,6 +53,20 @@ describe('Ekko built-in session commands', () => {
     expect(parseEkkoSessionCommand([{ type: 'text', text: `/${name}` }])).toBeNull()
   })
   it('keeps /compress as a compact alias', () => expect(parseEkkoSessionCommand('/compress')?.name).toBe('compact'))
+  it.each(['profile', 'family'])('rejects another session %s before joining or mutating it', async boundary => {
+    mocks.getSession.mockReturnValue({ id: 'ekko-1', profile: boundary === 'profile' ? 'other' : 'default', agent: boundary === 'family' ? 'hermes' : 'ekko-agent', source: 'cli' })
+    const f = fixture()
+    await f.run('/compact')
+    expect(f.socket.join).not.toHaveBeenCalled()
+    expect(f.emit).not.toHaveBeenCalled()
+    expect(f.socket.emit).toHaveBeenCalledWith('session.command', expect.objectContaining({ ok: false, message: expect.stringContaining(boundary) }))
+    expect(mocks.updateSession).not.toHaveBeenCalled()
+    expect(mocks.addMessage).not.toHaveBeenCalled()
+    expect(mocks.biliCompact).not.toHaveBeenCalled()
+    expect(mocks.compact).not.toHaveBeenCalled()
+    expect(f.dequeue).not.toHaveBeenCalled()
+    expect(f.state.isWorking).toBe(false)
+  })
   it.each(['group_chat', 'workflow'])('leaves slash-prefixed task inputs untouched on %s', source => {
     for (const input of ['/context', '/usage', '/status', '/compact', '/compress']) {
       expect(parseEkkoRunCommand({ input, source })).toBeNull()
@@ -111,6 +131,34 @@ describe('Ekko built-in session commands', () => {
     expect(f.state.inputTokens).toBe(10000)
     expect(f.dequeue).toHaveBeenCalledOnce()
     expect(mocks.addMessage).toHaveBeenCalledWith(expect.objectContaining({ role: 'command', content: '/compact' }))
+  })
+  it('uses public bili compression without native history or provider compression', async () => {
+    mocks.owner.mockResolvedValue({ manager: 'bili', conversationId: 'ekko-1', proxyUrl: 'http://localhost:8787', allowNativeFallback: false })
+    mocks.biliCompact.mockResolvedValue({ beforeTokens: 400, afterTokens: 180 })
+    const f = fixture()
+    await f.run('/compress')
+    expect(mocks.biliCompact).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'ekko-1', profile: 'default', agent: 'ekko', model: 'stored-model', state: f.state }))
+    expect(mocks.compact).not.toHaveBeenCalled()
+    expect(mocks.history).not.toHaveBeenCalled()
+    expect(mocks.runtime).not.toHaveBeenCalled()
+    expect(f.response()).toMatchObject({ ok: true, manager: 'bili', beforeTokens: 400, afterTokens: 180, contextTokens: 180 })
+  })
+  it('does not claim a bili compression success or fallback after a public tool failure', async () => {
+    mocks.owner.mockResolvedValue({ manager: 'bili', conversationId: 'ekko-1', allowNativeFallback: true })
+    mocks.biliCompact.mockRejectedValue(new Error('Bili did not commit a compression block.'))
+    const f = fixture()
+    await f.run('/compact')
+    expect(f.response()).toMatchObject({ ok: false, message: 'Bili did not commit a compression block.' })
+    expect(mocks.compact).not.toHaveBeenCalled()
+    expect(f.state.isWorking).toBe(false)
+  })
+  it('reports unavailable bili context as unknown rather than a native estimate', async () => {
+    mocks.owner.mockResolvedValue({ manager: 'bili', conversationId: 'ekko-1' })
+    const f = fixture()
+    await f.run('/context')
+    expect(mocks.refresh).toHaveBeenCalledOnce()
+    expect(mocks.history).not.toHaveBeenCalled()
+    expect(f.response()).toMatchObject({ manager: 'bili', available: false, estimated: false, contextTokens: null })
   })
   it('reports compression failure and releases the session', async () => {
     mocks.compact.mockRejectedValueOnce(new Error('Summarizer unavailable'))

@@ -15,7 +15,12 @@ test(`Ekko ${source} sessions expose built-in commands and send the native sourc
     }
   }, sessionId)
   await mockChatSocket(page)
+  // Vite lazy modules can still be loading after the document load event.
+  const sessionsLoaded = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/api/studio/sessions' && response.ok(),
+  )
   await page.goto(`/#/hermes/session/${sessionId}`)
+  await sessionsLoaded
   await expect(page.getByText('Ekko session ready')).toBeVisible()
   await expect(page.locator('.fork-bubble-btn')).toHaveCount(0)
   const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')

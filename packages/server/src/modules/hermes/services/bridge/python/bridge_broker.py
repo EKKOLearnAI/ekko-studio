@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import os
+import re
 import socket
 import sys
 import threading
@@ -11,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from bridge_runtime import _install_stop_signal_handlers, _jsonable
+from bridge_context_manager import BRIDGE_CONTEXT_CAPABILITIES, normalize_context_manager
 from bridge_transport import (
     WorkerProcess,
     _make_listen_socket,
@@ -28,12 +31,16 @@ class BridgeBroker:
         self.agent_root = agent_root
         self.hermes_home = hermes_home
         self._workers: dict[str, WorkerProcess] = {}
+        self._worker_context: dict[str, dict[str, Any]] = {}
+        self._worker_base_keys: dict[str, str] = {}
         self._run_profile: dict[str, str] = {}
         self._run_worker_key: dict[str, str] = {}
         self._running_run_profile: dict[str, str] = {}
         self._running_run_worker_key: dict[str, str] = {}
         self._session_profile: dict[str, str] = {}
         self._session_worker_key: dict[str, str] = {}
+        self._starting_session_requests: dict[str, int] = {}
+        self._destroying_profiles: set[str] = set()
         self._approval_profile: dict[str, str] = {}
         self._approval_worker_key: dict[str, str] = {}
         self._clarify_profile: dict[str, str] = {}
@@ -46,19 +53,28 @@ class BridgeBroker:
 
     def _normalize_profile(self, value: Any) -> str:
         profile = str(value or "").strip()
-        return profile or "default"
+        profile = profile or "default"
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", profile):
+            raise ValueError("invalid worker profile")
+        return profile
 
     def _normalize_worker_key(self, profile: str, value: Any = None) -> str:
+        profile = self._normalize_profile(profile)
         worker_key = str(value or "").strip()
-        return worker_key or profile
+        if not worker_key or worker_key == profile or worker_key.startswith(profile + ":"):
+            return worker_key or profile
+        return profile + ":" + worker_key
 
     def _worker_for_profile(self, profile: str, worker_key: str | None = None) -> WorkerProcess:
         profile = self._normalize_profile(profile)
         key = self._normalize_worker_key(profile, worker_key)
         with self._lock:
+            if profile in self._destroying_profiles or self._stop.is_set():
+                raise ValueError("worker profile is stopping; retry after restart")
             worker = self._workers.get(key)
             if worker is None:
                 worker = WorkerProcess(key, profile, _worker_endpoint(key, self.endpoint), self.agent_root, self.hermes_home)
+                worker.context_manager = self._worker_context.get(key)
                 self._workers[key] = worker
         return worker
 
@@ -79,12 +95,18 @@ class BridgeBroker:
             if fallback_profile is not None and fallback:
                 return fallback, self._normalize_worker_key(fallback, worker_key)
             raise KeyError(f"unknown session: {session_id}")
+        if fallback_profile is not None and self._normalize_profile(fallback_profile) != profile:
+            raise ValueError("Studio session cannot change worker profile")
         return profile, self._normalize_worker_key(profile, worker_key) if worker_key is not None else stored_worker_key
 
-    def _record_response_routes(self, profile: str, worker_key: str, resp: dict[str, Any]) -> None:
+    def _record_response_routes(self, profile: str, worker_key: str, resp: dict[str, Any], worker: WorkerProcess) -> None:
         run_id = str(resp.get("run_id") or "")
         session_id = str(resp.get("session_id") or "")
         with self._lock:
+            # A removed worker's late response must not resurrect its routes,
+            # including when a replacement has already reused the same key.
+            if self._stop.is_set() or self._workers.get(worker_key) is not worker:
+                return
             if run_id:
                 self._run_profile[run_id] = profile
                 self._run_worker_key[run_id] = worker_key
@@ -94,7 +116,7 @@ class BridgeBroker:
                 else:
                     self._running_run_profile.pop(run_id, None)
                     self._running_run_worker_key.pop(run_id, None)
-            if session_id:
+            if session_id and (session_id not in self._session_worker_key or self._session_worker_key[session_id] == worker_key):
                 self._session_profile[session_id] = profile
                 self._session_worker_key[session_id] = worker_key
             for event in resp.get("events") or []:
@@ -121,6 +143,7 @@ class BridgeBroker:
         with self._lock:
             workers = list(self._workers.values())
             self._workers.clear()
+            self._starting_session_requests.clear()
             self._run_profile.clear()
             self._run_worker_key.clear()
             self._running_run_profile.clear()
@@ -139,17 +162,63 @@ class BridgeBroker:
     def _forward(self, profile: str, req: dict[str, Any], worker_key: str | None = None) -> dict[str, Any]:
         profile = self._normalize_profile(profile)
         key = self._normalize_worker_key(profile, worker_key)
-        worker = self._worker_for_profile(profile, key)
+        session_id = str(req.get("session_id") or "")
+        with self._lock:
+            if profile in self._destroying_profiles or self._stop.is_set():
+                raise ValueError("worker profile is stopping; retry after restart")
+            previous_profile = self._session_profile.get(session_id)
+            previous_key = self._session_worker_key.get(session_id)
+            if previous_profile and previous_profile != profile:
+                raise ValueError("Studio session cannot change worker profile")
+            if req.get("profile") is not None and self._normalize_profile(req["profile"]) != profile:
+                raise ValueError("request profile does not match the routed worker profile")
+            if "context_manager" in req:
+                context = normalize_context_manager(req["context_manager"])
+                identity = req["context_manager"].get("conversationId") if isinstance(req["context_manager"], dict) else None
+                if identity is not None and identity != session_id:
+                    raise ValueError("context manager conversation identity must equal session_id")
+                base_key = self._worker_base_keys.get(key, key)
+                fingerprint = hashlib.sha256(json.dumps(context, sort_keys=True).encode()).hexdigest()[:16]
+                key = base_key + ":context:" + fingerprint
+                self._worker_context[key] = context
+                self._worker_base_keys[key] = base_key
+            elif previous_key and worker_key is None and "worker_key" not in req:
+                key = previous_key
+            elif key not in self._worker_context and key not in self._workers:
+                context = normalize_context_manager(None)
+                fingerprint = hashlib.sha256(json.dumps(context, sort_keys=True).encode()).hexdigest()[:16]
+                base_key = key
+                key += ":context:" + fingerprint
+                self._worker_context[key] = context
+                self._worker_base_keys[key] = base_key
+            if session_id and not req.get("run_id"):
+                if previous_key and previous_key != key and (self._starting_session_requests.get(session_id, 0) or previous_key in self._running_run_worker_key.values()):
+                    raise ValueError("cannot change context manager while the session worker is running")
+                # Reserve routing before startup, so concurrent requests cannot
+                # create this session in two profiles.
+                self._session_profile[session_id] = profile
+                self._session_worker_key[session_id] = key
+                if req.get("action") == "chat":
+                    self._starting_session_requests[session_id] = self._starting_session_requests.get(session_id, 0) + 1
         forwarded = dict(req)
         forwarded["profile"] = profile
         forwarded.pop("worker_key", None)
         try:
+            worker = self._worker_for_profile(profile, key)
             resp = worker.request(forwarded, self._worker_request_timeout(req))
-            self._record_response_routes(profile, key, resp)
+            self._record_response_routes(profile, key, resp, worker)
             return resp
         except RuntimeError as e:
             # Worker returned ok=false or connection error — return error response
             return {"ok": False, "error": str(e)}
+        finally:
+            if session_id and req.get("action") == "chat":
+                with self._lock:
+                    remaining = self._starting_session_requests.get(session_id, 1) - 1
+                    if remaining:
+                        self._starting_session_requests[session_id] = remaining
+                    else:
+                        self._starting_session_requests.pop(session_id, None)
 
     def _worker_request_timeout(self, req: dict[str, Any]) -> float:
         try:
@@ -166,6 +235,8 @@ class BridgeBroker:
             profile = self._session_profile.get(session_id)
             worker_key = self._session_worker_key.get(session_id)
             if profile:
+                if req.get("profile") is not None and self._normalize_profile(req["profile"]) != profile:
+                    raise ValueError("Studio session cannot change worker profile")
                 key = self._normalize_worker_key(profile, req.get("worker_key")) if "worker_key" in req else worker_key
             else:
                 fallback_profile = req.get("profile")
@@ -185,7 +256,7 @@ class BridgeBroker:
         try:
             resp = worker.request(forwarded, self._worker_request_timeout(req))
             if resp.get("exists") is not False:
-                self._record_response_routes(profile, key or profile, resp)
+                self._record_response_routes(profile, key or profile, resp, worker)
             resp.setdefault("loaded", True)
             return resp
         except RuntimeError as e:
@@ -215,12 +286,17 @@ class BridgeBroker:
                 running_sessions_by_profile: dict[str, int] = {}
                 for profile in self._running_run_profile.values():
                     running_sessions_by_profile[profile] = running_sessions_by_profile.get(profile, 0) + 1
+                for session_id, count in self._starting_session_requests.items():
+                    profile = self._session_profile.get(session_id)
+                    if profile:
+                        running_sessions_by_profile[profile] = running_sessions_by_profile.get(profile, 0) + count
                 active_sessions = len(self._session_profile)
-                running_sessions = len(self._running_run_profile)
+                running_sessions = sum(running_sessions_by_profile.values())
             return {
                 "pong": True,
                 "time": time.time(),
                 "mode": "broker",
+                "context_manager_capabilities": BRIDGE_CONTEXT_CAPABILITIES,
                 "broker": {
                     "pid": os.getpid(),
                     "endpoint": self.endpoint,
@@ -236,18 +312,15 @@ class BridgeBroker:
         if action == "worker_ping":
             profile = self._normalize_profile(req.get("profile"))
             worker_key = self._normalize_worker_key(profile, req.get("worker_key"))
-            resp = self._forward(profile, {"action": "ping"}, worker_key)
+            resp = self._forward(profile, {**req, "action": "ping"}, worker_key)
             resp["worker_profile"] = profile
             resp["worker_key"] = worker_key
             return resp
 
-        if action == "chat":
-            profile = self._normalize_profile(req.get("profile"))
-            return self._forward(profile, req, self._normalize_worker_key(profile, req.get("worker_key")))
-
-        if action == "context_estimate":
-            profile = self._normalize_profile(req.get("profile"))
-            return self._forward(profile, req, self._normalize_worker_key(profile, req.get("worker_key")))
+        if action in {"chat", "context_owner", "context_manager_status", "context_compact", "context_estimate"}:
+            session_id = str(req.get("session_id") or "")
+            profile, worker_key = self._route_for_session(session_id, req.get("profile", self._session_profile.get(session_id) or "default"), req.get("worker_key") if "worker_key" in req else None)
+            return self._forward(profile, req, worker_key)
 
         if action == "provider_credentials":
             profile = self._normalize_profile(req.get("profile"))
@@ -387,6 +460,14 @@ class BridgeBroker:
         if action == "destroy_profile":
             profile = self._normalize_profile(req.get("profile"))
             with self._lock:
+                if profile in self._destroying_profiles:
+                    raise ValueError("worker profile is already stopping")
+                if profile in self._running_run_profile.values() or any(
+                    count > 0 and self._session_profile.get(session_id) == profile
+                    for session_id, count in self._starting_session_requests.items()
+                ):
+                    raise ValueError("cannot destroy worker profile while sessions are running or starting")
+                self._destroying_profiles.add(profile)
                 workers = [
                     worker
                     for key, worker in list(self._workers.items())
@@ -407,21 +488,22 @@ class BridgeBroker:
                 self._compression_profile = {key: value for key, value in self._compression_profile.items() if value != profile}
                 self._compression_worker_key = {key: value for key, value in self._compression_worker_key.items() if key in self._compression_profile}
 
-            if not workers:
-                return {"profile": profile, "destroyed": 0}
-
             destroyed = 0
-            for worker in workers:
-                if not worker.running:
-                    worker.stop()
-                    continue
-                try:
-                    resp = worker.request({"action": "destroy_all"})
-                    destroyed += int(resp.get("destroyed") or 0)
-                except Exception:
-                    pass
-                finally:
-                    worker.stop()
+            try:
+                for worker in workers:
+                    if not worker.running:
+                        worker.stop()
+                        continue
+                    try:
+                        resp = worker.request({"action": "destroy_all"})
+                        destroyed += int(resp.get("destroyed") or 0)
+                    except Exception:
+                        pass
+                    finally:
+                        worker.stop()
+            finally:
+                with self._lock:
+                    self._destroying_profiles.discard(profile)
             return {"profile": profile, "destroyed": destroyed}
 
         if action == "list":

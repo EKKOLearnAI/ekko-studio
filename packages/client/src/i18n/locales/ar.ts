@@ -1,6 +1,59 @@
 import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
+  contextManager: {
+      "hermesWorker": "عملية Hermes",
+      "activeSessions": "الجلسات المحملة",
+      "runningSessions": "الجلسات قيد التشغيل",
+      "workerPid": "معرف العملية",
+      "restartWorker": "إعادة تشغيل العملية",
+      "restartImpact": "هل تريد إعادة تشغيل عملية Hermes للملف {profile}؟ ستنقطع الجلسات المحملة وعددها {count} وتعيد الاتصال عند الطلب التالي. تبقى المحادثات المحفوظة، ولا تتم إعادة تشغيل وكيل Billion Context.",
+      "cancel": "إلغاء",
+      "running": "قيد التشغيل",
+      "stopped": "متوقف",
+      "errors": {
+        "failed": "فشلت العملية. حدّث الحالة وحاول مجدداً.",
+        "invalidSettings": "تحقق من إعدادات السياق وعنوان الوكيل.",
+        "profileChanged": "تغير الملف المحدد. حدّث قبل إعادة التشغيل.",
+        "sessionsRunning": "انتظر انتهاء الجلسات قيد التشغيل.",
+        "confirmationRequired": "أكد التأثير على الجلسات المحملة قبل إعادة التشغيل.",
+        "workerUnavailable": "تعذر التحقق من العملية أو الجلسات قيد التشغيل. حدّث قبل إعادة التشغيل.",
+        "restartFailed": "تعذر تأكيد إعادة التشغيل. حدّث الحالة قبل المحاولة مجدداً.",
+        "busy": "هناك عملية أخرى قيد التنفيذ. انتظر وحدّث.",
+        "externallyManaged": "يُدار هذا الوكيل خارج Studio. استخدم مدير العمليات الخاص به.",
+        "installFailed": "التثبيت غير متاح أو فشل. تحقق من Node/npm.",
+        "startFailed": "الوكيل المُدار غير جاهز. تحقق من إعداداته.",
+        "stopFailed": "تعذر إيقاف الوكيل المُدار. حدّث حالته.",
+        "stopFirst": "أوقف الوكيل المُدار قبل ترقيته أو تغيير عنوانه.",
+        "notInstalled": "ثبّت Billion Context قبل بدء تشغيله.",
+        "httpOnly": "يبدأ Studio وكلاء HTTP فقط. أدر وكلاء HTTPS خارجياً.",
+        "probeFailed": "تعذر الاتصال بالوكيل أو التحقق منه. تحقق من عنوانه وتشغيله.",
+        "probeHttp": "أعاد فحص حالة الوكيل خطأ HTTP.",
+        "probeTimeout": "انتهت مهلة فحص حالة الوكيل.",
+        "probeInvalid": "أعاد الوكيل استجابة غير صالحة أو كبيرة جداً."
+      },
+      "issues": {
+        "protocol": "بروتوكول الوكيل غير متوافق.",
+        "fork": "الوكيل لا يدعم فروع المحادثات واللقطات.",
+        "tool": "الأداة المطلوبة {tool} مفقودة أو تعريفها غير صالح.",
+        "unknown": "أبلغ الوكيل عن قدرة غير مدعومة."
+      },
+      "probes": {
+        "manifest": "قدرات الوكيل",
+        "status": "حالة الوكيل"
+      },
+    proxyVersion: 'إصدار الوكيل المرصود',
+    title: 'إدارة السياق', native: 'مدمج', proxyUrl: 'أصل الوكيل', allowNativeFallback: 'السماح بالرجوع إلى الوضع المدمج',
+    save: 'حفظ', saved: 'تم حفظ الإعدادات', saveFailed: 'تعذر حفظ الإعدادات', loadFailed: 'تعذر تحميل الإعدادات',
+    refresh: 'تحديث', healthFailed: 'تعذر التحقق من حالة الوكيل', lifecycleFailed: 'فشلت العملية', actionDone: 'اكتملت العملية',
+    health: 'حالة التشغيل', healthy: 'سليم', unavailable: 'غير متاح', compatibility: 'التوافق',
+    compatible: 'متوافق', incompatible: 'غير متوافق', unverified: 'غير متحقق منه',
+    worker: 'حالة العملية', unknown: 'غير معروف', runtime: 'إدارة العملية',
+    studio: 'تتم إدارته بواسطة Studio', external: 'تتم إدارته خارجياً', none: 'متوقف', version: 'الإصدار المثبت', notInstalled: 'غير مثبت',
+    active: 'نشط', fallback: 'رجوع إلى الوضع المدمج', source: 'مصدر السياق', sourceUsage: 'استخدام مرصود', sourceEstimate: 'تقدير', sourceUnavailable: 'لا توجد ملاحظة',
+    model: 'النموذج', generation: 'الجيل', observed: 'وقت الرصد',
+    actions: { install: 'تثبيت', start: 'تشغيل', stop: 'إيقاف', upgrade: 'ترقية' },
+  },
   jev: {
     browserAutomation: "أتمتة المتصفح المدمج",
     browserAutomationHint: "تستخدم التقييمات الاختيارية اتصال JEV المحفوظ لهذا الملف الشخصي بدءًا من التقييم التالي. تُرسل التسميات المرئية دون قيم الإدخال. يستمر المسار المعتاد عند التعطيل أو عدم التوفر أو عدم اليقين.",
@@ -2531,10 +2584,16 @@ export default {
       memory: 'الذاكرة',
       compression: 'الضغط',
       session: 'الجلسة',
+      contextManager: 'إدارة السياق',
       privacy: 'الخصوصية',
       apiServer: 'خادم API',
       models: 'النماذج',
       voice: 'الصوت',
+    },
+    contextManager: {
+      title: 'إدارة السياق', hermes: 'Hermes', ekko: 'Ekko', hermesHint: 'مدير السياق المستخدم بواسطة Hermes', ekkoHint: 'مدير السياق المستخدم بواسطة Ekko', native: 'أصلي', bili: 'Bili', proxyUrl: 'عنوان الوكيل', proxyUrlHint: 'يُسمح فقط بعناوين HTTP(S) المحلية وعناوين loopback', allowNativeFallback: 'السماح بالرجوع إلى الأصلي', allowNativeFallbackHint: 'السماح بالمعالجة الأصلية عند عدم توفر المدير المحدد', save: 'حفظ',
+      healthTitle: 'الصحة', checkHealth: 'فحص الصحة', healthFailed: 'فشل فحص الصحة', compatibilityUnverified: 'التوافق غير متحقق', manifest: 'البيان', status: 'الحالة', available: 'متاح', unavailable: 'غير متاح', lifecycleTitle: 'دورة الحياة', lifecycleHint: 'تُرجع العمليات القيود عند عدم تسجيل CLI مدعوم', runLifecycle: 'تنفيذ العملية', lifecycleUnsupported: 'عملية دورة الحياة غير مدعومة', lifecycleFailed: 'فشلت عملية دورة الحياة', loadFailed: 'تعذر تحميل إعدادات إدارة السياق',
+      actions: { install: 'تثبيت', start: 'بدء', stop: 'إيقاف', upgrade: 'ترقية' },
     },
     webhooks: {
       title: 'خطافات الويب',

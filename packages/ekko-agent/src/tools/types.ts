@@ -50,6 +50,8 @@ export interface AgentToolContext {
   workspaceId?: string
   userId?: string
   sessionId?: string
+  /** Runtime-owned external conversation identity, separate from the host tool session. */
+  contextConversationId?: string
   profileId?: string
   sourceMessageIds?: string[]
   memoryWritePolicy?: import('../memory/types').MemoryWritePolicy

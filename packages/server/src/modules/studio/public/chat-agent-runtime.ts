@@ -17,6 +17,18 @@ export type ChatModelReasoningEffort = any
 export type ChatModelRequest = any
 export type ChatModelResponse = any
 
+export interface ChatBillionContextManagerOptions {
+  proxyOrigin: string
+  agent?: string
+  contextWindow?: number
+}
+
+export interface ChatContextManager {
+  readonly strategy: string
+  tools(signal?: AbortSignal): Promise<any[]>
+  prepareRequest(request: any, binding: any): Promise<any>
+}
+
 export interface ChatAgentRuntimeDependencies {
   projectBrowserHistory?<T extends { role: string; content: unknown; name?: string | null; tool_name?: string | null }>(messages: T[], options?: { truncateOtherTools?: (content: string) => string }): T[]
   createPrimaryAgentBridge(options?: Record<string, unknown>): PrimaryAgentBridgeClient
@@ -31,6 +43,7 @@ export interface ChatAgentRuntimeDependencies {
   abortEkkoBackgroundTasks(...args: any[]): Promise<any>
   hasEkkoBackgroundTasks(...args: any[]): boolean
   createEkkoModelClient(...args: any[]): any
+  createBillionContextManager?(options: ChatBillionContextManagerOptions): ChatContextManager
   resolveEkkoModelProviderConfigs(...args: any[]): any
   ekkoModelRequestTimeoutMs: number
   ekkoAgentReasoningText(...args: any[]): string
@@ -92,6 +105,11 @@ export const getChatEkkoAgent = (profile: string) => configured().getEkkoAgent(p
 export const abortChatEkkoBackgroundTasks = (...args: any[]) => configured().abortEkkoBackgroundTasks(...args)
 export const hasChatEkkoBackgroundTasks = (...args: any[]) => configured().hasEkkoBackgroundTasks(...args)
 export const createChatEkkoModelClient = (...args: any[]) => configured().createEkkoModelClient(...args)
+export function createChatBillionContextManager(options: ChatBillionContextManagerOptions): ChatContextManager {
+  const create = configured().createBillionContextManager
+  if (!create) throw new Error('Studio billion-context runtime has not been configured')
+  return create(options)
+}
 export const resolveChatEkkoModelProviderConfigs = (...args: any[]) => configured().resolveEkkoModelProviderConfigs(...args)
 export const getChatEkkoModelRequestTimeoutMs = () => configured().ekkoModelRequestTimeoutMs
 export const chatEkkoAgentReasoningText = (...args: any[]) => configured().ekkoAgentReasoningText(...args)

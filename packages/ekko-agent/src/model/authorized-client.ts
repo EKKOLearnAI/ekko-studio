@@ -22,6 +22,8 @@ export interface AuthorizedModelClientOptions {
 
 /** Model client decorator that refreshes OAuth credentials before each call. */
 export class AuthorizedModelClient implements ModelClient {
+  get supportsContextTransport(): boolean { return this.initialClient.supportsContextTransport === true }
+  get defaultModel(): string | undefined { return this.model ?? this.initialClient.defaultModel }
   readonly provider: string
   readonly requestStyle: ModelRequestStyle
   readonly capabilities: ModelCapabilities
