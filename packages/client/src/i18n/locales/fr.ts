@@ -1240,6 +1240,7 @@ export default {
     renameSession: 'Renommer la session',
     sessionNotFound: 'Session non trouvee',
     enterNewTitle: 'Entrez un nouveau titre',
+    builtinAgent: 'Agent intégré',
     other: 'Autre',
     runFailed: 'Echec de l\'execution',
     error: 'Erreur',

@@ -9,6 +9,7 @@ import { copyCompressionSnapshot } from './compression-snapshot'
 import { recordSkillUsageMessage } from './skill-usage-store'
 import { getRecordedSessionTokensBatch } from './usage-store'
 import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
+import { BUILTIN_EKKO_AGENT_IDS, BUILTIN_HISTORY_SOURCES, isBuiltinEkkoAgent, normalizeSessionIdentity } from '../contracts/history-source'
 
 // Re-export types for compatibility with sessions-db.ts consumers
 export interface HermesSessionRow {
@@ -89,6 +90,7 @@ export interface SessionListOptions {
   profiles?: string[]
   includeArchived?: boolean
   excludeSessionIds?: string[]
+  historySource?: string
 }
 
 export type SessionSearchOptions = SessionListOptions
@@ -122,10 +124,12 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
 function mapSessionRows(rows: Record<string, unknown>[]): HermesSessionRow[] {
   // Native Coding Agents' ledger owns token accounting. Stored counters can remain
   // zero; using them would erase live usage on the next session-list poll.
-  const nativeIds = rows.filter(row => row.source === 'coding_agent'
+  const builtinIds = rows.filter(row => isBuiltinEkkoAgent(String(row.agent || '')) || row.source === 'builtin_agent').map(row => String(row.id))
+  const nativeIds = rows.filter(row => !isBuiltinEkkoAgent(String(row.agent || '')) && (row.source === 'coding_agent'
     || (isAgentRuntime(row.agent) && agentFamilyForRuntime(row.agent) === 'coding')
-    || row.agent === 'claude' || row.agent === 'claude_code').map(row => String(row.id))
+    || row.agent === 'claude' || row.agent === 'claude_code')).map(row => String(row.id))
   const usage = nativeIds.length ? getRecordedSessionTokensBatch(nativeIds, 'coding_agent') : {}
+  Object.assign(usage, builtinIds.length ? getRecordedSessionTokensBatch(builtinIds, 'ekko_agent') : {})
   return rows.map(row => mapStoredSessionRow({ ...row, ...usage[String(row.id)] }))
 }
 
@@ -223,8 +227,10 @@ export function createSession(data: {
   push_enabled?: boolean | number
 }): HermesSessionRow {
   const now = Math.floor(Date.now() / 1000)
-  const source = data.source || 'api_server'
-  const agent = data.agent || (source === 'cli' ? 'hermes' : '')
+  const { source, agent } = normalizeSessionIdentity({
+    source: data.source || 'api_server',
+    agent: data.agent || (data.source === 'builtin_agent' ? 'ekko-agent' : data.source === 'cli' ? 'hermes' : ''),
+  })
   if (!isSqliteAvailable()) {
     return {
       id: data.id, profile: data.profile || 'default', source, agent,
@@ -311,8 +317,10 @@ export function createBranchedSession(data: {
 }): HermesSessionRow | null {
   if (!isSqliteAvailable()) return null
   const db = getDb()!
-  const source = data.source || 'api_server'
-  const agent = data.agent || (source === 'cli' ? 'hermes' : '')
+  const { source, agent } = normalizeSessionIdentity({
+    source: data.source || 'api_server',
+    agent: data.agent || (data.source === 'builtin_agent' ? 'ekko-agent' : data.source === 'cli' ? 'hermes' : ''),
+  })
   const insertMessage = db.prepare(
     `INSERT INTO ${MESSAGES_TABLE} (session_id, role, content, display_role, display_content, tool_call_id, tool_calls, tool_name, run_marker, timestamp, token_count, finish_reason, reasoning, reasoning_details, reasoning_content)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -454,6 +462,13 @@ export function getSessionMetadata(id: string): HermesSessionRow | null {
 export function updateSession(id: string, data: Partial<Omit<HermesSessionRow, 'id' | 'profile'>>): void {
   if (!isSqliteAvailable()) return
   const db = getDb()!
+  if (data.source !== undefined || data.agent !== undefined) {
+    const stored = db.prepare(`SELECT source, agent FROM ${SESSIONS_TABLE} WHERE id = ?`).get(id) as { source: string; agent: string } | undefined
+    if (stored) {
+      const identity = normalizeSessionIdentity({ source: data.source ?? stored.source, agent: data.agent ?? stored.agent })
+      data = { ...data, ...identity }
+    }
+  }
   const fields: string[] = []
   const values: any[] = []
   for (const [key, val] of Object.entries(data)) {
@@ -598,7 +613,7 @@ export function listSessions(
     FROM ${SESSIONS_TABLE} s
     LEFT JOIN ${SESSIONS_TABLE} p ON p.id = s.parent_session_id
     WHERE ${filters.sql}
-    ORDER BY s.is_pinned DESC, s.last_active DESC, s.id DESC
+    ORDER BY ${options.historySource ? '' : 's.is_pinned DESC, '}s.last_active DESC, s.id DESC
     LIMIT ? OFFSET ?
   `
 
@@ -670,6 +685,17 @@ function sessionFilterSql(
     if (sources.length === 0) return null
     clauses.push(`s.source IN (${sources.map(() => '?').join(', ')})`)
     params.push(...sources)
+  }
+  if (options.historySource) {
+    // Apply the family filter before LIMIT/OFFSET, including historical aliases.
+    const builtin = `s.source IN (${BUILTIN_HISTORY_SOURCES.map(() => '?').join(', ')}) AND LOWER(TRIM(COALESCE(s.agent, ''))) IN (${BUILTIN_EKKO_AGENT_IDS.map(() => '?').join(', ')})`
+    if (options.historySource === 'builtin_agent') {
+      clauses.push(`(${builtin})`)
+    } else {
+      clauses.push(`s.source = ? AND NOT (${builtin})`)
+      params.push(options.historySource)
+    }
+    params.push(...BUILTIN_HISTORY_SOURCES, ...BUILTIN_EKKO_AGENT_IDS)
   }
   if (options.includeArchived === false) {
     clauses.push('COALESCE(s.is_archived, 0) = 0')

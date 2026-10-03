@@ -1240,6 +1240,7 @@ export default {
     renameSession: 'セッション名の変更',
     sessionNotFound: 'セッションが見つかりません',
     enterNewTitle: '新しいタイトルを入力',
+    builtinAgent: '組み込み Agent',
     other: 'その他',
     runFailed: '実行に失敗しました',
     error: 'エラー',

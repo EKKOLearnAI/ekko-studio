@@ -27,7 +27,7 @@ export interface StartRunRequest {
   provider?: string
   model_groups?: Array<{ provider: string; models: string[] }>
   queue_id?: string
-  source?: 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
+  source?: 'api_server' | 'cli' | 'coding_agent' | 'builtin_agent' | 'global_agent' | 'workflow' | 'group_chat'
   session_source?: 'global_agent' | 'workflow' | 'group_chat'
   coding_agent_id?: ChatCodingAgentId
   agent_preset?: string

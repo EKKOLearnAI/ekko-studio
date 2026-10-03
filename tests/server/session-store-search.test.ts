@@ -60,6 +60,32 @@ describe('session store filtering', () => {
     expect([...first, ...next].every(s => s.is_pinned === 0)).toBe(true)
   })
 
+  it('filters builtin history before pagination while preserving source, aliases and profile boundaries', async () => {
+    const { createSession, listSessions, countSessions, getSession, setSessionPinned } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    for (let i = 0; i < 80; i++) {
+      createSession({ id: `external-${i}`, profile: 'default', source: 'coding_agent', agent: 'codex' })
+      db.prepare('UPDATE sessions SET last_active = ? WHERE id = ?').run(1000 + i, `external-${i}`)
+    }
+    for (const [i, agent] of ['ekko-agent', ' EKKO ', 'ekko_agent'].entries()) {
+      createSession({ id: `builtin-${i}`, profile: 'default', source: i === 1 ? 'cli' : 'coding_agent', agent })
+      db.prepare('UPDATE sessions SET last_active = ?, is_archived = ? WHERE id = ?').run(10 - i, i === 2 ? 1 : 0, `builtin-${i}`)
+    }
+    setSessionPinned('builtin-2', true)
+    createSession({ id: 'group', profile: 'default', source: 'group_chat', agent: 'ekko-agent' })
+    createSession({ id: 'workflow', profile: 'default', source: 'workflow', agent: 'ekko-agent' })
+    createSession({ id: 'other-profile', profile: 'travel', source: 'coding_agent', agent: 'ekko-agent' })
+    const first = listSessions('default', undefined, 2, { historySource: 'builtin_agent' })
+    const next = listSessions('default', undefined, 2, { historySource: 'builtin_agent', offset: 2 })
+    expect(first.map(row => row.id)).toEqual(['builtin-0', 'builtin-1'])
+    expect(next.map(row => row.id)).toEqual(['builtin-2'])
+    expect(next[0]).toMatchObject({ is_archived: 1, is_pinned: 1, source: 'builtin_agent' })
+    expect(countSessions('default', undefined, { historySource: 'builtin_agent' })).toBe(3)
+    expect(listSessions(undefined, undefined, 10, { historySource: 'builtin_agent', profiles: ['travel'] }).map(row => row.id)).toEqual(['other-profile'])
+    expect(countSessions('default', 'coding_agent', { historySource: 'coding_agent' })).toBe(80)
+    expect(listSessions('default', 'coding_agent', 10, { historySource: 'coding_agent', offset: 70 }).every(row => row.agent === 'codex')).toBe(true)
+    expect(getSession('builtin-0')?.source).toBe('builtin_agent')
+  })
+
   it('resolves notification title for untitled sessions and bounds assistant preview', async () => {
     const { createSession, addMessage, getSessionNotificationPreview } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     createSession({ id: 'untitled-notice', profile: 'default', source: 'coding_agent' })

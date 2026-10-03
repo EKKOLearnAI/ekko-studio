@@ -1187,6 +1187,7 @@ export const GC_SESSION_PROFILES_SCHEMA: Record<string, string> = {
 // ============================================================================
 
 import { getDb, getStoragePath } from './index'
+import { BUILTIN_EKKO_AGENT_IDS, BUILTIN_HISTORY_SOURCES } from '../../contracts/history-source'
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`
@@ -1666,6 +1667,13 @@ export function initAllHermesTables(): void {
     syncTable(SESSIONS_TABLE, SESSIONS_SCHEMA, {
       indexes: SESSIONS_INDEXES,
     })
+    // Idempotent classification migration. Messages, timestamps and metadata
+    // stay intact; group/workflow/global-agent sessions keep their source.
+    db.prepare(`UPDATE ${SESSIONS_TABLE} SET source = 'builtin_agent', agent = 'ekko-agent'
+      WHERE source IN (${BUILTIN_HISTORY_SOURCES.map(() => '?').join(', ')})
+      AND LOWER(TRIM(COALESCE(agent, ''))) IN (${BUILTIN_EKKO_AGENT_IDS.map(() => '?').join(', ')})
+      AND (source <> 'builtin_agent' OR agent <> 'ekko-agent')`)
+      .run(...BUILTIN_HISTORY_SOURCES, ...BUILTIN_EKKO_AGENT_IDS)
     createIndexes(db, SESSION_CATEGORIES_INDEXES)
     createIndexes(db, SESSIONS_INDEXES)
     syncTable(MESSAGES_TABLE, MESSAGES_SCHEMA)

@@ -47,6 +47,7 @@ import { recordSessionUsage } from '../usage/usage-recorder'
 import { observeRunChatPetEvent } from '../../public/pet-events'
 import { contentBlocksToString, convertContentBlocksForAgent, extractTextForPreview } from './content-blocks'
 import { buildCompressedHistory, getOrCreateSession } from './compression'
+import { handleEkkoSessionCommand, parseEkkoRunCommand } from './ekko-session-command'
 import { resolveBridgeRunModelConfig, type RunModelGroup } from './model-config'
 import { persistRunMessages, type RunMessageDraft } from './message-persistence'
 import { buildOutboundRunEvent } from './resume-payload'
@@ -120,6 +121,7 @@ export interface EkkoAgentRunSocketData {
 
 function isEkkoAgentId(data: EkkoAgentRunSocketData): boolean {
   return data.coding_agent_id === 'ekko-agent' || data.agent_id === 'ekko-agent'
+    || (data.source === 'builtin_agent' && !data.coding_agent_id && !data.agent_id)
 }
 
 function normalizeReasoningEffort(value: unknown): ModelReasoningEffort | undefined {
@@ -432,7 +434,13 @@ export async function handleEkkoAgentRun(
     return
   }
   if (!isEkkoAgentId(data)) {
-    socket.emit('run.failed', { event: 'run.failed', session_id: sessionId, error: 'ekko-agent run requires coding_agent_id=ekko-agent' })
+    socket.emit('run.failed', { event: 'run.failed', session_id: sessionId, error: 'ekko-agent run requires agent_id=ekko-agent' })
+    return
+  }
+  const storedSession = getSession(sessionId)
+  const command = parseEkkoRunCommand(data, storedSession?.source)
+  if (command && !backgroundContinuationContext) {
+    await handleEkkoSessionCommand(nsp, socket, data, command, profile, sessionMap, dequeueNextQueuedRun)
     return
   }
   const authenticatedUserId = socket.data?.user?.id == null ? undefined : String(socket.data.user.id)
@@ -442,16 +450,18 @@ export async function handleEkkoAgentRun(
   state.isWorking = true
   state.isAborting = false
   state.profile = profile
+  state.webhookAgent = 'ekko'
   state.source = data.session_source === 'group_chat' || data.source === 'group_chat'
     ? 'group_chat'
     : data.session_source === 'workflow' || data.source === 'workflow'
       ? 'workflow'
-      : 'coding_agent'
+      : data.session_source === 'global_agent' || data.source === 'global_agent'
+        ? 'global_agent'
+        : 'builtin_agent'
   state.events = []
   const abortController = new AbortController()
   state.abortController = abortController
 
-  const storedSession = getSession(sessionId)
   if (storedSession && !storedSession.user_id && authenticatedUserId) {
     updateSession(sessionId, { user_id: authenticatedUserId })
   }
@@ -503,13 +513,13 @@ export async function handleEkkoAgentRun(
   const instructionMessages: AgentMessage[] = instructions
     ? [{ role: 'system', content: instructions }]
     : []
-  const sessionSource = data.session_source === 'global_agent'
+  const sessionSource = data.session_source === 'global_agent' || data.source === 'global_agent'
     ? 'global_agent'
     : data.session_source === 'group_chat' || data.source === 'group_chat'
       ? 'group_chat'
       : data.session_source === 'workflow' || data.source === 'workflow'
         ? 'workflow'
-        : 'coding_agent'
+        : 'builtin_agent'
   const emit = (event: string, payload: any) => {
     const tagged = { ...payload, session_id: sessionId }
     observeRunChatPetEvent(profile, event, tagged)
@@ -1387,7 +1397,10 @@ export async function handleEkkoAgentRun(
             toolContext,
             metadata,
             backgroundDelegationEnabled: data.background_delegation_enabled !== false,
-          }).then((estimate: any) => estimate.contextTokens)
+          }).then((estimate: any) => {
+            state.ekkoContext = { fixedContextTokens: estimate.contextTokens }
+            return estimate.contextTokens
+          })
           return (await estimatePromise) + localMessageTokens
         },
         currentInputTokens,

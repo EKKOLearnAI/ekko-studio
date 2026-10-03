@@ -111,6 +111,25 @@ describe('run chat compression trigger', () => {
     readConfigYamlForProfileMock.mockResolvedValue({})
   })
 
+  it('manual Ekko compression includes the latest turn and preserves configured token budgets', async () => {
+    getSessionDetailMock.mockReturnValue({ messages: [
+      { id: 1, role: 'user', content: 'latest question' },
+      { id: 2, role: 'assistant', content: 'latest answer' },
+    ] })
+    compressorCompressMock.mockResolvedValue({ messages: [{ role: 'user', content: 'summary' }], meta: {
+      totalMessages: 2, compressed: true, llmCompressed: true, summaryTokenEstimate: 1, verbatimCount: 0, compressedStartIndex: 1,
+    } })
+    const { forceCompressBridgeHistory } = await import('../../packages/server/src/modules/studio/services/chat-run/compression')
+    await forceCompressBridgeHistory('session-1', 'default', [], undefined, {
+      model: 'ekko-model', provider: 'openai', apiMode: 'responses', force: true, excludeLastUser: false, allowHermesFallback: false,
+    })
+    expect(compressorCompressMock).toHaveBeenCalledWith([
+      expect.objectContaining({ role: 'user', content: 'latest question' }),
+      expect.objectContaining({ role: 'assistant', content: 'latest answer' }),
+    ], '', undefined, 'session-1', expect.objectContaining({ model: 'ekko-model', provider: 'openai', apiMode: 'responses', force: true, allowHermesFallback: false }))
+    expect(compressorConstructorMock.mock.calls[0][0].config.triggerTokens).toBeGreaterThan(0)
+  })
+
   it('preserves empty assistant reasoning_content in bridge history', async () => {
     getSessionDetailMock.mockReturnValue({
       messages: [

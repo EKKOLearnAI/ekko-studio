@@ -95,3 +95,15 @@ export function readBridgeSessionCommandName(input: string): BridgeSessionComman
 export function isKnownBridgeSessionCommand(input: string): boolean {
   return readBridgeSessionCommandName(input) !== null
 }
+
+export const EKKO_SESSION_COMMAND_DEFINITIONS: BridgeSessionCommandDefinition[] = [
+  { key: 'ekko:context', name: 'context', args: '', descriptionKey: 'chat.slashCommands.context' },
+  { key: 'ekko:compact', name: 'compact', args: '', descriptionKey: 'chat.slashCommands.compress' },
+  { key: 'ekko:usage', name: 'usage', args: '', descriptionKey: 'chat.slashCommands.usage' },
+  { key: 'ekko:status', name: 'status', args: '', descriptionKey: 'chat.slashCommands.status' },
+]
+
+export function isKnownEkkoSessionCommand(input: string): boolean {
+  const name = readBridgeSessionCommandName(input)
+  return name === 'compress' || EKKO_SESSION_COMMAND_DEFINITIONS.some(command => command.name === name)
+}

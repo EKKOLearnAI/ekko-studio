@@ -1326,7 +1326,7 @@ async function confirmNewChat() {
   }
 
   const group = selectedNewChatProviderGroup.value;
-  const source = newChatAgent.value === "hermes" ? "cli" : "coding_agent";
+  const source = newChatAgent.value === "hermes" ? "cli" : newChatAgent.value === "ekko-agent" ? "builtin_agent" : "coding_agent";
   const codingAgentMode = effectiveNewChatAgentMode.value;
   const isGlobalCodingAgent = source === "coding_agent" && codingAgentMode === "global";
   const agent = newChatAgent.value === "codex"
@@ -1351,12 +1351,12 @@ async function confirmNewChat() {
     source,
     agent,
     codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value,
-    codingAgentMode: source === "coding_agent" ? codingAgentMode : undefined,
+    codingAgentMode: source === "coding_agent" || source === "builtin_agent" ? codingAgentMode : undefined,
     agentPreset: newChatAgent.value === "dsh" ? newChatAgentPreset.value : undefined,
     workspace: newChatWorkspace.value || null,
     categoryId: newChatCategoryId.value,
-    baseUrl: source === "coding_agent" && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
-    apiKey: source === "coding_agent" && !isGlobalCodingAgent && !newChatUsesKeylessProvider.value ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
+    baseUrl: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
+    apiKey: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent && !newChatUsesKeylessProvider.value ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
     apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined,
   });
   // Record workspace to recent list
@@ -1773,6 +1773,7 @@ async function handleDeleteCategoryConfirm() {
 
 const canSetContextSessionModel = computed(() =>
   contextSession.value?.source === "cli" ||
+  contextSession.value?.source === "builtin_agent" ||
   (contextSession.value?.source === "coding_agent" && contextSession.value?.codingAgentMode !== "global"),
 );
 
@@ -2084,7 +2085,7 @@ const sessionModelSession = computed(() =>
 );
 
 const isSessionModelScopedCodingAgent = computed(() =>
-  sessionModelSession.value?.source === "coding_agent" &&
+  (sessionModelSession.value?.source === "coding_agent" || sessionModelSession.value?.source === "builtin_agent") &&
   sessionModelSession.value?.codingAgentMode !== "global",
 );
 const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>

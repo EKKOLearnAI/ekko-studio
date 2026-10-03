@@ -257,6 +257,42 @@ describe('ekko-agent context usage events', () => {
     expect(rows).toContainEqual(expect.objectContaining({ role: 'assistant', tool_calls: [expect.objectContaining({ function: expect.objectContaining({ name: 'update_plan' }) })] }))
   })
 
+  it.each(['builtin_agent', 'coding_agent'] as const)('persists Ekko direct chats as builtin_agent from %s requests', async source => {
+    getSessionMock.mockReturnValue(undefined)
+    agentRunMock.mockImplementationOnce(async (input: any) => {
+      input.onEvent({ type: 'run.started', runId: 'run-native-source', maxSteps: 3 })
+      return { runId: 'run-native-source', output: { role: 'assistant', content: 'Complete' }, steps: [], messages: [], events: [] }
+    })
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap, state } = makeHarness()
+    await handleEkkoAgentRun(nsp as any, socket as any, {
+      session_id: 'session-1', input: 'Hello', source, agent_id: 'ekko-agent',
+    }, 'default', sessionMap, vi.fn(() => false))
+    expect(createSessionMock).toHaveBeenCalledWith(expect.objectContaining({ source: 'builtin_agent', agent: 'ekko-agent' }))
+    expect(state.source).toBe('builtin_agent')
+    expect(agentRunMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['group_chat', 'workflow'] as const)('executes slash-prefixed %s tasks instead of treating them as single-chat commands', async source => {
+    agentRunMock.mockImplementationOnce(async (input: any) => {
+      input.onEvent({ type: 'run.started', runId: 'run-task', maxSteps: 3 })
+      return { runId: 'run-task', output: { role: 'assistant', content: 'Task complete' }, steps: [], messages: [], events: [] }
+    })
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap, state, events } = makeHarness()
+    await handleEkkoAgentRun(nsp as any, socket as any, {
+      session_id: 'session-1', input: '/compact', coding_agent_id: 'ekko-agent',
+      source: 'coding_agent', session_source: source,
+      onEvent: (event, payload) => events.push({ event, payload }),
+    }, 'default', sessionMap, vi.fn(() => false))
+    expect(agentRunMock).toHaveBeenCalledTimes(1)
+    expect(agentRunMock.mock.calls[0][0].messages).toContainEqual(expect.objectContaining({ role: 'user', content: '/compact' }))
+    expect((state as any).source).toBe(source)
+    expect(updateSessionMock).toHaveBeenCalledWith('session-1', expect.objectContaining({ source, agent: 'ekko-agent' }))
+    expect(events.some(item => item.event === 'session.command')).toBe(false)
+    expect(events.some(item => item.event === 'run.completed')).toBe(true)
+  })
+
   it('bridges Ekko tool approval requests through the existing chat events', async () => {
     agentRunMock.mockImplementationOnce(async (input: any) => {
       input.onEvent({ type: 'run.started', runId: 'run-approval', maxSteps: 3 })

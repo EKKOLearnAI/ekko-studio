@@ -1207,6 +1207,7 @@ export default {
     modelSet: 'Модель установлена',
     modelSwitching: 'Переключение модели...',
     modelSetFailed: 'Ошибка установки модели',
+    builtinAgent: 'Встроенный агент',
     other: 'Другое',
     runFailed: 'Ошибка выполнения',
     error: 'Ошибка',

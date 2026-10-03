@@ -1240,6 +1240,7 @@ export default {
     renameSession: '세션 이름 변경',
     sessionNotFound: '세션을 찾을 수 없습니다',
     enterNewTitle: '새 제목을 입력하세요',
+    builtinAgent: '내장 Agent',
     other: '기타',
     runFailed: '실행 실패',
     error: '오류',

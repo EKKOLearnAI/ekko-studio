@@ -7,6 +7,7 @@ import { logger } from '../../public/logging'
 import { handleMessage } from './message-format'
 import { estimateUsageTokensFromMessages } from './usage'
 import type { ChatRunSource, SessionState } from './types'
+import { historySessionSource, isBuiltinEkkoAgent } from '../../contracts/history-source'
 
 function restoreBackgroundDelegations(messages: any[]): SessionState['backgroundDelegations'] {
   const delegations: NonNullable<SessionState['backgroundDelegations']> = {}
@@ -40,10 +41,11 @@ function restoreBackgroundDelegations(messages: any[]): SessionState['background
 }
 
 export function resolveRunSource(source?: string, sessionId?: string): ChatRunSource {
-  if (source === 'coding_agent' || source === 'global_agent' || source === 'workflow' || source === 'group_chat' || source === 'cli') return source
+  if (source === 'builtin_agent' || source === 'coding_agent' || source === 'global_agent' || source === 'workflow' || source === 'group_chat' || source === 'cli') return source
   if (sessionId) {
-    const stored = getSession(sessionId)?.source
-    if (stored === 'coding_agent' || stored === 'global_agent' || stored === 'workflow' || stored === 'group_chat' || stored === 'cli') return stored
+    const storedSession = getSession(sessionId)
+    const stored = historySessionSource(storedSession || {})
+    if (stored === 'builtin_agent' || stored === 'coding_agent' || stored === 'global_agent' || stored === 'workflow' || stored === 'group_chat' || stored === 'cli') return stored
   }
   return 'cli'
 }
@@ -68,10 +70,10 @@ export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<strin
     let outputTokens: number
     let contextTokens: number | undefined
     const session = actualDetail?.session || getSession(sid)
-    const usageSource = session?.source === 'coding_agent' || ['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude', 'claude-code', 'claude_code', 'cursor'].includes(session?.agent || '')
-      ? 'coding_agent'
-      : session?.agent === 'ekko_agent' || session?.agent === 'ekko-agent'
-        ? 'ekko_agent'
+    const usageSource = isBuiltinEkkoAgent(session?.agent)
+      ? 'ekko_agent'
+      : session?.source === 'coding_agent' || ['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude', 'claude-code', 'claude_code', 'cursor', 'antigravity'].includes(session?.agent || '')
+        ? 'coding_agent'
         : 'hermes'
     const totals = getRecordedUsageTotals(sid, usageSource)
     const pageUsage = estimateUsageTokensFromMessages(messages)

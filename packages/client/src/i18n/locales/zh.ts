@@ -1328,6 +1328,7 @@ export default {
     modelSet: '模型已设置',
     modelSwitching: '正在切换模型...',
     modelSetFailed: '设置模型失败',
+    builtinAgent: '内置 Agent',
     other: '其他',
     runFailed: '运行失败',
     error: '错误',

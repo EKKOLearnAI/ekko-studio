@@ -6,6 +6,7 @@ import { SessionShareError, type SessionShareAction, type SessionShareAppUser, t
 import type { AuthenticatedUser } from '../../middleware/auth'
 import { findUserById, listUserProfiles } from '../../repositories/users-store'
 import { getSession } from '../../repositories/session-store'
+import { historySessionSource, isBuiltinEkkoAgent } from '../../contracts/history-source'
 import { getProfileUploadDir } from '../files/upload-paths'
 import { isPathWithin, isNearestExistingRealPathWithin } from '../files/path'
 import { shareAppIdentityVerifier } from './app-identity'
@@ -128,8 +129,10 @@ export function prepareSessionShareRun(access: SessionShareAccess, data: Record<
   assertShareProfile(access, data.profile)
   const session = getSession(access.share.session_id)!
   if (data.workspace !== undefined && data.workspace !== session.workspace) throw new SessionShareError('share_workspace_changed')
-  const source = ['coding_agent', 'global_agent', 'cli'].includes(session.source) ? session.source : 'cli'
-  if (data.source !== undefined && data.source !== session.source && data.source !== source) throw new SessionShareError('share_session_mismatch')
+  const canonicalSource = historySessionSource(session)
+  const source = ['builtin_agent', 'coding_agent', 'global_agent', 'cli'].includes(canonicalSource) ? canonicalSource : 'cli'
+  if (data.source !== undefined && data.source !== session.source
+    && historySessionSource({ source: String(data.source), agent: session.agent }) !== source) throw new SessionShareError('share_session_mismatch')
   // Session-management slash commands can branch, clear or switch sessions.
   if (typeof data.input === 'string' && /^\s*\//.test(data.input)) throw new SessionShareError('share_session_command_forbidden')
   const input = data.input
@@ -138,7 +141,8 @@ export function prepareSessionShareRun(access: SessionShareAccess, data: Record<
   Object.assign(data, { input, session_id: session.id, queue_id: queueId, profile: access.share.profile,
     source, workspace: session.workspace, model: session.model || undefined,
     provider: session.provider || undefined })
-  if (session.agent && session.agent !== 'hermes') data.coding_agent_id = session.agent.replace('ekko_agent', 'ekko-agent')
+  if (isBuiltinEkkoAgent(session.agent)) data.agent_id = 'ekko-agent'
+  else if (session.agent && session.agent !== 'hermes') data.coding_agent_id = session.agent
   if (session.agent_mode) data.mode = session.agent_mode
   if (session.api_mode) data.apiMode = session.api_mode
   if (session.reasoning_effort) data.reasoning_effort = session.reasoning_effort

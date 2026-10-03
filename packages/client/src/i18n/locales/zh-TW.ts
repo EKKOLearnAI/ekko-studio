@@ -1310,6 +1310,7 @@ export default {
     folderPickerSelected: '已選擇：',
     workspaceSet: '工作區已設定',
     workspaceSetFailed: '設定工作區失敗',
+    builtinAgent: '內建 Agent',
     other: '其他',
     runFailed: '執行失敗',
     error: '錯誤',

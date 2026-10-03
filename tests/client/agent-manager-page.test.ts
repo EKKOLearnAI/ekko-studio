@@ -514,7 +514,7 @@ describe('Agent Manager page', () => {
 
     expect(dialogWarning).not.toHaveBeenCalled()
     expect(newChat).toHaveBeenCalledWith({
-      source: 'coding_agent',
+      source: 'builtin_agent',
       agent: 'ekko-agent',
       codingAgentId: 'ekko-agent',
       codingAgentMode: 'scoped',
@@ -548,7 +548,7 @@ describe('Agent Manager page', () => {
     await flushPromises()
 
     expect(newChat).toHaveBeenCalledWith({
-      source: 'coding_agent',
+      source: 'builtin_agent',
       agent: 'ekko-agent',
       codingAgentId: 'ekko-agent',
       codingAgentMode: 'scoped',

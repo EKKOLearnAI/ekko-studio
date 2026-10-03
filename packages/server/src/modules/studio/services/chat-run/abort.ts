@@ -59,10 +59,10 @@ export async function handleAbort(
   const hasCodingAgentRun = codingAgentRunManager.hasSession(sessionId)
   const hasEkkoBackgroundTasks = hasGlobalEkkoBackgroundTasks(sessionId)
   if (!state && (hasCodingAgentRun || hasEkkoBackgroundTasks)) {
-    state = { messages: [], isWorking: true, events: [], queue: [], source: 'coding_agent' }
+    state = { messages: [], isWorking: true, events: [], queue: [], source: hasCodingAgentRun ? 'coding_agent' : 'builtin_agent' }
     sessionMap.set(sessionId, state)
   }
-  const isCodingAgentRun = state?.source === 'coding_agent' || hasCodingAgentRun || hasEkkoBackgroundTasks
+  const isCodingAgentRun = state?.source === 'coding_agent' || state?.source === 'builtin_agent' || state?.webhookAgent === 'ekko' || hasCodingAgentRun || hasEkkoBackgroundTasks
   if (
     (!state?.isWorking && !hasCodingAgentRun && !hasEkkoBackgroundTasks) ||
     (state && !isCodingAgentRun && !state.runId && !state.abortController)

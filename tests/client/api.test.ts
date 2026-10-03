@@ -422,20 +422,20 @@ describe('API Client', () => {
       await fetchHermesSessionGroups(20, 'travel', ['pinned-1', 'route-1'])
 
       const [url] = mockFetch.mock.calls[0]
-      expect(url).toBe('/api/studio/sessions/hermes/groups?limit=20&profile=travel&include=pinned-1&include=route-1')
+      expect(url).toBe('/api/studio/sessions/hermes/groups?limit=20&agent_groups=1&profile=travel&include=pinned-1&include=route-1')
     })
 
-    it('requests the next page for one Hermes history source', async () => {
+    it.each(['cli', 'builtin_agent', 'coding_agent'])('requests the next page for the %s history group', async source => {
       mockFetch.mockResolvedValue({
         ok: true,
         status: 200,
         json: () => Promise.resolve({ sessions: [], hasMore: false, offset: 20, limit: 20 }),
       })
 
-      await fetchHermesSessionPage('cli', 20, 20, 'travel')
+      await fetchHermesSessionPage(source, 20, 20, 'travel')
 
       const [url] = mockFetch.mock.calls[0]
-      expect(url).toBe('/api/studio/sessions/hermes?source=cli&offset=20&limit=20&profile=travel')
+      expect(url).toBe(`/api/studio/sessions/hermes?source=${source}&offset=20&limit=20&agent_groups=1&profile=travel`)
     })
 
     it('sends profile-qualified targets for batch deletes', async () => {

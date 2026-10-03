@@ -161,6 +161,8 @@ export interface SessionState {
   cacheReadTokens?: number
   cacheWriteTokens?: number
   contextTokens?: number
+  /** Ekko's system/tool context, kept separately from conversation history. */
+  ekkoContext?: { fixedContextTokens: number }
   bridgeContext?: BridgeContextState
   isAborting?: boolean
   queue: QueuedRun[]
@@ -214,7 +216,7 @@ export interface BridgeContextState {
   workspace?: string
 }
 
-export type ChatRunSource = 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
+export type ChatRunSource = 'api_server' | 'cli' | 'coding_agent' | 'builtin_agent' | 'global_agent' | 'workflow' | 'group_chat'
 export type ChatCodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'ekko-agent'
 
 export interface BridgeCompressionResult {

@@ -371,7 +371,7 @@ export async function fetchHermesSessionGroups(
   profile?: string | null,
   includedSessionIds: string[] = [],
 ): Promise<HermesSessionGroupsResult> {
-  const params = new URLSearchParams({ limit: String(limit) })
+  const params = new URLSearchParams({ limit: String(limit), agent_groups: '1' })
   if (profile) params.set('profile', profile)
   for (const sessionId of includedSessionIds) params.append('include', sessionId)
   return request<HermesSessionGroupsResult>(`/api/studio/sessions/hermes/groups?${params}`)
@@ -387,6 +387,7 @@ export async function fetchHermesSessionPage(
     source,
     offset: String(offset),
     limit: String(limit),
+    agent_groups: '1',
   })
   if (profile) params.set('profile', profile)
   return request<HermesSessionPage>(`/api/studio/sessions/hermes?${params}`)

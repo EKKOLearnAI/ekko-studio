@@ -194,6 +194,26 @@ describe('session search modal', () => {
     wrapper.unmount()
   })
 
+  it.each(['ekko-agent', 'ekko', 'ekko_agent'])('shows %s as builtin and opens it with native scoped identity', async agent => {
+    apiMocks.fetchSessionsMock.mockResolvedValue([{
+      id: 'ekko-history', source: 'coding_agent', agent, agent_mode: 'global',
+      agent_session_id: 'runtime', agent_native_session_id: 'native',
+      title: 'Native history', model: 'test-model', started_at: 100, ended_at: null, message_count: 1,
+    }])
+    const wrapper = mount(SessionSearchModal)
+    useSessionSearch().openSessionSearch()
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.get('.result-source').text()).toBe('chat.builtinAgent')
+    await wrapper.get('button.result-item').trigger('click')
+    await flushPromises()
+    expect(chatStoreMock.addOrUpdateSession).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'ekko-history', source: 'builtin_agent', agent, codingAgentId: 'ekko-agent', codingAgentMode: 'scoped', agentSessionId: 'runtime', agentNativeSessionId: 'native',
+    }))
+    expect(chatStoreMock.switchSession).toHaveBeenCalledWith('ekko-history', null)
+    wrapper.unmount()
+  })
+
   it('searches by content and opens the matched session', async () => {
     const { openSessionSearch } = useSessionSearch()
     const wrapper = mount(SessionSearchModal)

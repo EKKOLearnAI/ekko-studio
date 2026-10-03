@@ -13185,15 +13185,20 @@
                     "type": "string",
                     "enum": [
                       "cli",
+                      "builtin_agent",
                       "coding_agent",
-                      "global_agent"
+                      "global_agent",
+                      "workflow",
+                      "group_chat"
                     ],
-                    "description": "Run backend source. Use cli for Hermes bridge runs, coding_agent for Claude Code/Codex, or global_agent for global-agent sessions. Omit source for normal Hermes chat runs; do not use the legacy api_server source."
+                    "description": "Session source. Use cli for Hermes bridge runs, builtin_agent for native Ekko direct chats, coding_agent for external CLIs, or the matching group_chat/workflow/global_agent surface. Omit source for normal Hermes chat runs; do not use the legacy api_server source."
                   },
                   "session_source": {
                     "type": "string",
                     "enum": [
-                      "global_agent"
+                      "global_agent",
+                      "workflow",
+                      "group_chat"
                     ],
                     "description": "Marks a coding-agent or bridge session as launched from the global agent."
                   },
@@ -13220,7 +13225,7 @@
                       "opencode",
                       "ekko-agent"
                     ],
-                    "description": "Coding agent id when source is coding_agent."
+                    "description": "External coding-agent runtime id. ekko-agent is accepted for legacy clients; new native Ekko requests use agent_id."
                   },
                   "agent_id": {
                     "type": "string",
@@ -13232,7 +13237,7 @@
                       "opencode",
                       "ekko-agent"
                     ],
-                    "description": "Alias for coding_agent_id."
+                    "description": "Runtime id. Use ekko-agent for native Ekko with source=builtin_agent; external CLI ids remain accepted."
                   },
                   "mode": {
                     "type": "string",
@@ -19715,6 +19720,20 @@
         },
         "parameters": [
           {
+            "name": "agent_groups",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ],
+              "default": "0"
+            },
+            "description": "Set to 1 to include legacy native Ekko identities in the builtin_agent history group. Native direct chats are stored as builtin_agent."
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -19736,7 +19755,8 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "History source to page. With agent_groups=1, builtin_agent selects native Ekko and coding_agent excludes it. Other sources retain their names."
           }
         ]
       }
@@ -19767,12 +19787,32 @@
         },
         "parameters": [
           {
+            "name": "agent_groups",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ],
+              "default": "0"
+            },
+            "description": "Set to 1 to include legacy native Ekko identities in the builtin_agent history group. Native direct chats are stored as builtin_agent."
+          },
+          {
             "name": "include",
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
-            }
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true,
+            "description": "Repeat for each deep-linked session ID. Included and pinned sessions do not advance group pagination cursors."
           },
           {
             "name": "limit",

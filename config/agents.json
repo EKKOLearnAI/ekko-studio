@@ -1,0 +1,304 @@
+{
+  "schemaVersion": 1,
+  "revision": "2026-10-03.1",
+  "agents": [
+    {
+      "id": "hermes",
+      "name": "Hermes",
+      "kind": "hermes",
+      "aliases": [],
+      "sessionId": "hermes",
+      "groupId": "hermes",
+      "icon": "/static/hermes.png",
+      "modes": [
+        "scoped"
+      ],
+      "installation": {
+        "method": "builtin",
+        "updates": false,
+        "remove": false
+      },
+      "config": {
+        "skillsTarget": "hermes",
+        "skillsWritable": true,
+        "mcp": true,
+        "settings": "settings",
+        "memory": "memory"
+      },
+      "capabilities": {
+        "context": true,
+        "compact": true,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "ekko-agent",
+      "name": "Ekko",
+      "kind": "built-in",
+      "aliases": [],
+      "sessionId": "ekko-agent",
+      "groupId": "ekko",
+      "icon": "/static/agents/ekko.png",
+      "modes": [
+        "scoped"
+      ],
+      "installation": {
+        "method": "builtin",
+        "updates": false,
+        "remove": false
+      },
+      "config": {
+        "skillsTarget": "ekko",
+        "skillsWritable": true,
+        "mcp": true,
+        "settings": "settings",
+        "memory": "memory"
+      },
+      "capabilities": {
+        "context": true,
+        "compact": true,
+        "serverManagedAuth": true
+      }
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "claude",
+      "groupId": "claude",
+      "icon": "/static/agents/claude.svg",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsTarget": "claude",
+        "skillsWritable": false,
+        "mcp": true,
+        "settings": "settings",
+        "memory": "memory"
+      },
+      "capabilities": {
+        "context": true,
+        "compact": true,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "codex",
+      "groupId": "codex",
+      "icon": "/static/agents/codex.png",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsTarget": "codex",
+        "skillsWritable": false,
+        "mcp": true,
+        "settings": "config",
+        "memory": "agents"
+      },
+      "capabilities": {
+        "context": true,
+        "compact": true,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "pi",
+      "name": "Pi",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "pi",
+      "groupId": "pi",
+      "icon": "/static/agents/pi.svg",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsTarget": "pi",
+        "skillsWritable": false,
+        "mcp": true,
+        "settings": "settings",
+        "memory": "agents"
+      },
+      "capabilities": {
+        "context": true,
+        "compact": true,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "grok",
+      "name": "Grok",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "grok",
+      "groupId": "grok",
+      "icon": "/static/agents/grok.svg",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsTarget": "grok",
+        "skillsWritable": false,
+        "mcp": true,
+        "settings": "settings",
+        "memory": "agents"
+      },
+      "capabilities": {
+        "context": true,
+        "compact": true,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "opencode",
+      "groupId": "opencode",
+      "icon": "/static/agents/opencode.svg",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsTarget": "opencode",
+        "skillsWritable": false,
+        "mcp": true,
+        "settings": "settings",
+        "memory": "memory"
+      },
+      "capabilities": {
+        "context": true,
+        "compact": false,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "dsh",
+      "name": "DeepSeek Harness",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "dsh",
+      "groupId": "dsh",
+      "icon": "/static/agents/deepseek.svg",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsTarget": "dsh",
+        "skillsWritable": false,
+        "mcp": true,
+        "settings": "settings",
+        "memory": "memory"
+      },
+      "capabilities": {
+        "context": true,
+        "compact": false,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "cursor",
+      "groupId": "cursor",
+      "icon": "/static/agents/cursor.svg",
+      "modes": [
+        "global"
+      ],
+      "installation": {
+        "method": "manual",
+        "updates": false,
+        "remove": false,
+        "docsUrl": "https://cursor.com/install"
+      },
+      "config": {
+        "skillsTarget": "cursor",
+        "skillsWritable": true,
+        "mcp": true,
+        "settings": "settings"
+      },
+      "capabilities": {
+        "context": false,
+        "compact": false,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "antigravity",
+      "name": "Antigravity",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "antigravity",
+      "groupId": "antigravity",
+      "icon": "/static/agents/antigravity.png",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "manual",
+        "updates": false,
+        "remove": false,
+        "docsUrl": "https://antigravity.google/docs/cli/install"
+      },
+      "config": {
+        "skillsTarget": "antigravity",
+        "skillsWritable": true,
+        "mcp": true,
+        "settings": "settings",
+        "memory": "memory"
+      },
+      "capabilities": {
+        "context": false,
+        "compact": false,
+        "serverManagedAuth": false
+      }
+    }
+  ]
+}

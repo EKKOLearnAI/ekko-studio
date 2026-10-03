@@ -1,5 +1,6 @@
 import { withRunUsage, onRunUsageUpdated } from '../repositories/run-usage-store'
 import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
+import { isBuiltinEkkoAgent, normalizeEkkoRunData } from '../contracts/history-source'
 import { recordSessionUploadAttachments } from '../services/files/session-uploads'
 import { authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
 import { bindSessionShareSocket } from '../services/session-shares/socket-access'
@@ -51,6 +52,7 @@ import {
 import { handleBridgeRun, resumeBridgeRun } from '../services/chat-run/handle-bridge-run'
 import { handleCodingAgentRun } from '../services/chat-run/handle-coding-agent-run'
 import { handleEkkoAgentRun, type EkkoAgentRunSocketData } from '../services/chat-run/handle-ekko-agent-run'
+import { handleEkkoSessionCommand, parseEkkoRunCommand } from '../services/chat-run/ekko-session-command'
 import { handleAbort } from '../services/chat-run/abort'
 import { getOrCreateSession } from '../services/chat-run/compression'
 import { loadSessionStateFromDb, resolveRunSource } from '../services/chat-run/load-state'
@@ -263,8 +265,8 @@ export async function ensureBridgeReadyForChatRun(): Promise<ChatRunBridgeReadin
   }
 }
 
-function isCodingAgentExecution(source: string | undefined, data?: { coding_agent_id?: string; agent_id?: string }): boolean {
-  return source === 'coding_agent'
+function isProviderAgentExecution(source: string | undefined, data?: { coding_agent_id?: string; agent_id?: string }): boolean {
+  return isEkkoAgentExecution(data) || source === 'builtin_agent' || source === 'coding_agent'
     || ((source === 'workflow' || source === 'group_chat') && Boolean(data?.coding_agent_id || data?.agent_id))
 }
 
@@ -275,7 +277,7 @@ function resolveSessionCategoryId(value: unknown): number | null {
 }
 
 function isEkkoAgentExecution(data?: { coding_agent_id?: string; agent_id?: string }): boolean {
-  return data?.coding_agent_id === 'ekko-agent' || data?.agent_id === 'ekko-agent'
+  return isBuiltinEkkoAgent(data?.coding_agent_id) || isBuiltinEkkoAgent(data?.agent_id)
 }
 
 function webhookAgentForRun(data?: { coding_agent_id?: string; agent_id?: string }): ChatRunWebhookAgent {
@@ -940,6 +942,7 @@ export class ChatRunSocket {
       let runProfile: string
       try {
         runProfile = resolveRunProfile(data.session_id, data.profile)
+        normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
         if (!shared && data.session_id && Array.isArray(data.input)) {
           // New chats carry a client-generated id; the runtime persists them on the first run.
           if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id)
@@ -961,8 +964,18 @@ export class ChatRunSocket {
       if (data.session_id) {
         const state = getOrCreateSession(this.sessionMap, data.session_id)
         const source = resolveRunSource(data.source, data.session_id)
+        const storedSession = getSession(data.session_id)
+        const ekkoExecution = isEkkoAgentExecution(data)
+        if (ekkoExecution) {
+          data.agent_id = 'ekko-agent'
+          const ekkoCommand = parseEkkoRunCommand(data, storedSession?.source)
+          if (ekkoCommand) {
+            await handleEkkoSessionCommand(this.nsp, socket, data, ekkoCommand, runProfile, this.sessionMap, this.dequeueNextQueuedRun.bind(this))
+            return
+          }
+        }
         const command = parseSessionCommand(data.input)
-        if (command && (isBridgeRunSource(source) || command.name === 'branch')) {
+        if (command && ((!ekkoExecution && isBridgeRunSource(source)) || command.name === 'branch')) {
           try {
             const handled = await handleSessionCommand(data.session_id, command, {
               nsp: this.nsp,
@@ -990,7 +1003,7 @@ export class ChatRunSocket {
           }
           return
         }
-        if (isCodingAgentExecution(source, data)) {
+        if (!ekkoExecution && isProviderAgentExecution(source, data)) {
           if (typeof data.input === 'string') {
             const codingAgentCommand = parseCodingAgentSessionCommand(data.input)
             if (codingAgentCommand) {
@@ -1074,7 +1087,7 @@ export class ChatRunSocket {
           return
         }
         state.events = []
-        state.isWorking = !isCodingAgentExecution(source, data)
+        state.isWorking = !isProviderAgentExecution(source, data)
         state.runStartedAt = Date.now()
         state.profile = runProfile
         state.source = source
@@ -1569,6 +1582,7 @@ export class ChatRunSocket {
     backgroundContinuationContext?: BackgroundContinuationContext,
     pushTargetId?: string,
   ) {
+    normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
     const source = resolveRunSource(data.source, data.session_id)
     const surface = data.session_source || source
     if (data.session_id) getOrCreateSession(this.sessionMap, data.session_id).pushTargetId = pushTargetId
@@ -1583,7 +1597,7 @@ export class ChatRunSocket {
       : undefined
     const mcpCapabilities = ekkoMcpServers
       ? studioMcpCapabilities(ekkoMcpServers)
-      : isCodingAgentExecution(source, data)
+      : isProviderAgentExecution(source, data)
         ? studioMcpCapabilities(getChatCodingAgentMcpServers(codingAgentId(data), profile))
         : await hermesStudioMcpCapabilities(profile)
     const mobileTarget = data.session_id ? this.mobileRunTargets.get(data.session_id) : undefined
@@ -1611,9 +1625,9 @@ export class ChatRunSocket {
       state.webhookWorkflowId = data.workflow_id
       state.webhookWorkflowNodeId = data.workflow_node_id
     }
-    if (data.session_id && isBridgeRunSource(source) && isSessionCommand(data.input) && data.allow_command_passthrough !== true) return
+    if (data.session_id && !isEkkoAgentExecution(data) && isBridgeRunSource(source) && isSessionCommand(data.input) && data.allow_command_passthrough !== true) return
 
-    if (!isCodingAgentExecution(source, data)) {
+    if (!isProviderAgentExecution(source, data)) {
       const bridgeReady = await ensureBridgeReadyForChatRun()
       if (!bridgeReady.ok) {
         let shouldDequeueNext = false
@@ -2255,7 +2269,7 @@ export class ChatRunSocket {
     if (activeAgent === 'ekko') return 'ekko'
     if (activeAgent === 'claude-code' || activeAgent === 'codex' || activeAgent === 'pi' || activeAgent === 'grok' || (activeAgent === 'cursor' || activeAgent === 'antigravity') || (activeAgent === 'opencode' || activeAgent === 'dsh')) return activeAgent
     if (activeAgent !== 'bridge') return null
-    if (state.source === 'coding_agent') return null
+    if (state.source === 'coding_agent' || state.source === 'builtin_agent') return null
     return state.source === 'cli' || state.source === 'global_agent' ? 'hermes' : null
   }
 
@@ -2568,7 +2582,7 @@ export class ChatRunSocket {
     const pushTargetId = options.pushRoot ? getRunPushTarget(options.pushRoot)?.id : undefined
     const state = getOrCreateSession(this.sessionMap, sessionId)
     state.events = []
-    state.isWorking = !isCodingAgentExecution(source, data)
+    state.isWorking = !isProviderAgentExecution(source, data)
     state.runStartedAt = Date.now()
     state.profile = profile
     state.source = source

@@ -1321,6 +1321,7 @@ export default {
     modelSet: 'تم تعيين النموذج',
     modelSwitching: 'جارٍ تبديل النموذج...',
     modelSetFailed: 'تعذّر تعيين النموذج',
+    builtinAgent: 'وكيل مدمج',
     other: 'أخرى',
     runFailed: 'فشل التشغيل',
     error: 'خطأ',

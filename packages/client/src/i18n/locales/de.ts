@@ -1240,6 +1240,7 @@ export default {
     renameSession: 'Sitzung umbenennen',
     sessionNotFound: 'Sitzung nicht gefunden',
     enterNewTitle: 'Neuen Titel eingeben',
+    builtinAgent: 'Integrierter Agent',
     other: 'Sonstige',
     runFailed: 'Ausfuhrung fehlgeschlagen',
     error: 'Fehler',

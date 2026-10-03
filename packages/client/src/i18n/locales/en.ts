@@ -1328,6 +1328,7 @@ export default {
     modelSet: 'Model set',
     modelSwitching: 'Switching model...',
     modelSetFailed: 'Failed to set model',
+    builtinAgent: 'Built-in Agent',
     other: 'Other',
     runFailed: 'Run failed',
     error: 'Error',

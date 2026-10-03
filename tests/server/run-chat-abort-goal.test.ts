@@ -78,6 +78,20 @@ describe('run chat abort goal handling', () => {
     calcAndUpdateUsageMock.mockResolvedValue({ inputTokens: 0, outputTokens: 0 })
   })
 
+  it.each(['builtin_agent', 'group_chat', 'workflow', 'global_agent'])('aborts native Ekko on %s without calling Hermes', async source => {
+    const { handleAbort } = await import('../../packages/server/src/modules/studio/services/chat-run/abort')
+    const { nsp, socket } = makeHarness()
+    const controller = new AbortController()
+    const state = { messages: [], isWorking: true, events: [], queue: [], source, webhookAgent: 'ekko', runId: 'native-run', abortController: controller } as any
+    const sessionMap = new Map([['session-1', state]])
+    const bridge = { interrupt: vi.fn(), goalPause: vi.fn() }
+    await handleAbort(nsp as any, socket as any, 'session-1', sessionMap, bridge, vi.fn())
+    expect(controller.signal.aborted).toBe(true)
+    expect(bridge.interrupt).not.toHaveBeenCalled()
+    expect(state.source).toBe(source)
+    expect(state.isWorking).toBe(false)
+  })
+
   it('aborts detached Ekko background tasks after the parent run has finished', async () => {
     ekkoBackgroundMock.has.mockReturnValue(true)
     ekkoBackgroundMock.abort.mockResolvedValue(1)

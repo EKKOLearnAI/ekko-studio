@@ -196,6 +196,17 @@ describe('ChatContextCompressor', () => {
     expect(bridgeRequestMock).toHaveBeenCalledTimes(1)
   })
 
+  it.each([false, true])('reports manual summarizer failure without replacing the snapshot (incremental=%s)', async incremental => {
+    const { ChatContextCompressor } = await import('../../packages/server/src/modules/studio/services/context-compressor')
+    getCompressionSnapshotMock.mockReturnValue(incremental ? { summary: 'old summary', lastMessageIndex: 0, messageCountAtTime: 1 } : null)
+    const compressor = new ChatContextCompressor({ config: { tailMessageCount: 10 } })
+    await expect(compressor.compress([
+      { role: 'user', content: 'old' }, { role: 'assistant', content: 'answer' }, { role: 'user', content: 'new' },
+    ], '', undefined, 'session-1', { profile: 'default', model: 'summary-model', provider: 'openrouter', force: true, allowHermesFallback: false })).rejects.toThrow('ekko summarizer failed')
+    expect(saveCompressionSnapshotMock).not.toHaveBeenCalled()
+    expect(bridgeRequestMock).not.toHaveBeenCalled()
+  })
+
   it('does not fall back to Hermes when the caller disables it', async () => {
     const { callSummarizer } = await import('../../packages/server/src/modules/studio/services/context-compressor')
     ekkoRuntimeRunMock.mockRejectedValueOnce(new Error('provider unavailable'))

@@ -79,6 +79,8 @@ export interface CompressedResult {
 }
 
 export interface SummarizerOptions {
+  /** Manual compression folds small new segments too and reports summarizer failures. */
+  force?: boolean
   profile?: string
   model?: string | null
   provider?: string | null
@@ -837,7 +839,8 @@ export class ChatContextCompressor {
       previousSummaryMessage,
       ...newMessages,
     ]
-    const assembledOverBudget = messagesTokenEstimate(assembledWithPrevious) > this.config.triggerTokens
+    const force = typeof summarizer === 'object' && summarizer.force === true
+    const assembledOverBudget = force || messagesTokenEstimate(assembledWithPrevious) > this.config.triggerTokens
     const canKeepTailWindow = newMessages.length > tailCount
 
     // If the new segment itself is too small to split but already over budget,
@@ -881,6 +884,7 @@ export class ChatContextCompressor {
       summary = await callSummarizer(upstream, apiKey, prompt, [], this.config.summarizationTimeoutMs, previousSummary, summarizer)
       logger.info('[context-compressor] incremental-llm done in %dms, %d chars', Date.now() - t0, summary.length)
     } catch (err: any) {
+      if (force) throw err
       logger.warn('[context-compressor] incremental-llm failed: %s — keeping new messages verbatim', err.message)
       const fallback = [
         ...head,
@@ -994,6 +998,7 @@ export class ChatContextCompressor {
       summary = await callSummarizer(upstream, apiKey, prompt, [], this.config.summarizationTimeoutMs, undefined, summarizer)
       logger.info('[context-compressor] full-llm done in %dms, %d chars', Date.now() - t0, summary.length)
     } catch (err: any) {
+      if (typeof summarizer === 'object' && summarizer.force) throw err
       logger.warn('[context-compressor] full-llm failed: %s', err.message)
     }
 

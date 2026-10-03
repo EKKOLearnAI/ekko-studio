@@ -30,7 +30,14 @@ describe('api docs controller', () => {
     )
     expect(
       ctx.body.paths['/api/studio/chat-run/runs'].post.requestBody.content['application/json'].schema.properties.source.enum,
-    ).toEqual(['cli', 'coding_agent', 'global_agent'])
+    ).toEqual(['cli', 'builtin_agent', 'coding_agent', 'global_agent', 'workflow', 'group_chat'])
+    for (const path of ['/api/studio/sessions/hermes', '/api/studio/sessions/hermes/groups']) {
+      expect(ctx.body.paths[path].get.parameters).toContainEqual(expect.objectContaining({
+        name: 'agent_groups', in: 'query', required: false,
+        schema: { type: 'string', enum: ['0', '1'], default: '0' },
+      }))
+    }
+    expect(ctx.body.paths['/api/studio/sessions/hermes'].get.parameters.find((parameter: any) => parameter.name === 'source').schema).toEqual({ type: 'string' })
 
     for (const path of [
       '/api/studio/update/preview/prepare',

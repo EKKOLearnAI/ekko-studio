@@ -206,7 +206,7 @@ function buildAiHelpPrompt(agent: CodingAgentCard, operation: AgentManagementOpe
 
 function startAiHelpChat(prompt: string) {
   chatStore.newChat({
-    source: 'coding_agent',
+    source: 'builtin_agent',
     agent: 'ekko-agent',
     codingAgentId: 'ekko-agent',
     codingAgentMode: 'scoped',

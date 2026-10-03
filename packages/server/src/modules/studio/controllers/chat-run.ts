@@ -221,7 +221,7 @@ export async function runOnce(ctx: Context) {
   const token = bearerToken(ctx)
   const profile = profileFrom(ctx, body)
   const payload: Record<string, unknown> = { ...userBody(body), profile }
-  const isCodingAgentRun = body.source === 'coding_agent' || body.coding_agent_id != null || body.agent_id != null
+  const isCodingAgentRun = body.source === 'builtin_agent' || body.source === 'coding_agent' || body.coding_agent_id != null || body.agent_id != null
   if (isCodingAgentRun) {
     try {
       const identity = await resolveModelExecutionIdentity({

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isBuiltinEkkoSession, isExternalCodingAgentSession } from '@/utils/hermes/session-agent'
+import { EKKO_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
 import type { Attachment } from '@/stores/hermes/chat'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
@@ -230,28 +232,13 @@ let bundlesLoadRequestKey = ''
 const isBridgeSession = computed(() => {
   const session = chatStore.activeSession
   if (!session) return chatStore.runtimeMode !== 'global_agent'
-  return session.source === 'cli'
+  return session.source === 'cli' && !isBuiltinEkkoSession(session)
 })
-const isCodingAgentSession = computed(() => {
-  const session = chatStore.activeSession
-  return !!session && (
-    session.source === 'coding_agent'
-    || !!session.codingAgentId
-    || session.agent === 'claude'
-    || session.agent === 'codex'
-    || session.agent === 'claude-code'
-    || session.agent === 'pi'
-    || session.agent === 'grok'
-    || session.agent === 'opencode'
-    || (session.agent === 'cursor' || session.agent === 'antigravity')
-  )
-})
+const isEkkoSession = computed(() => isBuiltinEkkoSession(chatStore.activeSession))
+const isCodingAgentSession = computed(() => isExternalCodingAgentSession(chatStore.activeSession))
 const isCursorSession = computed(() => (chatStore.activeSession?.codingAgentId === 'cursor' || chatStore.activeSession?.codingAgentId === 'antigravity') || (chatStore.activeSession?.agent === 'cursor' || chatStore.activeSession?.agent === 'antigravity'))
-const showSessionUsage = computed(() => {
-  const session = chatStore.activeSession
-  return isCodingAgentSession.value && session?.codingAgentId !== 'ekko-agent' && session?.agent !== 'ekko-agent'
-})
-const isForkCommandSession = computed(() => !!chatStore.activeSession && chatStore.activeSession.source !== 'coding_agent')
+const showSessionUsage = computed(() => isCodingAgentSession.value)
+const isForkCommandSession = computed(() => !!chatStore.activeSession && !isEkkoSession.value && !isCodingAgentSession.value)
 const skillPickerItems = computed(() => {
   const byName = new Map<string, SkillInfo>()
   for (const category of skillCategories.value) {
@@ -272,7 +259,9 @@ const skillPickerItems = computed(() => {
 })
 const filteredBridgeCommands = computed(() => {
   const query = slashQuery.value.trim().toLowerCase()
-  const commands = isBridgeSession.value
+  const commands = isEkkoSession.value
+    ? EKKO_SESSION_COMMAND_DEFINITIONS.map(command => ({ ...command, args: command.args || '', description: t(command.descriptionKey) }))
+    : isBridgeSession.value
     ? bridgeCommands.value
     : isCodingAgentSession.value
       ? bridgeCommands.value.filter(command => CODING_AGENT_SLASH_COMMANDS.includes(command.name)
@@ -586,7 +575,7 @@ function scrollCommandIntoView() {
 }
 
 function updateSlashState() {
-  if (!isBridgeSession.value && !isCodingAgentSession.value && !isForkCommandSession.value) {
+  if (!isEkkoSession.value && !isBridgeSession.value && !isCodingAgentSession.value && !isForkCommandSession.value) {
     slashActive.value = false
     return
   }

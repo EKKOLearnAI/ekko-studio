@@ -187,9 +187,12 @@ async function mockHistoryApi(page: Page, sessions = historySessions, groupRooms
       const includedIds = new Set(url.searchParams.getAll('include'))
       const bySource = new Map<string, typeof sessions>()
       for (const session of sessions) {
-        const group = bySource.get(session.source) || []
+        const source = url.searchParams.get('agent_groups') === '1'
+          && ['ekko', 'ekko-agent', 'ekko_agent'].includes((session as { agent?: string }).agent || '')
+          && ['coding_agent', 'cli', 'api_server'].includes(session.source) ? 'builtin_agent' : session.source
+        const group = bySource.get(source) || []
         group.push(session)
-        bySource.set(session.source, group)
+        bySource.set(source, group)
       }
       const groups = [...bySource.entries()].map(([source, group]) => {
         group.sort((a, b) => Number(b.last_active || b.started_at) - Number(a.last_active || a.started_at))
@@ -206,7 +209,12 @@ async function mockHistoryApi(page: Page, sessions = historySessions, groupRooms
       const offset = Number(url.searchParams.get('offset') || 0)
       const limit = Number(url.searchParams.get('limit') || 20)
       const sourceSessions = sessions
-        .filter(session => session.source === source)
+        .filter(session => {
+          const builtin = url.searchParams.get('agent_groups') === '1'
+            && ['ekko', 'ekko-agent', 'ekko_agent'].includes((session as { agent?: string }).agent || '')
+            && ['coding_agent', 'cli', 'api_server'].includes(session.source)
+          return (builtin ? 'builtin_agent' : session.source) === source
+        })
         .sort((a, b) => Number(b.last_active || b.started_at) - Number(a.last_active || a.started_at))
       return json({
         sessions: sourceSessions.slice(offset, offset + limit),
@@ -433,6 +441,40 @@ test('groups database-pinned history separately from its source', async ({ page 
   await expect(pinned).toBeVisible()
   await expect(page.locator('.session-item').filter({ hasText: 'Alpha History Session' })).toHaveCount(1)
   await expect(page.locator('.session-item').filter({ hasText: 'Alpha History Session' }).locator('.session-item-pin')).toBeVisible()
+})
+
+test('legacy Ekko history has a builtin group, native identity and independent pagination', async ({ page }) => {
+  await authenticate(page)
+  const native = Array.from({ length: 55 }, (_, i) => ({
+    ...historySessions[0], id: `hist-ekko-${i}`, source: i % 2 ? 'cli' : 'coding_agent',
+    agent: ['ekko-agent', 'ekko', 'ekko_agent'][i % 3], agent_mode: 'scoped',
+    title: `Native Ekko History ${i}`, last_active: 1_790_010_000 - i,
+  }))
+  const coding = Array.from({ length: 55 }, (_, i) => ({
+    ...historySessions[0], id: `hist-codex-${i}`, source: 'coding_agent', agent: 'codex',
+    title: `External Codex History ${i}`, last_active: 1_790_020_000 - i,
+  }))
+  await mockHistoryApi(page, [...native, ...coding])
+  await page.goto('/#/hermes/history/session/hist-ekko-0')
+  await expect(page.getByText('Answer from Native Ekko History 0')).toBeVisible()
+  await expect(page.locator('.source-badge')).toHaveText('Built-in Agent')
+  const builtinHeader = page.locator('.session-group-header').filter({ hasText: 'Built-in Agent' })
+  const codingHeader = page.locator('.session-group-header').filter({ hasText: 'Coding Agent' })
+  await expect(builtinHeader).toBeVisible()
+  await expect(codingHeader).toBeVisible()
+  await expect(page.getByText('Native Ekko History 54', { exact: true })).toHaveCount(0)
+  const requested = page.waitForRequest(request => {
+    const url = new URL(request.url())
+    return url.pathname === '/api/studio/sessions/hermes' && url.searchParams.get('source') === 'builtin_agent'
+  })
+  await builtinHeader.getByRole('button', { name: 'Load more sessions' }).click()
+  const url = new URL((await requested).url())
+  expect(url.searchParams.get('offset')).toBe('50')
+  expect(url.searchParams.get('agent_groups')).toBe('1')
+  await expect(page.getByText('Native Ekko History 54', { exact: true })).toBeVisible()
+  await expect(builtinHeader.getByRole('button', { name: 'Load more sessions' })).toHaveCount(0)
+  await expect(codingHeader.getByRole('button', { name: 'Load more sessions' })).toBeVisible()
+  await expect(page.locator('.source-badge')).toHaveText('Built-in Agent')
 })
 
 for (const width of [1440, 390]) {
