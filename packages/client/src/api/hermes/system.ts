@@ -25,7 +25,6 @@ export interface ModelVisibilityRule {
 export type ModelVisibility = Record<string, ModelVisibilityRule>
 export type CustomModels = Record<string, string[]>
 export interface AvailableModelGroup {
-  catalog_status?: 'loading' | 'ready' | 'error' | 'unsupported'
   provider: string   // credential pool key (e.g. "zai", "custom:subrouter.ai")
   label: string      // display name (e.g. "zai", "subrouter.ai")
   base_url: string

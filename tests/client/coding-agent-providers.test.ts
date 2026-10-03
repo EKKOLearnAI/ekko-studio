@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  isKeylessModelProvider,
   canScopedCodingAgentUseProvider,
   isAuthModelProvider,
   usesServerManagedProviderAuth,
@@ -25,12 +24,4 @@ describe('coding agent provider visibility', () => {
       expect(canScopedCodingAgentUseProvider(agentId, 'deepseek')).toBe(true)
     },
   )
-})
-
-
-it('requires no key only for the native OpenCode Free provider', () => {
-  expect(isKeylessModelProvider('opencode-free')).toBe(true)
-  for (const provider of ['opencode-zen', 'custom:opencode-free', 'openai-api', undefined]) {
-    expect(isKeylessModelProvider(provider)).toBe(false)
-  }
 })

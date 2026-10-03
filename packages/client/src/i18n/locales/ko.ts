@@ -1640,10 +1640,6 @@ export default {
 
   // 모델
   models: {
-    opencodeFreeHint: "계정이나 API 키가 필요하지 않습니다. 무료 모델은 사용량이 제한될 수 있습니다.",
-    opencodeFreeLoading: "백그라운드에서 무료 모델을 불러오는 중…",
-    opencodeFreeRetry: "제공자 확인 또는 목록 갱신에 실패했습니다. 캐시를 유지하고 자동으로 다시 시도합니다.",
-    opencodeFreeUpgrade: "OpenCode Free를 사용하려면 Hermes Agent를 업데이트하세요.",
     title: '모델',
     addProvider: 'Provider 추가',
     noProviderPromptTitle: '모델 Provider가 설정되지 않음',

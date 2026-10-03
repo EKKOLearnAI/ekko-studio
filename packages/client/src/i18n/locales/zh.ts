@@ -2095,10 +2095,6 @@ export default {
 
   // 模型
   models: {
-    opencodeFreeHint: "无需账号或 API key，免费模型可能受到限流。",
-    opencodeFreeLoading: "正在后台加载免费模型…",
-    opencodeFreeRetry: "免费提供商检测或目录刷新失败，将自动重试并保留缓存模型。",
-    opencodeFreeUpgrade: "请更新 Hermes Agent 以使用 OpenCode Free。",
     title: '模型',
     searchPlaceholder: '搜索模型...',
     noResults: '无结果',

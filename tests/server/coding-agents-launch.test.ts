@@ -3888,63 +3888,19 @@ describe('coding agent launch preparation', () => {
 })
 
 
-describe('OpenCode Free coding agents', () => {
-  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode'])('prepares %s with a protected local proxy and no upstream key', async (id) => {
-    const home = makeHome()
-    if (id === 'pi') {
-      const adapter = join(home, 'coding-agent', 'pi-mcp-adapter', 'node_modules', 'pi-mcp-adapter', 'index.ts')
-      mkdirSync(dirname(adapter), { recursive: true })
-      writeFileSync(adapter, 'export default {}')
-    }
-    const launch = await prepareCodingAgentLaunch(id as any, {
-      profile: 'default', provider: 'opencode-free', model: 'mimo-v2.5-free', mode: 'scoped',
-    })
-    const contents = launch.files.map(file => readFileSync(file.absolutePath, 'utf8')).join('\n')
-    expect(contents).toMatch(/api\/(codex-proxy|claude-code-proxy)\//)
-    expect(contents + JSON.stringify(launch.env)).toContain('hwui_')
-    if (id === 'codex' || id === 'pi') {
-      revokeCodexProxyTargets('default', 'opencode-free')
-      const restored = id === 'pi' ? await restorePersistedPiProxyTargets() : await restorePersistedCodexProxyTargets()
-      expect(restored).toBeGreaterThan(0)
-    }
-  })
-
-  it.each([
-    ['mimo-v2.5-free', 'chat/completions'],
-    ['muse-spark-free', 'responses'],
-    ['qwen3-free', 'messages'],
-  ])('routes %s anonymously through both proxy protocols', async (model, endpoint) => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      id: 'test', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'ok' }],
-      output: [], choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }],
-    }), { headers: { 'Content-Type': 'application/json' } }))
-    vi.stubGlobal('fetch', fetchMock)
-    for (const claude of [false, true]) {
-      const input = { profile: 'default', provider: 'opencode-free', model, baseUrl: 'https://stale.example', apiKey: 'stale-key' }
-      const target = claude ? registerClaudeCodeProxyTarget(input) : registerCodexProxyTarget(input)
-      const handler = claude ? claudeProxyMessages : codexProxyResponses
-      const body = { model, max_tokens: 16, messages: [{ role: 'user', content: 'hello' }], input: 'hello' }
-      const denied = makeProxyContext(target.routeKey, '', body)
-      await handler(denied)
-      expect(denied.status).toBe(401)
-      fetchMock.mockClear()
-      const ctx = makeProxyContext(target.routeKey, target.token, body)
-      await handler(ctx)
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-      const [url, init] = fetchMock.mock.calls[0] as any
-      expect(url).toBe(`https://opencode.ai/zen/v1/${endpoint}`)
-      const headers = new Headers(init.headers)
-      expect(headers.has('authorization')).toBe(false)
-      expect(headers.has('x-api-key')).toBe(false)
-      expect(JSON.parse(init.body).model).toBe(model)
-    }
-  })
-
-  it('rejects paid model IDs for the native anonymous provider', async () => {
+describe('coding agent provider validation and managed MCP guidance', () => {
+  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode'])('rejects retired OpenCode Free for scoped %s', async (id) => {
     makeHome()
-    await expect(prepareCodingAgentLaunch('codex', {
-      provider: 'opencode-free', model: 'gpt-5', mode: 'scoped',
-    })).rejects.toMatchObject({ status: 400 })
+    await expect(prepareCodingAgentLaunch(id as any, {
+      profile: 'default', provider: 'opencode-free', model: 'mimo-v2.5-free', mode: 'scoped',
+      baseUrl: 'https://opencode.ai/zen/v1', apiKey: 'stale-key',
+    })).rejects.toMatchObject({ status: 400, message: expect.stringContaining('OpenCode Free is no longer supported') })
+  })
+
+  it('rejects retired provider proxy targets even with stale supplied credentials', () => {
+    const input = { profile: 'default', provider: 'opencode-free', model: 'mimo-v2.5-free', baseUrl: 'https://stale.example', apiKey: 'stale-key' }
+    expect(() => registerClaudeCodeProxyTarget(input)).toThrow('OpenCode Free is no longer supported')
+    expect(() => registerCodexProxyTarget(input)).toThrow('OpenCode Free is no longer supported')
   })
 
   it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] as const)('updates %s launch guidance when managed MCPs are disabled, isolated by profile', async agent => {

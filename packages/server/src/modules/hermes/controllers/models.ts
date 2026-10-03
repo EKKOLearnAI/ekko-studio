@@ -8,7 +8,7 @@ import { getActiveEnvPath, getActiveAuthPath, getActiveProfileName, getProfileDi
 import { readConfigYaml, readConfigYamlForProfile, updateConfigYaml, updateConfigYamlForProfile, buildModelGroups, PROVIDER_ENV_MAP } from '../../studio/public/profile-config'
 import { fetchProviderModels } from '../../studio/public/provider-catalog'
 import { getCompatibleCustomProviders } from '../../studio/contracts/provider-compat'
-import { buildProviderModelMap, PROVIDER_PRESETS } from '../../studio/contracts/providers'
+import { buildProviderModelMap, PROVIDER_PRESETS, isRetiredProvider, RETIRED_PROVIDER_MESSAGE } from '../../studio/contracts/providers'
 import { getCopilotModelsDetailed, resolveCopilotOAuthToken, type CopilotModelMeta } from '../services/providers/copilot-models'
 import { readAppConfig, writeAppConfig, providerDisplayLabel, type ModelVisibilityRule } from '../../studio/public/app-config'
 import { listUserProfiles } from '../../studio/public/users'
@@ -23,14 +23,12 @@ import { readProviderModelCatalogCache,
 } from '../services/providers/model-catalog-cache'
 import { providerEditorCapabilities, type ProviderEditableField } from '../services/providers/provider-editor'
 import { providerModelRefreshCapabilities } from '../services/providers/provider-model-refresh'
-import { getOpenCodeFreeStatus, type OpenCodeFreeStatus } from '../services/providers/opencode-free'
-import { OPENCODE_FREE_PROVIDER, OPENCODE_FREE_BASE_URL, isOpenCodeFreeModel } from '../../studio/contracts/opencode-free'
 
 const PROVIDER_MODEL_CATALOG = buildProviderModelMap()
 
 type ModelMeta = { preview?: boolean; disabled?: boolean; alias?: string }
 type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
-type AvailableGroup = { catalog_status?: OpenCodeFreeStatus; provider: string; label: string; base_url: string; models: string[]; api_key: string; api_mode?: ProviderApiMode; builtin?: boolean; model_meta?: Record<string, ModelMeta>; available_models?: string[]; base_url_env?: string; provider_source?: 'custom_providers' | 'providers'; provider_key?: string; provider_editable?: boolean; editable_fields?: ProviderEditableField[]; model_refreshable?: boolean; model_refresh_reason?: string; model_restore_available?: boolean }
+type AvailableGroup = { provider: string; label: string; base_url: string; models: string[]; api_key: string; api_mode?: ProviderApiMode; builtin?: boolean; model_meta?: Record<string, ModelMeta>; available_models?: string[]; base_url_env?: string; provider_source?: 'custom_providers' | 'providers'; provider_key?: string; provider_editable?: boolean; editable_fields?: ProviderEditableField[]; model_refreshable?: boolean; model_refresh_reason?: string; model_restore_available?: boolean }
 type ModelVisibility = Record<string, ModelVisibilityRule>
 type CustomModels = Record<string, string[]>
 
@@ -116,7 +114,6 @@ function normalizeCustomModels(input: unknown): CustomModels {
 
 function applyCustomModels(groups: AvailableGroup[], customModels: CustomModels): AvailableGroup[] {
   return groups.map(group => {
-    if (group.provider === OPENCODE_FREE_PROVIDER) return group
     const extra = customModels[group.provider] || []
     if (!extra.length) return group
     const models = [...new Set([...group.models, ...extra])]
@@ -133,10 +130,7 @@ function providerPresetToGroup(p: any, models?: string[]): AvailableGroup {
     provider: p.value,
     label: p.label,
     base_url: p.base_url,
-    models: p.value === OPENCODE_FREE_PROVIDER
-      ? getOpenCodeFreeStatus() === 'unsupported' ? [] : (models || p.models).filter(isOpenCodeFreeModel)
-      : models || p.models,
-    ...(p.value === OPENCODE_FREE_PROVIDER ? { catalog_status: getOpenCodeFreeStatus() } : {}),
+    models: models || p.models,
     api_key: '',
     ...(apiMode ? { api_mode: apiMode } : {}),
     ...(p.builtin ? { builtin: true } : {}),
@@ -184,7 +178,7 @@ function applyModelVisibility(groups: AvailableGroup[], visibility: ModelVisibil
         models: filterModelsForProvider(group.provider, availableModels, visibility),
       }
     })
-    .filter(group => group.models.length > 0 || group.provider === OPENCODE_FREE_PROVIDER)
+    .filter(group => group.models.length > 0)
 }
 
 function resolveVisibleDefault(defaultModel: string, defaultProvider: string, groups: AvailableGroup[]) {
@@ -425,7 +419,7 @@ async function buildAvailableForProfile(
   const groups: AvailableGroup[] = []
   const seenProviders = new Set<string>()
   const addGroup = (provider: string, label: string, base_url: string, models: string[], api_key: string, builtin?: boolean, model_meta?: Record<string, ModelMeta>, extra?: Pick<AvailableGroup, 'provider_source' | 'provider_key' | 'api_mode'>) => {
-    if (seenProviders.has(provider)) return
+    if (isRetiredProvider(provider) || seenProviders.has(provider)) return
     seenProviders.add(provider)
     const availableModels = [...new Set(models)]
     const apiMode = providerApiMode(provider, extra?.api_mode)
@@ -467,16 +461,6 @@ async function buildAvailableForProfile(
   }
 
   for (const [providerKey, envMapping] of Object.entries(PROVIDER_ENV_MAP)) {
-    if (providerKey === OPENCODE_FREE_PROVIDER) {
-      const freeStatus = getOpenCodeFreeStatus()
-      const models = freeStatus === 'unsupported' ? [] : resolveProviderCatalogModels(
-        modelCatalogCache, providerKey, OPENCODE_FREE_BASE_URL, [],
-      ).filter(isOpenCodeFreeModel)
-      addGroup(providerKey, 'OpenCode Free', OPENCODE_FREE_BASE_URL, models, '', true)
-      const group = groups.find(item => item.provider === providerKey)
-      if (group) group.catalog_status = freeStatus
-      continue
-    }
     const oauthAuthorized = providerSupportsStoredOAuth(providerKey) ? isOAuthAuthorized(providerKey) : false
     if (envMapping.api_key_env && !envHasValue(envMapping.api_key_env) && !oauthAuthorized) continue
     if (!envMapping.api_key_env) {
@@ -710,7 +694,7 @@ export async function getAvailable(ctx: any) {
       return match?.[1]?.trim() || ''
     }
     const addGroup = (provider: string, label: string, base_url: string, models: string[], api_key: string, builtin?: boolean, model_meta?: Record<string, ModelMeta>, extra?: Pick<AvailableGroup, 'provider_source' | 'provider_key'>) => {
-      if (seenProviders.has(provider)) return
+      if (isRetiredProvider(provider) || seenProviders.has(provider)) return
       seenProviders.add(provider)
       const availableModels = [...models]
       const apiMode = providerApiMode(provider)
@@ -944,7 +928,12 @@ export async function fetchProviderModelList(ctx: any) {
   try {
     const body = ctx.request.body as { base_url?: string; api_key?: string; freeOnly?: boolean; provider?: string; label?: string; update_cache?: boolean }
     const provider = String(body?.provider || '').trim()
-    const baseUrl = provider === OPENCODE_FREE_PROVIDER ? OPENCODE_FREE_BASE_URL : String(body?.base_url || '').trim()
+    if (isRetiredProvider(provider)) {
+      ctx.status = 400
+      ctx.body = { error: RETIRED_PROVIDER_MESSAGE }
+      return
+    }
+    const baseUrl = String(body?.base_url || '').trim()
     const apiKey = String(body?.api_key || '').trim()
     const freeOnly = body?.freeOnly === true
     const label = String(body?.label || provider).trim()
@@ -972,7 +961,7 @@ export async function fetchProviderModelList(ctx: any) {
     const base = baseUrl.replace(/\/+$/, '')
     const modelsUrl = /\/v\d+\/?$/.test(base) ? `${base}/models` : `${base}/v1/models`
     const headers: Record<string, string> = { ...openCodeSessionHeaders(modelsUrl), ...openRouterAttributionHeaders(modelsUrl, provider) }
-    if (apiKey && provider !== OPENCODE_FREE_PROVIDER) headers.Authorization = `Bearer ${apiKey}`
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`
 
     const res = await fetch(modelsUrl, {
       headers,
@@ -995,13 +984,7 @@ export async function fetchProviderModelList(ctx: any) {
       .map(m => String(m?.id || '').trim())
       .filter(Boolean)
     if (freeOnly) models = models.filter(m => m.endsWith(':free'))
-    if (provider === OPENCODE_FREE_PROVIDER) models = models.filter(isOpenCodeFreeModel)
     const uniqueModels = Array.from(new Set(models)).sort()
-    if (provider === OPENCODE_FREE_PROVIDER && !uniqueModels.length) {
-      ctx.status = 502
-      ctx.body = { error: 'OpenCode returned no free models; the cached catalog was retained' }
-      return
-    }
     if (body?.update_cache === true && provider) {
       await writeProviderModelCatalogEntry({
         provider,
@@ -1095,9 +1078,9 @@ export async function setConfigModel(ctx: any) {
     ctx.body = { error: 'Missing default model' }
     return
   }
-  if (reqProvider === OPENCODE_FREE_PROVIDER && !isOpenCodeFreeModel(defaultModel)) {
+  if (isRetiredProvider(String(reqProvider || ''))) {
     ctx.status = 400
-    ctx.body = { error: 'Select an OpenCode Free model' }
+    ctx.body = { error: RETIRED_PROVIDER_MESSAGE }
     return
   }
   try {

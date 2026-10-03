@@ -1640,10 +1640,6 @@ jobTriggered: 'Job declenche',
 
   // Models
   models: {
-    opencodeFreeHint: "Aucun compte ni clé API requis. Les modèles gratuits peuvent être limités.",
-    opencodeFreeLoading: "Chargement des modèles gratuits en arrière-plan…",
-    opencodeFreeRetry: "Échec de la vérification ou de la mise à jour du catalogue. Nouvelle tentative automatique ; le cache est conservé.",
-    opencodeFreeUpgrade: "Mettez Hermes Agent à jour pour utiliser OpenCode Free.",
     title: 'Modeles',
     addProvider: 'Ajouter un fournisseur',
     noProviderPromptTitle: 'Aucun fournisseur de modeles configure',

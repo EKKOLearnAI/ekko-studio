@@ -1640,10 +1640,6 @@ jobTriggered: 'Job ausgelost',
 
   // Models
   models: {
-    opencodeFreeHint: "Kein Konto oder API-Schlüssel erforderlich. Für kostenlose Modelle können Nutzungslimits gelten.",
-    opencodeFreeLoading: "Kostenlose Modelle werden im Hintergrund geladen…",
-    opencodeFreeRetry: "Anbieterprüfung oder Katalogaktualisierung fehlgeschlagen. Automatischer neuer Versuch; der Cache bleibt erhalten.",
-    opencodeFreeUpgrade: "Aktualisieren Sie Hermes Agent, um OpenCode Free zu nutzen.",
     title: 'Modelle',
     addProvider: 'Anbieter hinzufugen',
     noProviderPromptTitle: 'Kein Modellanbieter konfiguriert',

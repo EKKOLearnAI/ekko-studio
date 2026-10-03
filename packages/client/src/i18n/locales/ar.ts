@@ -2088,10 +2088,6 @@ export default {
 
   // Models
   models: {
-    opencodeFreeHint: "لا يلزم حساب أو مفتاح API. قد تخضع النماذج المجانية لحدود الاستخدام.",
-    opencodeFreeLoading: "جارٍ تحميل النماذج المجانية في الخلفية…",
-    opencodeFreeRetry: "فشل التحقق من المزود أو تحديث القائمة. ستتم إعادة المحاولة تلقائيًا مع الاحتفاظ بالنماذج المخزنة مؤقتًا.",
-    opencodeFreeUpgrade: "حدّث Hermes Agent لاستخدام OpenCode Free.",
     title: 'النماذج',
     searchPlaceholder: 'البحث في النماذج...',
     noResults: 'لا توجد نتائج',

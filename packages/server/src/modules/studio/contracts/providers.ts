@@ -3,7 +3,17 @@
  * Synced from hermes-agent hermes_cli/models.py _PROVIDER_MODELS.
  */
 
-import { OPENCODE_FREE_PROVIDER, OPENCODE_FREE_BASE_URL } from './opencode-free'
+export const RETIRED_PROVIDER_MESSAGE = 'OpenCode Free is no longer supported. Use OpenCode Zen or OpenCode Go with an API key.'
+
+export function isRetiredProvider(provider: string): boolean {
+  return provider.trim() === 'opencode-free'
+}
+
+export function assertProviderAvailable(provider: string): void {
+  if (isRetiredProvider(provider)) {
+    throw Object.assign(new Error(RETIRED_PROVIDER_MESSAGE), { status: 400 })
+  }
+}
 
 export interface ProviderPreset {
   label: string
@@ -411,13 +421,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'gemini-3.1-pro-preview',
       'gemini-2.5-pro',
     ],
-  },
-  {
-    label: 'OpenCode Free',
-    value: OPENCODE_FREE_PROVIDER,
-    builtin: true,
-    base_url: OPENCODE_FREE_BASE_URL,
-    models: [],
   },
   {
     label: 'OpenCode Zen',

@@ -1640,10 +1640,6 @@ jobTriggered: 'Job ejecutado',
 
   // Models
   models: {
-    opencodeFreeHint: "No se necesita cuenta ni clave API. Los modelos gratuitos pueden tener límites de uso.",
-    opencodeFreeLoading: "Cargando modelos gratuitos en segundo plano…",
-    opencodeFreeRetry: "Falló la comprobación o actualización del catálogo. Se reintentará automáticamente y se conservará la caché.",
-    opencodeFreeUpgrade: "Actualiza Hermes Agent para usar OpenCode Free.",
     title: 'Modelos',
     addProvider: 'Anadir proveedor',
     noProviderPromptTitle: 'No hay proveedor de modelos configurado',

@@ -2083,10 +2083,6 @@ export default {
 
   // 模型
   models: {
-    opencodeFreeHint: "無需帳號或 API key，免費模型可能受到限流。",
-    opencodeFreeLoading: "正在背景載入免費模型…",
-    opencodeFreeRetry: "免費提供商檢查或目錄更新失敗，將自動重試並保留快取模型。",
-    opencodeFreeUpgrade: "請更新 Hermes Agent 以使用 OpenCode Free。",
     title: '模型',
     searchPlaceholder: '搜尋模型...',
     noResults: '無結果',

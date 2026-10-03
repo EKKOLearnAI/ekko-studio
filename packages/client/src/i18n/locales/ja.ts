@@ -1640,10 +1640,6 @@ export default {
 
   // モデル
   models: {
-    opencodeFreeHint: "アカウントや API キーは不要です。無料モデルには利用制限があります。",
-    opencodeFreeLoading: "無料モデルをバックグラウンドで読み込み中…",
-    opencodeFreeRetry: "プロバイダーの確認または一覧の更新に失敗しました。キャッシュを保持して自動で再試行します。",
-    opencodeFreeUpgrade: "OpenCode Free を使うには Hermes Agent を更新してください。",
     title: 'モデル',
     addProvider: 'プロバイダーを追加',
     noProviderPromptTitle: 'モデルプロバイダーが設定されていません',

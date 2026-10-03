@@ -16,7 +16,6 @@ import {
 } from './provider-editor'
 import { getCompatibleCustomProviders } from '../../../studio/contracts/provider-compat'
 import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
-import { OPENCODE_FREE_PROVIDER } from '../../../studio/contracts/opencode-free'
 import { readConfigYamlForProfile } from '../../../studio/public/profile-config'
 
 export interface ProviderModelRefreshDiff {
@@ -112,7 +111,6 @@ async function protectedModels(profile: string, providerId: string, preferredMod
 }
 
 async function preferredModelForProvider(profile: string, providerId: string): Promise<string> {
-  if (providerId === OPENCODE_FREE_PROVIDER) return ''
   try {
     return (await getProviderEditorDetail(profile, providerId)).preferred_model
   } catch (error) {
@@ -253,7 +251,6 @@ async function fetchFullRemoteModels(
   target: ProviderCatalogRefreshTarget,
   apiMode: ProviderApiMode | undefined,
 ): Promise<string[]> {
-  if (target.provider === OPENCODE_FREE_PROVIDER) return fetchProviderCatalogRefreshTargetModels(target)
   if (target.credential_kind === 'api_key' || target.credential_kind === 'none') {
     return fetchProviderCatalogForTest(target.base_url, target.api_key, apiMode)
   }

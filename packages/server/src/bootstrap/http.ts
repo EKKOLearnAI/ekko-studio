@@ -34,7 +34,6 @@ import { ensureProfileGatewaysRunning } from '../modules/hermes/services/gateway
 import { runRegisteredStartupTasks } from './startup-tasks'
 import { refreshConfiguredProviderModelCatalogsInBackground } from '../modules/hermes/services/providers/model-catalog-cache'
 import { refreshModelCatalog } from '../modules/studio/public/model-catalog'
-import { initializeOpenCodeFreeInBackground } from '../modules/hermes/services/providers/opencode-free'
 import {
   scanLanDevices,
   selectLanIPv4Address,
@@ -692,7 +691,6 @@ export async function bootstrap() {
     close: stopLanDiscoveryResponder,
   })
   refreshConfiguredProviderModelCatalogsInBackground('bootstrap')
-  initializeOpenCodeFreeInBackground()
 
   if (isDesktopRuntime()) {
     await startRuntimeServicesAfterListen(hermesAgentAvailable)
