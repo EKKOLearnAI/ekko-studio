@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { findZcodeDesktopCli, resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/native/zcode-command'
+import { findZcodeDesktopCli, resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/zcode/installation'
 
 const installed = vi.hoisted(() => new Set<string>())
 vi.mock('node:fs', () => ({ existsSync: (path: string) => installed.has(path) }))

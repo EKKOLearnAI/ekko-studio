@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { getCodingAgentDefinition, getCodingAgentStatus, prepareCodingAgentLaunch } from '../../packages/server/src/modules/coding-agents/services'
-import { prepareNativeScopedRuntime } from '../../packages/server/src/modules/coding-agents/services/native/runtime-config'
-import { resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/native/zcode-command'
+import { prepareNativeScopedRuntime } from '../../packages/server/src/modules/coding-agents/services/registry/native-agents'
+import { resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/zcode/installation'
 
 // Uses the installed desktop CLI with isolated state and a local model endpoint.
 describe.skipIf(process.env.ZCODE_REAL_CLI_E2E !== '1')('real ZCode desktop CLI', () => {

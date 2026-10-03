@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { normalizeUsageCost } from '../../../studio/public/usage'
-import type { NativeUsageRow } from './native-usage'
-import { findRollout, readCodexTurnModel } from './native-model'
+import type { NativeUsageRow } from '../runtime/native-usage'
+import { findRollout, readCodexTurnModel } from './model'
 
 export interface CodexUsageTurn {
   id: string

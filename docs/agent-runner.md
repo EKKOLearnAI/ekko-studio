@@ -6,9 +6,10 @@ pipeline, one stream subscription model, and one persistence path while keeping
 agent-specific process and protocol behavior in named subdirectories.
 
 The Coding family also includes OpenCode, DSH, Cursor, Antigravity, and the
-[six native CLI integrations](native-coding-agents.md). The `services/native/`
-adapter uses standard ACP for Qwen, Kimi, CodeBuddy, Qoder, and Copilot, and the
-official ZCode headless JSONL protocol for ZCode. Qwen, Kimi, CodeBuddy, Copilot,
+[six native CLI integrations](native-coding-agents.md). Each runtime has its own
+`services/<id>/` directory. The shared `protocol/acp/` adapter serves Qwen, Kimi,
+CodeBuddy, Qoder, and Copilot; `services/zcode/` owns the official ZCode headless
+JSONL protocol. Qwen, Kimi, CodeBuddy, Copilot,
 and ZCode support isolated scoped model configuration and native global mode.
 Qoder remains global. All six share the same run manager, event persistence,
 group-chat and Workflow dispatch.
@@ -37,14 +38,27 @@ group-chat and Workflow dispatch.
 ## Current layout
 
 ```text
-services/coding-agents/
-  index.ts                 public install/config/launch facade
-  runtime/                 managed-run lifecycle and canonical event mapping
-  shared/                  provider bridge, stream utilities, and adapters
-  claude-code/             Claude Code proxy behavior
-  codex/                   Codex proxy behavior
-  pi/                      Pi RPC parsing and thinking-level translation
-  grok/                    Grok config isolation, turn process, and event adapter
+modules/coding-agents/
+  contracts/               definition and configuration-file contracts
+  protocol/                provider bridge, stream utilities, ACP sessions
+  services/
+    index.ts               public install/config/launch facade
+    registry/              definitions and native adapter composition
+    runtime/               shared managed-run and process lifecycle
+    claude-code/           Claude Code definition and proxy
+    codex/                 Codex definition, proxy, compaction and usage
+    pi/                    Pi definition, RPC parsing and thinking levels
+    grok/                  Grok definition, config, turns and events
+    opencode/              OpenCode definition, config, turns and events
+    dsh/                   DSH definition, configuration and ACP/Web adapters
+    cursor/                Cursor definition, settings, turns and events
+    antigravity/           Antigravity definition, config, turns and events
+    qwen/                  Qwen definition and scoped configuration
+    kimi/                  Kimi definition and scoped configuration
+    codebuddy/             CodeBuddy definition and scoped configuration
+    qoder/                 Qoder definition for the shared ACP transport
+    copilot/               Copilot definition and scoped configuration
+    zcode/                 ZCode definition, install discovery, config and JSONL
 ```
 
 - `claude-code/proxy.ts` exposes an Anthropic-compatible local proxy for Claude
@@ -53,7 +67,7 @@ services/coding-agents/
 - `pi/jsonl-parser.ts` decodes Pi's RPC stdout stream.
 - `grok/` owns Grok's isolated `GROK_HOME`, prompt-file launches, and
   `streaming-json` event adaptation.
-- `shared/provider-policy.ts` owns the scoped Coding Agent Provider allow/deny
+- `protocol/provider-policy.ts` owns the scoped Coding Agent Provider allow/deny
   boundary used by launches and Workflow capability checks.
 - `runtime/run-manager.ts` owns managed Claude Code, Codex, Pi, and Grok process
   lifecycle for chat-driven Coding Agent sessions.

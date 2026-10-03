@@ -2,8 +2,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { USAGE_SCHEMA, USAGE_RUN_INDEX, RUN_USAGE_SCHEMA, RUN_USAGE_INDEXES } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
 import { usageRepairSnapshot, applyUsageRepair, type RepairUsageRow } from '../../packages/server/src/modules/studio/repositories/usage-repair-store'
-import { planCodexUsageRepair } from '../../packages/server/src/modules/coding-agents/services/runtime/codex-usage-repair'
-import type { CodexUsageTurn } from '../../packages/server/src/modules/coding-agents/services/runtime/codex-usage'
+import { planCodexUsageRepair } from '../../packages/server/src/modules/coding-agents/services/codex/usage-repair'
+import type { CodexUsageTurn } from '../../packages/server/src/modules/coding-agents/services/codex/usage'
 
 describe('explicit historical usage repair', () => {
   let db: DatabaseSync, before: RepairUsageRow[]

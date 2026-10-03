@@ -5,11 +5,13 @@ import path from 'node:path'
 import { checkServerModuleBoundaries } from './server-module-boundaries.mjs'
 import { hasManagedMcpNodeMode } from './managed-mcp-harness.mjs'
 import { checkDshModuleBoundaries } from './dsh-module-harness.mjs'
+import { checkCodingAgentModuleBoundaries } from './coding-agent-module-harness.mjs'
 import { checkJevIntegrations } from './jev-harness.mjs'
 
 const root = process.cwd()
 const failures = []
 failures.push(...await checkDshModuleBoundaries(root))
+failures.push(...await checkCodingAgentModuleBoundaries(root))
 failures.push(...await checkJevIntegrations(root))
 
 function fail(message) {

@@ -3,7 +3,8 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ManagedCodingAgentRun } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
-import { startNativeChatTurn, type NativeTurnHost } from '../../packages/server/src/modules/coding-agents/services/native/chat-turn'
+import { startNativeChatTurn } from '../../packages/server/src/modules/coding-agents/services/registry/native-agents'
+import type { NativeTurnHost } from '../../packages/server/src/modules/coding-agents/services/runtime/turn-host'
 
 vi.mock('../../packages/server/src/modules/studio/public/sessions', () => ({ updateSession: vi.fn() }))
 import { updateSession } from '../../packages/server/src/modules/studio/public/sessions'

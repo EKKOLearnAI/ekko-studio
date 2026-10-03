@@ -12,8 +12,8 @@ import { codexProxyRoutes } from '../../packages/server/src/modules/coding-agent
 import { claudeCodeProxyRoutes } from '../../packages/server/src/modules/coding-agents/routes/claude-code-proxy'
 import { registerCodexProxyTarget } from '../../packages/server/src/modules/coding-agents/services/codex/proxy'
 import { registerClaudeCodeProxyTarget } from '../../packages/server/src/modules/coding-agents/services/claude-code/proxy'
-import { NativeAcpTurn } from '../../packages/server/src/modules/coding-agents/services/native/acp-turn'
-import { nativeScopedUsesChatCompletions, prepareNativeScopedRuntime } from '../../packages/server/src/modules/coding-agents/services/native/runtime-config'
+import { NativeAcpTurn } from '../../packages/server/src/modules/coding-agents/protocol/acp/turn'
+import { nativeScopedUsesChatCompletions, prepareNativeScopedRuntime } from '../../packages/server/src/modules/coding-agents/services/registry/native-agents'
 
 vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({ codingAgentRunManager: {
   handleProxyUsageEvent: vi.fn(), handleResponseEvent: vi.fn(),

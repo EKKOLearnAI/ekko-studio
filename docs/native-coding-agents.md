@@ -7,6 +7,15 @@ or ZCode's bundled CLI in a standard desktop installation directory.
 Their runtime, session, group, and catalog IDs are respectively `qwen`, `kimi`,
 `codebuddy`, `qoder`, `copilot`, and `zcode`.
 
+Their implementations live in separate `coding-agents/services/<id>/`
+directories. Each owns its definition and scoped configuration; Qoder owns
+only its definition because it is global-only and uses the shared ACP adapter.
+ZCode additionally owns desktop installation discovery, JSONL events and chat
+turns. `services/registry/native-agents.ts` selects the configuration and turn
+adapter; reusable ACP lives in `protocol/acp/`, while process lifecycle and
+private-file helpers live in `services/runtime/`. These source directories do
+not change the persisted `coding-agent/native/<id>/` MCP configuration paths.
+
 Qwen Code, Kimi Code, CodeBuddy, Copilot, and ZCode support **scoped** and
 **global** modes. Scoped uses the selected Studio provider/model, with isolated
 per-session configuration and data under Web UI state. Global retains each

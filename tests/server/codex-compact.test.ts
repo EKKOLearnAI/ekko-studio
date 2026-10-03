@@ -27,7 +27,7 @@ describe('compactCodexThread', () => {
     const child = makeChild()
     spawnMock.mockReturnValue(child)
 
-    const { compactCodexThread } = await import('../../packages/server/src/modules/coding-agents/services/runtime/codex-compact')
+    const { compactCodexThread } = await import('../../packages/server/src/modules/coding-agents/services/codex/compact')
     const promise = compactCodexThread({
       command: 'codex',
       env: { CODEX_HOME: '/tmp/codex' },
@@ -55,7 +55,7 @@ describe('compactCodexThread', () => {
     const child = makeChild()
     spawnMock.mockReturnValue(child)
 
-    const { compactCodexThread } = await import('../../packages/server/src/modules/coding-agents/services/runtime/codex-compact')
+    const { compactCodexThread } = await import('../../packages/server/src/modules/coding-agents/services/codex/compact')
     const promise = compactCodexThread({
       command: 'codex',
       env: { CODEX_HOME: '/tmp/codex' },
@@ -83,7 +83,7 @@ describe('compactCodexThread', () => {
     const child = makeChild()
     spawnMock.mockReturnValue(child)
 
-    const { compactCodexThread } = await import('../../packages/server/src/modules/coding-agents/services/runtime/codex-compact')
+    const { compactCodexThread } = await import('../../packages/server/src/modules/coding-agents/services/codex/compact')
     const promise = compactCodexThread({
       command: 'codex',
       env: { CODEX_HOME: '/tmp/codex' },
@@ -99,7 +99,7 @@ describe('compactCodexThread', () => {
     const child = makeChild()
     spawnMock.mockReturnValue(child)
 
-    const { compactCodexThread } = await import('../../packages/server/src/modules/coding-agents/services/runtime/codex-compact')
+    const { compactCodexThread } = await import('../../packages/server/src/modules/coding-agents/services/codex/compact')
     const promise = compactCodexThread({
       command: 'codex',
       env: { CODEX_HOME: '/tmp/codex' },
