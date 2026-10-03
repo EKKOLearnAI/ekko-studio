@@ -1,6 +1,6 @@
 {
   "name": "hermes-studio",
-  "version": "0.7.28",
+  "version": "0.7.29",
   "description": "Ekko Studio desktop app for multi-agent chat, coding, and visual workflows, with bundled local runtimes.",
   "homepage": "https://ekkostudio.xyz",
   "author": {

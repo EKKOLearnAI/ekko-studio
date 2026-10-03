@@ -3335,6 +3335,8 @@ jobTriggered: 'Job acionado',
   },
 
   changelog: {
+    new_0_7_29_1: 'Restaurado o download de arquivos pelos menus da árvore de arquivos e pelas barras de diferenças nos espaços de trabalho de chats e chats em grupo (#3268)',
+    new_0_7_29_2: 'Corrigida a identificação incorreta do Antigravity como Ekko nas notificações de atividade ao vivo (#3272)',
     new_0_7_28_1: 'Adicionado Antigravity CLI para chats, chats em grupo e fluxos de trabalho nos modos global e isolado, com configurações nativas, MCP e gestão de habilidades (#3256)',
     new_0_7_28_2: 'Adicionada uma página de relay APIKEY.FAN com saldo, uso diário e total e detalhamento por modelo para as chaves API configuradas (#3257)',
     new_0_7_28_3: 'Corrigidos o estado das verificações manuais de atualização e a detecção de versões CLI atualizadas nos Coding Agents, com proteção das sessões ativas (#3261)',

@@ -3335,6 +3335,8 @@ jobTriggered: 'Job ausgelost',
   },
 
   changelog: {
+    new_0_7_29_1: 'Dateidownloads über Dateibaum-Menüs und Diff-Werkzeugleisten in den Arbeitsbereichen von Chats und Gruppenchats wiederhergestellt (#3268)',
+    new_0_7_29_2: 'Falsche Anzeige von Antigravity als Ekko in Live-Aktivitätsbenachrichtigungen behoben (#3272)',
     new_0_7_28_1: 'Antigravity CLI für Chats, Gruppenchats und Workflows im globalen und isolierten Modus ergänzt, mit nativen Einstellungen, MCP und Skill-Verwaltung (#3256)',
     new_0_7_28_2: 'APIKEY.FAN-Relay-Seite mit Guthaben, Tages- und Gesamtnutzung sowie Aufschlüsselung nach Modell für konfigurierte API-Schlüssel ergänzt (#3257)',
     new_0_7_28_3: 'Status manueller Update-Prüfungen und Erkennung aktualisierter CLI-Versionen für Coding Agents korrigiert und aktive Sitzungen geschützt (#3261)',
