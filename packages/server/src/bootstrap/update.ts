@@ -7,9 +7,9 @@ import {
   configureUpdateRuntime,
   stopPreviewRuntime,
 } from '../modules/studio/services/update/version-preview-manager'
-import { isDockerContainer } from '../modules/studio/public/runtime-environment'
+import { isDockerContainer, isGitCloneDeployment, getGitCloneRoot } from '../modules/studio/public/runtime-environment'
 
-configureUpdateRuntime({ getWebUiHome, isDockerContainer })
+configureUpdateRuntime({ getWebUiHome, isDockerContainer, isGitCloneDeployment, getGitCloneRoot })
 configureSuperAdminMiddleware(requireSuperAdmin)
 
 export const {

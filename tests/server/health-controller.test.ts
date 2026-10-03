@@ -12,6 +12,7 @@ function readRootPackage() {
 type LoadHealthControllerOptions = {
   injectedVersion?: string
   isDocker?: boolean
+  isGitClone?: boolean
   disableUpdateCheck?: boolean
   bridgeReadiness?: any
   bridgeReadinessError?: Error
@@ -66,6 +67,7 @@ async function loadHealthController(options: LoadHealthControllerOptions = {}) {
   }))
   vi.doMock('../../packages/server/src/modules/studio/public/runtime-environment', () => ({
     isDockerContainer: () => options.isDocker === true,
+    isGitCloneDeployment: () => options.isGitClone === true,
   }))
 
   const health = await import('../../packages/server/src/bootstrap/health')
@@ -233,6 +235,31 @@ describe('health controller version metadata', () => {
       is_docker: true,
       webui_latest: '0.6.29',
       webui_update_available: true,
+    }))
+  })
+
+  it('flags a git checkout and suppresses registry-driven update prompts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ version: '0.6.29' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { checkLatestVersion, healthCheck } = await loadHealthController({
+      injectedVersion: '0.6.28',
+      isGitClone: true,
+    })
+
+    await checkLatestVersion()
+    const ctx = createMockCtx()
+    await healthCheck(ctx)
+
+    // A git checkout upgrades from the repository, so a newer registry release
+    // must not be advertised as an available update.
+    expect(ctx.body).toEqual(expect.objectContaining({
+      is_git_clone: true,
+      is_docker: false,
+      webui_latest: '',
+      webui_update_available: false,
     }))
   })
 

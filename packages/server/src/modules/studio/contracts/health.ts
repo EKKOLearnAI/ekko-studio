@@ -18,4 +18,5 @@ export interface StudioHealthDependencies {
   getPrimaryAgentVersion(): Promise<string>
   getPrimaryAgentBridgeHealth(): Promise<AgentBridgeHealthPayload>
   isDockerContainer(): boolean
+  isGitCloneDeployment(): boolean
 }

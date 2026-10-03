@@ -18,6 +18,8 @@ type UpdateControllerMocks = {
 
 type LoadUpdateControllerOptions = Partial<UpdateControllerMocks> & {
   isDocker?: boolean
+  isGitClone?: boolean
+  gitCloneRoot?: string
 }
 
 async function loadUpdateController(overrides: LoadUpdateControllerOptions = {}) {
@@ -47,6 +49,8 @@ async function loadUpdateController(overrides: LoadUpdateControllerOptions = {})
   }))
   vi.doMock('../../packages/server/src/modules/studio/public/runtime-environment', () => ({
     isDockerContainer: () => overrides.isDocker === true,
+    isGitCloneDeployment: () => overrides.isGitClone === true,
+    getGitCloneRoot: () => (overrides.isGitClone === true ? overrides.gitCloneRoot ?? '/srv/ekko-studio' : null),
   }))
 
   const mod = await import('../../packages/server/src/bootstrap/update')
@@ -369,6 +373,257 @@ describe('update controller', () => {
       process.execPath,
       [npmCli, 'install', '--include=dev', '--ignore-scripts'],
       expect.any(Object),
+    )
+  })
+
+  it('runs a git-clone update through git fetch, merge, npm install, npm build, and a systemd restart', async () => {
+    process.env.PORT = '9129'
+    const npmCli = getNpmCliPath()
+    const repoRoot = '/srv/ekko-studio'
+    const calls: { command: string; args: string[]; cwd?: string }[] = []
+    const execFileSync = vi.fn((command: string, args: string[], options: any = {}) => {
+      if (command === 'which' && args[0] === 'git') return '/usr/bin/git\n'
+      if (command === '/usr/bin/git') {
+        calls.push({ command, args, cwd: options.cwd })
+        return ''
+      }
+      if (command === 'systemctl') return 'systemd 252\n'
+      calls.push({ command, args, cwd: options.cwd })
+      if (args[1] === 'root') return '/usr/lib/node_modules'
+      return 'rebuilt'
+    })
+    const readFileSync = vi.fn((path: string) => {
+      if (path === '/proc/self/cgroup') return '0::/system.slice/ekko-studio.service\n'
+      return JSON.stringify({ name: 'ekko-studio', version: '0.7.22' })
+    })
+    const { handleUpdate, mocks } = await loadUpdateController({
+      execFileSync,
+      readFileSync,
+      isGitClone: true,
+      gitCloneRoot: repoRoot,
+    })
+    const ctx = createMockCtx()
+
+    await handleUpdate(ctx)
+    await vi.runAllTimersAsync()
+
+    const gitCalls = calls.filter(call => call.command === '/usr/bin/git')
+    const gitCommands = gitCalls.map(call => call.args.join(' '))
+    expect(gitCommands).toContain('fetch origin main --prune')
+    expect(gitCommands).toContain('merge --ff-only origin/main')
+    // Every git invocation must run inside the checkout, never the Web UI home.
+    expect(gitCalls.every(call => call.cwd === repoRoot)).toBe(true)
+
+    // `npm install -g` must never run for a git deployment.
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith(
+      process.execPath,
+      [npmCli, 'install', '-g', 'ekko-studio@latest'],
+      expect.anything(),
+    )
+    // Rebuild must happen inside the checkout.
+    expect(mocks.execFileSync).toHaveBeenCalledWith(
+      process.execPath,
+      [npmCli, 'run', 'build'],
+      expect.objectContaining({ cwd: repoRoot, timeout: 30 * 60 * 1000 }),
+    )
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      'systemctl',
+      ['restart', 'ekko-studio.service'],
+      expect.objectContaining({ detached: true, stdio: 'ignore', windowsHide: true }),
+    )
+    expect(ctx.body).toEqual({
+      success: true,
+      message: 'fetched origin/main; merged origin/main; installed dependencies; rebuilt the application',
+    })
+  })
+
+  it('stashes and restores local changes around a git-clone update', async () => {
+    const repoRoot = '/srv/ekko-studio'
+    const gitArgs: string[] = []
+    const execFileSync = vi.fn((command: string, args: string[], _options: any = {}) => {
+      if (command === 'which' && args[0] === 'git') return '/usr/bin/git\n'
+      if (command === '/usr/bin/git') {
+        gitArgs.push(args.join(' '))
+        // A dirty checkout forces the stash path.
+        if (args[0] === 'status') return ' M packages/server/src/modules/studio/services/health.ts\n'
+        return ''
+      }
+      if (command === 'systemctl') return 'systemd 252\n'
+      if (args[1] === 'root') return '/usr/lib/node_modules'
+      return 'ok'
+    })
+    const readFileSync = vi.fn((path: string) => {
+      if (path === '/proc/self/cgroup') return '0::/system.slice/ekko-studio.service\n'
+      return JSON.stringify({ name: 'ekko-studio', version: '0.7.22' })
+    })
+    const { handleUpdate } = await loadUpdateController({
+      execFileSync,
+      readFileSync,
+      isGitClone: true,
+      gitCloneRoot: repoRoot,
+    })
+
+    await handleUpdate(createMockCtx())
+    await vi.runAllTimersAsync()
+
+    expect(gitArgs).toContain('stash push -m ekko-studio-auto-update')
+    expect(gitArgs).toContain('stash pop')
+    // Stash before merging, restore after: the merge needs a clean tree, and the
+    // local diff must be back in place before the rebuild.
+    expect(gitArgs.indexOf('stash push -m ekko-studio-auto-update')).toBeLessThan(gitArgs.indexOf('stash pop'))
+    expect(gitArgs.indexOf('merge --ff-only origin/main')).toBeLessThan(gitArgs.indexOf('stash pop'))
+    expect(gitArgs.indexOf('stash push -m ekko-studio-auto-update')).toBeLessThan(gitArgs.indexOf('merge --ff-only origin/main'))
+  })
+
+  it('does not stash a clean checkout', async () => {
+    const repoRoot = '/srv/ekko-studio'
+    const gitArgs: string[] = []
+    const execFileSync = vi.fn((command: string, args: string[], _options: any = {}) => {
+      if (command === 'which' && args[0] === 'git') return '/usr/bin/git\n'
+      if (command === '/usr/bin/git') {
+        gitArgs.push(args.join(' '))
+        return ''
+      }
+      if (command === 'systemctl') return 'systemd 252\n'
+      if (args[1] === 'root') return '/usr/lib/node_modules'
+      return 'ok'
+    })
+    const readFileSync = vi.fn((path: string) => {
+      if (path === '/proc/self/cgroup') return '0::/system.slice/ekko-studio.service\n'
+      return JSON.stringify({ name: 'ekko-studio', version: '0.7.22' })
+    })
+    const { handleUpdate, mocks } = await loadUpdateController({
+      execFileSync,
+      readFileSync,
+      isGitClone: true,
+      gitCloneRoot: repoRoot,
+    })
+    const ctx = createMockCtx()
+
+    await handleUpdate(ctx)
+    await vi.runAllTimersAsync()
+
+    expect(gitArgs.some(arg => arg.startsWith('stash'))).toBe(false)
+    // A clean checkout still updates and rebuilds.
+    expect(ctx.body).toEqual({
+      success: true,
+      message: 'fetched origin/main; merged origin/main; installed dependencies; rebuilt the application',
+    })
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      'systemctl',
+      ['restart', 'ekko-studio.service'],
+      expect.objectContaining({ detached: true }),
+    )
+  })
+
+  it('reports a failed local-change restore instead of rebuilding', async () => {
+    const npmCli = getNpmCliPath()
+    const repoRoot = '/srv/ekko-studio'
+    const execFileSync = vi.fn((command: string, args: string[], _options: any = {}) => {
+      if (command === 'which' && args[0] === 'git') return '/usr/bin/git\n'
+      if (command === '/usr/bin/git') {
+        if (args[0] === 'status') return ' M some-file.ts\n'
+        if (args[0] === 'stash' && args[1] === 'pop') throw new Error('CONFLICT (content): Merge conflict in some-file.ts')
+        return ''
+      }
+      if (command === 'systemctl') return 'systemd 252\n'
+      if (args[1] === 'root') return '/usr/lib/node_modules'
+      return 'ok'
+    })
+    const readFileSync = vi.fn((path: string) => {
+      if (path === '/proc/self/cgroup') return '0::/system.slice/ekko-studio.service\n'
+      return JSON.stringify({ name: 'ekko-studio', version: '0.7.22' })
+    })
+    const { handleUpdate, mocks } = await loadUpdateController({
+      execFileSync,
+      readFileSync,
+      isGitClone: true,
+      gitCloneRoot: repoRoot,
+    })
+    const ctx = createMockCtx()
+
+    await handleUpdate(ctx)
+
+    expect(ctx.status).toBe(500)
+    expect((ctx.body as any).success).toBe(false)
+    expect(String((ctx.body as any).message)).toContain('git stash pop')
+    // No rebuild, no restart: the checkout is left on the new commit untouched.
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith(
+      process.execPath,
+      [npmCli, 'run', 'build'],
+      expect.anything(),
+    )
+    expect(mocks.spawn).not.toHaveBeenCalled()
+  })
+
+  it('restarts a user-scoped unit through `systemctl --user`', async () => {
+    const repoRoot = '/srv/ekko-studio'
+    const execFileSync = vi.fn((command: string, args: string[], _options: any = {}) => {
+      if (command === 'which' && args[0] === 'git') return '/usr/bin/git\n'
+      if (command === '/usr/bin/git') return ''
+      if (command === 'systemctl') return 'systemd 252\n'
+      if (args[1] === 'root') return '/usr/lib/node_modules'
+      return 'ok'
+    })
+    const readFileSync = vi.fn((path: string) => {
+      // A user-scoped unit: `--user` is required or the restart targets nothing.
+      if (path === '/proc/self/cgroup') {
+        return '0::/user.slice/user-1000.slice/user@1000.service/app.slice/ekko-studio.service\n'
+      }
+      return JSON.stringify({ name: 'ekko-studio', version: '0.7.22' })
+    })
+    const { handleUpdate, mocks } = await loadUpdateController({
+      execFileSync,
+      readFileSync,
+      isGitClone: true,
+      gitCloneRoot: repoRoot,
+    })
+
+    await handleUpdate(createMockCtx())
+    await vi.runAllTimersAsync()
+
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      'systemctl',
+      ['--user', 'restart', 'ekko-studio.service'],
+      expect.objectContaining({ detached: true, stdio: 'ignore', windowsHide: true }),
+    )
+    // The deeper system unit must win over the intermediate `user@1000.service`.
+    expect(mocks.spawn).not.toHaveBeenCalledWith(
+      'systemctl',
+      expect.arrayContaining(['user@1000.service']),
+      expect.anything(),
+    )
+  })
+
+  it('falls back to the CLI restart when no systemd unit owns the process', async () => {
+    const repoRoot = '/srv/ekko-studio'
+    // The CLI script is resolved through `npm root -g`, not through the Node prefix.
+    const cliScript = '/usr/lib/node_modules/ekko-studio/bin/hermes-web-ui.mjs'
+    const execFileSync = vi.fn((command: string, args: string[], _options: any = {}) => {
+      if (command === 'which' && args[0] === 'git') return '/usr/bin/git\n'
+      if (command === '/usr/bin/git') return ''
+      if (args[1] === 'root') return '/usr/lib/node_modules'
+      return 'ok'
+    })
+    const readFileSync = vi.fn((path: string) => {
+      // A bare-metal run without systemd reports no unit in the cgroup.
+      if (path === '/proc/self/cgroup') return '0::/user.slice/session-3.scope\n'
+      return JSON.stringify({ name: 'ekko-studio', version: '0.7.22' })
+    })
+    const { handleUpdate, mocks } = await loadUpdateController({
+      execFileSync,
+      readFileSync,
+      isGitClone: true,
+      gitCloneRoot: repoRoot,
+    })
+
+    await handleUpdate(createMockCtx())
+    await vi.runAllTimersAsync()
+
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      process.execPath,
+      [cliScript, 'restart', '--port', '8648'],
+      expect.objectContaining({ detached: true, stdio: 'ignore', windowsHide: true, cwd: repoRoot }),
     )
   })
 
