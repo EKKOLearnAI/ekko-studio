@@ -57,6 +57,16 @@ describe('Studio Live Activity orchestration', () => {
 
  it('persists an encrypted destination and emits ordered start update end without exposing credentials',async()=>{const consume=await setup();await consume(event('chat.plan.updated'));await consume(event('chat.plan.updated',2,'completed'));await consume(event('chat.run.completed',3));expect(fetchMock).toHaveBeenCalledTimes(3);const bodies=fetchMock.mock.calls.map(([,r])=>JSON.parse(r.body));expect(bodies.map(b=>b.event)).toEqual(['start','update','end']);expect(bodies.map(b=>b.revision)).toEqual([1,2,3]);expect(bodies.every(b=>b.content_state.agent==='codex')).toBe(true);expect(bodies[0].ekko_run).toMatchObject({session_id:'session-a',studio_device_id:'studio-a',cloud_user_id:107});expect(JSON.stringify(bodies)).not.toContain('push_')})
  it('preserves Pi runtime identity instead of the default session agent',async()=>{const consume=await setup();const e=event('chat.plan.updated');e.chat.agent='pi';await consume(e);expect(JSON.parse(fetchMock.mock.calls[0][1].body).content_state.agent).toBe('pi')})
+ it('preserves Antigravity through start update and end with session fallback',async()=>{
+  vi.doMock('../../packages/server/src/modules/studio/repositories/session-store',()=>({getSession:()=>({title:'Build App',profile:'default',user_id:7,agent:'antigravity'}),getSessionNotificationPreview:()=>({})}))
+  const consume=await setup(),start=event('chat.plan.updated'),update=event('chat.plan.updated',2,'completed')
+  start.source='coding_agent';start.chat.agent='antigravity'
+  update.source='coding_agent';update.chat.agent='antigravity'
+  await consume(start);await consume(update);await consume(event('chat.run.completed',3))
+  const bodies=fetchMock.mock.calls.map(([,request])=>JSON.parse(request.body))
+  expect(bodies.map(body=>body.event)).toEqual(['start','update','end'])
+  expect(bodies.map(body=>body.content_state.agent)).toEqual(['antigravity','antigravity','antigravity'])
+ })
  it('reports rejected start without logging credentials or task text',async()=>{const log=vi.spyOn(console,'info').mockImplementation(()=>{});try{const consume=await setup();fetchMock.mockResolvedValueOnce({status:403,json:async()=>({error:'grant_revoked'}),body:null});await consume(event('chat.plan.updated'));expect(log).toHaveBeenCalledWith('[live-activity] delivery',expect.objectContaining({connection:1,action:'start',http:403,error:'grant_revoked'}));expect(JSON.stringify(log.mock.calls)).not.toContain('push_');expect(JSON.stringify(log.mock.calls)).not.toContain('Build App')}finally{log.mockRestore()}})
 
  it('uses the bounded notification title when the saved session title is absent',async()=>{
@@ -77,6 +87,7 @@ describe('Studio Live Activity orchestration', () => {
   ['coding_agent','pi','pi'],['coding_agent','grok','grok'],
   ['coding_agent','opencode','opencode'],['coding_agent','dsh','deepseek'],
   ['coding_agent','cursor','cursor'],
+  ['coding_agent','antigravity','antigravity'],['coding_agent',' Antigravity ','antigravity'],
   ['chat','bridge','hermes'],['chat','ekko-agent','ekko'],
  ])('preserves title and normalized agent for %s / %s',async(source,runtime,expected)=>{
   const consume=await setup(), e=event('chat.plan.updated')
