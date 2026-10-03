@@ -34,6 +34,13 @@ import { configureProfileConfig } from '../../packages/server/src/modules/studio
 import * as providerRuntime from '../../packages/server/src/modules/studio/public/provider-runtime'
 import { upsertCodingAgentMcpServer } from '../../packages/server/src/modules/coding-agents/services/mcp-manager'
 import { getCodingAgentManagedMcpServerConfigs } from '../../packages/server/src/modules/coding-agents/services'
+import { resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/native/zcode-command'
+
+// Keep launch fixtures independent of desktop applications installed on the host.
+// Actual ZCode desktop command resolution is covered by zcode-desktop-command.
+vi.mock('../../packages/server/src/modules/coding-agents/services/native/zcode-command', () => ({
+  resolveZcodeCommand: vi.fn(async (args: string[]) => ({ command: 'zcode', args, env: {}, path: 'zcode' })),
+}))
 
 // Registry tests verify isolated homes/model injection without requiring a
 // machine-wide DSH install. Real Web composition is covered by dsh-web-real.
@@ -3969,6 +3976,35 @@ it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot'])('loads %s supplementa
   expect(launch.nativeMcpServers!['ekko-studio-interaction']).toBeDefined()
 })
 
+
+it('uses desktop provider paths globally while retaining scoped ZCode configuration in chat and terminal launchers', async () => {
+  const home = makeHome()
+  const cli = '/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs'
+  const defaults = { ELECTRON_RUN_AS_NODE: '1',
+    ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: '/desktop/config/provider/zcode-builtin.json',
+    ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: join(home, '.zcode', 'v2', 'provider_config.json'),
+    ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE: '' }
+  vi.mocked(resolveZcodeCommand).mockResolvedValueOnce({ command: process.execPath, args: [cli], env: defaults, path: cli })
+  const global = await prepareCodingAgentLaunch('zcode', { mode: 'global', workspace: join(home, 'workspace') })
+  expect(global.command).toBe(process.execPath)
+  expect(global.env).toEqual(defaults)
+  expect(global.args).toEqual([cli])
+  expect(global.shellCommand).toContain('ZCODE_BUILTIN_PROVIDER_CONFIG_FILE')
+  expect(global.shellCommand).toContain(cli)
+
+  vi.mocked(resolveZcodeCommand).mockResolvedValueOnce({ command: process.execPath, args: [cli], env: defaults, path: cli })
+  const scoped = await prepareCodingAgentLaunch('zcode', { mode: 'scoped', profile: 'default',
+    provider: 'custom:test', model: 'model-a', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test',
+    workspace: join(home, 'workspace'), sessionId: 'desktop-scoped' })
+  expect(scoped.command).toBe(process.execPath)
+  expect(scoped.env.ELECTRON_RUN_AS_NODE).toBe('1')
+  expect(scoped.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(join(scoped.rootDir, 'zcode-builtin.json'))
+  expect(scoped.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE).toBe(join(scoped.rootDir, 'personal-providers.json'))
+  expect(scoped.env.ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE).toBe('')
+  const launcher = readFileSync(launcherFile(scoped.rootDir), 'utf8')
+  expect(launcher).toContain(cli)
+  expect(launcher).toContain(scoped.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE)
+})
 
 it.each(['qwen', 'kimi', 'codebuddy', 'copilot', 'zcode'].flatMap(id =>
   ['chat_completions', 'codex_responses', 'anthropic_messages'].map(apiMode => [id, apiMode] as const)

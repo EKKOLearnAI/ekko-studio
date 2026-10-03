@@ -1,4 +1,5 @@
 import { prepareNativeScopedRuntime, nativeScopedUsesChatCompletions } from './native/runtime-config'
+import { resolveZcodeCommand } from './native/zcode-command'
 import { NATIVE_CODING_AGENTS, isNativeCodingAgent, nativeCodingAgentSupportsScoped, isGlobalOnlyCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
 import { prioritizeManagedNpmBin } from './managed-command-path'
 import { readTomlAssignment } from './toml-assignment'
@@ -2872,14 +2873,15 @@ export async function getCodingAgentStatus(definition: CodingAgentDefinition): P
   let resolvedCommand = ''
   try {
     const env = await commandEnv()
-    resolvedCommand = await resolveCommandForExecution(definition.command, env)
-    const execution = commandExecution(resolvedCommand, ['--version'])
+    const zcode = definition.id === 'zcode' ? await resolveZcodeCommand(['--version'], env, findCommandPaths) : undefined
+    resolvedCommand = zcode?.path || await resolveCommandForExecution(definition.command, env)
+    const execution = commandExecution(zcode?.command || resolvedCommand, zcode?.args || ['--version'])
     const { stdout, stderr } = await execFileAsync(execution.command, execution.args, {
       encoding: 'utf-8',
       timeout: 8000,
       windowsHide: true,
       windowsVerbatimArguments: execution.windowsVerbatimArguments,
-      env,
+      env: { ...env, ...zcode?.env },
     })
     const rawVersion = `${stdout || ''}${stderr || ''}`.trim()
     if (definition.id === 'pi' && !existsSync(getPiMcpAdapterEntry())) {
@@ -3393,9 +3395,12 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       const content = mcpFile ? await safeReadFile(mcpFile.absolutePath) : ''
       const userMcp = content ? JSON.parse(content).mcpServers || {} : {}
       const nativeMcpServers = { ...userMcp, ...getCodingAgentManagedMcpServerConfigs(tool.id, scope.profile, input.studioMcpTokenFile) }
+      const execution = tool.id === 'zcode'
+        ? await resolveZcodeCommand([], await commandEnv(), findCommandPaths)
+        : { command: tool.command, args: [], env: {} }
       return { agentId: tool.id, mode, profile: scope.profile, provider: 'global', model: '', rootDir, workspaceDir,
-        command: tool.command, args: [], env: {}, files: [], nativeSystemPrompt: systemPrompt, nativeMcpServers,
-        shellCommand: buildLaunchShellCommand({ workspaceDir, env: {}, command: tool.command, args: [] }) }
+        command: execution.command, args: execution.args, env: execution.env, files: [], nativeSystemPrompt: systemPrompt, nativeMcpServers,
+        shellCommand: buildLaunchShellCommand({ workspaceDir, ...execution }) }
     }
 
     let promptFile = ''
@@ -3973,17 +3978,24 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
 
   const chatSessionId = String(isolatedInput.sessionId || '').trim()
   if (chatSessionId) env[HERMES_STUDIO_SESSION_ENV_KEY] = chatSessionId
+  let command = tool.command
+  if (tool.id === 'zcode') {
+    const execution = await resolveZcodeCommand(args, { ...(await commandEnv()), ...env }, findCommandPaths)
+    command = execution.command
+    args = execution.args
+    env = { ...execution.env, ...env }
+  }
   let shellCommand = buildLaunchShellCommand({
     workspaceDir,
     env,
-    command: tool.command,
+    command,
     args,
   })
   const launcherPath = await writeLauncherScript({
     rootDir,
     workspaceDir,
     env,
-    command: tool.command,
+    command,
     args,
   })
   files.push({
@@ -4002,7 +4014,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     apiMode,
     rootDir,
     workspaceDir,
-    command: tool.command,
+    command,
     args,
     env,
     shellCommand,

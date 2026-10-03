@@ -2,7 +2,8 @@
 
 Studio registers Qwen Code, Kimi Code, CodeBuddy, Qoder, GitHub Copilot CLI,
 and ZCode as Coding-family runtimes. They are available in single chat, group
-chat, and Workflow after Studio detects their CLI on the executable search path.
+chat, and Workflow after Studio detects their CLI on the executable search path
+or ZCode's bundled CLI in a standard desktop installation directory.
 Their runtime, session, group, and catalog IDs are respectively `qwen`, `kimi`,
 `codebuddy`, `qoder`, `copilot`, and `zcode`.
 
@@ -61,11 +62,20 @@ Configuration references: [Qwen model providers](https://qwenlm.github.io/qwen-c
 | CodeBuddy | `npm install -g @tencent-ai/codebuddy-code` | `codebuddy --acp` |
 | Qoder | `npm install -g @qoder-ai/qodercli` | `qoder --acp` |
 | GitHub Copilot | `npm install -g @github/copilot` | `copilot --acp` |
-| ZCode | [Official repository and CLI build](https://github.com/zai-org/ZCode) | `zcode --output-format stream-json -p ...` |
+| ZCode | [Official desktop application or CLI build](https://github.com/zai-org/ZCode) | `zcode --output-format stream-json -p ...` |
 
 Studio manages npm installation, updates, and removal for the five public npm
-packages. The official ZCode CLI requires manual installation; Studio
-does not install a similarly named third-party npm package. Native terminal
+packages. ZCode requires manual installation. Studio prefers an existing
+`zcode` command and otherwise detects `glm/zcode.cjs` in the desktop application:
+`/Applications/ZCode.app` or `~/Applications/ZCode.app` on macOS, the standard
+per-user/Program Files ZCode directories on Windows, and `/opt/ZCode` or
+`/opt/zcode` on Linux. Detection, chat, and native terminal launches use the same
+CLI with Studio's Node runtime (`ELECTRON_RUN_AS_NODE=1` for desktop servers).
+Global desktop launches explicitly pair the app's `config/provider/zcode-builtin.json`
+with the native `~/.zcode/v2/provider_config.json` (or the configured data base
+directory). Scoped launches retain Studio's isolated builtin/personal files.
+Custom installation directories still require a `zcode` command on PATH.
+Studio does not install a similarly named third-party npm package. Native terminal
 launches open the ordinary CLI rather than an ACP server.
 
 ACP adapters negotiate protocol version 1, mount Studio MCP tools with the
