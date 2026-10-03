@@ -3,7 +3,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { readCodexTurnModel, readOpenCodeMessageModel } from '../../packages/server/src/modules/coding-agents/services/runtime/native-model'
+import { readCodexTurnModel } from '../../packages/server/src/modules/coding-agents/services/codex/model'
+import { readOpenCodeMessageModel } from '../../packages/server/src/modules/coding-agents/services/opencode/model'
 import { NativeTurnUsage } from '../../packages/server/src/modules/coding-agents/services/runtime/native-usage'
 
 describe('native model metadata', () => {

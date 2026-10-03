@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { findZcodeDesktopCli, resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/native/zcode-command'
+import { findZcodeDesktopCli, resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/zcode/installation'
 
 const installed = vi.hoisted(() => new Set<string>())
 vi.mock('node:fs', () => ({ existsSync: (path: string) => installed.has(path) }))
@@ -21,6 +21,30 @@ describe('ZCode desktop command resolution', () => {
     expect(await resolveZcodeCommand(['--version'], {}, lookup)).toEqual({
       command: '/usr/local/bin/zcode', args: ['--version'], env: {}, path: '/usr/local/bin/zcode',
     })
+  })
+
+  it.each(['cmd', 'bat'])('prefers the Windows .%s shim over an extensionless PATH entry', async extension => {
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    const script = 'C:\\工具 目录\\zcode'
+    const shim = `${script}.${extension}`
+    const result = await resolveZcodeCommand(['--version'], {}, async () => [script, shim])
+    expect(result).toEqual({ command: shim, path: shim, args: ['--version'], env: {} })
+  })
+
+  it('can prefer the Windows desktop entrypoint for safe managed prompt transport', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    const cli = 'C:\\Programs\\ZCode\\resources\\glm\\zcode.cjs'
+    installed.add(cli)
+    const lookup = async () => ['C:\\bin\\zcode.cmd']
+    const env = { LOCALAPPDATA: 'C:\\' }
+    expect((await resolveZcodeCommand([], env, lookup)).command).toBe('C:\\bin\\zcode.cmd')
+    expect((await resolveZcodeCommand([], env, lookup, { preferDesktop: true })).args).toEqual([cli])
+  })
+
+  it('retains a standalone Windows command when no desktop bundle is available', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    const result = await resolveZcodeCommand([], {}, async () => ['C:\\bin\\zcode.cmd'], { preferDesktop: true })
+    expect(result.command).toBe('C:\\bin\\zcode.cmd')
   })
 
   it('supplies both desktop provider paths when running the bundled CLI globally', async () => {

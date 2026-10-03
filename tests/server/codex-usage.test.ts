@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { readCodexUsageFile, readCodexTurnUsage } from '../../packages/server/src/modules/coding-agents/services/runtime/codex-usage'
+import { readCodexUsageFile, readCodexTurnUsage } from '../../packages/server/src/modules/coding-agents/services/codex/usage'
 import { NativeTurnUsage } from '../../packages/server/src/modules/coding-agents/services/runtime/native-usage'
 import { estimateCatalogUsageCost } from '../../packages/server/src/modules/studio/services/usage/catalog-pricing'
 

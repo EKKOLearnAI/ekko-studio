@@ -1,6 +1,10 @@
-import { prepareNativeScopedRuntime, nativeScopedUsesChatCompletions } from './native/runtime-config'
-import { resolveZcodeCommand } from './native/zcode-command'
-import { NATIVE_CODING_AGENTS, isNativeCodingAgent, nativeCodingAgentSupportsScoped, isGlobalOnlyCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
+import type { CodingAgentDefinition, CodingAgentConfigFileDefinition } from '../contracts/definition'
+import { TOOL_DEFINITIONS, CONFIG_FILE_DEFINITIONS } from './registry/definitions'
+import { createOpenCodeConfig, mergeOpenCodeSettingsConfig, openCodeSettingsConfig, opencodeMcpServerConfig, openCodeRuntimeEnv, OPENCODE_CONFIG_FILE, OPENCODE_DATABASE_FILE, OPENCODE_API_KEY_ENV, OPENCODE_PROVIDER_ID } from './opencode/config'
+import { prepareOpenCodeBaseConfig } from './opencode/runtime-config'
+import { NATIVE_CODING_AGENTS, prepareNativeScopedRuntime, nativeScopedUsesChatCompletions, checkNativeCodingAgentEnvironment, checkNativeCodingAgentPlatform } from './registry/native-agents'
+import { resolveZcodeCommand } from './zcode/installation'
+import { isNativeCodingAgent, nativeCodingAgentSupportsScoped, isGlobalOnlyCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
 import { prioritizeManagedNpmBin } from './managed-command-path'
 import { readTomlAssignment } from './toml-assignment'
 import { studioMcpCapabilities } from '../../studio/public/runs/mcp-capabilities'
@@ -21,7 +25,7 @@ import { getProfileDir, PROVIDER_ENV_MAP, readConfigYamlForProfile, safeReadFile
 import { getCompatibleCustomProviders } from '../../studio/contracts/provider-compat'
 import { registerClaudeCodeProxyTarget } from './claude-code/proxy'
 import { registerCodexProxyTarget, restoreCodexProxyTarget } from './codex/proxy'
-import { compactCodexThread } from './runtime/codex-compact'
+import { compactCodexThread } from './codex/compact'
 import { hermesPromptDocument, writeManagedPromptFile } from './prompt-file'
 import type { ApiMode, CodingAgentImageInput } from '../protocol/types'
 import { PROVIDER_PRESETS, assertProviderAvailable, isRetiredProvider } from '../../studio/contracts/providers'
@@ -29,11 +33,10 @@ import { getModelContextLength, getModelRuntimeCapabilities } from '../../studio
 import { getSystemPrompt, studioMcpUsageGuidelines } from '../../studio/public/runs/prompt'
 import { codingAgentRunManager } from './runtime/run-manager'
 import { mergePiSettings, userSettingsProvidesPiMcpAdapter } from './pi/settings'
-import { ANTIGRAVITY_CAPABILITIES } from './antigravity/capabilities'
 import { ANTIGRAVITY_DEFAULT_SETTINGS, ANTIGRAVITY_INSTALL_URL, prepareAntigravityRuntime, validateAntigravitySettings } from './antigravity/config'
 import { CURSOR_DEFAULT_SETTINGS, cursorSettingsPath, validateCursorSettings } from './cursor/settings'
 import { PI_EXTENDED_THINKING_LEVEL_MAP, piModelSupportsThinking } from './pi/thinking'
-import { GROK_API_KEY_ENV, GROK_CODING_AGENT_DEFINITION, GROK_PROVIDER_ID } from './grok/definition'
+import { GROK_API_KEY_ENV, GROK_PROVIDER_ID } from './grok/definition'
 import { getDisabledManagedMcpServers, getManagedMcpServerOverride } from './mcp-overrides'
 import {
   grokSettingsConfig,
@@ -78,21 +81,6 @@ const PI_PROVIDER_ID = 'hermes-studio'
 const PI_PROXY_TARGET_FILE = 'proxy-target.json'
 const PI_DYNAMIC_PROMPT_FILE = 'dynamic-system-prompt.md'
 const PI_STUDIO_EXTENSION_FILE = 'hermes-studio-runtime.ts'
-const OPENCODE_PROVIDER_ID = 'hermes-studio'
-const OPENCODE_CONFIG_FILE = 'opencode.json'
-const OPENCODE_DATABASE_FILE = 'opencode.db'
-const OPENCODE_API_KEY_ENV = 'HERMES_OPENCODE_API_KEY'
-const OPENCODE_RUNTIME_CONFIG_ENV = 'OPENCODE_CONFIG_CONTENT'
-const OPENCODE_SHARED_CONFIG_DIRS = [
-  'agent',
-  'agents',
-  'command',
-  'commands',
-  'plugin',
-  'plugins',
-  'skill',
-  'skills',
-] as const
 const PI_PROXY_TARGET_KEY_FILE = '.pi-proxy-target.key'
 const PI_PROXY_TARGET_LEGACY_AAD = Buffer.from('hermes-studio/pi-proxy-target/v1', 'utf8')
 // Codex ToolSearch became stable in 0.128; always-defer was removed in 0.142.
@@ -260,15 +248,6 @@ interface CommandExecution {
 
 export type CodingAgentId = CodingAgentRuntime
 
-export interface CodingAgentDefinition {
-  id: CodingAgentId
-  name: string
-  provider: string
-  command: string
-  packageName: string
-  capabilities?: { modes: readonly string[]; installation: string; images: boolean; nativeCompact: boolean; automaticUpdates: boolean }
-}
-
 export interface CodingAgentToolStatus extends CodingAgentDefinition {
   installed: boolean
   version: string
@@ -287,13 +266,6 @@ export interface CodingAgentMutationResult extends CodingAgentsStatus {
   tool: CodingAgentToolStatus
   message?: string
   code?: string
-}
-
-export interface CodingAgentConfigFileDefinition {
-  key: string
-  path: string
-  absolutePath: string
-  language: string
 }
 
 export interface CodingAgentConfigScope {
@@ -367,114 +339,17 @@ export interface CodingAgentRunStartResult extends CodingAgentLaunchResult {
   pid: number
 }
 
-const TOOL_DEFINITIONS: CodingAgentDefinition[] = [
-  ...NATIVE_CODING_AGENTS.map(({ acpArgs, docsUrl, ...agent }) => ({ ...agent, capabilities: { modes: nativeCodingAgentSupportsScoped(agent.id) ? ['scoped', 'global'] : ['global'], installation: agent.packageName ? 'npm' : 'manual', images: false, nativeCompact: false, automaticUpdates: Boolean(agent.packageName) } })),
-  { id: 'antigravity', name: 'Antigravity', provider: 'Google', command: 'agy', packageName: '', capabilities: ANTIGRAVITY_CAPABILITIES },
-  {
-    id: 'claude-code',
-    name: 'Claude Code',
-    provider: 'Anthropic',
-    command: 'claude',
-    packageName: '@anthropic-ai/claude-code',
-  },
-  {
-    id: 'codex',
-    name: 'Codex',
-    provider: 'OpenAI',
-    command: 'codex',
-    packageName: '@openai/codex',
-  },
-  {
-    id: 'pi',
-    name: 'Pi',
-    provider: 'Pi',
-    command: 'pi',
-    packageName: '@earendil-works/pi-coding-agent',
-  },
-  GROK_CODING_AGENT_DEFINITION,
-  {
-    id: 'opencode',
-    name: 'OpenCode',
-    provider: 'OpenCode',
-    command: 'opencode',
-    packageName: 'opencode-ai',
-  },
-  {
-    id: 'dsh',
-    name: 'DeepSeek Harness',
-    provider: 'DeepSeek',
-    command: 'dsh',
-    packageName: '@deepseek-ai/dsh',
-  },
-  {
-    id: 'cursor',
-    name: 'Cursor',
-    provider: 'Cursor',
-    command: 'agent',
-    packageName: 'cursor-agent',
-  },
-]
-
-const CONFIG_FILE_DEFINITIONS: Record<CodingAgentId, Array<Omit<CodingAgentConfigFileDefinition, 'absolutePath'> & { scopedPath: string }>> = {
-  qwen: [{ key: 'mcp', path: join('coding-agent', 'native', 'qwen', 'mcp.json'), scopedPath: 'mcp.json', language: 'json' }],
-  kimi: [{ key: 'mcp', path: join('coding-agent', 'native', 'kimi', 'mcp.json'), scopedPath: 'mcp.json', language: 'json' }],
-  codebuddy: [{ key: 'mcp', path: join('coding-agent', 'native', 'codebuddy', 'mcp.json'), scopedPath: 'mcp.json', language: 'json' }],
-  qoder: [{ key: 'mcp', path: join('coding-agent', 'native', 'qoder', 'mcp.json'), scopedPath: 'mcp.json', language: 'json' }],
-  copilot: [{ key: 'mcp', path: join('coding-agent', 'native', 'copilot', 'mcp.json'), scopedPath: 'mcp.json', language: 'json' }],
-  zcode: [],
-  'claude-code': [
-    { key: 'settings', path: '~/.claude/settings.json', scopedPath: 'settings.json', language: 'json' },
-    { key: 'mcp', path: '~/.claude/mcp.json', scopedPath: 'mcp.json', language: 'json' },
-    { key: 'memory', path: '~/.claude/CLAUDE.md', scopedPath: 'CLAUDE.md', language: 'markdown' },
-    { key: 'prompt', path: '~/.claude/hermes-rules.md', scopedPath: 'hermes-rules.md', language: 'markdown' },
-  ],
-  codex: [
-    { key: 'auth', path: '~/.codex/auth.json', scopedPath: 'auth.json', language: 'json' },
-    { key: 'config', path: '~/.codex/config.toml', scopedPath: 'config.toml', language: 'ini' },
-    { key: 'agents', path: '~/.codex/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
-  ],
-  pi: [
-    { key: 'auth', path: '~/.pi/agent/auth.json', scopedPath: 'auth.json', language: 'json' },
-    { key: 'settings', path: '~/.pi/agent/settings.json', scopedPath: 'settings.json', language: 'json' },
-    { key: 'agents', path: '~/.pi/agent/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
-    { key: 'mcp', path: '~/.pi/agent/mcp.json', scopedPath: 'mcp.json', language: 'json' },
-  ],
-  grok: [
-    { key: 'auth', path: '~/.grok/auth.json', scopedPath: 'auth.json', language: 'json' },
-    { key: 'config', path: '~/.grok/config.toml', scopedPath: 'config.toml', language: 'ini' },
-    { key: 'mcp', path: '~/.grok/config.toml', scopedPath: 'config.toml', language: 'ini' },
-    { key: 'settings', path: '~/.grok/config.toml', scopedPath: 'config.toml', language: 'ini' },
-    { key: 'agents', path: '~/.grok/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
-  ],
-  dsh: [
-    { key: 'settings', path: '~/.dsh/settings.yaml', scopedPath: 'settings.yaml', language: 'yaml' },
-    { key: 'memory', path: '~/.dsh/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
-    { key: 'mcp', path: '~/.dsh/cordis.patch.yml', scopedPath: 'cordis.patch.yml', language: 'yaml' },
-  ],
-  opencode: [
-    { key: 'settings', path: '~/.config/opencode/opencode.json', scopedPath: OPENCODE_CONFIG_FILE, language: 'json' },
-    { key: 'memory', path: '~/.config/opencode/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
-    { key: 'mcp', path: '~/.config/opencode/opencode.json', scopedPath: OPENCODE_CONFIG_FILE, language: 'json' },
-    // Keep the native names as compatibility aliases for older clients.
-    { key: 'config', path: '~/.config/opencode/opencode.json', scopedPath: OPENCODE_CONFIG_FILE, language: 'json' },
-    { key: 'agents', path: '~/.config/opencode/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
-  ],
-  antigravity: [
-    { key: 'settings', path: '~/.gemini/antigravity-cli/settings.json', scopedPath: 'settings.json', language: 'json' },
-    { key: 'mcp', path: '~/.gemini/config/mcp_config.json', scopedPath: 'mcp_config.json', language: 'json' },
-    { key: 'memory', path: '~/.gemini/config/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
-  ],
-  cursor: [
-    { key: 'settings', path: '~/.cursor/cli-config.json', scopedPath: 'cli-config.json', language: 'json' },
-    { key: 'mcp', path: '~/.cursor/mcp.json', scopedPath: '.cursor/mcp.json', language: 'json' },
-  ],
-}
-
 const installingTools = new Set<CodingAgentId>()
 const deletingTools = new Set<CodingAgentId>()
 let cachedGlobalNpmBin: string | null | undefined
 let cachedLoginShellPath: string | null | undefined
 const MAX_CONFIG_FILE_SIZE = parseInt(process.env.MAX_EDIT_SIZE || '', 10) || 10 * 1024 * 1024
+
+const { opencodeRuntimeConfig } = createOpenCodeConfig({
+  managedServerNames: new Set([...HERMES_MCP_SERVER_NAMES, ...LEGACY_HERMES_MCP_SERVER_NAMES]),
+  managedMcp: (profile, tokenFile) => getCodingAgentManagedMcpServerConfigs('opencode', profile, tokenFile),
+  displayNameForModel,
+})
 
 function getNodeBinDir() {
   return dirname(process.execPath)
@@ -1748,187 +1623,6 @@ function piMcpConfig(profile: string, runTokenFile: string | undefined, ...exter
   }, null, 2)}\n`
 }
 
-function opencodeMcpServerConfig(server: Record<string, unknown>, enabled: boolean): Record<string, unknown> {
-  const command = typeof server.command === 'string' ? server.command : ''
-  const args = Array.isArray(server.args) ? server.args.map(String) : []
-  if (command) {
-    return {
-      type: 'local',
-      command: [command, ...args],
-      enabled,
-      ...(typeof server.timeout === 'number' ? { timeout: server.timeout } : {}),
-      ...(server.env && typeof server.env === 'object' && !Array.isArray(server.env)
-        ? { environment: server.env }
-        : {}),
-    }
-  }
-  return {
-    type: 'remote',
-    url: String(server.url || ''),
-    enabled,
-    ...(typeof server.timeout === 'number' ? { timeout: server.timeout } : {}),
-    ...(server.headers && typeof server.headers === 'object' && !Array.isArray(server.headers)
-      ? { headers: server.headers }
-      : {}),
-  }
-}
-
-function parseOpenCodeConfig(...contents: Array<string | null | undefined>): Record<string, any> {
-  let config: Record<string, any> = {}
-  for (const content of contents) {
-    if (!content?.trim()) continue
-    try {
-      const parsed = JSON.parse(content)
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
-      config = {
-        ...config,
-        ...parsed,
-        provider: {
-          ...(config.provider && typeof config.provider === 'object' ? config.provider : {}),
-          ...(parsed.provider && typeof parsed.provider === 'object' ? parsed.provider : {}),
-        },
-        mcp: {
-          ...(config.mcp && typeof config.mcp === 'object' ? config.mcp : {}),
-          ...(parsed.mcp && typeof parsed.mcp === 'object' ? parsed.mcp : {}),
-        },
-      }
-    } catch {
-      // Invalid user JSON remains editable and is ignored only for launch-time merging.
-    }
-  }
-  return config
-}
-
-function parseEditableOpenCodeConfig(content: string): Record<string, any> {
-  try {
-    const parsed = JSON.parse(content || '{}')
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
-  } catch {}
-  const err = new Error('OpenCode configuration contains invalid JSON')
-  ;(err as any).status = 400
-  throw err
-}
-
-function openCodeSettingsConfig(content: string): string {
-  const config = parseEditableOpenCodeConfig(content)
-  delete config.mcp
-  return `${JSON.stringify(config, null, 2)}\n`
-}
-
-function mergeOpenCodeSettingsConfig(existingContent: string, settingsContent: string): string {
-  const existing = parseEditableOpenCodeConfig(existingContent)
-  const settings = parseEditableOpenCodeConfig(settingsContent)
-  delete settings.mcp
-  const merged: Record<string, any> = { ...settings }
-  if (Object.prototype.hasOwnProperty.call(existing, 'mcp')) merged.mcp = existing.mcp
-  else delete merged.mcp
-  return `${JSON.stringify(merged, null, 2)}\n`
-}
-
-function opencodeRuntimeConfig(
-  profile: string,
-  runtime: {
-    provider?: string
-    model?: string
-    baseUrl?: string
-    systemPrompt?: string
-    contextPolicy?: CodingAgentContextPolicy
-    studioMcpTokenFile?: string
-  },
-  ...existingContents: Array<string | null | undefined>
-): string {
-  const config = parseOpenCodeConfig(...existingContents)
-  const externalMcp = config.mcp && typeof config.mcp === 'object' && !Array.isArray(config.mcp)
-    ? { ...config.mcp }
-    : {}
-  for (const name of [...HERMES_MCP_SERVER_NAMES, ...LEGACY_HERMES_MCP_SERVER_NAMES]) delete externalMcp[name]
-  const disabledManaged = getDisabledManagedMcpServers('opencode', profile)
-  const managedMcp = Object.fromEntries(HERMES_MCP_SERVERS.map((item) => {
-    const server = managedHermesMcpServerConfig('opencode', profile, item.name, item.toolset, runtime.studioMcpTokenFile)
-    return [item.name, opencodeMcpServerConfig(server, !disabledManaged.has(item.name))]
-  }))
-  const inheritedInstructions = Array.isArray(config.instructions)
-    ? config.instructions.map(String)
-    : typeof config.instructions === 'string'
-      ? [config.instructions]
-      : []
-  if (runtime.model) {
-    delete config.model
-    delete config.provider
-  }
-  delete config.instructions
-  return `${JSON.stringify({
-    ...config,
-    $schema: 'https://opencode.ai/config.json',
-    ...(runtime.model ? {
-      model: `${OPENCODE_PROVIDER_ID}/${runtime.model}`,
-      provider: {
-        [OPENCODE_PROVIDER_ID]: {
-          npm: '@ai-sdk/openai',
-          name: runtime.provider || 'Ekko Studio',
-          options: {
-            baseURL: runtime.baseUrl || '',
-            apiKey: `{env:${OPENCODE_API_KEY_ENV}}`,
-          },
-          models: {
-            [runtime.model]: {
-              name: displayNameForModel(runtime.model),
-              // Always forward images; let the upstream model handle support.
-              attachment: true,
-              modalities: { input: ['text', 'image'], output: ['text'] },
-              ...(runtime.contextPolicy ? { limit: {
-                context: runtime.contextPolicy.contextWindow,
-                input: runtime.contextPolicy.contextWindow,
-                output: runtime.contextPolicy.outputLimit,
-              } } : {}),
-            },
-          },
-        },
-      },
-    } : {}),
-    ...(runtime.contextPolicy ? { compaction: {
-      ...(config.compaction && typeof config.compaction === 'object' ? config.compaction : {}),
-      auto: true,
-      reserved: runtime.contextPolicy.contextWindow - runtime.contextPolicy.triggerTokens,
-    } } : {}),
-    ...((inheritedInstructions.length || runtime.systemPrompt) ? {
-      instructions: [...new Set([
-        ...inheritedInstructions,
-        ...(runtime.systemPrompt ? [runtime.systemPrompt] : []),
-      ])],
-    } : {}),
-    mcp: {
-      ...externalMcp,
-      ...managedMcp,
-    },
-    permission: { '*': 'allow' },
-  }, null, 2)}\n`
-}
-
-function openCodeRuntimeEnv(input: {
-  configDir: string
-  databasePath: string
-  runtimeConfig?: string
-  apiKey?: string
-}): Record<string, string> {
-  // OPENCODE_CONFIG_DIR is OpenCode's native global-config override. Keep it
-  // stable at the provider/profile root so OpenCode installs its plugin SDK
-  // once and discovers the same agents, commands, plugins, skills, memory, and
-  // MCP configuration for terminal, chat, group-chat, and workflow launches.
-  //
-  // Per-conversation provider credentials and model selection are applied with
-  // OPENCODE_CONFIG_CONTENT, which OpenCode intentionally loads last. The
-  // native database remains isolated per conversation. Do not redirect HOME or
-  // XDG because that would also redirect git, ssh, npm, and child shells.
-  return {
-    OPENCODE_CONFIG_DIR: input.configDir,
-    OPENCODE_DB: input.databasePath,
-    ...(input.runtimeConfig ? { [OPENCODE_RUNTIME_CONFIG_ENV]: input.runtimeConfig } : {}),
-    OPENCODE_DISABLE_CLAUDE_CODE: '1',
-    ...(input.apiKey ? { [OPENCODE_API_KEY_ENV]: input.apiKey } : {}),
-  }
-}
-
 export function getCodingAgentManagedMcpServerConfigs(
   id: CodingAgentId,
   profile = 'default',
@@ -2313,99 +2007,12 @@ async function ensurePiScopedBaseConfigFiles(scope: Required<CodingAgentConfigSc
   }
 }
 
-function shouldShareOpenCodeGlobalFile(name: string): boolean {
-  if (name === 'AGENTS.md' || name === 'opencode.json' || name === 'opencode.jsonc') return false
-  if (name === '.gitignore' || name === 'package.json' || name === 'package-lock.json' || name === 'bun.lock') return false
-  if (name.endsWith('.lock') || name.endsWith('.pid') || name.endsWith('.sock')) return false
-  if (name.endsWith('.db') || name.endsWith('.db-shm') || name.endsWith('.db-wal')) return false
-  if (name.endsWith('.sqlite') || name.endsWith('.sqlite-shm') || name.endsWith('.sqlite-wal')) return false
-  return !name.endsWith('.log')
-}
-
-async function shareOpenCodeGlobalEntry(source: string, target: string, type: 'file' | 'dir'): Promise<void> {
-  if (await pathEntryExists(target)) return
-  try {
-    await symlink(source, target, process.platform === 'win32' && type === 'dir' ? 'junction' : type)
-    return
-  } catch (err: any) {
-    if (err?.code !== 'EEXIST' && err?.code !== 'EPERM' && err?.code !== 'ENOTSUP' && err?.code !== 'EINVAL') {
-      throw err
-    }
-    if (err?.code === 'EEXIST') return
-  }
-  if (type === 'dir') {
-    await cp(source, target, {
-      recursive: true,
-      dereference: true,
-      errorOnExist: false,
-      force: false,
-      preserveTimestamps: true,
-    })
-  } else {
-    await copyFile(source, target)
-  }
-}
-
-async function ensureOpenCodeScopedBaseConfigFiles(
-  scope: Required<CodingAgentConfigScope>,
-  systemPrompt: string,
-  workspaceDir = resolveLaunchWorkspaceRoot(scope, null),
-): Promise<{
-  rootDir: string
-  memoryFile: string
-  promptFile: string
-  configFile: string
-  launcherFile: string
-  launcherRuntimeConfig: string
-}> {
-  const rootDir = getScopedConfigRoot('opencode', scope)
-  const sourceHome = dirname(getLiveConfigFileDefinition('opencode', 'config')?.absolutePath || '')
-  await mkdir(rootDir, { recursive: true, mode: 0o700 })
-  await mkdir(sourceHome, { recursive: true })
-
-  for (const directory of OPENCODE_SHARED_CONFIG_DIRS) {
-    const source = join(sourceHome, directory)
-    const target = join(rootDir, directory)
-    if (directory === 'skills') await mkdir(source, { recursive: true })
-    if (!existsSync(source)) continue
-    await shareOpenCodeGlobalEntry(source, target, 'dir')
-  }
-
-  if (sourceHome !== rootDir && existsSync(sourceHome)) {
-    for (const entry of await readdir(sourceHome, { withFileTypes: true })) {
-      if (!entry.isFile() || !shouldShareOpenCodeGlobalFile(entry.name)) continue
-      await shareOpenCodeGlobalEntry(join(sourceHome, entry.name), join(rootDir, entry.name), 'file')
-    }
-  }
-
-  const memoryFile = join(rootDir, 'AGENTS.md')
-  const promptFile = join(rootDir, 'hermes-rules.md')
-  const configFile = join(rootDir, OPENCODE_CONFIG_FILE)
-  const globalInstructions = await safeReadFile(join(sourceHome, 'AGENTS.md')) || ''
-  const globalConfig = await safeReadFile(join(sourceHome, OPENCODE_CONFIG_FILE))
-    || await safeReadFile(join(sourceHome, 'opencode.jsonc'))
-    || ''
-  await writeFile(memoryFile, globalInstructions, 'utf-8')
-  await writeManagedPromptFile(promptFile, systemPrompt, '')
-  await writeFile(
-    configFile,
-    opencodeRuntimeConfig(scope.profile, {}, globalConfig),
-    'utf-8',
-  )
-  const launcherRuntimeConfig = opencodeRuntimeConfig(scope.profile, { systemPrompt: promptFile })
-  const env = openCodeRuntimeEnv({
-    configDir: rootDir,
-    databasePath: join(rootDir, OPENCODE_DATABASE_FILE),
-    runtimeConfig: launcherRuntimeConfig,
+function ensureOpenCodeScopedBaseConfigFiles(scope: Required<CodingAgentConfigScope>, systemPrompt: string, workspaceDir = resolveLaunchWorkspaceRoot(scope, null)) {
+  return prepareOpenCodeBaseConfig({
+    rootDir: getScopedConfigRoot('opencode', scope),
+    sourceHome: dirname(getLiveConfigFileDefinition('opencode', 'config')?.absolutePath || ''),
+    profile: scope.profile, systemPrompt, workspaceDir, writeLauncherScript, opencodeRuntimeConfig,
   })
-  const launcherFile = await writeLauncherScript({
-    rootDir,
-    workspaceDir,
-    env,
-    command: 'opencode',
-    args: [],
-  })
-  return { rootDir, memoryFile, promptFile, configFile, launcherFile, launcherRuntimeConfig }
 }
 
 function buildLaunchShellCommand(input: {
@@ -2723,7 +2330,8 @@ function normalizeError(err: any): string {
 }
 
 function normalizeErrorCode(err: any): string | undefined {
-  return isNodeEnvironmentMissingError(err) ? NODE_ENVIRONMENT_MISSING_CODE : undefined
+  return isNodeEnvironmentMissingError(err) ? NODE_ENVIRONMENT_MISSING_CODE
+    : err?.code === 'coding_agent_environment_unavailable' ? err.code : undefined
 }
 
 async function findCommandPaths(command: string, env: NodeJS.ProcessEnv): Promise<string[]> {
@@ -2837,6 +2445,20 @@ async function commandEnv(): Promise<NodeJS.ProcessEnv> {
   return env
 }
 
+async function nativeAgentEnvironment(id: Parameters<typeof checkNativeCodingAgentEnvironment>[0], env: NodeJS.ProcessEnv) {
+  return checkNativeCodingAgentEnvironment(id, {
+    platform: process.platform, arch: process.arch, env, exists: existsSync, findCommandPaths,
+    output: async (command, args) => {
+      const execution = commandExecution(command, args)
+      const { stdout } = await execFileAsync(execution.command, execution.args, {
+        env, encoding: 'utf-8', timeout: 5000, windowsHide: true,
+        windowsVerbatimArguments: execution.windowsVerbatimArguments,
+      })
+      return stdout
+    },
+  })
+}
+
 export function getCodingAgentDefinitions(): CodingAgentDefinition[] {
   return TOOL_DEFINITIONS.map(tool => ({ ...tool }))
 }
@@ -2873,6 +2495,11 @@ export async function getCodingAgentStatus(definition: CodingAgentDefinition): P
   let resolvedCommand = ''
   try {
     const env = await commandEnv()
+    let environmentError: string | undefined
+    if (isNativeCodingAgent(definition.id)) {
+      try { Object.assign(env, await nativeAgentEnvironment(definition.id, env)) }
+      catch (error) { environmentError = normalizeError(error) }
+    }
     const zcode = definition.id === 'zcode' ? await resolveZcodeCommand(['--version'], env, findCommandPaths) : undefined
     resolvedCommand = zcode?.path || await resolveCommandForExecution(definition.command, env)
     const execution = commandExecution(zcode?.command || resolvedCommand, zcode?.args || ['--version'])
@@ -2907,6 +2534,7 @@ export async function getCodingAgentStatus(definition: CodingAgentDefinition): P
       rawVersion,
       source: 'user-cli',
       path: resolvedCommand,
+      ...(environmentError ? { error: environmentError } : {}),
     }
     recordCodingAgentStatus(status)
     return status
@@ -3056,6 +2684,7 @@ export async function installCodingAgent(id: string): Promise<CodingAgentMutatio
 
   installingTools.add(tool.id)
   try {
+    if (isNativeCodingAgent(tool.id)) checkNativeCodingAgentPlatform(tool.id)
     if (codingAgentUsesNpm(tool.id)) {
       const env = await commandEnv()
       await runNpm(withCodingAgentRegistry(
@@ -3326,6 +2955,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     throw err
   }
 
+  // Check before creating config files, proxy targets or workspace directories.
+  if (isNativeCodingAgent(tool.id)) checkNativeCodingAgentPlatform(tool.id)
+  const nativeEnvironment = isNativeCodingAgent(tool.id)
+    ? await nativeAgentEnvironment(tool.id, await commandEnv()) : {}
+
   const mcpCapabilities = studioMcpCapabilities(getCodingAgentManagedMcpServerConfigs(tool.id, input.profile || 'default'))
   const mode = resolvedCodingAgentLaunchMode(tool.id, input.mode)
   if (mode === 'global') {
@@ -3396,8 +3030,9 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       const userMcp = content ? JSON.parse(content).mcpServers || {} : {}
       const nativeMcpServers = { ...userMcp, ...getCodingAgentManagedMcpServerConfigs(tool.id, scope.profile, input.studioMcpTokenFile) }
       const execution = tool.id === 'zcode'
-        ? await resolveZcodeCommand([], await commandEnv(), findCommandPaths)
+        ? await resolveZcodeCommand([], await commandEnv(), findCommandPaths, { preferDesktop: process.platform === 'win32' })
         : { command: tool.command, args: [], env: {} }
+      execution.env = { ...nativeEnvironment, ...execution.env }
       return { agentId: tool.id, mode, profile: scope.profile, provider: 'global', model: '', rootDir, workspaceDir,
         command: execution.command, args: execution.args, env: execution.env, files: [], nativeSystemPrompt: systemPrompt, nativeMcpServers,
         shellCommand: buildLaunchShellCommand({ workspaceDir, ...execution }) }
@@ -3977,10 +3612,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   }
 
   const chatSessionId = String(isolatedInput.sessionId || '').trim()
+  env = { ...nativeEnvironment, ...env }
   if (chatSessionId) env[HERMES_STUDIO_SESSION_ENV_KEY] = chatSessionId
   let command = tool.command
   if (tool.id === 'zcode') {
-    const execution = await resolveZcodeCommand(args, { ...(await commandEnv()), ...env }, findCommandPaths)
+    const execution = await resolveZcodeCommand(args, { ...(await commandEnv()), ...env }, findCommandPaths, { preferDesktop: process.platform === 'win32' })
     command = execution.command
     args = execution.args
     env = { ...execution.env, ...env }

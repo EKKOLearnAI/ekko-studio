@@ -1,6 +1,9 @@
-import { isNativeCodingAgent, NATIVE_CODING_AGENTS } from '../../../studio/contracts/agents/native-coding-agents'
-import { startNativeChatTurn } from '../native/chat-turn'
-import type { NativeAcpTurn } from '../native/acp-turn'
+import { startOpenCodeTurn as startOpenCodeTurnProcess } from '../opencode/chat-turn'
+import { applyOpenCodeLine } from '../opencode/event-adapter'
+import type { OpenCodeTurnHost } from '../opencode/turn-host'
+import { isNativeCodingAgent } from '../../../studio/contracts/agents/native-coding-agents'
+import { NATIVE_CODING_AGENTS, startNativeChatTurn } from '../registry/native-agents'
+import type { NativeAcpTurn } from '../../protocol/acp/turn'
 import type { DshAcpTurn } from '../dsh/acp-turn'
 import { startDshChatTurn } from '../dsh/chat-turn'
 import { agentUpdateLocked, noteAgentActivity } from '../update-lock'
@@ -28,7 +31,7 @@ import { normalizeWindowsCommandPath, windowsCmdShimExecution, windowsCommandNee
 import { killOwnedProcessTree } from '../../../studio/public/process-tree'
 import { attachPiJsonlReader } from '../pi/jsonl-parser'
 import { normalizePiThinkingLevel } from '../pi/thinking'
-import { compactCodexThread } from './codex-compact'
+import { compactCodexThread } from '../codex/compact'
 import { updateManagedPromptFileSync } from '../prompt-file'
 import { grokSessionExists, startGrokTurnProcess } from '../grok/turn-process'
 import { applyGrokStreamEvent } from '../grok/event-adapter'
@@ -39,8 +42,7 @@ import { applyCursorStreamEvent } from '../cursor/event-adapter'
 import { isolatedCodingAgentChildEnv } from './child-env'
 import { NativeTurnUsage, type NativeUsageRow } from './native-usage'
 import { RunToolTiming } from './tool-timing'
-import { readOpenCodeMessageModel } from './native-model'
-import { readCodexTurnAccounting } from './codex-usage'
+import { readCodexTurnAccounting } from '../codex/usage'
 import { getCodingAgentGlobalHome } from '../../../studio/public/coding-agent-global-home'
 import {
   isContextWindowExceededError,
@@ -3055,218 +3057,28 @@ export class CodingAgentRunManager {
     }
   }
 
-  private startOpenCodeTurn(
-    run: ManagedCodingAgentRun,
-    input: string,
-    systemPrompt = '',
-    images: CodingAgentImageInput[] = [],
-  ) {
-    if (childIsRunning(run.currentChild)) {
-      throw new Error('OpenCode is still processing the previous input')
+  private openCodeTurnHost(run: ManagedCodingAgentRun): OpenCodeTurnHost {
+    return {
+      spawn: spawnCodingAgentChild, isRunning: childIsRunning,
+      processError: error => childProcessErrorMessage(error, run.launch.agentId),
+      exitError: (code, stderr) => exitErrorMessage('OpenCode', code, stderr),
+      errorMessage: responseErrorMessage, sanitizeOutput: sanitizeCodingAgentTerminalOutput,
+      appendedTextDelta, truncateToolOutput: truncateCodingAgentToolOutputForStorage,
+      touch: () => this.touch(run), line: line => this.handleOpenCodeLine(run, line),
+      stderr: chunk => appendChildStderr(run, chunk),
+      response: event => this.handleClaudePrintResponseEvent(run, event),
+      ensureText: () => this.ensureClaudePrintText(run),
+      completeAfterUsage: (event, payload) => this.emitAndMarkPrintChatRunCompletedAfterUsage(run, event, payload),
+      complete: () => this.completeClaudePrintTurn(run), fail: message => this.failClaudePrintTurn(run, message),
     }
+  }
 
-    const responseId = `resp_${Date.now()}`
-    run.printResponseId = responseId
-    run.printMessageId = `msg_${responseId}`
-    run.printTextStarted = false
-    run.printText = ''
-    run.printCompleted = false
-    run.responseStartEmitted = false
-    run.terminalEventHandled = false
-    run.currentChildStderr = ''
-    run.runMarker = undefined
-    run.memoryExportStarted = false
-
-    this.handleClaudePrintResponseEvent(run, {
-      type: 'response.created',
-      data: {
-        type: 'response.created',
-        response: { id: responseId, object: 'response', status: 'in_progress', model: run.launch.model, output: [] },
-      },
-    })
-
-    if (run.launch.promptFile) updateManagedPromptFileSync(run.launch.promptFile, systemPrompt)
-    const args = [
-      'run',
-      '--format', 'json',
-      '--agent', 'build',
-      '--auto',
-      '--thinking',
-      ...run.launch.args,
-      ...(run.launch.agentNativeSessionId && run.nativeResumeReady
-        ? ['--session', run.launch.agentNativeSessionId]
-        : []),
-      ...images.flatMap(image => ['--file', image.path]),
-      // --file consumes an array; terminate options before the message.
-      '--',
-      input,
-    ]
-    const child = spawnCodingAgentChild(run.launch.command, args, {
-      cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
-      env: run.launch.mode === 'global'
-        ? { ...process.env, ...(run.launch.env || {}) }
-        : isolatedCodingAgentChildEnv(run.launch.env),
-    })
-    run.currentChild = child
-
-    let stdoutBuffer = ''
-    child.stdout?.on('data', (chunk: Buffer) => {
-      this.touch(run)
-      stdoutBuffer += chunk.toString('utf8')
-      const lines = stdoutBuffer.split(/\r?\n/)
-      stdoutBuffer = lines.pop() || ''
-      for (const line of lines) this.handleOpenCodeLine(run, line)
-    })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      this.touch(run)
-      const text = appendChildStderr(run, chunk)
-      if (text) logger.debug({ runId: run.id, sessionId: run.launch.sessionId, text }, '[coding-agent-run] opencode stderr')
-    })
-    child.on('error', (err) => {
-      run.currentChild = undefined
-      logger.warn({ err, runId: run.id, sessionId: run.launch.sessionId }, '[coding-agent-run] opencode failed to start')
-      if (!run.printCompleted) this.failClaudePrintTurn(run, childProcessErrorMessage(err, run.launch.agentId))
-    })
-    child.on('close', (code) => {
-      if (stdoutBuffer.trim()) this.handleOpenCodeLine(run, stdoutBuffer)
-      run.currentChild = undefined
-      logger.info({ runId: run.id, sessionId: run.launch.sessionId, code }, '[coding-agent-run] opencode exited')
-      if (run.stoppedByUser) return
-      if (run.pendingChatCompletionEvent) {
-        void this.emitAndMarkPrintChatRunCompletedAfterUsage(run, run.pendingChatCompletionEvent, run.pendingChatCompletionPayload)
-        return
-      }
-      if (run.printCompleted) return
-      if (code === 0) this.completeClaudePrintTurn(run)
-      else this.failClaudePrintTurn(run, exitErrorMessage('OpenCode', code, run.currentChildStderr))
-    })
+  private startOpenCodeTurn(run: ManagedCodingAgentRun, input: string, systemPrompt = '', images: CodingAgentImageInput[] = []) {
+    startOpenCodeTurnProcess(run, input, systemPrompt, images, this.openCodeTurnHost(run))
   }
 
   private handleOpenCodeLine(run: ManagedCodingAgentRun, line: string) {
-    const trimmed = line.trim()
-    if (!trimmed || run.printCompleted) return
-    let event: any
-    try {
-      event = JSON.parse(trimmed)
-    } catch {
-      logger.debug({ runId: run.id, line: sanitizeCodingAgentTerminalOutput(trimmed) }, '[coding-agent-run] ignored non-json OpenCode line')
-      return
-    }
-    const nativeSessionId = String(event.sessionID || event.session_id || '').trim()
-    if (nativeSessionId) this.recordOpenCodeNativeSessionId(run, nativeSessionId)
-    if (event.type === 'error') {
-      this.failClaudePrintTurn(run, responseErrorMessage(event.error) || 'OpenCode run failed')
-      return
-    }
-    const part = event.part
-    if (!part || typeof part !== 'object') return
-    if (event.type === 'step_finish' && part.type === 'step-finish') {
-      // Scoped runs already record each provider call through the proxy.
-      // Native global runs report usage only in their completed step parts.
-      if (run.launch.mode === 'global' && part.id && part.tokens) {
-        const tokens = part.tokens
-        const usage = normalizeTokenUsage({
-          inputTokens: tokens.input,
-          // OpenCode separates reasoning from output; Studio includes it.
-          outputTokens: typeof tokens.output === 'number'
-            ? tokens.output + (Number(tokens.reasoning) || 0)
-            : undefined,
-          cacheReadTokens: tokens.cache?.read,
-          cacheWriteTokens: tokens.cache?.write,
-          reasoningTokens: tokens.reasoning,
-        })
-        if (!usage.isEstimated) {
-          const nativeModel = readOpenCodeMessageModel(run.launch.env?.OPENCODE_DB, nativeSessionId || run.launch.agentNativeSessionId || '', String(part.messageID || ''))
-          if (nativeModel && run.nativeUsage) Object.assign(run.nativeUsage, nativeModel)
-          recordSessionUsage({
-            sessionId: run.launch.sessionId,
-            runId: String(part.id),
-            parentRunId: run.usageRunId || run.id,
-            source: 'coding_agent',
-            agent: 'opencode',
-            usageScope: 'model_call',
-            apiCalls: 1,
-            usage,
-            profile: run.launch.profile,
-            cost: normalizeUsageCost(part, 'estimated'),
-            model: nativeModel?.model || run.launch.model,
-            provider: nativeModel?.provider || run.launch.provider,
-            isEstimated: false,
-          })
-        }
-      }
-      return
-    }
-    if (event.type === 'text' && part.type === 'text') {
-      const text = String(part.text || '')
-      if (!text) return
-      this.ensureClaudePrintText(run)
-      const delta = appendedTextDelta(run.printText || '', text)
-      if (!delta) return
-      run.printText = `${run.printText || ''}${delta}`
-      this.handleClaudePrintResponseEvent(run, {
-        type: 'response.output_text.delta',
-        data: {
-          type: 'response.output_text.delta',
-          item_id: run.printMessageId,
-          output_index: 0,
-          content_index: 0,
-          delta,
-        },
-      })
-      return
-    }
-    if (event.type === 'reasoning' && part.type === 'reasoning' && part.text) {
-      this.handleClaudePrintResponseEvent(run, {
-        type: 'response.reasoning.delta',
-        data: {
-          type: 'response.reasoning.delta',
-          item_id: run.printMessageId,
-          output_index: 0,
-          delta: String(part.text),
-        },
-      })
-      return
-    }
-    if (event.type !== 'tool_use' || part.type !== 'tool') return
-    const state = part.state || {}
-    const callId = String(part.callID || part.callId || part.id || `opencode_tool_${Date.now()}`)
-    run.usageToolTiming?.recordWallInterval(callId, state.time?.start, state.time?.end)
-    const name = String(part.tool || 'tool')
-    const argumentsJson = JSON.stringify(state.input || {})
-    this.handleClaudePrintResponseEvent(run, {
-      type: 'response.output_item.done',
-      data: {
-        type: 'response.output_item.done',
-        output_index: 0,
-        item: { type: 'function_call', id: callId, call_id: callId, name, arguments: argumentsJson },
-      },
-    })
-    this.handleClaudePrintResponseEvent(run, {
-      type: 'response.output_item.done',
-      data: {
-        type: 'response.output_item.done',
-        output_index: 0,
-        item: {
-          type: 'function_call_output',
-          id: callId,
-          call_id: callId,
-          output: truncateCodingAgentToolOutputForStorage(state.output || state.error || ''),
-          ...(state.status === 'error' ? { status: 'failed' } : {}),
-        },
-      },
-    })
-  }
-
-  private recordOpenCodeNativeSessionId(run: ManagedCodingAgentRun, nativeSessionId: string) {
-    if (!nativeSessionId) return
-    run.launch.agentNativeSessionId = nativeSessionId
-    run.nativeResumeReady = true
-    try {
-      updateSession(run.launch.sessionId, { agent_native_session_id: nativeSessionId })
-    } catch (err) {
-      logger.warn({ err, runId: run.id, sessionId: run.launch.sessionId }, '[coding-agent-run] failed to persist OpenCode session id')
-    }
+    applyOpenCodeLine(run, line, this.openCodeTurnHost(run))
   }
 
   private startCodexExecTurn(

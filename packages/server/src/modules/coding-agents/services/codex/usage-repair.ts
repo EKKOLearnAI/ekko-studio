@@ -1,6 +1,6 @@
 import { usageRepairHash, type RepairUsageRow, type UsageCost } from '../../../studio/public/usage'
-import type { CodexUsageTurn } from './codex-usage'
-import type { NativeUsageRow } from './native-usage'
+import type { CodexUsageTurn } from './usage'
+import type { NativeUsageRow } from '../runtime/native-usage'
 
 /** Only the legacy Codex aggregate format has a verified invocation timestamp. */
 export function planCodexUsageRepair(before: RepairUsageRow[], turns: CodexUsageTurn[], price: (row: NativeUsageRow, old: RepairUsageRow) => UsageCost | undefined) {

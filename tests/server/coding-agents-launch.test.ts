@@ -34,11 +34,11 @@ import { configureProfileConfig } from '../../packages/server/src/modules/studio
 import * as providerRuntime from '../../packages/server/src/modules/studio/public/provider-runtime'
 import { upsertCodingAgentMcpServer } from '../../packages/server/src/modules/coding-agents/services/mcp-manager'
 import { getCodingAgentManagedMcpServerConfigs } from '../../packages/server/src/modules/coding-agents/services'
-import { resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/native/zcode-command'
+import { resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/zcode/installation'
 
 // Keep launch fixtures independent of desktop applications installed on the host.
 // Actual ZCode desktop command resolution is covered by zcode-desktop-command.
-vi.mock('../../packages/server/src/modules/coding-agents/services/native/zcode-command', () => ({
+vi.mock('../../packages/server/src/modules/coding-agents/services/zcode/installation', () => ({
   resolveZcodeCommand: vi.fn(async (args: string[]) => ({ command: 'zcode', args, env: {}, path: 'zcode' })),
 }))
 

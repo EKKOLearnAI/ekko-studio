@@ -7,6 +7,15 @@ or ZCode's bundled CLI in a standard desktop installation directory.
 Their runtime, session, group, and catalog IDs are respectively `qwen`, `kimi`,
 `codebuddy`, `qoder`, `copilot`, and `zcode`.
 
+Their implementations live in separate `coding-agents/services/<id>/`
+directories. Each owns its definition, scoped configuration and any environment
+requirements; Qoder is global-only and uses the shared ACP adapter.
+ZCode additionally owns desktop installation discovery, JSONL events and chat
+turns. `services/registry/native-agents.ts` selects the configuration and turn
+adapter; reusable ACP lives in `protocol/acp/`, while process lifecycle and
+private-file helpers live in `services/runtime/`. These source directories do
+not change the persisted `coding-agent/native/<id>/` MCP configuration paths.
+
 Qwen Code, Kimi Code, CodeBuddy, Copilot, and ZCode support **scoped** and
 **global** modes. Scoped uses the selected Studio provider/model, with isolated
 per-session configuration and data under Web UI state. Global retains each
@@ -77,6 +86,52 @@ directory). Scoped launches retain Studio's isolated builtin/personal files.
 Custom installation directories still require a `zcode` command on PATH.
 Studio does not install a similarly named third-party npm package. Native terminal
 launches open the ordinary CLI rather than an ACP server.
+Windows launches prefer the installed desktop entrypoint when available so
+managed chat can use its safe prompt transport, even if a PATH wrapper exists.
+
+## Platform requirements and verification
+
+The Studio server and CLI must run in the same operating-system environment.
+Windows Studio does not automatically invoke a CLI installed only inside WSL;
+run both inside WSL if that is the chosen environment. Managed chat works in
+headless Linux/Docker; opening an external native terminal requires a desktop
+session and is unavailable inside Docker.
+
+Windows prerequisites are checked before either scoped or global launch writes
+configuration or starts a process. The check belongs to the individual Agent:
+
+- [Kimi Code](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html)
+  requires Git for Windows. Studio validates Git Bash in standard installation
+  directories or PATH, and passes its absolute path as `KIMI_SHELL_PATH`.
+  A custom `KIMI_SHELL_PATH` must point to a working native `bash.exe`;
+  the Windows WSL launcher is excluded.
+- [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli)
+  requires PowerShell 6 or later (`pwsh.exe`). Studio checks its version and
+  includes its directory in the child PATH. Windows PowerShell 5.1 is insufficient.
+- [Qoder](https://docs.qoder.com/cli/installation) does not support native Windows
+  ARM64. Studio blocks installation and launch on that target before invoking npm.
+  Linux ARM64 and macOS ARM64 are unaffected.
+- CodeBuddy retains its upstream PowerShell fallback; missing Git Bash does not
+  block it. Qwen and ZCode do not receive these other Agents' shell requirements.
+
+A successful CLI version check still reports the CLI as installed when a runtime
+prerequisite is missing, with the prerequisite error attached to its status.
+Launching reports that specific error instead of attempting a broken run.
+
+On Windows, ZCode discovery prefers `.cmd`/`.bat` over the extensionless script
+that `where.exe` can also return. Its bundled desktop CJS entrypoint receives
+the full prompt through stdin before running as Node's main module, preserving
+long UTF-8 input, newlines and shell metacharacters. Standalone executables and
+custom command wrappers still use the upstream `-p` argument and remain subject
+to their launcher command-line limits. Windows launches automatically choose the
+desktop bundle when available; long standalone prompts require upstream stdin or
+file-input support, which the current print CLI does not expose.
+
+`coding-agent-platforms.yml` runs focused checks on Windows, Linux and macOS.
+Real child-process fixtures cover each Agent's supported modes, paths with spaces
+and Chinese characters, long ACP prompts, the ZCode bundled prompt bridge and
+process cancellation. These fixtures verify Studio's OS/process integration;
+they do not authenticate with vendor services or certify every upstream CLI build.
 
 ACP adapters negotiate protocol version 1, mount Studio MCP tools with the
 current profile/run credentials, and translate assistant text, thinking, and

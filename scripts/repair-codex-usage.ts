@@ -21,9 +21,9 @@ async function main() {
   // from the user's running app; the explicit --db remains the only repair target.
   const scratch = mkdtempSync(join(tmpdir(), 'studio-usage-repair-'))
   process.env.HERMES_WEB_UI_HOME = scratch
-  const { findRollout } = await import('../packages/server/src/modules/coding-agents/services/runtime/native-model')
-  const { readCodexUsageFile } = await import('../packages/server/src/modules/coding-agents/services/runtime/codex-usage')
-  const { planCodexUsageRepair } = await import('../packages/server/src/modules/coding-agents/services/runtime/codex-usage-repair')
+  const { findRollout } = await import('../packages/server/src/modules/coding-agents/services/codex/model')
+  const { readCodexUsageFile } = await import('../packages/server/src/modules/coding-agents/services/codex/usage')
+  const { planCodexUsageRepair } = await import('../packages/server/src/modules/coding-agents/services/codex/usage-repair')
   const { applyUsageRepair, usageRepairSnapshot, usageRepairHash, estimateUsageCost } = await import('../packages/server/src/modules/studio/public/usage')
   const { estimateCatalogUsageCost } = await import('../packages/server/src/modules/studio/services/usage/catalog-pricing')
   const db = new DatabaseSync(values.db!, { readOnly: !values.apply })
