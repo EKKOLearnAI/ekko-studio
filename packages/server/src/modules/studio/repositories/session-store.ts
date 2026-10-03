@@ -1,3 +1,4 @@
+import { sessionDisplayPreview } from '../contracts/session-display-text'
 /**
  * Self-built session database — completely replaces Hermes CLI dependency.
  * Uses the same ensureTable/getDb pattern as usage-store.ts.
@@ -131,7 +132,7 @@ function mapSessionRows(rows: Record<string, unknown>[]): HermesSessionRow[] {
 
 function mapStoredSessionRow(row: Record<string, unknown>): HermesSessionRow {
   const rawTitle = row.title != null ? String(row.title) : null
-  const preview = String(row.preview || '')
+  const preview = sessionDisplayPreview(row.preview)
   const title = rawTitle || (preview ? (preview.length > 40 ? preview.slice(0, 40) + '...' : preview) : null)
   return {
     id: String(row.id || ''),
@@ -164,7 +165,7 @@ function mapStoredSessionRow(row: Record<string, unknown>): HermesSessionRow {
     estimated_cost_usd: Number(row.estimated_cost_usd || 0),
     actual_cost_usd: row.actual_cost_usd != null ? Number(row.actual_cost_usd) : null,
     cost_status: String(row.cost_status || ''),
-    preview: String(row.preview || ''),
+    preview,
     last_active: Number(row.last_active || 0),
     is_archived: Number(row.is_archived || 0),
     is_pinned: Number(row.is_pinned || 0),
@@ -407,16 +408,16 @@ export function getSession(id: string): HermesSessionRow | null {
 export function getSessionNotificationPreview(id: string): { title: string; preview: string } | null {
   if (!isSqliteAvailable()) return null
   const row = getDb()!.prepare(`
-    SELECT SUBSTR(COALESCE(NULLIF(s.title, ''), NULLIF(s.preview, ''),
-      (SELECT SUBSTR(m.content, 1, 63) FROM ${MESSAGES_TABLE} m
+    SELECT s.title AS explicit_title, COALESCE(NULLIF(s.title, ''), NULLIF(s.preview, ''),
+      (SELECT SUBSTR(m.content, 1, 65536) FROM ${MESSAGES_TABLE} m
        WHERE m.session_id = s.id AND m.role = 'user' AND m.content != ''
-       ORDER BY m.timestamp, m.id LIMIT 1), ''), 1, 120) AS title,
+       ORDER BY m.timestamp, m.id LIMIT 1), '') AS title,
       COALESCE((SELECT SUBSTR(COALESCE(NULLIF(m.display_content, ''), m.content), 1, 240)
        FROM ${MESSAGES_TABLE} m WHERE m.session_id = s.id AND m.role = 'assistant' AND m.content != ''
        ORDER BY m.timestamp DESC, m.id DESC LIMIT 1), '') AS preview
     FROM ${SESSIONS_TABLE} s WHERE s.id = ?
-  `).get(id) as { title: string; preview: string } | undefined
-  return row || null
+  `).get(id) as { title: string; preview: string; explicit_title?: string } | undefined
+  return row ? { title: row.explicit_title ? row.explicit_title.slice(0, 120) : sessionDisplayPreview(row.title, 120), preview: row.preview } : null
 }
 
 /** Session and branch metadata without loading this session's message bodies. */
@@ -566,7 +567,7 @@ export function listSessions(
       COALESCE(
         NULLIF(s.preview, ''),
         (
-          SELECT SUBSTR(REPLACE(REPLACE(m.content, CHAR(10), ' '), CHAR(13), ' '), 1, 63)
+          SELECT SUBSTR(m.content, 1, 65536)
           FROM ${MESSAGES_TABLE} m
           WHERE m.session_id = s.id AND m.role = 'user' AND m.content IS NOT NULL
           ORDER BY m.timestamp, m.id

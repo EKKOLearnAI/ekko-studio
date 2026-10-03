@@ -1,3 +1,4 @@
+import { sessionDisplayText } from '../../../../server/src/modules/studio/contracts/session-display-text'
 import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
 import { startRunViaSocket, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
@@ -2145,8 +2146,8 @@ export const useChatStore = defineStore('chat', () => {
           if (!target.title) {
             const firstUser = target.messages.find(m => m.role === 'user')
             if (firstUser) {
-              const t = firstUser.content.slice(0, 40)
-              target.title = t + (firstUser.content.length > 40 ? '...' : '')
+              const text = sessionDisplayText(firstUser.content) || firstUser.attachments?.map(attachment => attachment.name).join(', ') || ''
+              target.title = text.slice(0, 40) + (text.length > 40 ? '...' : '')
             }
           }
           activeSession.value = target
@@ -3483,9 +3484,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!target.title) {
       const firstUser = target.messages.find(m => m.role === 'user')
       if (firstUser) {
-        const title = firstUser.attachments?.length
-          ? firstUser.attachments.map(a => a.name).join(', ')
-          : firstUser.content
+        const title = sessionDisplayText(firstUser.content) || firstUser.attachments?.map(attachment => attachment.name).join(', ') || ''
         target.title = title.slice(0, 40) + (title.length > 40 ? '...' : '')
       }
     }

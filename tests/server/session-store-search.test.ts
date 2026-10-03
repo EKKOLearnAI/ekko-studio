@@ -23,6 +23,21 @@ describe('session store filtering', () => {
     vi.resetModules()
   })
 
+  it('extracts multimodal preview before clipping and preserves explicit titles', async () => {
+    const { createSession, addMessage, listSessions, getSessionNotificationPreview, updateSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    createSession({ id: 'multimodal', profile: 'default' })
+    const content = JSON.stringify([{ type: 'text', text: 'Explain this architecture diagram and its safety boundaries.' }, { type: 'image', name: 'diagram.png', path: '/private/diagram.png' }])
+    addMessage({ session_id: 'multimodal', role: 'user', content, timestamp: 1 })
+    const row = listSessions('default').find(session => session.id === 'multimodal')!
+    expect(row.preview).toBe('Explain this architecture diagram and its safety boundaries.')
+    expect(row.title).toBe('Explain this architecture diagram and its safety boundaries.'.slice(0, 40) + '...')
+    expect(getSessionNotificationPreview('multimodal')?.title).toBe('Explain this architecture diagram and its safety boundaries.')
+    updateSession('multimodal', { title: 'Chosen custom title' })
+    expect(listSessions('default').find(session => session.id === 'multimodal')?.title).toBe('Chosen custom title')
+    expect(getSessionNotificationPreview('multimodal')?.title).toBe('Chosen custom title')
+    expect(db.prepare('SELECT content FROM messages WHERE session_id = ?').get('multimodal').content).toBe(content)
+  })
+
   it('stores pins on sessions, retains categories, and includes old pins before pagination', async () => {
     const { createSession, getSession, listSessions, setSessionPinned } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     createSession({ id: 'old', profile: 'default', category_id: 1 })
