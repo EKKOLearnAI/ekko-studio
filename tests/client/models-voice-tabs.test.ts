@@ -41,6 +41,7 @@ vi.mock('vue-i18n', () => ({
 vi.mock('naive-ui', async () => {
   const { defineComponent, h } = await import('vue')
   return {
+    NAlert: defineComponent({ name: 'NAlert', template: '<div><slot /></div>' }),
     NButton: defineComponent({
       name: 'NButton',
       emits: ['click'],
