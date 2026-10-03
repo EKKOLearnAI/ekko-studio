@@ -73,6 +73,10 @@ state and does not require a running Gateway.
 
 - Build workflow: installs dependencies, runs coverage, and builds production
   assets on pushes and pull requests.
+- Coding agent platforms workflow: runs environment/discovery checks and real
+  CLI protocol fixtures on Windows, Linux and macOS, including long stdin prompts,
+  non-ASCII installation paths and process cancellation. Vendor authentication
+  and paid API calls are not required.
 - Playwright workflow: runs all browser tests across four independent shards,
   then merges their blob reports into the `playwright-report` HTML artifact.
   The final `e2e` check requires every shard to pass. Keep route/viewport sweeps

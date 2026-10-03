@@ -2,7 +2,7 @@ import type { CodingAgentDefinition, CodingAgentConfigFileDefinition } from '../
 import { TOOL_DEFINITIONS, CONFIG_FILE_DEFINITIONS } from './registry/definitions'
 import { createOpenCodeConfig, mergeOpenCodeSettingsConfig, openCodeSettingsConfig, opencodeMcpServerConfig, openCodeRuntimeEnv, OPENCODE_CONFIG_FILE, OPENCODE_DATABASE_FILE, OPENCODE_API_KEY_ENV, OPENCODE_PROVIDER_ID } from './opencode/config'
 import { prepareOpenCodeBaseConfig } from './opencode/runtime-config'
-import { NATIVE_CODING_AGENTS, prepareNativeScopedRuntime, nativeScopedUsesChatCompletions } from './registry/native-agents'
+import { NATIVE_CODING_AGENTS, prepareNativeScopedRuntime, nativeScopedUsesChatCompletions, checkNativeCodingAgentEnvironment, checkNativeCodingAgentPlatform } from './registry/native-agents'
 import { resolveZcodeCommand } from './zcode/installation'
 import { isNativeCodingAgent, nativeCodingAgentSupportsScoped, isGlobalOnlyCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
 import { prioritizeManagedNpmBin } from './managed-command-path'
@@ -2330,7 +2330,8 @@ function normalizeError(err: any): string {
 }
 
 function normalizeErrorCode(err: any): string | undefined {
-  return isNodeEnvironmentMissingError(err) ? NODE_ENVIRONMENT_MISSING_CODE : undefined
+  return isNodeEnvironmentMissingError(err) ? NODE_ENVIRONMENT_MISSING_CODE
+    : err?.code === 'coding_agent_environment_unavailable' ? err.code : undefined
 }
 
 async function findCommandPaths(command: string, env: NodeJS.ProcessEnv): Promise<string[]> {
@@ -2444,6 +2445,20 @@ async function commandEnv(): Promise<NodeJS.ProcessEnv> {
   return env
 }
 
+async function nativeAgentEnvironment(id: Parameters<typeof checkNativeCodingAgentEnvironment>[0], env: NodeJS.ProcessEnv) {
+  return checkNativeCodingAgentEnvironment(id, {
+    platform: process.platform, arch: process.arch, env, exists: existsSync, findCommandPaths,
+    output: async (command, args) => {
+      const execution = commandExecution(command, args)
+      const { stdout } = await execFileAsync(execution.command, execution.args, {
+        env, encoding: 'utf-8', timeout: 5000, windowsHide: true,
+        windowsVerbatimArguments: execution.windowsVerbatimArguments,
+      })
+      return stdout
+    },
+  })
+}
+
 export function getCodingAgentDefinitions(): CodingAgentDefinition[] {
   return TOOL_DEFINITIONS.map(tool => ({ ...tool }))
 }
@@ -2480,6 +2495,11 @@ export async function getCodingAgentStatus(definition: CodingAgentDefinition): P
   let resolvedCommand = ''
   try {
     const env = await commandEnv()
+    let environmentError: string | undefined
+    if (isNativeCodingAgent(definition.id)) {
+      try { Object.assign(env, await nativeAgentEnvironment(definition.id, env)) }
+      catch (error) { environmentError = normalizeError(error) }
+    }
     const zcode = definition.id === 'zcode' ? await resolveZcodeCommand(['--version'], env, findCommandPaths) : undefined
     resolvedCommand = zcode?.path || await resolveCommandForExecution(definition.command, env)
     const execution = commandExecution(zcode?.command || resolvedCommand, zcode?.args || ['--version'])
@@ -2514,6 +2534,7 @@ export async function getCodingAgentStatus(definition: CodingAgentDefinition): P
       rawVersion,
       source: 'user-cli',
       path: resolvedCommand,
+      ...(environmentError ? { error: environmentError } : {}),
     }
     recordCodingAgentStatus(status)
     return status
@@ -2663,6 +2684,7 @@ export async function installCodingAgent(id: string): Promise<CodingAgentMutatio
 
   installingTools.add(tool.id)
   try {
+    if (isNativeCodingAgent(tool.id)) checkNativeCodingAgentPlatform(tool.id)
     if (codingAgentUsesNpm(tool.id)) {
       const env = await commandEnv()
       await runNpm(withCodingAgentRegistry(
@@ -2933,6 +2955,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     throw err
   }
 
+  // Check before creating config files, proxy targets or workspace directories.
+  if (isNativeCodingAgent(tool.id)) checkNativeCodingAgentPlatform(tool.id)
+  const nativeEnvironment = isNativeCodingAgent(tool.id)
+    ? await nativeAgentEnvironment(tool.id, await commandEnv()) : {}
+
   const mcpCapabilities = studioMcpCapabilities(getCodingAgentManagedMcpServerConfigs(tool.id, input.profile || 'default'))
   const mode = resolvedCodingAgentLaunchMode(tool.id, input.mode)
   if (mode === 'global') {
@@ -3003,8 +3030,9 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       const userMcp = content ? JSON.parse(content).mcpServers || {} : {}
       const nativeMcpServers = { ...userMcp, ...getCodingAgentManagedMcpServerConfigs(tool.id, scope.profile, input.studioMcpTokenFile) }
       const execution = tool.id === 'zcode'
-        ? await resolveZcodeCommand([], await commandEnv(), findCommandPaths)
+        ? await resolveZcodeCommand([], await commandEnv(), findCommandPaths, { preferDesktop: process.platform === 'win32' })
         : { command: tool.command, args: [], env: {} }
+      execution.env = { ...nativeEnvironment, ...execution.env }
       return { agentId: tool.id, mode, profile: scope.profile, provider: 'global', model: '', rootDir, workspaceDir,
         command: execution.command, args: execution.args, env: execution.env, files: [], nativeSystemPrompt: systemPrompt, nativeMcpServers,
         shellCommand: buildLaunchShellCommand({ workspaceDir, ...execution }) }
@@ -3584,10 +3612,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   }
 
   const chatSessionId = String(isolatedInput.sessionId || '').trim()
+  env = { ...nativeEnvironment, ...env }
   if (chatSessionId) env[HERMES_STUDIO_SESSION_ENV_KEY] = chatSessionId
   let command = tool.command
   if (tool.id === 'zcode') {
-    const execution = await resolveZcodeCommand(args, { ...(await commandEnv()), ...env }, findCommandPaths)
+    const execution = await resolveZcodeCommand(args, { ...(await commandEnv()), ...env }, findCommandPaths, { preferDesktop: process.platform === 'win32' })
     command = execution.command
     args = execution.args
     env = { ...execution.env, ...env }

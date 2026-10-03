@@ -4,11 +4,17 @@ import type { NativeTurnHost } from '../runtime/turn-host'
 import { startNativeTurnProcess } from '../runtime/native-turn-process'
 import { applyZcodeEvent } from './event-adapter'
 
+// Read the prompt before executing the CJS entrypoint as Node's main module.
+// Windows command lines cannot carry arbitrary multiline/long chat content.
+const WINDOWS_PROMPT_BRIDGE = "let input='';process.stdin.setEncoding('utf8');process.stdin.on('data',chunk=>input+=chunk);process.stdin.on('end',()=>{process.argv=[process.execPath,...JSON.parse(input)];require('node:module').runMain()})"
+
 export function startZcodeChatTurn(definition: { name: string }, run: ManagedCodingAgentRun, input: string, systemPrompt: string, host: NativeTurnHost) {
-  const { child, session, finish, isFinished } = startNativeTurnProcess(run, input, systemPrompt, host, {
+  const bridge = process.platform === 'win32' && run.launch.command === process.execPath && /\.cjs$/i.test(run.launch.args[0] || '')
+  const promptArgs = (text: string) => [...run.launch.args, '--output-format', 'stream-json', '--mode', run.launch.approvalRequired ? 'plan' : 'yolo',
+    ...(run.nativeResumeReady && run.launch.agentNativeSessionId ? ['--resume', run.launch.agentNativeSessionId] : []), '-p', text]
+  const { child, text, session, finish, isFinished } = startNativeTurnProcess(run, input, systemPrompt, host, {
     name: definition.name,
-    args: text => [...run.launch.args, '--output-format', 'stream-json', '--mode', run.launch.approvalRequired ? 'plan' : 'yolo',
-      ...(run.nativeResumeReady && run.launch.agentNativeSessionId ? ['--resume', run.launch.agentNativeSessionId] : []), '-p', text],
+    args: text => bridge ? ['--eval', WINDOWS_PROMPT_BRIDGE] : promptArgs(text),
     exitError: code => code === 0 ? 'ZCode exited without a final result' : undefined,
   })
   const decoder = new StringDecoder('utf8')
@@ -42,5 +48,5 @@ export function startZcodeChatTurn(definition: { name: string }, run: ManagedCod
     try { receive(buffer + decoder.end()); buffer = '' }
     catch (error) { finish(host.processError(error)); host.terminate(child) }
   })
-  child.stdin?.end()
+  child.stdin?.end(bridge ? JSON.stringify(promptArgs(text)) : undefined)
 }

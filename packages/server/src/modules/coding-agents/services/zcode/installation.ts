@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { posix, win32 } from 'node:path'
+import { windowsCommandNeedsShell } from '../../../studio/public/windows-command'
 
 export function findZcodeDesktopCli(env: NodeJS.ProcessEnv): string | undefined {
   let resources: string[] = []
@@ -24,11 +25,14 @@ export async function resolveZcodeCommand(
   args: string[],
   env: NodeJS.ProcessEnv,
   findCommandPaths: (command: string, env: NodeJS.ProcessEnv) => Promise<string[]>,
+  options: { preferDesktop?: boolean } = {},
 ): Promise<{ command: string; args: string[]; env: Record<string, string>; path: string }> {
-  const [cli] = await findCommandPaths('zcode', env)
-  if (cli) return { command: cli, args, env: {}, path: cli }
+  const candidates = await findCommandPaths('zcode', env)
+  const cli = (process.platform === 'win32' && candidates.find(windowsCommandNeedsShell)) || candidates[0]
+  const preferredDesktop = options.preferDesktop ? findZcodeDesktopCli(env) : undefined
+  if (cli && !preferredDesktop) return { command: cli, args, env: {}, path: cli }
 
-  const bundledCli = findZcodeDesktopCli(env)
+  const bundledCli = preferredDesktop || findZcodeDesktopCli(env)
   if (!bundledCli) return { command: 'zcode', args, env: {}, path: 'zcode' }
 
   const path = process.platform === 'win32' ? win32 : posix
