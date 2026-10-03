@@ -3,10 +3,16 @@ import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { CodingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
 import { configureRunState } from '../../packages/server/src/modules/studio/public/run-state'
 import { applyResponseStreamEvent } from '../../packages/server/src/modules/studio/services/chat-run/response-stream'
+
+// Transport fixtures must not depend on another test initializing session tables.
+vi.mock('../../packages/server/src/modules/studio/public/sessions', async original => ({
+  ...await original<typeof import('../../packages/server/src/modules/studio/public/sessions')>(),
+  updateSession: vi.fn(),
+}))
 
 const roots: string[] = []
 const acpAgents = ['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot'] as const
