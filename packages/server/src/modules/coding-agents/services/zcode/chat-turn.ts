@@ -3,18 +3,28 @@ import type { ManagedCodingAgentRun } from '../runtime/run-manager'
 import type { NativeTurnHost } from '../runtime/turn-host'
 import { startNativeTurnProcess } from '../runtime/native-turn-process'
 import { applyZcodeEvent } from './event-adapter'
+import type { CodingAgentImageInput } from '../../protocol/types'
+import { prepareZcodePrompt } from './prompt'
 
 // Read the prompt before executing the CJS entrypoint as Node's main module.
 // Windows command lines cannot carry arbitrary multiline/long chat content.
 const WINDOWS_PROMPT_BRIDGE = "let input='';process.stdin.setEncoding('utf8');process.stdin.on('data',chunk=>input+=chunk);process.stdin.on('end',()=>{process.argv=[process.execPath,...JSON.parse(input)];require('node:module').runMain()})"
 
-export function startZcodeChatTurn(definition: { name: string }, run: ManagedCodingAgentRun, input: string, systemPrompt: string, host: NativeTurnHost) {
+export function startZcodeChatTurn(definition: { name: string }, run: ManagedCodingAgentRun, input: string, systemPrompt: string, host: NativeTurnHost, images: CodingAgentImageInput[] = []) {
   const bridge = process.platform === 'win32' && run.launch.command === process.execPath && /\.cjs$/i.test(run.launch.args[0] || '')
-  const promptArgs = (text: string) => [...run.launch.args, '--output-format', 'stream-json', '--mode', run.launch.approvalRequired ? 'plan' : 'yolo',
-    ...(run.nativeResumeReady && run.launch.agentNativeSessionId ? ['--resume', run.launch.agentNativeSessionId] : []), '-p', text]
+  const baseArgs = [...run.launch.args, '--output-format', 'stream-json', '--mode', run.launch.approvalRequired ? 'plan' : 'yolo',
+    ...(run.nativeResumeReady && run.launch.agentNativeSessionId ? ['--resume', run.launch.agentNativeSessionId] : []),
+    ...images.flatMap(image => ['--attach', image.path])]
+  let prepared: ReturnType<typeof prepareZcodePrompt> | undefined
   const { child, text, session, finish, isFinished } = startNativeTurnProcess(run, input, systemPrompt, host, {
     name: definition.name,
-    args: text => bridge ? ['--eval', WINDOWS_PROMPT_BRIDGE] : promptArgs(text),
+    args: text => {
+      if (bridge) return ['--eval', WINDOWS_PROMPT_BRIDGE]
+      prepared = prepareZcodePrompt(run.launch.command, baseArgs, text)
+      return prepared.args
+    },
+    emptyPrompt: images.length ? 'Inspect the attached images.' : '',
+    cleanup: () => prepared?.cleanup(),
     exitError: code => code === 0 ? 'ZCode exited without a final result' : undefined,
   })
   const decoder = new StringDecoder('utf8')
@@ -48,5 +58,5 @@ export function startZcodeChatTurn(definition: { name: string }, run: ManagedCod
     try { receive(buffer + decoder.end()); buffer = '' }
     catch (error) { finish(host.processError(error)); host.terminate(child) }
   })
-  child.stdin?.end(bridge ? JSON.stringify(promptArgs(text)) : undefined)
+  child.stdin?.end(bridge ? JSON.stringify([...baseArgs, '-p', text]) : undefined)
 }

@@ -1,6 +1,9 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NativeAcpTurn } from '../../packages/server/src/modules/coding-agents/protocol/acp/turn'
 import { acpMcpServers, applyNativeAcpUpdate } from '../../packages/server/src/modules/coding-agents/protocol/acp/events'
@@ -9,7 +12,7 @@ import { applyZcodeEvent } from '../../packages/server/src/modules/coding-agents
 const turns: NativeAcpTurn[] = []
 afterEach(() => { for (const turn of turns.splice(0)) turn.dispose() })
 
-function connection(options: { load?: boolean; resume?: boolean; error?: boolean; hold?: boolean; permissionRequired?: boolean } = {}) {
+function connection(options: { image?: boolean; load?: boolean; resume?: boolean; error?: boolean; hold?: boolean; permissionRequired?: boolean } = {}) {
   const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough() })
   const sent: any[] = [], update = vi.fn(), session = vi.fn()
   const receive = (message: object) => child.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
@@ -19,7 +22,7 @@ function connection(options: { load?: boolean; resume?: boolean; error?: boolean
     if (!message.method || message.id === undefined || (options.hold && message.method === 'session/prompt')) return
     if (message.method === 'session/load') receive({ method: 'session/update', params: { sessionId: 'native', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'old history' } } } })
     const result = message.method === 'initialize'
-      ? { protocolVersion: 1, agentCapabilities: { loadSession: options.load, sessionCapabilities: options.resume ? { resume: {} } : {} } }
+      ? { protocolVersion: 1, agentCapabilities: { promptCapabilities: { image: options.image }, loadSession: options.load, sessionCapabilities: options.resume ? { resume: {} } : {} } }
       : message.method === 'session/new' ? { sessionId: 'native' }
       : message.method === 'session/prompt' ? { stopReason: 'end_turn' } : {}
     queueMicrotask(() => receive({ id: message.id, ...(options.error && message.method === 'session/load'
@@ -31,6 +34,26 @@ function connection(options: { load?: boolean; resume?: boolean; error?: boolean
 }
 
 describe('native ACP session transport', () => {
+  it('sends exact image bytes and long Unicode text over stdin after capability negotiation', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'native-acp-image-'))
+    try {
+      const path = join(root, '截图 space.png'), bytes = Buffer.from([0, 255, 1, 128])
+      writeFileSync(path, bytes)
+      const { turn, sent } = connection({ image: true })
+      const text = '中文😀\r\n$HOME & "%PATH%" '.repeat(4000)
+      await turn.prompt({ cwd: '/workspace', text, images: [{ path, name: '截图.png', mediaType: 'image/png' }], mcpServers: [] })
+      expect(sent.at(-1).params.prompt).toEqual([{ type: 'text', text },
+        { type: 'image', mimeType: 'image/png', data: bytes.toString('base64') }])
+      const onlyImages = connection({ image: true })
+      await onlyImages.turn.prompt({ cwd: '/workspace', text: '', images: [{ path, name: 'photo.jpg', mediaType: 'image/jpg' }], mcpServers: [] })
+      expect(onlyImages.sent.at(-1).params.prompt).toEqual([{ type: 'image', mimeType: 'image/jpeg', data: bytes.toString('base64') }])
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+  it('rejects image input before creating a session when the CLI does not advertise it', async () => {
+    const { turn, sent } = connection()
+    await expect(turn.prompt({ cwd: '/workspace', text: 'look', images: [{ path: '/not-read.png', name: 'x', mediaType: 'image/png' }], mcpServers: [] })).rejects.toThrow('ACP image input support')
+    expect(sent.map(message => message.method)).toEqual(['initialize'])
+  })
   it('negotiates and forwards scoped managed MCP env without vendor-specific calls', async () => {
     const { turn, sent, child } = connection()
     const servers = acpMcpServers({ enabled: { command: 'node', args: ['mcp.mjs'], env: { ELECTRON_RUN_AS_NODE: '1' } }, disabled: { command: 'skip', enabled: false } })

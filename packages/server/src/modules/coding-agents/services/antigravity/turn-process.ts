@@ -22,8 +22,12 @@ export interface AntigravityTurnProcessInput {
 }
 
 function antigravityPrompt(input: string, images: CodingAgentImageInput[]): string {
-  if (images.length) throw Object.assign(new Error('Antigravity CLI image input is not supported in this integration. Attach a file path as text instead.'), { status: 400 })
-  return String(input || '').trim()
+  const text = String(input || '').trim()
+  if (!images.length) return text
+  // Headless NDJSON supports only text. Its native view_file tool supplies
+  // image bytes to the model; do not fabricate unsupported image blocks.
+  return [text, 'Before answering, open each attached image with the native image/file viewing tool and inspect its visual content:',
+    ...images.map(image => JSON.stringify(image.path))].filter(Boolean).join('\n')
 }
 
 export function buildAntigravityTurnArgs(

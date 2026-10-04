@@ -141,6 +141,8 @@ describe('Antigravity official CLI protocol', () => {
 
 describe('Antigravity product routing', () => {
   it('retains Antigravity identity in workflow and group presets, preserving scoped mode', async () => {
+    const { getCodingAgentDefinition } = await import('../../packages/server/src/modules/coding-agents/services')
+    expect(getCodingAgentDefinition('antigravity')?.capabilities?.images).toBe(true)
     const { resolveWorkflowNodeRunTarget, normalizeWorkflowNode } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const { normalizeGroupAgentPresetInput } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-presets')
     expect(resolveWorkflowNodeRunTarget('antigravity')).toMatchObject({ agent: 'antigravity', codingAgentId: 'antigravity' })

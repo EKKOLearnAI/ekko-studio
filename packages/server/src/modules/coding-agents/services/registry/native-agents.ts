@@ -2,6 +2,7 @@ import type { NativeCodingAgentId } from '../../../studio/contracts/agents/nativ
 import type { ScopedRuntimeInput, ScopedRuntimeConfig } from '../runtime/scoped-config'
 import type { ManagedCodingAgentRun } from '../runtime/run-manager'
 import type { NativeTurnHost } from '../runtime/turn-host'
+import type { CodingAgentImageInput } from '../../protocol/types'
 import { startAcpChatTurn } from '../runtime/acp-chat-turn'
 import { startZcodeChatTurn } from '../zcode/chat-turn'
 import { QWEN_DEFINITION } from '../qwen/definition'
@@ -60,8 +61,8 @@ export function prepareNativeScopedRuntime(input: ScopedRuntimeInput & { agentId
   return NATIVE_AGENT_ADAPTERS[input.agentId].prepareScoped(input)
 }
 
-export function startNativeChatTurn(run: ManagedCodingAgentRun, input: string, systemPrompt: string, host: NativeTurnHost) {
+export function startNativeChatTurn(run: ManagedCodingAgentRun, input: string, systemPrompt: string, host: NativeTurnHost, images: CodingAgentImageInput[] = []) {
   const adapter = NATIVE_AGENT_ADAPTERS[run.launch.agentId as NativeCodingAgentId]
   if (!adapter) throw new Error('Unknown native coding agent')
-  adapter.startTurn(adapter.definition, run, input, systemPrompt, host)
+  adapter.startTurn(adapter.definition, run, input, systemPrompt, host, images)
 }

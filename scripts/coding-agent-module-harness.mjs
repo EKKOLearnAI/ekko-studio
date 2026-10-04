@@ -13,6 +13,7 @@ const ownedImplementations = new Map([
   ['prepareZcodeScopedRuntime', 'services/zcode/'],
   ['resolveZcodeCommand', 'services/zcode/'],
   ['startZcodeChatTurn', 'services/zcode/'],
+  ['prepareZcodePrompt', 'services/zcode/'],
   ['applyZcodeEvent', 'services/zcode/'],
   ['createOpenCodeConfig', 'services/opencode/'],
   ['prepareOpenCodeBaseConfig', 'services/opencode/'],

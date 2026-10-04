@@ -5,6 +5,8 @@ import { updateSession } from '../../../studio/public/sessions'
 export function startNativeTurnProcess(run: ManagedCodingAgentRun, message: string, systemPrompt: string, host: NativeTurnHost, input: {
   name: string
   args(text: string): string[]
+  emptyPrompt?: string
+  cleanup?(): void
   exitError?(code: number | null): string | undefined
 }) {
   if (host.isRunning(run.currentChild)) throw new Error(`${input.name} is still processing the previous input`)
@@ -18,10 +20,14 @@ export function startNativeTurnProcess(run: ManagedCodingAgentRun, message: stri
   host.response({ type: 'response.created', data: {
     type: 'response.created', response: { id: responseId, object: 'response', status: 'in_progress', model: '', output: [] },
   } })
-  const text = [systemPrompt || run.launch.nativeSystemPrompt, message].filter(Boolean).join('\n\n')
-  const child = host.spawn(run.launch.command, input.args(text), {
-    cwd: run.launch.workspaceDir, pipeStdin: true, env: { ...process.env, ...run.launch.env },
-  })
+  const text = [systemPrompt || run.launch.nativeSystemPrompt, message].filter(Boolean).join('\n\n') || input.emptyPrompt || ''
+  const child = (() => {
+    try {
+      return host.spawn(run.launch.command, input.args(text), {
+        cwd: run.launch.workspaceDir, pipeStdin: true, env: { ...process.env, ...run.launch.env },
+      })
+    } catch (error) { input.cleanup?.(); throw error }
+  })()
   run.currentChild = child
   let finished = false
   const session = (id: string) => {
@@ -37,8 +43,9 @@ export function startNativeTurnProcess(run: ManagedCodingAgentRun, message: stri
   }
   child.stderr?.on('data', (chunk: Buffer) => { host.stderr(chunk); host.touch() })
   child.stdin?.on('error', error => { finish(host.processError(error)); host.terminate(child) })
-  child.on('error', error => finish(host.processError(error)))
+  child.on('error', error => { input.cleanup?.(); finish(host.processError(error)) })
   child.on('close', code => {
+    input.cleanup?.()
     if (run.currentChild !== child) return
     run.currentChild = undefined
     if (run.currentChildKillTimer) clearTimeout(run.currentChildKillTimer)

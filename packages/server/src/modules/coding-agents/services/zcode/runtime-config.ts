@@ -14,7 +14,7 @@ export async function prepareZcodeScopedRuntime(input: ScopedRuntimeInput): Prom
   await write('builtin', 'zcode-builtin.json', json({ schemaVersion: 1, revision: 0, config: {
     providerConfigRules: { providerRules: [], templateRules: [] }, modelConfigRules: {
       modelRules: [{ modelMatch: '.*', config: { enabled: true, properties: { contextWindow,
-        requiresMfjsToolSchema: false, inputFormat: { supportsText: true, supportsImage: false,
+        requiresMfjsToolSchema: false, inputFormat: { supportsText: true, supportsImage: true,
           supportsVideo: false, supportsAudio: false, supportsPdf: false }, outputFormat: { supportsText: true },
         supportsToolCall: true, supportsJsonSchemaOutput: false, supportsNativeWebSearch: false,
         supportsMidConversationSystem: false }, optionSpecs: {

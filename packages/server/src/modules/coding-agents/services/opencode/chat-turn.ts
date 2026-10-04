@@ -50,17 +50,20 @@ export function startOpenCodeTurn(
       ? ['--session', run.launch.agentNativeSessionId]
       : []),
     ...images.flatMap(image => ['--file', image.path]),
-    // --file consumes an array; terminate options before the message.
-    '--',
-    input,
   ]
   const child = host.spawn(run.launch.command, args, {
     cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
     env: run.launch.mode === 'global'
       ? { ...process.env, ...(run.launch.env || {}) }
       : isolatedCodingAgentChildEnv(run.launch.env),
+    pipeStdin: true,
   })
   run.currentChild = child
+
+  child.stdin?.on('error', err => {
+    if (!run.printCompleted && !run.stoppedByUser) host.fail(host.processError(err))
+    host.terminate(child)
+  })
 
   let stdoutBuffer = ''
   child.stdout?.on('data', (chunk: Buffer) => {
@@ -93,4 +96,5 @@ export function startOpenCodeTurn(
     if (code === 0) host.complete()
     else host.fail(host.exitError(code, run.currentChildStderr))
   })
+  child.stdin?.end(input || (images.length ? 'Inspect the attached images.' : ''))
 }

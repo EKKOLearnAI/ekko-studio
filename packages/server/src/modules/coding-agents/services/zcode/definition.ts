@@ -8,7 +8,7 @@ export const ZCODE_DEFINITION = {
   packageName: '',
   docsUrl: 'https://github.com/zai-org/ZCode',
   acpArgs: [],
-  capabilities: { modes: ['scoped', 'global'], installation: 'manual', images: false, nativeCompact: false, automaticUpdates: false },
+  capabilities: { modes: ['scoped', 'global'], installation: 'manual', images: true, nativeCompact: false, automaticUpdates: false },
 } as const
 
 export const ZCODE_CONFIG_FILES: CodingAgentConfigFileTemplate[] = []

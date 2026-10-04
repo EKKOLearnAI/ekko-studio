@@ -1,7 +1,8 @@
 import type { ChildProcess } from 'node:child_process'
 
 export interface OpenCodeTurnHost {
-  spawn(command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }): ChildProcess
+  spawn(command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; pipeStdin?: boolean }): ChildProcess
+  terminate(child?: ChildProcess): void
   isRunning(child?: ChildProcess): boolean
   processError(error: unknown): string
   exitError(code: number | null, stderr?: string): string

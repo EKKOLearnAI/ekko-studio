@@ -1,36 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "2026-10-03.4",
+  "revision": "2026-10-04.2",
   "agents": [
-    {
-      "id": "hermes",
-      "name": "Hermes",
-      "kind": "hermes",
-      "aliases": [],
-      "sessionId": "hermes",
-      "groupId": "hermes",
-      "icon": "/static/hermes.png",
-      "modes": [
-        "scoped"
-      ],
-      "installation": {
-        "method": "builtin",
-        "updates": false,
-        "remove": false
-      },
-      "config": {
-        "skillsTarget": "hermes",
-        "skillsWritable": true,
-        "mcp": true,
-        "settings": "settings",
-        "memory": "memory"
-      },
-      "capabilities": {
-        "context": true,
-        "compact": true,
-        "serverManagedAuth": false
-      }
-    },
     {
       "id": "ekko-agent",
       "name": "Ekko",
@@ -58,6 +29,35 @@
         "context": true,
         "compact": true,
         "serverManagedAuth": true
+      }
+    },
+    {
+      "id": "hermes",
+      "name": "Hermes",
+      "kind": "hermes",
+      "aliases": [],
+      "sessionId": "hermes",
+      "groupId": "hermes",
+      "icon": "/static/hermes.png",
+      "modes": [
+        "scoped"
+      ],
+      "installation": {
+        "method": "builtin",
+        "updates": false,
+        "remove": false
+      },
+      "config": {
+        "skillsTarget": "hermes",
+        "skillsWritable": true,
+        "mcp": true,
+        "settings": "settings",
+        "memory": "memory"
+      },
+      "capabilities": {
+        "context": true,
+        "compact": true,
+        "serverManagedAuth": false
       }
     },
     {
@@ -453,7 +453,7 @@
       ],
       "installation": {
         "method": "manual",
-        "docsUrl": "https://github.com/zai-org/ZCode",
+        "docsUrl": "https://zcode.z.ai/",
         "updates": false,
         "remove": false
       },

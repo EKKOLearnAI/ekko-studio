@@ -20,7 +20,7 @@ describe('OpenCode turns', () => {
   let workspace: string
   let sessionId: string
   let agentSessionId: string
-  let child: EventEmitter & { stdout: PassThrough; stderr: PassThrough; exitCode: number | null; signalCode: null }
+  let child: EventEmitter & { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough; exitCode: number | null; signalCode: null }
   let emitted: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
@@ -33,7 +33,7 @@ describe('OpenCode turns', () => {
     ;(manager as any).emitToChat = emitted
     ;(manager as any).markChatRunCompleted = () => {}
     child = Object.assign(new EventEmitter(), {
-      stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null, signalCode: null,
+      stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null, signalCode: null,
     })
     vi.mocked(spawn).mockReturnValue(child as any)
   })
@@ -64,7 +64,7 @@ describe('OpenCode turns', () => {
     child.emit('close', code)
   }
 
-  it('separates attachment paths from messages including option-like text', () => {
+  it('sends option-like text through stdin while retaining image file args', () => {
     start()
     const files = [join(workspace, 'first image.png'), join(workspace, 'second.png')]
     manager.send(sessionId, '--describe these images', {
@@ -72,8 +72,35 @@ describe('OpenCode turns', () => {
     })
     expect(vi.mocked(spawn).mock.calls[0][1]).toEqual([
       'run', '--format', 'json', '--agent', 'build', '--auto', '--thinking',
-      '--model', 'test/model', '--file', files[0], '--file', files[1], '--', '--describe these images',
+      '--model', 'test/model', '--file', files[0], '--file', files[1],
     ])
+    expect(child.stdin.read().toString()).toBe('--describe these images')
+    expect(child.stdin.writableEnded).toBe(true)
+    expect(vi.mocked(spawn).mock.calls[0][2]?.stdio).toEqual(['pipe', 'pipe', 'pipe'])
+    close()
+  })
+
+  it('keeps long multiline Unicode input out of Windows cmd shim arguments', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    try {
+      start()
+      const run = manager.getBySession(sessionId)!
+      run.launch.command = 'C:\\Tools\\opencode.cmd'
+      const text = '你好😀\r\n%PATH% & | "quoted" '.repeat(4000)
+      manager.send(sessionId, text)
+      const args = vi.mocked(spawn).mock.calls[0][1]!
+      expect(args.join(' ').length).toBeLessThan(7000)
+      expect(args.join(' ')).not.toContain('你好')
+      expect(child.stdin.read().toString()).toBe(text.trim())
+      close()
+    } finally { Object.defineProperty(process, 'platform', platform) }
+  })
+
+  it('supplies a nonempty stdin prompt when only images are attached', () => {
+    start()
+    manager.send(sessionId, '', { images: [{ path: join(workspace, 'image.png'), name: 'image.png', mediaType: 'image/png' }] })
+    expect(child.stdin.read().toString()).toBe('Inspect the attached images.')
     close()
   })
 
