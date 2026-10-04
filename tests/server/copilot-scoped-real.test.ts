@@ -47,48 +47,73 @@ describeReal('real Copilot scoped ACP', () => {
     ['glm-5.3-flash', 'codex_responses'],
     ['glm-5.3-flash', 'anthropic_messages'],
     ['claude-sonnet-4-6', 'anthropic_messages'],
-  ] as const)('keeps %s on the selected %s upstream without token-count warnings', async (model, apiMode) => {
+  ] as const)('executes a command with %s on the selected %s upstream', async (model, apiMode) => {
     const requests: Array<{ path: string; body: any }> = []
+    const toolInput = { command: 'printf SCOPED_TOOL_OK', description: 'Print verification marker', initial_wait: 1 }
+    const toolArguments = JSON.stringify(toolInput)
+    let inferenceCount = 0
     const upstream = new Koa()
     upstream.use(createRequestBodyParser())
     upstream.use(ctx => {
       const body = ctx.request.body as any
       requests.push({ path: ctx.path, body })
+      if (ctx.path.endsWith('/count_tokens')) { ctx.body = { input_tokens: 10 }; return }
+      const callTool = inferenceCount++ === 0
       const response = { id: 'response-mock', object: 'response', status: 'completed', model: body.model,
-        output: [{ id: 'message-mock', type: 'message', role: 'assistant', status: 'completed',
-          content: [{ type: 'output_text', text: 'SCOPED_OK', annotations: [] }] }],
+        output: callTool ? [{ id: 'tool-mock', type: 'function_call', call_id: 'call-bash', name: 'bash',
+          arguments: toolArguments, status: 'completed' }] : [{ id: 'message-mock', type: 'message', role: 'assistant',
+          status: 'completed', content: [{ type: 'output_text', text: 'SCOPED_OK', annotations: [] }] }],
         usage: { input_tokens: 10, output_tokens: 3, total_tokens: 13 } }
       const chat = { id: 'chat-mock', object: 'chat.completion', model: body.model,
-        choices: [{ index: 0, message: { role: 'assistant', content: 'SCOPED_OK' }, finish_reason: 'stop' }],
+        choices: [{ index: 0, message: callTool ? { role: 'assistant', content: null,
+          tool_calls: [{ id: 'call-bash', type: 'function', function: { name: 'bash', arguments: toolArguments } }] }
+          : { role: 'assistant', content: 'SCOPED_OK' }, finish_reason: callTool ? 'tool_calls' : 'stop' }],
         usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 } }
       const message = { id: 'message-mock', type: 'message', role: 'assistant', model: body.model,
-        content: [{ type: 'text', text: 'SCOPED_OK' }], stop_reason: 'end_turn', stop_sequence: null,
+        content: callTool ? [{ type: 'tool_use', id: 'call-bash', name: 'bash', input: toolInput }]
+          : [{ type: 'text', text: 'SCOPED_OK' }], stop_reason: callTool ? 'tool_use' : 'end_turn', stop_sequence: null,
         usage: { input_tokens: 10, output_tokens: 3 } }
-      if (ctx.path.endsWith('/count_tokens')) { ctx.body = { input_tokens: 10 }; return }
       if (!body.stream) {
         ctx.body = apiMode === 'chat_completions' ? chat : apiMode === 'codex_responses' ? response : message
         return
       }
       ctx.set('Content-Type', 'text/event-stream')
       if (apiMode === 'chat_completions') {
+        const deltas = callTool ? [
+          { tool_calls: [{ index: 0, id: 'call-bash', type: 'function', function: { name: 'bash', arguments: toolArguments.slice(0, 2) } }] },
+          { tool_calls: [{ index: 0, function: { arguments: toolArguments.slice(2) } }] },
+        ] : [{ role: 'assistant', content: 'SCOPED_OK' }]
         ctx.body = Readable.from([
+          ...deltas.map(delta =>
+            `data: ${JSON.stringify({ ...chat, object: 'chat.completion.chunk', choices: [{ index: 0,
+              delta, finish_reason: null }] })}\n\n`),
           `data: ${JSON.stringify({ ...chat, object: 'chat.completion.chunk', choices: [{ index: 0,
-            delta: { role: 'assistant', content: 'SCOPED_OK' }, finish_reason: null }] })}\n\n`,
-          `data: ${JSON.stringify({ ...chat, object: 'chat.completion.chunk', choices: [{ index: 0,
-            delta: {}, finish_reason: 'stop' }] })}\n\n`,
+            delta: {}, finish_reason: callTool ? 'tool_calls' : 'stop' }] })}\n\n`,
           'data: [DONE]\n\n',
         ])
       } else {
         const events = apiMode === 'codex_responses' ? [
           { type: 'response.created', response: { ...response, status: 'in_progress', output: [] } },
-          { type: 'response.output_text.delta', item_id: 'message-mock', output_index: 0, content_index: 0, delta: 'SCOPED_OK' },
+          ...(callTool ? [
+            { type: 'response.output_item.added', output_index: 0,
+              item: { ...response.output[0], arguments: '', status: 'in_progress' } },
+            { type: 'response.function_call_arguments.delta', item_id: 'tool-mock', output_index: 0, delta: toolArguments.slice(0, 2) },
+            { type: 'response.function_call_arguments.delta', item_id: 'tool-mock', output_index: 0, delta: toolArguments.slice(2) },
+            { type: 'response.output_item.done', output_index: 0, item: response.output[0] },
+          ] : [{ type: 'response.output_text.delta', item_id: 'message-mock', output_index: 0, content_index: 0, delta: 'SCOPED_OK' }]),
           { type: 'response.completed', response },
         ] : [
           { type: 'message_start', message: { ...message, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 0 } } },
-          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
-          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'SCOPED_OK' } },
+          ...(callTool ? [
+            { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'call-bash', name: 'bash', input: {} } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: toolArguments.slice(0, 2) } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: toolArguments.slice(2) } },
+          ] : [
+            { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'SCOPED_OK' } },
+          ]),
           { type: 'content_block_stop', index: 0 },
-          { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 3 } },
+          { type: 'message_delta', delta: { stop_reason: callTool ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: 3 } },
           { type: 'message_stop' },
         ]
         ctx.body = Readable.from(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`))
@@ -120,16 +145,29 @@ describeReal('real Copilot scoped ACP', () => {
       })
       let stderr = ''
       let reply = ''
+      const toolUpdates: any[] = []
       child.stderr!.on('data', chunk => { stderr += chunk.toString() })
       turn = new NativeAcpTurn(child, { session: () => {}, update: update => {
         if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') reply += update.content.text
+        if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') toolUpdates.push(update)
       } })
       timer = setTimeout(() => stop(child!), 30_000)
-      await turn.prompt({ cwd: workspace, mcpServers: [], text: 'Reply SCOPED_OK only.' })
+      await turn.prompt({ cwd: workspace, mcpServers: [], text: 'Run printf SCOPED_TOOL_OK, then reply SCOPED_OK only.' })
       expect(reply).toBe('SCOPED_OK')
+      expect(toolUpdates.some(update => update.status === 'completed'
+        && JSON.stringify(update.rawOutput ?? update.content).includes('SCOPED_TOOL_OK'))).toBe(true)
+      expect(toolUpdates.some(update => update.status === 'failed')).toBe(false)
       expect(stderr + reply).not.toContain('No token count multiplier')
       const inference = requests.filter(request => !request.path.endsWith('/count_tokens'))
-      expect(inference.length).toBeGreaterThan(0)
+      expect(inference.length).toBe(2)
+      const toolResult = apiMode === 'codex_responses'
+        ? inference[1].body.input.find((item: any) => item.type === 'function_call_output')?.output
+        : apiMode === 'chat_completions'
+          ? inference[1].body.messages.find((item: any) => item.role === 'tool')?.content
+          : inference[1].body.messages.flatMap((item: any) => Array.isArray(item.content) ? item.content : [])
+            .find((item: any) => item.type === 'tool_result')?.content
+      expect(JSON.stringify(toolResult)).toContain('SCOPED_TOOL_OK')
+      expect(JSON.stringify(toolResult)).not.toContain('Unexpected non-whitespace')
       for (const request of inference) {
         expect(request.path).toBe(apiMode === 'chat_completions' ? '/v1/chat/completions'
           : apiMode === 'codex_responses' ? '/v1/responses' : '/v1/messages')

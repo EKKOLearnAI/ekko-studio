@@ -534,7 +534,9 @@ export function responseToolNamespaceForName(name: unknown): string | undefined 
 
 export function normalizeResponseFunctionCall(name: unknown, argumentsValue: unknown): { name: string; arguments: string; namespace?: string } {
   const rawName = String(name || 'tool')
-  const rawArguments = String(argumentsValue || '{}')
+  // An empty string starts streamed arguments; adding {} would corrupt the
+  // JSON when the client appends subsequent argument deltas.
+  const rawArguments = String(argumentsValue ?? '{}')
   const namespace = normalizedNamespaceName(rawName)
   if (namespace.startsWith('mcp__')) {
     const parsed = safeJsonParse(rawArguments)

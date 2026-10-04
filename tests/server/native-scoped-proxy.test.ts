@@ -94,6 +94,67 @@ describe('native scoped model gateway', () => {
     expect(codingAgentRunManager.handleResponseEvent).not.toHaveBeenCalled()
   })
 
+  it.each(['codebuddy', 'copilot'].flatMap(agentId =>
+    ['chat_completions', 'codex_responses', 'anthropic_messages'].map(apiMode => [agentId, apiMode] as const)))
+  ('preserves %s streamed tool JSON through the %s upstream', async (agentId, apiMode) => {
+    const target = registerCodexProxyTarget({ profile: 'research', provider: 'custom:test', model: 'selected-model',
+      baseUrl: 'https://provider.example/v1', apiKey: 'sk-upstream', apiMode: apiMode as any,
+      agentId, agentSessionId: `tools-${agentId}-${apiMode}` })
+    const calls = [
+      { id: 'call-bash', name: 'bash', arguments: JSON.stringify({ command: 'printf "厦门天气 ☀️"', description: 'Print weather' }) },
+      { id: 'call-mcp', name: 'ekko_studio_browser_toolset', arguments: JSON.stringify({ action: 'list' }) },
+      { id: 'call-empty', name: 'no_arguments', arguments: '{}' },
+    ]
+    const fragments = calls.map(call => [call.arguments.slice(0, 2), call.arguments.slice(2)])
+    let upstream: string
+    if (apiMode === 'chat_completions') {
+      const deltas = [
+        { tool_calls: calls.map((call, index) => ({ index, id: call.id, type: 'function',
+          function: { name: call.name, arguments: fragments[index][0] } })) },
+        { tool_calls: calls.map((_, index) => ({ index, function: { arguments: fragments[index][1] } })) },
+      ]
+      upstream = deltas.map(delta => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`).join('')
+        + `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })}\n\n`
+        + 'data: [DONE]\n\n'
+    } else {
+      const events = apiMode === 'codex_responses' ? [
+        { type: 'response.created', response: { id: 'response-tools' } },
+        ...calls.map((call, output_index) => ({ type: 'response.output_item.added', output_index,
+          item: { type: 'function_call', id: call.id, call_id: call.id, name: call.name, arguments: '' } })),
+        ...[0, 1].flatMap(fragment => calls.map((call, output_index) => ({ type: 'response.function_call_arguments.delta',
+          item_id: call.id, output_index, delta: fragments[output_index][fragment] }))),
+        { type: 'response.completed', response: { id: 'response-tools', status: 'completed',
+          output: calls.map(call => ({ type: 'function_call', call_id: call.id, ...call })) } },
+      ] : [
+        { type: 'message_start', message: { id: 'message-tools', content: [] } },
+        ...calls.map((call, index) => ({ type: 'content_block_start', index,
+          content_block: { type: 'tool_use', id: call.id, name: call.name, input: {} } })),
+        ...[0, 1].flatMap(fragment => calls.map((_, index) => ({ type: 'content_block_delta', index,
+          delta: { type: 'input_json_delta', partial_json: fragments[index][fragment] } }))),
+        ...calls.map((_, index) => ({ type: 'content_block_stop', index })),
+        { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
+        { type: 'message_stop' },
+      ]
+      upstream = events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(upstream, { headers: { 'content-type': 'text/event-stream' } }))
+    const ctx = context(target, { stream: true, messages: [{ role: 'user', content: 'use tools' }] })
+    await codingAgentProxyChatCompletions(ctx)
+    const frames = (await read(ctx.body)).split('\n\n').filter(frame => frame.startsWith('data: {'))
+      .map(frame => JSON.parse(frame.slice(6)))
+    const accumulated = new Map<number, { id: string; name: string; arguments: string }>()
+    for (const frame of frames) for (const call of frame.choices?.[0]?.delta?.tool_calls || []) {
+      const current = accumulated.get(call.index) || { id: '', name: '', arguments: '' }
+      current.id += call.id || ''
+      current.name += call.function?.name || ''
+      current.arguments += call.function?.arguments || ''
+      accumulated.set(call.index, current)
+    }
+    expect([...accumulated.values()]).toEqual(calls)
+    for (const call of accumulated.values()) expect(() => JSON.parse(call.arguments)).not.toThrow()
+    expect(frames.at(-1).choices[0].finish_reason).toBe('tool_calls')
+  })
+
   it('preserves function selection and output limits and refuses truncated streams', async () => {
     expect(chatCompletionsToResponses({ messages: [], max_tokens: 32,
       tool_choice: { type: 'function', function: { name: 'read' } } })).toMatchObject({ max_output_tokens: 32, tool_choice: { type: 'function', name: 'read' } })
