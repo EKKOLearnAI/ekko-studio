@@ -144,6 +144,32 @@ for (const mode of ['scoped', 'global']) {
   })
 }
 
+for (const entry of ['/hermes/chat', '/studio/agents']) {
+  test(`a new chat from ${entry} is ready without resuming server history`, async ({ page }) => {
+    await authenticate(page, TEST_ACCESS_KEY, 'research')
+    const api = await mockHermesApi(page)
+    // There is no resumed payload for the new session, just as the server has no history yet.
+    await mockChatSocket(page)
+    await page.goto(`/#${entry}`)
+    if (entry !== '/hermes/chat') await page.getByRole('link', { name: 'Chat', exact: true }).click()
+    await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+    const drawer = page.locator('.new-chat-drawer')
+    await drawer.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(page).toHaveURL(/#\/hermes\/session\//)
+    const sessionId = new URL(page.url()).hash.split('/').pop()!
+    const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')
+    await expect(input).toBeVisible({ timeout: 2000 })
+    await expect(page.locator('.chat-view > .page-loading-overlay')).toHaveCount(0)
+    expect(await page.evaluate(sid => (window as any).__PW_CHAT_SOCKET__?.emitted
+      ?.filter((item: any) => item.event === 'resume' && item.payload.session_id === sid) || [], sessionId)).toEqual([])
+    await input.fill('First message')
+    await page.getByRole('button', { name: 'Send', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted
+      ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({ session_id: sessionId, agent_id: 'ekko-agent' })
+    expect(api.unexpectedRequests).toEqual([])
+  })
+}
+
 for (const failure of ['not-installed', 'unavailable']) {
   test(`creation stops when the latest Coding Agent inventory is ${failure}`, async ({ page }) => {
     await authenticate(page, TEST_ACCESS_KEY, 'research')

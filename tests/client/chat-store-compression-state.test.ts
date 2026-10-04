@@ -125,6 +125,61 @@ describe('chat store compression state', () => {
     }))
   })
 
+  it.each([
+    { agent: 'hermes', source: 'cli' },
+    { agent: 'ekko-agent', source: 'builtin_agent' },
+    { agent: 'codex', source: 'coding_agent' },
+  ] as const)('opens a new $agent chat without resuming an unpersisted session', async options => {
+    const store = useChatStore()
+    const session = store.newChat({ ...options, workspace: '/workspace/draft', model: 'chosen-model', provider: 'chosen-provider' })
+
+    expect(store.activeSessionId).toBe(session.id)
+    expect(store.isLoadingMessages).toBe(false)
+    expect(chatApi.resumeSession).not.toHaveBeenCalled()
+    expect(session.isLocalOnly).toBe(true)
+    expect(session.workspace).toBe('/workspace/draft')
+    expect(session.model).toBe('chosen-model')
+
+    await expect(store.switchSession(session.id)).resolves.toBe(true)
+    expect(chatApi.resumeSession).not.toHaveBeenCalled()
+
+    session.isLocalOnly = false
+    await store.switchSession(session.id)
+    expect(chatApi.resumeSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('resumes a new session once its first message has been sent', async () => {
+    const store = useChatStore()
+    const session = store.newChat({ model: 'chosen-model', provider: 'chosen-provider' })
+    await store.sendMessage('First message')
+    expect(chatApi.startRunViaSocket).toHaveBeenCalled()
+
+    await store.switchSession(session.id)
+    expect(chatApi.resumeSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps an unsent draft ready while an older session resume is pending', async () => {
+    const store = useChatStore()
+    const draft = store.newChat({ workspace: '/workspace/draft' })
+    store.sessions.push(makeSession('persisted-session'))
+    let completeResume!: (data: any) => void
+    chatApi.resumeSession.mockImplementationOnce((_sessionId, onResumed) => {
+      completeResume = onResumed
+      return {} as any
+    })
+
+    const pending = store.switchSession('persisted-session')
+    expect(store.isLoadingMessages).toBe(true)
+    await expect(store.switchSession(draft.id)).resolves.toBe(true)
+    expect(store.isLoadingMessages).toBe(false)
+    expect(store.activeSession?.workspace).toBe('/workspace/draft')
+
+    completeResume({ session_id: 'persisted-session', messages: [], isWorking: false })
+    await pending
+    expect(store.activeSessionId).toBe(draft.id)
+    expect(store.isLoadingMessages).toBe(false)
+  })
+
   it('keeps message loading scoped to the active session during rapid switches', async () => {
     const callbacks = new Map<string, (data: any) => void>()
     chatApi.resumeSession.mockImplementation((sessionId: string, onResumed: (data: any) => void) => {
