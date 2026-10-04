@@ -238,6 +238,30 @@ def ensure_bili_agent(agent: Any, owner: dict[str, Any]) -> None:
     agent._bridge_bili_conversation_id = identity
 
 
+def _bili_request_kwargs(agent: Any, api_kwargs: dict[str, Any]) -> dict[str, Any]:
+    # Plugin middleware may carry the previous turn's output cap. Stamp a copy
+    # at dispatch, never SDK defaults or proxy-wide agent/model runtime-info.
+    managed = {"x-bili-plugin-context-window", "x-bili-plugin-model", "x-bili-plugin-max-output"}
+    headers = {key: value for key, value in dict(api_kwargs.get("extra_headers") or {}).items()
+               if key.lower() not in managed}
+    model = api_kwargs.get("model")
+    if isinstance(model, str) and model:
+        headers["x-bili-plugin-model"] = model
+        compressor = getattr(agent, "context_compressor", None)
+        if (model == getattr(agent, "model", None) and compressor is not None
+                and all(getattr(compressor, key, None) == getattr(agent, key, None)
+                        for key in ("model", "provider", "base_url", "api_mode"))):
+            window = getattr(compressor, "context_length", None)
+            if isinstance(window, int) and not isinstance(window, bool) and window > 0:
+                headers["x-bili-plugin-context-window"] = str(window)
+        output = next((api_kwargs[key] for key in ("max_output_tokens", "max_completion_tokens", "max_tokens")
+                       if key in api_kwargs),
+                      getattr(agent, "max_tokens", None) if model == getattr(agent, "model", None) else None)
+        if isinstance(output, int) and not isinstance(output, bool) and output > 0:
+            headers["x-bili-plugin-max-output"] = str(output)
+    return {**api_kwargs, "extra_headers": headers}
+
+
 def install_bili_worker_guard(agent_class: type, owner: dict[str, Any]) -> None:
     if owner.get("manager") != "bili":
         return
@@ -279,10 +303,20 @@ def install_bili_worker_guard(agent_class: type, owner: dict[str, Any]) -> None:
     # Future upstream delegate constructors import this same class. Never give
     # children the parent's ID or patch files in the Hermes installation.
     agent_class.__init__ = initialize
-    for name in ("run_conversation", "_interruptible_api_call", "_interruptible_streaming_api_call", "switch_model", "_swap_credential"):
+    for name in ("run_conversation", "switch_model", "_swap_credential"):
         original = getattr(agent_class, name, None)
         if callable(original):
             setattr(agent_class, name, guard_method(original, name in {"switch_model", "_swap_credential"}))
+    def guard_api_method(original: Any):
+        @wraps(original)
+        def guarded(agent: Any, api_kwargs: dict[str, Any], *args: Any, **kwargs: Any):
+            ensure_bili_agent(agent, policy)
+            return original(agent, _bili_request_kwargs(agent, api_kwargs), *args, **kwargs)
+        return guarded
+    for name in ("_interruptible_api_call", "_interruptible_streaming_api_call"):
+        original = getattr(agent_class, name, None)
+        if callable(original):
+            setattr(agent_class, name, guard_api_method(original))
     original_codex_stream = getattr(agent_class, "_run_codex_stream", None)
     if callable(original_codex_stream):
         @wraps(original_codex_stream)
@@ -294,7 +328,8 @@ def install_bili_worker_guard(agent_class: type, owner: dict[str, Any]) -> None:
             # its fallback once and pass the exact verified client to the sender.
             active_client = client or agent._ensure_primary_openai_client(reason="codex_stream_direct")
             verify_bili_transport(agent, policy, sdk=active_client)
-            return original_codex_stream(agent, api_kwargs, client=active_client, on_first_delta=on_first_delta)
+            return original_codex_stream(agent, _bili_request_kwargs(agent, api_kwargs),
+                                         client=active_client, on_first_delta=on_first_delta)
         agent_class._run_codex_stream = codex_stream
     agent_class._bridge_bili_worker_binding = binding
 

@@ -290,6 +290,118 @@ class ContextManagerTests(unittest.TestCase):
         self.isolation.enter_context(patch.dict(os.environ, {'HTTPS_PROXY': owner['proxyUrl'], 'https_proxy': owner['proxyUrl']}))
         return owner, names, entries, client
 
+    def request_agent_fixture(self):
+        from bridge_context_manager import install_bili_worker_guard
+        owner, _, _, client = self.bili_fixture()
+        class Agent:
+            def __init__(self, session_id='own', parent_session_id=None, model='model-a',
+                         context_length=123456, max_tokens=2048, api_mode='chat_completions'):
+                self.session_id = session_id
+                self._parent_session_id = parent_session_id
+                self.model, self.max_tokens, self.api_mode = model, max_tokens, api_mode
+                self.provider, self.base_url = 'custom-test', 'https://provider.invalid/v1'
+                self.tools = []
+                self.client = self._anthropic_client = types.SimpleNamespace(
+                    _client=client, base_url=self.base_url)
+                self.context_compressor = types.SimpleNamespace(
+                    model=model, provider=self.provider, base_url=self.base_url,
+                    api_mode=api_mode, context_length=context_length)
+            def _interruptible_api_call(self, api_kwargs):
+                return api_kwargs
+            def _interruptible_streaming_api_call(self, api_kwargs, *, on_first_delta=None):
+                return api_kwargs
+            def switch_model(self, model, context_length, max_tokens):
+                self.model, self.max_tokens = model, max_tokens
+                self.context_compressor.model = model
+                self.context_compressor.context_length = context_length
+        install_bili_worker_guard(Agent, owner)
+        return Agent
+
+    def test_first_request_headers_use_current_compressor_and_wire_output(self):
+        Agent = self.request_agent_fixture()
+        for mode in ('chat_completions', 'anthropic', 'anthropic_messages'):
+            for method in ('_interruptible_api_call', '_interruptible_streaming_api_call'):
+                for output_key in ('max_completion_tokens', 'max_tokens', 'max_output_tokens'):
+                    with self.subTest(mode=mode, method=method, output_key=output_key):
+                        agent = Agent(api_mode=mode)
+                        headers = {'authorization': 'keep', 'anthropic-beta': 'keep-beta',
+                                   'x-bili-plugin-conversation': 'own', 'x-bili-plugin': 'hermes',
+                                   'X-Bili-Plugin-Context-Window': '999999',
+                                   'X-Bili-Plugin-Model': 'old-model', 'x-bili-plugin-max-output': '9999'}
+                        kwargs = {'model': agent.model, output_key: 321, 'extra_headers': headers}
+                        actual = getattr(agent, method)(api_kwargs=kwargs)['extra_headers']
+                        self.assertEqual(actual['x-bili-plugin-context-window'], '123456')
+                        self.assertEqual(actual['x-bili-plugin-model'], 'model-a')
+                        self.assertEqual(actual['x-bili-plugin-max-output'], '321')
+                        self.assertEqual(actual['authorization'], 'keep')
+                        self.assertEqual(actual['anthropic-beta'], 'keep-beta')
+                        self.assertEqual(actual['x-bili-plugin-conversation'], 'own')
+                        self.assertEqual(actual['x-bili-plugin'], 'hermes')
+                        self.assertNotIn('X-Bili-Plugin-Context-Window', actual)
+                        self.assertEqual(headers['X-Bili-Plugin-Context-Window'], '999999')
+                        self.assertIs(kwargs['extra_headers'], headers)
+
+    def test_request_headers_refresh_model_switch_and_isolate_agents(self):
+        Agent = self.request_agent_fixture()
+        parent = Agent(session_id='parent', context_length=123456)
+        child = Agent(session_id='child', parent_session_id='parent', model='model-b',
+                      context_length=234567, max_tokens=512)
+        other_profile = Agent(session_id='other-profile', context_length=456789, max_tokens=1024)
+        barrier = threading.Barrier(3)
+        def request(agent):
+            barrier.wait(5)
+            return agent._interruptible_api_call({'model': agent.model})['extra_headers']
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(request, agent) for agent in (parent, child, other_profile)]
+            actual = [future.result(10) for future in futures]
+        self.assertEqual([item['x-bili-plugin-context-window'] for item in actual],
+                         ['123456', '234567', '456789'])
+        self.assertEqual([item['x-bili-plugin-max-output'] for item in actual], ['2048', '512', '1024'])
+        parent.switch_model('model-c', 345678, 4096)
+        switched = parent._interruptible_streaming_api_call({'model': 'model-c'})['extra_headers']
+        self.assertEqual(switched['x-bili-plugin-model'], 'model-c')
+        self.assertEqual(switched['x-bili-plugin-context-window'], '345678')
+        self.assertEqual(switched['x-bili-plugin-max-output'], '4096')
+        self.assertEqual(child._interruptible_api_call({'model': 'model-b'})['extra_headers'], actual[1])
+
+    def test_request_headers_do_not_invent_invalid_or_stale_windows(self):
+        Agent = self.request_agent_fixture()
+        for value in (None, 0, -1, True, 123.5, '123456', float('nan'), float('inf')):
+            with self.subTest(window=value):
+                agent = Agent(context_length=value)
+                kwargs = {'model': 'model-a', 'extra_headers': {'x-bili-plugin-context-window': 'stale'}}
+                self.assertNotIn('x-bili-plugin-context-window', agent._interruptible_api_call(kwargs)['extra_headers'])
+        for field, value in (('model', 'old'), ('provider', 'old'), ('base_url', 'https://other.invalid'),
+                             ('api_mode', 'anthropic')):
+            with self.subTest(stale_field=field):
+                agent = Agent()
+                setattr(agent.context_compressor, field, value)
+                self.assertNotIn('x-bili-plugin-context-window',
+                                 agent._interruptible_api_call({'model': 'model-a'})['extra_headers'])
+        agent = Agent()
+        self.assertNotIn('x-bili-plugin-context-window',
+                         agent._interruptible_api_call({'model': 'auxiliary-model'})['extra_headers'])
+        agent.context_compressor = None
+        self.assertNotIn('x-bili-plugin-context-window',
+                         agent._interruptible_api_call({'model': 'model-a'})['extra_headers'])
+
+    def test_request_headers_do_not_reuse_stale_output_or_patch_native_agents(self):
+        Agent = self.request_agent_fixture()
+        for value in (None, 0, -1, True, '321', 12.5):
+            with self.subTest(output=value):
+                agent = Agent()
+                kwargs = {'model': 'model-a', 'max_tokens': value,
+                          'extra_headers': {'x-bili-plugin-max-output': 'stale'}}
+                self.assertNotIn('x-bili-plugin-max-output', agent._interruptible_api_call(kwargs)['extra_headers'])
+        from bridge_context_manager import install_bili_worker_guard
+        class Native:
+            def _interruptible_api_call(self, api_kwargs):
+                return api_kwargs
+        original = Native._interruptible_api_call
+        install_bili_worker_guard(Native, {'manager': 'native'})
+        self.assertIs(Native._interruptible_api_call, original)
+        self.assertEqual(Native()._interruptible_api_call({'model': 'model-a'}), {'model': 'model-a'})
+
     def test_worker_guard_covers_future_delegated_construction_and_final_tools(self):
         from bridge_context_manager import install_bili_worker_guard
         owner, names, entries, client = self.bili_fixture()
@@ -409,7 +521,7 @@ class Proxy(socketserver.StreamRequestHandler):
                 name, value = line.decode().split(':', 1)
                 headers[name.lower()] = value.strip()
             body = json.loads(stream.read(int(headers['content-length'])))
-            wire.append((connect, request, body))
+            wire.append((connect, request, body, headers))
             response = {'id': 'local-fixture', 'object': 'response', 'created_at': 1,
                         'status': 'completed', 'model': 'test-model',
                         'output': [{'id': 'msg-fixture', 'type': 'message', 'role': 'assistant',
@@ -431,16 +543,25 @@ os.environ['HTTPS_PROXY'] = os.environ['https_proxy'] = owner['proxyUrl']
 
 class Agent(AIAgent):
     # Keep real transport selection and Responses dispatch, without init/plugin IO.
-    def __init__(self, sdk, session_id='child', parent_session_id='parent'):
+    def __init__(self, sdk, session_id='child', parent_session_id='parent',
+                 model='test-model', context_length=123456, max_tokens=2048):
         self.client = sdk
         self.api_mode = 'codex_responses'
         self.provider = 'custom-test'
-        self.model = 'test-model'
+        self.model = model
+        self.base_url = str(sdk.base_url)
+        self.max_tokens = max_tokens
+        self.context_compressor = types.SimpleNamespace(model=model, provider=self.provider,
+            base_url=self.base_url, api_mode=self.api_mode, context_length=context_length)
         self.session_id = session_id
         self._parent_session_id = parent_session_id
         self.tools = []
         self._interrupt_requested = False
-    def switch_model(self):
+    def switch_model(self, model=None, context_length=None, max_tokens=None):
+        if model is not None:
+            self.model = self.context_compressor.model = model
+            self.context_compressor.context_length = context_length
+            self.max_tokens = max_tokens
         self.compression_enabled = True
         self.codex_responses_native_compaction = True
 
@@ -560,12 +681,35 @@ with contextlib.ExitStack() as stack:
     with patch.object(request_sdk.responses, 'create', side_effect=real_create), \
          patch.object(agent, '_touch_activity'), patch.object(agent, '_fire_reasoning_delta'), \
          patch.object(agent, '_fire_stream_delta'):
-        result = agent._run_codex_stream({'model': 'test-model', 'input': []}, client=request_sdk)
+        kwargs = {'model': 'test-model', 'input': [], 'max_output_tokens': 321,
+                  'extra_headers': {'x-bili-plugin-conversation': 'child', 'x-existing': 'keep',
+                                    'x-bili-plugin-max-output': '9999'}}
+        result = agent._run_codex_stream(kwargs, client=request_sdk)
+        assert kwargs['extra_headers']['x-bili-plugin-max-output'] == '9999'
     assert result.status == 'completed' and result.output[0].content[0].text == 'local verified'
     assert len(wire) == 1
     assert wire[0][0] == 'CONNECT provider.invalid:443 HTTP/1.1'
     assert wire[0][1] == 'POST /v1/responses HTTP/1.1'
     assert wire[0][2]['stream'] is True
+    assert wire[0][3]['x-bili-plugin-context-window'] == '123456'
+    assert wire[0][3]['x-bili-plugin-model'] == wire[0][2]['model'] == 'test-model'
+    assert wire[0][3]['x-bili-plugin-max-output'] == '321'
+    assert wire[0][3]['x-existing'] == 'keep'
+    assert 'x-bili-plugin-context-window' not in request_sdk.default_headers
+    agent.switch_model('switched-model', 234567, 512)
+    child = Agent(good, session_id='delegated-child', parent_session_id='child',
+                  model='child-model', context_length=345678, max_tokens=1024)
+    for current in (agent, child, agent):
+        with patch.object(request_sdk.responses, 'create', side_effect=real_create), \
+             patch.object(current, '_touch_activity'), patch.object(current, '_fire_reasoning_delta'), \
+             patch.object(current, '_fire_stream_delta'):
+            current._run_codex_stream({'model': current.model, 'input': [],
+                'extra_headers': {'x-bili-plugin-conversation': current.session_id}}, client=request_sdk)
+    assert len(wire) == 4
+    assert [item[3]['x-bili-plugin-context-window'] for item in wire] == ['123456', '234567', '345678', '234567']
+    assert [item[3]['x-bili-plugin-max-output'] for item in wire] == ['321', '512', '1024', '512']
+    assert [item[3]['x-bili-plugin-conversation'] for item in wire] == ['child', 'child', 'delegated-child', 'child']
+    assert all(item[3]['x-bili-plugin-model'] == item[2]['model'] for item in wire)
 print('real Responses dispatch: 3 guarded calls; 6 bypass/CA clients rejected; HTTPS CONNECT/SSE completed')
 '''
         with tempfile.TemporaryDirectory(dir=SCRATCH_DIR) as home:
