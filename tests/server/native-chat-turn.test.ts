@@ -1,6 +1,9 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ManagedCodingAgentRun } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
 import { startNativeChatTurn, type NativeTurnHost } from '../../packages/server/src/modules/coding-agents/services/native/chat-turn'
@@ -39,6 +42,44 @@ function fixture(agentId: string, resume = false) {
 }
 
 describe('native process turn lifecycle', () => {
+  it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot'])('forwards %s image attachments through the negotiated ACP transport', async agent => {
+    const root = mkdtempSync(join(tmpdir(), 'native-image-'))
+    try {
+      const path = join(root, 'image.png')
+      writeFileSync(path, 'image-bytes')
+      const { run, child, host } = fixture(agent)
+      const requests: any[] = []
+      child.stdin.on('data', chunk => {
+        const message = JSON.parse(chunk.toString()); requests.push(message)
+        if (message.id === undefined) return
+        const result = message.method === 'initialize' ? { protocolVersion: 1, agentCapabilities: { promptCapabilities: { image: true } } }
+          : message.method === 'session/new' ? { sessionId: 'native' } : { stopReason: 'end_turn' }
+        queueMicrotask(() => child.stdout.write(JSON.stringify({ id: message.id, result }) + '\n'))
+      })
+      startNativeChatTurn(run, 'look', '', host, [{ path, name: 'image.png', mediaType: 'image/png' }])
+      await vi.waitFor(() => expect(host.complete).toHaveBeenCalled())
+      expect(requests.at(-1).params.prompt).toContainEqual({ type: 'image', mimeType: 'image/png', data: Buffer.from('image-bytes').toString('base64') })
+      child.emit('close', 0)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it.each(['close', 'error', 'throw'])('cleans staged ZCode long input on process %s while retaining image args', event => {
+    const { run, child, host } = fixture('zcode')
+    let path = ''
+    host.spawn = vi.fn((_command, args) => {
+      path = args[args.lastIndexOf('--attach') + 1]
+      expect(readFileSync(path, 'utf8')).toBe('Studio instructions\n\n' + '长文本😀'.repeat(20000))
+      expect(args).toContain('/image.png')
+      if (event === 'throw') throw new Error('spawn failed')
+      return child as unknown as ChildProcess
+    })
+    const start = () => startNativeChatTurn(run, '长文本😀'.repeat(20000), '', host,
+      [{ path: '/image.png', name: 'image.png', mediaType: 'image/png' }])
+    if (event === 'throw') expect(start).toThrow('spawn failed')
+    else { start(); child.emit(event, event === 'close' ? 1 : new Error('spawn failed')) }
+    expect(path).not.toBe('')
+    expect(existsSync(path)).toBe(false)
+  })
   it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot'].flatMap(agent => [false, true].map(resume => [agent, resume] as const)))(
     'streams and persists %s sessions (resume: %s) before completing after process close', async (agent, resume) => {
       const { child, run, host } = fixture(agent, resume)

@@ -4,6 +4,8 @@ import type { ManagedCodingAgentRun } from '../runtime/run-manager'
 import { updateSession } from '../../../studio/public/sessions'
 import { NATIVE_CODING_AGENTS } from '../../../studio/contracts/agents/native-coding-agents'
 import { NativeAcpTurn } from './acp-turn'
+import type { CodingAgentImageInput } from '../../protocol/types'
+import { prepareZcodePrompt } from './zcode-prompt'
 
 export interface NativeTurnHost {
   spawn(command: string, args: string[], options: { cwd: string; pipeStdin: boolean; env: NodeJS.ProcessEnv }): ChildProcess
@@ -60,7 +62,7 @@ export function applyZcodeEvent(event: any, host: Pick<NativeTurnHost, 'text' | 
   else if (event.type === 'turn.failed') host.fail(payload.error?.message || payload.message || 'ZCode turn failed')
 }
 
-export function startNativeChatTurn(run: ManagedCodingAgentRun, input: string, systemPrompt: string, host: NativeTurnHost) {
+export function startNativeChatTurn(run: ManagedCodingAgentRun, input: string, systemPrompt: string, host: NativeTurnHost, images: CodingAgentImageInput[] = []) {
   const definition = NATIVE_CODING_AGENTS.find(agent => agent.id === run.launch.agentId)
   if (!definition) throw new Error('Unknown native coding agent')
   if (host.isRunning(run.currentChild)) throw new Error(`${definition.name} is still processing the previous input`)
@@ -75,13 +77,18 @@ export function startNativeChatTurn(run: ManagedCodingAgentRun, input: string, s
     type: 'response.created', response: { id: responseId, object: 'response', status: 'in_progress', model: '', output: [] },
   } })
   const text = [systemPrompt || run.launch.nativeSystemPrompt, input].filter(Boolean).join('\n\n')
-  const args = definition.id === 'zcode'
-    ? [...run.launch.args, '--output-format', 'stream-json', '--mode', run.launch.approvalRequired ? 'plan' : 'yolo',
-      ...(run.nativeResumeReady && run.launch.agentNativeSessionId ? ['--resume', run.launch.agentNativeSessionId] : []), '-p', text]
-    : [...run.launch.args, ...definition.acpArgs]
-  const child = host.spawn(run.launch.command, args, {
-    cwd: run.launch.workspaceDir, pipeStdin: true, env: { ...process.env, ...run.launch.env },
-  })
+    || (images.length ? 'Inspect the attached images.' : '')
+  const prepared = definition.id === 'zcode' ? prepareZcodePrompt(run.launch.command,
+    [...run.launch.args, '--output-format', 'stream-json', '--mode', run.launch.approvalRequired ? 'plan' : 'yolo',
+      ...(run.nativeResumeReady && run.launch.agentNativeSessionId ? ['--resume', run.launch.agentNativeSessionId] : []),
+      ...images.flatMap(image => ['--attach', image.path])], text) : undefined
+  const args = prepared?.args || [...run.launch.args, ...definition.acpArgs]
+  let child: ChildProcess
+  try {
+    child = host.spawn(run.launch.command, args, {
+      cwd: run.launch.workspaceDir, pipeStdin: true, env: { ...process.env, ...run.launch.env },
+    })
+  } catch (error) { prepared?.cleanup(); throw error }
   run.currentChild = child
   let finished = false
   let connection: NativeAcpTurn | undefined
@@ -98,8 +105,9 @@ export function startNativeChatTurn(run: ManagedCodingAgentRun, input: string, s
   }
   child.stderr?.on('data', (chunk: Buffer) => { host.stderr(chunk); host.touch() })
   child.stdin?.on('error', error => { finish(host.processError(error)); host.terminate(child) })
-  child.on('error', error => finish(host.processError(error)))
+  child.on('error', error => { prepared?.cleanup(); finish(host.processError(error)) })
   child.on('close', code => {
+    prepared?.cleanup()
     if (run.currentChild !== child) return
     run.currentChild = undefined
     if (run.currentChildKillTimer) clearTimeout(run.currentChildKillTimer)
@@ -150,7 +158,7 @@ export function startNativeChatTurn(run: ManagedCodingAgentRun, input: string, s
       update: update => { if (!run.exited && !run.stoppedByUser && !finished) { host.touch(); applyNativeAcpUpdate(update, host) } },
     })
     run.nativeAcpTurn = connection
-    void connection.prompt({ cwd: run.launch.workspaceDir, text,
+    void connection.prompt({ cwd: run.launch.workspaceDir, text, images,
       nativeSessionId: run.nativeResumeReady ? run.launch.agentNativeSessionId : undefined,
       mcpServers: acpMcpServers(run.launch.nativeMcpServers || {}),
     }).then(reason => finish(['end_turn', 'max_tokens'].includes(reason) ? undefined : `${definition.name} stopped: ${reason}`))

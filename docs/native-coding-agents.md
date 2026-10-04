@@ -97,10 +97,56 @@ events and `--resume <sessionId>` between turns. Its native MCP configuration
 remains managed in ZCode; this initial integration does not expose Studio MCP
 configuration for ZCode. A missing final result is a failed turn.
 
-The initial catalog does not expose image prompts, native `/compact`, context
-snapshots, native settings editors, or Studio skills editors for these six
-agents. Text prompts can refer to files in the selected workspace. Native CLI
-errors, including required authentication, surface in chat.
+Image prompts use the transport supported by each CLI. ACP agents must advertise
+`agentCapabilities.promptCapabilities.image` during initialization; Studio sends
+base64 image blocks over stdin and reports a clear error if that capability is
+missing. It never silently drops an attachment. Kimi's scoped runtime enables
+`image_in`, and ZCode's scoped model rules permit native image serialization.
+The selected model and provider must still accept images; a text-only model does
+not gain vision from these adapters. Older CLI releases may require an update.
+
+| Runtime | Image input | Prompt text transport |
+| --- | --- | --- |
+| Claude Code | Stream-json base64 blocks | stdin |
+| Codex | `--image <path>` | stdin |
+| Pi | RPC base64 blocks | stdin |
+| Grok | JSON prompt file with base64 blocks | file |
+| DSH | Negotiated ACP image blocks | stdin |
+| Qwen, Kimi, CodeBuddy, Qoder, Copilot | Negotiated ACP image blocks | stdin |
+| Cursor | Native `--image <path>` (available in current CLI, hidden in help) | stdin, without a positional prompt |
+| OpenCode | `--file <path>` | stdin |
+| ZCode | `--attach <path>` | Short single-line argv, otherwise a UTF-8 attachment file |
+| Antigravity | Native `view_file` tool, requested with uploaded absolute paths | Text-only NDJSON stdin |
+
+Antigravity's headless NDJSON does not accept direct image blocks. Studio asks
+the native viewing tool to open the uploaded image before answering; this requires
+a tool-capable model and permission to read the file. The scoped Gemini bridge
+preserves image bytes in both user content and `functionResponse.parts`, including
+when translating to Responses, Chat Completions, or Anthropic Messages. It does
+not read arbitrary local media URLs on the server. An actual CLI 1.2.14 check with
+isolated state and a local mock model verified image bytes after `view_file`.
+
+On Windows, prompt bodies no longer pass through `cmd.exe` for Cursor or
+OpenCode. ACP and the other stdin/file transports likewise avoid the Windows
+command-line length and newline-parsing limits. ZCode's `-p` remains argv-only:
+Studio stages multiline Windows prompts or prompts approaching the escaped
+command-line limit in private files under Web UI state, passes them with
+`--attach`, and instructs the agent to read through EOF because native attachment
+previews can truncate. Large Unix prompts use the same fallback. Files are removed
+on process exit or launch failure. Model context limits and Studio's Socket.IO
+message-size limit remain independent of command-line transport.
+
+Focused tests exercise long Chinese/emoji prompts, CRLF, shell metacharacters,
+image-only turns, capability rejection, and prompt-file cleanup. Opt-in
+`tests/server/native-acp-image-real.test.ts` verified Qwen 0.24.7, Kimi 2.1.1,
+CodeBuddy 2.161.1, and Copilot 1.0.91 against isolated local model endpoints,
+including exact image bytes and the long prompt's final sentinel. These checks
+do not require real provider credentials. Windows launch cases are simulated
+on non-Windows hosts; they do not substitute for a Windows machine check.
+
+Native `/compact`, context snapshots, native settings editors, and Studio skills
+editors remain unavailable for these six agents. Native CLI errors, including
+required authentication and unsupported upstream image models, surface in chat.
 
 `config/agents.json` revision `2026-10-03.4` includes their public metadata and
 official product icons. Website

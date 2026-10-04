@@ -30,6 +30,7 @@ import {
   piModelSupportsThinking,
 } from '../../packages/server/src/modules/coding-agents/services/pi/thinking'
 import { codingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
+import { getCodingAgentDefinition } from '../../packages/server/src/modules/coding-agents/services'
 import { configureProfileConfig } from '../../packages/server/src/modules/studio/public/profile-config'
 import * as providerRuntime from '../../packages/server/src/modules/studio/public/provider-runtime'
 import { upsertCodingAgentMcpServer } from '../../packages/server/src/modules/coding-agents/services/mcp-manager'
@@ -3945,6 +3946,7 @@ describe('Antigravity scoped launch', () => {
 })
 
 it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('prepares %s with native auth and truthful global capabilities', async id => {
+  expect(getCodingAgentDefinition(id)?.capabilities?.images).toBe(true)
   const home = makeHome()
   const tokenFile = join(home, 'group-auth.json')
   const launch = await prepareCodingAgentLaunch(id, {

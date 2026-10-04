@@ -368,7 +368,7 @@ export interface CodingAgentRunStartResult extends CodingAgentLaunchResult {
 }
 
 const TOOL_DEFINITIONS: CodingAgentDefinition[] = [
-  ...NATIVE_CODING_AGENTS.map(({ acpArgs, docsUrl, ...agent }) => ({ ...agent, capabilities: { modes: nativeCodingAgentSupportsScoped(agent.id) ? ['scoped', 'global'] : ['global'], installation: agent.packageName ? 'npm' : 'manual', images: false, nativeCompact: false, automaticUpdates: Boolean(agent.packageName) } })),
+  ...NATIVE_CODING_AGENTS.map(({ acpArgs, docsUrl, ...agent }) => ({ ...agent, capabilities: { modes: nativeCodingAgentSupportsScoped(agent.id) ? ['scoped', 'global'] : ['global'], installation: agent.packageName ? 'npm' : 'manual', images: true, nativeCompact: false, automaticUpdates: Boolean(agent.packageName) } })),
   { id: 'antigravity', name: 'Antigravity', provider: 'Google', command: 'agy', packageName: '', capabilities: ANTIGRAVITY_CAPABILITIES },
   {
     id: 'claude-code',

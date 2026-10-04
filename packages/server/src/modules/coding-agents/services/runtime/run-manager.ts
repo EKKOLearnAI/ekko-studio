@@ -873,8 +873,6 @@ export class CodingAgentRunManager {
     const text = String(input || '').trim()
     const images = Array.isArray(options.images) ? options.images : []
     if (!text && images.length === 0) throw new Error('Input is required')
-    if (run.launch.agentId === 'antigravity' && images.length) throw Object.assign(new Error('Antigravity CLI image input is not supported; send a file path as text instead'), { status: 400 })
-    if (isNativeCodingAgent(run.launch.agentId) && images.length) throw Object.assign(new Error('This coding agent integration accepts text and file paths; image input is not supported'), { status: 400 })
     // Keep native metadata separate from launch configuration: global CLIs can
     // choose a different model each turn, including during a resumed session.
     if (!childIsRunning(run.currentChild) || (run.launch.agentId === 'pi' && !run.turnActive)) {
@@ -899,7 +897,7 @@ export class CodingAgentRunManager {
     this.emitTerminalStatus(run, 'Input sent to coding agent.')
     this.startWorkspaceRunDiff(run)
     if (isNativeCodingAgent(run.launch.agentId)) {
-      this.startNativeTurn(run, text, systemPrompt)
+      this.startNativeTurn(run, text, systemPrompt, images)
       return { runId: run.id, messageId }
     }
     if (run.launch.agentId === 'claude-code') {
@@ -2649,7 +2647,7 @@ export class CodingAgentRunManager {
     })
   }
 
-  private startNativeTurn(run: ManagedCodingAgentRun, input: string, systemPrompt: string) {
+  private startNativeTurn(run: ManagedCodingAgentRun, input: string, systemPrompt: string, images: CodingAgentImageInput[]) {
     startNativeChatTurn(run, input, systemPrompt, {
       spawn: spawnCodingAgentChild, isRunning: childIsRunning,
       terminate: terminateChildProcess, forceKill: forceKillChildProcess,
@@ -2660,7 +2658,7 @@ export class CodingAgentRunManager {
       toolStarted: item => this.handleCodexItemStarted(run, item), toolCompleted: item => this.handleCodexItemCompleted(run, item),
       completeAfterUsage: (event, payload) => this.emitAndMarkPrintChatRunCompletedAfterUsage(run, event, payload),
       complete: usage => this.completeClaudePrintTurn(run, usage), fail: message => this.failClaudePrintTurn(run, message),
-    })
+    }, images)
   }
 
   private startDshTurn(run: ManagedCodingAgentRun, input: string, systemPrompt: string, images: CodingAgentImageInput[]) {
@@ -3097,17 +3095,20 @@ export class CodingAgentRunManager {
         ? ['--session', run.launch.agentNativeSessionId]
         : []),
       ...images.flatMap(image => ['--file', image.path]),
-      // --file consumes an array; terminate options before the message.
-      '--',
-      input,
     ]
     const child = spawnCodingAgentChild(run.launch.command, args, {
       cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
       env: run.launch.mode === 'global'
         ? { ...process.env, ...(run.launch.env || {}) }
         : isolatedCodingAgentChildEnv(run.launch.env),
+      pipeStdin: true,
     })
     run.currentChild = child
+
+    child.stdin?.on('error', err => {
+      if (!run.printCompleted && !run.stoppedByUser) this.failClaudePrintTurn(run, childProcessErrorMessage(err, run.launch.agentId))
+      terminateChildProcess(child)
+    })
 
     let stdoutBuffer = ''
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -3140,6 +3141,7 @@ export class CodingAgentRunManager {
       if (code === 0) this.completeClaudePrintTurn(run)
       else this.failClaudePrintTurn(run, exitErrorMessage('OpenCode', code, run.currentChildStderr))
     })
+    child.stdin?.end(input || (images.length ? 'Inspect the attached images.' : ''))
   }
 
   private handleOpenCodeLine(run: ManagedCodingAgentRun, line: string) {

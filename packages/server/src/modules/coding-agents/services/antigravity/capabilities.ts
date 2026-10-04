@@ -1,4 +1,4 @@
-/** Explicit initial support boundary; do not infer features from CLI flags alone. */
+/** Studio integration support; images are opened through native viewing tools. */
 export const ANTIGRAVITY_CAPABILITIES = {
   modes: ['global', 'scoped'],
   installation: 'manual',
@@ -8,7 +8,7 @@ export const ANTIGRAVITY_CAPABILITIES = {
   tools: true,
   mcp: true,
   skills: true,
-  images: false,
+  images: true,
   nativeCompact: false,
   overflowRecovery: false,
   memoryExport: false,
