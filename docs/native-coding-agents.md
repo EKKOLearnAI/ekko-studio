@@ -62,7 +62,7 @@ Configuration references: [Qwen model providers](https://qwenlm.github.io/qwen-c
 | CodeBuddy | `npm install -g @tencent-ai/codebuddy-code` | `codebuddy --acp` |
 | Qoder | `npm install -g @qoder-ai/qodercli` | `qoder --acp` |
 | GitHub Copilot | `npm install -g @github/copilot` | `copilot --acp` |
-| ZCode | [Official desktop application or CLI build](https://github.com/zai-org/ZCode) | `zcode --output-format stream-json -p ...` |
+| ZCode | [Official desktop application or CLI build](https://zcode.z.ai/) | `zcode --output-format stream-json -p ...` |
 
 Studio manages npm installation, updates, and removal for the five public npm
 packages. ZCode requires manual installation. Studio prefers an existing

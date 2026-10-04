@@ -1,15 +1,24 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
-const agentLabels = ['Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor', 'Antigravity', 'Qwen Code', 'Kimi Code', 'CodeBuddy', 'Qoder', 'GitHub Copilot', 'ZCode']
+const agentLabels = ['Ekko', 'Hermes', 'Codex', 'Qwen Code']
 
 for (const mobile of [false, true]) {
-  test(`single-chat Agent order includes six native agents (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
+  test(`single-chat only lists installed Agents in catalog order (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 })
     await authenticate(page, TEST_ACCESS_KEY, 'research')
     await mockHermesApi(page)
     await mockChatSocket(page)
     await page.route('**/api/coding-agents', route => route.fulfill({ json: { tools: [{ id: 'qwen', installed: true }] } }))
+    await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+      revision: 1, updatedAt: new Date().toISOString(), agents: [
+        { id: 'hermes', installed: true, source: 'user-cli' },
+        { id: 'ekko-agent', installed: true, source: 'built-in' },
+        { id: 'claude-code', installed: false, source: 'not-installed' },
+        { id: 'codex', installed: true, source: 'user-cli' },
+        { id: 'qwen', installed: true, source: 'user-cli' },
+      ],
+    } }))
     await page.goto('/#/hermes/chat')
     if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()

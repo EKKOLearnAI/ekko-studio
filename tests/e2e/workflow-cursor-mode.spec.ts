@@ -34,7 +34,7 @@ for (const target of [
     const node = page.locator('.vue-flow__node[data-id="agent"]')
     await node.locator('.n-select').first().click()
     await expect.poll(async () => (await page.locator('.n-base-select-option__content:visible').allTextContents())
-      .map(label => label.split(' · ')[0])).toEqual(['Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor', 'Antigravity'])
+      .map(label => label.split(' · ')[0])).toEqual(['Ekko', 'Hermes', 'Codex', 'Cursor'])
     await page.getByText('Cursor', { exact: true }).last().click()
     await expect(node.locator('.n-select').first()).toContainText('Cursor')
     await expect.poll(() => api.requests.some(request => (

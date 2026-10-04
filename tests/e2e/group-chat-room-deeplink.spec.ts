@@ -2040,12 +2040,20 @@ test.describe('group chat room deep links', () => {
 })
 
 
-test('group-chat Agent picker follows the single-chat order', async ({ page }) => {
+test('group-chat Agent picker only lists installed Agents in catalog order', async ({ page }) => {
   await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  await page.route('**/api/agents/status', route => route.fulfill({ json: {
+    revision: 1, updatedAt: new Date().toISOString(), agents: [
+      { id: 'ekko-agent', installed: true, source: 'built-in', path: '', version: '' },
+      { id: 'claude-code', installed: false, source: 'not-installed', path: '', version: '' },
+      { id: 'codex', installed: true, source: 'user-cli', path: '/test/codex', version: '' },
+      { id: 'qwen', installed: true, source: 'user-cli', path: '/test/qwen', version: '' },
+    ],
+  } }))
   await page.locator('.agent-avatar-rail-add').click()
   const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
   await expect(drawer.locator('.agent-form-loading')).toBeHidden()
   await drawer.locator('.n-select').first().click()
   await expect.poll(async () => (await page.locator('.n-base-select-option__content:visible').allTextContents())
-    .map(label => label.split(' · ')[0])).toEqual(['Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor', 'Antigravity'])
+    .map(label => label.split(' · ')[0])).toEqual(['Ekko', 'Codex', 'Qwen Code'])
 })
