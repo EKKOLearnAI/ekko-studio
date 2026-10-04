@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
+import agentCatalog from '../../config/agents.json'
 
 function gate() {
   let release!: () => void
@@ -168,6 +169,47 @@ for (const entry of ['/hermes/chat', '/studio/agents']) {
       ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({ session_id: sessionId, agent_id: 'ekko-agent' })
     expect(api.unexpectedRequests).toEqual([])
   })
+}
+
+for (const agent of agentCatalog.agents) {
+  for (const mode of agent.modes) {
+    test(`${agent.name} ${mode} new chat skips history resume and starts its first run`, async ({ page }) => {
+      await authenticate(page, TEST_ACCESS_KEY, 'research')
+      const api = await mockHermesApi(page)
+      await mockChatSocket(page)
+      await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+        revision: 1,
+        updatedAt: new Date().toISOString(),
+        agents: agentCatalog.agents.map(item => ({
+          id: item.id, installed: true, source: item.kind === 'built-in' ? 'built-in' : 'user-cli',
+        })),
+      } }))
+      await page.goto('/#/hermes/chat')
+      await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+      const drawer = page.locator('.new-chat-drawer')
+      if (agent.id !== 'ekko-agent') {
+        await drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first().locator('.n-base-selection').click()
+        await page.locator('.n-base-select-option:visible').getByText(agent.name, { exact: true }).click()
+      }
+      if (mode === 'global' && agent.modes.includes('scoped')) await drawer.getByText('Global config', { exact: true }).click()
+      await drawer.getByRole('button', { name: 'Create', exact: true }).click()
+      await expect(page).toHaveURL(/#\/hermes\/session\//)
+      const sessionId = new URL(page.url()).hash.split('/').pop()!
+      expect(await page.evaluate(sid => (window as any).__PW_CHAT_SOCKET__?.emitted
+        ?.filter((item: any) => item.event === 'resume' && item.payload.session_id === sid) || [], sessionId)).toEqual([])
+      const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')
+      await expect(input).toBeVisible({ timeout: 2000 })
+      await input.fill('First message')
+      await page.getByRole('button', { name: 'Send', exact: true }).click()
+      await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted
+        ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({
+          session_id: sessionId,
+          ...(agent.kind === 'coding-agent' ? { coding_agent_id: agent.id, mode }
+            : agent.kind === 'built-in' ? { agent_id: agent.id } : { source: 'cli' }),
+        })
+      expect(api.unexpectedRequests).toEqual([])
+    })
+  }
 }
 
 for (const failure of ['not-installed', 'unavailable']) {

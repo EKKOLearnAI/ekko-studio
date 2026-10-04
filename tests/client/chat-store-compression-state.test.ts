@@ -64,6 +64,19 @@ vi.mock('@/utils/completion-sound', () => ({
 }))
 
 import { useChatStore, type Message, type Session } from '@/stores/hermes/chat'
+import agentCatalog from '../../config/agents.json'
+
+type NewChatOptions = NonNullable<Parameters<ReturnType<typeof useChatStore>['newChat']>[0]>
+const newChatCases = agentCatalog.agents.flatMap(agent => agent.modes.map(mode => ({
+  name: agent.name,
+  mode,
+  options: {
+    agent: agent.sessionId as NewChatOptions['agent'],
+    codingAgentId: agent.kind === 'hermes' ? undefined : agent.id as NewChatOptions['codingAgentId'],
+    codingAgentMode: mode as NewChatOptions['codingAgentMode'],
+    source: agent.kind === 'hermes' ? 'cli' : agent.kind === 'built-in' ? 'builtin_agent' : 'coding_agent',
+  } satisfies NewChatOptions,
+})))
 
 function makeSession(id: string): Session {
   return {
@@ -125,11 +138,7 @@ describe('chat store compression state', () => {
     }))
   })
 
-  it.each([
-    { agent: 'hermes', source: 'cli' },
-    { agent: 'ekko-agent', source: 'builtin_agent' },
-    { agent: 'codex', source: 'coding_agent' },
-  ] as const)('opens a new $agent chat without resuming an unpersisted session', async options => {
+  it.each(newChatCases)('opens a new $name $mode chat without resuming an unpersisted session', async ({ options, mode }) => {
     const store = useChatStore()
     const session = store.newChat({ ...options, workspace: '/workspace/draft', model: 'chosen-model', provider: 'chosen-provider' })
 
@@ -138,7 +147,7 @@ describe('chat store compression state', () => {
     expect(chatApi.resumeSession).not.toHaveBeenCalled()
     expect(session.isLocalOnly).toBe(true)
     expect(session.workspace).toBe('/workspace/draft')
-    expect(session.model).toBe('chosen-model')
+    expect(session.model).toBe(mode === 'global' ? undefined : 'chosen-model')
 
     await expect(store.switchSession(session.id)).resolves.toBe(true)
     expect(chatApi.resumeSession).not.toHaveBeenCalled()
