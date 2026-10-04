@@ -23,6 +23,7 @@ for (const mobile of [false, true]) {
     if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()
     const drawer = page.locator('.new-chat-drawer')
+    await expect(drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first()).toContainText('Ekko')
     await drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first().locator('.n-base-selection').click()
     await expect(page.locator('.n-base-select-option__content:visible')).toHaveText(agentLabels)
     await page.locator('.n-base-select-option:visible').filter({ hasText: /^Qwen Code$/ }).click()
