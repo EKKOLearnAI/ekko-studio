@@ -97,7 +97,7 @@ describe('ChatPanel session clicks', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
 
     expect(AGENT_OPTIONS).toContainEqual({ label: 'Ekko', value: 'ekko-agent' })
-    expect(source).toContain('const newChatAgentOptions = computed(() => AGENT_OPTIONS.map(')
+    expect(source).toContain('const newChatAgentOptions = computed(() => AGENT_OPTIONS.filter(')
     expect(source).not.toContain('showEkkoAgentEntry')
     expect(source).not.toContain('import.meta.env.DEV')
   })

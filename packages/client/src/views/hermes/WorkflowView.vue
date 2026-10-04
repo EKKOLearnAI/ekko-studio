@@ -427,14 +427,9 @@ let workflowBudgetClock: number | null = null
 
 const workflowAgentDefinitions = AGENT_OPTIONS
 
-const agentOptions = computed<WorkflowSelectOption[]>(() => workflowAgentDefinitions.map((option) => {
-  const disabled = !isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
-  return {
-    ...option,
-    disabled,
-    label: disabled ? `${option.label} · ${t('codingAgents.notInstalled')}` : option.label,
-  }
-}))
+const agentOptions = computed<WorkflowSelectOption[]>(() => workflowAgentDefinitions.filter(option =>
+  isAgentStatusAvailable(agentStatusSnapshot.value, option.value),
+))
 
 const firstAvailableWorkflowAgent = computed(() =>
   agentOptions.value.find(option => !option.disabled)?.value || null,

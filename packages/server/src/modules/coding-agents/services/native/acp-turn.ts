@@ -1,5 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
+import { readFileSync } from 'node:fs'
+import type { CodingAgentImageInput } from '../../protocol/types'
 
 interface Pending {
   resolve(value: any): void
@@ -85,12 +87,15 @@ export class NativeAcpTurn {
     else pending.resolve(message.result)
   }
 
-  async prompt(input: { cwd: string; text: string; nativeSessionId?: string; mcpServers: object[] }): Promise<string> {
+  async prompt(input: { cwd: string; text: string; images?: CodingAgentImageInput[]; nativeSessionId?: string; mcpServers: object[] }): Promise<string> {
     const initialized = await this.request('initialize', {
       protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'ekko-studio', version: '1.0.0' },
     })
     if (initialized?.protocolVersion !== 1) throw new Error('Unsupported ACP protocol version')
     const capabilities = initialized.agentCapabilities || {}
+    if (input.images?.length && capabilities.promptCapabilities?.image !== true) {
+      throw new Error('This CLI does not advertise ACP image input support; update the CLI or choose an image-capable model')
+    }
     let method = 'session/new'
     if (input.nativeSessionId) {
       if (capabilities.sessionCapabilities?.resume) method = 'session/resume'
@@ -106,9 +111,12 @@ export class NativeAcpTurn {
     this.sessionId = session?.sessionId || input.nativeSessionId
     if (!this.sessionId || typeof this.sessionId !== 'string') throw new Error('ACP returned no session ID')
     this.callbacks.session(this.sessionId)
-    const result = await this.request('session/prompt', {
-      sessionId: this.sessionId, prompt: [{ type: 'text', text: input.text }],
-    }, 0)
+    const prompt: any[] = input.text ? [{ type: 'text', text: input.text }] : []
+    for (const image of input.images || []) prompt.push({
+      type: 'image', mimeType: image.mediaType === 'image/jpg' ? 'image/jpeg' : image.mediaType || 'image/png',
+      data: readFileSync(image.path).toString('base64'),
+    })
+    const result = await this.request('session/prompt', { sessionId: this.sessionId, prompt }, 0)
     this.child.stdin?.end()
     return String(result?.stopReason || 'unknown')
   }

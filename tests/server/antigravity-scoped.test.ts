@@ -32,10 +32,15 @@ describe('Antigravity scoped provider bridge', () => {
     const usage = vi.spyOn(codingAgentRunManager, 'handleProxyUsageEvent').mockImplementation(() => {})
     const lifecycle = vi.spyOn(codingAgentRunManager, 'handleResponseEvent')
     try {
+      const imageBody = { ...body, contents: [
+        ...body.contents.slice(0, -1),
+        { role: 'user', parts: [{ functionResponse: { name: 'read', response: { output: 'opened image' },
+          parts: [{ inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }] } }] },
+      ] }
       const target = registerCodexProxyTarget({ profile: 'test', provider: 'external', model: 'chosen-model', baseUrl: 'https://example.test/v1', apiKey: 'upstream-secret', apiMode, agentId: 'antigravity', agentSessionId: 's' })
       for (const operation of ['gemini-title:streamGenerateContent', 'gemini-main:streamGenerateContent']) {
         const ctx: any = { params: { key: target.routeKey, operation }, path: '/api/codex-proxy/key/gemini/v1beta/models/'+operation,
-          get: (name: string) => name === 'x-goog-api-key' ? target.token : '', request: { body }, res: { once: vi.fn(), off: vi.fn(), writableEnded: false }, set: vi.fn() }
+          get: (name: string) => name === 'x-goog-api-key' ? target.token : '', request: { body: imageBody }, res: { once: vi.fn(), off: vi.fn(), writableEnded: false }, set: vi.fn() }
         await antigravityProxyGenerate(ctx)
         expect(ctx.body?.error).toBeUndefined()
         expect(ctx.status).toBeUndefined()
@@ -44,6 +49,8 @@ describe('Antigravity scoped provider bridge', () => {
       }
       const init: any = fetch.mock.calls[0][1]
       expect(JSON.parse(init.body).model).toBe('chosen-model')
+      expect(init.body).toContain('aW1hZ2U=')
+      expect(init.body).toContain('opened image')
       expect(init.headers.Authorization).toBe('Bearer upstream-secret')
       expect(usage).toHaveBeenCalledTimes(2)
       expect(lifecycle).not.toHaveBeenCalled()

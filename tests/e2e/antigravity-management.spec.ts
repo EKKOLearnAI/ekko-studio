@@ -27,6 +27,12 @@ test('Antigravity picker offers scoped provider selection and global config', as
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await mockHermesApi(page)
   await mockChatSocket(page)
+  await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+    revision: 1, updatedAt: new Date().toISOString(), agents: [
+      { id: 'ekko-agent', installed: true, source: 'built-in' },
+      { id: 'antigravity', installed: true, source: 'user-cli' },
+    ],
+  } }))
   await page.goto('/#/hermes/chat')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const drawer = page.locator('.new-chat-drawer')

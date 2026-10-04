@@ -45,6 +45,12 @@ const AGENT_STATUS_ALIASES: Record<string, AgentStatusId> = {
   dsh: 'dsh',
   cursor: 'cursor',
   antigravity: 'antigravity',
+  qwen: 'qwen',
+  kimi: 'kimi',
+  codebuddy: 'codebuddy',
+  qoder: 'qoder',
+  copilot: 'copilot',
+  zcode: 'zcode',
 }
 
 export function resolveAgentStatusId(agent: string): AgentStatusId | null {

@@ -255,17 +255,12 @@ type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | '
 
 const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
 
-const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.map((option) => {
-    const disabled = !isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
-    return {
-        ...option,
-        disabled,
-        label: disabled ? `${option.label} · ${t('codingAgents.notInstalled')}` : option.label,
-    }
-}))
+const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.filter(option =>
+    isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
+))
 
 const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
-    groupAgentTypeOptions.value.find(option => !option.disabled)?.value || null
+    groupAgentTypeOptions.value[0]?.value || null
 )
 const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
