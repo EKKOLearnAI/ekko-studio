@@ -165,6 +165,10 @@
       "description": "Profile-scoped TypeSafe JEV configuration and shared Choice, Score, Noul evaluations"
     },
     {
+      "name": "Context Manager",
+      "description": "Profile-scoped native/bili selection, compatibility, managed proxy lifecycle and idle Hermes worker restart"
+    },
+    {
       "name": "Media",
       "description": "Media generation endpoints"
     },
@@ -13341,6 +13345,561 @@
         "x-session-share-permission": "input"
       }
     },
+    "/api/studio/context-manager/health": {
+      "get": {
+        "tags": [
+          "Context Manager"
+        ],
+        "summary": "Get health",
+        "description": "Reports proxy reachability separately from protocol compatibility, required public fork support, runtime version, worker state and lifecycle ownership. Reachability alone does not imply compatibility.",
+        "operationId": "health",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Concurrent operation, external process ownership, running sessions or confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Invalid installation, settings storage or operation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Managed package installation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker, Node/npm, proxy readiness or port ownership unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ]
+      }
+    },
+    "/api/studio/context-manager/lifecycle/{action}": {
+      "post": {
+        "tags": [
+          "Context Manager"
+        ],
+        "summary": "Create :action",
+        "description": "Installs or operates the Profile-managed proxy. External processes are never stopped or upgraded; stop a managed proxy before upgrading. Install can prepare a release without taking ownership of an external process.",
+        "operationId": "lifecycle",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "Concurrent operation, external process ownership, running sessions or confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Invalid installation, settings storage or operation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Managed package installation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker, Node/npm, proxy readiness or port ownership unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "install",
+                "start",
+                "stop",
+                "upgrade"
+              ]
+            }
+          },
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "manager"
+                ],
+                "properties": {
+                  "manager": {
+                    "type": "string",
+                    "enum": [
+                      "hermes",
+                      "ekko"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/context-manager/settings": {
+      "get": {
+        "tags": [
+          "Context Manager"
+        ],
+        "summary": "Get settings",
+        "description": "GET /api/studio/context-manager/settings",
+        "operationId": "getSettings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Profile-scoped context manager settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Concurrent operation, external process ownership, running sessions or confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Invalid installation, settings storage or operation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Managed package installation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker, Node/npm, proxy readiness or port ownership unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Context Manager"
+        ],
+        "summary": "Update settings",
+        "description": "PUT /api/studio/context-manager/settings",
+        "operationId": "updateSettings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Profile-scoped context manager settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "Concurrent operation, external process ownership, running sessions or confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Invalid installation, settings storage or operation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Managed package installation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker, Node/npm, proxy readiness or port ownership unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "hermes": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "manager"
+                    ],
+                    "properties": {
+                      "manager": {
+                        "type": "string",
+                        "enum": [
+                          "native",
+                          "bili"
+                        ]
+                      }
+                    }
+                  },
+                  "ekko": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "manager"
+                    ],
+                    "properties": {
+                      "manager": {
+                        "type": "string",
+                        "enum": [
+                          "native",
+                          "bili"
+                        ]
+                      }
+                    }
+                  },
+                  "proxyUrl": {
+                    "type": "string",
+                    "format": "uri",
+                    "maxLength": 2048,
+                    "description": "HTTP(S) loopback origin only; no credentials, path, query or fragment."
+                  },
+                  "allowNativeFallback": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ]
+      }
+    },
+    "/api/studio/context-manager/worker/restart": {
+      "post": {
+        "tags": [
+          "Context Manager"
+        ],
+        "summary": "Create restart",
+        "description": "Restarts only the selected idle Hermes worker after verifying no sessions are running. Rejects missing confirmation, Profile mismatch or unverifiable state.",
+        "operationId": "restartWorker",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or missing Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "Concurrent operation, external process ownership, running sessions or confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Invalid installation, settings storage or operation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Managed package installation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker, Node/npm, proxy readiness or port ownership unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextManagerError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "profile",
+                  "confirm"
+                ],
+                "properties": {
+                  "profile": {
+                    "type": "string",
+                    "description": "Must exactly match the selected authorized Profile."
+                  },
+                  "confirm": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Hermes-Profile",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorized Profile; never changes the global active Profile."
+          }
+        ]
+      }
+    },
     "/api/studio/files/copy": {
       "post": {
         "tags": [
@@ -25415,6 +25974,76 @@
             "type": "string",
             "pattern": "^jev_",
             "description": "Stable JEV error code used for client-side translation; middleware errors may omit it."
+          }
+        }
+      },
+      "ContextManagerSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hermes",
+          "ekko",
+          "proxyUrl",
+          "allowNativeFallback"
+        ],
+        "properties": {
+          "hermes": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "manager"
+            ],
+            "properties": {
+              "manager": {
+                "type": "string",
+                "enum": [
+                  "native",
+                  "bili"
+                ]
+              }
+            }
+          },
+          "ekko": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "manager"
+            ],
+            "properties": {
+              "manager": {
+                "type": "string",
+                "enum": [
+                  "native",
+                  "bili"
+                ]
+              }
+            }
+          },
+          "proxyUrl": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "description": "HTTP(S) loopback origin only; no credentials, path, query or fragment."
+          },
+          "allowNativeFallback": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "ContextManagerError": {
+        "type": "object",
+        "required": [
+          "error",
+          "code"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^context_manager_"
           }
         }
       }
