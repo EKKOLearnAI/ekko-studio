@@ -194,8 +194,8 @@ describe('loadSessionStateFromDb', () => {
     })
   })
 
-  it('restores Cursor native usage without turning aggregate consumption into context occupancy', async () => {
-    getSessionMock.mockReturnValue({ id: 'session-1', agent: 'cursor', source: 'coding_agent' })
+  it.each(['cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('restores %s native usage without turning aggregate consumption into context occupancy', async agent => {
+    getSessionMock.mockReturnValue({ id: 'session-1', agent, source: 'coding_agent' })
     getRecordedUsageTotalsMock.mockReturnValue({ inputTokens: 24_003, outputTokens: 474, cacheReadTokens: 20_736, cacheWriteTokens: 0 })
     getUsageMock.mockReturnValue({ input_tokens: 24_003, output_tokens: 474, cache_read_tokens: 20_736 })
     const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')

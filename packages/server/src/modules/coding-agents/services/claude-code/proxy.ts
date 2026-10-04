@@ -1,4 +1,5 @@
 import { Readable } from 'stream'
+import { isNativeCodingAgent } from '../../../studio/contracts/agents/native-coding-agents'
 import type { Context } from 'koa'
 import { config } from '../../../studio/public/config'
 import {
@@ -361,7 +362,7 @@ function observeResponsesEvents(target: ClaudeCodeProxyTarget, events: AsyncIter
     try {
       for await (const event of events) {
         codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event, (performance.now() - startedAt) / 1000)
-        codingAgentRunManager.handleResponseEvent(target.agentSessionId, event)
+        if (!isNativeCodingAgent(target.agentId)) codingAgentRunManager.handleResponseEvent(target.agentSessionId, event)
       }
     } catch (err) {
       loggerLikeWarn(err, '[claude-code-proxy] failed to observe provider stream')

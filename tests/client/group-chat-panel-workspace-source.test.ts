@@ -18,7 +18,7 @@ describe('GroupChatPanel workspace save handling', () => {
       expect(source).toMatch(/selectedAgentType\.value === 'pi'[\s\S]*?\\? 'pi'/)
       expect(source).toContain("selectedAgentType.value === 'grok'")
       expect(source).toContain("selectedAgentType.value === 'opencode'")
-      expect(source).toContain("selectedAgentType.value === 'cursor'")
+      expect(source).toContain("isGlobalOnlyCodingAgent(selectedAgentType.value)")
     }
     expect(panel).toContain('priorAgentMode.value = storedPriorAgentMode(agent.priorAgentMode)')
     expect(panel).toContain('priorAgentMode: priorAgentMode.value,')
@@ -562,7 +562,7 @@ describe('GroupChatPanel workspace save handling', () => {
     expect(source).toContain('normalizeCodingAgentApiMode(')
     expect(source).toContain("v-if=\"selectedAgentType !== 'hermes' && !usesGlobalAgentMode\"")
     for (const modelSource of [source, linkView]) {
-      expect(modelSource).toContain("const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(selectedAgentType.value))")
+      expect(modelSource).toContain("const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))")
       expect(modelSource).toContain("v-if=\"!usesGlobalAgentMode\"")
     }
     expect(source).toContain('@update:value="handleAgentModeChange"')

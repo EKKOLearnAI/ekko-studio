@@ -156,13 +156,16 @@ describe('branch session command', () => {
     }))
   })
 
-  it('rejects /fork for coding agent sessions', async () => {
+  it.each([
+    { source: 'coding_agent', agent: 'codex' },
+    ...['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].map(agent => ({ source: 'cli', agent })),
+  ])('rejects /fork for $agent coding agent sessions', async identity => {
     const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
     const { nsp, socket, namespaceEmit } = makeSocketHarness()
     const sessionMap = new Map<string, any>([
       ['session-1', { messages: [], isWorking: false, events: [], queue: [] }],
     ])
-    getSessionMock.mockReturnValue(makeParentSession({ source: 'coding_agent', agent: 'codex' }))
+    getSessionMock.mockReturnValue(makeParentSession(identity))
 
     await handleSessionCommand('session-1', parseSessionCommand('/fork side path')!, makeCtx(sessionMap, nsp, socket))
 

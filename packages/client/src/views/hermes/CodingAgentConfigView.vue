@@ -41,10 +41,16 @@ const settingsKeys: Record<CodingAgentId, Partial<Record<SettingsEditor, string>
   opencode: { preference: 'memory', configuration: 'settings' },
   dsh: { preference: 'memory', configuration: 'settings' },
   cursor: { configuration: 'settings' },
+  qwen: {},
+  kimi: {},
+  codebuddy: {},
+  qoder: {},
+  copilot: {},
+  zcode: {},
   antigravity: { preference: 'memory', configuration: 'settings' },
 }
 
-const skillTargets: Record<CodingAgentId, SkillTarget> = {
+const skillTargets: Partial<Record<CodingAgentId, SkillTarget>> = {
   'claude-code': 'claude',
   codex: 'codex',
   pi: 'pi',
@@ -67,7 +73,7 @@ const validAgentId = computed<CodingAgentId | null>(() =>
   agentId.value in settingsKeys ? agentId.value as CodingAgentId : null,
 )
 const skillTarget = computed<SkillTarget>(() =>
-  validAgentId.value ? skillTargets[validAgentId.value] : 'hermes',
+  validAgentId.value ? skillTargets[validAgentId.value] || 'hermes' : 'hermes',
 )
 const activeEditorKinds = computed(() => editorKinds.filter(kind =>
   validAgentId.value && settingsKeys[validAgentId.value][kind],

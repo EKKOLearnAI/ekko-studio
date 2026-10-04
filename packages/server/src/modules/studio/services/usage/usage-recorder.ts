@@ -22,7 +22,7 @@ export interface RecordSessionUsageInput {
   /** Model request duration in seconds, excluding tool execution. */
   apiDuration?: number
   source: 'hermes' | 'coding_agent' | 'ekko_agent'
-  agent: 'hermes' | 'claude_code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'ekko_agent'
+  agent: 'hermes' | 'claude_code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode' | 'ekko_agent'
   profile?: string | null
   model?: string | null
   provider?: string | null

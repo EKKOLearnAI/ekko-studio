@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -131,7 +132,7 @@ function getAgentModelGroups(profile: string) {
             ? 'pi'
             : selectedAgentType.value === 'grok'
               ? 'grok'
-            : (selectedAgentType.value === 'cursor' || selectedAgentType.value === 'antigravity')
+            : (isGlobalOnlyCodingAgent(selectedAgentType.value) || (selectedAgentType.value === 'antigravity' || isNativeCodingAgent(selectedAgentType.value)))
               ? 'cursor'
             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
               ? 'opencode'
@@ -182,7 +183,7 @@ const agentReasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
   { label: t('chat.reasoningEffort.options.max'), value: 'max' },
 ])
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },

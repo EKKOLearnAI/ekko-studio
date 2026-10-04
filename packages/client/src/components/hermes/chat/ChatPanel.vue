@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import { usePageLoadingTask } from '@/composables/usePageLoading'
@@ -993,7 +994,7 @@ function effectiveNewChatMode(
   requestedMode: typeof newChatAgentMode.value,
 ) {
   if (agent === "ekko-agent") return "scoped";
-  if (agent === "cursor") return "global";
+  if (isGlobalOnlyCodingAgent(agent)) return "global";
   return requestedMode;
 }
 
@@ -1093,7 +1094,7 @@ const selectedNewChatProviderGroup = computed(() =>
 );
 
 const isNewChatCodingAgent = computed(() => newChatAgent.value !== "hermes");
-const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || newChatAgent.value === "antigravity" || newChatAgent.value === "cursor" || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
+const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || (newChatAgent.value === "antigravity" || isNativeCodingAgent(newChatAgent.value)) || isGlobalOnlyCodingAgent(newChatAgent.value) || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
 const effectiveNewChatAgentMode = computed(() =>
   effectiveNewChatMode(newChatAgent.value, newChatAgentMode.value),
 );
@@ -1204,6 +1205,7 @@ async function openNewChatModal() {
   showBatchDeleteConfirm.value = false;
   newChatAgentPreset.value = undefined;
   newChatPresetReady.value = false;
+  if (isMobile.value) showSessions.value = false;
   showNewChatModal.value = true;
   newChatLoading.value = true;
   newChatCategoryId.value = null;
@@ -1305,6 +1307,7 @@ async function confirmNewChat() {
         ? "grok"
       : newChatAgent.value === "dsh" ? "dsh" : newChatAgent.value === "opencode"
         ? "opencode"
+      : isNativeCodingAgent(newChatAgent.value) ? newChatAgent.value
       : newChatAgent.value === "antigravity" ? "antigravity" : newChatAgent.value === "cursor"
         ? "cursor"
       : newChatAgent.value === "ekko-agent"
@@ -2066,6 +2069,7 @@ const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>
         ? "grok"
       : sessionModelSession.value?.agent === "dsh" ? "dsh" : sessionModelSession.value?.agent === "opencode"
         ? "opencode"
+      : isNativeCodingAgent(sessionModelSession.value?.agent) ? sessionModelSession.value?.agent
       : sessionModelSession.value?.agent === "antigravity" ? "antigravity" : sessionModelSession.value?.agent === "cursor"
         ? "cursor"
       : sessionModelSession.value?.agent === "ekko-agent"
@@ -2880,6 +2884,7 @@ async function handleSessionModelCustomSubmit() {
             <NSelect
               v-model:value="newChatAgent"
               :options="newChatAgentOptions"
+                :virtual-scroll="false"
               :disabled="newChatLoading"
             />
           </label>
@@ -2887,7 +2892,7 @@ async function handleSessionModelCustomSubmit() {
             v-if="showNewChatModal && newChatAgent === 'dsh'"
             v-model="newChatAgentPreset" :disabled="newChatLoading" @valid="newChatPresetReady = $event"
           />
-          <label v-if="isNewChatExternalCodingAgent && newChatAgent !== 'cursor'" class="new-chat-field">
+          <label v-if="isNewChatExternalCodingAgent && !isGlobalOnlyCodingAgent(newChatAgent)" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.launchModeScope") }}</span>
             <NRadioGroup v-model:value="newChatAgentMode" name="new-chat-coding-agent-mode">
               <NRadioButton

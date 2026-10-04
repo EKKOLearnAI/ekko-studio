@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Release PageLoading timers and native-installation listeners before jsdom closes.
+enableAutoUnmount(afterEach)
 
 const api = vi.hoisted(() => ({
   checkCodingAgentUpdate: vi.fn(),
@@ -286,7 +289,7 @@ describe('Agent Manager page', () => {
     expect(wrapper.get('[data-testid="agent-card-codex"]').text()).toContain('agentManager.codingAgentDescription')
     expect(wrapper.get('[data-testid="agent-card-codex"]').text()).toContain('codingAgents.installNow')
     expect(wrapper.get('.coding-agent-grid').findAll('.agent-card').map(card => card.attributes('data-testid')))
-      .toEqual(['agent-card-ekko', 'agent-card-hermes', 'agent-card-claude-code', 'agent-card-codex', 'agent-card-pi', 'agent-card-grok', 'agent-card-opencode', 'agent-card-dsh', 'agent-card-cursor', 'agent-card-antigravity'])
+      .toEqual(['agent-card-ekko', 'agent-card-hermes', 'agent-card-claude-code', 'agent-card-codex', 'agent-card-pi', 'agent-card-grok', 'agent-card-opencode', 'agent-card-dsh', 'agent-card-cursor', 'agent-card-antigravity', 'agent-card-qwen', 'agent-card-kimi', 'agent-card-codebuddy', 'agent-card-qoder', 'agent-card-copilot', 'agent-card-zcode'])
     expect(wrapper.find('[data-testid="agent-settings-cursor"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="agent-settings-claude-code"]').exists()).toBe(true)
   })

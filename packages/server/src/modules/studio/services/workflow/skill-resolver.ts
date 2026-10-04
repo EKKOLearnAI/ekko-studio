@@ -1,3 +1,4 @@
+import { isNativeCodingAgent } from '../../contracts/agents/native-coding-agents'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { readdir, realpath } from 'fs/promises'
@@ -14,7 +15,7 @@ export interface ResolvedWorkflowSkill {
 }
 
 function targetForAgent(agent?: string | null): WorkflowSkillTarget {
-  if (agent === 'antigravity') return 'antigravity'
+  if ((agent === 'antigravity' || isNativeCodingAgent(agent))) return 'antigravity'
   if (agent === 'cursor') return 'cursor'
   if (agent === 'claude-code') return 'claude'
   if (agent === 'codex') return 'codex'
@@ -91,7 +92,7 @@ async function configuredHermesSkillRoots(profile: string): Promise<string[]> {
 async function skillRootsForTarget(target: WorkflowSkillTarget, profile: string): Promise<string[]> {
   if (target === 'hermes') return configuredHermesSkillRoots(profile)
   const globalHome = getCodingAgentGlobalHome()
-  if (target === 'antigravity') return [join(globalHome, '.gemini', 'config', 'skills'), join(globalHome, '.agents', 'skills')]
+  if ((target === 'antigravity' || isNativeCodingAgent(target))) return [join(globalHome, '.gemini', 'config', 'skills'), join(globalHome, '.agents', 'skills')]
   if (target === 'cursor') return [join(globalHome, '.cursor', 'skills'), join(globalHome, '.agents', 'skills')]
   if (target === 'claude') return [join(globalHome, '.claude', 'skills')]
   if (target === 'pi') return [join(globalHome, '.agents', 'skills')]

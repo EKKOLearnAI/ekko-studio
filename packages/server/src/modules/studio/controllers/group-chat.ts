@@ -1,3 +1,4 @@
+import { isGlobalOnlyCodingAgent } from '../contracts/agents/native-coding-agents'
 import { randomBytes } from 'node:crypto'
 import {
     GROUP_CHAT_MESSAGE_WINDOW,
@@ -105,7 +106,7 @@ function contentPreview(content: unknown): string {
 
 type AgentInput = {
     presetId?: string
-    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
+    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     agentMode?: 'scoped' | 'global'
     priorAgentMode?: 'scoped' | 'global' | ''
     profile: string
@@ -135,9 +136,9 @@ type RoomSummaryInput = {
 }
 
 const GROUP_AGENT_REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-const GROUP_AGENT_TYPES = new Set(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'])
+const GROUP_AGENT_TYPES = new Set(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])
 const GROUP_AGENT_API_MODES = new Set(['chat_completions', 'codex_responses', 'anthropic_messages'])
-const GLOBAL_MODE_GROUP_AGENTS = new Set(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'])
+const GLOBAL_MODE_GROUP_AGENTS = new Set(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])
 const GROUP_AGENT_AVATAR_MAX_LENGTH = 1_500_000
 
 function normalizeRoomAgentAvatar(value: unknown): string {
@@ -312,7 +313,7 @@ async function connectAndPersistRoomAgent(server: GroupChatServer, roomId: strin
         throw new Error('Invalid agentMode')
     }
     const profile = input.profile.trim()
-    const agentMode = agent === 'cursor' ? 'global' : input.agentMode === 'global' ? 'global' : 'scoped'
+    const agentMode = isGlobalOnlyCodingAgent(agent) ? 'global' : input.agentMode === 'global' ? 'global' : 'scoped'
     if (agentMode === 'global' && !GLOBAL_MODE_GROUP_AGENTS.has(agent || '')) {
         throw new Error('Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor')
     }
@@ -372,7 +373,7 @@ export async function createRoom(ctx: any) {
         inviteCode?: string
         agents?: {
             presetId?: string
-            agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
+            agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
             agentMode?: 'scoped' | 'global'
             profile: string
             provider?: string
@@ -761,7 +762,7 @@ export async function addRoomAgent(ctx: any) {
     }
     const normalizedProfile = typeof profile === 'string' ? profile.trim() : ''
     const normalizedAgent = typeof agent === 'string' ? agent.trim() : 'hermes'
-    const normalizedAgentMode = normalizedAgent === 'cursor' || agentMode === 'global' ? 'global' : 'scoped'
+    const normalizedAgentMode = isGlobalOnlyCodingAgent(normalizedAgent) || agentMode === 'global' ? 'global' : 'scoped'
     const normalizedProvider = normalizedAgentMode === 'global' ? '' : typeof provider === 'string' ? provider.trim() : ''
     const normalizedModel = normalizedAgentMode === 'global' ? '' : typeof model === 'string' ? model.trim() : ''
     const normalizedApiMode = normalizedAgent === 'hermes' || normalizedAgentMode === 'global'
@@ -882,7 +883,7 @@ export async function updateRoomAgent(ctx: any) {
     }
     const normalizedProfile = typeof profile === 'string' ? profile.trim() : ''
     const normalizedAgent = typeof agent === 'string' ? agent.trim() : 'hermes'
-    const normalizedAgentMode = normalizedAgent === 'cursor' || agentMode === 'global' ? 'global' : 'scoped'
+    const normalizedAgentMode = isGlobalOnlyCodingAgent(normalizedAgent) || agentMode === 'global' ? 'global' : 'scoped'
     const normalizedProvider = normalizedAgentMode === 'global' ? '' : typeof provider === 'string' ? provider.trim() : ''
     const normalizedModel = normalizedAgentMode === 'global' ? '' : typeof model === 'string' ? model.trim() : ''
     const normalizedApiMode = normalizedAgent === 'hermes' || normalizedAgentMode === 'global'

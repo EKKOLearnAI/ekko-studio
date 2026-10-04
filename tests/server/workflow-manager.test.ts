@@ -186,6 +186,17 @@ describe('workflow manager', () => {
     expect(workflowNodeRequiresApproval({ data: {} })).toBe(false)
   })
 
+  it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('preserves %s workflow identity and scoped model when supported', async agent => {
+    const { normalizeWorkflowNode, resolveWorkflowNodeRunTarget } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    const normalized = normalizeWorkflowNode({ id: agent, type: 'agent', data: {
+      agent, agentMode: 'scoped', provider: 'custom:test', model: 'test-model', apiMode: 'chat_completions',
+    } })!
+    expect(normalized.data).toMatchObject(agent === 'qoder' ? { agent, agentMode: 'global', provider: '', model: '', apiMode: '' } : { agent, agentMode: 'scoped', provider: 'custom:test', model: 'test-model', apiMode: 'chat_completions' })
+    expect(resolveWorkflowNodeRunTarget(normalized.data.agent)).toEqual({
+      type: 'workflow', source: 'workflow', agent, codingAgentId: agent,
+    })
+  })
+
   it('rejects unsupported node types and agent runtimes instead of silently falling back to Hermes', async () => {
     const { normalizeWorkflowNode } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     expect(() => normalizeWorkflowNode({ id: 'shell', type: 'shell', data: { agent: 'hermes' } })).toThrow('workflow node shell must be an Agent node')

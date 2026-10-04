@@ -25,6 +25,13 @@ describe('Agent status registry', () => {
       'dsh',
       'cursor',
       'antigravity',
+      'qwen',
+      'kimi',
+      'codebuddy',
+      'qoder',
+      'copilot',
+      'zcode',
+
     ])
     expect(snapshot.agents.find(agent => agent.id === 'ekko-agent')).toMatchObject({
       installed: true,

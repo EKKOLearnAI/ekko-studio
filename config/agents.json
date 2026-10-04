@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": "2026-10-03.1",
+  "revision": "2026-10-03.4",
   "agents": [
     {
       "id": "hermes",
@@ -293,6 +293,173 @@
         "mcp": true,
         "settings": "settings",
         "memory": "memory"
+      },
+      "capabilities": {
+        "context": false,
+        "compact": false,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "qwen",
+      "name": "Qwen Code",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "qwen",
+      "groupId": "qwen",
+      "icon": "https://ekkostudio.xyz/coding-agents/qwen-logo.svg",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "docsUrl": "https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsWritable": false,
+        "mcp": true
+      },
+      "capabilities": {
+        "context": false,
+        "compact": false,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "kimi",
+      "name": "Kimi Code",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "kimi",
+      "groupId": "kimi",
+      "icon": "https://ekkostudio.xyz/coding-agents/kimi-logo.png",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "docsUrl": "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsWritable": false,
+        "mcp": true
+      },
+      "capabilities": {
+        "context": false,
+        "compact": false,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "codebuddy",
+      "name": "CodeBuddy",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "codebuddy",
+      "groupId": "codebuddy",
+      "icon": "https://ekkostudio.xyz/coding-agents/codebuddy-logo.svg",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "docsUrl": "https://www.codebuddy.ai/docs/cli/README",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsWritable": false,
+        "mcp": true
+      },
+      "capabilities": {
+        "context": false,
+        "compact": false,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "qoder",
+      "name": "Qoder",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "qoder",
+      "groupId": "qoder",
+      "icon": "https://ekkostudio.xyz/coding-agents/qoder-logo.svg",
+      "modes": [
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "docsUrl": "https://docs.qoder.com/cli/installation",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsWritable": false,
+        "mcp": true
+      },
+      "capabilities": {
+        "context": false,
+        "compact": false,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "copilot",
+      "name": "GitHub Copilot",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "copilot",
+      "groupId": "copilot",
+      "icon": "https://ekkostudio.xyz/coding-agents/copilot-logo.svg",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "npm",
+        "docsUrl": "https://docs.github.com/en/copilot/get-started/cli-quickstart",
+        "updates": true,
+        "remove": true
+      },
+      "config": {
+        "skillsWritable": false,
+        "mcp": true
+      },
+      "capabilities": {
+        "context": false,
+        "compact": false,
+        "serverManagedAuth": false
+      }
+    },
+    {
+      "id": "zcode",
+      "name": "ZCode",
+      "kind": "coding-agent",
+      "aliases": [],
+      "sessionId": "zcode",
+      "groupId": "zcode",
+      "icon": "https://ekkostudio.xyz/coding-agents/zcode-logo.png",
+      "modes": [
+        "scoped",
+        "global"
+      ],
+      "installation": {
+        "method": "manual",
+        "docsUrl": "https://github.com/zai-org/ZCode",
+        "updates": false,
+        "remove": false
+      },
+      "config": {
+        "skillsWritable": false,
+        "mcp": false
       },
       "capabilities": {
         "context": false,

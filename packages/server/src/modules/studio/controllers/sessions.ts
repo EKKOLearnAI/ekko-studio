@@ -1,3 +1,4 @@
+import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
 import { withRunUsage } from '../public/usage'
 import { businessEvents } from '../services/webhooks/business-events'
 import { getUsagePricing, saveUsagePricing, validateUsagePricing } from '../services/usage/usage-pricing'
@@ -236,7 +237,7 @@ function isProviderAgentSession(session?: { source?: string | null; agent?: stri
     session?.agent === 'pi' ||
     session?.agent === 'grok' ||
     session?.agent === 'opencode' ||
-    (session?.agent === 'cursor' || session?.agent === 'antigravity') ||
+    (session?.agent === 'cursor' || (session?.agent === 'antigravity' || isNativeCodingAgent(session?.agent))) ||
     Boolean(session?.agent_session_id)
 }
 

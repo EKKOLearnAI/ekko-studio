@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import { usePageLoadingState } from '@/composables/usePageLoading'
@@ -250,7 +251,7 @@ const profileOptions = computed(() =>
     profilesStore.profiles.map(p => ({ label: p.name, value: p.name }))
 )
 
-type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
+type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
 
 const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
 
@@ -266,7 +267,7 @@ const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.map((opti
 const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
     groupAgentTypeOptions.value.find(option => !option.disabled)?.value || null
 )
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
     { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -310,7 +311,7 @@ function getAgentModelGroups(profile: string) {
                         ? 'pi'
                         : selectedAgentType.value === 'grok'
                             ? 'grok'
-                            : (selectedAgentType.value === 'cursor' || selectedAgentType.value === 'antigravity')
+                            : (isGlobalOnlyCodingAgent(selectedAgentType.value) || (selectedAgentType.value === 'antigravity' || isNativeCodingAgent(selectedAgentType.value)))
                                 ? 'cursor'
                             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
                                 ? 'opencode'

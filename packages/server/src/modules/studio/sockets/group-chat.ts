@@ -246,7 +246,7 @@ interface RoomAgent {
     id: string
     roomId: string
     agentId: string
-    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
+    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     agentMode: 'scoped' | 'global'
     priorAgentMode: 'scoped' | 'global' | ''
     profile: string
@@ -277,7 +277,7 @@ interface GroupAgentActivity {
 }
 
 interface RoomAgentMetadata {
-    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
+    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     agentMode?: 'scoped' | 'global'
     priorAgentMode?: 'scoped' | 'global' | ''
     provider?: string

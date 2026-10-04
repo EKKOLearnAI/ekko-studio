@@ -1,3 +1,4 @@
+import { isNativeCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
 import type { Server, Socket } from 'socket.io'
 import { addMessage, getSession, updateSessionStats } from '../../studio/public/sessions'
 import { getModelContextLength } from '../../studio/public/provider-runtime'
@@ -267,7 +268,7 @@ export async function handleCodingAgentSessionCommand(
       })
       return
     }
-    if ((compactAgentId === 'cursor' || compactAgentId === 'antigravity')) {
+    if (isNativeCodingAgent(compactAgentId) || (compactAgentId === 'cursor' || compactAgentId === 'antigravity')) {
       emitCommand({
         ok: false,
         action: 'compact',

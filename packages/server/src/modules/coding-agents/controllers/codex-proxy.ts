@@ -1,1 +1,1 @@
-export { codexProxyModels, codexProxyResponses, antigravityProxyGenerate } from '../services/codex/proxy'
+export { codexProxyModels, codexProxyResponses, antigravityProxyGenerate, codingAgentProxyChatCompletions } from '../services/codex/proxy'

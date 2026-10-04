@@ -5,6 +5,14 @@ managed Claude Code, Codex, Pi, and Grok runs. The services share one canonical 
 pipeline, one stream subscription model, and one persistence path while keeping
 agent-specific process and protocol behavior in named subdirectories.
 
+The Coding family also includes OpenCode, DSH, Cursor, Antigravity, and the
+[six native CLI integrations](native-coding-agents.md). The `services/native/`
+adapter uses standard ACP for Qwen, Kimi, CodeBuddy, Qoder, and Copilot, and the
+official ZCode headless JSONL protocol for ZCode. Qwen, Kimi, CodeBuddy, Copilot,
+and ZCode support isolated scoped model configuration and native global mode.
+Qoder remains global. All six share the same run manager, event persistence,
+group-chat and Workflow dispatch.
+
 ## Goals
 
 - Provide shared protocol plumbing that can be used by:

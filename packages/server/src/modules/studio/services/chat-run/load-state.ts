@@ -1,3 +1,4 @@
+import { isNativeCodingAgent } from '../../contracts/agents/native-coding-agents'
 import {
   getSession,
   getSessionDetailPaginated,
@@ -72,7 +73,7 @@ export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<strin
     const session = actualDetail?.session || getSession(sid)
     const usageSource = isBuiltinEkkoAgent(session?.agent)
       ? 'ekko_agent'
-      : session?.source === 'coding_agent' || ['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude', 'claude-code', 'claude_code', 'cursor', 'antigravity'].includes(session?.agent || '')
+      : session?.source === 'coding_agent' || ['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude', 'claude-code', 'claude_code', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(session?.agent || '')
         ? 'coding_agent'
         : 'hermes'
     const totals = getRecordedUsageTotals(sid, usageSource)
@@ -81,8 +82,8 @@ export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<strin
     const hasPersistedUsage = !!latestUsage || totals.inputTokens > 0 || totals.outputTokens > 0
     inputTokens = hasPersistedUsage ? totals.inputTokens : pageUsage.inputTokens
     outputTokens = hasPersistedUsage ? totals.outputTokens : pageUsage.outputTokens
-    // Billing records cannot restore a native Agent's assembled context.
-    if (usageSource === 'coding_agent' && latestUsage && session?.agent !== 'cursor' && session?.agent !== 'antigravity') {
+    // Billing records cannot restore a built-in Agent or native CLI's assembled context.
+    if (usageSource === 'coding_agent' && latestUsage && session?.agent !== 'cursor' && session?.agent !== 'antigravity' && !isNativeCodingAgent(session?.agent)) {
       contextTokens = Number(latestUsage.input_tokens || 0) + Number(latestUsage.output_tokens || 0)
     }
 

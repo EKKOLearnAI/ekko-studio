@@ -67,6 +67,13 @@ describe('workflow import capabilities', () => {
     ], [])).not.toThrow()
   })
 
+  it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('validates %s scoped models while allowing explicit global mode', agent => {
+    expect(() => assertWorkflowImportCapabilities([node({ agent, agentMode: 'global' })], [])).not.toThrow()
+    const target = node({ agent, agentMode: 'scoped', provider: 'custom:test', model: 'model-a', apiMode: 'codex_responses' })
+    expect(() => assertWorkflowImportCapabilities([target], [{ provider: 'custom:test', models: ['model-a'], api_mode: 'chat_completions' }])).not.toThrow()
+    if (agent !== 'qoder') expect(() => assertWorkflowImportCapabilities([target], [])).toThrow('unavailable')
+  })
+
   it.each(['openai-codex', 'copilot', 'xai-oauth', 'qwen-oauth', 'nous', 'claude-oauth', 'minimax-oauth'])(
     'rejects scoped Coding Agent targets backed by auth provider %s',
     (provider) => {

@@ -238,7 +238,7 @@ export async function isolateUnhealthyRuntimeMcpServers(
   configPath: string,
   options: { probe?: typeof probeCodingAgentMcpConfig } = {},
 ): Promise<string[]> {
-  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(agentId)) return []
+  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(agentId)) return []
   let content: string
   try {
     content = await readFile(configPath, 'utf-8')

@@ -1,3 +1,6 @@
+import { prepareNativeScopedRuntime, nativeScopedUsesChatCompletions } from './native/runtime-config'
+import { resolveZcodeCommand } from './native/zcode-command'
+import { NATIVE_CODING_AGENTS, isNativeCodingAgent, nativeCodingAgentSupportsScoped, isGlobalOnlyCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
 import { prioritizeManagedNpmBin } from './managed-command-path'
 import { readTomlAssignment } from './toml-assignment'
 import { studioMcpCapabilities } from '../../studio/public/runs/mcp-capabilities'
@@ -263,7 +266,7 @@ export interface CodingAgentDefinition {
   provider: string
   command: string
   packageName: string
-  capabilities?: typeof ANTIGRAVITY_CAPABILITIES
+  capabilities?: { modes: readonly string[]; installation: string; images: boolean; nativeCompact: boolean; automaticUpdates: boolean }
 }
 
 export interface CodingAgentToolStatus extends CodingAgentDefinition {
@@ -349,6 +352,8 @@ export interface CodingAgentLaunchResult {
   files: Array<{ key: string; path: string; absolutePath: string }>
   promptFile?: string
   reasoningEffort?: string
+  nativeSystemPrompt?: string
+  nativeMcpServers?: Record<string, any>
 }
 
 export interface CodingAgentNativeLaunchResult extends CodingAgentLaunchResult {
@@ -363,6 +368,7 @@ export interface CodingAgentRunStartResult extends CodingAgentLaunchResult {
 }
 
 const TOOL_DEFINITIONS: CodingAgentDefinition[] = [
+  ...NATIVE_CODING_AGENTS.map(({ acpArgs, docsUrl, ...agent }) => ({ ...agent, capabilities: { modes: nativeCodingAgentSupportsScoped(agent.id) ? ['scoped', 'global'] : ['global'], installation: agent.packageName ? 'npm' : 'manual', images: false, nativeCompact: false, automaticUpdates: Boolean(agent.packageName) } })),
   { id: 'antigravity', name: 'Antigravity', provider: 'Google', command: 'agy', packageName: '', capabilities: ANTIGRAVITY_CAPABILITIES },
   {
     id: 'claude-code',
@@ -410,6 +416,12 @@ const TOOL_DEFINITIONS: CodingAgentDefinition[] = [
 ]
 
 const CONFIG_FILE_DEFINITIONS: Record<CodingAgentId, Array<Omit<CodingAgentConfigFileDefinition, 'absolutePath'> & { scopedPath: string }>> = {
+  qwen: [{ key: 'mcp', path: join('coding-agent', 'native', 'qwen', 'mcp.json'), scopedPath: 'mcp.json', language: 'json' }],
+  kimi: [{ key: 'mcp', path: join('coding-agent', 'native', 'kimi', 'mcp.json'), scopedPath: 'mcp.json', language: 'json' }],
+  codebuddy: [{ key: 'mcp', path: join('coding-agent', 'native', 'codebuddy', 'mcp.json'), scopedPath: 'mcp.json', language: 'json' }],
+  qoder: [{ key: 'mcp', path: join('coding-agent', 'native', 'qoder', 'mcp.json'), scopedPath: 'mcp.json', language: 'json' }],
+  copilot: [{ key: 'mcp', path: join('coding-agent', 'native', 'copilot', 'mcp.json'), scopedPath: 'mcp.json', language: 'json' }],
+  zcode: [],
   'claude-code': [
     { key: 'settings', path: '~/.claude/settings.json', scopedPath: 'settings.json', language: 'json' },
     { key: 'mcp', path: '~/.claude/mcp.json', scopedPath: 'mcp.json', language: 'json' },
@@ -889,7 +901,7 @@ function normalizeLaunchApiMode(value: unknown, fallback: ApiMode): ApiMode {
 }
 
 function resolvedCodingAgentLaunchMode(id: string, mode?: string | null): 'global' | 'scoped' {
-  if (id === 'cursor') return 'global'
+  if (isGlobalOnlyCodingAgent(id)) return 'global'
   return mode === 'global' ? 'global' : 'scoped'
 }
 
@@ -898,7 +910,8 @@ function storedCodingAgentMode(session: HermesSessionRow | null): 'scoped' | 'gl
   return session?.provider === 'global' ? 'global' : 'scoped'
 }
 
-function persistedAgentId(id: string): 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' {
+function persistedAgentId(id: string): 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode' {
+  if (isNativeCodingAgent(id)) return id
   if (id === 'codex') return 'codex'
   if (id === 'pi') return 'pi'
   if (id === 'grok') return 'grok'
@@ -1921,7 +1934,8 @@ export function getCodingAgentManagedMcpServerConfigs(
   profile = 'default',
   runTokenFile?: string,
 ): Record<string, Record<string, unknown>> {
-  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(id)) return {}
+  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(id)) return {}
+  if (id === 'zcode') return {}
   const disabledManaged = getDisabledManagedMcpServers(id, profile)
   return Object.fromEntries(HERMES_MCP_SERVERS.map((item) => {
     const server = managedHermesMcpServerConfig(id, profile || 'default', item.name, item.toolset, runTokenFile)
@@ -2603,7 +2617,7 @@ function getLiveConfigFileDefinition(id: string, key: string): CodingAgentConfig
     key: definition.key,
     path: definition.path,
     language: definition.language,
-    absolutePath: id === 'cursor' && key === 'settings' ? cursorSettingsPath(getGlobalConfigHome()) : expandHomePath(definition.path),
+    absolutePath: isNativeCodingAgent(id) && key === 'mcp' ? join(getWebUiHome(), 'coding-agent', 'native', id, 'mcp.json') : id === 'cursor' && key === 'settings' ? cursorSettingsPath(getGlobalConfigHome()) : expandHomePath(definition.path),
   }
 }
 
@@ -2670,7 +2684,7 @@ async function npmExecution(args: string[], env: NodeJS.ProcessEnv): Promise<Com
 let npmInvocationCount = 0
 
 function codingAgentUsesNpm(id: CodingAgentId): boolean {
-  return id !== 'cursor' && id !== 'antigravity'
+  return Boolean(getCodingAgentDefinition(id)?.packageName) && id !== 'cursor' && id !== 'antigravity'
 }
 
 export function getCodingAgentNpmInvocationCount(): number {
@@ -2851,7 +2865,7 @@ export function getCodingAgentConfigFileDefinitions(id: string): CodingAgentConf
     key: file.key,
     path: file.path,
     language: file.language,
-    absolutePath: id === 'cursor' && file.key === 'settings' ? cursorSettingsPath(getGlobalConfigHome()) : expandHomePath(file.path),
+    absolutePath: isNativeCodingAgent(id) && file.key === 'mcp' ? join(getWebUiHome(), 'coding-agent', 'native', id, 'mcp.json') : id === 'cursor' && file.key === 'settings' ? cursorSettingsPath(getGlobalConfigHome()) : expandHomePath(file.path),
   }))
 }
 
@@ -2859,14 +2873,15 @@ export async function getCodingAgentStatus(definition: CodingAgentDefinition): P
   let resolvedCommand = ''
   try {
     const env = await commandEnv()
-    resolvedCommand = await resolveCommandForExecution(definition.command, env)
-    const execution = commandExecution(resolvedCommand, ['--version'])
+    const zcode = definition.id === 'zcode' ? await resolveZcodeCommand(['--version'], env, findCommandPaths) : undefined
+    resolvedCommand = zcode?.path || await resolveCommandForExecution(definition.command, env)
+    const execution = commandExecution(zcode?.command || resolvedCommand, zcode?.args || ['--version'])
     const { stdout, stderr } = await execFileAsync(execution.command, execution.args, {
       encoding: 'utf-8',
       timeout: 8000,
       windowsHide: true,
       windowsVerbatimArguments: execution.windowsVerbatimArguments,
-      env,
+      env: { ...env, ...zcode?.env },
     })
     const rawVersion = `${stdout || ''}${stderr || ''}`.trim()
     if (definition.id === 'pi' && !existsSync(getPiMcpAdapterEntry())) {
@@ -3007,7 +3022,7 @@ export async function checkUpdateAgent(id: string): Promise<CodingAgentUpdateRes
       tool: status,
       latestVersion: '',
       updateAvailable: false,
-      message: `${tool.name} CLI updates are not managed by Studio. Use ${tool.id === 'antigravity' ? ANTIGRAVITY_INSTALL_URL : CURSOR_CLI_INSTALL_URL}`,
+      message: `${tool.name} CLI updates are not managed by Studio. Use ${NATIVE_CODING_AGENTS.find(agent => agent.id === tool.id)?.docsUrl || (tool.id === 'antigravity' ? ANTIGRAVITY_INSTALL_URL : CURSOR_CLI_INSTALL_URL)}`,
     }
   }
   try {
@@ -3063,12 +3078,14 @@ export async function installCodingAgent(id: string): Promise<CodingAgentMutatio
       tools: allStatus.tools,
       message: status.installed
         ? 'Installed'
+        : isNativeCodingAgent(tool.id) && !tool.packageName
+          ? `Install ${tool.name} from ${NATIVE_CODING_AGENTS.find(agent => agent.id === tool.id)?.docsUrl}`
         : tool.id === 'antigravity'
           ? `Install the Antigravity CLI from ${ANTIGRAVITY_INSTALL_URL}`
         : tool.id === 'cursor'
           ? `Install the Cursor CLI from ${CURSOR_CLI_INSTALL_URL}`
           : status.error || 'Install completed but the command was not found',
-      code: !status.installed && (tool.id === 'cursor' || tool.id === 'antigravity') ? 'MANUAL_INSTALL' : undefined,
+      code: !status.installed && !codingAgentUsesNpm(tool.id) ? 'MANUAL_INSTALL' : undefined,
     }
   } catch (err: any) {
     const status = await getCodingAgentStatus(tool)
@@ -3098,7 +3115,7 @@ export async function deleteCodingAgent(id: string): Promise<CodingAgentMutation
     throw err
   }
 
-  if (tool.id === 'cursor' || tool.id === 'antigravity') {
+  if (!codingAgentUsesNpm(tool.id)) {
     const status = await getCodingAgentStatus(tool)
     const allStatus = await getCodingAgentsStatus()
     return {
@@ -3373,6 +3390,18 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       ? [input.groupSystemPrompt.trim(), studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
       : getSystemPrompt(undefined, { mcpCapabilities })
     await mkdir(rootDir, { recursive: true })
+    if (isNativeCodingAgent(tool.id)) {
+      const mcpFile = tool.id === 'zcode' ? undefined : getLiveConfigFileDefinition(tool.id, 'mcp')
+      const content = mcpFile ? await safeReadFile(mcpFile.absolutePath) : ''
+      const userMcp = content ? JSON.parse(content).mcpServers || {} : {}
+      const nativeMcpServers = { ...userMcp, ...getCodingAgentManagedMcpServerConfigs(tool.id, scope.profile, input.studioMcpTokenFile) }
+      const execution = tool.id === 'zcode'
+        ? await resolveZcodeCommand([], await commandEnv(), findCommandPaths)
+        : { command: tool.command, args: [], env: {} }
+      return { agentId: tool.id, mode, profile: scope.profile, provider: 'global', model: '', rootDir, workspaceDir,
+        command: execution.command, args: execution.args, env: execution.env, files: [], nativeSystemPrompt: systemPrompt, nativeMcpServers,
+        shellCommand: buildLaunchShellCommand({ workspaceDir, ...execution }) }
+    }
 
     let promptFile = ''
     let files: Array<{ key: string; path: string; absolutePath: string }> = []
@@ -3522,7 +3551,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     : groupSystemPrompt
       ? [groupSystemPrompt, studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
       : getSystemPrompt(undefined, { mcpCapabilities })
-  const isolatedInput = tool.id === 'pi' || tool.id === 'dsh' || tool.id === 'antigravity'
+  const isolatedInput = tool.id === 'pi' || tool.id === 'dsh' || tool.id === 'antigravity' || nativeCodingAgentSupportsScoped(tool.id)
     ? {
         ...input,
         sessionId: input.sessionId || randomUUID(),
@@ -3552,7 +3581,24 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   let args: string[] = []
   let env: Record<string, string> = {}
 
-  if (tool.id === 'antigravity') {
+  let nativeMcpServers: Record<string, any> | undefined
+  if (nativeCodingAgentSupportsScoped(tool.id)) {
+    const targetInput = { provider, model, baseUrl, apiKey, apiMode, reasoningEffort,
+      agentId: tool.id, agentSessionId: isolatedInput.agentSessionId, chatSessionId: isolatedInput.sessionId }
+    const target = nativeScopedUsesChatCompletions(tool.id, model)
+      ? registerCodexProxyTarget({ ...targetInput, profile: scope.profile })
+      : registerClaudeCodeProxyTarget(targetInput)
+    const prepared = await prepareNativeScopedRuntime({ agentId: tool.id, rootDir, model,
+      baseUrl: target.baseUrl, token: target.token, contextWindow: contextPolicy.contextWindow,
+      outputLimit: contextPolicy.outputLimit })
+    files.push(...prepared.files)
+    args = prepared.args
+    env = prepared.env
+    const mcpFile = tool.id === 'zcode' ? undefined : getLiveConfigFileDefinition(tool.id, 'mcp')
+    const content = mcpFile ? await safeReadFile(mcpFile.absolutePath) : ''
+    nativeMcpServers = { ...(content ? JSON.parse(content).mcpServers || {} : {}),
+      ...getCodingAgentManagedMcpServerConfigs(tool.id, scope.profile, input.studioMcpTokenFile) }
+  } else if (tool.id === 'antigravity') {
     if (!['chat_completions', 'codex_responses', 'anthropic_messages'].includes(apiMode)) throw Object.assign(new Error('Antigravity scoped API mode is unsupported'), { status: 400 })
     const target = registerCodexProxyTarget({ profile: scope.profile, provider, model, baseUrl, apiKey, apiMode, reasoningEffort,
       agentId: tool.id, agentSessionId: isolatedInput.agentSessionId, chatSessionId: isolatedInput.sessionId })
@@ -3932,17 +3978,24 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
 
   const chatSessionId = String(isolatedInput.sessionId || '').trim()
   if (chatSessionId) env[HERMES_STUDIO_SESSION_ENV_KEY] = chatSessionId
+  let command = tool.command
+  if (tool.id === 'zcode') {
+    const execution = await resolveZcodeCommand(args, { ...(await commandEnv()), ...env }, findCommandPaths)
+    command = execution.command
+    args = execution.args
+    env = { ...execution.env, ...env }
+  }
   let shellCommand = buildLaunchShellCommand({
     workspaceDir,
     env,
-    command: tool.command,
+    command,
     args,
   })
   const launcherPath = await writeLauncherScript({
     rootDir,
     workspaceDir,
     env,
-    command: tool.command,
+    command,
     args,
   })
   files.push({
@@ -3961,7 +4014,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     apiMode,
     rootDir,
     workspaceDir,
-    command: tool.command,
+    command,
     args,
     env,
     shellCommand,
@@ -3974,6 +4027,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
           ? join(rootDir, 'AGENTS.md')
         : undefined,
     reasoningEffort,
+    ...(nativeCodingAgentSupportsScoped(tool.id) ? { nativeSystemPrompt: scopedSystemPrompt, nativeMcpServers } : {}),
   }
 }
 
@@ -4056,7 +4110,7 @@ async function startCodingAgentRunInternal(
     ? await resolveCommandForExecution(launch.command, commandExecutionEnv)
     : launch.command
   const runtimeEnv = launch.agentId === 'pi' ? launch.env : commandExecutionEnv
-  const persistedProvider = id === 'cursor' || id === 'antigravity'
+  const persistedProvider = isNativeCodingAgent(id) || id === 'cursor' || id === 'antigravity'
     ? String(launch.provider || 'global').trim() || 'global'
     : String(resolvedInput.provider || launch.provider || '').trim() || launch.provider
   const started = codingAgentRunManager.start({
@@ -4076,6 +4130,8 @@ async function startCodingAgentRunInternal(
     workspaceDir: launch.workspaceDir,
     env: runtimeEnv,
     promptFile: launch.promptFile,
+    nativeSystemPrompt: launch.nativeSystemPrompt,
+    nativeMcpServers: launch.nativeMcpServers,
     state,
     reasoningEffort: launch.reasoningEffort,
     agentPreset,
