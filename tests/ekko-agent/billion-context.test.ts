@@ -550,6 +550,7 @@ describe('billion-context public HTTP adapter', () => {
     expect(outgoing).toHaveLength(2)
     for (const request of outgoing) {
       expect(request.headers['x-bili-plugin']).toBe('ekko-agent')
+      expect(request.headers['x-bili-plugin-agent']).toBe('main')
       expect(request.headers['x-bili-plugin-conversation']).toBe('conversation-1')
       expect(request.headers['x-bili-plugin-context-window']).toBe('200000')
       expect(request.body.tools).toEqual(definitions.map(fn => ({ type: 'function', function: fn })))

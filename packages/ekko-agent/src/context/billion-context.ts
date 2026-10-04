@@ -152,6 +152,7 @@ export class BillionContextManager implements AgentContextManager {
     const contextWindow = this.contextWindow ?? binding.modelClient.capabilities.maxInputTokens
     const headers: Record<string, string> = {
       'x-bili-plugin': this.agent,
+      'x-bili-plugin-agent': 'main',
       'x-bili-plugin-conversation': binding.conversationId,
       'x-bili-plugin-model': model,
     }
