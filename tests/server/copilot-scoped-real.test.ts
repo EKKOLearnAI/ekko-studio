@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -43,14 +43,16 @@ function stop(child: ChildProcess) {
 
 describeReal('real Copilot scoped ACP', () => {
   it.each([
-    ['glm-5.3-flash', 'chat_completions'],
-    ['glm-5.3-flash', 'codex_responses'],
-    ['glm-5.3-flash', 'anthropic_messages'],
-    ['claude-sonnet-4-6', 'anthropic_messages'],
-  ] as const)('executes a command with %s on the selected %s upstream', async (model, apiMode) => {
+    ['glm-5.3-flash', 'chat_completions', false],
+    ['glm-5.3-flash', 'codex_responses', false],
+    ['glm-5.3-flash', 'anthropic_messages', false],
+    ['claude-sonnet-4-6', 'anthropic_messages', false],
+    ['gpt-5.6-sol', 'codex_responses', true],
+  ] as const)('executes a command with %s on the selected %s upstream (image: %s)', async (model, apiMode, withImage) => {
     const requests: Array<{ path: string; body: any }> = []
     const toolInput = { command: 'printf SCOPED_TOOL_OK', description: 'Print verification marker', initial_wait: 1 }
     const toolArguments = JSON.stringify(toolInput)
+    const patchInput = '*** Begin Patch\n*** Add File: SCOPED_TOOL_OK.txt\n+IMAGE_CUSTOM_OK\n*** End Patch'
     let inferenceCount = 0
     const upstream = new Koa()
     upstream.use(createRequestBodyParser())
@@ -59,9 +61,11 @@ describeReal('real Copilot scoped ACP', () => {
       requests.push({ path: ctx.path, body })
       if (ctx.path.endsWith('/count_tokens')) { ctx.body = { input_tokens: 10 }; return }
       const callTool = inferenceCount++ === 0
+      const call = withImage
+        ? { id: 'tool-mock', type: 'custom_tool_call', call_id: 'call-patch', name: 'apply_patch', input: patchInput, status: 'completed' }
+        : { id: 'tool-mock', type: 'function_call', call_id: 'call-bash', name: 'bash', arguments: toolArguments, status: 'completed' }
       const response = { id: 'response-mock', object: 'response', status: 'completed', model: body.model,
-        output: callTool ? [{ id: 'tool-mock', type: 'function_call', call_id: 'call-bash', name: 'bash',
-          arguments: toolArguments, status: 'completed' }] : [{ id: 'message-mock', type: 'message', role: 'assistant',
+        output: callTool ? [call] : [{ id: 'message-mock', type: 'message', role: 'assistant',
           status: 'completed', content: [{ type: 'output_text', text: 'SCOPED_OK', annotations: [] }] }],
         usage: { input_tokens: 10, output_tokens: 3, total_tokens: 13 } }
       const chat = { id: 'chat-mock', object: 'chat.completion', model: body.model,
@@ -96,9 +100,11 @@ describeReal('real Copilot scoped ACP', () => {
           { type: 'response.created', response: { ...response, status: 'in_progress', output: [] } },
           ...(callTool ? [
             { type: 'response.output_item.added', output_index: 0,
-              item: { ...response.output[0], arguments: '', status: 'in_progress' } },
-            { type: 'response.function_call_arguments.delta', item_id: 'tool-mock', output_index: 0, delta: toolArguments.slice(0, 2) },
-            { type: 'response.function_call_arguments.delta', item_id: 'tool-mock', output_index: 0, delta: toolArguments.slice(2) },
+              item: { ...response.output[0], ...(withImage ? { input: '' } : { arguments: '' }), status: 'in_progress' } },
+            { type: withImage ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta',
+              item_id: 'tool-mock', output_index: 0, delta: (withImage ? patchInput : toolArguments).slice(0, 2) },
+            { type: withImage ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta',
+              item_id: 'tool-mock', output_index: 0, delta: (withImage ? patchInput : toolArguments).slice(2) },
             { type: 'response.output_item.done', output_index: 0, item: response.output[0] },
           ] : [{ type: 'response.output_text.delta', item_id: 'message-mock', output_index: 0, content_index: 0, delta: 'SCOPED_OK' }]),
           { type: 'response.completed', response },
@@ -128,6 +134,9 @@ describeReal('real Copilot scoped ACP', () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'ekko-copilot-real-'))
     const workspace = join(rootDir, 'workspace')
     await mkdir(workspace)
+    const imagePath = join(workspace, 'image space.png')
+    const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAFElEQVQYlWP4z8CABzGMSjNgCQMAt8pjnanKDKUAAAAASUVORK5CYII=', 'base64')
+    if (withImage) await writeFile(imagePath, imageBytes)
     let child: ChildProcess | undefined
     let turn: NativeAcpTurn | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -152,7 +161,8 @@ describeReal('real Copilot scoped ACP', () => {
         if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') toolUpdates.push(update)
       } })
       timer = setTimeout(() => stop(child!), 30_000)
-      await turn.prompt({ cwd: workspace, mcpServers: [], text: 'Run printf SCOPED_TOOL_OK, then reply SCOPED_OK only.' })
+      await turn.prompt({ cwd: workspace, mcpServers: [], text: 'Run printf SCOPED_TOOL_OK, then reply SCOPED_OK only.',
+        ...(withImage ? { images: [{ path: imagePath, mediaType: 'image/png' }] } : {}) })
       expect(reply).toBe('SCOPED_OK')
       expect(toolUpdates.some(update => update.status === 'completed'
         && JSON.stringify(update.rawOutput ?? update.content).includes('SCOPED_TOOL_OK'))).toBe(true)
@@ -160,8 +170,20 @@ describeReal('real Copilot scoped ACP', () => {
       expect(stderr + reply).not.toContain('No token count multiplier')
       const inference = requests.filter(request => !request.path.endsWith('/count_tokens'))
       expect(inference.length).toBe(2)
+      if (withImage) {
+        const image = inference[0].body.input.flatMap((item: any) => Array.isArray(item.content) ? item.content : [])
+          .find((part: any) => part.type === 'input_image')
+        expect(image.image_url).toBe(`data:image/png;base64,${imageBytes.toString('base64')}`)
+        const custom = inference[0].body.tools.find((tool: any) => tool.type === 'custom' && tool.name === 'apply_patch')
+        expect(custom.format).toMatchObject({ type: 'grammar', syntax: 'lark', definition: expect.any(String) })
+        expect(custom.format).not.toHaveProperty('grammar')
+        expect(await readFile(join(workspace, 'SCOPED_TOOL_OK.txt'), 'utf8')).toBe('IMAGE_CUSTOM_OK\n')
+        expect(inference[1].body.input.find((item: any) => item.type === 'custom_tool_call')).toMatchObject({
+          name: 'apply_patch', input: patchInput, call_id: 'call-patch',
+        })
+      }
       const toolResult = apiMode === 'codex_responses'
-        ? inference[1].body.input.find((item: any) => item.type === 'function_call_output')?.output
+        ? inference[1].body.input.find((item: any) => item.type === (withImage ? 'custom_tool_call_output' : 'function_call_output'))?.output
         : apiMode === 'chat_completions'
           ? inference[1].body.messages.find((item: any) => item.role === 'tool')?.content
           : inference[1].body.messages.flatMap((item: any) => Array.isArray(item.content) ? item.content : [])

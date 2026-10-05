@@ -3,9 +3,10 @@ import type { CanonicalResponsesEvent } from './responses-stream'
 /** Chat Completions clients use the same provider gateway as Responses clients. */
 export function chatCompletionsToResponses(body: any): any {
   const input: any[] = []
+  const customCallIds = new Set<string>()
   for (const message of body.messages || []) {
     if (message.role === 'tool') {
-      input.push({ type: 'function_call_output', call_id: message.tool_call_id,
+      input.push({ type: customCallIds.has(message.tool_call_id) ? 'custom_tool_call_output' : 'function_call_output', call_id: message.tool_call_id,
         output: typeof message.content === 'string' ? message.content : JSON.stringify(message.content) })
       continue
     }
@@ -17,15 +18,28 @@ export function chatCompletionsToResponses(body: any): any {
       }) : message.content
       input.push({ role: message.role, content })
     }
-    for (const call of message.tool_calls || []) input.push({ type: 'function_call', call_id: call.id,
-      name: call.function?.name, arguments: call.function?.arguments || '{}' })
+    for (const call of message.tool_calls || []) {
+      if (call.type === 'custom') {
+        customCallIds.add(call.id)
+        input.push({ type: 'custom_tool_call', call_id: call.id, name: call.custom?.name, input: call.custom?.input ?? '' })
+      } else input.push({ type: 'function_call', call_id: call.id,
+        name: call.function?.name, arguments: call.function?.arguments || '{}' })
+    }
   }
   const tools = (body.tools || []).map((tool: any) => {
+    if (tool.type === 'custom') {
+      const format = tool.custom?.format
+      // Chat Completions nests grammar fields; Responses puts them on format.
+      return { type: 'custom', ...tool.custom,
+        ...(format?.type === 'grammar' ? { format: { type: 'grammar', ...format.grammar } } : {}) }
+    }
     if (tool.type !== 'function') throw Object.assign(new Error(`Unsupported Chat Completions tool: ${tool.type}`), { status: 400 })
     return { type: 'function', ...tool.function }
   })
   const toolChoice = body.tool_choice?.type === 'function'
-    ? { type: 'function', name: body.tool_choice.function?.name } : body.tool_choice
+    ? { type: 'function', name: body.tool_choice.function?.name }
+    : body.tool_choice?.type === 'custom'
+      ? { type: 'custom', name: body.tool_choice.custom?.name } : body.tool_choice
   return { input, tools, stream: body.stream === true,
     ...(toolChoice ? { tool_choice: toolChoice } : {}),
     ...(body.parallel_tool_calls != null ? { parallel_tool_calls: body.parallel_tool_calls } : {}),
@@ -52,6 +66,8 @@ export function responsesToChatCompletion(response: any, model: string): any {
     if (item.type === 'message') text += (item.content || []).map((part: any) => part.text || '').join('')
     if (item.type === 'function_call') calls.push({ id: item.call_id || item.id, type: 'function',
       function: { name: item.name, arguments: item.arguments || '{}' } })
+    if (item.type === 'custom_tool_call') calls.push({ id: item.call_id || item.id, type: 'custom',
+      custom: { name: item.name, input: item.input ?? '' } })
   }
   return { id: response.id, object: 'chat.completion', created: response.created_at || Math.floor(Date.now() / 1000), model,
     choices: [{ index: 0, message: { role: 'assistant', content: text || null,
@@ -63,7 +79,7 @@ export function responsesToChatCompletion(response: any, model: string): any {
 export async function* responsesToChatCompletionSse(events: AsyncIterable<CanonicalResponsesEvent>, model: string, includeUsage: boolean) {
   let id = 'chatcmpl-scoped'
   const created = Math.floor(Date.now() / 1000)
-  const calls = new Map<string, number>()
+  const calls = new Map<string, { index: number; type: 'function' | 'custom' }>()
   let completed = false
   const chunk = (delta: any, finishReason: string | null = null) => `data: ${JSON.stringify({ id,
     object: 'chat.completion.chunk', created, model,
@@ -76,16 +92,21 @@ export async function* responsesToChatCompletionSse(events: AsyncIterable<Canoni
     } else if (event.type === 'response.output_text.delta') yield chunk({ content: data.delta })
     else if (event.type === 'response.reasoning_summary_text.delta' || event.type === 'response.reasoning_text.delta') {
       yield chunk({ reasoning_content: data.delta })
-    } else if (event.type === 'response.output_item.added' && data.item?.type === 'function_call') {
+    } else if (event.type === 'response.output_item.added'
+      && (data.item?.type === 'function_call' || data.item?.type === 'custom_tool_call')) {
       const item = data.item
       const index = calls.size
-      calls.set(item.id, index)
-      yield chunk({ tool_calls: [{ index, id: item.call_id || item.id, type: 'function',
-        function: { name: item.name, arguments: item.arguments || '' } }] })
-    } else if (event.type === 'response.function_call_arguments.delta') {
-      const index = calls.get(data.item_id)
-      if (index == null) throw new Error('Provider streamed tool arguments without a function call')
-      yield chunk({ tool_calls: [{ index, function: { arguments: data.delta } }] })
+      const type = item.type === 'custom_tool_call' ? 'custom' : 'function'
+      calls.set(item.id, { index, type })
+      yield chunk({ tool_calls: [{ index, id: item.call_id || item.id, type,
+        ...(type === 'custom' ? { custom: { name: item.name, input: item.input ?? '' } }
+          : { function: { name: item.name, arguments: item.arguments || '' } }) }] })
+    } else if (event.type === 'response.function_call_arguments.delta' || event.type === 'response.custom_tool_call_input.delta') {
+      const call = calls.get(data.item_id)
+      const type = event.type === 'response.custom_tool_call_input.delta' ? 'custom' : 'function'
+      if (!call || call.type !== type) throw new Error(`Provider streamed tool ${type === 'custom' ? 'input' : 'arguments'} without a ${type} call`)
+      yield chunk({ tool_calls: [{ index: call.index,
+        ...(type === 'custom' ? { custom: { input: data.delta } } : { function: { arguments: data.delta } }) }] })
     } else if (event.type === 'response.completed' || event.type === 'response.incomplete') {
       completed = true
       const response = data.response || {}
