@@ -6,7 +6,9 @@ import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
 import { readAppConfig } from '../../../studio/public/app-config'
 import { config } from '../../../studio/public/config'
 import { logger } from '../../../studio/public/logging'
-import { fetchProviderModels } from '../../../studio/public/provider-catalog'
+import { fetchProviderModelDescriptors, fetchProviderModels } from '../../../studio/public/provider-catalog'
+import type { ProviderModelDescriptor } from '../../../studio/public/provider-catalog'
+import { insertMissingProviderContextLengths } from '../../../studio/public/provider-context'
 import { PROVIDER_ENV_MAP, readConfigYamlForProfile } from '../../../studio/public/profile-config'
 import { safeFileStore } from '../../../studio/public/safe-file-store'
 import { fetchCopilotModelsWithOAuthToken, resolveCopilotOAuthToken } from './copilot-models'
@@ -85,6 +87,33 @@ function safeKey(value: string): boolean {
 
 export function normalizeCatalogBaseUrl(baseUrl: string): string {
   return String(baseUrl || '').trim().replace(/\/+$/, '')
+}
+
+/**
+ * Persist context windows a provider advertises on its live `/v1/models` into
+ * `model_context`, so the chat indicator and compression thresholds stop
+ * falling back to the 256k default for custom/gateway providers that are absent
+ * from the shared models.dev catalog (see #3119). Existing rows are preserved:
+ * the manual editor and any prior auto-population stay authoritative.
+ */
+export function persistAdvertisedContextLengths(input: {
+  provider: string
+  profiles: string[]
+  descriptors: ProviderModelDescriptor[]
+}): number {
+  const provider = input.provider.trim()
+  const profiles = uniqueModels(input.profiles)
+  if (!provider || profiles.length === 0) return 0
+  const lengths: Record<string, number> = {}
+  for (const descriptor of input.descriptors) {
+    if (descriptor.contextLength && descriptor.contextLength > 0) lengths[descriptor.id] = descriptor.contextLength
+  }
+  if (Object.keys(lengths).length === 0) return 0
+  let inserted = 0
+  for (const profile of profiles) {
+    inserted += insertMissingProviderContextLengths(profile, provider, lengths)
+  }
+  return inserted
 }
 
 export function providerModelCatalogKey(
@@ -274,7 +303,7 @@ export async function refreshProviderModelCatalog(input: {
   const baseUrl = normalizeCatalogBaseUrl(input.base_url)
   if (!provider || !baseUrl) return null
 
-  const fetched = await fetchProviderCatalogRefreshTargetModels({
+  const descriptors = await fetchProviderCatalogRefreshTargetDescriptors({
     provider,
     label: input.label,
     base_url: baseUrl,
@@ -285,7 +314,13 @@ export async function refreshProviderModelCatalog(input: {
     api_mode: input.api_mode,
     credential_kind: input.credential_kind || (input.api_key ? 'api_key' : 'none'),
   })
+  const fetched = uniqueModels(descriptors.map(descriptor => descriptor.id))
   if (fetched.length > 0) {
+    const profiles = uniqueModels([...(input.profiles || []), String(input.profile || '').trim()])
+    const inserted = persistAdvertisedContextLengths({ provider, profiles, descriptors })
+    if (inserted > 0) {
+      logger.info('[model-catalog-cache] populated %d advertised context windows provider=%s', inserted, provider)
+    }
     return writeProviderModelCatalogEntry({
       provider,
       label: input.label,
@@ -406,21 +441,35 @@ async function fetchClaudeOAuthModels(baseUrl: string, accessToken: string): Pro
 export async function fetchProviderCatalogRefreshTargetModels(
   target: ProviderCatalogRefreshTarget,
 ): Promise<string[]> {
+  const descriptors = await fetchProviderCatalogRefreshTargetDescriptors(target)
+  return uniqueModels(descriptors.map(descriptor => descriptor.id))
+}
+
+/**
+ * Same as {@link fetchProviderCatalogRefreshTargetModels} but keeps the context
+ * window each model advertises. Only the generic OpenAI-compatible path can
+ * report one; OAuth/Codex/Copilot/Claude catalogs return ids alone.
+ */
+export async function fetchProviderCatalogRefreshTargetDescriptors(
+  target: ProviderCatalogRefreshTarget,
+): Promise<ProviderModelDescriptor[]> {
   if (target.skip_live_fetch) return []
-  if (target.provider === 'openai-codex') return fetchCodexOAuthModels(target.api_key)
+  if (target.provider === 'openai-codex') {
+    return (await fetchCodexOAuthModels(target.api_key)).map(id => ({ id }))
+  }
   if (target.provider === 'copilot') {
     try {
       const models = await fetchCopilotModelsWithOAuthToken(target.api_key)
-      return uniqueModels(models.map(model => model.id))
+      return uniqueModels(models.map(model => model.id)).map(id => ({ id }))
     } catch (err) {
       logger.warn(err, '[model-catalog-cache] Copilot models fetch failed')
       return []
     }
   }
   if (target.provider === 'claude-oauth') {
-    return fetchClaudeOAuthModels(target.base_url, target.api_key)
+    return (await fetchClaudeOAuthModels(target.base_url, target.api_key)).map(id => ({ id }))
   }
-  return fetchProviderModels(target.base_url, target.api_key, target.free_only === true)
+  return fetchProviderModelDescriptors(target.base_url, target.api_key, target.free_only === true)
 }
 
 function hasOAuthCredential(value: any): boolean {

@@ -444,7 +444,75 @@ describe('getModelContextLength', () => {
     writeConfig(`model:\n  default: broken-team\n  provider: moa\n\nmoa:\n  presets:\n    broken-team:\n      enabled: true\n`)
 
     const { getModelContextLength } = await loadModelContext()
-
     expect(getModelContextLength({ provider: 'moa', model: 'broken-team' })).toBe(256_000)
+  })
+
+  it('resolves claude-oauth to the anthropic catalog instead of the 256k fallback', async () => {
+    writeConfig(`model:\n  default: claude-sonnet-5\n  provider: claude-oauth\n`)
+    writeModelsCache({
+      anthropic: { models: { 'claude-sonnet-5': { limit: { context: 1_000_000, output: 64_000 } } } },
+    })
+
+    const { getModelContextLength } = await loadModelContext()
+
+    expect(getModelContextLength()).toBe(1_000_000)
+  })
+
+  it.each([
+    ['kimi-coding', 'kimi-code-plan-global'],
+    ['kimi-coding-cn', 'kimi-code-plan-cn'],
+  ])('resolves %s through its Coding Plan catalog', async (provider, plan) => {
+    writeConfig(`model:\n  default: k3\n  provider: ${provider}\n`)
+    writeModelsCache({
+      [plan]: { models: { k3: { limit: { context: 262_144, output: 32_000 } } } },
+      moonshotai: { models: { k3: { limit: { context: 131_072, output: 16_000 } } } },
+    })
+
+    const { getModelContextLength } = await loadModelContext()
+
+    expect(getModelContextLength()).toBe(262_144)
+  })
+
+  it.each([
+    ['openai-api', 'openai'],
+    ['copilot', 'github-copilot'],
+    ['novita', 'novita-ai'],
+    ['gmi', 'gmicloud'],
+    ['minimax-oauth', 'minimax-coding-plan'],
+  ])('resolves the %s runtime key to its catalog provider %s', async (provider, catalog) => {
+    writeConfig(`model:\n  default: shared-model\n  provider: ${provider}\n`)
+    writeModelsCache({
+      [catalog]: { models: { 'shared-model': { limit: { context: 400_000 } } } },
+    })
+
+    const { getModelContextLength } = await loadModelContext()
+
+    expect(getModelContextLength()).toBe(400_000)
+  })
+
+  it('falls through an alias chain to a catalog that owns the model when the first candidate omits it', async () => {
+    writeConfig(`model:\n  default: glm-5.3-flashx\n  provider: glm\n`)
+    writeModelsCache({
+      'zhipuai-coding-plan': { models: { 'glm-5.3-flash': { limit: { context: 1_000_000 } } } },
+      zai: { models: { 'glm-5.3-flashx': { limit: { context: 1_000_000 } } } },
+      zhipuai: { models: { 'glm-5.3-flashx': { limit: { context: 400_000 } } } },
+    })
+
+    const { getModelContextLength } = await loadModelContext()
+
+    expect(getModelContextLength()).toBe(1_000_000)
+  })
+
+  it('still prefers the Coding Plan window over the metered vendor API for a shared model', async () => {
+    writeConfig(`model:\n  default: glm-5.3-flash\n  provider: glm\n`)
+    writeModelsCache({
+      'zhipuai-coding-plan': { models: { 'glm-5.3-flash': { limit: { context: 1_000_000 } } } },
+      zai: { models: { 'glm-5.3-flash': { limit: { context: 200_000 } } } },
+      zhipuai: { models: { 'glm-5.3-flash': { limit: { context: 400_000 } } } },
+    })
+
+    const { getModelContextLength } = await loadModelContext()
+
+    expect(getModelContextLength()).toBe(1_000_000)
   })
 })

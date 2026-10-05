@@ -51,6 +51,40 @@ export function upsertModelContextRecord(
   return { available: true, row }
 }
 
+/**
+ * Persist context windows advertised by a provider's live `/v1/models` without
+ * overwriting an existing row. `model_context` rows are the highest-priority
+ * override, so a manual value must win over auto-population; this only fills
+ * the gaps that would otherwise resolve to the 256k fallback. See #3119.
+ */
+export function insertMissingProviderContextLengths(
+  profile: string,
+  provider: string,
+  contextLengths: Record<string, number>,
+): number {
+  const db = getDb()
+  if (!db || !provider) return 0
+  const entries = Object.entries(contextLengths)
+    .map(([model, value]) => [model, Math.floor(Number(value))] as const)
+    .filter(([model, value]) => !!model.trim() && Number.isFinite(value) && value > 0)
+  if (entries.length === 0) return 0
+  ensureProviderContextTable()
+  const insert = db.prepare(
+    `INSERT INTO ${MODEL_CONTEXT_TABLE} (profile, provider, model, context_limit) VALUES (?, ?, ?, ?) `
+    + 'ON CONFLICT(profile, provider, model) DO NOTHING',
+  )
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    let inserted = 0
+    for (const [model, value] of entries) inserted += Number(insert.run(profile, provider, model, value).changes)
+    db.exec('COMMIT')
+    return inserted
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}
+
 export function readProviderContextLengths(profile: string, provider: string): Record<string, number> {
   const db = getDb()
   if (!db) return {}

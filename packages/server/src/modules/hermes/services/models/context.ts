@@ -61,6 +61,11 @@ interface ConfigProviderEntry {
   models?: ConfigProviderModels
 }
 
+// Studio provider keys that differ from the models.dev catalog key. Only the
+// catalog key can supply `limit.context`, so every runtime key Studio can emit
+// must resolve to a real catalog provider here (see #3119). Entries are ordered
+// most-specific first: the resolver returns the first candidate that owns the
+// model, so a Coding Plan catalog is preferred over the metered vendor API.
 const MODEL_CACHE_PROVIDER_ALIASES: Record<string, string[]> = {
   gemini: ['google'],
   moonshot: ['moonshotai'],
@@ -68,11 +73,18 @@ const MODEL_CACHE_PROVIDER_ALIASES: Record<string, string[]> = {
   'ai-gateway': ['vercel'],
   'opencode-zen': ['opencode'],
   'opencode-go': ['opencode'],
-  glm: ['zhipuai-coding-plan'],
-  'glm-coding-plan': ['zai-coding-plan'],
-  'kimi-coding': ['kimi-for-coding'],
-  'kimi-coding-cn': ['kimi-for-coding'],
+  glm: ['zhipuai-coding-plan', 'zai', 'zhipuai'],
+  'glm-coding-plan': ['zai-coding-plan', 'zai'],
+  'kimi-coding': ['kimi-code-plan-global', 'kimi-for-coding', 'moonshotai'],
+  'kimi-coding-cn': ['kimi-code-plan-cn', 'kimi-for-coding', 'moonshotai-cn'],
   'xai-oauth': ['xai'],
+  'claude-oauth': ['anthropic'],
+  'minimax-oauth': ['minimax-coding-plan', 'minimax'],
+  'openai-api': ['openai'],
+  copilot: ['github-copilot'],
+  novita: ['novita-ai'],
+  gmi: ['gmicloud'],
+  'xiaomi-token-plan': ['xiaomi-token-plan-cn', 'xiaomi'],
 }
 
 // Coding Plan catalogs may omit older models. Only their own vendor can supply
@@ -297,8 +309,15 @@ function findModelEntry(models: Record<string, ModelEntry>, modelName: string): 
 }
 
 function findProviderModelEntry(data: Record<string, ProviderEntry>, provider: string, modelName: string): ModelEntry | undefined {
-  const own = findModelEntry(getProviderEntry(data, provider)?.models || {}, modelName)
-  if (own) return own
+  // Walk every candidate catalog in alias order and return the first one that
+  // actually owns the model. Resolving to the first candidate that merely
+  // *exists* would strand models that a Coding Plan catalog omits (e.g. an
+  // older `glm-4.5` when `zhipuai-coding-plan` only lists `glm-5.3*`), which is
+  // the 256k-understatement reported in #3119.
+  for (const candidate of getProviderCandidates(provider)) {
+    const entry = findModelEntry(getProviderEntry(data, candidate)?.models || {}, modelName)
+    if (entry) return entry
+  }
   for (const candidate of getProviderCandidates(provider)) {
     const fallback = MODEL_METADATA_PROVIDER_FALLBACKS[candidate]
     if (!fallback) continue
