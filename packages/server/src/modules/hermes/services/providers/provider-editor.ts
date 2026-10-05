@@ -1,4 +1,5 @@
 import { openCodeSessionHeaders } from '../../../studio/public/opencode-session'
+import { advertisedModelContextLength, type ProviderModelDescriptor } from '../../../studio/public/provider-catalog'
 import { openRouterAttributionHeaders } from '../../../studio/public/openrouter-attribution'
 import { createHash, randomBytes } from 'crypto'
 import { chmod } from 'fs/promises'
@@ -433,6 +434,20 @@ async function readLimitedResponse(response: Response): Promise<string> {
 }
 
 export async function fetchProviderCatalogForTest(baseUrl: string, apiKey: string, apiMode?: ProviderApiMode): Promise<string[]> {
+  const descriptors = await fetchProviderCatalogDescriptorsForTest(baseUrl, apiKey, apiMode)
+  return descriptors.map(descriptor => descriptor.id)
+}
+
+/**
+ * Same probe as {@link fetchProviderCatalogForTest} but keeps the context window
+ * each model advertises (e.g. `context_length`, `context_window`,
+ * `max_input_tokens`). Providers that omit it yield id-only descriptors.
+ */
+export async function fetchProviderCatalogDescriptorsForTest(
+  baseUrl: string,
+  apiKey: string,
+  apiMode?: ProviderApiMode,
+): Promise<ProviderModelDescriptor[]> {
   const endpoint = providerModelsEndpoint(baseUrl, apiMode)
   let current = endpoint.url
   const headers: Record<string, string> = {
@@ -478,9 +493,17 @@ export async function fetchProviderCatalogForTest(baseUrl: string, apiKey: strin
       const rawModels = endpoint.protocol === 'gemini' ? body?.models : body?.data
       if (!Array.isArray(rawModels)) throw new ProviderEditorError('Provider returned an unsupported model catalog', 422, 'PROVIDER_TEST_FAILED')
       if (rawModels.length > PROVIDER_TEST_MAX_MODELS) throw new ProviderEditorError('Provider returned more than 10,000 models', 422, 'PROVIDER_MODEL_LIMIT_EXCEEDED')
-      const models = rawModels.map((item: any) => String(item?.id || item?.name || '').replace(/^models\//, '').trim()).filter(Boolean)
-      if (models.length === 0) throw new ProviderEditorError('Provider returned an empty model catalog', 422, 'PROVIDER_EMPTY_CATALOG')
-      return [...new Set(models)]
+      const descriptors: ProviderModelDescriptor[] = []
+      const seen = new Set<string>()
+      for (const item of rawModels) {
+        const id = String(item?.id || item?.name || '').replace(/^models\//, '').trim()
+        if (!id || seen.has(id)) continue
+        seen.add(id)
+        const contextLength = advertisedModelContextLength(item)
+        descriptors.push(contextLength ? { id, contextLength } : { id })
+      }
+      if (descriptors.length === 0) throw new ProviderEditorError('Provider returned an empty model catalog', 422, 'PROVIDER_EMPTY_CATALOG')
+      return descriptors
     }
     throw new ProviderEditorError('Provider redirect failed', 422, 'PROVIDER_REDIRECT_REJECTED')
   } catch (error: any) {

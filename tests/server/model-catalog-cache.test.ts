@@ -4,6 +4,7 @@ import { join } from 'node:path'
 const {
   mockReadFile,
   mockFetchProviderModels,
+  mockFetchProviderModelDescriptors,
   mockReadConfigYamlForProfile,
   mockReadText,
   mockUpdateText,
@@ -17,6 +18,7 @@ const {
 } = vi.hoisted(() => ({
   mockReadFile: vi.fn(),
   mockFetchProviderModels: vi.fn(),
+  mockFetchProviderModelDescriptors: vi.fn(),
   mockReadConfigYamlForProfile: vi.fn(),
   mockReadText: vi.fn(),
   mockUpdateText: vi.fn(),
@@ -107,10 +109,19 @@ vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => 
 
 vi.mock('../../packages/server/src/modules/studio/public/provider-catalog', () => ({
   fetchProviderModels: mockFetchProviderModels,
+  fetchProviderModelDescriptors: mockFetchProviderModelDescriptors,
+  advertisedModelContextLength: (item: any) => {
+    const value = item?.context_length ?? item?.context_window ?? item?.max_input_tokens
+    return typeof value === 'number' && value > 0 ? value : null
+  },
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/app-config', () => ({
   readAppConfig: mockReadAppConfig,
+}))
+
+vi.mock('../../packages/server/src/modules/studio/public/provider-context', () => ({
+  insertMissingProviderContextLengths: vi.fn(() => 0),
 }))
 
 vi.mock('../../packages/server/src/modules/hermes/services/providers/copilot-models', () => ({
@@ -157,6 +168,9 @@ describe('model catalog cache', () => {
     mockResolveCopilotOAuthToken.mockResolvedValue('')
     mockFetchCopilotModelsWithOAuthToken.mockResolvedValue([])
     mockFetchProviderModels.mockResolvedValue([])
+    mockFetchProviderModelDescriptors.mockImplementation(async (baseUrl: string, apiKey: string, freeOnly: boolean) => (
+      (await mockFetchProviderModels(baseUrl, apiKey, freeOnly)).map((id: string) => ({ id }))
+    ))
     mockResolveAuthorizedCredentials.mockRejectedValue(new Error('not authenticated'))
     mockGlobalFetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) })
     vi.stubGlobal('fetch', mockGlobalFetch)

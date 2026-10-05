@@ -1,6 +1,7 @@
 import {
-  fetchProviderCatalogRefreshTargetModels,
+  fetchProviderCatalogRefreshTargetDescriptors,
   normalizeCatalogBaseUrl,
+  persistAdvertisedContextLengths,
   readProviderModelCatalogCache,
   resolveProviderCatalogRefreshTarget,
   resolveProviderCatalogEntry,
@@ -9,11 +10,12 @@ import {
   type ProviderModelCatalogEntry,
 } from './model-catalog-cache'
 import {
-  fetchProviderCatalogForTest,
+  fetchProviderCatalogDescriptorsForTest,
   getProviderEditorDetail,
   ProviderEditorError,
   type ProviderApiMode,
 } from './provider-editor'
+import type { ProviderModelDescriptor } from '../../../studio/public/provider-catalog'
 import { getCompatibleCustomProviders } from '../../../studio/contracts/provider-compat'
 import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
 import { readConfigYamlForProfile } from '../../../studio/public/profile-config'
@@ -189,7 +191,8 @@ export async function refreshProviderModels(
     const baseUrl = normalizeCatalogBaseUrl(target.base_url)
     const { models: currentModels, entry, freeOnly } = await currentModelsForProvider(profile, providerId, baseUrl)
     const protectedList = await protectedModels(profile, providerId, preferredModel)
-    const remoteModels = await fetchFullRemoteModels(target, apiMode)
+    const remoteDescriptors = await fetchFullRemoteModels(target, apiMode)
+    const remoteModels = uniqueModels(remoteDescriptors.map(descriptor => descriptor.id))
     if (remoteModels.length === 0) {
       // The global catalog refresh treats an empty result as a failed probe and
       // keeps the last-good cache. Do the same before calculating removals;
@@ -225,6 +228,9 @@ export async function refreshProviderModels(
       protectedModels: protectedList,
       createRestoreSnapshot: diff.added.length > 0 || diff.removed.length > 0,
     })
+    // Auto-populate the context windows the provider advertises so the chat
+    // indicator and compression thresholds do not fall back to 256k (#3119).
+    persistAdvertisedContextLengths({ provider: providerId, profiles: [profile], descriptors: remoteDescriptors })
 
     return {
       provider_id: providerId,
@@ -250,11 +256,11 @@ export async function refreshProviderModels(
 async function fetchFullRemoteModels(
   target: ProviderCatalogRefreshTarget,
   apiMode: ProviderApiMode | undefined,
-): Promise<string[]> {
+): Promise<ProviderModelDescriptor[]> {
   if (target.credential_kind === 'api_key' || target.credential_kind === 'none') {
-    return fetchProviderCatalogForTest(target.base_url, target.api_key, apiMode)
+    return fetchProviderCatalogDescriptorsForTest(target.base_url, target.api_key, apiMode)
   }
-  return fetchProviderCatalogRefreshTargetModels(target)
+  return fetchProviderCatalogRefreshTargetDescriptors(target)
 }
 
 export async function restoreProviderModels(
