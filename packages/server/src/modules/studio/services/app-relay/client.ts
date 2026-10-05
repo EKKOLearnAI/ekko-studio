@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import { io, type Socket } from 'socket.io-client'
 import { config } from '../../public/config'
+import { P2PRelaySessions } from './p2p'
 import {
   assignLegacyCloudAppConnectionUser,
   listAppConnections,
@@ -230,6 +231,7 @@ export class AppRelayClient {
   private readonly bridges = new Map<string, LocalSocketBridge>()
   private readonly relayUrl: string
   private readonly localBaseUrl: string
+  private readonly p2p: P2PRelaySessions
   private readonly fetchImpl: typeof fetch
   private pairingCode = ''
   private pairingExpiresAt = 0
@@ -250,6 +252,7 @@ export class AppRelayClient {
   }) {
     this.relayUrl = resolveAppRelayUrl(options.relayUrl)
     this.localBaseUrl = options.localBaseUrl.replace(/\/$/, '')
+    this.p2p = new P2PRelaySessions(this.localBaseUrl)
     this.fetchImpl = options.fetchImpl
   }
 
@@ -341,6 +344,11 @@ export class AppRelayClient {
         .then(response => ack?.(response))
         .catch(err => ack?.(httpError(request?.id, 'relay_internal_error', err instanceof Error ? err.message : String(err), 500)))
     })
+    this.socket.on('app.p2p.offer', (request: Record<string, any>, ack?: (response: unknown) => void) => {
+      void this.p2p.offer(request.owner, request).then(response => ack?.(response)).catch(() => ack?.({ ok: false, error: 'p2p_unavailable' }))
+    })
+    this.socket.on('app.p2p.keepalive', (request: Record<string, any>, ack?: (response: unknown) => void) => { ack?.(this.p2p.keepalive(request.owner)) })
+    this.socket.on('app.p2p.close', (request: Record<string, any>, ack?: (response: unknown) => void) => { ack?.(this.p2p.close(request.owner)) })
     this.socket.on('app.http.download.chunk', (
       request: AppRelayHttpDownloadRequest = {},
       ack?: (response: AppRelayHttpDownloadResponse) => void,
@@ -722,6 +730,7 @@ export class AppRelayClient {
   }
 
   private clearRelaySessionState(): void {
+    this.p2p.closeAll()
     this.downloadSessions.cancelAll()
     this.cloudSupportsChunkedDownloads = false
     this.pendingPreconnections.clear()

@@ -142,3 +142,47 @@ rows. Cleanup runs at startup, every six hours, and after each 1,000 new audit
 records, deleting in bounded batches. Super administrators can query the audit
 history through `/admin/appConnectionAudit/getList`. Retention and row limits
 can be adjusted with `APP_AUDIT_RETENTION_DAYS` and `APP_AUDIT_MAX_ROWS`.
+
+## Direct P2P transport
+
+Authenticated Apps can negotiate a data-only WebRTC channel using the
+`p2p.direct.v1` capability. Manual connections negotiate on this Studio's
+`/app-relay`; cloud connections forward only `p2p.offer`, `p2p.keepalive`, and
+`p2p.close` through the cloud. The cloud derives the session owner and device
+identity from the formal connection, never from an App-supplied target.
+
+Studio terminates the DataChannel in its backend using `werift`, including in
+CLI/Docker deployments and with the desktop window closed. Each peer has a
+separate authenticated loopback `/app-relay` connection, so the existing local
+HTTP and namespace dispatcher enforces device revocation, entitlement expiry,
+user/profile permissions, header/path allowlists, and request size limits.
+Cloud negotiation additionally checks the local token's device, connection
+type, and authorizing Studio user against the formal cloud connection.
+
+The channel uses versioned, ordered JSON frames with binary values encoded as
+base64. Each frame carries at most 8 KiB of text; complete messages, concurrent
+requests, reassembly and send buffers are bounded. File downloads use the
+existing chunk protocol. Download sessions stay pinned to their originating
+transport. Transport failure rejects pending requests and never automatically
+replays a write. Namespace bridges own chat resume and resubscription.
+
+This version enables direct ICE candidates only. Studio verifies the selected
+candidate pair before admitting traffic; TURN offers are rejected. Direct
+traffic does not pass through the cloud's bandwidth limiter or traffic meter.
+Fallback traffic continues through the unchanged cloud relay and its normal
+speed/file policies. Local/manual fallback continues using its existing local
+policy. File size and memory limits still apply to direct traffic.
+
+The App uses native data-only WebRTC on Android/iOS and browser WebRTC on H5.
+Missing native modules and failed negotiation preserve the existing relay.
+Backgrounding closes the direct channel and restores relay namespace bridges,
+preserving Android's native notification transport and iOS push behavior.
+The original signaling connection stays open. Studio closes all peers on cloud
+disconnect; peers must renew a 45-second lease through authorized signaling.
+
+Set `STUDIO_P2P_ENABLED=0` to disable direct negotiation. Optional
+`STUDIO_P2P_STUN_URLS` is a comma-separated list of `stun:` URLs; an empty value
+uses host candidates only. Defaults are Cloudflare and Google STUN. TURN is
+deliberately unsupported in this version; a later TURN integration must enforce
+its bandwidth policy instead of treating a relay candidate as an unlimited
+direct connection.

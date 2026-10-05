@@ -106,6 +106,7 @@
     "smol-toml": "^1.8.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
+    "werift": "0.24.4",
     "yaml": "^2.9.0"
   },
   "optionalDependencies": {
