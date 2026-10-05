@@ -40,6 +40,9 @@ All key runtime settings are configured from compose variables.
 | `HERMES_LAN_ADVERTISE_URL` | unset | Reachable Docker host origin placed in App LAN QR codes when the browser origin is localhost. Example: `http://192.168.1.20:6060`. |
 | `HERMES_APP_ENTITLEMENT_REQUIRED` | `true` | Require an RS256 cloud entitlement for App LAN relay connections. |
 | `HERMES_APP_ENTITLEMENT_PUBLIC_KEY` | built in | Optional PEM public-key override for App entitlement verification. |
+| `STUDIO_P2P_INTERFACE` | automatic | Container interface for P2P, normally `eth0` in bridge mode. |
+| `STUDIO_P2P_UDP_PORT_RANGE` | `50000-50127` | UDP range used by ICE and published with identical host/container ports. |
+| `STUDIO_P2P_ADVERTISE_ADDRESSES` | unset | Reachable Docker host LAN/public IP addresses advertised for the published UDP range. |
 | `HERMES_BIN` | `/opt/hermes/.venv/bin/hermes` | Path to Hermes CLI binary |
 | `HERMES_AGENT_IMAGE` | `nousresearch/hermes-agent:latest` | Hermes Agent base image (used only during build) |
 | `WEBUI_IMAGE` | `hermes-web-ui-local:latest` | Web UI image (set to `ekkoye8888/hermes-web-ui` to use pre-built) |
@@ -98,8 +101,33 @@ if you use native global logins and need to retain them across recreation.
 | Port | Description |
 |---|---|
 | `${PORT}` (6060) | Web UI dashboard |
+| `${STUDIO_P2P_UDP_PORT_RANGE}` (`50000-50127/udp`) | App P2P ICE checks and DataChannel traffic |
 
 No Hermes gateway ports are exposed by this compose setup.
+
+### App P2P connectivity
+
+Compose publishes the P2P UDP range in addition to TCP. A standalone
+`docker run` needs `-p 50000-50127:50000-50127/udp`; `EXPOSE` alone does not
+publish the range. A TCP reverse proxy for the Web UI does not replace this
+UDP mapping.
+
+For a host whose LAN IP is `192.168.1.20`, use:
+
+```bash
+STUDIO_P2P_ADVERTISE_ADDRESSES=192.168.1.20 docker compose up -d
+```
+
+For several Studio containers, assign each container a separate range and
+keep its host/container port numbers identical. Allow the configured range
+through the host firewall and cloud security group. Linux `network_mode: host`
+can use the host's interfaces directly; remove `ports` mappings when using it.
+Docker Desktop bridge mode uses the published host address through its VM
+network. The host VPN can still intercept the VM's UDP traffic and may need
+an exclusion. Containers with no IPv6 uplink use IPv4 candidates only.
+
+See [P2P network configuration](app-relay.md#network-interfaces-and-containers)
+for platform behavior, explicit interfaces and relay fallback.
 
 ## Code Runtime Behavior
 

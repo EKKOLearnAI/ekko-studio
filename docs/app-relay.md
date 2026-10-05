@@ -186,3 +186,52 @@ uses host candidates only. Defaults are Cloudflare and Google STUN. TURN is
 deliberately unsupported in this version; a later TURN integration must enforce
 its bandwidth policy instead of treating a relay candidate as an unlimited
 direct connection.
+
+### Network interfaces and containers
+
+Studio binds each ICE UDP socket to a real local address instead of a wildcard
+address. IPv4 and IPv6 use their respective default-route interfaces. macOS
+reads the routing table, Windows reads `Get-NetRoute`, and Linux reads the
+kernel's `/proc/net/route` and `/proc/net/ipv6_route` without requiring
+`iproute2` in the image. If route discovery is unavailable, Studio enumerates
+usable local interfaces. Automatic selection excludes known tunnel adapters,
+host-side container bridges, loopback, link-local and Clash fake-IP addresses.
+The container's own `eth0` remains eligible. Selection is refreshed for every
+negotiation, including after changing networks.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `STUDIO_P2P_INTERFACE` | automatic | Exact local interface name, such as `en0`, `Ethernet`, `Wi-Fi`, or container `eth0`. Explicit selection can also use a deployment-owned VPN interface. |
+| `STUDIO_P2P_UDP_PORT_RANGE` | OS-assigned ports; Docker image uses `50000-50127` | Inclusive UDP range, `low-high`, between 1024 and 65535, with at most 4096 ports. Use matching firewall and Docker mappings. |
+| `STUDIO_P2P_ADVERTISE_ADDRESSES` | unset | Comma-separated literal host/public IP addresses reachable through the published UDP range. Requires a fixed range and a matching local address family. |
+
+Published addresses add same-port host candidates to the answer; Studio still
+binds sockets to its own addresses. They do not open extra sockets or bind an
+address that belongs to the Docker host. Keep Docker host and container UDP
+port numbers identical. A deployment with multiple containers needs a distinct
+range per instance. Invalid network settings reject P2P negotiation and the App
+continues using its existing relay.
+
+Source binding keeps this Mac's P2P traffic out of Clash TUN while retaining
+the system HTTP proxy. Windows/Linux VPN drivers or policy routing can still
+force bound sockets through the VPN. Such deployments need a VPN exclusion
+for Studio's UDP traffic; a STUN-only exclusion is insufficient because ICE
+checks and DataChannel traffic use peer addresses and the same UDP sockets.
+With a configured fixed range, filter by the Studio process and that UDP source
+range, preserving the application's TCP/HTTP proxy. Allow inbound UDP through
+the OS firewall and, for servers, the cloud security group. Do not disable the
+whole firewall or alter global proxy settings to enable P2P.
+
+Docker bridge deployments must publish UDP in addition to the HTTP port. For
+LAN connectivity, set `STUDIO_P2P_ADVERTISE_ADDRESSES` to the reachable host LAN
+IP; for an explicitly forwarded public range, use the corresponding public IP.
+A TCP reverse proxy does not carry this traffic. Linux host networking is an
+alternative to bridge publication. Docker Desktop adds a VM/network layer, so
+host addresses, UDP publication and the host VPN rules all need to agree.
+IPv6 candidates require a usable IPv6 address inside the container as well as
+an IPv6 path to the host. NAT or firewall restrictions can still prevent direct
+connectivity; the existing authorized relay remains the fallback.
+
+Routing and deployment references: [Windows Get-NetRoute](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netroute),
+[Linux network namespace routing files](https://man7.org/linux/man-pages/man5/proc_pid_net.5.html),
+[Docker port publication](https://docs.docker.com/engine/network/port-publishing/).

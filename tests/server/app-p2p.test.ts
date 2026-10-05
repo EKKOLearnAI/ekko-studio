@@ -7,6 +7,12 @@ import { LocalAppRelayServer } from '../../packages/server/src/modules/studio/se
 import { P2PRelaySessions } from '../../packages/server/src/modules/studio/services/app-relay/p2p'
 import { P2PAssembler, encodeP2P, p2pFrames } from '../../packages/server/src/modules/studio/services/app-relay/p2p-wire'
 import { inspectAppUserToken } from '../../packages/server/src/modules/studio/middleware/auth'
+import { getP2PNetworkConfig } from '../../packages/server/src/modules/studio/services/app-relay/p2p-network'
+
+vi.mock('../../packages/server/src/modules/studio/services/app-relay/p2p-network', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../packages/server/src/modules/studio/services/app-relay/p2p-network')>()
+  return { ...actual, getP2PNetworkConfig: vi.fn(actual.getP2PNetworkConfig) }
+})
 
 vi.mock('../../packages/server/src/modules/studio/middleware/auth', () => ({
   authenticateUserToken: vi.fn(async () => ({ id: 1 })),
@@ -116,6 +122,25 @@ describe('real P2P transport', () => {
     sessions.closeAll()
     authorize({ status: 'active', user: { id: 1 }, deviceCode: 'phone', connectionType: 'cloud' })
     expect(await offer).toMatchObject({ ok: false, error: 'p2p_cancelled' })
+    expect(sessions.keepalive('owner')).toEqual({ ok: false })
+  })
+
+  it('cannot resurrect a peer when its owner disconnects during network discovery', async () => {
+    let discover!: (value: Awaited<ReturnType<typeof getP2PNetworkConfig>>) => void
+    vi.mocked(getP2PNetworkConfig).mockImplementationOnce(() => new Promise(resolve => { discover = resolve }))
+    const sessions = new P2PRelaySessions('http://127.0.0.1:1')
+    const offer = sessions.offer('owner', { type: 'offer', sdp: 'sdp', auth: { token: 'good' } })
+    await vi.waitFor(() => expect(discover).toBeTypeOf('function'))
+    sessions.closeAll()
+    discover({ peer: {}, advertiseAddresses: [] })
+    expect(await offer).toEqual({ ok: false, error: 'p2p_cancelled' })
+    expect(sessions.keepalive('owner')).toEqual({ ok: false })
+  })
+
+  it('rejects invalid network configuration without leaving a P2P session', async () => {
+    vi.stubEnv('STUDIO_P2P_INTERFACE', 'missing-p2p-interface')
+    const sessions = new P2PRelaySessions('http://127.0.0.1:1')
+    expect(await sessions.offer('owner', { type: 'offer', sdp: 'sdp', auth: { token: 'good' } })).toEqual({ ok: false, error: 'p2p_invalid_network_config' })
     expect(sessions.keepalive('owner')).toEqual({ ok: false })
   })
 

@@ -4,6 +4,7 @@ import type { RTCPeerConnection, RTCDataChannel } from 'werift'
 import { inspectAppUserToken } from '../../middleware/auth'
 import { getDeviceId } from '../../public/system-info'
 import { P2PAssembler, P2P_EVENTS, encodeP2P, p2pFrames } from './p2p-wire'
+import { addP2PAdvertiseCandidates, getP2PNetworkConfig } from './p2p-network'
 
 export const P2P_STUN_URLS = ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302']
 type Session = { pc: RTCPeerConnection; socket: Socket; timer: NodeJS.Timeout; expires: number; channel?: RTCDataChannel; queue: string[]; queued: number; serial: number; assembler: P2PAssembler; inflight: number; drain?: NodeJS.Timeout }
@@ -40,7 +41,11 @@ export class P2PRelaySessions {
     if (this.offers.get(owner) !== attempt) return { ok: false, error: 'p2p_cancelled' }
     const stun = process.env.STUDIO_P2P_STUN_URLS === undefined ? P2P_STUN_URLS : process.env.STUDIO_P2P_STUN_URLS.split(',').map(url => url.trim()).filter(Boolean)
     if (stun.some(url => !url.startsWith('stun:'))) return { ok: false, error: 'p2p_invalid_stun_config' }
-    const pc = new PeerConnection({ iceServers: stun.map(url => ({ urls: url })) })
+    let network: Awaited<ReturnType<typeof getP2PNetworkConfig>>
+    try { network = await getP2PNetworkConfig() }
+    catch { return { ok: false, error: 'p2p_invalid_network_config' } }
+    if (this.offers.get(owner) !== attempt) return { ok: false, error: 'p2p_cancelled' }
+    const pc = new PeerConnection({ iceServers: stun.map(url => ({ urls: url })), ...network.peer })
     const socket = io(`${this.localBaseUrl}/app-relay`, { auth: localAuth, transports: ['websocket'], forceNew: true, autoConnect: false, reconnection: false, timeout: 8000 })
     const session: Session = { pc, socket, timer: setInterval(() => { if (this.sessions.get(owner) === session && Date.now() > session.expires) this.close(owner) }, 5000), expires: Date.now() + 45_000, queue: [], queued: 0, serial: 0, assembler: new P2PAssembler(), inflight: 0 }
     session.timer.unref()
@@ -81,7 +86,7 @@ export class P2PRelaySessions {
       await pc.setRemoteDescription({ type: 'offer', sdp: input.sdp })
       await pc.setLocalDescription(await pc.createAnswer())
       if (this.sessions.get(owner) !== session) throw new Error('p2p_cancelled')
-      return { ok: true, type: 'answer', sdp: pc.localDescription?.sdp }
+      return { ok: true, type: 'answer', sdp: addP2PAdvertiseCandidates(pc.localDescription!.sdp, network.advertiseAddresses) }
     } catch {
       if (this.sessions.get(owner) === session) this.close(owner)
       return { ok: false, error: 'p2p_unavailable' }
