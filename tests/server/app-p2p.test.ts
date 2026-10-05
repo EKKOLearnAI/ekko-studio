@@ -10,7 +10,7 @@ import { inspectAppUserToken } from '../../packages/server/src/modules/studio/mi
 
 vi.mock('../../packages/server/src/modules/studio/middleware/auth', () => ({
   authenticateUserToken: vi.fn(async () => ({ id: 1 })),
-  inspectAppUserToken: vi.fn(async (token: string) => token === 'good' ? { status: 'active', user: { id: 1 }, deviceCode: 'phone', connectionType: 'lan' } : { status: 'revoked' }),
+  inspectAppUserToken: vi.fn(async (token: string) => ['good', 'cloud-good'].includes(token) ? { status: 'active', user: { id: 1 }, deviceCode: 'phone', connectionType: token === 'cloud-good' ? 'cloud' : 'lan' } : { status: 'revoked' }),
 }))
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ config: { port: 8648, appRelay: { entitlementRequired: false } } }))
 vi.mock('../../packages/server/src/modules/studio/public/system-info', () => ({ getDeviceId: vi.fn(async () => 'machine') }))
@@ -18,7 +18,7 @@ vi.mock('../../packages/server/src/modules/studio/public/system-info', () => ({ 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
 describe('real P2P transport', () => {
-  it('serves APIs, binary downloads and chat through a real direct channel, with the existing relay available as fallback', async () => {
+  it.each(['manual', 'cloud development'])('serves APIs, binary downloads and chat over %s P2P, with relay fallback', async mode => {
     vi.stubEnv('STUDIO_P2P_STUN_URLS', '')
     let writes = 0
     const http = createServer((request, response) => {
@@ -32,6 +32,7 @@ describe('real P2P transport', () => {
     const url = `http://127.0.0.1:${address.port}`
     const local = new LocalAppRelayServer(server, { machineId: 'machine', localBaseUrl: url, entitlementRequired: false })
     local.init()
+    const cloudP2P = new P2PRelaySessions(url)
     server.of('/chat-run').on('connection', socket => socket.on('run', () => socket.emit('message.done', { text: 'hello' })))
     const raw = io(`${url}/app-relay`, { forceNew: true, autoConnect: false, auth: { role: 'app', machineId: 'machine', deviceCode: 'phone', token: 'good' }, transports: ['websocket'] })
     const peer = new RTCPeerConnection({ iceServers: [] })
@@ -61,14 +62,19 @@ describe('real P2P transport', () => {
       const ready = new Promise<void>(resolve => raw.once('relay.ready', resolve))
       raw.connect(); await ready
       await peer.setLocalDescription(await peer.createOffer())
-      const answer = await new Promise<any>((resolve, reject) => raw.timeout(25_000).emit('p2p.offer', {
+      const answer = mode === 'cloud development'
+        ? await cloudP2P.offer('cloud-app', {
+          type: 'offer', sdp: peer.localDescription!.sdp, studioUserId: 1,
+          auth: { token: 'cloud-good', deviceCode: 'phone', machineId: 'separate-development-cloud-identity' },
+        })
+        : await new Promise<any>((resolve, reject) => raw.timeout(25_000).emit('p2p.offer', {
         type: 'offer', sdp: peer.localDescription!.sdp, auth: { token: 'client-cannot-override-auth' },
       }, (error: Error | null, result: any) => error ? reject(error) : resolve(result)))
       expect(answer.ok).toBe(true)
       await peer.setRemoteDescription({ type: 'answer', sdp: answer.sdp })
       await vi.waitFor(() => expect(readyMessage).toMatchObject({ transport: 'p2p-direct', cloudSpeedLimited: false }), { timeout: 20_000 })
       const api = await request('http.request', { id: 'get', method: 'GET', path: '/api/test' })
-      expect(api.status).toBe(200); expect(JSON.parse(api.body).authorization).toBe('Bearer good')
+      expect(api.status).toBe(200); expect(JSON.parse(api.body).authorization).toBe(mode === 'cloud development' ? 'Bearer cloud-good' : 'Bearer good')
       const file = await request('http.request', { id: 'file', method: 'GET', path: '/api/file', streamBinary: true })
       const chunk = await request('http.download.chunk', { id: file.download.id })
       expect(new Uint8Array(chunk.bodyBytes).byteLength).toBeGreaterThan(0)
@@ -80,13 +86,14 @@ describe('real P2P transport', () => {
       await vi.waitFor(() => expect(events.some(event => event.event === 'message.done' && event.payload.text === 'hello')).toBe(true))
       const write = await request('http.request', { id: 'write', method: 'POST', path: '/api/write' })
       expect(write.status).toBe(200); expect(writes).toBe(1)
-      await new Promise<void>(resolve => raw.emit('p2p.close', {}, () => resolve()))
+      if (mode === 'cloud development') cloudP2P.close('cloud-app')
+      else await new Promise<void>(resolve => raw.emit('p2p.close', {}, () => resolve()))
       const fallback = await new Promise<any>((resolve, reject) => raw.timeout(5000).emit('http.request', {
         id: 'fallback', method: 'GET', path: '/api/test',
       }, (error: Error | null, result: any) => error ? reject(error) : resolve(result)))
       expect(fallback.status).toBe(200)
       expect(writes).toBe(1)
-    } finally { raw.disconnect(); await peer.close(); await new Promise<void>(resolve => server.close(() => resolve())) }
+    } finally { cloudP2P.closeAll(); raw.disconnect(); await peer.close(); await new Promise<void>(resolve => server.close(() => resolve())) }
   }, 30_000)
 
   it('rejects TURN offers, invalid credentials and oversized frames', async () => {

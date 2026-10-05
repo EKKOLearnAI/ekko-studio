@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { io, type Socket } from 'socket.io-client'
 import type { RTCPeerConnection, RTCDataChannel } from 'werift'
 import { inspectAppUserToken } from '../../middleware/auth'
+import { getDeviceId } from '../../public/system-info'
 import { P2PAssembler, P2P_EVENTS, encodeP2P, p2pFrames } from './p2p-wire'
 
 export const P2P_STUN_URLS = ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302']
@@ -26,9 +27,13 @@ export class P2PRelaySessions {
   }
 
   private async negotiate(owner: string, input: Record<string, any>, attempt: symbol): Promise<Record<string, unknown>> {
+    const localAuth = { ...input.auth, role: 'app' }
     if (input.studioUserId) {
       const token = await inspectAppUserToken(String(input.auth.token))
       if (token?.status !== 'active' || token.deviceCode !== input.auth.deviceCode || token.user?.id !== input.studioUserId || token.connectionType !== 'cloud') return { ok: false, error: 'p2p_unauthorized' }
+      // Development uses a separate cloud relay identity. The authenticated
+      // loopback dispatcher still expects this Studio's local device identity.
+      localAuth.machineId = await getDeviceId()
     }
     if (this.offers.get(owner) !== attempt) return { ok: false, error: 'p2p_cancelled' }
     const { RTCPeerConnection: PeerConnection } = await import('werift')
@@ -36,7 +41,7 @@ export class P2PRelaySessions {
     const stun = process.env.STUDIO_P2P_STUN_URLS === undefined ? P2P_STUN_URLS : process.env.STUDIO_P2P_STUN_URLS.split(',').map(url => url.trim()).filter(Boolean)
     if (stun.some(url => !url.startsWith('stun:'))) return { ok: false, error: 'p2p_invalid_stun_config' }
     const pc = new PeerConnection({ iceServers: stun.map(url => ({ urls: url })) })
-    const socket = io(`${this.localBaseUrl}/app-relay`, { auth: { ...input.auth, role: 'app' }, transports: ['websocket'], forceNew: true, autoConnect: false, reconnection: false, timeout: 8000 })
+    const socket = io(`${this.localBaseUrl}/app-relay`, { auth: localAuth, transports: ['websocket'], forceNew: true, autoConnect: false, reconnection: false, timeout: 8000 })
     const session: Session = { pc, socket, timer: setInterval(() => { if (this.sessions.get(owner) === session && Date.now() > session.expires) this.close(owner) }, 5000), expires: Date.now() + 45_000, queue: [], queued: 0, serial: 0, assembler: new P2PAssembler(), inflight: 0 }
     session.timer.unref()
     this.sessions.set(owner, session)
