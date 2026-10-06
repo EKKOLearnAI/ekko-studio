@@ -253,8 +253,7 @@ async function submitApproval(action: Extract<GlobalPendingAction, { kind: 'chat
 }
 
 function clarifyQuestionsOf(action: Extract<GlobalPendingAction, { kind: 'chat-clarify' | 'group-clarify' }>): ClarifyQuestion[] {
-  // Chat clarifications arrive as a question list; group rooms still relay a single question.
-  if (action.kind === 'chat-clarify' && action.pending.questions?.length) return action.pending.questions
+  if (action.pending.questions?.length) return action.pending.questions
   return normalizeClarifyQuestions(null, action.pending.question, action.pending.choices)
 }
 
@@ -306,7 +305,7 @@ async function submitClarify(action: Extract<GlobalPendingAction, { kind: 'chat-
   submitting[action.key] = true
   try {
     if (action.kind === 'chat-clarify') chatStore.respondToClarifyFor(action.pending.sessionId, action.pending.clarifyId, response, answers)
-    else await groupChatStore.respondClarifyFor(action.pending.roomId, action.pending.clarifyId, response)
+    else await groupChatStore.respondClarifyFor(action.pending.roomId, action.pending.clarifyId, response, answers)
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
   } finally {

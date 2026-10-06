@@ -5,7 +5,7 @@ import {
   emitAck,
   once,
 } from './group-chat-test-helpers'
-import { GROUP_CHAT_AGENT_SOCKET_SECRET, groupRuntimeSessionId } from '../../packages/server/src/modules/studio/services/group-chat/agent-clients'
+import { GROUP_CHAT_AGENT_SOCKET_SECRET, groupRuntimeSessionId, type GroupAgentExecutor } from '../../packages/server/src/modules/studio/services/group-chat/agent-clients'
 import { AgentBridgeClient } from '../../packages/server/src/modules/hermes/services/bridge/index'
 import { ChatRunSocket } from '../../packages/server/src/modules/studio/sockets/chat-run'
 import '../../packages/server/src/bootstrap/chat-agent-runtime-adapter'
@@ -588,6 +588,75 @@ describe('group chat approval and context baseline', () => {
     await expect(clarification).resolves.toBe('staging')
   })
 
+  it('relays every clarify question into the room and the join snapshot', async () => {
+    const { agent, human, agentSessionId } = await joinPair()
+    const requested = once<any>(human, 'clarify.requested')
+
+    agent.emit('clarify.requested', {
+      roomId: 'room-1',
+      agentName: 'Agent',
+      agentSessionId,
+      clarify_id: 'clarify-multi',
+      question: '1. Which environment?\n2. Which regions?',
+      choices: null,
+      questions: [
+        { qid: 'q0', question: 'Which environment?', choices: ['staging', 'production'] },
+        { qid: 'q1', question: 'Which regions?', choices: ['eu', 'us'], multi_select: true },
+        { qid: 'q2', question: '' },
+      ],
+      timeout_ms: 300_000,
+    })
+
+    const questions = [
+      { qid: 'q0', question: 'Which environment?', choices: ['staging', 'production'], multi_select: false },
+      { qid: 'q1', question: 'Which regions?', choices: ['eu', 'us'], multi_select: true },
+    ]
+    await expect(requested).resolves.toMatchObject({ clarify_id: 'clarify-multi', questions })
+    const rejoined = await emitAck<any>(human, 'join', { roomId: 'room-1', inviteCode: 'ROOM1' })
+    expect(rejoined.pendingClarifies).toContainEqual(expect.objectContaining({
+      clarify_id: 'clarify-multi',
+      questions,
+    }))
+  })
+
+  it('forwards a well-formed clarify answers map and drops malformed ones', async () => {
+    const { agent, human, agentSessionId } = await joinPair()
+    const respondClarify = vi.fn(async () => true)
+    const executor = { name: 'Agent', agent: 'hermes', respondClarify } as unknown as GroupAgentExecutor
+    vi.spyOn(groupServer.agentClients, 'getAgents').mockReturnValue([executor])
+
+    async function respond(clarifyId: string, answers: unknown) {
+      const requested = once<any>(human, 'clarify.requested')
+      agent.emit('clarify.requested', {
+        roomId: 'room-1', agentName: 'Agent', agentSessionId, clarify_id: clarifyId,
+        question: 'Which environment?', timeout_ms: 300_000,
+      })
+      await requested
+      await expect(emitAck(human, 'clarify.respond', {
+        roomId: 'room-1', clarify_id: clarifyId, response: 'staging', answers,
+      })).resolves.toEqual({ ok: true, resolved: true })
+    }
+
+    await respond('clarify-valid', { q0: 'staging', q1: ['eu', 'us'], q2: null })
+    expect(respondClarify).toHaveBeenLastCalledWith('clarify-valid', 'staging', {
+      q0: 'staging', q1: ['eu', 'us'], q2: null,
+    })
+
+    const malformed: unknown[] = [
+      'staging',
+      ['staging'],
+      { q0: 5 },
+      { q0: ['eu', 7] },
+      { q0: 'a', q1: 'b', q2: 'c', q3: 'd', q4: 'e', q5: 'f' },
+      { ['q'.repeat(80)]: 'staging' },
+      { q0: Array.from({ length: 21 }, (_, index) => `choice-${index}`) },
+    ]
+    for (const [index, answers] of malformed.entries()) {
+      await respond(`clarify-bad-${index}`, answers)
+      expect(respondClarify).toHaveBeenLastCalledWith(`clarify-bad-${index}`, 'staging', undefined)
+    }
+  })
+
   it('settles an Ekko clarification through the real GroupChat interrupt and ChatRun abort chain', async () => {
     const human = await connectGroupChatClient(port, 'human-1', 'Human')
     harness.sockets.push(human)
@@ -828,7 +897,7 @@ describe('group chat approval and context baseline', () => {
     await expect(emitAck(human, 'clarify.respond', {
       roomId: 'room-1', clarify_id: 'clarify-hermes', response: 'yes',
     })).resolves.toEqual({ ok: true, resolved: true })
-    expect(bridgeClarify).toHaveBeenCalledWith('clarify-hermes', 'yes')
+    expect(bridgeClarify).toHaveBeenCalledWith('clarify-hermes', 'yes', undefined)
   })
 
   it('restores pending approvals and clarifications to a room manager on rejoin', async () => {
@@ -994,7 +1063,7 @@ describe('group chat approval and context baseline', () => {
       clarify_id: 'clarify-remote-once',
       response: 'production',
     })).resolves.toEqual({ error: 'Clarification is not pending in this room' })
-    expect(respondClarify).toHaveBeenCalledWith('clarify-remote-once', 'staging')
+    expect(respondClarify).toHaveBeenCalledWith('clarify-remote-once', 'staging', undefined)
   })
 
   it('falls back to the Hermes bridge when a remote clarification responder does not own the request', async () => {
@@ -1024,8 +1093,8 @@ describe('group chat approval and context baseline', () => {
       clarify_id: 'clarify-hermes-behind-remote',
       response: 'yes',
     })).resolves.toEqual({ ok: true, resolved: true })
-    expect(respondClarify).toHaveBeenCalledWith('clarify-hermes-behind-remote', 'yes')
-    expect(bridgeClarify).toHaveBeenCalledWith('clarify-hermes-behind-remote', 'yes')
+    expect(respondClarify).toHaveBeenCalledWith('clarify-hermes-behind-remote', 'yes', undefined)
+    expect(bridgeClarify).toHaveBeenCalledWith('clarify-hermes-behind-remote', 'yes', undefined)
   })
 
   it('expires stale pending interactions and tells the browser to close them', async () => {

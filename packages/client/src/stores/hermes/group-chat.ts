@@ -10,6 +10,7 @@ import {
     pendingInteractionDeadline,
     type PendingInteractionSubmitResult,
 } from '@/utils/pending-interaction'
+import { normalizeClarifyQuestions, type ClarifyAnswers, type ClarifyQuestion } from '@/utils/clarify-questions'
 import { getActiveProfileName, getStoredUsername } from '@/api/client'
 import { fetchCurrentUser } from '@/api/studio/auth'
 import { formatMessageWithReference, type Attachment, type ContentBlock, type MessageReference } from './chat'
@@ -175,6 +176,7 @@ export interface GroupPendingClarify {
     clarifyId: string
     question: string
     choices: string[] | null
+    questions: ClarifyQuestion[]
     initialResponse: string
     responseMode: string
     timeoutMs: number
@@ -507,14 +509,17 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         })
     }
 
-    function upsertPendingClarify(data: { roomId: string; agentName?: string; clarify_id?: string; question?: string; choices?: string[] | null; initial_response?: string; response_mode?: string; timeout_ms?: number; remaining_timeout_ms?: number; requested_at?: number }) {
+    function upsertPendingClarify(data: { roomId: string; agentName?: string; clarify_id?: string; question?: string; choices?: string[] | null; questions?: unknown; initial_response?: string; response_mode?: string; timeout_ms?: number; remaining_timeout_ms?: number; requested_at?: number }) {
         if (!data.roomId || !data.clarify_id) return
+        const question = data.question || ''
+        const choices = Array.isArray(data.choices) ? data.choices.map(String) : null
         pendingClarifies.value.set(pendingClarifyKey(data.roomId, data.clarify_id), {
             roomId: data.roomId,
             agentName: data.agentName || '',
             clarifyId: data.clarify_id,
-            question: data.question || '',
-            choices: Array.isArray(data.choices) ? data.choices.map(String) : null,
+            question,
+            choices,
+            questions: normalizeClarifyQuestions(data.questions, question, choices),
             initialResponse: String(data.initial_response || ''),
             responseMode: String(data.response_mode || ''),
             timeoutMs: Number(data.timeout_ms) || 300_000,
@@ -1937,7 +1942,7 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         return respondApprovalFor(pending.roomId, pending.approvalId, choice)
     }
 
-    async function respondClarifyFor(roomId: string, clarifyId: string, response: string): Promise<PendingInteractionSubmitResult> {
+    async function respondClarifyFor(roomId: string, clarifyId: string, response: string, answers?: ClarifyAnswers): Promise<PendingInteractionSubmitResult> {
         const key = pendingClarifyKey(roomId, clarifyId)
         const pending = pendingClarifies.value.get(key)
         if (!pending) return 'missing'
@@ -1950,6 +1955,7 @@ export const useGroupChatStore = defineStore('groupChat', () => {
                     roomId: pending.roomId,
                     clarify_id: pending.clarifyId,
                     response,
+                    ...(answers ? { answers } : {}),
                 }, (res: any) => {
                     if (res?.error) reject(new Error(res.error))
                     else {
@@ -1975,10 +1981,10 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         return 'submitted'
     }
 
-    async function respondClarify(response: string): Promise<PendingInteractionSubmitResult> {
+    async function respondClarify(response: string, answers?: ClarifyAnswers): Promise<PendingInteractionSubmitResult> {
         const pending = activePendingClarify.value
         if (!pending) return 'missing'
-        return respondClarifyFor(pending.roomId, pending.clarifyId, response)
+        return respondClarifyFor(pending.roomId, pending.clarifyId, response, answers)
     }
 
     async function cancelExecutionQueueItem(queueId: string) {

@@ -7,7 +7,7 @@ import PageHeader from '@/components/layout/PageHeader.vue'
 import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
-import { ref, computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, provide, watch } from 'vue'
+import { reactive, ref, computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, provide, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { NSpin, useMessage, NInput, NButton, NSpace, NSelect, NPopconfirm, NInputNumber, NDropdown, NModal, NPopover, NDrawer, NDrawerContent, NSwitch, type DropdownOption } from 'naive-ui'
@@ -47,6 +47,7 @@ import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
 import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
 import { copyToClipboard } from '@/utils/clipboard'
+import { buildClarifySubmission, type ClarifyAnswers, type ClarifyDraft, type ClarifyQuestion } from '@/utils/clarify-questions'
 import type { Attachment } from '@/stores/hermes/chat'
 import type {
     GroupAgentPreset,
@@ -175,7 +176,7 @@ const remoteRoomConnections = ref<LocalGroupAgentConnection[]>([])
 const localRoomsCollapsed = ref(false)
 const remoteRoomsCollapsed = ref(false)
 const isDecidingAgentPairing = ref(false)
-const clarifyResponse = ref('')
+const clarifyDrafts = reactive<Record<string, ClarifyDraft>>({})
 const allowGuestAgentsDraft = ref(false)
 const maxGuestAgentsPerMemberDraft = ref(1)
 const allowRemoteWorkspaceAccessDraft = ref(false)
@@ -694,9 +695,20 @@ const visibleClarify = computed(() =>
         ? store.activePendingClarify
         : null,
 )
+const clarifyQuestions = computed<ClarifyQuestion[]>(() => visibleClarify.value?.questions || [])
+/** One question without multi-select keeps the original card: the choices answer on click. */
+const clarifySingleQuestion = computed(() => clarifyQuestions.value.length === 1 && !clarifyQuestions.value[0].multiSelect)
+const clarifyCanSubmit = computed(() => visibleClarify.value?.responseMode === 'editor'
+    || Boolean(buildClarifySubmission(clarifyQuestions.value, clarifyDrafts).response))
 watch(
     () => visibleClarify.value?.clarifyId,
-    () => { clarifyResponse.value = visibleClarify.value?.initialResponse || '' },
+    () => {
+        for (const qid of Object.keys(clarifyDrafts)) delete clarifyDrafts[qid]
+        for (const question of clarifyQuestions.value) clarifyDrafts[question.qid] = { choices: [], text: '' }
+        const first = clarifyQuestions.value[0]
+        if (first) clarifyDrafts[first.qid].text = visibleClarify.value?.initialResponse || ''
+    },
+    { immediate: true },
 )
 const visibleAgentPairing = computed(() =>
     currentRoomCanManage.value ? pendingAgentPairings.value[0] || null : null,
@@ -2105,20 +2117,43 @@ async function handleApproval(choice: 'once' | 'session' | 'always' | 'deny') {
     }
 }
 
-async function handleClarify(response?: string) {
+async function submitClarify(response: string, answers: ClarifyAnswers) {
     if (!currentRoomCanManage.value) return
-    const finalResponse = response !== undefined
-        ? response
-        : visibleClarify.value?.responseMode === 'editor'
-            ? clarifyResponse.value
-            : clarifyResponse.value.trim()
-    if (response === undefined && !finalResponse && visibleClarify.value?.responseMode !== 'editor') return
     try {
-        await store.respondClarify(finalResponse)
-        clarifyResponse.value = ''
+        await store.respondClarify(response, answers)
+        for (const draft of Object.values(clarifyDrafts)) {
+            draft.choices = []
+            draft.text = ''
+        }
     } catch (err: any) {
         message.error(err.message || t('common.saveFailed'))
     }
+}
+
+function toggleClarifyChoice(question: ClarifyQuestion, choice: string) {
+    const draft = clarifyDrafts[question.qid] || (clarifyDrafts[question.qid] = { choices: [], text: '' })
+    if (!question.multiSelect) {
+        draft.choices = draft.choices.includes(choice) ? [] : [choice]
+        return
+    }
+    draft.choices = draft.choices.includes(choice)
+        ? draft.choices.filter(item => item !== choice)
+        : [...draft.choices, choice]
+}
+
+/** The single-question card answers straight from the clicked choice. */
+function handleClarifyChoice(choice: string) {
+    void submitClarify(choice, { [clarifyQuestions.value[0]?.qid || 'q0']: choice })
+}
+
+function handleClarifyDismiss() {
+    void submitClarify('', {})
+}
+
+function handleClarify() {
+    const { response, answers } = buildClarifySubmission(clarifyQuestions.value, clarifyDrafts)
+    if (!response && visibleClarify.value?.responseMode !== 'editor') return
+    void submitClarify(response, answers)
 }
 
 function handleClarifyKeydown(event: KeyboardEvent) {
@@ -2583,18 +2618,33 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                 <div class="approval-float-title">
                                     <span v-if="visibleClarify.agentName">@{{ visibleClarify.agentName }} · </span>{{ t('chat.clarifyTitle') }}
                                 </div>
-                                <div class="approval-float-desc">{{ visibleClarify.question }}</div>
-                                <div v-if="visibleClarify.choices?.length" class="approval-float-actions">
-                                    <NButton v-for="choice in visibleClarify.choices" :key="choice" size="small" type="primary" @click="handleClarify(choice)">
-                                        {{ choice }}
-                                    </NButton>
-                                    <NButton size="small" type="error" secondary @click="handleClarify('')">
-                                        {{ t('chat.clarifyDismiss') }}
-                                    </NButton>
+                                <div class="clarify-float-questions">
+                                    <div v-for="question in clarifyQuestions" :key="question.qid" class="clarify-float-question">
+                                        <div class="approval-float-desc">{{ question.question }}</div>
+                                        <div v-if="question.choices?.length" class="approval-float-actions">
+                                            <NButton
+                                                v-for="choice in question.choices"
+                                                :key="choice"
+                                                size="small"
+                                                :type="clarifySingleQuestion || clarifyDrafts[question.qid]?.choices.includes(choice) ? 'primary' : 'default'"
+                                                :secondary="!clarifySingleQuestion && !clarifyDrafts[question.qid]?.choices.includes(choice)"
+                                                @click="clarifySingleQuestion ? handleClarifyChoice(choice) : toggleClarifyChoice(question, choice)"
+                                            >
+                                                {{ choice }}
+                                            </NButton>
+                                            <NButton v-if="clarifySingleQuestion" size="small" type="error" secondary @click="handleClarifyDismiss()">
+                                                {{ t('chat.clarifyDismiss') }}
+                                            </NButton>
+                                        </div>
+                                        <NInput v-if="!clarifySingleQuestion && clarifyDrafts[question.qid]" v-model:value="clarifyDrafts[question.qid].text" size="small" :type="visibleClarify.responseMode === 'editor' ? 'textarea' : 'text'" :placeholder="t('chat.clarifyPlaceholder')" />
+                                    </div>
                                 </div>
                                 <div class="clarify-float-input-row">
-                                    <NInput v-model:value="clarifyResponse" size="small" :type="visibleClarify.responseMode === 'editor' ? 'textarea' : 'text'" :placeholder="t('chat.clarifyPlaceholder')" @keydown.enter="handleClarifyKeydown" />
-                                    <NButton size="small" type="primary" :disabled="visibleClarify.responseMode !== 'editor' && !clarifyResponse.trim()" @click="handleClarify()">
+                                    <NInput v-if="clarifySingleQuestion && clarifyDrafts[clarifyQuestions[0].qid]" v-model:value="clarifyDrafts[clarifyQuestions[0].qid].text" size="small" :type="visibleClarify.responseMode === 'editor' ? 'textarea' : 'text'" :placeholder="t('chat.clarifyPlaceholder')" @keydown.enter="handleClarifyKeydown" />
+                                    <NButton v-else size="small" type="error" secondary class="clarify-float-dismiss" @click="handleClarifyDismiss()">
+                                        {{ t('chat.clarifyDismiss') }}
+                                    </NButton>
+                                    <NButton size="small" type="primary" :disabled="!clarifyCanSubmit" @click="handleClarify()">
                                         {{ t('chat.clarifySubmit') }}
                                     </NButton>
                                 </div>
@@ -3711,6 +3761,19 @@ export default defineComponent({ components: { CreateRoomForm } })
     margin-top: 10px;
     padding: 10px 4px 0;
     border-top: 1px solid $border-color;
+}
+
+.clarify-float-questions {
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.clarify-float-question + .clarify-float-question {
+    margin-top: 12px;
+}
+
+.clarify-float-dismiss {
+    justify-self: start;
 }
 
 @media (max-width: 640px) {
