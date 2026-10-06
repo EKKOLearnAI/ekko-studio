@@ -136,10 +136,48 @@ describe('ordered catalog resolution', () => {
       .toMatchObject({ provider: 'maker', matchedBy: 'model' })
   })
 
+  it.each([
+    ['deepseek-flash', 'relay/vendor/deepseek-flash'],
+    ['workspace/mirror/deepseek-flash', 'deepseek-flash'],
+    ['workspace/mirror/deepseek-flash', 'relay/vendor/deepseek-flash'],
+    ['workspace/mirror/DEEPSEEK-FLASH', 'relay/vendor/deepseek-flash'],
+  ])('matches only the final model ID segment: %s against %s', (model, catalogId) => {
+    const catalogs = { deepseek: { api: 'https://maker.test/v1', models: { [catalogId]: original } } }
+    expect(resolveCatalogModel(catalogs, { provider: 'custom:proxy', model }))
+      .toMatchObject({ provider: 'deepseek', modelId: catalogId, model: original, matchedBy: 'model' })
+    expect(resolveCatalogModel(catalogs, { provider: 'deepseek', model })?.matchedBy).toBe('provider')
+    expect(resolveCatalogModel(catalogs, { baseUrl: 'https://maker.test/v1', model })?.matchedBy).toBe('url')
+  })
+
+  it('prefers complete IDs over tail matches and rejects ambiguous tails within one directory', () => {
+    const catalogs = { first: { api: 'https://same.test/v1', models: { 'other/shared': relay } }, second: { api: 'https://same.test/v1', models: { 'workspace/shared': original } } }
+    expect(resolveCatalogModel(catalogs, { model: 'workspace/shared' }))
+      .toMatchObject({ provider: 'second', model: original })
+    expect(resolveCatalogModel(catalogs, { baseUrl: 'https://same.test/v1', model: 'workspace/shared' }))
+      .toMatchObject({ provider: 'second', model: original, matchedBy: 'url' })
+    const ambiguous = { proxy: { api: 'https://proxy.test/v1', models: { 'a/shared': relay, 'b/shared': original } } }
+    expect(resolveCatalogModel(ambiguous, { provider: 'proxy', baseUrl: 'https://proxy.test/v1', model: 'shared' })).toBeUndefined()
+  })
+
+  it('uses an already matched original ID without translating canonical version IDs into aliases', () => {
+    const canonical = 'deepseek/deepseek-v4.1-flash'
+    const official = { ...original, canonical_model_id: canonical }
+    const proxy = { ...relay, canonical_model_id: canonical }
+    const catalogs = { relay: { models: { 'deepseek-flash': proxy } }, deepseek: { models: { 'deepseek-flash': official } } }
+    for (const ordered of [catalogs, Object.fromEntries(Object.entries(catalogs).reverse())]) {
+      expect(resolveCatalogModel(ordered, { provider: 'custom:api.apikey.fun', model: 'deepseek-flash' }))
+        .toMatchObject({ provider: 'deepseek', modelId: 'deepseek-flash', model: official })
+      for (const model of ['deepseek-v4.1-flash', 'vendor/nested/deepseek-v4.1-flash', 'deepseek-v4-flash', 'vendor/deepseek-flash/']) {
+        expect(resolveCatalogModel(ordered, { model })).toBeUndefined()
+      }
+    }
+  })
+
   it('keeps global fallback on model IDs while supporting official endpoints omitted by SDK catalogs', () => {
     const catalogs = { openai: { models: { only: { name: 'Friendly', reasoning: false } } }, proxy: { models: { 'vendor/only': relay } } }
     expect(resolveCatalogModel(catalogs, { model: 'Friendly' })).toBeUndefined()
-    expect(resolveCatalogModel({ proxy: catalogs.proxy }, { model: 'only' })).toBeUndefined()
+    expect(resolveCatalogModel({ proxy: catalogs.proxy }, { model: 'only' }))
+      .toMatchObject({ provider: 'proxy', modelId: 'vendor/only', matchedBy: 'model' })
     expect(resolveCatalogModel(catalogs, { baseUrl: 'https://api.openai.com/v1', model: 'only' }))
       .toMatchObject({ provider: 'openai', matchedBy: 'url' })
     expect(resolveCatalogModel({ openai: { models: { only: relay } } }, { baseUrl: 'https://api.openai.com/v1', model: 'only' })?.model).toBe(relay)

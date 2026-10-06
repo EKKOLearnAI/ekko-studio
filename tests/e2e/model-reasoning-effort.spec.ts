@@ -3,6 +3,7 @@ import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY, TEST_MODE
 
 for (const [name, provider, model, metadata, max] of [
   ['GLM 5.3 advertised effort levels', 'glm', 'glm-5.3', { reasoning: true, reasoning_efforts: ['low', 'high', 'max'] }, 3],
+  ['custom DeepSeek Flash advertised effort levels', 'custom:api.apikey.fun', 'deepseek-flash', { reasoning: true, reasoning_efforts: ['none', 'low', 'high', 'max'] }, 4],
   ['no reasoning support', 'test-provider', 'test-model', { reasoning: false, reasoning_efforts: [] }, 0],
   ['unknown capabilities', 'test-provider', 'test-model', {}, 7],
 ] as const) {

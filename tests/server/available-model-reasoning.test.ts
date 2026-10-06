@@ -28,6 +28,30 @@ afterEach(() => {
 })
 
 describe('available model reasoning metadata', () => {
+  it.each(['deepseek-flash', 'vendor/mirror/deepseek-flash', 'deepseek-v4.1-flash'])(
+    'attaches custom model metadata only when the actual ID or final segment matches: %s', async modelId => {
+      writeFileSync(join(home, 'config.yaml'), `model:\n  provider: custom:api.apikey.fun\n  default: ${modelId}\ncustom_providers:\n  - name: api.apikey.fun\n    base_url: https://api.apikey.fan\n    api_key: test-key\n    model: ${modelId}\n`)
+      const model = {
+        canonical_model_id: 'deepseek/deepseek-v4.1-flash', reasoning: true,
+        reasoning_options: [{ type: 'toggle' }, { type: 'effort', values: ['low', 'high', 'max'] }],
+        cost: { input: 0.15, output: 0.6 },
+      }
+      writeFileSync(join(appHome, 'models', 'models.dev.json'), JSON.stringify({
+        deepseek: { models: { 'deepseek-flash': model } },
+        relay: { models: { 'deepseek-flash': { ...model, cost: { input: 1, output: 2 } } } },
+      }))
+      await import('../../packages/server/src/bootstrap/agent-profile-adapter')
+      const { getAvailable } = await import('../../packages/server/src/modules/hermes/controllers/models')
+      const ctx = { query: { profile: 'default' }, body: undefined as any }
+      await getAvailable(ctx)
+      for (const groups of [ctx.body.groups, ctx.body.profiles[0].groups]) {
+        const metadata = groups.find((group: any) => group.provider === 'custom:api.apikey.fun').model_meta?.[modelId]
+        if (modelId === 'deepseek-v4.1-flash') expect(metadata).toBeUndefined()
+        else expect(metadata).toMatchObject({ reasoning: true, reasoning_efforts: ['none', 'low', 'high', 'max'] })
+      }
+    },
+  )
+
   it('includes effort metadata in configured, profile and preset catalogs without changing the configured context', async () => {
     await import('../../packages/server/src/bootstrap/agent-profile-adapter')
     const { getAvailable } = await import('../../packages/server/src/modules/hermes/controllers/models')

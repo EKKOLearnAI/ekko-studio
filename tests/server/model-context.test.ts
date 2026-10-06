@@ -413,19 +413,19 @@ describe('getModelContextLength', () => {
     expect(getModelContextLength()).toBe(1_000_000)
   })
 
-  it('keeps the unresolved custom-provider fallback strict to exact or case-insensitive model-name matches', async () => {
-    writeConfig(`model:\n  default: gpt-5\n  provider: custom\n  base_url: https://proxy.example.com/v1\n`)
+  it.each(['gpt-5', 'vendor/nested/gpt-5'])('matches the final ID segment for an unresolved custom provider: %s', async model => {
+    writeConfig(`model:\n  default: ${model}\n  provider: custom\n  base_url: https://proxy.example.com/v1\n`)
     writeModelsCache({
       vercel: {
         models: {
-          'openai/gpt-5': { limit: { context: 1_000_000 } },
+          'openai/catalog/gpt-5': { limit: { context: 1_000_000 } },
         },
       },
     })
 
     const { getModelContextLength } = await loadModelContext()
 
-    expect(getModelContextLength()).toBe(256_000)
+    expect(getModelContextLength()).toBe(1_000_000)
   })
 
   it('does not guess across multiple cache providers when a custom provider remains unresolved', async () => {
