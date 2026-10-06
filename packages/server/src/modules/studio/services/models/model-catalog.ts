@@ -16,6 +16,7 @@ export interface CatalogModel {
   limit?: { context?: number; input?: number; output?: number }
   cost?: Record<string, unknown>
   reasoning?: boolean
+  reasoning_options?: Array<{ type: string; values?: string[]; min?: number; max?: number }>
   attachment?: boolean
   modalities?: { input?: string[]; output?: string[] }
 }

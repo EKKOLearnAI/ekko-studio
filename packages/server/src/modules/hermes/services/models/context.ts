@@ -4,7 +4,7 @@ import yaml from 'js-yaml'
 import { getCompatibleCustomProviders } from '../../../studio/contracts/provider-compat'
 import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
 import { readModelContextRecord } from '../../../studio/public/provider-context'
-import { getModelCatalog as loadModelsDevCache } from '../../../studio/public/model-catalog'
+import { getModelCatalog as loadModelsDevCache, findCatalogModelByProvider, findCatalogModel, catalogReasoningEfforts } from '../../../studio/public/model-catalog'
 import { detectHermesHome } from '../runtime/path'
 
 const HERMES_BASE = detectHermesHome()
@@ -34,6 +34,7 @@ interface ModelEntry {
   name?: string
   limit?: ModelLimit
   reasoning?: boolean
+  reasoning_options?: Array<{ type: string; values?: string[]; min?: number; max?: number }>
   attachment?: boolean
   modalities?: {
     input?: string[]
@@ -59,27 +60,6 @@ interface ConfigProviderEntry {
   default_model?: string
   model?: string
   models?: ConfigProviderModels
-}
-
-const MODEL_CACHE_PROVIDER_ALIASES: Record<string, string[]> = {
-  gemini: ['google'],
-  moonshot: ['moonshotai'],
-  kilocode: ['kilo'],
-  'ai-gateway': ['vercel'],
-  'opencode-zen': ['opencode'],
-  'opencode-go': ['opencode'],
-  glm: ['zhipuai-coding-plan'],
-  'glm-coding-plan': ['zai-coding-plan'],
-  'kimi-coding': ['kimi-for-coding'],
-  'kimi-coding-cn': ['kimi-for-coding'],
-  'xai-oauth': ['xai'],
-}
-
-// Coding Plan catalogs may omit older models. Only their own vendor can supply
-// missing model specifications; this fallback must never be used for pricing.
-const MODEL_METADATA_PROVIDER_FALLBACKS: Record<string, string> = {
-  'zhipuai-coding-plan': 'zhipuai',
-  'zai-coding-plan': 'zai',
 }
 
 // --- Config YAML helpers (js-yaml) ---
@@ -250,62 +230,8 @@ function getCachedContext(entry: ModelEntry | undefined): number | null {
   return typeof context === 'number' && Number.isFinite(context) && context > 0 ? context : null
 }
 
-function normalizeProviderKey(provider: string): string {
-  return provider.trim().toLowerCase()
-}
-
-function getProviderCandidates(provider: string): string[] {
-  const normalized = normalizeProviderKey(provider)
-  return [normalized, ...(MODEL_CACHE_PROVIDER_ALIASES[normalized] || [])]
-}
-
-function getProviderEntry(data: Record<string, ProviderEntry>, provider: string): ProviderEntry | null {
-  const candidates = getProviderCandidates(provider)
-
-  for (const candidate of candidates) {
-    const exact = data[candidate]
-    if (exact) return exact
-  }
-
-  const entries = Object.entries(data)
-  for (const candidate of candidates) {
-    const match = entries.find(([name]) => name.toLowerCase() === candidate)
-    if (match) return match[1]
-  }
-
-  return null
-}
-
-function findModelEntry(models: Record<string, ModelEntry>, modelName: string): ModelEntry | undefined {
-  const exact = models[modelName]
-  if (exact) return exact
-
-  const lower = modelName.toLowerCase()
-  for (const [name, entry] of Object.entries(models)) {
-    if (name.toLowerCase() === lower) return entry
-    if (entry.id?.toLowerCase() === lower) return entry
-    if (entry.name?.toLowerCase() === lower) return entry
-  }
-
-  const suffix = `/${lower}`
-  for (const [name, entry] of Object.entries(models)) {
-    if (name.toLowerCase().endsWith(suffix)) return entry
-    if (entry.id?.toLowerCase().endsWith(suffix)) return entry
-  }
-
-  return undefined
-}
-
-function findProviderModelEntry(data: Record<string, ProviderEntry>, provider: string, modelName: string): ModelEntry | undefined {
-  const own = findModelEntry(getProviderEntry(data, provider)?.models || {}, modelName)
-  if (own) return own
-  for (const candidate of getProviderCandidates(provider)) {
-    const fallback = MODEL_METADATA_PROVIDER_FALLBACKS[candidate]
-    if (!fallback) continue
-    const entry = findModelEntry(getProviderEntry(data, fallback)?.models || {}, modelName)
-    if (entry) return entry
-  }
-}
+const findModelEntry = findCatalogModel
+const findProviderModelEntry = findCatalogModelByProvider
 
 function lookupContextGloballyByModelName(data: Record<string, ProviderEntry>, modelName: string): number | null {
   for (const prov of Object.values(data)) {
@@ -473,6 +399,7 @@ export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
   contextWindow: number
   outputLimit: number
   reasoning: boolean
+  reasoningEfforts?: string[]
   input: Array<'text' | 'image'>
 } {
   const contextWindow = getModelContextLength(input)
@@ -506,6 +433,7 @@ export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
       }
     }
   }
+  const reasoningEfforts = catalogReasoningEfforts(entry)
   const outputLimit = getPositiveNumber(entry?.limit?.output) || Math.min(32_000, contextWindow)
   // Unknown custom models must remain usable. A missing models.dev entry is
   // absence of metadata, not evidence that reasoning or image input is
@@ -516,6 +444,7 @@ export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
     contextWindow,
     outputLimit: Math.min(outputLimit, contextWindow),
     reasoning: entry ? entry.reasoning === true : true,
+    ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
     input: imageInput ? ['text', 'image'] : ['text'],
   }
 }

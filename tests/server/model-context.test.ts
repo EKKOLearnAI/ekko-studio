@@ -81,6 +81,22 @@ describe('getModelContextLength', () => {
     expect(getModelRuntimeCapabilities(input).contextWindow).toBe(80_000)
   })
 
+  it('resolves reasoning efforts through the same provider mapping and observes refreshed metadata', async () => {
+    writeModelsCache({ 'kimi-code-plan-global': { models: { 'kimi-for-coding': {
+      limit: { context: 256_000 }, reasoning: true,
+      reasoning_options: [{ type: 'toggle' }, { type: 'effort', values: ['low', 'high', 'max'] }],
+    } } } })
+    const { getModelRuntimeCapabilities } = await loadModelContext()
+    const input = { provider: 'kimi-coding', model: 'kimi-for-coding' }
+    expect(getModelRuntimeCapabilities(input).reasoningEfforts).toEqual(['none', 'low', 'high', 'max'])
+    const { refreshModelCatalog } = await import('../../packages/server/src/modules/studio/public/model-catalog')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ 'kimi-code-plan-global': { models: {
+      'kimi-for-coding': { reasoning: true, reasoning_options: [{ type: 'effort', values: ['low', 'high'] }] },
+    } } }))))
+    await refreshModelCatalog(true)
+    expect(getModelRuntimeCapabilities(input).reasoningEfforts).toEqual(['low', 'high'])
+  })
+
   it.each([false, true])('prefers the manually edited model window (config file exists: %s)', async withConfig => {
     if (withConfig) writeConfig('model:\n  default: policy-model\n  provider: test\n  context_length: 256000\n')
     const readModelContextRecord = vi.fn(() => ({ available: true, row: { context_limit: 80000 } }))
