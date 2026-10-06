@@ -19481,6 +19481,17 @@
         },
         "parameters": [
           {
+            "name": "base_url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          {
             "name": "model",
             "in": "query",
             "required": false,

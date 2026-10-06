@@ -1721,7 +1721,8 @@ export async function contextLength(ctx: any) {
   const profile = requestedProfile(ctx)
   const model = typeof ctx.query.model === 'string' ? ctx.query.model : undefined
   const provider = typeof ctx.query.provider === 'string' ? ctx.query.provider : undefined
-  ctx.body = { context_length: getHermesModelContextLength({ profile, model, provider }) }
+  const baseUrl = typeof ctx.query.base_url === 'string' ? ctx.query.base_url : undefined
+  ctx.body = { context_length: getHermesModelContextLength({ profile, model, provider, baseUrl }) }
 }
 
 export async function usageStats(ctx: any) {

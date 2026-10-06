@@ -40,6 +40,7 @@ const getGroupChatServerMock = vi.fn()
 const getLocalUsageStatsMock = vi.fn()
 const getRecordedUsageSessionIdsMock = vi.fn()
 const getActiveProfileNameMock = vi.fn()
+const getHermesModelContextLengthMock = vi.fn()
 const loggerWarnMock = vi.fn()
 const getCompressionSnapshotMock = vi.fn()
 const buildDbExportHistoryMock = vi.fn()
@@ -224,7 +225,7 @@ vi.mock('../../packages/server/src/modules/studio/services/context-compressor/ex
 vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime', () => ({
   deleteHermesSessionForProfile: deleteHermesSessionForProfileMock,
   getHermesCliSession: getSessionMock,
-  getHermesModelContextLength: vi.fn(),
+  getHermesModelContextLength: getHermesModelContextLengthMock,
   getHermesSessionDetail: getSessionDetailFromDbMock,
   getHermesSessionDetailForProfile: getSessionDetailFromDbWithProfileMock,
   getHermesSessionDetailPaginatedForProfile: vi.fn(),
@@ -246,11 +247,27 @@ vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime',
   invalidateCodingAgentSessionRuntime: invalidateCodingAgentSessionRuntimeMock,
 }))
 
+vi.mock('../../packages/server/src/modules/studio/services/task-plans', () => ({
+  getSessionTaskPlans: vi.fn(() => []),
+}))
+
 vi.mock('../../packages/server/src/modules/studio/public/agent-status-registry', () => ({
   isHermesAgentAvailable: vi.fn(() => agentStatusMocks.hermesAvailable),
 }))
 
 describe('session conversations controller', () => {
+  it('forwards the optional model endpoint to context resolution without changing legacy requests', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    getHermesModelContextLengthMock.mockReturnValue(202800)
+    const ctx: any = { query: { profile: 'coding', provider: 'custom:glm', model: 'glm-5.3', base_url: 'https://api.z.ai/api/coding/paas/v4' } }
+    await mod.contextLength(ctx)
+    expect(getHermesModelContextLengthMock).toHaveBeenLastCalledWith({
+      profile: 'coding', provider: 'custom:glm', model: 'glm-5.3', baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    })
+    expect(ctx.body).toEqual({ context_length: 202800 })
+    await mod.contextLength({ query: { profile: 'default', model: 'glm-5.3', base_url: ['untrusted'] } })
+    expect(getHermesModelContextLengthMock).toHaveBeenLastCalledWith({ profile: 'default', model: 'glm-5.3', provider: undefined, baseUrl: undefined })
+  })
   beforeEach(() => {
     vi.resetModules()
     agentStatusMocks.hermesAvailable = true
