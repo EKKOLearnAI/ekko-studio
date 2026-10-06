@@ -652,6 +652,33 @@ describe('chat store reasoning/tool boundaries', () => {
     ])
   })
 
+  it('does not render the hidden input row of an automatic turn', async () => {
+    const store = useChatStore()
+    const session = makeSession()
+    store.sessions = [session]
+    store.activeSessionId = 'session-1'
+    store.activeSession = session
+    sessionsApi.fetchSessionMessagesPage.mockResolvedValue({
+      session: { id: 'session-1', title: 'session' },
+      messages: [
+        { id: 1, role: 'user', content: 'Approved, deploy it.', timestamp: 1 },
+        { id: 2, role: 'assistant', content: 'Deployed.', timestamp: 2 },
+        { id: 3, role: 'user', display_role: 'hidden', content: '[plugin-notice:n-1] Build finished.', timestamp: 3 },
+        { id: 4, role: 'assistant', content: 'Noted.', timestamp: 4 },
+      ],
+      total: 4,
+      hasMore: false,
+    })
+
+    await store.refreshActiveSession()
+
+    expect(store.messages.map(message => [message.role, message.content])).toEqual([
+      ['user', 'Approved, deploy it.'],
+      ['assistant', 'Deployed.'],
+      ['assistant', 'Noted.'],
+    ])
+  })
+
   it('settles running coding-agent tools when the run completes without a tool.completed event', async () => {
     const store = useChatStore()
     const session = makeSession()

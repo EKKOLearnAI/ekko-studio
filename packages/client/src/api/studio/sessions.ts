@@ -114,7 +114,8 @@ export interface HermesMessage {
   session_id: string
   role: 'user' | 'assistant' | 'system' | 'tool' | 'command' | 'moa'
   content: string
-  display_role?: 'user' | 'assistant' | 'system' | 'tool' | 'command' | null
+  /** 'hidden': automatic-turn input the model reads but the chat never renders. */
+  display_role?: 'user' | 'assistant' | 'system' | 'tool' | 'command' | 'hidden' | null
   display_content?: string | null
   tool_call_id: string | null
   tool_calls: any[] | null
