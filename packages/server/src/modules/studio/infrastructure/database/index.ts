@@ -49,7 +49,9 @@ export function getDb(): DatabaseSync | null {
         candidate.exec('PRAGMA synchronous=NORMAL')
         candidate.exec('PRAGMA foreign_keys=ON')
       } else if (isDev) {
-        candidate.exec('PRAGMA journal_mode=DELETE')
+        candidate.exec('PRAGMA journal_mode=WAL')
+        candidate.exec('PRAGMA synchronous=NORMAL')
+        candidate.exec('PRAGMA foreign_keys=ON')
       } else {
         candidate.exec('PRAGMA journal_mode=WAL')
         candidate.exec('PRAGMA synchronous=NORMAL')
