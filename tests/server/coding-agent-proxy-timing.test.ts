@@ -58,7 +58,7 @@ describe('Coding Agent proxy request timing', () => {
         expect(ctx.status, `${proxy} ${mode}, stream=${stream}: ${JSON.stringify(ctx.body)}`).toBeUndefined()
         if (stream) for await (const _chunk of ctx.body) { /* consume the actual proxy stream */ }
         await vi.waitFor(() => expect(codingAgentRunManager.handleProxyUsageEvent).toHaveBeenCalledWith(
-          'timed-agent', expect.objectContaining({ type: 'response.completed' }), 4,
+          'timed-agent', expect.objectContaining({ type: 'response.completed' }), 4, 'https://provider.test/v1',
         ))
         expect(vi.mocked(codingAgentRunManager.handleProxyUsageEvent).mock.calls.filter(([, event]) => event.type === 'response.completed')).toHaveLength(1)
       }

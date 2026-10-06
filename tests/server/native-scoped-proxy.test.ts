@@ -66,6 +66,7 @@ describe('native scoped model gateway', () => {
     await claudeProxyMessages(ctx)
     expect(await read(ctx.body)).toContain('hello')
     expect(codingAgentRunManager.handleProxyUsageEvent).toHaveBeenCalled()
+    expect(vi.mocked(codingAgentRunManager.handleProxyUsageEvent).mock.calls[0][3]).toBe('https://provider.example/v1')
     expect(codingAgentRunManager.handleResponseEvent).not.toHaveBeenCalled()
   })
 

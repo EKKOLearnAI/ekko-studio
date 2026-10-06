@@ -1,5 +1,4 @@
-import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
-import { getModelCatalog, findCatalogModelByProvider, catalogReasoningEfforts } from '../../../studio/public/model-catalog'
+import { getModelCatalog, resolveCatalogModel, catalogReasoningEfforts } from '../../../studio/public/model-catalog'
 
 interface CatalogModelGroup {
   provider: string
@@ -11,17 +10,10 @@ interface CatalogModelGroup {
 export function applyCatalogModelMetadata<T extends CatalogModelGroup>(groups: T[]): T[] {
   const catalog = getModelCatalog()
   if (!catalog) return groups
-  const normalizeUrl = (url: string) => url.trim().toLowerCase().replace(/\/+$/, '')
   return groups.map(group => {
-    // Preserve existing custom-provider inference by full preset URL.
-    // Arbitrary gateways must not borrow another provider's effort settings.
-    const provider = group.provider === 'custom' || group.provider.startsWith('custom:')
-      ? PROVIDER_PRESETS.find(preset => normalizeUrl(preset.base_url) === normalizeUrl(group.base_url))?.value
-      : group.provider
-    if (!provider) return group
     const meta = { ...group.model_meta }
     for (const id of group.models) {
-      const model = findCatalogModelByProvider(catalog, provider, id)
+      const model = resolveCatalogModel(catalog, { provider: group.provider, baseUrl: group.base_url, model: id })?.model
       if (!model) continue
       const efforts = catalogReasoningEfforts(model)
       meta[id] = {

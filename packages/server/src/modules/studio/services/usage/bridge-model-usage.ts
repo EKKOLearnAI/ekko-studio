@@ -46,6 +46,7 @@ export function recordBridgeModelUsage(
     usage: event.usage,
     model: stringValue(event.model) || modelContext.model,
     provider: stringValue(event.provider) || modelContext.provider,
+    baseUrl: stringValue(event.base_url) || undefined,
     profile,
     isEstimated: false,
   })

@@ -157,7 +157,7 @@ async function callOpenAiChat(target: CodexProxyTarget, body: any, signal?: Abor
     body: chatBody,
     signal,
   })
-  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000)
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
   return response
 }
 
@@ -181,7 +181,7 @@ async function callAnthropicMessages(target: CodexProxyTarget, body: any, signal
     body: anthropicBody,
     signal,
   })
-  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000)
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
   return response
 }
 
@@ -201,7 +201,7 @@ async function callOpenAiResponses(target: CodexProxyTarget, body: any, signal?:
     body: responsesBody,
     signal,
   })
-  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000)
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
   return response
 }
 
@@ -253,7 +253,7 @@ function responseEventForCodexClient(target: CodexProxyTarget, event: CanonicalR
 function observableResponsesEvents(target: CodexProxyTarget, events: AsyncIterable<CanonicalResponsesEvent>, startedAt: number): AsyncIterable<CanonicalResponsesEvent> {
 async function* observe() {
     for await (const event of normalizeResponsesSseEvents(events)) {
-      codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event, (performance.now() - startedAt) / 1000)
+      codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event, (performance.now() - startedAt) / 1000, target.baseUrl)
       const clientEvent = responseEventForCodexClient(target, event)
       // Grok, OpenCode and DSH report the same model activity through their native
       // stdout streams. The proxy remains responsible for transport and usage

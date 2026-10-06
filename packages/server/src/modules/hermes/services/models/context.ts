@@ -2,9 +2,9 @@ import { join } from 'path'
 import { readFileSync, existsSync } from 'fs'
 import yaml from 'js-yaml'
 import { getCompatibleCustomProviders } from '../../../studio/contracts/provider-compat'
-import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
 import { readModelContextRecord } from '../../../studio/public/provider-context'
-import { getModelCatalog as loadModelsDevCache, findCatalogModelByProvider, findCatalogModel, catalogReasoningEfforts } from '../../../studio/public/model-catalog'
+import { getModelCatalog as loadModelsDevCache, resolveCatalogModel, catalogReasoningEfforts } from '../../../studio/public/model-catalog'
+import { resolveConfiguredModelEndpoint } from './endpoint'
 import { detectHermesHome } from '../runtime/path'
 
 const HERMES_BASE = detectHermesHome()
@@ -20,6 +20,7 @@ export interface ModelContextLengthOptions {
   profile?: string
   model?: string | null
   provider?: string | null
+  baseUrl?: string | null
   fallbackContextLength?: number
 }
 
@@ -40,10 +41,6 @@ interface ModelEntry {
     input?: string[]
     output?: string[]
   }
-}
-
-interface ProviderEntry {
-  models?: Record<string, ModelEntry>
 }
 
 interface CustomProviderEntry {
@@ -230,96 +227,13 @@ function getCachedContext(entry: ModelEntry | undefined): number | null {
   return typeof context === 'number' && Number.isFinite(context) && context > 0 ? context : null
 }
 
-const findModelEntry = findCatalogModel
-const findProviderModelEntry = findCatalogModelByProvider
-
-function lookupContextGloballyByModelName(data: Record<string, ProviderEntry>, modelName: string): number | null {
-  for (const prov of Object.values(data)) {
-    const context = getCachedContext(prov.models?.[modelName])
-    if (context) return context
-  }
-
-  const lower = modelName.toLowerCase()
-  for (const prov of Object.values(data)) {
-    const models = prov.models || {}
-    for (const [name, entry] of Object.entries(models)) {
-      if (name.toLowerCase() === lower) {
-        const context = getCachedContext(entry)
-        if (context) return context
-      }
-    }
-  }
-
-  return null
-}
-
-function lookupUniqueContextGloballyByModelName(data: Record<string, ProviderEntry>, modelName: string): number | null {
-  const exactMatches: number[] = []
-  for (const prov of Object.values(data)) {
-    const context = getCachedContext(prov.models?.[modelName])
-    if (context) exactMatches.push(context)
-    if (exactMatches.length > 1) return null
-  }
-  if (exactMatches.length === 1) return exactMatches[0]
-
-  const lower = modelName.toLowerCase()
-  const ciMatches: number[] = []
-  for (const prov of Object.values(data)) {
-    const models = prov.models || {}
-    for (const [name, entry] of Object.entries(models)) {
-      if (name.toLowerCase() !== lower) continue
-      const context = getCachedContext(entry)
-      if (context) ciMatches.push(context)
-      break
-    }
-    if (ciMatches.length > 1) return null
-  }
-
-  return ciMatches[0] || null
-}
-
-function resolveCacheProviderFromBaseUrl(baseUrl: string | null): string | null {
-  if (!baseUrl) return null
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
-  const preset = PROVIDER_PRESETS.find((entry) => normalizeBaseUrl(entry.base_url) === normalizedBaseUrl)
-  return preset?.value || null
-}
-
-function resolveCustomCacheProvider(config: any, modelName: string, provider: string): string | null {
-  const customEntry = resolveCustomProviderEntry(config, modelName, provider)
-  const entryBaseUrl = typeof customEntry?.base_url === 'string' ? customEntry.base_url : null
-  const providerFromEntryBaseUrl = resolveCacheProviderFromBaseUrl(entryBaseUrl)
-  if (providerFromEntryBaseUrl) return providerFromEntryBaseUrl
-
-  return resolveCacheProviderFromBaseUrl(getModelBaseUrl(config))
-}
-
-function lookupContextFromCache(config: any, modelName: string, provider: string | null): number | null {
-  const data = loadModelsDevCache()
-  if (!data) return null
-
-  if (provider) {
-    if (provider === 'custom' || provider.startsWith('custom:')) {
-      const inferredProvider = resolveCustomCacheProvider(config, modelName, provider)
-
-      if (inferredProvider) {
-        const scoped = getCachedContext(findProviderModelEntry(data, inferredProvider, modelName))
-        if (scoped) return scoped
-        return null
-      }
-
-      if (provider === 'custom') {
-        return lookupUniqueContextGloballyByModelName(data, modelName)
-      }
-
-      return null
-    }
-
-    return getCachedContext(findProviderModelEntry(data, provider, modelName))
-  }
-
-  // Legacy configs may omit model.provider; preserve the old global exact/CI lookup semantics.
-  return lookupContextGloballyByModelName(data, modelName)
+function lookupModelFromCache(config: any, model: string, provider: string | null, options: ModelContextLengthOptions): ModelEntry | undefined {
+  const catalog = loadModelsDevCache()
+  if (!catalog) return undefined
+  let envContent = ''
+  try { envContent = readFileSync(join(getProfileDir(options.profile), '.env'), 'utf8') } catch {}
+  const baseUrl = options.baseUrl?.trim() || resolveConfiguredModelEndpoint(config, provider, model, envContent)
+  return resolveCatalogModel(catalog, { provider, baseUrl, model })?.model
 }
 
 /**
@@ -330,7 +244,7 @@ function lookupContextFromCache(config: any, modelName: string, provider: string
  *   3. provider-level providers.<provider>.context_length when the model belongs to that provider
  *   4. custom_providers models.<model>.context_length
  *   5. top-level model.context_length fallback
- *   6. Studio's shared models.dev catalog, scoped to model.provider when configured
+ *   6. Studio's shared models.dev catalog: provider, endpoint, then model ID
  *   7. DEFAULT_CONTEXT_LENGTH
  */
 /**
@@ -388,7 +302,7 @@ export function getModelContextLength(input?: string | ModelContextLengthOptions
   if (configCtx && configCtx > 0) return configCtx
 
   // 4. Shared local models.dev catalog
-  const cached = lookupContextFromCache(config, model, provider)
+  const cached = getCachedContext(lookupModelFromCache(config, model, provider, options))
   if (cached) return cached
 
   // 5. Fallback
@@ -403,36 +317,15 @@ export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
   input: Array<'text' | 'image'>
 } {
   const contextWindow = getModelContextLength(input)
-  const model = String(input.model || '').trim()
-  const provider = String(input.provider || '').trim()
-  const data = loadModelsDevCache()
-  let entry: ModelEntry | undefined
-  if (data && model) {
-    if (provider === 'custom' || provider.startsWith('custom:')) {
-      const profileDir = getProfileDir(input.profile)
-      const config = loadConfig(profileDir)
-      const inferredProvider = resolveCustomCacheProvider(config, model, provider)
-      if (inferredProvider) entry = findProviderModelEntry(data, inferredProvider, model)
-      else if (provider === 'custom') {
-        for (const candidate of Object.values(data)) {
-          const found = findModelEntry(candidate.models || {}, model)
-          if (!found) continue
-          if (entry) {
-            entry = undefined
-            break
-          }
-          entry = found
-        }
-      }
-    } else if (provider) {
-      entry = findProviderModelEntry(data, provider, model)
-    } else {
-      for (const candidate of Object.values(data)) {
-        entry = findModelEntry(candidate.models || {}, model)
-        if (entry) break
-      }
-    }
+  const config = loadConfig(getProfileDir(input.profile)) || {}
+  let model = String(input.model || '').trim() || getDefaultModel(config) || ''
+  let provider = String(input.provider || '').trim() || getDefaultProvider(config) || ''
+  if (provider.toLowerCase() === 'moa') {
+    const aggregator = resolveMoaAggregator(config, model)
+    model = aggregator?.model || ''
+    provider = aggregator?.provider || ''
   }
+  const entry = model ? lookupModelFromCache(config, model, provider, input) : undefined
   const reasoningEfforts = catalogReasoningEfforts(entry)
   const outputLimit = getPositiveNumber(entry?.limit?.output) || Math.min(32_000, contextWindow)
   // Unknown custom models must remain usable. A missing models.dev entry is

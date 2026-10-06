@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { catalogReasoningEfforts, findCatalogModelByProvider } from '../../packages/server/src/modules/studio/services/models/model-metadata'
+import { catalogReasoningEfforts, findCatalogModelByProvider, resolveCatalogModel } from '../../packages/server/src/modules/studio/services/models/model-metadata'
 import type { ModelCatalog } from '../../packages/server/src/modules/studio/services/models/model-catalog'
 
 const catalog: ModelCatalog = {
@@ -24,9 +24,10 @@ describe('catalog provider mapping', () => {
     expect(findCatalogModelByProvider({ [directory]: { models: { model } } }, provider, 'model')).toBe(model)
   })
 
-  it('prefers plan metadata and only falls back to the same vendor for omitted models', () => {
+  it('keeps provider lookup scoped to its mapped directory before the shared resolver falls back', () => {
     expect(findCatalogModelByProvider(catalog, 'glm', 'glm')).toBe(catalog['zhipuai-coding-plan'].models!.glm)
-    expect(findCatalogModelByProvider(catalog, 'glm', 'old')).toBe(catalog.zhipuai.models!.old)
+    expect(findCatalogModelByProvider(catalog, 'glm', 'old')).toBeUndefined()
+    expect(resolveCatalogModel(catalog, { provider: 'glm', model: 'old' })?.model).toBe(catalog.zhipuai.models!.old)
     expect(findCatalogModelByProvider(catalog, 'glm-coding-plan', 'old')).toBeUndefined()
     expect(findCatalogModelByProvider(catalog, 'custom:gateway', 'glm')).toBeUndefined()
     expect(findCatalogModelByProvider(catalog, '__proto__', 'glm')).toBeUndefined()
@@ -72,13 +73,75 @@ describe('available model reasoning metadata', () => {
     expect(group.model_meta.glm).toEqual({ alias: 'Work', preview: true })
   })
 
-  it('preserves full preset URL inference for custom providers without guessing from the hostname', () => {
+  it('uses endpoint hostname metadata for custom providers', () => {
     const groups = [
       { provider: 'custom:official', base_url: 'https://open.bigmodel.cn/api/coding/paas/v4/', models: ['glm'] },
       { provider: 'custom:gateway', base_url: 'https://open.bigmodel.cn/other', models: ['glm'] },
     ]
     const results = applyCatalogModelMetadata(groups)
     expect(results[0].model_meta?.glm.reasoning_efforts).toEqual(['low', 'high', 'max'])
-    expect(results[1]).toBe(groups[1])
+    expect(results[1].model_meta?.glm.reasoning_efforts).toEqual(['low', 'high', 'max'])
+  })
+})
+
+describe('ordered catalog resolution', () => {
+  const original = { canonical_model_id: 'maker/shared', cost: { input: 2, output: 4 }, reasoning: true, reasoning_options: [{ type: 'effort', values: ['low', 'high'] }] }
+  const relay = { ...original, cost: { input: 5, output: 10 }, reasoning_options: [{ type: 'effort', values: ['max'] }] }
+  const plan = { ...original, cost: { input: 0, output: 0 } }
+  const data: ModelCatalog = {
+    relay: { api: 'https://relay.test/v1', models: { shared: relay } },
+    maker: { api: 'https://maker.test/api/v1', models: { shared: original } },
+    plan: { api: 'https://maker.test/api/coding/v1', models: { shared: plan } },
+  }
+
+  it('uses the provider before a different URL and uses URL before the original model directory', () => {
+    expect(resolveCatalogModel(data, { provider: ' RELAY ', baseUrl: 'https://maker.test/api/v1', model: 'shared' }))
+      .toMatchObject({ provider: 'relay', matchedBy: 'provider', model: relay })
+    expect(resolveCatalogModel(data, { provider: 'unknown', baseUrl: 'https://relay.test/other/path', model: 'shared' }))
+      .toMatchObject({ provider: 'relay', matchedBy: 'url', model: relay })
+    expect(resolveCatalogModel(data, { provider: 'unknown', baseUrl: 'https://proxy.test', model: 'shared' }))
+      .toMatchObject({ provider: 'maker', matchedBy: 'model', model: original })
+  })
+
+  it.each([
+    ['https://MAKER.test/api/coding/v1/', 'plan'],
+    ['https://maker.test/api/v1/chat/completions?stream=true', 'maker'],
+    ['https://maker.test/api/coding/v10', 'maker'],
+  ])('distinguishes directories on a shared host using path boundaries: %s', (baseUrl, provider) => {
+    expect(resolveCatalogModel(data, { baseUrl, model: 'shared' })).toMatchObject({ provider, matchedBy: 'url' })
+  })
+
+  it.each(['https://relay.test.attacker.test/v1', 'https://relay.test@attacker.test/v1', 'file://relay.test/v1', 'invalid'])('does not treat a partial or invalid hostname as the relay: %s', baseUrl => {
+    expect(resolveCatalogModel(data, { baseUrl, model: 'shared' })).toMatchObject({ provider: 'maker', matchedBy: 'model' })
+  })
+
+  it('continues from a missing provider model to URL and then to a unique model ID', () => {
+    const catalogs = { ...data, omitted: { models: {} }, unique: { models: { unique: original } } }
+    expect(resolveCatalogModel(catalogs, { provider: 'omitted', baseUrl: 'https://relay.test', model: 'shared' })?.matchedBy).toBe('url')
+    expect(resolveCatalogModel(catalogs, { provider: 'omitted', baseUrl: 'https://relay.test', model: 'unique' }))
+      .toMatchObject({ provider: 'unique', matchedBy: 'model' })
+  })
+
+  it('uses the original canonical directory independent of catalog ordering and retains unknown collisions', () => {
+    for (const catalogs of [data, Object.fromEntries(Object.entries(data).reverse())]) {
+      expect(resolveCatalogModel(catalogs, { model: 'shared' })?.provider).toBe('maker')
+    }
+    expect(resolveCatalogModel({ a: { models: { shared: { cost: { input: 1, output: 2 } } } }, b: { models: { shared: { cost: { input: 9, output: 8 } } } } }, { model: 'shared' })).toBeUndefined()
+    expect(resolveCatalogModel({ a: data.relay, b: data.plan }, { model: 'shared' })).toBeUndefined()
+  })
+
+  it('does not label a directory outside the matching host as a URL match', () => {
+    const catalogs = { ...data, second: { api: 'https://relay.test/v1', models: { shared: plan } } }
+    expect(resolveCatalogModel(catalogs, { baseUrl: 'https://relay.test/v1', model: 'shared' }))
+      .toMatchObject({ provider: 'maker', matchedBy: 'model' })
+  })
+
+  it('keeps global fallback on model IDs while supporting official endpoints omitted by SDK catalogs', () => {
+    const catalogs = { openai: { models: { only: { name: 'Friendly', reasoning: false } } }, proxy: { models: { 'vendor/only': relay } } }
+    expect(resolveCatalogModel(catalogs, { model: 'Friendly' })).toBeUndefined()
+    expect(resolveCatalogModel({ proxy: catalogs.proxy }, { model: 'only' })).toBeUndefined()
+    expect(resolveCatalogModel(catalogs, { baseUrl: 'https://api.openai.com/v1', model: 'only' }))
+      .toMatchObject({ provider: 'openai', matchedBy: 'url' })
+    expect(resolveCatalogModel({ openai: { models: { only: relay } } }, { baseUrl: 'https://api.openai.com/v1', model: 'only' })?.model).toBe(relay)
   })
 })

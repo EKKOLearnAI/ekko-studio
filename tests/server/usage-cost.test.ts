@@ -11,6 +11,8 @@ import { getUsagePricing, saveUsagePricing, validateUsagePricing } from '../../p
 let db: DatabaseSync
 const catalogMock = vi.hoisted(() => ({ getModelCatalogSnapshot: vi.fn(), refreshModelCatalog: vi.fn() }))
 vi.mock('../../packages/server/src/modules/studio/public/model-catalog', () => catalogMock)
+const endpointMock = vi.hoisted(() => vi.fn())
+vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({ resolveModelBaseUrl: endpointMock }))
 vi.mock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({
   isSqliteAvailable: () => true, getDb: () => db,
   jsonGet: vi.fn(), jsonSet: vi.fn(), jsonGetAll: vi.fn(), jsonDelete: vi.fn(),
@@ -18,6 +20,7 @@ vi.mock('../../packages/server/src/modules/studio/infrastructure/database/index'
 
 describe('usage cost accounting', () => {
   beforeEach(() => {
+    endpointMock.mockReset()
     catalogMock.getModelCatalogSnapshot.mockReset()
     catalogMock.refreshModelCatalog.mockReset().mockResolvedValue(undefined)
     db = new DatabaseSync(':memory:')
@@ -60,7 +63,10 @@ describe('usage cost accounting', () => {
     expect(getLocalUsageStats('p', 1)).toMatchObject({ cost: 0.00485, cost_coverage: { reported: 0, estimated: 1, unknown: 0 } })
     saveUsagePricing('p', [{ ...price, input: 99 }])
     record('reported', { ...usage, cost: 0 })
-    expect(getLocalUsageStats('p', 1).cost).toBeCloseTo(0.00485)
+    expect(getLocalUsageStats('p', 1).cost).toBeCloseTo(0.1067)
+    const history = db.prepare('SELECT cost_usd FROM session_usage ORDER BY id').all() as any[]
+    expect(history[0].cost_usd).toBeCloseTo(0.00485)
+    expect(history[1].cost_usd).toBeCloseTo(0.10185)
     expect(estimateUsageCost(usage, { ...price, cacheRead: undefined })).toBeUndefined()
     record('other-profile', usage, { profile: 'other' })
     expect(getLocalUsageStats('other', 1).cost_coverage?.unknown).toBe(1)
@@ -121,7 +127,7 @@ describe('usage cost accounting', () => {
     'test-model': { cost: { input: 2, output: 8, cache_read: 0.2 } },
   } } } }
 
-  it('persists catalog estimates and the exact pricing snapshot, with reported and manual costs taking priority', () => {
+  it('persists catalog estimates and the exact pricing snapshot, with manual rates taking priority over reported and catalog costs', () => {
     catalogMock.getModelCatalogSnapshot.mockReturnValue(catalogSnapshot)
     record('catalog', { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 5000 })
     const saved = db.prepare('SELECT * FROM session_usage').get() as any
@@ -131,9 +137,9 @@ describe('usage cost accounting', () => {
     record('manual', { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 5000 })
     record('reported', { inputTokens: 1000, outputTokens: 200, cost: 0 })
     const rows = db.prepare('SELECT * FROM session_usage ORDER BY id').all() as any[]
-    expect(rows.map(row => row.cost_usd)).toEqual([0.0046, 0.0092, 0])
+    expect(rows.map(row => row.cost_usd)).toEqual([0.0046, 0.0092, 0.0072])
     expect(JSON.parse(rows[1].cost_pricing).source).toBe('manual')
-    expect(rows[2].cost_pricing).toBeNull()
+    expect(JSON.parse(rows[2].cost_pricing).source).toBe('manual')
     expect(catalogMock.refreshModelCatalog).not.toHaveBeenCalled()
   })
 
@@ -186,6 +192,41 @@ describe('usage cost accounting', () => {
       cost: 0.804, input_tokens: 900_000, output_tokens: 6000, total_api_calls: 6,
       cost_coverage: { reported: 1, estimated: 1, unknown: 1 },
     })
+  })
+
+
+  it.each([false, true])('prices provider, actual URL, profile URL and model fallback consistently (cold: %s)', async cold => {
+    const canonical = 'maker/test-model'
+    const data = {
+      relay: { api: 'https://relay.test/v1', models: { 'test-model': { canonical_model_id: canonical, cost: { input: 5, output: 10 } } } },
+      maker: { api: 'https://maker.test/v1', models: { 'test-model': { canonical_model_id: canonical, cost: { input: 2, output: 4 } } } },
+    }
+    const snapshot = { ...catalogSnapshot, data }
+    if (cold) catalogMock.refreshModelCatalog.mockResolvedValue(snapshot)
+    else catalogMock.getModelCatalogSnapshot.mockReturnValue(snapshot)
+    const usage = { inputTokens: 1000, outputTokens: 200 }
+    record('provider', usage, { provider: 'relay', baseUrl: 'https://maker.test' })
+    record('actual-url', usage, { provider: 'unknown', baseUrl: 'https://relay.test/other' })
+    endpointMock.mockReturnValue('https://relay.test/v1')
+    record('profile-url', usage)
+    endpointMock.mockReturnValue(undefined)
+    record('model', usage, { provider: undefined })
+    await vi.waitFor(() => {
+      const rows = db.prepare('SELECT * FROM session_usage ORDER BY id').all() as any[]
+      expect(rows.map(row => row.cost_usd)).toEqual([0.007, 0.007, 0.007, 0.0028])
+      expect(rows.map(row => JSON.parse(row.cost_pricing).rates.provider)).toEqual(['relay', 'relay', 'relay', 'maker'])
+      expect(rows[3].provider).toBe('')
+    })
+    expect(endpointMock).toHaveBeenCalledWith('p', 'global', 'test-model')
+  })
+
+  it('keeps a model-only collision unknown when no original directory can be identified', () => {
+    catalogMock.getModelCatalogSnapshot.mockReturnValue({ ...catalogSnapshot, data: {
+      a: { models: { 'test-model': { cost: { input: 1, output: 2 } } } },
+      b: { models: { 'test-model': { cost: { input: 3, output: 4 } } } },
+    } })
+    record('collision', { inputTokens: 1000, outputTokens: 200 })
+    expect(getLocalUsageStats('p', 1).cost_coverage?.unknown).toBe(1)
   })
 
   it('late enrichment cannot overwrite a known cost or restore a deleted row', () => {

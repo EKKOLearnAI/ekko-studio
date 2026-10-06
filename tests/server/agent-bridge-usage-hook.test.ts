@@ -186,6 +186,7 @@ callback(
     ended_at=102.5,
     model="requested-model",
     response_model="response-model",
+    base_url="https://runtime.test/v1",
     provider="openai",
     api_mode="responses",
     usage={
@@ -209,6 +210,7 @@ print(json.dumps({"callback_count": len(manager._hooks["post_api_request"]), "ev
       started_at: 100,
       ended_at: 102.5,
       model: 'response-model',
+      base_url: 'https://runtime.test/v1',
       provider: 'openai',
       api_mode: 'responses',
       usage: {
