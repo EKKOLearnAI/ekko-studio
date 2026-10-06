@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 export interface MessageQueueFloatItem {
   id: string
   text: string
+  /** Full un-truncated content used as the initial value when editing. */
+  fullText?: string
   secondary?: string
   position?: number
 }
@@ -12,12 +15,14 @@ const props = withDefaults(defineProps<{
   items: MessageQueueFloatItem[]
   testId?: string
   canInsert?: boolean
+  canEdit?: boolean
   activeInsertId?: string | null
   insertTitle?: (item: MessageQueueFloatItem) => string
   removeTitle?: string | ((item: MessageQueueFloatItem) => string)
 }>(), {
   testId: undefined,
   canInsert: false,
+  canEdit: false,
   activeInsertId: null,
   insertTitle: undefined,
   removeTitle: undefined,
@@ -26,8 +31,52 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   insert: [id: string]
   remove: [id: string]
+  edit: [id: string, content: string]
 }>()
 const { t } = useI18n()
+
+const editingId = ref<string | null>(null)
+const editingText = ref('')
+const editingInput = ref<HTMLTextAreaElement | null>(null)
+
+watch(() => props.items, (items) => {
+  if (editingId.value && !items.some(item => item.id === editingId.value)) {
+    cancelEditing()
+  }
+})
+
+function startEditing(item: MessageQueueFloatItem) {
+  editingId.value = item.id
+  editingText.value = item.fullText ?? item.text
+  void nextTick(() => {
+    editingInput.value?.focus()
+    editingInput.value?.setSelectionRange(editingInput.value.value.length, editingInput.value.value.length)
+  })
+}
+
+function cancelEditing() {
+  editingId.value = null
+  editingText.value = ''
+}
+
+function saveEditing() {
+  const id = editingId.value
+  if (!id) return
+  const content = editingText.value.trim()
+  if (!content) return
+  emit('edit', id, content)
+  cancelEditing()
+}
+
+function onEditKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    saveEditing()
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    cancelEditing()
+  }
+}
 
 function resolvedInsertTitle(item: MessageQueueFloatItem): string {
   return props.insertTitle?.(item) || t('chat.insertQueuedMessage')
@@ -56,11 +105,59 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
         v-for="(item, index) in items"
         :key="item.id"
         class="queue-float-item"
+        :class="{ 'queue-float-item--editing': editingId === item.id }"
         :data-queue-id="item.id"
       >
+        <template v-if="editingId === item.id">
+          <textarea
+            ref="editingInput"
+            v-model="editingText"
+            class="queue-edit-input"
+            rows="2"
+            :aria-label="t('chat.editQueuedMessage')"
+            @keydown="onEditKeydown"
+          ></textarea>
+          <button
+            type="button"
+            class="queue-edit-save"
+            :title="t('chat.saveQueuedMessageEdit')"
+            :aria-label="t('chat.saveQueuedMessageEdit')"
+            :disabled="!editingText.trim()"
+            @click="saveEditing"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="queue-edit-cancel"
+            :title="t('chat.cancelQueuedMessageEdit')"
+            :aria-label="t('chat.cancelQueuedMessageEdit')"
+            @click="cancelEditing"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </template>
+        <template v-else>
         <span class="queue-index">{{ item.position || index + 1 }}</span>
         <span v-if="item.secondary" class="queue-agent">{{ item.secondary }}</span>
         <span class="queue-text">{{ item.text }}</span>
+        <button
+          v-if="canEdit"
+          type="button"
+          class="queue-edit"
+          :title="t('chat.editQueuedMessage')"
+          :aria-label="t('chat.editQueuedMessage')"
+          @click="startEditing(item)"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+          </svg>
+        </button>
         <button
           v-if="canInsert"
           type="button"
@@ -88,6 +185,7 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
+        </template>
       </div>
     </div>
   </div>
@@ -226,6 +324,90 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
   transition: all $transition-fast;
 }
 
+.queue-edit {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: $text-muted;
+  background: transparent;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.12);
+  }
+}
+
+.queue-edit-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 1px solid rgba(var(--accent-info-rgb), 0.35);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1.4;
+  color: $text-primary;
+  background: #ffffff;
+  outline: none;
+
+  &:focus {
+    border-color: var(--accent-primary);
+  }
+
+  .dark & {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+.queue-edit-save,
+.queue-edit-cancel {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  cursor: pointer;
+  transition: all $transition-fast;
+}
+
+.queue-edit-save {
+  color: var(--accent-primary);
+
+  &:hover:not(:disabled) {
+    background: rgba(var(--accent-primary-rgb), 0.14);
+  }
+
+  &:disabled {
+    opacity: 0.34;
+    cursor: default;
+  }
+}
+
+.queue-edit-cancel {
+  color: $text-muted;
+
+  &:hover {
+    color: $error;
+    background: rgba($error, 0.1);
+  }
+}
+
+.queue-float-item--editing {
+  align-items: flex-start;
+}
+
 .queue-insert {
   color: var(--accent-info);
 
@@ -304,7 +486,10 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
   }
 
   .queue-insert,
-  .queue-remove {
+  .queue-remove,
+  .queue-edit,
+  .queue-edit-save,
+  .queue-edit-cancel {
     width: 22px;
     height: 22px;
   }

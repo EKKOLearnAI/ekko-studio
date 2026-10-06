@@ -299,6 +299,7 @@ const queuedMessages = computed(() => {
 const queuedFloatItems = computed(() => queuedMessages.value.map(message => ({
   id: message.id,
   text: queuedPreview(message.content),
+  fullText: queuedFullText(message.content),
 })));
 const activeQueueInsertion = computed(() => {
   const sid = chatStore.activeSessionId;
@@ -403,6 +404,12 @@ function insertQueuedMessage(messageId: string) {
   chatStore.insertQueuedMessage(sid, messageId);
 }
 
+function editQueuedMessage(messageId: string, content: string) {
+  const sid = chatStore.activeSessionId;
+  if (!sid) return;
+  chatStore.editQueuedMessage(sid, messageId, content);
+}
+
 function queueInsertionTitle(messageId: string): string {
   const insertion = activeQueueInsertion.value;
   if (!insertion) return t("chat.insertQueuedMessage");
@@ -416,6 +423,11 @@ function queuedPreview(content: string): string {
   const visibleContent = reference?.reply || reference?.content || content;
   const normalized = visibleContent.replace(/\s+/g, " ").trim();
   return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized;
+}
+
+function queuedFullText(content: string): string {
+  const reference = parseMessageReference(content);
+  return reference?.reply || reference?.content || content;
 }
 
 function shouldAutoFollowBottom(threshold = 100): boolean {
@@ -1060,10 +1072,12 @@ defineExpose({
         <MessageQueueFloatPanel
           :items="queuedFloatItems"
           :can-insert="canInsertQueuedMessages"
+          can-edit
           :active-insert-id="activeQueueInsertion?.queueId"
           :insert-title="item => queueInsertionTitle(item.id)"
           @insert="insertQueuedMessage"
           @remove="removeQueuedMessage"
+          @edit="editQueuedMessage"
         />
       </Transition>
     </div>
