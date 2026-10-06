@@ -6,6 +6,12 @@ import { nextTick } from 'vue'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import ChatInput from '@/components/hermes/chat/ChatInput.vue'
+import {
+  clearChatInputDraft,
+  loadChatInputDraft,
+  pruneMemoryChatInputDrafts,
+  saveChatInputDraft,
+} from '@/utils/chat-input-drafts'
 
 enableAutoUnmount(afterEach)
 
@@ -109,6 +115,7 @@ function mountForSession(
 describe('ChatInput draft persistence', () => {
   beforeEach(() => {
     localStorage.clear()
+    pruneMemoryChatInputDrafts([])
     window.innerWidth = 1024
     fetchSkillsMock.mockReset()
     fetchSkillsMock.mockResolvedValue({ categories: [], archived: [] })
@@ -233,13 +240,40 @@ describe('ChatInput draft persistence', () => {
 
     expect(localStorage.getItem('hermes_chat_input_draft_v1')).toBeNull()
     expect(JSON.parse(localStorage.getItem('hermes_chat_input_drafts_v1') || '{}')).toEqual({
-      'session-a': 'draft for session a',
-      'session-b': 'draft for session b',
+      version: 1,
+      drafts: {
+        'session-a': { text: 'draft for session a', updatedAt: expect.any(Number) },
+        'session-b': { text: 'draft for session b', updatedAt: expect.any(Number) },
+      },
     })
 
     const remountedA = mountForSession('session-a')
     await nextTick()
     expect((remountedA.get('textarea').element as HTMLTextAreaElement).value).toBe('draft for session a')
+  })
+
+  it('keeps drafts of never-persisted sessions out of localStorage', async () => {
+    const wrapper = mountForSession('session-blank', { isLocalOnly: true })
+    const textarea = wrapper.get('textarea')
+    await textarea.setValue('typed but never sent')
+    await nextTick()
+    expect(localStorage.getItem('hermes_chat_input_drafts_v1')).toBeNull()
+
+    const chatStore = useChatStore()
+    chatStore.sessions.push({
+      id: 'session-other', title: 'other', source: 'cli', messages: [], createdAt: Date.now(), updatedAt: Date.now(),
+    })
+    chatStore.activeSessionId = 'session-other'
+    chatStore.activeSession = chatStore.sessions[1]
+    await nextTick()
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('')
+
+    chatStore.activeSessionId = 'session-blank'
+    chatStore.activeSession = chatStore.sessions[0]
+    await nextTick()
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('typed but never sent')
+    expect(localStorage.getItem('hermes_chat_input_drafts_v1')).toBeNull()
+    wrapper.unmount()
   })
 
   it('prefills a transient help prompt without overwriting the session draft', async () => {
@@ -566,5 +600,75 @@ describe('ChatInput draft persistence', () => {
     await nextTick()
 
     expect(wrapper.find('.slash-command-dropdown').exists()).toBe(false)
+  })
+})
+
+describe('chat input draft storage', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    pruneMemoryChatInputDrafts([])
+  })
+
+  it('migrates legacy flat drafts and keeps the text', () => {
+    localStorage.setItem('hermes_chat_input_drafts_v1', JSON.stringify({ 'session-old': 'legacy draft' }))
+    expect(loadChatInputDraft('session-old')).toBe('legacy draft')
+
+    const stored = JSON.parse(localStorage.getItem('hermes_chat_input_drafts_v1') || '{}')
+    expect(stored.version).toBe(1)
+    expect(stored.drafts['session-old']).toEqual({ text: 'legacy draft', updatedAt: expect.any(Number) })
+  })
+
+  it('drops drafts older than the TTL on read and keeps fresh ones', () => {
+    const stale = Date.now() - 31 * 24 * 60 * 60 * 1000
+    localStorage.setItem('hermes_chat_input_drafts_v1', JSON.stringify({
+      version: 1,
+      drafts: {
+        'session-stale': { text: 'old draft', updatedAt: stale },
+        'session-fresh': { text: 'new draft', updatedAt: Date.now() },
+      },
+    }))
+    expect(loadChatInputDraft('session-stale')).toBe('')
+    expect(loadChatInputDraft('session-fresh')).toBe('new draft')
+
+    const stored = JSON.parse(localStorage.getItem('hermes_chat_input_drafts_v1') || '{}')
+    expect(Object.keys(stored.drafts)).toEqual(['session-fresh'])
+  })
+
+  it('removes the storage key once every draft expired', () => {
+    const stale = Date.now() - 31 * 24 * 60 * 60 * 1000
+    localStorage.setItem('hermes_chat_input_drafts_v1', JSON.stringify({
+      version: 1,
+      drafts: { 'session-stale': { text: 'old draft', updatedAt: stale } },
+    }))
+    expect(loadChatInputDraft('session-stale')).toBe('')
+    expect(localStorage.getItem('hermes_chat_input_drafts_v1')).toBeNull()
+  })
+
+  it('clears both memory and storage drafts for a session', () => {
+    saveChatInputDraft('session-memory', 'in-memory draft', true)
+    saveChatInputDraft('session-stored', 'stored draft', false)
+    clearChatInputDraft('session-memory')
+    clearChatInputDraft('session-stored')
+    expect(loadChatInputDraft('session-memory')).toBe('')
+    expect(loadChatInputDraft('session-stored')).toBe('')
+    expect(localStorage.getItem('hermes_chat_input_drafts_v1')).toBeNull()
+  })
+
+  it('keeps unpersisted session drafts in memory only', () => {
+    saveChatInputDraft('session-blank', 'typed but unsent', true)
+    expect(localStorage.getItem('hermes_chat_input_drafts_v1')).toBeNull()
+    expect(loadChatInputDraft('session-blank')).toBe('typed but unsent')
+
+    saveChatInputDraft('session-real', 'persisted draft', false)
+    const stored = JSON.parse(localStorage.getItem('hermes_chat_input_drafts_v1') || '{}')
+    expect(stored.drafts['session-real']).toEqual({ text: 'persisted draft', updatedAt: expect.any(Number) })
+    expect(stored.drafts['session-blank']).toBeUndefined()
+  })
+
+  it('prunes memory drafts whose sessions are gone', () => {
+    saveChatInputDraft('session-gone', 'orphan text', true)
+    pruneMemoryChatInputDrafts(['session-alive'])
+    expect(loadChatInputDraft('session-gone')).toBe('')
+    expect(localStorage.getItem('hermes_chat_input_drafts_v1')).toBeNull()
   })
 })

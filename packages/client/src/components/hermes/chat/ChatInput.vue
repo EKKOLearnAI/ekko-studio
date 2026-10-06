@@ -15,6 +15,7 @@ import { computed, ref, nextTick, onMounted, onUnmounted, watch, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToolTraceVisibility } from '@/composables/useToolTraceVisibility'
 import { extractClipboardFiles } from '@/utils/clipboard-files'
+import { loadChatInputDraft, pruneMemoryChatInputDrafts, saveChatInputDraft } from '@/utils/chat-input-drafts'
 import VoiceDialogueControls from './VoiceDialogueControls.vue'
 import BundleCreateModal from './BundleCreateModal.vue'
 import { BRIDGE_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
@@ -115,8 +116,6 @@ const compactModelLabel = computed(() => {
   return parts[parts.length - 1] || label
 })
 
-const DRAFT_STORAGE_KEY = 'hermes_chat_input_drafts_v1'
-type DraftMap = Record<string, string>
 const inputText = ref('')
 const textareaRef = ref<HTMLTextAreaElement>()
 const commandDropdownRef = ref<HTMLDivElement>()
@@ -474,38 +473,25 @@ const inputSettingsOptions = computed<DropdownOption[]>(() => [
   },
 ])
 
-function readDraftMap(): DraftMap {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || '{}')
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
 function getActiveDraftSessionId() {
   return chatStore.activeSessionId || chatStore.activeSession?.id || ''
 }
 
+function isActiveDraftSessionLocalOnly() {
+  const sessionId = getActiveDraftSessionId()
+  return chatStore.sessions.find(session => session.id === sessionId)?.isLocalOnly === true
+}
+
 function loadDraftForActiveSession() {
   const sessionId = getActiveDraftSessionId()
-  inputText.value = sessionId ? readDraftMap()[sessionId] || '' : ''
+  inputText.value = sessionId ? loadChatInputDraft(sessionId) : ''
 }
 
 function saveDraftForActiveSession(value: string) {
   const sessionId = getActiveDraftSessionId()
   if (!sessionId) return
-  const drafts = readDraftMap()
-  if (value) {
-    drafts[sessionId] = value
-  } else {
-    delete drafts[sessionId]
-  }
-  if (Object.keys(drafts).length > 0) {
-    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts))
-  } else {
-    localStorage.removeItem(DRAFT_STORAGE_KEY)
-  }
+  pruneMemoryChatInputDrafts(chatStore.sessions.map(session => session.id))
+  saveChatInputDraft(sessionId, value, isActiveDraftSessionLocalOnly())
 }
 
 // 从 localStorage 读取设置

@@ -21,6 +21,7 @@ import { primeCompletionSound, playCompletionSound } from '@/utils/completion-so
 import { showCompletionNotification } from '@/utils/completion-notification'
 import { detectThinkingBoundary } from '@/utils/thinking-parser'
 import { isKnownBridgeSessionCommand } from '@/utils/hermes/bridge-session-commands'
+import { clearChatInputDraft } from '@/utils/chat-input-drafts'
 import { responseErrorMessage } from '@/utils/http-error'
 import {
   isPendingInteractionExpiredError,
@@ -2394,6 +2395,7 @@ export const useChatStore = defineStore('chat', () => {
     setBackgroundPending(sessionId, 0)
     sessions.value = sessions.value.filter(s => s.id !== sessionId)
     clearMessageReference(sessionId)
+    clearChatInputDraft(sessionId)
     setAbortState(sessionId, null)
     if (activeSessionId.value === sessionId) {
       if (sessions.value.length > 0) {
@@ -2413,6 +2415,7 @@ export const useChatStore = defineStore('chat', () => {
     setBackgroundPending(sessionId, 0)
     sessions.value = sessions.value.filter(s => s.id !== sessionId)
     clearMessageReference(sessionId)
+    clearChatInputDraft(sessionId)
     setAbortState(sessionId, null)
     if (completedUnreadSessions.value.has(sessionId)) {
       const next = new Set(completedUnreadSessions.value)
