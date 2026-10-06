@@ -187,6 +187,20 @@ deliberately unsupported in this version; a later TURN integration must enforce
 its bandwidth policy instead of treating a relay candidate as an unlimited
 direct connection.
 
+Studio resolves STUN hostnames to usable IPv4 endpoints before creating the
+peer. If system DNS returns a synthetic address in `198.18.0.0/15`, only the two
+built-in public STUN hostnames may use Cloudflare DNS over HTTPS to obtain real
+addresses. All resolution shares a 1.5-second deadline; original configured URLs
+remain available on failure, and custom/private hostnames never go to this public
+resolver. This avoids sending source-bound physical-network UDP sockets to a
+TUN-only fake address. It does not override system routing or VPN policies.
+
+Server logs tagged `[app-p2p]` record an independent attempt ID, STUN resolution
+counts, offer/answer candidate counts and connection state. They contain no SDP,
+candidate IP addresses or authorization credentials. On cross-network failure,
+check whether either side has no `srflx` candidates and whether ICE reaches
+`connected`; a LAN-only candidate set can work locally while NAT traversal fails.
+
 ### Network interfaces and containers
 
 Studio binds each ICE UDP socket to a real local address instead of a wildcard
