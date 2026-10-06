@@ -12,7 +12,7 @@ const sessionScrollPositions = new Map<string, MessageViewportScrollSnapshot>();
 <script setup lang="ts">
 import { NSpin, NButton, NInput } from 'naive-ui'
 import { usePageLoadingTask } from '@/composables/usePageLoading'
-import { ref, computed, nextTick, onBeforeUnmount, onMounted, watch } from "vue";
+import { ref, computed, nextTick, onBeforeUnmount, onMounted, reactive, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import VirtualMessageList from "./VirtualMessageList.vue";
@@ -30,6 +30,7 @@ import { messageScrollPositionKey, rememberMessageScrollPosition } from "./messa
 import { chatSessionAgentAvatar } from "@/utils/chat-agent-avatar";
 import { parseThinking } from "@/utils/thinking-parser";
 import { groupCompletedToolsByRun } from "./tool-run-grouping";
+import { buildClarifySubmission, type ClarifyDraft, type ClarifyQuestion } from "@/utils/clarify-questions";
 
 const props = withDefaults(defineProps<{
   approvalPortalToBody?: boolean
@@ -317,10 +318,18 @@ const canInsertQueuedMessages = computed(() => {
 });
 const visibleApproval = computed(() => chatStore.activePendingApproval);
 const visibleClarify = computed(() => chatStore.activePendingClarify);
-const clarifyResponse = ref("");
+const clarifyDrafts = reactive<Record<string, ClarifyDraft>>({});
 watch(
   () => visibleClarify.value?.clarifyId,
-  () => { clarifyResponse.value = visibleClarify.value?.initialResponse || ""; },
+  () => {
+    for (const qid of Object.keys(clarifyDrafts)) delete clarifyDrafts[qid];
+    for (const question of visibleClarify.value?.questions || []) {
+      clarifyDrafts[question.qid] = { choices: [], text: "" };
+    }
+    const first = visibleClarify.value?.questions?.[0];
+    if (first) clarifyDrafts[first.qid].text = visibleClarify.value?.initialResponse || "";
+  },
+  { immediate: true },
 );
 const hasFloatingPrompt = computed(() => !!visibleApproval.value || !!visibleClarify.value);
 const virtualListPadding = computed(() => {
@@ -381,14 +390,25 @@ function handleApproval(choice: "once" | "session" | "always" | "deny") {
   chatStore.respondApproval(choice);
 }
 
-function handleClarify(response?: string) {
-  const finalResponse = response !== undefined
-    ? response
-    : visibleClarify.value?.responseMode === "editor"
-      ? clarifyResponse.value
-      : clarifyResponse.value.trim();
-  chatStore.respondToClarify(finalResponse);
-  clarifyResponse.value = "";
+function toggleClarifyChoice(question: ClarifyQuestion, choice: string) {
+  const draft = clarifyDrafts[question.qid] || (clarifyDrafts[question.qid] = { choices: [], text: "" });
+  if (!question.multiSelect) {
+    draft.choices = draft.choices.includes(choice) ? [] : [choice];
+    return;
+  }
+  draft.choices = draft.choices.includes(choice)
+    ? draft.choices.filter(item => item !== choice)
+    : [...draft.choices, choice];
+}
+
+function handleClarify() {
+  const questions = visibleClarify.value?.questions || [];
+  const { response, answers } = buildClarifySubmission(questions, clarifyDrafts);
+  chatStore.respondToClarify(response, answers);
+}
+
+function handleClarifyDismiss() {
+  chatStore.respondToClarify("", {});
 }
 
 function removeQueuedMessage(messageId: string) {
@@ -1028,28 +1048,38 @@ defineExpose({
             <PendingInteractionCountdown :deadline="visibleClarify.countdownDeadline" />
           </div>
           <div class="approval-float-title">{{ t("chat.clarifyTitle") }}</div>
-          <div class="approval-float-desc">{{ visibleClarify.question }}</div>
-          <div v-if="visibleClarify.choices && visibleClarify.choices.length" class="approval-float-actions">
-            <NButton
-              v-for="choice in visibleClarify.choices"
-              :key="choice"
-              size="small"
-              type="primary"
-              @click="handleClarify(choice)"
+          <div class="clarify-float-questions">
+            <div
+              v-for="question in visibleClarify.questions"
+              :key="question.qid"
+              class="clarify-float-question"
             >
-              {{ choice }}
-            </NButton>
-            <NButton size="small" type="error" secondary @click="handleClarify('')">
-              {{ t("chat.clarifyDismiss") }}
-            </NButton>
+              <div class="approval-float-desc">{{ question.question }}</div>
+              <div v-if="question.choices && question.choices.length" class="approval-float-actions">
+                <NButton
+                  v-for="choice in question.choices"
+                  :key="choice"
+                  size="small"
+                  :type="clarifyDrafts[question.qid]?.choices.includes(choice) ? 'primary' : 'default'"
+                  :secondary="!clarifyDrafts[question.qid]?.choices.includes(choice)"
+                  @click="toggleClarifyChoice(question, choice)"
+                >
+                  {{ choice }}
+                </NButton>
+              </div>
+              <NInput
+                v-if="clarifyDrafts[question.qid]"
+                v-model:value="clarifyDrafts[question.qid].text"
+                size="small"
+                :type="visibleClarify.responseMode === 'editor' ? 'textarea' : 'text'"
+                :placeholder="t('chat.clarifyPlaceholder')"
+              />
+            </div>
           </div>
           <div class="clarify-float-input-row">
-            <NInput
-              v-model:value="clarifyResponse"
-              size="small"
-              :type="visibleClarify.responseMode === 'editor' ? 'textarea' : 'text'"
-              :placeholder="t('chat.clarifyPlaceholder')"
-            />
+            <NButton size="small" type="error" secondary @click="handleClarifyDismiss()">
+              {{ t("chat.clarifyDismiss") }}
+            </NButton>
             <NButton size="small" type="primary" @click="handleClarify()">
               {{ t("chat.clarifySubmit") }}
             </NButton>
@@ -1241,6 +1271,15 @@ defineExpose({
   margin-top: 10px;
   padding: 10px 4px 0;
   border-top: 1px solid $border-color;
+}
+
+.clarify-float-questions {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.clarify-float-question + .clarify-float-question {
+  margin-top: 12px;
 }
 
 .clarify-float-input-row {

@@ -1300,7 +1300,7 @@ export class ChatRunSocket {
       }
     })
 
-    socket.on('clarify.respond', async (data: { session_id?: string; clarify_id?: string; response?: string }) => {
+    socket.on('clarify.respond', async (data: { session_id?: string; clarify_id?: string; response?: string; answers?: Record<string, string | string[] | null> }) => {
       if (!data.session_id || !data.clarify_id) return
       try {
         requireSocketSessionAccess(data.session_id)
@@ -1359,7 +1359,7 @@ export class ChatRunSocket {
       }
       try {
         if (shared && !buildResumeEvents(this.sessionMap.get(data.session_id)?.events || []).some(entry => entry.event === 'clarify.requested' && entry.data?.clarify_id === data.clarify_id)) throw new Error('Clarification does not belong to this session')
-        const result = await this.bridge.clarifyRespond(data.clarify_id, data.response || '')
+        const result = await this.bridge.clarifyRespond(data.clarify_id, data.response || '', data.answers)
         const resolved = Boolean((result as any)?.resolved)
         this.emitToSession(socket, data.session_id, 'clarify.resolved', {
           event: 'clarify.resolved',

@@ -250,7 +250,13 @@ describe('buildResumeMessages', () => {
       },
       {
         event: 'clarify.requested',
-        data: { event: 'clarify.requested', clarify_id: 'clarify-1', timeout_ms: 120_000, requested_at: requestedAt },
+        data: {
+          event: 'clarify.requested',
+          clarify_id: 'clarify-1',
+          questions: [{ qid: 'q0', question: 'Which environment?', choices: ['staging', 'production'], multi_select: false }],
+          timeout_ms: 120_000,
+          requested_at: requestedAt,
+        },
       },
     ]
 
@@ -258,6 +264,9 @@ describe('buildResumeMessages', () => {
 
     expect(outbound[0].data.remaining_timeout_ms).toBe(255_000)
     expect(outbound[1].data.remaining_timeout_ms).toBe(75_000)
+    expect(outbound[1].data.questions).toEqual([
+      { qid: 'q0', question: 'Which environment?', choices: ['staging', 'production'], multi_select: false },
+    ])
     expect(stateEvents[0].data).not.toHaveProperty('remaining_timeout_ms')
   })
 

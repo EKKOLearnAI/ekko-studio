@@ -545,6 +545,7 @@ describe('MessageList session scroll position', () => {
       clarifyId: 'stale-clarify',
       question: 'Which environment?',
       choices: ['staging'],
+      questions: [{ qid: 'q0', question: 'Which environment?', choices: ['staging'], multiSelect: false }],
       initialResponse: '',
       responseMode: 'input',
       timeoutMs: 1,
@@ -568,7 +569,10 @@ describe('MessageList session scroll position', () => {
     const clarifyPanel = wrapper.findAll('.approval-float-panel')
       .find(panel => panel.text().includes('chat.clarifyTitle'))
     expect(clarifyPanel).toBeTruthy()
+    expect(clarifyPanel!.findAll('.approval-float-actions button')).toHaveLength(1)
+    expect(clarifyPanel!.findAll('.clarify-float-question input')).toHaveLength(1)
     await clarifyPanel!.get('.approval-float-actions button').trigger('click')
+    await clarifyPanel!.findAll('.clarify-float-input-row button')[1].trigger('click')
     expect(chatStore.pendingClarifies.has(session.id)).toBe(false)
     wrapper.unmount()
   })

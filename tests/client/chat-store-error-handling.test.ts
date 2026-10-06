@@ -7,6 +7,7 @@ const chatApi = vi.hoisted(() => ({
   resumeSession: vi.fn(),
   registerSessionHandlers: vi.fn(),
   globalPendingHandler: undefined as undefined | ((event: any) => void),
+  respondClarify: vi.fn(),
   unregisterSessionHandlers: vi.fn(),
 }))
 
@@ -22,7 +23,7 @@ vi.mock('@/api/studio/chat', () => ({
   unregisterSessionHandlers: chatApi.unregisterSessionHandlers,
   getChatRunSocket: vi.fn(() => ({ emit: vi.fn() })),
   respondToolApproval: vi.fn(),
-  respondClarify: vi.fn(),
+  respondClarify: chatApi.respondClarify,
   onPeerUserMessage: vi.fn((handler: (event: any) => void) => { chatApi.globalPendingHandler = handler; return vi.fn() }),
   onApprovalRequested: vi.fn(() => vi.fn()),
   onApprovalResolved: vi.fn(() => vi.fn()),
@@ -174,6 +175,34 @@ describe('chat store error handling - #1644', () => {
     expect(store.pendingApprovals.get('session-b')!.countdownDeadline - now).toBeLessThanOrEqual(42_100)
     expect(store.pendingClarifies.get('session-b')!.countdownDeadline - now).toBeGreaterThanOrEqual(16_900)
     expect(store.pendingClarifies.get('session-b')!.countdownDeadline - now).toBeLessThanOrEqual(17_100)
+  })
+
+  it('keeps every clarify question from the bridge and answers them per question id', () => {
+    const store = useChatStore()
+    store.sessions = [makeSession('session-b')]
+
+    chatApi.globalPendingHandler?.({
+      event: 'clarify.requested', session_id: 'session-b', clarify_id: 'clarify-b',
+      question: '1. Which environment?\n2. Which checks?',
+      choices: null,
+      questions: [
+        { qid: 'q0', question: 'Which environment?', choices: ['staging (Recommended)', 'production'], multi_select: false },
+        { qid: 'q1', question: 'Which checks?', choices: ['unit', 'e2e'], multi_select: true },
+      ],
+      timeout_ms: 300_000,
+    })
+
+    expect(store.pendingClarifies.get('session-b')!.questions).toEqual([
+      { qid: 'q0', question: 'Which environment?', choices: ['staging (Recommended)', 'production'], multiSelect: false },
+      { qid: 'q1', question: 'Which checks?', choices: ['unit', 'e2e'], multiSelect: true },
+    ])
+
+    expect(store.respondToClarifyFor('session-b', 'clarify-b', 'Which environment? production', {
+      q0: 'production', q1: ['unit'],
+    })).toBe('submitted')
+    expect(chatApi.respondClarify).toHaveBeenCalledWith(
+      'session-b', 'clarify-b', 'Which environment? production', { q0: 'production', q1: ['unit'] }, 'chat-run',
+    )
   })
 
   it('keeps a pending approval when the authoritative response is unresolved', () => {

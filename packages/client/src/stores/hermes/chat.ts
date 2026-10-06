@@ -22,6 +22,7 @@ import { showCompletionNotification } from '@/utils/completion-notification'
 import { detectThinkingBoundary } from '@/utils/thinking-parser'
 import { isKnownBridgeSessionCommand } from '@/utils/hermes/bridge-session-commands'
 import { responseErrorMessage } from '@/utils/http-error'
+import { normalizeClarifyQuestions, type ClarifyAnswers, type ClarifyQuestion } from '@/utils/clarify-questions'
 import {
   isPendingInteractionExpiredError,
   notifyPendingInteractionExpired,
@@ -444,6 +445,7 @@ export interface PendingClarify {
   clarifyId: string
   question: string
   choices: string[] | null
+  questions: ClarifyQuestion[]
   initialResponse: string
   responseMode: string
   timeoutMs: number
@@ -3377,21 +3379,34 @@ export const useChatStore = defineStore('chat', () => {
 
   function setPendingClarify(evt: RunEvent) {
     const sid = evt.session_id
-    const clarifyId = (evt as any).clarify_id as string | undefined
+    const data = evt as RunEvent & {
+      clarify_id?: string
+      question?: string
+      choices?: unknown
+      questions?: unknown
+      initial_response?: string
+      response_mode?: string
+      timeout_ms?: number
+      remaining_timeout_ms?: number
+    }
+    const clarifyId = data.clarify_id
     if (!sid || !clarifyId) return
     if (pendingClarifyResponseIds.get(sid) !== clarifyId) pendingClarifyResponseIds.delete(sid)
+    const question = String(data.question || '')
+    const choices = Array.isArray(data.choices) ? data.choices.map(String) : null
     pendingClarifies.value.set(sid, {
       sessionId: sid,
       clarifyId,
-      question: String((evt as any).question || ''),
-      choices: Array.isArray((evt as any).choices) ? (evt as any).choices : null,
-      initialResponse: String((evt as any).initial_response || ''),
-      responseMode: String((evt as any).response_mode || ''),
-      timeoutMs: Number((evt as any).timeout_ms) || 300000,
+      question,
+      choices,
+      questions: normalizeClarifyQuestions(data.questions, question, choices),
+      initialResponse: String(data.initial_response || ''),
+      responseMode: String(data.response_mode || ''),
+      timeoutMs: Number(data.timeout_ms) || 300000,
       requestedAt: Date.now(),
       countdownDeadline: pendingInteractionDeadline(
-        (evt as any).remaining_timeout_ms,
-        (evt as any).timeout_ms,
+        data.remaining_timeout_ms,
+        data.timeout_ms,
       ),
     })
     pendingClarifies.value = new Map(pendingClarifies.value)
@@ -3454,18 +3469,23 @@ export const useChatStore = defineStore('chat', () => {
     pendingClarifies.value = new Map(pendingClarifies.value)
   }
 
-  function respondToClarifyFor(sessionId: string, clarifyId: string, response: string): PendingInteractionSubmitResult {
+  function respondToClarifyFor(
+    sessionId: string,
+    clarifyId: string,
+    response: string,
+    answers?: ClarifyAnswers,
+  ): PendingInteractionSubmitResult {
     const pending = pendingClarifies.value.get(sessionId)
     if (!pending || pending.clarifyId !== clarifyId) return 'missing'
-    respondClarify(sessionId, clarifyId, response, runtimeTransport())
+    respondClarify(sessionId, clarifyId, response, answers, runtimeTransport())
     pendingClarifyResponseIds.set(sessionId, clarifyId)
     return 'submitted'
   }
 
-  function respondToClarify(response: string): PendingInteractionSubmitResult {
+  function respondToClarify(response: string, answers?: ClarifyAnswers): PendingInteractionSubmitResult {
     const pending = activePendingClarify.value
     if (!pending) return 'missing'
-    const result = respondToClarifyFor(pending.sessionId, pending.clarifyId, response)
+    const result = respondToClarifyFor(pending.sessionId, pending.clarifyId, response, answers)
     if (result === 'submitted') dismissPendingClarifyFor(pending.sessionId, pending.clarifyId)
     return result
   }

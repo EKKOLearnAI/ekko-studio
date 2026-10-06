@@ -16,5 +16,13 @@ describe('AgentBridgeClient clarify responses', () => {
       clarify_id: 'clarify-1',
       response: 'Use the first option',
     })
+
+    await client.clarifyRespond('clarify-1', 'Use the first option', { q0: 'Use the first option', q1: null })
+    expect(request).toHaveBeenLastCalledWith({
+      action: 'clarify_respond',
+      clarify_id: 'clarify-1',
+      response: 'Use the first option',
+      answers: { q0: 'Use the first option', q1: null },
+    })
   })
 })
