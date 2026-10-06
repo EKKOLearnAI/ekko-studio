@@ -87,9 +87,8 @@ function loadCachedTheme(userId: number | null): UserThemeSettings {
 const brightness = ref<BrightnessMode>(
   (localStorage.getItem(BRIGHTNESS_KEY) as BrightnessMode) || 'system',
 )
-// Start in the default style while the quick style switch is unavailable.
 // Keep this in sync with the pre-render theme in index.html.
-const style = ref<ThemeStyle>('ink')
+const style = ref<ThemeStyle>(localStorage.getItem(STYLE_KEY) === 'comic' ? 'comic' : 'ink')
 const isDark = ref(false)
 const isComic = ref(false)
 const activeUserId = ref<number | null>(storedUserId())
