@@ -20,7 +20,7 @@ import type { AgentSkill } from '../skills/types'
 import { RunTaskPlan } from '../tools/plan'
 import { AgentToolRegistry, createDefaultToolRegistry } from '../tools/registry'
 import { sanitizeAgentToolResult } from '../tools/tool-result-sanitizer'
-import type { AgentTaskRequest, AgentToolContext, AgentToolResult } from '../tools/types'
+import type { AgentTaskRequest, AgentTool, AgentToolContext, AgentToolResult } from '../tools/types'
 import {
   inspectLocalSkillValidationIssues,
   resolveSkillRouting,
@@ -161,6 +161,16 @@ function cloneAgentMessages(messages: AgentMessage[]): AgentMessage[] {
 }
 
 export class AgentRuntime {
+  readonly contextManager?: AgentRuntimeOptions['contextManager']
+  private readonly managedConversationId = randomUUID()
+  private readonly contextTools = new Map<string, AgentTool>()
+  private readonly scopedRuntimes = new Set<AgentRuntime>()
+  private readonly options: AgentRuntimeOptions
+  private runJev: EkkoJevClient
+  private onIdle?: () => void
+
+  /** Hosts must bypass native automatic, manual and overflow compression for external owners. */
+  get contextManagement(): string { return this.contextManager?.strategy ?? 'native' }
   readonly jev: EkkoJevClient
   private readonly modelClient?: AgentRuntimeOptions['modelClient']
   private readonly profileId?: string
@@ -195,7 +205,10 @@ export class AgentRuntime {
   private readonly runtimeLogger?: EkkoRuntimeLogger
 
   constructor(options: AgentRuntimeOptions) {
+    this.options = options
+    this.contextManager = options.contextManager
     this.jev = new EkkoJevClient(options.jev)
+    this.runJev = this.jev
     this.profileId = String(options.profileId || '').trim() || undefined
     this.modelClient = options.modelClient
     this.toolsEnabled = options.toolsEnabled !== false
@@ -275,13 +288,14 @@ export class AgentRuntime {
 
   async drainSkillReviews(): Promise<void> {
     await this.skillReview?.drain()
+    await Promise.all([...this.scopedRuntimes].map(runtime => runtime.drainSkillReviews()))
   }
 
   hasBackgroundTasks(sessionId?: string): boolean {
     for (const task of this.backgroundTasks.values()) {
       if (!sessionId || task.sessionId === sessionId) return true
     }
-    return false
+    return [...this.scopedRuntimes].some(runtime => runtime.hasBackgroundTasks(sessionId))
   }
 
   async abortBackgroundTasks(sessionId?: string): Promise<number> {
@@ -292,7 +306,8 @@ export class AgentRuntime {
       task.resolveContinuationContext(null)
     }
     await Promise.allSettled(tasks.map(task => task.promise))
-    return tasks.length
+    const scopedCounts = await Promise.all([...this.scopedRuntimes].map(runtime => runtime.abortBackgroundTasks(sessionId)))
+    return tasks.length + scopedCounts.reduce((sum, count) => sum + count, 0)
   }
 
   /**
@@ -307,8 +322,7 @@ export class AgentRuntime {
   ): AgentRuntimeBoundaryInterruptResult {
     const sessionId = input.sessionId.trim()
     const expectedRunId = input.expectedRunId?.trim()
-    const sessionRuns = [...this.activeBoundaryRuns.values()]
-      .filter(run => run.sessionId === sessionId && !run.terminal)
+    const sessionRuns = this.boundaryRunsForSession(sessionId)
 
     if (sessionRuns.length === 0) return { status: 'not_running' }
 
@@ -346,7 +360,11 @@ export class AgentRuntime {
    * outside the runtime.
    */
   async estimateContext(input: AgentRuntimeRunInput): Promise<AgentRuntimeContextEstimate> {
+    if (input.contextManager) {
+      return this.createContextRuntime(input.contextManager).estimateContext({ ...input, contextManager: undefined })
+    }
     await this.refreshTools(this.runToolContext(input))
+    await this.refreshContextTools()
     const modelClient = this.modelClientFor(input)
     const skillRouting = await this.skillRouting(input)
     const messages = this.prepareMessages(input, undefined, skillRouting.names)
@@ -357,8 +375,30 @@ export class AgentRuntime {
   }
 
   async run(input: AgentRuntimeRunInput): Promise<AgentRuntimeRunResult> {
+    if (input.contextManager) {
+      const runtime = this.createContextRuntime(input.contextManager)
+      this.scopedRuntimes.add(runtime)
+      let foregroundComplete = false
+      let cleanupStarted = false
+      runtime.onIdle = () => {
+        if (!foregroundComplete || runtime.hasBackgroundTasks() || cleanupStarted) return
+        cleanupStarted = true
+        const release = () => {
+          this.scopedRuntimes.delete(runtime)
+          this.onIdle?.()
+        }
+        // Keep asynchronous review usage reachable through the host's public drain.
+        void runtime.drainSkillReviews().then(release, release)
+      }
+      try {
+        return await runtime.run({ ...input, contextManager: undefined })
+      } finally {
+        foregroundComplete = true
+        runtime.onIdle()
+      }
+    }
     const runId = randomUUID()
-    return this.jev.runScoped(input.signal, () => this.runWithSnapshot(input, runId), diagnostic => {
+    return this.runJev.runScoped(input.signal, () => this.runWithSnapshot(input, runId), diagnostic => {
       const context = { sessionId: this.contextKeyFor(input), ...input.logContext }
       if (diagnostic.stage === 'skill_routing' || diagnostic.stage === 'skill_review') {
         this.runtimeLogger?.skillJev(runId, diagnostic, context)
@@ -368,8 +408,27 @@ export class AgentRuntime {
     })
   }
 
+  private createContextRuntime(manager: NonNullable<AgentRuntimeOptions['contextManager']>): AgentRuntime {
+    const runtime = new AgentRuntime({
+      ...this.options,
+      contextManager: manager,
+      tools: this.tools.fork([...this.contextTools.keys()]),
+      skills: [...this.skills],
+    })
+    runtime.runJev = this.runJev
+    return runtime
+  }
+
+  private boundaryRunsForSession(sessionId: string): ActiveBoundaryRun[] {
+    return [
+      ...[...this.activeBoundaryRuns.values()].filter(run => run.sessionId === sessionId && !run.terminal),
+      ...[...this.scopedRuntimes].flatMap(runtime => runtime.boundaryRunsForSession(sessionId)),
+    ]
+  }
+
   private async runWithSnapshot(input: AgentRuntimeRunInput, runId: string): Promise<AgentRuntimeRunResult> {
     await this.refreshTools(this.runToolContext(input))
+    await this.refreshContextTools()
 
     const events: AgentRuntimeEvent[] = []
     const steps: AgentRuntimeStep[] = []
@@ -407,7 +466,7 @@ export class AgentRuntime {
     const memoryContext = memoryPreparation?.context
     const sessionId = this.contextKeyFor(input)?.trim()
     const activeBoundaryRun = sessionId
-      ? this.registerBoundaryRun(sessionId, runId)
+      ? this.registerBoundaryRun(this.contextManager && !input.metadata?.subagent_id ? this.mergedToolContext(input)?.sessionId || sessionId : sessionId, runId)
       : undefined
 
     emit({ type: 'run.started', runId, maxSteps })
@@ -544,8 +603,15 @@ export class AgentRuntime {
           : input.signal
         const modelClient = this.modelClientFor(input)
         emit({ type: 'model.started', runId, step })
-        const request = this.modelRequest(input, messages, modelClient, contextKey, modelSignal)
+        let request = this.modelRequest(input, messages, modelClient, contextKey, modelSignal)
         request.metadata = { ...request.metadata, session_id: contextKey || runId }
+        if (this.contextManager) {
+          request = await this.contextManager.prepareRequest(request, {
+            conversationId: contextKey!,
+            profileId: this.profileId,
+            modelClient,
+          })
+        }
         const recoveryDirective = this.currentRecoveryDirective()
         if (recoveryDirective?.active && request.tools?.length) {
           const allowed = new Set(recoveryDirective.allowedToolNames)
@@ -1110,7 +1176,8 @@ export class AgentRuntime {
     return input.contextKey ||
       (typeof input.metadata?.session_id === 'string' ? input.metadata.session_id : undefined) ||
       input.toolContext?.sessionId ||
-      this.defaultContextKey
+      this.defaultContextKey ||
+      (this.contextManager ? this.managedConversationId : undefined)
   }
 
   private backgroundDelegationFor(input: AgentRuntimeRunInput): boolean {
@@ -1138,6 +1205,22 @@ export class AgentRuntime {
     return modelClient
   }
 
+  private async refreshContextTools(): Promise<void> {
+    if (!this.contextManager) return
+    if (!this.toolsEnabled) throw new Error('Context management requires toolsEnabled.')
+    const tools = await this.contextManager.tools()
+    for (const tool of tools) {
+      const existing = this.tools.get(tool.definition.name)
+      if (existing && existing !== this.contextTools.get(tool.definition.name)) {
+        throw new Error(`Context manager tool collision: ${tool.definition.name}`)
+      }
+    }
+    for (const tool of tools) {
+      this.tools.registerExclusive(tool, this.contextTools.get(tool.definition.name))
+      this.contextTools.set(tool.definition.name, tool)
+    }
+  }
+
   private runToolContext(input: AgentRuntimeRunInput, sourceMessageIds?: string[]): AgentToolContext | undefined {
     const context = this.mergedToolContext(input)
     const memoryMessages = this.memoryCaptureMessages(input)
@@ -1148,6 +1231,7 @@ export class AgentRuntime {
     return {
       ...context,
       ...(sourceMessageIds?.length ? { sourceMessageIds } : {}),
+      ...(this.contextManager ? { contextConversationId: this.contextKeyFor(input) } : {}),
       ...(this.memory ? {
         memoryWritePolicy,
         memoryExplicitIntent,
@@ -1259,7 +1343,8 @@ export class AgentRuntime {
         rawResult,
         shouldInspectSkills,
       )
-      const result = await sanitizeAgentToolResult(validatedResult, {
+      // Public context results include restore text and protocol markers owned by the proxy.
+      const result = this.contextTools.has(toolCall.name) ? validatedResult : await sanitizeAgentToolResult(validatedResult, {
         tempRoot: workspaceToolAssetDirectory(context),
         compactJson: /(?:ekko|hermes)_studio_browser_/.test(toolCall.name),
       })
@@ -1361,7 +1446,8 @@ export class AgentRuntime {
       resolveContinuationContext = resolve
     })
     const sessionId = this.contextKeyFor(parentInput)
-    const childContextKey = sessionId
+    const hostSessionId = this.contextManager ? this.mergedToolContext(parentInput)?.sessionId || sessionId : sessionId
+    const childContextKey = this.contextManager ? subagentId : sessionId
       ? `${sessionId}:subagent:${subagentId}`
       : `subagent:${subagentId}`
     const abortChild = () => controller.abort()
@@ -1395,6 +1481,7 @@ export class AgentRuntime {
       let error: string | undefined
       try {
         const child = await this.run({
+          contextManager: this.contextManager,
           messages: [{
             role: 'user',
             content: subtaskPrompt(request),
@@ -1422,7 +1509,7 @@ export class AgentRuntime {
           reasoningSummary: parentInput.reasoningSummary,
           metadata: {
             ...parentInput.metadata,
-            session_id: sessionId ? `${sessionId}:subagent:${subagentId}` : `subagent:${subagentId}`,
+            session_id: childContextKey,
             parent_session_id: sessionId,
             parent_run_id: parentRunId,
             subagent_id: subagentId,
@@ -1573,16 +1660,17 @@ export class AgentRuntime {
     if (!background) return childPromise
 
     this.backgroundTasks.set(subagentId, {
-      sessionId,
+      sessionId: hostSessionId,
       controller,
       promise: childPromise,
       resolveContinuationContext,
     })
     onBackgroundStarted?.(subagentId)
-    void childPromise.then(
-      () => this.backgroundTasks.delete(subagentId),
-      () => this.backgroundTasks.delete(subagentId),
-    )
+    const finishBackground = () => {
+      this.backgroundTasks.delete(subagentId)
+      this.onIdle?.()
+    }
+    void childPromise.then(finishBackground, finishBackground)
     const payload = {
       runtime: 'ekko',
       mode: request.mode,

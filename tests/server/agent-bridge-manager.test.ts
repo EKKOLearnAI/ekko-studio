@@ -12,6 +12,14 @@ type MockManagedChild = EventEmitter & {
   unref: ReturnType<typeof vi.fn>
 }
 
+const contextManagerCapabilities = {
+  version: 1,
+  workerIsolation: true,
+  stableConversationId: true,
+  singleCompressionOwner: true,
+  contextOwnerStatus: true,
+}
+
 function createMockManagedChild(pid: number): MockManagedChild {
   const child = new EventEmitter() as MockManagedChild
   child.pid = pid
@@ -52,6 +60,13 @@ describe('agent bridge manager command resolution', () => {
     delete process.env.HERMES_AGENT_BRIDGE_PYTHON
     delete process.env.HERMES_AGENT_BRIDGE_UV
     delete process.env.UV
+    process.env.HERMES_HOME = join(tempDir, 'home')
+    process.env.HERMES_BIN = join(tempDir, 'missing-hermes')
+    delete process.env.HERMES_AGENT_BRIDGE_ENDPOINT
+    vi.doMock('child_process', async () => ({
+      ...await vi.importActual<typeof import('child_process')>('child_process'),
+      spawn: vi.fn(() => { throw new Error('Unexpected real bridge spawn in manager unit test') }),
+    }))
   })
 
   afterEach(() => {
@@ -254,7 +269,7 @@ describe('agent bridge manager command resolution', () => {
   it('retries a refused bridge connection before succeeding', async () => {
     const server = createServer((socket) => {
       socket.once('data', () => {
-        socket.end(`${JSON.stringify({ ok: true, pong: true })}\n`)
+        socket.end(`${JSON.stringify({ ok: true, pong: true, context_manager_capabilities: contextManagerCapabilities })}\n`)
       })
     })
     const endpoint = await listenOnRandomTcpPort(server)
@@ -272,7 +287,7 @@ describe('agent bridge manager command resolution', () => {
     try {
       const { AgentBridgeClient } = await import('../../packages/server/src/modules/hermes/services/bridge/client')
       const client = new AgentBridgeClient({ endpoint, connectRetryMs: 1000, timeoutMs: 1000 })
-      await expect(client.ping()).resolves.toMatchObject({ ok: true, pong: true })
+      await expect(client.ping()).resolves.toMatchObject({ ok: true, pong: true, context_manager_capabilities: contextManagerCapabilities })
       expect(createConnection).toHaveBeenCalledTimes(2)
       expect(refusedSocket.destroyed).toBe(true)
     } finally {
@@ -285,7 +300,7 @@ describe('agent bridge manager command resolution', () => {
   it('reports readiness when a fake TCP server answers ping with pong', async () => {
     const server = createServer((socket) => {
       socket.once('data', () => {
-        socket.end(`${JSON.stringify({ ok: true, pong: true })}\n`)
+        socket.end(`${JSON.stringify({ ok: true, pong: true, context_manager_capabilities: contextManagerCapabilities })}\n`)
       })
     })
     const endpoint = await listenOnRandomTcpPort(server)
@@ -485,7 +500,7 @@ describe('agent bridge manager command resolution', () => {
       socket.once('data', (chunk) => {
         const request = JSON.parse(chunk.toString('utf8').trim())
         actions.push(request.action)
-        socket.end(`${JSON.stringify({ ok: true, pong: request.action === 'ping' })}\n`)
+        socket.end(`${JSON.stringify({ ok: true, pong: request.action === 'ping', context_manager_capabilities: contextManagerCapabilities })}\n`)
       })
     })
     const endpoint = await listenOnRandomTcpPort(server)
@@ -522,7 +537,7 @@ describe('agent bridge manager command resolution', () => {
       socket.once('data', (chunk) => {
         const request = JSON.parse(chunk.toString('utf8').trim())
         actions.push(request.action)
-        socket.end(`${JSON.stringify({ ok: true, pong: request.action === 'ping' })}\n`)
+        socket.end(`${JSON.stringify({ ok: true, pong: request.action === 'ping', context_manager_capabilities: contextManagerCapabilities })}\n`)
       })
     })
     const endpoint = await listenOnRandomTcpPort(server)
@@ -602,7 +617,7 @@ describe('agent bridge manager command resolution', () => {
       socket.once('data', (chunk) => {
         const request = JSON.parse(chunk.toString('utf8').trim())
         actions.push(request.action)
-        socket.end(`${JSON.stringify({ ok: true, pong: request.action === 'ping' })}\n`, () => {
+        socket.end(`${JSON.stringify({ ok: true, pong: request.action === 'ping', context_manager_capabilities: contextManagerCapabilities })}\n`, () => {
           if (request.action === 'shutdown') {
             server.close()
           }
@@ -1105,7 +1120,7 @@ describe('agent bridge manager command resolution', () => {
       if (pingCalls === 1 || pingCalls === 3) {
         throw new Error('bridge offline')
       }
-      return { ok: true, pong: true } as any
+      return { ok: true, pong: true, context_manager_capabilities: contextManagerCapabilities } as any
     })
 
     const manager = new AgentBridgeManager({ endpoint: 'tcp://127.0.0.1:6562', startupTimeoutMs: 100 })

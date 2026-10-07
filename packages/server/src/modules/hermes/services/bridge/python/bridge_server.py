@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from bridge_pool import AgentPool
+from bridge_context_manager import BRIDGE_CONTEXT_CAPABILITIES, compact_session, discover_context_owner, normalize_context_manager, worker_config
 from bridge_runtime import (
     _agent_root,
     _apply_profile_env,
@@ -43,6 +44,37 @@ class BridgeServer:
         action = str(req.get("action") or "").strip()
         if not action:
             raise ValueError("action is required")
+        worker_profile = _worker_profile()
+        if worker_profile and req.get("profile") and req["profile"] != worker_profile:
+            raise ValueError("request profile does not match the isolated worker profile")
+        if "context_manager" in req and normalize_context_manager(req["context_manager"]) != worker_config():
+            raise ValueError("request context manager does not match the isolated worker configuration")
+        if isinstance(req.get("context_manager"), dict) and req["context_manager"].get("conversationId") is not None and req["context_manager"]["conversationId"] != req.get("session_id"):
+            raise ValueError("context manager conversation identity must equal session_id")
+
+        if action in {"context_owner", "context_manager_status", "context_compact"}:
+            session_id = str(req.get("session_id") or "").strip()
+            if not session_id:
+                raise ValueError("session_id is required")
+            with _profile_env(req.get("profile")):
+                _ensure_agent_imports()
+                owner = discover_context_owner(session_id)
+                if action in {"context_owner", "context_manager_status"}:
+                    if owner.get("manager") == "bili":
+                        from bridge_context_manager import ensure_bili_agent
+                        session = self.pool.get_or_create(
+                            session_id,
+                            profile=req.get("profile"),
+                            model=req.get("model"),
+                            provider=req.get("provider"),
+                        )
+                        ensure_bili_agent(session.agent, owner)
+                    return {"session_id": session_id, "context_manager": owner}
+                with self.pool._lock:
+                    session = self.pool._sessions.get(session_id)
+                    if session is not None and session.running:
+                        raise RuntimeError("Compression can only run while the session is idle")
+                    return {"session_id": session_id, **compact_session(owner, session_id)}
 
         if action == "ping":
             with self.pool._lock:
@@ -50,6 +82,7 @@ class BridgeServer:
             running_sessions = sum(1 for session in sessions if session.running)
             return {
                 "pong": True,
+                "context_manager_capabilities": BRIDGE_CONTEXT_CAPABILITIES,
                 "time": time.time(),
                 "pid": os.getpid(),
                 "agent_root": str(_agent_root()),
@@ -101,7 +134,8 @@ class BridgeServer:
                         break
                     time.sleep(0.05)
                 return self.pool.get_result(record.run_id)
-            return {"run_id": record.run_id, "session_id": session_id, "status": record.status}
+            return {"run_id": record.run_id, "session_id": session_id, "status": record.status,
+                    "context_manager": record.context_manager}
 
         if action == "context_estimate":
             session_id = str(req.get("session_id") or "").strip() or uuid.uuid4().hex

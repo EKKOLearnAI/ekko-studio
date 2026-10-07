@@ -9,10 +9,11 @@ import AgentSettings from '@/components/hermes/settings/AgentSettings.vue'
 import GatewayAutoStartSettings from '@/components/hermes/settings/GatewayAutoStartSettings.vue'
 import MemorySettings from '@/components/hermes/settings/MemorySettings.vue'
 import SessionSettings from '@/components/hermes/settings/SessionSettings.vue'
+import ContextManagerSettings from '@/components/hermes/settings/ContextManagerSettings.vue'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
 
-type HermesSettingsTab = 'agent' | 'memory' | 'session'
+type HermesSettingsTab = 'agent' | 'memory' | 'session' | 'context-manager'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -22,7 +23,7 @@ const settingsStore = useSettingsStore()
 const activeTab = ref<HermesSettingsTab>('agent')
 
 function normalizeTab(value: unknown): HermesSettingsTab {
-  return value === 'memory' || value === 'session' ? value : 'agent'
+  return value === 'memory' || value === 'session' || value === 'context-manager' ? value : 'agent'
 }
 
 function handleTabUpdate(tab: HermesSettingsTab) {
@@ -73,6 +74,9 @@ onMounted(() => {
           </NTabPane>
           <NTabPane name="session" :tab="t('settings.tabs.session')">
             <SessionSettings />
+          </NTabPane>
+          <NTabPane name="context-manager" :tab="t('settings.tabs.contextManager')">
+            <ContextManagerSettings />
           </NTabPane>
         </NTabs>
       </div>

@@ -1,6 +1,59 @@
 import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
+  contextManager: {
+      "hermesWorker": "Hermes ワーカープロセス",
+      "activeSessions": "読み込み済みセッション",
+      "runningSessions": "実行中セッション",
+      "workerPid": "プロセス ID",
+      "restartWorker": "ワーカーを再起動",
+      "restartImpact": "プロファイル {profile} の Hermes ワーカーを再起動しますか？読み込み済みの {count} セッションは切断され、次のリクエストで再接続します。保存済みの会話は保持され、Billion Context プロキシは再起動されません。",
+      "cancel": "キャンセル",
+      "running": "実行中",
+      "stopped": "停止中",
+      "errors": {
+        "failed": "操作に失敗しました。更新して再試行してください。",
+        "invalidSettings": "コンテキスト設定とプロキシのアドレスを確認してください。",
+        "profileChanged": "プロファイルが変更されました。更新してから再起動してください。",
+        "sessionsRunning": "実行中のセッションが終了するまでお待ちください。",
+        "confirmationRequired": "再起動前に読み込み済みセッションへの影響を確認してください。",
+        "workerUnavailable": "ワーカーまたは実行中セッションの状態を確認できません。更新してから再起動してください。",
+        "restartFailed": "再起動を確認できませんでした。状態を更新してから再試行してください。",
+        "busy": "別の操作が実行中です。しばらく待って更新してください。",
+        "externallyManaged": "このプロキシは Studio 外で管理されています。専用のプロセス管理ツールを使用してください。",
+        "installFailed": "インストールできないか失敗しました。Node/npm を確認してください。",
+        "startFailed": "管理対象プロキシの準備ができませんでした。設定を確認してください。",
+        "stopFailed": "管理対象プロキシを停止できませんでした。状態を更新してください。",
+        "stopFirst": "更新やアドレス変更の前に管理対象プロキシを停止してください。",
+        "notInstalled": "起動する前に Billion Context をインストールしてください。",
+        "httpOnly": "Studio が起動できるのは HTTP プロキシのみです。HTTPS は外部で管理してください。",
+        "probeFailed": "プロキシへの接続または状態確認ができません。アドレスとプロセスを確認してください。",
+        "probeHttp": "プロキシの状態確認で HTTP エラーが返されました。",
+        "probeTimeout": "プロキシの状態確認がタイムアウトしました。",
+        "probeInvalid": "プロキシの応答が無効または大きすぎます。"
+      },
+      "issues": {
+        "protocol": "プロキシのプロトコルに互換性がありません。",
+        "fork": "会話の分岐とスナップショットがサポートされていません。",
+        "tool": "必須ツール {tool} がないか定義が無効です。",
+        "unknown": "サポートされていない機能が報告されました。"
+      },
+      "probes": {
+        "manifest": "プロキシの機能",
+        "status": "プロキシの状態"
+      },
+    proxyVersion: '観測したプロキシバージョン',
+    title: 'コンテキスト管理', native: '標準', proxyUrl: 'プロキシのオリジン', allowNativeFallback: '標準へのフォールバックを許可',
+    save: '保存', saved: '設定を保存しました', saveFailed: '設定を保存できませんでした', loadFailed: '設定を読み込めませんでした',
+    refresh: '更新', healthFailed: 'プロキシの状態を確認できませんでした', lifecycleFailed: '操作に失敗しました', actionDone: '操作が完了しました',
+    health: '稼働状態', healthy: '正常', unavailable: '利用不可', compatibility: '互換性',
+    compatible: '互換', incompatible: '非互換', unverified: '未確認',
+    worker: 'ワーカーの状態', unknown: '不明', runtime: 'プロセス管理',
+    studio: 'Studio が管理', external: '外部で管理', none: '停止中', version: 'インストール済みバージョン', notInstalled: '未インストール',
+    active: '有効', fallback: '標準にフォールバック', source: 'コンテキストの取得元', sourceUsage: '実測値', sourceEstimate: '推定値', sourceUnavailable: '観測値なし',
+    model: 'モデル', generation: '世代', observed: '観測日時',
+    actions: { install: 'インストール', start: '開始', stop: '停止', upgrade: 'アップグレード' },
+  },
   jev: {
     browserAutomation: "内蔵ブラウザーの自動化",
     browserAutomationHint: "このプロファイルに保存した JEV 接続を使用し、次の判定から適用します。画面上のラベルを JEV に送信しますが、入力値は含みません。無効時、利用不可時、判定が不確かな場合は従来の処理を維持します。",
@@ -2036,10 +2089,17 @@ export default {
       memory: 'メモリ',
       compression: '圧縮',
       session: 'セッション',
+      contextManager: 'コンテキスト管理',
       privacy: 'プライバシー',
       apiServer: 'API サーバー',
       models: 'モデル',
       voice: '音声',
+    },
+    contextManager: {
+      title: 'コンテキスト管理', hermes: 'Hermes', ekko: 'Ekko', hermesHint: 'Hermes が使用するコンテキスト管理', ekkoHint: 'Ekko が使用するコンテキスト管理',
+      native: 'ネイティブ', bili: 'Bili', proxyUrl: 'プロキシ URL', proxyUrlHint: 'localhost とループバック HTTP(S) URL のみ許可', allowNativeFallback: 'ネイティブへフォールバック', allowNativeFallbackHint: '選択した管理が利用できない場合にネイティブ処理を許可', save: '保存',
+      healthTitle: 'ヘルス', checkHealth: 'ヘルスを確認', healthFailed: 'ヘルスチェックに失敗', compatibilityUnverified: '互換性未検証', manifest: 'Manifest', status: '状態', available: '利用可能', unavailable: '利用不可', lifecycleTitle: 'ライフサイクル', lifecycleHint: '対応 CLI が登録されていない場合、制限を返します', runLifecycle: '操作を実行', lifecycleUnsupported: 'ライフサイクル操作は未対応', lifecycleFailed: 'ライフサイクル操作に失敗', loadFailed: 'コンテキスト管理設定の読み込みに失敗',
+      actions: { install: 'インストール', start: '開始', stop: '停止', upgrade: '更新' },
     },
     webhooks: {
       title: 'Webhook',

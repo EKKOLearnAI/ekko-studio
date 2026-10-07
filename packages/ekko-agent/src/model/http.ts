@@ -5,6 +5,8 @@ import { openRouterAttributionHeaders } from './openrouter-attribution'
 import type { ModelProviderConfig, ModelRequest } from './types'
 
 const requestSessions = new WeakMap<ModelRequest, string>()
+// Track runtime-owned transport without adding wire headers or changing native requests.
+const contextTransportHeaders = new WeakSet<HeadersInit>()
 
 export function modelRequestHeaders(
   config: ModelProviderConfig,
@@ -16,10 +18,26 @@ export function modelRequestHeaders(
     sessionId = requestSessions.get(request) || randomUUID()
     requestSessions.set(request, sessionId)
   }
-  return requestHeaders(config, {
+  const headers = requestHeaders(config, {
     ...openCodeSessionHeaders(config.baseUrl || '', sessionId, config.id),
     ...defaults,
   })
+  if (!request.transport) return headers
+  const managedHeaders = new Headers(headers)
+  for (const [name, value] of Object.entries(request.transport.headers)) {
+    managedHeaders.set(name, value)
+  }
+  const transportHeaders = Object.fromEntries(managedHeaders.entries())
+  contextTransportHeaders.add(transportHeaders)
+  return transportHeaders
+}
+
+export function modelRequestUrl(url: string, request: ModelRequest): string {
+  if (!request.transport) return url
+  const target = new URL(url)
+  const proxy = new URL(request.transport.proxyOrigin)
+  if (target.origin === proxy.origin && target.pathname.startsWith('/bili/')) return url
+  return `${proxy.origin}/bili/${url}`
 }
 
 export function requestHeaders(config: ModelProviderConfig, defaults: Record<string, string> = {}): HeadersInit {
@@ -100,6 +118,7 @@ export async function postJson<TResponse>(
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
+    redirect: contextTransportHeaders.has(headers) ? 'error' : undefined,
     signal: abortSignal(config.timeoutMs, signal),
   })
 
@@ -122,6 +141,7 @@ export async function postStream(
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
+    redirect: contextTransportHeaders.has(headers) ? 'error' : undefined,
     signal: abortSignal(config.timeoutMs, signal),
   })
 

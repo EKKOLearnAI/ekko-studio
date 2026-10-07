@@ -18,7 +18,8 @@ import type {
   PrimaryAgentBridgeOutput as AgentBridgeOutput,
 } from '../../public/chat-agent-runtime'
 import { contentBlocksToString, convertContentBlocksForAgent, extractTextForPreview, isContentBlockArray } from './content-blocks'
-import { buildCompressedHistory, buildDbSnapshotAwareHistory, forceCompressBridgeHistory, pushState, replaceState } from './compression'
+import { buildCompressedHistory, buildDbSnapshotAwareHistory, forceCompressBridgeHistory, getSessionCompressionOwner, pushState, replaceState } from './compression'
+import { ensureBiliConversation, refreshExternalContextUsage, resolveStudioContextManager } from '../context-manager/runtime'
 import {
   calcAndUpdateUsage,
   contextTokensWithCachedOverhead,
@@ -714,48 +715,51 @@ export async function handleBridgeRun(
     return
   }
 
-  const history = callbackContext
-    ? structuredClone(callbackContext.messages)
-    : await buildCompressedHistory(
-      session_id, profile,
-      '',
-      undefined,
-      emit,
-      sessionMap,
-      { model: resolvedModel, provider: resolvedProvider },
-      async (_messages, localMessageTokens) => {
-        const fixedContextTokens = await ensureBridgeFixedContext({
-          sessionId: session_id,
-          profile,
-          model: resolvedModel,
-          provider: resolvedProvider,
-          workspace,
-          instructions: fullInstructions,
-          state,
-          bridge,
-          refresh: true,
-          backgroundDelegationEnabled,
-        })
-        const contextTokens = fixedContextTokens == null
-          ? localMessageTokens
-          : fixedContextTokens + localMessageTokens
-        bridgeLogger.info({
-          sessionId: session_id,
-          profile,
-          model: resolvedModel,
-          provider: resolvedProvider,
-          fixedContextTokens,
-          messageTokens: localMessageTokens,
-          contextTokens,
-        }, '[chat-run-socket] local context estimate')
-        return contextTokens
-      },
-      currentInputTokens,
-    )
-  const bridgeHistory = history
   let backgroundNotificationAccepted = false
-
   try {
+    const contextBinding = await resolveStudioContextManager(profile, 'hermes', session_id)
+    const contextOwner = await getSessionCompressionOwner(session_id, profile, 'hermes')
+    state.contextOwner = contextOwner
+    if (contextOwner.manager === 'bili') await ensureBiliConversation(profile, 'hermes', session_id, contextOwner)
+    const history = callbackContext
+      ? structuredClone(callbackContext.messages)
+      : await buildCompressedHistory(
+        session_id, profile,
+        '',
+        undefined,
+        emit,
+        sessionMap,
+        { model: resolvedModel, provider: resolvedProvider, contextOwner },
+        async (_messages, localMessageTokens) => {
+          const fixedContextTokens = await ensureBridgeFixedContext({
+            sessionId: session_id,
+            profile,
+            model: resolvedModel,
+            provider: resolvedProvider,
+            workspace,
+            instructions: fullInstructions,
+            state,
+            bridge,
+            refresh: true,
+            backgroundDelegationEnabled,
+          })
+          const contextTokens = fixedContextTokens == null
+            ? localMessageTokens
+            : fixedContextTokens + localMessageTokens
+          bridgeLogger.info({
+            sessionId: session_id,
+            profile,
+            model: resolvedModel,
+            provider: resolvedProvider,
+            fixedContextTokens,
+            messageTokens: localMessageTokens,
+            contextTokens,
+          }, '[chat-run-socket] local context estimate')
+          return contextTokens
+        },
+        currentInputTokens,
+      )
+    const bridgeHistory = history
     const originalBridgeInput = isContentBlockArray(input)
       ? await convertContentBlocksForAgent(input)
       : input
@@ -802,6 +806,7 @@ export async function handleBridgeRun(
       fullInstructions,
       profile,
       {
+        context_manager: contextBinding,
         ...(bridgeStorageInput !== undefined ? { storage_message: bridgeStorageInput } : {}),
         ...(resolvedModel ? { model: resolvedModel } : {}),
         ...(resolvedProvider ? { provider: resolvedProvider } : {}),
@@ -1183,6 +1188,11 @@ async function refreshFinalContextUsage(args: {
   bridge: AgentBridgeClient
 }): Promise<number | undefined> {
   try {
+    if (await refreshExternalContextUsage({
+      sessionId: args.sessionId, profile: args.profile, agent: 'hermes', model: args.model,
+      state: args.state, emit: args.emit, owner: args.state.contextOwner,
+    })) return args.state.contextTokens
+    if (args.state.contextOwner?.manager === 'bili') return undefined
     const finalHistory = await buildDbSnapshotAwareHistory(
       args.sessionId,
       args.profile,
@@ -1582,6 +1592,7 @@ async function applyBridgeChunkAsync(
       emit('compression.started', payload)
       if (ev.request_id && Array.isArray(ev.messages)) {
         try {
+          if (state.contextOwner?.manager === 'bili') throw new Error('Bili owns context compression; native compression is disabled for this conversation.')
           const compressed = await forceCompressBridgeHistory(
             sessionId,
             profile,

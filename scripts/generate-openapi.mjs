@@ -84,6 +84,7 @@ const tagMappings = {
   'modules/studio/routes/tts.ts': { name: 'TTS', description: 'Text-to-speech generation and settings' },
   'modules/studio/routes/stt.ts': { name: 'STT', description: 'Speech-to-text transcription and settings' },
   'modules/studio/routes/jev.ts': { name: 'JEV', description: 'Profile-scoped TypeSafe JEV configuration and shared Choice, Score, Noul evaluations' },
+  'modules/studio/routes/context-manager.ts': { name: 'Context Manager', description: 'Profile-scoped native/bili selection, compatibility, managed proxy lifecycle and idle Hermes worker restart' },
   'modules/studio/routes/media.ts': { name: 'Media', description: 'Media generation endpoints' },
   'modules/studio/routes/performance-monitor.ts': { name: 'Performance', description: 'Runtime performance monitoring' },
   'modules/studio/routes/petdex.ts': { name: 'Petdex', description: 'Desktop pet catalog and assets' },
@@ -1473,6 +1474,66 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
     for (const [status, description] of Object.entries({ 400: 'Invalid input or missing Profile', 403: 'Profile access denied', 409: 'API key not configured', 499: 'Request cancelled', 500: 'Settings operation failed', 502: 'Provider request failed', 504: 'Provider request timed out' })) {
       operation.responses[status] = { description, content: { 'application/json': { schema: { $ref: '#/components/schemas/JevError' } } } }
     }
+  }
+}
+
+// Context manager handlers delegate validation to services rather than parsing
+// request fields at the HTTP boundary, so their contracts are explicit here.
+const contextManagerProperties = {
+  ...Object.fromEntries(['hermes', 'ekko'].map(name => [name, {
+    type: 'object', additionalProperties: false, required: ['manager'],
+    properties: { manager: { type: 'string', enum: ['native', 'bili'] } },
+  }])),
+  proxyUrl: { type: 'string', format: 'uri', maxLength: 2048,
+    description: 'HTTP(S) loopback origin only; no credentials, path, query or fragment.' },
+  allowNativeFallback: { type: 'boolean', default: false },
+}
+const contextManagerSettingsSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['hermes', 'ekko', 'proxyUrl', 'allowNativeFallback'], properties: contextManagerProperties,
+}
+openapi.components.schemas.ContextManagerSettings = contextManagerSettingsSchema
+openapi.components.schemas.ContextManagerError = {
+  type: 'object', required: ['error', 'code'], properties: {
+    error: { type: 'string' }, code: { type: 'string', pattern: '^context_manager_' },
+  },
+}
+const contextManagerBody = schema => ({ required: true, content: { 'application/json': { schema } } })
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  if (!path.startsWith('/api/studio/context-manager/')) continue
+  for (const [method, operation] of Object.entries(methods)) {
+    operation.parameters = [...(operation.parameters || []), {
+      name: 'X-Hermes-Profile', in: 'header', required: true, schema: { type: 'string' },
+      description: 'Authorized Profile; never changes the global active Profile.',
+    }]
+    if (path.endsWith('/settings')) {
+      operation.responses['200'] = { description: 'Profile-scoped context manager settings',
+        content: { 'application/json': { schema: { $ref: '#/components/schemas/ContextManagerSettings' } } } }
+      if (method === 'put') operation.requestBody = contextManagerBody({
+        type: 'object', additionalProperties: false, properties: contextManagerProperties,
+      })
+    } else if (path.endsWith('/health')) {
+      operation.description = 'Reports proxy reachability separately from protocol compatibility, required public fork support, runtime version, worker state and lifecycle ownership. Reachability alone does not imply compatibility.'
+    } else if (path.endsWith('/worker/restart')) {
+      operation.description = 'Restarts only the selected idle Hermes worker after verifying no sessions are running. Rejects missing confirmation, Profile mismatch or unverifiable state.'
+      operation.requestBody = contextManagerBody({ type: 'object', required: ['profile', 'confirm'], properties: {
+        profile: { type: 'string', description: 'Must exactly match the selected authorized Profile.' },
+        confirm: { type: 'boolean', enum: [true] },
+      } })
+    } else if (path.endsWith('/lifecycle/{action}')) {
+      operation.description = 'Installs or operates the Profile-managed proxy. External processes are never stopped or upgraded; stop a managed proxy before upgrading. Install can prepare a release without taking ownership of an external process.'
+      const action = operation.parameters.find(parameter => parameter.in === 'path' && parameter.name === 'action')
+      action.schema = { type: 'string', enum: ['install', 'start', 'stop', 'upgrade'] }
+      operation.requestBody = contextManagerBody({ type: 'object', required: ['manager'], properties: {
+        manager: { type: 'string', enum: ['hermes', 'ekko'] },
+      } })
+    }
+    for (const [status, description] of Object.entries({
+      400: 'Invalid input or missing Profile', 409: 'Concurrent operation, external process ownership, running sessions or confirmation required',
+      500: 'Invalid installation, settings storage or operation failure', 502: 'Managed package installation failed',
+      503: 'Worker, Node/npm, proxy readiness or port ownership unavailable',
+    })) operation.responses[status] = { description,
+      content: { 'application/json': { schema: { $ref: '#/components/schemas/ContextManagerError' } } } }
   }
 }
 

@@ -3,7 +3,7 @@ import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import { isBuiltinEkkoSession, isExternalCodingAgentSession } from '@/utils/hermes/session-agent'
 import { EKKO_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
 import type { Attachment } from '@/stores/hermes/chat'
-import { useChatStore } from '@/stores/hermes/chat'
+import { isSessionContextCurrent, useChatStore } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
@@ -827,21 +827,47 @@ const cumulativeTokens = computed(() => {
   return (session?.inputTokens ?? 0) + (session?.outputTokens ?? 0)
     + (session?.cacheReadTokens ?? 0) + (session?.cacheWriteTokens ?? 0)
 })
+const contextNow = ref(Date.now())
+let contextClock: ReturnType<typeof setInterval> | undefined
+onMounted(() => { contextClock = setInterval(() => { contextNow.value = Date.now() }, 1000) })
+onUnmounted(() => { clearInterval(contextClock) })
+const contextCurrent = computed(() => isSessionContextCurrent(chatStore.activeSession, contextNow.value))
 const totalTokens = computed(() => {
   if (showSessionUsage.value) return cumulativeTokens.value
-  const context = chatStore.activeSession?.contextTokens
-  if (typeof context === 'number' && Number.isFinite(context) && context > 0) return context
-  const input = chatStore.activeSession?.inputTokens ?? 0
-  const output = chatStore.activeSession?.outputTokens ?? 0
-  return input + output
+  return contextCurrent.value ? chatStore.activeSession!.contextTokens! : 0
 })
 const showContextUsage = computed(() => !!chatStore.activeSession)
-const showContextLimit = computed(() => !showSessionUsage.value)
+const contextUnavailable = computed(() => !contextCurrent.value)
+const contextUnknownLabel = computed(() => t(`contextManager.${chatStore.activeSession?.contextSource === 'unavailable' ? 'unavailable' : 'unknown'}`))
+const showContextLimit = computed(() => !showSessionUsage.value && !contextUnavailable.value)
+const effectiveContextLength = computed(() => {
+  const value = chatStore.activeSession?.contextWindow
+  return contextCurrent.value && typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : contextLength.value
+})
+const contextStatus = computed(() => {
+  const session = chatStore.activeSession
+  if (!session?.contextManager || showSessionUsage.value) return ''
+  if (session.contextFallback === true) return t('contextManager.fallback')
+  const manager = session.contextManager === 'bili' ? 'Billion Context' : t('contextManager.native')
+  return `${manager} · ${t(`contextManager.${contextUnavailable.value ? 'unavailable' : 'active'}`)}`
+})
+const contextTooltip = computed(() => {
+  const session = chatStore.activeSession
+  if (!session) return ''
+  const source = !contextCurrent.value ? 'sourceUnavailable' : session.contextSource === 'usage' ? 'sourceUsage' : 'sourceEstimate'
+  const lines = [contextStatus.value, `${t('contextManager.source')}: ${t(`contextManager.${source}`)}`]
+  if (contextCurrent.value) {
+    if (session.contextModel) lines.push(`${t('contextManager.model')}: ${session.contextModel}`)
+    if (session.contextGeneration) lines.push(`${t('contextManager.generation')}: ${session.contextGeneration}`)
+    if (session.contextObservedAt != null) lines.push(`${t('contextManager.observed')}: ${new Date(session.contextObservedAt).toLocaleString()}`)
+  }
+  return lines.join('\n')
+})
 
-const remainingTokens = computed(() => Math.max(0, contextLength.value - totalTokens.value))
+const remainingTokens = computed(() => Math.max(0, effectiveContextLength.value - totalTokens.value))
 
 const usagePercent = computed(() =>
-  Math.min((totalTokens.value / contextLength.value) * 100, 100),
+  Math.min((totalTokens.value / effectiveContextLength.value) * 100, 100),
 )
 
 function formatTokens(n: number): string {
@@ -1170,13 +1196,14 @@ function openAttachmentPreview(attachment: Attachment) {
     <div v-if="showContextUsage" class="context-usage-row">
       <span class="context-info" :class="{ 'context-warning': showContextLimit && usagePercent > 80 }">
         <template v-if="showSessionUsage">{{ t('chat.sessionUsage') }} </template>
-        {{ formatTokens(totalTokens) }}
+        {{ contextUnavailable && !showSessionUsage ? contextUnknownLabel : formatTokens(totalTokens) }}
         <template v-if="showContextLimit">
           /
-          <NTooltip trigger="hover" :disabled="isMobileViewport">
+          <span v-if="chatStore.activeSession?.contextWindow" class="context-limit-observed">{{ formatTokens(effectiveContextLength) }}</span>
+          <NTooltip v-else trigger="hover" :disabled="isMobileViewport">
             <template #trigger>
               <span class="context-limit-editable" @click="handleEditContextLimit">
-                {{ formatTokens(contextLength) }}
+                {{ formatTokens(effectiveContextLength) }}
               </span>
             </template>
             <span>{{ t('chat.contextClickToEdit') }}</span>
@@ -1184,6 +1211,7 @@ function openAttachmentPreview(attachment: Attachment) {
           · {{ t('chat.contextRemaining') }} {{ formatTokens(remainingTokens) }}
         </template>
       </span>
+      <span v-if="contextStatus" class="context-status" :class="{ 'context-warning': contextUnavailable || chatStore.activeSession?.contextFallback }" :title="contextTooltip" tabindex="0">{{ contextStatus }}</span>
       <div v-if="showContextLimit" class="context-bar">
         <div
           class="context-bar-fill"
@@ -1886,6 +1914,7 @@ function openAttachmentPreview(attachment: Attachment) {
 
 .context-usage-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
   gap: 7px;
@@ -1924,7 +1953,7 @@ function openAttachmentPreview(attachment: Attachment) {
   font-size: 11px;
   color: inherit;
   min-width: 0;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 
   &.context-warning {
     color: #e8a735;
@@ -1933,6 +1962,7 @@ function openAttachmentPreview(attachment: Attachment) {
 
 .context-limit-editable {
   cursor: pointer;
+  white-space: nowrap;
   border-bottom: 1px dashed transparent;
   transition: all 0.2s ease;
   padding: 0 2px;
@@ -1946,11 +1976,20 @@ function openAttachmentPreview(attachment: Attachment) {
 
 .context-bar {
   width: 60px;
+  flex: 0 0 60px;
   height: 4px;
   margin-inline-start: -4px;
   background: rgba(var(--text-muted-rgb), 0.2);
   border-radius: 2px;
   overflow: hidden;
+}
+
+.context-status {
+  min-width: 0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+
+  &.context-warning { color: #e8a735; }
 }
 
 .context-bar-fill {

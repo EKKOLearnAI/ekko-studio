@@ -13,6 +13,8 @@ export function createEkkoAgentInfo(): EkkoAgentInfo {
 }
 
 export * from './model/errors'
+export * from './context/types'
+export * from './context/billion-context'
 export * from './agent/manager'
 export * from './agent/modules'
 export * from './agent/profile-agent'

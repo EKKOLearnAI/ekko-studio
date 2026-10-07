@@ -2,6 +2,49 @@ import { describe, expect, it, vi } from 'vitest'
 import { openapi } from '../../packages/server/src/modules/studio/controllers/api-docs'
 
 describe('api docs controller', () => {
+  it('documents profile-scoped context manager controls and mutation guards', async () => {
+    const ctx = { set: vi.fn(), status: 200, body: undefined as any }
+    await openapi(ctx as any)
+    const paths = ctx.body.paths
+    const prefix = '/api/studio/context-manager'
+    expect(ctx.body.tags).toContainEqual(expect.objectContaining({ name: 'Context Manager' }))
+    for (const [path, methods] of Object.entries({
+      [`${prefix}/settings`]: ['get', 'put'],
+      [`${prefix}/health`]: ['get'],
+      [`${prefix}/worker/restart`]: ['post'],
+      [`${prefix}/lifecycle/{action}`]: ['post'],
+    })) {
+      for (const method of methods) {
+        const operation = paths[path]?.[method]
+        expect(operation).toBeDefined()
+        expect(operation.tags).toEqual(['Context Manager'])
+        expect(operation.parameters).toContainEqual(expect.objectContaining({
+          name: 'X-Hermes-Profile', in: 'header', required: true,
+        }))
+        expect(operation.security).toEqual([{ BearerAuth: [] }])
+        expect(operation.responses['409']).toBeDefined()
+      }
+    }
+    const settings = paths[`${prefix}/settings`].put.requestBody.content['application/json'].schema
+    expect(settings.additionalProperties).toBe(false)
+    expect(settings.properties.hermes.properties.manager.enum).toEqual(['native', 'bili'])
+    expect(settings.properties.ekko.properties.manager.enum).toEqual(['native', 'bili'])
+    expect(settings.properties.proxyUrl.description).toContain('loopback')
+    expect(settings.properties.allowNativeFallback.type).toBe('boolean')
+    const lifecycle = paths[`${prefix}/lifecycle/{action}`].post
+    expect(lifecycle.parameters).toContainEqual(expect.objectContaining({
+      name: 'action', in: 'path', required: true,
+      schema: { type: 'string', enum: ['install', 'start', 'stop', 'upgrade'] },
+    }))
+    expect(lifecycle.requestBody.content['application/json'].schema).toEqual({
+      type: 'object', required: ['manager'], properties: { manager: { type: 'string', enum: ['hermes', 'ekko'] } },
+    })
+    const restart = paths[`${prefix}/worker/restart`].post.requestBody.content['application/json'].schema
+    expect(restart.required).toEqual(['profile', 'confirm'])
+    expect(restart.properties.confirm).toEqual({ type: 'boolean', enum: [true] })
+    expect(paths[`${prefix}/health`].get.description).toContain('compatibility')
+  })
+
   it('returns the OpenAPI route catalog', async () => {
     const ctx = {
       set: vi.fn(),

@@ -161,6 +161,19 @@ export interface SessionState {
   cacheReadTokens?: number
   cacheWriteTokens?: number
   contextTokens?: number
+  externalContext?: {
+    manager: 'bili'
+    conversationId: string
+    model: string
+    tokens: number
+    source: 'usage' | 'estimate'
+    observedAt: number
+    generation: string
+    window: number
+  }
+  contextManagerStatus?: 'active' | 'unavailable' | 'native'
+  contextFallback?: boolean
+  contextOwner?: { manager: 'native' | 'bili'; proxyUrl?: string; conversationId: string }
   /** Ekko's system/tool context, kept separately from conversation history. */
   ekkoContext?: { fixedContextTokens: number }
   bridgeContext?: BridgeContextState

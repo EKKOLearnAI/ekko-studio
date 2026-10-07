@@ -144,7 +144,23 @@ describe('loadSessionStateFromDb', () => {
     expect(buildSnapshotAwareHistoryMock).not.toHaveBeenCalled()
     expect(state.inputTokens).toBe(28_000)
     expect(state.outputTokens).toBe(2_000)
-    expect(state.contextTokens).toBe(9_000)
+    expect(state.contextTokens).toBeUndefined()
+    expect(state.contextManagerStatus).toBe('unavailable')
+  })
+
+  it.each([
+    { agent: 'hermes', source: 'cli' },
+    { agent: 'ekko-agent', source: 'builtin_agent' },
+    { agent: 'ekko-agent', source: 'coding_agent' },
+  ])('does not restore $agent context occupancy from billing', async identity => {
+    getSessionMock.mockReturnValue({ id: 'session-1', profile: 'default', ...identity })
+    getUsageMock.mockReturnValue({ input_tokens: 900_000, output_tokens: 50_000, cache_read_tokens: 100_000 })
+    const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')
+    const state = await loadSessionStateFromDb('session-1', new Map())
+    expect(state.inputTokens).toBe(28_000)
+    expect(state.outputTokens).toBe(2_000)
+    expect(state.contextTokens).toBeUndefined()
+    expect(state.contextManagerStatus).toBe('unavailable')
   })
 
   it('restores the persisted tool-result anchor for a Hermes background delegation', async () => {
@@ -178,8 +194,8 @@ describe('loadSessionStateFromDb', () => {
     })
   })
 
-  it('restores Cursor native usage without turning aggregate consumption into context occupancy', async () => {
-    getSessionMock.mockReturnValue({ id: 'session-1', agent: 'cursor', source: 'coding_agent' })
+  it.each(['cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('restores %s native usage without turning aggregate consumption into context occupancy', async agent => {
+    getSessionMock.mockReturnValue({ id: 'session-1', agent, source: 'coding_agent' })
     getRecordedUsageTotalsMock.mockReturnValue({ inputTokens: 24_003, outputTokens: 474, cacheReadTokens: 20_736, cacheWriteTokens: 0 })
     getUsageMock.mockReturnValue({ input_tokens: 24_003, output_tokens: 474, cache_read_tokens: 20_736 })
     const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')

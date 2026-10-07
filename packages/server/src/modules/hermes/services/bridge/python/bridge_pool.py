@@ -80,6 +80,8 @@ def _set_bridge_session_vars(
     profile: str | None,
     workspace: str | None,
     background_delegation_enabled: bool,
+    *,
+    require_identity: bool = False,
 ) -> Any:
     """Bind the richest session context supported by the installed runtime."""
     from gateway.session_context import set_session_vars
@@ -106,6 +108,8 @@ def _set_bridge_session_vars(
         }
     except (TypeError, ValueError):
         supported = values
+    if require_identity and not {"session_id", "ui_session_id"}.issubset(supported):
+        raise RuntimeError("installed Hermes cannot bind task-local conversation identity")
     return set_session_vars(**supported)
 
 
@@ -152,6 +156,7 @@ class RunRecord:
     error: str | None = None
     deltas: list[str] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
+    context_manager: dict[str, Any] | None = None
 
 
 @dataclass
@@ -402,8 +407,12 @@ class AgentPool:
         with self._lock:
             existing = self._sessions.get(session_id)
             if existing is not None:
-                # If profile changed, destroy old session and recreate
                 profile_changed = bool(profile and existing.config.get("profile") != profile)
+                if existing.config.get("context_manager", {}).get("manager") == "bili":
+                    from bridge_context_manager import install_bili_compression_guard
+                    install_bili_compression_guard(existing.agent, session_id)
+                if profile_changed:
+                    raise ValueError("Studio session cannot change worker profile")
                 runtime_changed = bool(
                     (requested_model and existing.config.get("model") != requested_model)
                     or (requested_provider and existing.config.get("provider") != requested_provider)
@@ -417,7 +426,7 @@ class AgentPool:
                 # Studio updates ANTHROPIC_TOKEN after centrally refreshing
                 # Claude OAuth, so compare the newly resolved runtime with the
                 # cached client and hot-switch before the next model request.
-                if not profile_changed and not runtime_changed and effective_provider == "anthropic":
+                if not runtime_changed and effective_provider == "anthropic":
                     target_profile = profile or str(existing.config.get("profile") or "default")
                     with _profile_env(target_profile):
                         _refresh_worker_profile_env()
@@ -432,14 +441,8 @@ class AgentPool:
                         or str(refreshed_runtime.get("api_mode") or "")
                         != str(getattr(existing.agent, "api_mode", "") or "")
                     )
-                config_changed = profile_changed or runtime_changed
-                if config_changed:
-                    if profile_changed and not existing.running:
-                        self._destroy_session(session_id)
-                    elif profile_changed:
-                        existing.last_used_at = time.time()
-                        return existing
-                    elif not existing.running:
+                if runtime_changed:
+                    if not existing.running:
                         try:
                             self._switch_loaded_session_model(
                                 existing,
@@ -479,6 +482,11 @@ class AgentPool:
                 _refresh_worker_profile_env()
                 _refresh_approval_allowlist()
                 discovered_mcp_tools = _discover_bridge_mcp_tools()
+                from bridge_context_manager import discover_context_owner, install_bili_compression_guard
+                context_owner = discover_context_owner(session_id)
+                if context_owner["manager"] == "bili":
+                    from bridge_context_manager import install_bili_worker_guard
+                    install_bili_worker_guard(AIAgent, context_owner)
                 cfg = _load_cfg()
                 resolved_model = requested_model or _resolve_model(cfg)
                 runtime = _resolve_runtime(resolved_model, requested_provider or None)
@@ -515,8 +523,13 @@ class AgentPool:
                     tool_complete_callback=self._tool_complete_callback(session_id),
                     clarify_callback=self._clarify_callback(session_id),
                 )
+                if getattr(agent, "session_id", session_id) != session_id:
+                    raise RuntimeError("Hermes agent session identity must equal the Studio session ID")
                 agent.compression_enabled = False
-                self._install_compression_hook(agent, session_id)
+                if context_owner["manager"] == "bili":
+                    install_bili_compression_guard(agent, session_id)
+                else:
+                    self._install_compression_hook(agent, session_id)
                 self._install_prepersist_dedup_hook(agent)
                 mcp_tool_names = self._mcp_tool_names(self._agent_tool_names(getattr(agent, "tools", None) or []))
 
@@ -526,6 +539,7 @@ class AgentPool:
                     history=[],
                     config={
                         "requested_session_id": session_id,
+                        "context_manager": context_owner,
                         "profile": profile or "default",
                         "model": resolved_model,
                         # Keep the user-facing provider selector (for example
@@ -659,6 +673,9 @@ class AgentPool:
             base_url=runtime.get("base_url") or "",
             api_mode=runtime.get("api_mode") or "",
         )
+        if session.config.get("context_manager", {}).get("manager") == "bili":
+            from bridge_context_manager import install_bili_compression_guard
+            install_bili_compression_guard(session.agent, session.session_id)
         session.agent.reasoning_config = reasoning_config
         if resolved_provider.lower() == "moa":
             self._install_moa_reference_callback(session)
@@ -1002,6 +1019,7 @@ class AgentPool:
             "profile": profile or session.config.get("profile") or "default",
             "model": session.config.get("model"),
             "provider": session.config.get("provider"),
+            "context_manager": session.config.get("context_manager"),
             **context_info,
         }
 
@@ -1701,6 +1719,7 @@ class AgentPool:
                 raise RuntimeError(f"session {session_id} is already running")
             run_id = uuid.uuid4().hex
             record = RunRecord(run_id=run_id, session_id=session_id)
+            record.context_manager = session.config.get("context_manager")
             with self._lock:
                 self._runs[run_id] = record
             session.running = True
@@ -1764,9 +1783,21 @@ class AgentPool:
                         profile,
                         workspace,
                         session.config.get("background_delegation_enabled", True) is not False,
+                        require_identity=session.config.get("context_manager", {}).get("manager") == "bili",
                     )
-                except Exception:
+                except Exception as exc:
+                    if session.config.get("context_manager", {}).get("manager") == "bili":
+                        raise RuntimeError("bili requires task-local Hermes session context and identity support") from exc
                     session_context_tokens = None
+                if session.config.get("context_manager", {}).get("manager") == "bili":
+                    from gateway.session_context import get_session_env
+                    # Plugin model middleware and concurrent tools must see the
+                    # same stable identity; older APIs must not fall back to env.
+                    if session_context_tokens is None or any(
+                        get_session_env(name, "") != session.session_id
+                        for name in ("HERMES_SESSION_ID", "HERMES_UI_SESSION_ID")
+                    ):
+                        raise RuntimeError("bili task-local conversation identity must equal the Studio session ID")
                 try:
                     self._enter_exec_ask_scope()
                     exec_ask_scope_entered = True
@@ -1794,8 +1825,11 @@ class AgentPool:
                 db_count_after_prepersist = self._session_db_message_count(session.session_id, profile)
                 agent_message = self._prepend_pending_model_switch_note(session, message)
                 if force_compress:
+                    if session.config.get("context_manager", {}).get("manager") == "bili":
+                        from bridge_context_manager import compact_session
+                        compact_session(session.config["context_manager"], session.session_id)
                     compress = getattr(session.agent, "_compress_context", None)
-                    if callable(compress):
+                    if callable(compress) and session.config.get("context_manager", {}).get("manager") != "bili":
                         compressed_history, compressed_system = compress(
                             conversation_history if isinstance(conversation_history, list) else [],
                             instructions,
@@ -2702,6 +2736,7 @@ class AgentPool:
             "session_id": record.session_id,
             "status": record.status,
             "started_at": record.started_at,
+            "context_manager": getattr(record, "context_manager", None),
             "ended_at": record.ended_at,
             "output": "".join(record.deltas),
             "deltas": list(record.deltas),
@@ -2727,6 +2762,7 @@ class AgentPool:
             "session_id": record.session_id,
             "status": record.status,
             "delta": "".join(deltas[cursor:]),
+            "context_manager": getattr(record, "context_manager", None),
             "cursor": next_cursor,
             "output": "".join(deltas),
             "done": record.status != "running",
@@ -2858,6 +2894,7 @@ class AgentPool:
             return {
                 "session_id": session_id,
                 "exists": True,
+                "context_manager": session.config.get("context_manager"),
                 "running": session.running,
                 "current_run_id": session.current_run_id,
                 "boundary_interrupt": {

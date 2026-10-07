@@ -45,6 +45,8 @@ export interface AgentRuntimeRecoveryDirective {
 }
 
 export interface AgentRuntimeOptions {
+  /** Optional external context owner; omitted preserves native host behavior. */
+  contextManager?: import('../context/types').AgentContextManager
   /** JEV configuration values only; the runtime creates its own client and never persists overrides. */
   jev?: EkkoJevOverrides
   /** Fixed profile identity for tool and memory operations. Per-run input cannot override it. */
@@ -94,6 +96,8 @@ export interface AgentRuntimeOptions {
 }
 
 export interface AgentRuntimeRunInput {
+  /** Isolated context owner for this run and its subagents; never changes shared defaults. */
+  contextManager?: import('../context/types').AgentContextManager
   messages: AgentMessageInput[]
   signal?: AbortSignal
   systemPrompt?: string

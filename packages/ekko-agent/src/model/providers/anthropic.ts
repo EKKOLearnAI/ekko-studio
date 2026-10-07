@@ -13,7 +13,7 @@ import type {
   ModelUsage,
 } from '../types'
 import { ModelProviderError } from '../errors'
-import { isPlainRecord, parseJson, postJson, postStream, providerUrl, readServerSentEvents, modelRequestHeaders } from '../http'
+import { isPlainRecord, parseJson, postJson, postStream, providerUrl, readServerSentEvents, modelRequestHeaders, modelRequestUrl } from '../http'
 import { agentReasoningText, normalizeAgentReasoning } from '../messages'
 
 interface AnthropicPayload {
@@ -68,6 +68,8 @@ const capabilities: ModelCapabilities = {
 }
 
 export class AnthropicMessagesModelClient implements ModelClient {
+  readonly supportsContextTransport = true
+  get defaultModel(): string { return this.config.defaultModel }
   readonly provider: string
   readonly requestStyle = 'anthropic-messages'
   readonly capabilities: ModelCapabilities
@@ -90,7 +92,7 @@ export class AnthropicMessagesModelClient implements ModelClient {
     const response = await postJson<AnthropicResponse>(
       this.config,
       this.fetchImpl,
-      anthropicUrl(this.config),
+      modelRequestUrl(anthropicUrl(this.config), request),
       toAnthropicMessagesPayload(this.config, { ...request, stream: false }),
       anthropicHeaders(this.config, request),
       request.signal,
@@ -103,7 +105,7 @@ export class AnthropicMessagesModelClient implements ModelClient {
     const response = await postStream(
       this.config,
       this.fetchImpl,
-      anthropicUrl(this.config),
+      modelRequestUrl(anthropicUrl(this.config), request),
       toAnthropicMessagesPayload(this.config, { ...request, stream: true }),
       anthropicHeaders(this.config, request),
       request.signal,

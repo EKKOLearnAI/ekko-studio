@@ -281,6 +281,9 @@ export function createSession(data: {
 export function createBranchedSession(data: {
   parent_session_id: string
   id: string
+  copyCompression?: boolean
+  expectedHistoryRevision?: number
+  expectedHistoryMessages?: HermesMessageRow[]
   profile?: string
   source?: string
   agent?: string
@@ -328,6 +331,13 @@ export function createBranchedSession(data: {
 
   db.exec('BEGIN')
   try {
+    if (data.expectedHistoryRevision !== undefined) {
+      const parent = db.prepare(`SELECT history_revision FROM ${SESSIONS_TABLE} WHERE id = ?`).get(data.parent_session_id) as { history_revision: number } | undefined
+      if (!parent || parent.history_revision !== data.expectedHistoryRevision) throw new Error('Parent history changed while preparing the branch.')
+    }
+    if (data.expectedHistoryMessages && JSON.stringify(getSessionDetail(data.parent_session_id)?.messages) !== JSON.stringify(data.expectedHistoryMessages)) {
+      throw new Error('Parent history changed while preparing the branch.')
+    }
     db.prepare(
       `UPDATE ${SESSIONS_TABLE} SET ended_at = ?, end_reason = ? WHERE id = ?`,
     ).run(data.ended_at, 'branched', data.parent_session_id)
@@ -342,8 +352,8 @@ export function createBranchedSession(data: {
       agent,
       data.agent_mode || '',
       data.agent_preset || '',
-      data.agent_session_id || '',
-      data.agent_native_session_id || '',
+      '',
+      '',
       data.user_id == null ? null : String(data.user_id),
       data.model || '',
       data.provider || '',
@@ -392,14 +402,15 @@ export function createBranchedSession(data: {
 
     // Preserve the parent's compressed runtime context when its boundary is in
     // the copied prefix. Cursor IDs are remapped to the child's new row IDs.
-    copyCompressionSnapshot(data.parent_session_id, data.id)
+    if (data.copyCompression !== false) copyCompressionSnapshot(data.parent_session_id, data.id)
+    const child = getSession(data.id)
+    if (!child) throw new Error('Branched session could not be read before commit.')
     db.exec('COMMIT')
+    return child
   } catch (e) {
     db.exec('ROLLBACK')
     throw e
   }
-
-  return getSession(data.id)
 }
 
 export function getSession(id: string): HermesSessionRow | null {

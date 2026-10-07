@@ -23,7 +23,10 @@ async function runBridgeProbe(script: string): Promise<any> {
   const { stdout } = await execFileAsync('python3', ['-c', script], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
+      ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('HERMES_')
+        && !key.startsWith('BILI_') && !key.startsWith('BILLION_CONTEXT_') && key !== 'PYTHONPATH')),
+      HERMES_HOME: tempDir,
+      HERMES_AGENT_BRIDGE_BASE_HOME: tempDir,
       BRIDGE_PATH: bridgePath,
       TEST_HERMES_HOME: tempDir,
     },

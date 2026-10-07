@@ -23,6 +23,7 @@ export class AgentToolRegistry {
   private readonly tools = new Map<string, AgentTool>()
   private readonly providers = new Map<string, AgentToolProvider>()
   private readonly providerTools = new Map<string, Set<string>>()
+  private readonly exclusiveTools = new Map<string, AgentTool>()
 
   constructor(private authorizer?: AgentToolAuthorizer) {}
 
@@ -31,7 +32,32 @@ export class AgentToolRegistry {
   }
 
   register(tool: AgentTool): void {
+    const owner = this.exclusiveTools.get(tool.definition.name)
+    if (owner && owner !== tool) throw new Error(`Context manager tool collision: ${tool.definition.name}`)
     this.tools.set(tool.definition.name, tool)
+  }
+
+  /** Reserve a context tool against replacement by providers, skills or built-ins. */
+  registerExclusive(tool: AgentTool, previous?: AgentTool): void {
+    const existing = this.tools.get(tool.definition.name)
+    if (existing && existing !== previous) throw new Error(`Context manager tool collision: ${tool.definition.name}`)
+    this.exclusiveTools.set(tool.definition.name, tool)
+    this.tools.set(tool.definition.name, tool)
+  }
+
+  /** Copy registry state and authorization, not run-local external tool ownership. */
+  fork(excludedNames: string[] = []): AgentToolRegistry {
+    const registry = new AgentToolRegistry(this.authorizer)
+    const excluded = new Set(excludedNames)
+    for (const [name, tool] of this.tools) {
+      if (excluded.has(name)) continue
+      registry.register(tool instanceof CodeExecTool
+        ? tool.fork((toolName, input, context) => registry.execute(toolName, input, context))
+        : tool)
+    }
+    for (const provider of this.providers.values()) registry.registerProvider(provider)
+    for (const [id, names] of this.providerTools) registry.providerTools.set(id, new Set(names))
+    return registry
   }
 
   registerMany(tools: AgentTool[]): void {
@@ -41,6 +67,7 @@ export class AgentToolRegistry {
   }
 
   unregister(name: string): boolean {
+    if (this.exclusiveTools.has(name)) throw new Error(`Context manager tool collision: ${name}`)
     return this.tools.delete(name)
   }
 
@@ -57,6 +84,7 @@ export class AgentToolRegistry {
       const previous = this.providerTools.get(provider.id)
       if (previous) {
         for (const name of previous) {
+          if (this.exclusiveTools.has(name)) throw new Error(`Context manager tool collision: ${name}`)
           this.tools.delete(name)
         }
       }

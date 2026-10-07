@@ -490,6 +490,14 @@ export interface Session {
   cacheReadTokens?: number
   cacheWriteTokens?: number
   contextTokens?: number
+  contextManager?: 'native' | 'bili'
+  contextFallback?: boolean
+  contextSource?: 'usage' | 'estimate' | 'unavailable'
+  contextManagerStatus?: 'active' | 'unavailable' | 'native'
+  contextObservedAt?: number
+  contextGeneration?: string
+  contextModel?: string
+  contextWindow?: number
   endedAt?: number | null
   parentSessionId?: string | null
   forkPointMessageId?: string | null
@@ -1164,13 +1172,73 @@ function lastVisibleMessageRole(messages?: Message[] | null): string | null {
   return lastVisibleMessage(messages)?.role || null
 }
 
+export function isSessionContextCurrent(session: Session | null, now = Date.now()): boolean {
+  if (!session || (session.contextSource !== 'usage' && session.contextSource !== 'estimate')
+    || typeof session.contextTokens !== 'number' || !Number.isFinite(session.contextTokens) || session.contextTokens < 0) return false
+  if (session.contextModel != null && session.contextModel !== session.model) return false
+  const observedAt = session.contextObservedAt
+  if (observedAt != null && (typeof observedAt !== 'number' || !Number.isFinite(observedAt)
+    || observedAt < now - 900_000 || observedAt > now + 60_000)) return false
+  if (session.contextManager === 'native') return session.contextManagerStatus === 'native'
+  return session.contextManager === 'bili' && session.contextManagerStatus === 'active' && session.contextFallback !== true
+    && typeof observedAt === 'number' && Number.isFinite(observedAt)
+    && typeof session.contextModel === 'string' && Boolean(session.contextModel) && session.contextModel === session.model
+    && typeof session.contextGeneration === 'string' && Boolean(session.contextGeneration)
+    && typeof session.contextWindow === 'number' && Number.isFinite(session.contextWindow) && session.contextWindow > 0
+}
+
+function invalidateSessionContext(session: Session) {
+  session.contextSource = 'unavailable'
+  session.contextManagerStatus = 'unavailable'
+  session.contextTokens = undefined
+  session.contextObservedAt = undefined
+  session.contextGeneration = undefined
+  session.contextModel = undefined
+  session.contextWindow = undefined
+}
+
 function applySessionTokenUsage(session: Session, usage: {
   inputTokens?: number | null; outputTokens?: number | null
   cacheReadTokens?: number | null; cacheWriteTokens?: number | null; contextTokens?: number | null
+  contextManager?: unknown; contextFallback?: unknown; contextSource?: unknown; contextManagerStatus?: unknown
+  contextObservedAt?: unknown; contextGeneration?: unknown; contextModel?: unknown; contextWindow?: unknown
 }) {
-  for (const key of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'contextTokens'] as const) {
+  for (const key of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const) {
     const value = usage[key]
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0) session[key] = value
+  }
+  if (typeof usage.contextModel === 'string' && usage.contextModel !== session.model) return
+  const unavailable = (usage.contextManager === 'bili' || usage.contextManager === 'native') && usage.contextSource === 'unavailable'
+    && usage.contextManagerStatus === 'unavailable'
+  const current = isSessionContextCurrent({ ...usage, model: session.model } as Session)
+  const verifiedBili = usage.contextManager === 'bili' && current
+  const native = usage.contextManager === 'native' && current
+  if (!unavailable && !verifiedBili && !native) return
+  const observedAt = usage.contextObservedAt
+  if (typeof observedAt === 'number' && Number.isFinite(observedAt)
+    && session.contextObservedAt != null && observedAt < session.contextObservedAt) return
+  if (usage.contextManager === 'native' || usage.contextManager === 'bili') session.contextManager = usage.contextManager
+  if (typeof usage.contextFallback === 'boolean') session.contextFallback = usage.contextFallback
+  if (usage.contextManagerStatus === 'active' || usage.contextManagerStatus === 'unavailable' || usage.contextManagerStatus === 'native') session.contextManagerStatus = usage.contextManagerStatus
+  if (usage.contextSource === 'usage' || usage.contextSource === 'estimate' || usage.contextSource === 'unavailable') {
+    session.contextSource = usage.contextSource
+    // Snapshot metadata is not billing: omitted observations must not survive a degraded snapshot.
+    session.contextObservedAt = typeof observedAt === 'number' && Number.isFinite(observedAt) && observedAt >= 0 ? observedAt : undefined
+    session.contextGeneration = typeof usage.contextGeneration === 'string' ? usage.contextGeneration : undefined
+    session.contextModel = typeof usage.contextModel === 'string' ? usage.contextModel : undefined
+    session.contextWindow = typeof usage.contextWindow === 'number' && Number.isFinite(usage.contextWindow) && usage.contextWindow > 0 ? usage.contextWindow : undefined
+    session.contextTokens = undefined
+  }
+  if (session.contextSource !== 'unavailable' && typeof usage.contextTokens === 'number' && Number.isFinite(usage.contextTokens) && usage.contextTokens >= 0) session.contextTokens = usage.contextTokens
+}
+
+function contextSnapshot(session: Session) {
+  return {
+    contextTokens: session.contextTokens, contextManager: session.contextManager,
+    contextFallback: session.contextFallback,
+    contextSource: session.contextSource, contextManagerStatus: session.contextManagerStatus,
+    contextObservedAt: session.contextObservedAt, contextGeneration: session.contextGeneration,
+    contextModel: session.contextModel, contextWindow: session.contextWindow,
   }
 }
 
@@ -1345,7 +1413,37 @@ export const useChatStore = defineStore('chat', () => {
   /** Authoritative live delegation counts, never inferred from transcript history. */
   const backgroundPendingBySession = ref<Map<string, number>>(new Map())
   let runtimeGeneration = 0
+  let contextManagerSocket: ReturnType<typeof getChatRunSocket> = null
+  let contextManagerListener: ((evt: {
+    session_id?: string
+    selectedManager?: 'native' | 'bili'
+    manager?: 'native' | 'bili'
+    fallback?: boolean
+  }) => void) | undefined
+  let contextManagerListenerGeneration = -1
   const backgroundObservers = new Map<string, () => void>()
+
+  function bindContextManagerEvents() {
+    const socket = getChatRunSocket(runtimeTransport())
+    if (!socket?.on || (socket === contextManagerSocket && contextManagerListenerGeneration === runtimeGeneration)) return
+    if (contextManagerListener) contextManagerSocket?.off('context.manager', contextManagerListener)
+    const generation = runtimeGeneration
+    contextManagerListener = evt => {
+      if (generation !== runtimeGeneration || !evt.session_id || (evt.manager !== 'native' && evt.manager !== 'bili')) return
+      const targets = [sessions.value.find(s => s.id === evt.session_id), activeSession.value?.id === evt.session_id ? activeSession.value : null]
+        .filter((session): session is Session => Boolean(session))
+      for (const target of new Set(targets)) {
+        applySessionTokenUsage(target, {
+          contextManager: evt.manager,
+          contextFallback: evt.fallback === true,
+          contextSource: 'unavailable', contextManagerStatus: 'unavailable', contextTokens: null,
+        })
+      }
+    }
+    contextManagerSocket = socket
+    contextManagerListenerGeneration = generation
+    socket.on('context.manager', contextManagerListener)
+  }
 
   function clearBackgroundObservers() {
     for (const dispose of backgroundObservers.values()) dispose()
@@ -1362,6 +1460,7 @@ export const useChatStore = defineStore('chat', () => {
 
   onScopeDispose(() => {
     unsubscribeAuthInvalidation()
+    if (contextManagerListener) contextManagerSocket?.off('context.manager', contextManagerListener)
     runtimeGeneration += 1
     clearBackgroundObservers()
   })
@@ -1777,7 +1876,7 @@ export const useChatStore = defineStore('chat', () => {
       Object.assign(existing, {
         ...mapped,
         messages: existing.messages,
-        contextTokens: existing.contextTokens,
+        ...contextSnapshot(existing),
         apiMode: mapped.apiMode || existing.apiMode,
         loadedMessageCount: existing.loadedMessageCount,
         hasMoreBefore: existing.hasMoreBefore,
@@ -1808,13 +1907,13 @@ export const useChatStore = defineStore('chat', () => {
       // so we don't blow away the active session's messages on refresh.
       const runtimeByIdBefore = new Map(sessions.value.map(s => [s.id, {
         messages: s.messages,
-        contextTokens: s.contextTokens,
+        context: contextSnapshot(s),
         apiMode: s.apiMode,
       }]))
       for (const s of fresh) {
         const prev = runtimeByIdBefore.get(s.id)
         if (prev?.messages?.length) s.messages = prev.messages
-        if (prev?.contextTokens != null) s.contextTokens = prev.contextTokens
+        if (prev) Object.assign(s, prev.context)
         if (!s.apiMode && prev?.apiMode) s.apiMode = prev.apiMode
       }
       const freshIds = new Set(fresh.map(session => session.id))
@@ -2132,8 +2231,8 @@ export const useChatStore = defineStore('chat', () => {
             setAbortState(sessionId, null)
           }
           if (!data.isWorking) setCompressionState(sessionId, null)
-          applySessionTokenUsage(target, data)
           applyResumedSessionSettings(data)
+          applySessionTokenUsage(target, data)
           if (typeof data.workspace === 'string') {
             target.workspace = data.workspace.trim() || null
             target.isLocalOnly = false
@@ -2182,7 +2281,7 @@ export const useChatStore = defineStore('chat', () => {
                   compressed: e.compressed ?? false,
                   error: e.error,
                 })
-                if (e.contextTokens != null) target.contextTokens = e.contextTokens
+                applySessionTokenUsage(target, e)
               } else if (e.event === 'abort.started') {
                 setAbortState(sessionId, { aborting: true, synced: null })
               } else if (e.event === 'abort.timeout') {
@@ -2240,6 +2339,7 @@ export const useChatStore = defineStore('chat', () => {
           }
           resolve()
         }, activeSession.value?.profile, runtimeTransport())
+        bindContextManagerEvents()
       })
       // A search hit can be older than both the resume page and the live-chat
       // history cap. Only explicit message navigation may extend that window.
@@ -2371,6 +2471,7 @@ export const useChatStore = defineStore('chat', () => {
       if (!ok) return false
     }
     if (target) {
+      if (target.model !== modelId || target.provider !== (provider || '')) invalidateSessionContext(target)
       target.model = modelId
       target.provider = provider || ''
       target.apiMode = preservedApiMode
@@ -2378,6 +2479,7 @@ export const useChatStore = defineStore('chat', () => {
       if (shouldClearRuntimeCredentials) clearCodingAgentRuntimeCredentials(target)
     }
     if (activeTarget) {
+      if (activeTarget.model !== modelId || activeTarget.provider !== (provider || '')) invalidateSessionContext(activeTarget)
       activeTarget.model = modelId
       activeTarget.provider = provider || ''
       activeTarget.apiMode = preservedApiMode
@@ -3537,6 +3639,8 @@ export const useChatStore = defineStore('chat', () => {
     const targets = [sessions.value.find(s => s.id === sid), activeSession.value?.id === sid ? activeSession.value : null]
       .filter((session): session is Session => Boolean(session))
     for (const target of new Set(targets)) {
+      if ((typeof evt.model === 'string' && evt.model !== target.model)
+        || (typeof evt.provider === 'string' && evt.provider !== target.provider)) invalidateSessionContext(target)
       if (typeof evt.model === 'string') target.model = evt.model
       if (typeof evt.provider === 'string') target.provider = evt.provider
       if (typeof evt.api_mode === 'string') target.apiMode = evt.api_mode as ProviderApiMode || undefined
@@ -3904,8 +4008,8 @@ export const useChatStore = defineStore('chat', () => {
         }
         if (!data.isWorking) setCompressionState(sid, null)
 
-        applySessionTokenUsage(target, data)
         applyResumedSessionSettings(data)
+        applySessionTokenUsage(target, data)
 
         if (Array.isArray(data.messages)) {
           const previousActiveAssistantMessageId = activeAssistantMessageId
@@ -3974,7 +4078,7 @@ export const useChatStore = defineStore('chat', () => {
                   compressed: (e as any).compressed ?? false,
                   error: (e as any).error,
                 })
-                if ((e as any).contextTokens != null) target.contextTokens = (e as any).contextTokens
+                applySessionTokenUsage(target, e as any)
                 break
               }
               case 'abort.started':
@@ -4108,7 +4212,7 @@ export const useChatStore = defineStore('chat', () => {
               })
               if ((evt as any).contextTokens != null) {
                 const target = sessions.value.find(s => s.id === sid)
-                if (target) target.contextTokens = (evt as any).contextTokens
+                if (target) applySessionTokenUsage(target, evt as any)
               }
               // Auto-clear after 5s
               setTimeout(() => {
@@ -4585,6 +4689,7 @@ export const useChatStore = defineStore('chat', () => {
         undefined,
         { onReconnectResume: applyReconnectResume, transport: runtimeTransport() },
       )
+      bindContextManagerEvents()
       runSubmitted = true
 
       if (isProviderAgent && !isBuiltinSlashCommand) {
@@ -4778,7 +4883,7 @@ export const useChatStore = defineStore('chat', () => {
           })
           if ((evt as any).contextTokens != null) {
             const target = sessions.value.find(s => s.id === sid)
-            if (target) target.contextTokens = (evt as any).contextTokens
+            if (target) applySessionTokenUsage(target, evt as any)
           }
           setTimeout(() => {
             const state = compressionStates.value.get(sid)
@@ -5250,6 +5355,7 @@ export const useChatStore = defineStore('chat', () => {
       onClarifyRequested: (evt) => handleEvent(evt),
       onClarifyResolved: (evt) => handleEvent(evt),
     })
+    bindContextManagerEvents()
 
     // No need to emit resume here — switchSession already did it.
     // Server already joined room and replayed events.
@@ -5427,6 +5533,7 @@ export const useChatStore = defineStore('chat', () => {
             }
             resumeServerWorkingRun(sid, (data.backgroundPending || 0) > 0, !data.isWorking)
           }, activeSession.value?.profile, runtimeTransport())
+          bindContextManagerEvents()
         }
       }
     })

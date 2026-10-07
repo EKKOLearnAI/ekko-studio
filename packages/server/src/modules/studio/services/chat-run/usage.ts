@@ -220,6 +220,28 @@ export async function calcAndUpdateUsage(
   }
 }
 
+export function invalidateExternalContextUsage(
+  sid: string,
+  state: SessionState,
+  emit: (event: string, payload: any) => void,
+  usage?: { inputTokens: number; outputTokens: number },
+): undefined {
+  if (!state.contextOwner && state.externalContext) {
+    state.contextOwner = { manager: 'bili', conversationId: state.externalContext.conversationId }
+  }
+  state.externalContext = undefined
+  state.contextTokens = undefined
+  state.contextManagerStatus = 'unavailable'
+  emit('usage.updated', {
+    event: 'usage.updated', session_id: sid,
+    inputTokens: usage?.inputTokens ?? state.inputTokens ?? 0,
+    outputTokens: usage?.outputTokens ?? state.outputTokens ?? 0,
+    contextTokens: null, contextManager: 'bili', contextSource: 'unavailable', contextManagerStatus: 'unavailable',
+    contextObservedAt: null, contextGeneration: null, contextModel: null, contextWindow: null,
+  })
+  return undefined
+}
+
 export function updateContextTokenUsage(
   sid: string,
   state: SessionState,
@@ -227,17 +249,37 @@ export function updateContextTokenUsage(
   contextTokens: number | null | undefined,
   usage?: { inputTokens: number; outputTokens: number },
 ): number | undefined {
+  const external = state.externalContext
+  if (external) {
+    const now = Date.now()
+    if (external.conversationId !== sid || external.observedAt < now - 15 * 60 * 1_000 || external.observedAt > now + 60_000) {
+      return invalidateExternalContextUsage(sid, state, emit, usage)
+    }
+    contextTokens = external.tokens
+  }
+  if (state.contextOwner?.manager === 'bili' && !state.externalContext) {
+    return invalidateExternalContextUsage(sid, state, emit, usage)
+  }
   if (typeof contextTokens !== 'number' || !Number.isFinite(contextTokens) || contextTokens < 0) {
     return state.contextTokens
   }
   const normalizedContextTokens = Math.floor(contextTokens)
   state.contextTokens = normalizedContextTokens
+  state.contextManagerStatus = state.externalContext ? 'active' : 'native'
   emit('usage.updated', {
     event: 'usage.updated',
     session_id: sid,
     inputTokens: usage?.inputTokens ?? state.inputTokens ?? 0,
     outputTokens: usage?.outputTokens ?? state.outputTokens ?? 0,
     contextTokens: normalizedContextTokens,
+    contextManager: state.externalContext?.manager ?? state.contextOwner?.manager ?? 'native',
+    contextSource: state.externalContext?.source ?? 'estimate',
+    contextObservedAt: state.externalContext?.observedAt,
+    contextGeneration: state.externalContext?.generation,
+    contextModel: state.externalContext?.model,
+    contextWindow: state.externalContext?.window,
+    contextManagerStatus: state.contextManagerStatus ?? 'native',
+    contextFallback: state.contextFallback === true,
   })
   return normalizedContextTokens
 }
@@ -265,6 +307,15 @@ export function updateMessageContextTokenUsage(
   messageTokens: number | null | undefined,
   usage?: { inputTokens: number; outputTokens: number },
 ): number | undefined {
+  const external = state.externalContext
+  if (external) {
+    const now = Date.now()
+    if (external.conversationId === sid && external.observedAt >= now - 15 * 60 * 1_000 && external.observedAt <= now + 60_000) {
+      return state.contextTokens
+    }
+    return invalidateExternalContextUsage(sid, state, emit, usage)
+  }
+  if (state.contextOwner?.manager === 'bili') return invalidateExternalContextUsage(sid, state, emit, usage)
   if (typeof messageTokens !== 'number' || !Number.isFinite(messageTokens) || messageTokens < 0) {
     return state.contextTokens
   }

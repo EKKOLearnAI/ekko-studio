@@ -1,6 +1,59 @@
 import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
+  contextManager: {
+      "hermesWorker": "Hermes 작업 프로세스",
+      "activeSessions": "로드된 세션",
+      "runningSessions": "실행 중인 세션",
+      "workerPid": "프로세스 ID",
+      "restartWorker": "작업 프로세스 재시작",
+      "restartImpact": "프로필 {profile}의 Hermes 작업 프로세스를 재시작할까요? 로드된 세션 {count}개가 연결 해제된 후 다음 요청에서 다시 연결됩니다. 저장된 대화는 유지되며 Billion Context 프록시는 재시작되지 않습니다.",
+      "cancel": "취소",
+      "running": "실행 중",
+      "stopped": "중지됨",
+      "errors": {
+        "failed": "작업에 실패했습니다. 새로 고친 후 다시 시도하세요.",
+        "invalidSettings": "컨텍스트 설정과 프록시 주소를 확인하세요.",
+        "profileChanged": "선택한 프로필이 변경되었습니다. 새로 고친 후 재시작하세요.",
+        "sessionsRunning": "실행 중인 세션이 끝날 때까지 기다리세요.",
+        "confirmationRequired": "재시작 전에 로드된 세션에 미치는 영향을 확인하세요.",
+        "workerUnavailable": "작업 프로세스 또는 실행 중인 세션 상태를 확인할 수 없습니다. 새로 고친 후 재시작하세요.",
+        "restartFailed": "재시작을 확인할 수 없습니다. 상태를 새로 고친 후 다시 시도하세요.",
+        "busy": "다른 작업이 진행 중입니다. 기다린 후 새로 고치세요.",
+        "externallyManaged": "이 프록시는 Studio 외부에서 관리됩니다. 해당 프로세스 관리 도구를 사용하세요.",
+        "installFailed": "설치할 수 없거나 설치에 실패했습니다. Node/npm을 확인하세요.",
+        "startFailed": "관리 프록시가 준비되지 않았습니다. 설정을 확인하세요.",
+        "stopFailed": "관리 프록시를 중지할 수 없습니다. 상태를 새로 고치세요.",
+        "stopFirst": "업그레이드하거나 주소를 바꾸기 전에 관리 프록시를 중지하세요.",
+        "notInstalled": "시작 전에 Billion Context를 설치하세요.",
+        "httpOnly": "Studio는 HTTP 프록시만 시작할 수 있습니다. HTTPS는 외부에서 관리하세요.",
+        "probeFailed": "프록시에 연결하거나 상태를 확인할 수 없습니다. 주소와 프로세스를 확인하세요.",
+        "probeHttp": "프록시 상태 확인에서 HTTP 오류가 반환되었습니다.",
+        "probeTimeout": "프록시 상태 확인 시간이 초과되었습니다.",
+        "probeInvalid": "프록시 응답이 잘못되었거나 너무 큽니다."
+      },
+      "issues": {
+        "protocol": "프록시 프로토콜이 호환되지 않습니다.",
+        "fork": "대화 분기와 스냅샷을 지원하지 않습니다.",
+        "tool": "필수 도구 {tool}가 없거나 정의가 잘못되었습니다.",
+        "unknown": "지원하지 않는 기능이 보고되었습니다."
+      },
+      "probes": {
+        "manifest": "프록시 기능",
+        "status": "프록시 상태"
+      },
+    proxyVersion: '관측된 프록시 버전',
+    title: '컨텍스트 관리', native: '기본', proxyUrl: '프록시 오리진', allowNativeFallback: '기본 방식으로 대체 허용',
+    save: '저장', saved: '설정이 저장되었습니다', saveFailed: '설정을 저장하지 못했습니다', loadFailed: '설정을 불러오지 못했습니다',
+    refresh: '새로고침', healthFailed: '프록시 상태를 확인하지 못했습니다', lifecycleFailed: '작업 실패', actionDone: '작업 완료',
+    health: '작동 상태', healthy: '정상', unavailable: '사용 불가', compatibility: '호환성',
+    compatible: '호환', incompatible: '호환되지 않음', unverified: '확인되지 않음',
+    worker: '작업 프로세스 상태', unknown: '알 수 없음', runtime: '프로세스 관리',
+    studio: 'Studio에서 관리', external: '외부에서 관리', none: '중지됨', version: '설치된 버전', notInstalled: '설치되지 않음',
+    active: '활성', fallback: '기본 방식으로 대체됨', source: '컨텍스트 출처', sourceUsage: '관측된 사용량', sourceEstimate: '추정치', sourceUnavailable: '관측값 없음',
+    model: '모델', generation: '세대', observed: '관측 시간',
+    actions: { install: '설치', start: '시작', stop: '중지', upgrade: '업그레이드' },
+  },
   jev: {
     browserAutomation: "내장 브라우저 자동화",
     browserAutomationHint: "이 프로필에 저장된 JEV 연결을 사용하며 다음 판단부터 적용됩니다. 화면의 레이블을 JEV에 보내지만 입력값은 제외합니다. 비활성화, 서비스 오류 또는 불확실한 판단 시 기존 흐름을 유지합니다.",
@@ -2036,10 +2089,17 @@ export default {
       memory: '메모리',
       compression: '압축',
       session: '세션',
+      contextManager: '컨텍스트 관리',
       privacy: '개인정보',
       apiServer: 'API 서버',
       models: '모델',
       voice: '음성',
+    },
+    contextManager: {
+      title: '컨텍스트 관리', hermes: 'Hermes', ekko: 'Ekko', hermesHint: 'Hermes에서 사용하는 컨텍스트 관리자', ekkoHint: 'Ekko에서 사용하는 컨텍스트 관리자',
+      native: '네이티브', bili: 'Bili', proxyUrl: '프록시 URL', proxyUrlHint: 'localhost 및 루프백 HTTP(S) URL만 허용', allowNativeFallback: '네이티브 폴백 허용', allowNativeFallbackHint: '선택한 관리자를 사용할 수 없을 때 네이티브 처리를 허용', save: '저장',
+      healthTitle: '상태', checkHealth: '상태 확인', healthFailed: '상태 확인 실패', compatibilityUnverified: '호환성 확인 안 됨', manifest: 'Manifest', status: '상태', available: '사용 가능', unavailable: '사용 불가', lifecycleTitle: '수명 주기', lifecycleHint: '지원되는 CLI가 등록되지 않으면 제한을 반환합니다', runLifecycle: '작업 실행', lifecycleUnsupported: '수명 주기 작업을 지원하지 않음', lifecycleFailed: '수명 주기 작업 실패', loadFailed: '컨텍스트 관리 설정을 불러오지 못함',
+      actions: { install: '설치', start: '시작', stop: '중지', upgrade: '업그레이드' },
     },
     webhooks: {
       title: '웹훅',

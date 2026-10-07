@@ -41,6 +41,7 @@ vi.mock('vue-i18n', () => ({
 vi.mock('naive-ui', async () => {
   const { defineComponent, h } = await import('vue')
   return {
+    NAlert: defineComponent({ name: 'NAlert', template: '<div><slot /></div>' }),
     NButton: defineComponent({
       name: 'NButton',
       emits: ['click'],
@@ -103,6 +104,7 @@ vi.mock('@/components/hermes/settings/VoiceSettings.vue', () => ({
 vi.mock('@/components/hermes/settings/AccountSettings.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/settings/AgentSettings.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/settings/CompressionSettings.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/hermes/settings/ContextManagerSettings.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/settings/DisplaySettings.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/settings/GatewayAutoStartSettings.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/settings/MemorySettings.vue', () => ({ default: { template: '<div />' } }))

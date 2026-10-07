@@ -41,7 +41,33 @@ export interface AgentBridgeRequestOptions {
   serialize?: boolean
 }
 
+export interface AgentBridgeContextManagerOptions {
+  manager: 'native' | 'bili'
+  proxyUrl?: string
+  caBundlePath?: string
+  allowNativeFallback?: boolean
+  conversationId?: string
+}
+
+export interface AgentBridgeContextOwner {
+  manager: 'native' | 'bili'
+  owner: 'native' | 'bili'
+  selectedManager: 'native' | 'bili'
+  independentPlugin: boolean
+  conversationId: string
+  proxyUrl?: string
+  caBundlePath?: string
+  allowNativeFallback: boolean
+  protocolVersion?: number
+}
+
+export interface AgentBridgeContextManagerStatus extends AgentBridgeResponse {
+  session_id: string
+  context_manager: AgentBridgeContextOwner
+}
+
 export interface AgentBridgeChatOptions {
+  context_manager?: AgentBridgeContextManagerOptions
   force_compress?: boolean
   /** Agent-session creation policy. False keeps delegate_task available but
    * makes background=true fall back to synchronous execution. */
@@ -68,12 +94,14 @@ export interface AgentBridgeResponse {
 }
 
 export interface AgentBridgeChatStarted extends AgentBridgeResponse {
+  context_manager?: AgentBridgeContextOwner
   run_id: string
   session_id: string
   status: AgentBridgeStatus
 }
 
 export interface AgentBridgeOutput extends AgentBridgeResponse {
+  context_manager?: AgentBridgeContextOwner
   run_id: string
   session_id: string
   status: AgentBridgeStatus
@@ -88,6 +116,7 @@ export interface AgentBridgeOutput extends AgentBridgeResponse {
 }
 
 export interface AgentBridgeRunResult extends AgentBridgeResponse {
+  context_manager?: AgentBridgeContextOwner
   run_id: string
   session_id: string
   status: AgentBridgeStatus
@@ -120,6 +149,7 @@ export interface AgentBridgeSessionTitle extends AgentBridgeResponse {
 }
 
 export interface AgentBridgeContextEstimate extends AgentBridgeResponse {
+  context_manager?: AgentBridgeContextOwner
   session_id: string
   token_count?: number | null
   fixed_context_tokens?: number | null
@@ -508,6 +538,7 @@ export class AgentBridgeClient {
   ): Promise<AgentBridgeChatStarted> {
     return this.request<AgentBridgeChatStarted>({
       action: 'chat',
+      ...(options.context_manager ? { context_manager: options.context_manager } : {}),
       session_id: sessionId,
       message,
       ...(options.storage_message !== undefined ? { storage_message: options.storage_message } : {}),
@@ -534,10 +565,11 @@ export class AgentBridgeClient {
     messages: unknown[],
     instructions?: string,
     profile?: string,
-    options: Pick<AgentBridgeChatOptions, 'model' | 'provider' | 'workspace' | 'background_delegation_enabled'> = {},
+    options: Pick<AgentBridgeChatOptions, 'model' | 'provider' | 'workspace' | 'background_delegation_enabled' | 'context_manager'> = {},
   ): Promise<AgentBridgeContextEstimate> {
     return this.request<AgentBridgeContextEstimate>({
       action: 'context_estimate',
+      ...(options.context_manager ? { context_manager: options.context_manager } : {}),
       session_id: sessionId,
       messages,
       ...(instructions ? { instructions } : {}),
@@ -548,6 +580,19 @@ export class AgentBridgeClient {
       ...(options.background_delegation_enabled !== undefined
         ? { background_delegation_enabled: options.background_delegation_enabled }
         : {}),
+    })
+  }
+
+  contextManagerStatus(
+    sessionId: string,
+    profile?: string,
+    options: Pick<AgentBridgeChatOptions, 'context_manager'> = {},
+  ): Promise<AgentBridgeContextManagerStatus> {
+    return this.request<AgentBridgeContextManagerStatus>({
+      action: 'context_manager_status',
+      session_id: sessionId,
+      ...(profile ? { profile } : {}),
+      ...(options.context_manager ? { context_manager: options.context_manager } : {}),
     })
   }
 

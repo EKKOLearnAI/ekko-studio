@@ -430,8 +430,10 @@ def _profile_home(profile: str | None) -> Path:
     base = _base_hermes_home()
     if not profile or profile == "default":
         return base
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", profile):
+        raise ValueError("invalid Hermes profile")
     profile_home = base / "profiles" / profile
-    return profile_home if profile_home.exists() else base
+    return profile_home
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -630,12 +632,19 @@ def _restore_profile_dotenv(snapshot: dict[str, str | None]) -> None:
 
 
 def _set_worker_profile_env(profile: str | None) -> None:
+    from bridge_context_manager import worker_config, worker_environment
+    context_config = worker_config()
     profile_home = _profile_home(profile)
     os.environ["HERMES_HOME"] = str(profile_home)
     os.environ["HERMES_AGENT_BRIDGE_WORKER_PROFILE"] = profile or "default"
     # Bind the worker's home and credentials before importing any Hermes code.
     # Terminal config requires Hermes' YAML adapter and is refreshed after bootstrap.
     _apply_profile_dotenv(profile)
+    configured_env = worker_environment(dict(os.environ), context_config)
+    for key in ("BILLION_CONTEXT_PROXY", "BILI_PROVIDER_REWRITES"):
+        if key not in configured_env:
+            os.environ.pop(key, None)
+    os.environ.update(configured_env)
 
 
 def _refresh_worker_profile_env() -> None:
@@ -645,9 +654,16 @@ def _refresh_worker_profile_env() -> None:
         return
     profile_home = _profile_home(profile)
     os.environ["HERMES_HOME"] = str(profile_home)
+    from bridge_context_manager import worker_config, worker_environment
+    context_config = worker_config()
     values = _read_dotenv(profile_home / ".env")
     for key, value in values.items():
         os.environ[key] = value
+    configured_env = worker_environment(dict(os.environ), context_config)
+    for key in ("BILLION_CONTEXT_PROXY", "BILI_PROVIDER_REWRITES"):
+        if key not in configured_env:
+            os.environ.pop(key, None)
+    os.environ.update(configured_env)
     _refresh_terminal_env()
 
 

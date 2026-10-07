@@ -29,6 +29,7 @@ class WorkerProcess:
         self.endpoint = endpoint
         self.agent_root = agent_root
         self.hermes_home = hermes_home
+        self.context_manager: dict[str, Any] | None = None
         self.process: subprocess.Popen[str] | None = None
         self.last_used_at = time.time()
         self._lock = threading.RLock()
@@ -65,6 +66,8 @@ class WorkerProcess:
                 "HERMES_AGENT_BRIDGE_BROKER_PID": str(os.getpid()),
             }
             env.pop("ANTHROPIC_AUTH_TOKEN", None)
+            from bridge_context_manager import worker_environment
+            env = worker_environment(env, getattr(self, "context_manager", None))
             self.process = subprocess.Popen(
                 args,
                 env=env,

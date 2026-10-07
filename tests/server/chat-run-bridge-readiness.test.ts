@@ -29,11 +29,22 @@ const loadSessionStateFromDbMock = vi.hoisted(() => vi.fn())
 const startBridgeMock = vi.hoisted(() => vi.fn())
 const ensureReadyMock = vi.hoisted(() => vi.fn())
 const getRuntimeStateMock = vi.hoisted(() => vi.fn())
+vi.mock('../../packages/server/src/modules/studio/services/context-manager/settings', () => ({
+  getContextManagerSettings: vi.fn(async () => ({
+    hermes: { manager: 'native' }, ekko: { manager: 'native' },
+    proxyUrl: 'http://127.0.0.1:8787', allowNativeFallback: false,
+  })),
+}))
 const userCanAccessProfileMock = vi.hoisted(() => vi.fn((_user: unknown, _profile: string) => true))
 const getSessionMock = vi.hoisted(() => vi.fn((sessionId?: string) => sessionId
   ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai' }
   : undefined))
 const bridgeMock = vi.hoisted(() => ({
+  contextManagerStatus: vi.fn(async (sessionId: string) => ({
+    ok: true,
+    context_manager: { manager: 'native', owner: 'native', selectedManager: 'native',
+      conversationId: sessionId, allowNativeFallback: false },
+  })),
   status: vi.fn(),
   statusIfLoaded: vi.fn(),
   releaseBackgroundNotification: vi.fn(async () => ({ ok: true, released: true })),
@@ -155,6 +166,14 @@ function makeServerHarness() {
     }),
   }
   return { emitted, handlers, io, namespace, socket }
+}
+
+function expectOwnerDiscoveryWithoutRunGate() {
+  expect(ensureReadyMock).toHaveBeenCalledExactlyOnceWith()
+  expect(bridgeMock.contextManagerStatus).toHaveBeenCalledExactlyOnceWith('session-1', 'default', {
+    context_manager: { manager: 'native', proxyUrl: 'http://127.0.0.1:8787',
+      conversationId: 'session-1', allowNativeFallback: false },
+  })
 }
 
 describe('ChatRunSocket global pending interactions', () => {
@@ -679,7 +698,7 @@ describe('ChatRunSocket bridge readiness gating', () => {
     ;(server as any).onConnection(socket)
     await handlers.get('resume')?.({ session_id: 'session-1' })
 
-    expect(ensureReadyMock).not.toHaveBeenCalled()
+    expectOwnerDiscoveryWithoutRunGate()
     expect(resumeBridgeRunMock).toHaveBeenCalledTimes(1)
     expect(socket.emit).toHaveBeenCalledWith('resumed', expect.objectContaining({
       session_id: 'session-1',
@@ -718,7 +737,7 @@ describe('ChatRunSocket bridge readiness gating', () => {
     ;(server as any).onConnection(socket)
     await handlers.get('resume')?.({ session_id: 'session-1' })
 
-    expect(ensureReadyMock).not.toHaveBeenCalled()
+    expectOwnerDiscoveryWithoutRunGate()
     expect(resumeBridgeRunMock).not.toHaveBeenCalled()
     expect(emitted).toContainEqual({
       room: 'session:session-1',
@@ -782,7 +801,7 @@ describe('ChatRunSocket bridge readiness gating', () => {
     ;(server as any).onConnection(socket)
     await handlers.get('resume')?.({ session_id: 'session-1' })
 
-    expect(ensureReadyMock).not.toHaveBeenCalled()
+    expectOwnerDiscoveryWithoutRunGate()
     expect(resumeBridgeRunMock).not.toHaveBeenCalled()
     expect(emitted.some(({ event }) => event === 'run.reattach_failed')).toBe(false)
     expect(socket.emit).toHaveBeenCalledWith('resumed', expect.objectContaining({
@@ -799,7 +818,7 @@ describe('ChatRunSocket bridge readiness gating', () => {
 
   it('does not query Hermes bridge status when resuming a coding agent session', async () => {
     getSessionMock.mockImplementation((sessionId?: string) => sessionId
-      ? { id: sessionId, profile: 'default', source: 'coding_agent', model: 'codex', provider: 'codex' }
+      ? { id: sessionId, profile: 'default', source: 'coding_agent', agent: 'codex', model: 'codex', provider: 'codex' }
       : undefined)
     loadSessionStateFromDbMock.mockResolvedValueOnce({
       messages: [],
@@ -865,7 +884,7 @@ describe('ChatRunSocket bridge readiness gating', () => {
     await handlers.get('resume')?.({ session_id: 'session-1' })
 
     expect(sourceAtResume).toBe('workflow')
-    expect(ensureReadyMock).not.toHaveBeenCalled()
+    expectOwnerDiscoveryWithoutRunGate()
     expect(bridgeMock.statusIfLoaded).toHaveBeenCalledWith('session-1', 'default', { timeoutMs: 1000 })
     expect(resumeBridgeRunMock).toHaveBeenCalledWith(
       expect.anything(),
@@ -911,7 +930,7 @@ describe('ChatRunSocket bridge readiness gating', () => {
     ;(server as any).onConnection(socket)
     await handlers.get('resume')?.({ session_id: 'session-1' })
 
-    expect(ensureReadyMock).not.toHaveBeenCalled()
+    expectOwnerDiscoveryWithoutRunGate()
     expect(bridgeMock.statusIfLoaded).toHaveBeenCalledWith('session-1', 'default', { timeoutMs: 1000 })
     expect(resumeBridgeRunMock).toHaveBeenCalledWith(
       expect.anything(),
@@ -961,7 +980,7 @@ describe('ChatRunSocket bridge readiness gating', () => {
     ;(server as any).onConnection(socket)
     await handlers.get('resume')?.({ session_id: 'session-1' })
 
-    expect(ensureReadyMock).not.toHaveBeenCalled()
+    expectOwnerDiscoveryWithoutRunGate()
     expect(bridgeMock.statusIfLoaded).toHaveBeenCalledWith('session-1', 'default', { timeoutMs: 1000 })
     expect(resumeBridgeRunMock).not.toHaveBeenCalled()
     expect(emitted.some(({ event }) => event === 'run.reattach_failed')).toBe(false)

@@ -52,3 +52,9 @@ The cached system/tool context is available after a run in the current Studio
 process. After a restart, `/context` remains an estimate of local assembled history
 until the next run refreshes that overhead. It does not present token accounting
 as an exact measurement of the provider's current context.
+
+These estimates and the shared Studio summarizer apply to the default native
+context manager. With [Billion Context](context-managers.md), `/context` reads the
+public effective-context observation and reports unavailable observations as
+unknown. `/compact` uses the bili-managed conversation instead of creating a
+native compression snapshot. `/usage` remains cumulative billing in either mode.

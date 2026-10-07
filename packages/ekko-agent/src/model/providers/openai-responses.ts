@@ -12,7 +12,7 @@ import type {
   ModelResponse,
   ModelUsage,
 } from '../types'
-import { modelRequestHeaders, isPlainRecord, parseJson, postJson, postStream, providerUrl, readServerSentEvents } from '../http'
+import { modelRequestHeaders, modelRequestUrl, isPlainRecord, parseJson, postJson, postStream, providerUrl, readServerSentEvents } from '../http'
 import { collectModelEvents, normalizeAgentReasoning } from '../messages'
 
 interface OpenAIResponsesPayload {
@@ -109,6 +109,8 @@ const capabilities: ModelCapabilities = {
 }
 
 export class OpenAIResponsesModelClient implements ModelClient {
+  readonly supportsContextTransport = true
+  get defaultModel(): string { return this.config.defaultModel }
   readonly provider: string
   readonly requestStyle = 'openai-responses'
   readonly capabilities: ModelCapabilities
@@ -135,7 +137,7 @@ export class OpenAIResponsesModelClient implements ModelClient {
     const response = await postJson<OpenAIResponsesResponse>(
       this.config,
       this.fetchImpl,
-      responsesUrl(this.config),
+      modelRequestUrl(responsesUrl(this.config), request),
       toOpenAIResponsesPayload(this.config, { ...request, stream: false }),
       modelRequestHeaders(this.config, request),
       request.signal,
@@ -147,7 +149,7 @@ export class OpenAIResponsesModelClient implements ModelClient {
     const response = await postStream(
       this.config,
       this.fetchImpl,
-      responsesUrl(this.config),
+      modelRequestUrl(responsesUrl(this.config), request),
       toOpenAIResponsesPayload(this.config, { ...request, stream: true }),
       modelRequestHeaders(this.config, request),
       request.signal,
