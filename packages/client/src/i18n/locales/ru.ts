@@ -3093,8 +3093,6 @@ export default {
     agentPairingApproved: 'Подключение Agent одобрено',
     agentPairingRejected: 'Подключение Agent отклонено',
     title: 'Групповой чат',
-    refactorNoticeTitle: 'Обновление группового чата',
-    refactorNoticeMessage: 'Групповой чат был значительно переработан. Если в комнате не удаётся общаться, создайте новую комнату.',
     emptyState: 'Начните групповой разговор',
     createRoom: 'Создать комнату',
     joinByCode: 'Присоединиться по коду-приглашению',

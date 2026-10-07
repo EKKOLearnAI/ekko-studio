@@ -72,7 +72,6 @@ test('group chat covers initial room data and keeps failed or stale room switche
   await authenticate(page)
   await mockHermesApi(page)
   await mockChatSocket(page)
-  await page.addInitScript(() => localStorage.setItem('hermes.groupChat.refactorNotice.v1.acknowledged', '1'))
   const rooms = ['alpha', 'beta'].map(id => ({ id, name: `Room ${id}`, canManage: true, workspace: '/tmp/group', summaryProfile: 'research', summaryProvider: 'test-provider', summaryModel: 'test-model', summaryEveryTurns: 20 }))
   const list = gate()
   const detail = gate()

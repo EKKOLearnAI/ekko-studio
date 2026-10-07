@@ -3,7 +3,6 @@ import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
-import { usePageLoadingState } from '@/composables/usePageLoading'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
@@ -126,8 +125,6 @@ watch(
 const showCreateModal = ref(false)
 const showCloneModal = ref(false)
 const showAddAgentDrawer = ref(false)
-const showGroupChatRefactorNotice = ref(false)
-const pageLoading = usePageLoadingState()
 const showManualRoomLinkModal = ref(false)
 const manualRoomLink = ref('')
 const manualRoomLinkInput = ref<HTMLInputElement | null>(null)
@@ -238,7 +235,6 @@ const toolPanelTransitionReady = ref(false)
 const activeWorkspacePanel = ref<'files' | 'terminal' | 'browser'>('files')
 const desktopBrowserAvailable = hasDesktopBrowserBridge()
 const workspacePanelMobile = ref(window.innerWidth <= 768)
-const GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY = 'hermes.groupChat.refactorNotice.v1.acknowledged'
 const WORKSPACE_PANEL_MIN_WIDTH = 360
 const WORKSPACE_PANEL_DEFAULT_WIDTH = 560
 const WORKSPACE_PANEL_STORAGE_KEY = 'hermes.groupChat.workspacePanelWidth'
@@ -960,16 +956,6 @@ function handleGroupAttachmentPreviewRequest(event: Event): void {
     })
 }
 
-
-function acknowledgeGroupChatRefactorNotice() {
-    try {
-        window.localStorage.setItem(GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY, '1')
-    } catch {
-        // The notice can still be dismissed when persistent browser storage is unavailable.
-    }
-    showGroupChatRefactorNotice.value = false
-}
-
 const remoteRooms = computed(() => buildRemoteGroupChatRooms(
     remoteRoomConnections.value,
 ))
@@ -1606,13 +1592,6 @@ function handleEditAgent(agent: RoomAgent) {
 
 onMounted(() => {
     if (!props.standalone) void refreshAgentAvailability()
-    if (!props.standalone) {
-        try {
-            showGroupChatRefactorNotice.value = window.localStorage.getItem(GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY) !== '1'
-        } catch {
-            showGroupChatRefactorNotice.value = true
-        }
-    }
     window.addEventListener('hermes:preview-workspace-file', handleWorkspaceFilePreviewRequest)
     window.addEventListener('hermes:preview-group-attachment', handleGroupAttachmentPreviewRequest)
     window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest)
@@ -3205,25 +3184,6 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                 </template>
             </NModal>
             <NModal
-                v-model:show="showGroupChatRefactorNotice"
-                v-if="!pageLoading"
-                preset="dialog"
-                :title="t('groupChat.refactorNoticeTitle')"
-                :mask-closable="false"
-                :close-on-esc="false"
-                :closable="false"
-                style="width: 480px; max-width: 92vw"
-            >
-                <p class="group-chat-refactor-notice">
-                    {{ t('groupChat.refactorNoticeMessage') }}
-                </p>
-                <template #action>
-                    <NButton type="primary" @click="acknowledgeGroupChatRefactorNotice">
-                        {{ t('common.confirm') }}
-                    </NButton>
-                </template>
-            </NModal>
-            <NModal
                 v-model:show="showWorkspaceModal"
                 preset="dialog"
                 :title="t('chat.setWorkspaceTitle')"
@@ -3593,11 +3553,6 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex: 1;
     min-height: 0;
     display: flex;
-}
-
-.group-chat-refactor-notice {
-    margin: 0;
-    line-height: 1.7;
 }
 
 @media (max-width: $breakpoint-mobile) {

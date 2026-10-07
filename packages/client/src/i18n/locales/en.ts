@@ -3457,8 +3457,6 @@ export default {
     agentPairingApproved: 'Agent connection approved',
     agentPairingRejected: 'Agent connection rejected',
     title: 'Group Chat',
-    refactorNoticeTitle: 'Group Chat Upgrade',
-    refactorNoticeMessage: 'Group chat has undergone a major redesign. If a room can no longer send messages, please create a new room.',
     emptyState: 'Start a group conversation',
     createRoom: 'Create Room',
     joinByCode: 'Join by Code',

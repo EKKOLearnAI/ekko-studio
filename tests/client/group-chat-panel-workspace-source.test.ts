@@ -487,19 +487,6 @@ describe('GroupChatPanel workspace save handling', () => {
     expect(singleSource).toContain('easing: "ease"')
   })
 
-  it('shows the refactor notice once and persists acknowledgement locally', () => {
-    const source = readFileSync('packages/client/src/components/hermes/group-chat/GroupChatPanel.vue', 'utf8')
-
-    expect(source).toContain("const GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY = 'hermes.groupChat.refactorNotice.v1.acknowledged'")
-    expect(source).toContain("window.localStorage.getItem(GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY) !== '1'")
-    expect(source).toContain("window.localStorage.setItem(GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY, '1')")
-    expect(source).toContain('v-model:show="showGroupChatRefactorNotice"')
-    expect(source).toContain(':mask-closable="false"')
-    expect(source).toContain(':close-on-esc="false"')
-    expect(source).toContain("t('groupChat.refactorNoticeMessage')")
-    expect(source).toContain('@click="acknowledgeGroupChatRefactorNotice"')
-  })
-
   it('renders room creation and manageable room settings as right-side drawers', () => {
     const source = readFileSync('packages/client/src/components/hermes/group-chat/GroupChatPanel.vue', 'utf8')
 

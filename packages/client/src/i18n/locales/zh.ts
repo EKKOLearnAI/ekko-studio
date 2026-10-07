@@ -3505,8 +3505,6 @@ export default {
     agentPairingApproved: '已批准 Agent 接入',
     agentPairingRejected: '已拒绝 Agent 接入',
     title: '群聊',
-    refactorNoticeTitle: '群聊升级说明',
-    refactorNoticeMessage: '群聊已完成重大重构。如果遇到无法聊天的情况，请重新创建房间。',
     emptyState: '开始群聊对话',
     createRoom: '创建房间',
     joinByCode: '通过邀请码加入',

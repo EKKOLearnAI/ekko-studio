@@ -3399,8 +3399,6 @@ export default {
     agentPairingApproved: '已批准 Agent 接入',
     agentPairingRejected: '已拒絕 Agent 接入',
     title: '群聊',
-    refactorNoticeTitle: '群聊升級說明',
-    refactorNoticeMessage: '群聊已完成重大重構。如果遇到無法聊天的情況，請重新建立房間。',
     emptyState: '開始群聊對話',
     createRoom: '建立房間',
     joinByCode: '透過邀請碼加入',

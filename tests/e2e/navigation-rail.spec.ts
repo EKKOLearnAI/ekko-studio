@@ -44,7 +44,8 @@ test('keeps global navigation and account controls available when the conversati
   await expect.poll(async () => (await page.locator('.workflow-view').boundingBox())?.y).toBe(40)
   expect((await page.locator('.workflow-view').boundingBox())?.height).toBe(855)
   await rail.getByRole('link', { name: 'Group Chat', exact: true }).click()
-  await page.getByRole('dialog').filter({ hasText: 'Group Chat Upgrade' }).getByRole('button', { name: 'Confirm', exact: true }).click()
+  await expect(page.locator('.group-chat-view')).toHaveAttribute('aria-busy', 'false')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect.poll(async () => (await page.locator('.group-chat-panel').boundingBox())?.y).toBe(40)
   expect((await page.locator('.group-chat-panel').boundingBox())?.height).toBe(855)
   await rail.getByRole('link', { name: 'Settings', exact: true }).click()
@@ -139,7 +140,6 @@ test('navigates through the shared mobile rail and closes it on leaf pages', asy
 })
 
 test('keeps both navigation levels while switching lists and settings on mobile', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('hermes.groupChat.refactorNotice.v1.acknowledged', '1'))
   await page.setViewportSize({ width: 390, height: 800 })
   await page.goto('/#/hermes/chat')
   await page.getByRole('button', { name: 'Menu', exact: true }).click()

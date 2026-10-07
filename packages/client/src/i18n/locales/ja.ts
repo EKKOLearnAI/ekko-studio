@@ -3179,8 +3179,6 @@ export default {
     agentPairingRejected: 'Agent の接続を拒否しました',
     emptyState: 'グループ会話を始めましょう',
     title: 'グループチャット',
-    refactorNoticeTitle: 'グループチャット更新のお知らせ',
-    refactorNoticeMessage: 'グループチャットは大幅に再設計されました。チャットできない場合は、新しいルームを作成してください。',
     createRoom: 'ルームを作成',
     joinByCode: '招待コードで参加',
     shareTitle: 'グループチャットに参加',

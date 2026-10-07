@@ -3179,8 +3179,6 @@ export default {
     agentPairingRejected: 'Agent 연결이 거부되었습니다',
     emptyState: '그룹 대화를 시작하세요',
     title: '그룹 채팅',
-    refactorNoticeTitle: '그룹 채팅 업데이트 안내',
-    refactorNoticeMessage: '그룹 채팅이 대폭 개편되었습니다. 채팅할 수 없는 경우 새 방을 만들어 주세요.',
     createRoom: '방 만들기',
     joinByCode: '초대 코드로 참여',
     shareTitle: '그룹 채팅 참여',

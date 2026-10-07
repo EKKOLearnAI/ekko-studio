@@ -578,9 +578,6 @@ async function installMockVoiceCapture(page: Page) {
 
 async function setup(page: Page, path: string, platform?: DesktopPlatform, offlinePresence = false) {
   if (platform) await installDesktopBridge(page, platform)
-  await page.addInitScript(() => {
-    window.localStorage.setItem('hermes.groupChat.refactorNotice.v1.acknowledged', '1')
-  })
   await authenticate(page)
   await mockGroupChatSocket(page)
   const api = await mockGroupChatApi(page, offlinePresence)

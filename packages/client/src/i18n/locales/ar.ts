@@ -3438,8 +3438,6 @@ export default {
     agentPairingApproved: 'تمت الموافقة على توصيل Agent',
     agentPairingRejected: 'تم رفض توصيل Agent',
     title: 'محادثة جماعية',
-    refactorNoticeTitle: 'تحديث المحادثة الجماعية',
-    refactorNoticeMessage: 'أُعيد تصميم المحادثة الجماعية بشكل كبير. إذا تعذر إجراء محادثة في غرفة، فيُرجى إنشاء غرفة جديدة.',
     emptyState: 'ابدأ محادثة جماعية',
     createRoom: 'إنشاء غرفة',
     joinByCode: 'انضمام بالرمز',
