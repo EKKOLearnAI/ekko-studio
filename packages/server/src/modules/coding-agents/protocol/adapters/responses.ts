@@ -858,6 +858,11 @@ export function responsesToOpenAiChat(body: any, target: ResponsesAdapterTarget,
     ...(typeof body?.top_p === 'number' ? { top_p: body.top_p } : {}),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     ...(tools?.length ? { tools } : {}),
+    // OpenAI-compatible streaming providers (notably vLLM) omit token usage
+    // from the final SSE chunk unless the client explicitly requests it.
+    // Without this the Responses→Chat Completions conversion never receives a
+    // usage frame, so the turn lands with zero/missing token accounting.
+    ...(stream ? { stream_options: { include_usage: true } } : {}),
     stream,
   }
 }
