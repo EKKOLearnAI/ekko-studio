@@ -1584,12 +1584,18 @@ function piMcpConfig(profile: string, runTokenFile: string | undefined, ...exter
     .map((item) => {
     const server = managedHermesMcpServerConfig('pi', profile, item.name, item.toolset, runTokenFile)
     const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
-    const interaction = item.toolset === 'plan'
+    // plan and use are always-on direct tools. The use toolset collapses all
+    // Studio operations (including session_get / session_messages) into a
+    // single toolset meta-tool, so registering it directly costs one tool, not
+    // dozens. Pi previously demoted `use` to lazy/non-direct, which left
+    // session-readability dependent on the model remembering to lazy-load it -
+    // the source of "can sometimes, sometimes cannot read a session id".
+    const directToolset = item.toolset === 'plan' || item.toolset === 'use'
     return [item.name, {
       ...server,
-      lifecycle: interaction ? 'eager' : 'lazy',
-      directTools: interaction,
-      toolPrefix: interaction ? 'server' : 'none',
+      lifecycle: directToolset ? 'eager' : 'lazy',
+      directTools: directToolset,
+      toolPrefix: directToolset ? 'server' : 'none',
       requestTimeoutMs,
     }]
   }))
@@ -1617,11 +1623,15 @@ export function getCodingAgentManagedMcpServerConfigs(
     const server = managedHermesMcpServerConfig(id, profile || 'default', item.name, item.toolset, runTokenFile)
     if (id === 'pi') {
       const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
+      // plan and use are always-on direct tools (use collapses all Studio
+      // operations into one toolset meta-tool, so direct registration costs a
+      // single tool). See piMcpConfig for the session-readability rationale.
+      const directToolset = item.toolset === 'plan' || item.toolset === 'use'
       return [item.name, {
         ...server,
-        lifecycle: item.toolset === 'plan' ? 'eager' : 'lazy',
-        directTools: item.toolset === 'plan',
-        toolPrefix: item.toolset === 'plan' ? 'server' : 'none',
+        lifecycle: directToolset ? 'eager' : 'lazy',
+        directTools: directToolset,
+        toolPrefix: directToolset ? 'server' : 'none',
         requestTimeoutMs,
         ...(disabledManaged.has(item.name) ? { enabled: false } : {}),
       }]
@@ -1644,6 +1654,26 @@ export function getCodingAgentManagedMcpServerConfigs(
   }))
 }
 
+function piManagedServerToolset(name: string, server: Record<string, unknown>): string {
+  // Authoritative source is the injected env; fall back to the managed server
+  // name suffix (ekko-studio-use -> use, ekko-studio-interaction -> plan).
+  const env = (server.env && typeof server.env === 'object' ? server.env : {}) as Record<string, unknown>
+  if (typeof env.HERMES_MCP_TOOLSET === 'string' && env.HERMES_MCP_TOOLSET) return env.HERMES_MCP_TOOLSET
+  const bare = String(name).replace(/^mcp__/, '')
+  const suffix = /-(api|browser|devices|use|interaction|plan)$/.exec(bare)?.[1]
+  if (suffix) return suffix === 'interaction' ? 'plan' : suffix
+  return ''
+}
+
+function piManagedServerIsDirectTool(name: string, server: Record<string, unknown>): boolean {
+  // The use and plan toolsets collapse their operations into a single toolset
+  // meta-tool, so they register as direct always-on tools. api/browser/devices
+  // stay lazy to keep the tool surface small. Decided from the toolset, never
+  // from the persisted lifecycle/directTools (those are what we are fixing).
+  const toolset = piManagedServerToolset(name, server)
+  return toolset === 'use' || toolset === 'plan'
+}
+
 function migratePiRuntimeMcpContent(content: string): string | null {
   try {
     const parsed = JSON.parse(content)
@@ -1663,11 +1693,18 @@ function migratePiRuntimeMcpContent(content: string): string | null {
     }
     delete parsed.settings.freezeDirectTools
 
-    for (const [, server] of managedServers) {
+    for (const [name, server] of managedServers) {
       if (!server || typeof server !== 'object' || Array.isArray(server)) continue
       const managedServer = server as Record<string, unknown>
-      managedServer.lifecycle = 'lazy'
-      managedServer.directTools = false
+      if (piManagedServerIsDirectTool(name, managedServer)) {
+        managedServer.lifecycle = 'eager'
+        managedServer.directTools = true
+        managedServer.toolPrefix = 'server'
+      } else {
+        managedServer.lifecycle = 'lazy'
+        managedServer.directTools = false
+        managedServer.toolPrefix = 'none'
+      }
     }
 
     const migrated = `${JSON.stringify(parsed, null, 2)}\n`
