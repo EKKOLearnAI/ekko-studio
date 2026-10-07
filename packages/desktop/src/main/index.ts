@@ -51,6 +51,7 @@ import { migratePendingLegacyWindowsData } from './legacy-windows-data-migration
 import { createDesktopAppLifecycle } from './app-lifecycle'
 import { configureDesktopIdentity } from './desktop-identity'
 import { migrateWindowsLoginItem } from './login-item-migration'
+import { getOpenAtLogin as readOpenAtLogin, setOpenAtLogin as writeOpenAtLogin, refreshLinuxLoginItem } from './login-item-settings'
 
 configureDesktopIdentity(app)
 
@@ -321,23 +322,17 @@ function hasQuitRequest(data: unknown): boolean {
     && (data as { quit?: unknown }).quit === true
 }
 
-function loginItemOptions() {
-  return {
-    path: process.execPath,
-    args: ['--hidden'],
+function getOpenAtLogin(): boolean {
+  try {
+    return readOpenAtLogin(app)
+  } catch (error) {
+    console.warn('[tray] failed to read the login item:', error)
+    return false
   }
 }
 
-function getOpenAtLogin(): boolean {
-  return app.getLoginItemSettings(loginItemOptions()).openAtLogin
-}
-
 function setOpenAtLogin(openAtLogin: boolean) {
-  app.setLoginItemSettings({
-    ...loginItemOptions(),
-    openAtLogin,
-    openAsHidden: true,
-  })
+  writeOpenAtLogin(app, openAtLogin)
 }
 
 async function clearWebLoginSession() {
@@ -447,10 +442,17 @@ function updateTrayMenu() {
     {
       label: t('tray.openAtLogin'),
       type: 'checkbox',
+      enabled: process.platform !== 'linux' || app.isPackaged,
       checked: getOpenAtLogin(),
       click: (item) => {
-        setOpenAtLogin(item.checked)
-        updateTrayMenu()
+        try {
+          setOpenAtLogin(item.checked)
+        } catch (error) {
+          console.error('[tray] failed to change the login item:', error)
+          dialog.showErrorBox(t('tray.openAtLoginFailedTitle'), `${t('tray.openAtLoginFailedMessage')}\n\n${String(error instanceof Error ? error.message : error)}`)
+        } finally {
+          updateTrayMenu()
+        }
       },
     },
     { type: 'separator' },
@@ -1366,6 +1368,11 @@ function runDesktopApp() {
       migrateWindowsLoginItem(app, APP_USER_MODEL_ID)
     } catch (error) {
       console.warn('[desktop] failed to migrate the Windows login item:', error)
+    }
+    try {
+      refreshLinuxLoginItem(app)
+    } catch (error) {
+      console.warn('[desktop] failed to refresh the Linux login item:', error)
     }
     installMicrophonePermissionHandler()
     createTray()
