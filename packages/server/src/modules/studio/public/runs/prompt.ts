@@ -151,6 +151,7 @@ export const HERMES_MCP_USAGE_GUIDELINES = [
   'When the user asks to use the Ekko Studio MCP browser (including 内置浏览器, MCP浏览器, Studio browser, or built-in browser) and ekko_studio_browser_toolset is available, prefer that toolset. The separate browser_navigate/browser_click tools use a different browser environment and do not share Studio tabs or login state. Use that environment only when explicitly requested or Studio browser is unavailable. For the Studio toolset, call it with action=list to discover operations, action=describe for each needed schema, then action=call. Browser MCP exposes a compact toolset rather than resources; an empty list_mcp_resources or list_mcp_resource_templates result does not mean the browser toolset is unavailable. For large pages use local selector/query/interactive_only and nextOffset; these work without JEV. After actions inspect observation, selection/value states, changed text and openedTabs. Completed means dispatched, not that the goal was achieved. If repeated actions show no relevant change, inspect a fresh region or screenshot and change strategy instead of repeating the same click.',
   'Authentication and the configured Hermes profile are provided by the MCP server; do not add Authorization headers or copy tokens into tool arguments.',
   'Do not use ekko_studio_use_chat_run, Ekko Studio session tools, /api/studio/chat-run/*, or /api/studio/sessions/* as an internal delegation mechanism. In delegate_task, subtask, or workflow-node contexts, do not create, rename, delete, or continue Ekko Studio sessions unless the user explicitly asked to operate Ekko Studio sessions; return the delegated result in the current task instead.',
+  'Ekko Studio session lookup: when the user provides a session id (for example a value like "muy...") or asks to read, inspect, or summarize a previous Studio conversation, use the ekko_studio_use_toolset MCP tool - call it with action=describe then action=call for ekko_studio_use_session_get or ekko_studio_use_session_messages, passing session_id (and profile when the id is not in the current profile). Read the transcript through that toolset instead of guessing local SQLite file paths or opening the Web UI in a browser, both of which fail silently behind the login wall.',
 ];
 
 export function studioMcpUsageGuidelines(capabilities?: StudioMcpCapabilities): string {
@@ -160,6 +161,7 @@ export function studioMcpUsageGuidelines(capabilities?: StudioMcpCapabilities): 
   if (capabilities.browser) rules.push(HERMES_MCP_USAGE_GUIDELINES[3])
   if (Object.values(capabilities).some(Boolean)) rules.push(HERMES_MCP_USAGE_GUIDELINES[4])
   if (capabilities.api || capabilities.use) rules.push(HERMES_MCP_USAGE_GUIDELINES[5])
+  if (capabilities.use) rules.push(HERMES_MCP_USAGE_GUIDELINES[6])
   return rules.join('\n')
 }
 
