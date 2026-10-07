@@ -66,7 +66,10 @@ function linuxExec(options: LoginItemOptions): string {
   // Exec quoting is followed by desktop-entry string escaping, not shell quoting.
   // https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html
   const quoted = executable.replace(/(["`$\\])/g, '\\$1').replace(/%/g, '%%')
-  return `"${quoted.replace(/\\/g, '\\\\').replace(/\t/g, '\\t')}" --hidden`
+  // GIO validates the executable before expanding %% field codes. Keep a path
+  // containing a literal percent in an argument so that validation can succeed.
+  const launcher = executable.includes('%') ? '/usr/bin/env -- ' : ''
+  return `${launcher}"${quoted.replace(/\\/g, '\\\\').replace(/\t/g, '\\t')}" --hidden`
 }
 
 function writeAutostartEntry(options: LoginItemOptions, contents: string): void {

@@ -110,25 +110,26 @@ describe('Linux login items', () => {
     const { app, options, path } = fixture()
     options.env = { APPIMAGE: '/home/user/Ekko 100% "quoted" $cash \\ `tick`.AppImage' }
     setOpenAtLogin(app, true, options)
-    expect(readFileSync(path, 'utf8')).toContain(String.raw`Exec="/home/user/Ekko 100%% \\"quoted\\" \\$cash \\\\ `
+    expect(readFileSync(path, 'utf8')).toContain(String.raw`Exec=/usr/bin/env -- "/home/user/Ekko 100%% \\"quoted\\" \\$cash \\\\ `
       + '\\\\`tick\\\\`.AppImage" --hidden\n')
   })
 
-  it.skipIf(process.platform !== 'linux' || spawnSync('gio', ['version'], { stdio: 'ignore' }).status !== 0)(
-    'launches the saved entry through the Linux desktop launcher with the exact executable and arguments', async () => {
-      const { app, options, path } = fixture()
-      const executable = join(options.homeDir, '应用 Ekko 100% %f "quoted" $cash \\ `tick`.AppImage')
-      const outputPath = join(options.homeDir, 'launched-args')
-      writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n" "$@" > "$EKKO_AUTOSTART_TEST_OUTPUT"\n', { mode: 0o755 })
-      options.env = { APPIMAGE: executable }
-      setOpenAtLogin(app, true, options)
-      execFileSync('gio', ['launch', path], {
-        env: { ...process.env, EKKO_AUTOSTART_TEST_OUTPUT: outputPath },
-        timeout: 5000,
-      })
-      await vi.waitFor(() => expect(readFileSync(outputPath, 'utf8')).toBe('--hidden\n'))
-    },
-  )
+  it.skipIf(process.platform !== 'linux' || spawnSync('gio', ['version'], { stdio: 'ignore' }).status !== 0).each([
+    '应用 Ekko Studio.AppImage',
+    '应用 Ekko 100% %f "quoted" $cash \\ `tick`.AppImage',
+  ])('launches %s through the Linux desktop launcher with the exact executable and arguments', async name => {
+    const { app, options, path } = fixture()
+    const executable = join(options.homeDir, name)
+    const outputPath = join(options.homeDir, 'launched-args')
+    writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n" "$@" > "$EKKO_AUTOSTART_TEST_OUTPUT"\n', { mode: 0o755 })
+    options.env = { APPIMAGE: executable }
+    setOpenAtLogin(app, true, options)
+    execFileSync('gio', ['launch', path], {
+      env: { ...process.env, EKKO_AUTOSTART_TEST_OUTPUT: outputPath },
+      timeout: 5000,
+    })
+    await vi.waitFor(() => expect(readFileSync(outputPath, 'utf8')).toBe('--hidden\n'))
+  })
 
   it('surfaces filesystem failures instead of claiming the setting was saved', () => {
     const { app, options } = fixture()
