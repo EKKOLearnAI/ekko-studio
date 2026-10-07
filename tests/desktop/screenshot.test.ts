@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   getDisplays: vi.fn(),
   permission: vi.fn(() => 'granted'),
   load: vi.fn(),
+  portal: vi.fn(),
+  probePortal: vi.fn(),
 }))
 
 vi.mock('electron', async () => {
@@ -27,12 +29,14 @@ vi.mock('electron', async () => {
     setMenu = vi.fn()
     loadURL = state.load
     showInactive = vi.fn()
+    show = vi.fn()
     hide = vi.fn()
     focus = vi.fn()
     isDestroyed = () => this.destroyed
     destroy = () => { this.destroyed = true; this.emit('closed') }
   }
   return {
+    app: Object.assign(new EventEmitter(), { commandLine: { getSwitchValue: () => '' } }),
     BrowserWindow: Overlay,
     nativeImage: { createFromBuffer: () => ({ toBitmap: () => Buffer.from([149, 83, 17, 255]) }) },
     desktopCapturer: { getSources: state.getSources },
@@ -46,8 +50,13 @@ vi.mock('electron', async () => {
   }
 })
 
-import { ipcMain, screen } from 'electron'
-import { cancelRegionScreenshot, captureRegionScreenshot, parseScreenshotRequest, screenshotPngSize } from '../../packages/desktop/src/main/screenshot'
+vi.mock('../../packages/desktop/src/main/screenshot-portal', () => ({
+  capturePortalScreenshot: state.portal,
+  probeScreenshotPortal: state.probePortal,
+}))
+
+import { app, ipcMain, screen } from 'electron'
+import { cancelRegionScreenshot, captureRegionScreenshot, getScreenshotCapabilities, parseScreenshotRequest, screenshotPngSize } from '../../packages/desktop/src/main/screenshot'
 import { disposeScreenshotOverlays } from '../../packages/desktop/src/main/screenshot-windows'
 import { screenshotBitmap } from '../../packages/desktop/src/main/screenshot-bitmap'
 
@@ -57,6 +66,7 @@ const request = { requestId: 'capture-1', labels }
 function owner() {
   return Object.assign(new EventEmitter(), {
     webContents: { id: 1 }, isDestroyed: () => false, isVisible: () => true,
+    isMinimized: vi.fn(() => false),
     hide: vi.fn(), showInactive: vi.fn(), focus: vi.fn(),
     getOpacity: vi.fn(() => 0.85), setOpacity: vi.fn(),
   }) as unknown as BrowserWindow
@@ -88,14 +98,23 @@ async function openCapture(hideWindows = false) {
 }
 
 function emit(channel: string, overlay: any, region?: unknown, frame = overlay.webContents.mainFrame) {
+  if (channel === 'hermes-desktop:screenshot-overlay-submit' && region && typeof region === 'object') {
+    const init = overlay.webContents.send.mock.calls.find(([name]: string[]) => name === 'hermes-desktop:screenshot-overlay-init')?.[1]
+    region = { frameId: init?.frameId, ...region }
+  }
   ipcMain.emit(channel, { sender: overlay.webContents, senderFrame: frame }, region)
 }
 
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!
+function platform(value: string) { Object.defineProperty(process, 'platform', { ...platformDescriptor, value }) }
+
 beforeEach(() => {
+  platform('darwin')
   vi.useFakeTimers()
   state.overlays.length = 0
   state.permission.mockReturnValue('granted')
   state.load.mockResolvedValue(undefined)
+  state.probePortal.mockResolvedValue({ version: 2 })
   state.getDisplays.mockReturnValue([
     { id: 1, bounds: { x: 0, y: 0, width: 1440, height: 900 }, size: { width: 1440, height: 900 }, scaleFactor: 2 },
     { id: 2, bounds: { x: -1920, y: 0, width: 1920, height: 1080 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 },
@@ -111,6 +130,8 @@ afterEach(() => {
   disposeScreenshotOverlays()
   vi.useRealTimers()
   vi.clearAllMocks()
+  Object.defineProperty(process, 'platform', platformDescriptor)
+  vi.unstubAllEnvs()
 })
 
 describe('desktop region screenshots', () => {
@@ -137,7 +158,7 @@ describe('desktop region screenshots', () => {
     const sources = await state.getSources.mock.results[0].value
     for (const source of sources) expect(source.thumbnail.toPNG).not.toHaveBeenCalled()
     expect(state.overlays[0].webContents.send).toHaveBeenCalledWith('hermes-desktop:screenshot-overlay-init', expect.objectContaining({ bitmap: expect.objectContaining({ width: 2880, height: 1800 }), requestId: request.requestId }))
-    emit('hermes-desktop:screenshot-overlay-submit', state.overlays[0], { requestId: request.requestId, region: { x: 10, y: 20, width: 100, height: 80 }, png: png(200, 160) })
+    emit('hermes-desktop:screenshot-overlay-submit', state.overlays[0], { requestId: request.requestId, region: { x: 20, y: 40, width: 200, height: 160 }, png: png(200, 160) })
     await expect(result).resolves.toMatchObject({ width: 200, height: 160, dataUrl: expect.stringMatching(/^data:image\/png/) })
     expect(state.overlays.every(overlay => !overlay.destroyed)).toBe(true)
     expect(state.overlays[0].hide).toHaveBeenCalledOnce()
@@ -180,6 +201,7 @@ describe('desktop region screenshots', () => {
   it('restores opacity when cancelled during the compositor wait and does not take a screenshot', async () => {
     const window = owner()
     const result = captureRegionScreenshot(window, { ...request, hideWindows: true }, [window])
+    await vi.advanceTimersByTimeAsync(0)
     expect(window.setOpacity).toHaveBeenLastCalledWith(0)
     cancelRegionScreenshot(1, request.requestId)
     await vi.advanceTimersByTimeAsync(34)
@@ -249,7 +271,9 @@ describe('desktop region screenshots', () => {
 
   it('does not allow overlapping capture operations', async () => {
     const { window, result } = await openCapture()
-    await expect(captureRegionScreenshot(window, { ...request, requestId: 'second' }, [window])).rejects.toThrow('SCREENSHOT_BUSY')
+    const beforeHide = vi.fn()
+    await expect(captureRegionScreenshot(window, { ...request, requestId: 'second', hideWindows: true }, [window], beforeHide)).rejects.toThrow('SCREENSHOT_BUSY')
+    expect(beforeHide).not.toHaveBeenCalled()
     cancelRegionScreenshot(1, request.requestId)
     await expect(result).resolves.toBeNull()
   })
@@ -301,5 +325,135 @@ describe('desktop region screenshots', () => {
     const html = screenshotOverlayHtml('data:image/png;base64,aA==', { ...labels, hint: '</script><img src=x>' })
     expect(html).not.toContain('</script><img src=x>')
     expect(html).toContain('\\u003c/script>')
+  })
+
+  it('uses Windows window options and preserves hidden or minimized Studio windows', async () => {
+    platform('win32')
+    const window = owner(), minimized = owner(), invisible = owner()
+    vi.mocked(minimized.isMinimized).mockReturnValue(true)
+    invisible.isVisible = () => false
+    const result = captureRegionScreenshot(window, { ...request, hideWindows: true }, [window, window, minimized, invisible])
+    await vi.advanceTimersByTimeAsync(34)
+    expect(window.hide).toHaveBeenCalledOnce()
+    expect(minimized.hide).not.toHaveBeenCalled()
+    expect(invisible.hide).not.toHaveBeenCalled()
+    for (const entry of state.overlays) {
+      expect(entry.options.type).toBeUndefined()
+      expect(entry.setVisibleOnAllWorkspaces).not.toHaveBeenCalled()
+    }
+    cancelRegionScreenshot(1, request.requestId)
+    await expect(result).resolves.toBeNull()
+    expect(minimized.showInactive).not.toHaveBeenCalled()
+    expect(invisible.showInactive).not.toHaveBeenCalled()
+  })
+
+  it('edits unmapped sources as independent images, with no guessed desktop bounds', async () => {
+    const sources = [{ display_id: '', thumbnail: image(800, 600) }, { display_id: '', thumbnail: image(640, 480) }]
+    state.getSources.mockResolvedValueOnce(sources)
+    const { result } = await openCapture()
+    const editor = state.overlays.at(-1)
+    const init = editor.webContents.send.mock.calls.find(([name]: string[]) => name === 'hermes-desktop:screenshot-overlay-init')[1]
+    expect(init.presentation).toBe('image-editor')
+    expect(init.frames).toHaveLength(2)
+    expect(init.frames.every((frame: any) => !frame.desktopBounds && !frame.displayId)).toBe(true)
+    expect(editor.show).toHaveBeenCalledOnce()
+    ;(screen as unknown as EventEmitter).emit('display-removed')
+    ;(screen as unknown as EventEmitter).emit('display-metrics-changed', {}, {}, ['bounds'])
+    emit('hermes-desktop:screenshot-overlay-submit', editor, { requestId: request.requestId, frameId: init.frames[1].id, region: { x: 20, y: 30, width: 200, height: 100 }, png: png(200, 100) })
+    await expect(result).resolves.toMatchObject({ width: 200, height: 100 })
+  })
+
+  it('cancels a hung native capture promptly and ignores its late result', async () => {
+    let resolve!: (sources: unknown[]) => void
+    state.getSources.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const window = owner()
+    const result = captureRegionScreenshot(window, request, [window])
+    await vi.advanceTimersByTimeAsync(0)
+    cancelRegionScreenshot(1, request.requestId)
+    await expect(result).resolves.toBeNull()
+    resolve([{ display_id: '1', thumbnail: image(800, 600) }])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(state.overlays.every(entry => !entry.webContents.send.mock.calls.length)).toBe(true)
+  })
+
+  it('times out native capture and restores opacity without waiting for the callback', async () => {
+    state.getSources.mockImplementationOnce(() => new Promise(() => {}))
+    const window = owner()
+    const result = captureRegionScreenshot(window, { ...request, hideWindows: true }, [window])
+    const rejected = expect(result).rejects.toThrow('SCREENSHOT_TIMEOUT')
+    await vi.advanceTimersByTimeAsync(10_034)
+    await rejected
+    expect(window.setOpacity).toHaveBeenLastCalledWith(0.85)
+    expect(window.showInactive).toHaveBeenCalledOnce()
+    expect(app.listenerCount('before-quit')).toBe(0)
+  })
+
+  it('blocks Linux hidden capture explicitly, without opacity calls or normal capture fallback', async () => {
+    platform('linux')
+    vi.stubEnv('XDG_SESSION_TYPE', 'x11')
+    vi.stubEnv('DISPLAY', ':0')
+    vi.stubEnv('WAYLAND_DISPLAY', '')
+    const window = owner()
+    const beforeHide = vi.fn()
+    await expect(captureRegionScreenshot(window, { ...request, hideWindows: true }, [window], beforeHide)).rejects.toThrow('SCREENSHOT_HIDE_UNAVAILABLE')
+    expect(beforeHide).not.toHaveBeenCalled()
+    expect(state.getSources).not.toHaveBeenCalled()
+    expect(window.setOpacity).not.toHaveBeenCalled()
+    expect(window.hide).not.toHaveBeenCalled()
+    const { result } = await openCapture()
+    expect(state.getSources).toHaveBeenCalledOnce()
+    cancelRegionScreenshot(1, request.requestId)
+    await expect(result).resolves.toBeNull()
+  })
+
+  it('uses a Portal image in Wayland even when DISPLAY is present', async () => {
+    platform('linux')
+    vi.stubEnv('XDG_SESSION_TYPE', 'wayland')
+    vi.stubEnv('DISPLAY', ':0')
+    state.portal.mockResolvedValueOnce({ id: 'portal-frame', bitmap: { width: 20, height: 10, data: new Uint8Array(800) }, initialSelection: { x: 0, y: 0, width: 20, height: 10 } })
+    const { window, result } = await openCapture()
+    expect(state.getSources).not.toHaveBeenCalled()
+    expect(window.hide).not.toHaveBeenCalled()
+    const editor = state.overlays[0]
+    expect(editor.options.frame).not.toBe(false)
+    const init = editor.webContents.send.mock.calls[0][1]
+    expect(init).toMatchObject({ presentation: 'image-editor', frameId: 'portal-frame', initialSelection: { width: 20, height: 10 } })
+    emit('hermes-desktop:screenshot-overlay-submit', editor, { requestId: request.requestId, frameId: 'foreign-frame', region: { x: 0, y: 0, width: 20, height: 10 }, png: png(20, 10) })
+    expect(editor.hide).not.toHaveBeenCalled()
+    emit('hermes-desktop:screenshot-overlay-submit', editor, { requestId: request.requestId, region: { x: 0, y: 0, width: 20, height: 10 }, png: png(20, 10) })
+    await expect(result).resolves.toMatchObject({ width: 20, height: 10 })
+  })
+
+  it('reports an unavailable Portal and releases the active request for a retry', async () => {
+    platform('linux')
+    vi.stubEnv('XDG_SESSION_TYPE', 'wayland')
+    state.probePortal.mockRejectedValue(new Error('No portal'))
+    expect(await getScreenshotCapabilities()).toMatchObject({ capture: 'unavailable', hideWindows: false })
+    const window = owner()
+    await expect(captureRegionScreenshot(window, request, [window])).rejects.toThrow('SCREENSHOT_PORTAL_UNAVAILABLE')
+    await expect(captureRegionScreenshot(window, request, [window])).rejects.toThrow('SCREENSHOT_PORTAL_UNAVAILABLE')
+    state.probePortal.mockResolvedValue({ version: 2 })
+  })
+
+  it('cancels Portal interaction when the owner closes and ignores a late frame', async () => {
+    platform('linux')
+    vi.stubEnv('XDG_SESSION_TYPE', 'wayland')
+    state.portal.mockImplementationOnce((signal: AbortSignal) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })))
+    const window = owner()
+    const result = captureRegionScreenshot(window, request, [window])
+    await vi.advanceTimersByTimeAsync(0)
+    window.emit('closed')
+    await expect(result).resolves.toBeNull()
+    expect(state.overlays[0].show).not.toHaveBeenCalled()
+    expect(state.overlays[0].webContents.send).not.toHaveBeenCalled()
+  })
+
+  it('cancels an active editor when the app quits and restores hidden windows', async () => {
+    const { window, result } = await openCapture(true)
+    app.emit('before-quit')
+    await expect(result).resolves.toBeNull()
+    expect(window.setOpacity).toHaveBeenLastCalledWith(0.85)
+    expect(window.showInactive).toHaveBeenCalledOnce()
+    expect(app.listenerCount('before-quit')).toBe(0)
   })
 })

@@ -140,6 +140,12 @@ export interface DesktopUpdaterBridge {
 
 export interface HermesDesktopBridge {
   screenshot?: {
+    getCapabilities?: () => Promise<{
+      capture: 'electron' | 'portal-screenshot' | 'unavailable'
+      presentation: 'desktop-overlay' | 'image-editor'
+      hideWindows: boolean
+      regionSelection: 'studio' | 'system-or-studio'
+    }>
     captureRegion: (request: { requestId: string; hideWindows?: boolean; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }) => Promise<{ dataUrl: string; width: number; height: number } | null>
     cancel: (requestId: string) => Promise<boolean>
   }

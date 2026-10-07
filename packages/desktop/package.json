@@ -39,6 +39,7 @@
     "typescript": "~5.6.3"
   },
   "dependencies": {
+    "dbus-next": "0.10.2",
     "electron-updater": "^6.3.9",
     "tar": "^7.5.16"
   }

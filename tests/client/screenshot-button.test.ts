@@ -93,4 +93,38 @@ describe('screenshot composer button', () => {
     expect(wrapper.get('[role="alert"]').text()).toBe('chat.screenshot.permissionDenied')
     expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
   })
+
+  it('disables Linux hiding with an explanation while allowing ordinary screenshots', async () => {
+    const native = nativeBridge()
+    native.getCapabilities = vi.fn().mockResolvedValue({ capture: 'electron', hideWindows: false })
+    const wrapper = mount(ScreenshotButton)
+    await flushPromises()
+    expect(wrapper.getComponent(NDropdown).props('options')[0]).toMatchObject({ disabled: true, label: 'chat.screenshot.hideUnavailable' })
+    wrapper.getComponent(NDropdown).vm.$emit('select', 'hide-window')
+    await flushPromises()
+    expect(native.captureRegion).not.toHaveBeenCalled()
+    await wrapper.get('button.screenshot-button').trigger('click')
+    await flushPromises()
+    expect(native.captureRegion).toHaveBeenCalledWith(expect.objectContaining({ hideWindows: false }))
+  })
+
+  it('shows system waiting and allows cancelling an outstanding Portal request', async () => {
+    const native = nativeBridge(vi.fn(() => new Promise(() => {})))
+    native.getCapabilities = vi.fn().mockResolvedValue({ capture: 'portal-screenshot', hideWindows: false })
+    const wrapper = mount(ScreenshotButton)
+    await flushPromises()
+    await wrapper.get('button.screenshot-button').trigger('click')
+    expect(wrapper.get('[role="status"]').text()).toContain('chat.screenshot.systemWaiting')
+    await wrapper.get('[role="status"] button').trigger('click')
+    expect(native.cancel).toHaveBeenCalledWith(native.captureRegion.mock.calls[0][0].requestId)
+  })
+
+  it('explains unavailable system screenshots and disables capture', async () => {
+    const native = nativeBridge()
+    native.getCapabilities = vi.fn().mockResolvedValue({ capture: 'unavailable', hideWindows: false })
+    const wrapper = mount(ScreenshotButton)
+    await flushPromises()
+    expect(wrapper.get('button.screenshot-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.getComponent(NDropdown).props('options')[0].disabled).toBe(true)
+  })
 })

@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('screenshotOverlay', {
-  submit: (payload: { requestId: string; region: { x: number; y: number; width: number; height: number }; png: Uint8Array }) => ipcRenderer.send('hermes-desktop:screenshot-overlay-submit', payload),
+  submit: (payload: { requestId: string; frameId: string; region: { x: number; y: number; width: number; height: number }; png: Uint8Array }) => ipcRenderer.send('hermes-desktop:screenshot-overlay-submit', payload),
   ready: (requestId: string) => ipcRenderer.send('hermes-desktop:screenshot-overlay-ready', requestId),
   cancel: () => ipcRenderer.send('hermes-desktop:screenshot-overlay-cancel'),
   select: () => ipcRenderer.send('hermes-desktop:screenshot-overlay-select'),

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { NButton, NDropdown, NModal, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { desktopBridge } from '@/utils/desktop-bridge'
@@ -12,12 +12,28 @@ const screenshot = desktop?.isDesktop ? desktop.screenshot : undefined
 const available = typeof screenshot?.captureRegion === 'function' && typeof screenshot.cancel === 'function'
 const busy = ref(false)
 const error = ref('')
-const options = computed(() => [{ key: 'hide-window', label: t('chat.screenshot.hideWindow'), disabled: busy.value || props.disabled }])
+const capabilities = ref<{ capture: string; hideWindows: boolean } | null>(null)
+const checking = ref(typeof screenshot?.getCapabilities === 'function')
+const supported = computed(() => capabilities.value?.capture !== 'unavailable')
+const canHide = computed(() => capabilities.value?.hideWindows ?? !checking.value)
+const options = computed(() => [{
+  key: 'hide-window',
+  label: t(capabilities.value?.hideWindows === false ? 'chat.screenshot.hideUnavailable' : 'chat.screenshot.hideWindow'),
+  disabled: busy.value || props.disabled || checking.value || !canHide.value || !supported.value,
+}])
 let requestId: string | null = null
 let disposed = false
 
+onMounted(async () => {
+  if (!screenshot?.getCapabilities) return
+  try { capabilities.value = await screenshot.getCapabilities() }
+  catch { capabilities.value = { capture: 'unavailable', hideWindows: false } }
+  finally { checking.value = false }
+})
+
 async function start(hideWindows = false) {
-  if (!available || !screenshot || busy.value || props.disabled) return
+  if (!available || !screenshot || busy.value || props.disabled || checking.value || !supported.value) return
+  if (hideWindows && !canHide.value) { error.value = t('chat.screenshot.hideUnavailable'); return }
   const id = crypto.randomUUID()
   requestId = id
   busy.value = true
@@ -31,7 +47,7 @@ async function start(hideWindows = false) {
         confirm: t('chat.screenshot.done'),
         cancel: t('common.cancel'),
         reset: t('chat.screenshot.reset'),
-        tools: Object.fromEntries(['select', 'rectangle', 'ellipse', 'arrow', 'pen', 'text', 'mosaic', 'undo', 'redo', 'color', 'lineWidth', 'textPlaceholder'].map(key => [key, t(`chat.screenshot.tools.${key}`)])),
+        tools: Object.fromEntries(['select', 'rectangle', 'ellipse', 'arrow', 'pen', 'text', 'mosaic', 'undo', 'redo', 'color', 'lineWidth', 'textPlaceholder', 'zoomIn', 'zoomOut', 'fit', 'source'].map(key => [key, t(`chat.screenshot.tools.${key}`)])),
       },
     })
     if (disposed || !result) return
@@ -44,6 +60,9 @@ async function start(hideWindows = false) {
     const detail = reason instanceof Error ? reason.message : String(reason)
     const key = detail.includes('SCREENSHOT_PERMISSION_DENIED') ? 'permissionDenied'
       : detail.includes('SCREENSHOT_SOURCE_UNAVAILABLE') ? 'sourceUnavailable'
+      : detail.includes('SCREENSHOT_HIDE_UNAVAILABLE') ? 'hideUnavailable'
+      : detail.includes('SCREENSHOT_PORTAL_UNAVAILABLE') ? 'systemUnavailable'
+      : detail.includes('SCREENSHOT_TIMEOUT') ? 'timedOut'
       : 'failed'
     error.value = t(`chat.screenshot.${key}`)
   } finally {
@@ -56,6 +75,10 @@ function selectOption(key: string | number) {
   if (key === 'hide-window') void start(true)
 }
 
+function cancelCurrent() {
+  if (requestId) void screenshot?.cancel(requestId).catch(() => undefined)
+}
+
 onUnmounted(() => {
   disposed = true
   if (requestId) void screenshot?.cancel(requestId).catch(() => undefined)
@@ -66,10 +89,11 @@ onUnmounted(() => {
   <span v-if="available" class="screenshot-controls">
     <NTooltip trigger="hover" :disabled="mobile || busy">
       <template #trigger>
+        <span class="screenshot-trigger">
         <NButton
           quaternary size="tiny" circle class="toolbar-icon-button screenshot-button"
-          :aria-label="t('chat.screenshot.action')"
-          :disabled="disabled || busy"
+          :aria-label="t(supported ? 'chat.screenshot.action' : 'chat.screenshot.systemUnavailable')"
+          :disabled="disabled || busy || checking || !supported"
           :loading="busy"
           @click="start(false)"
         >
@@ -80,8 +104,9 @@ onUnmounted(() => {
             </svg>
           </template>
         </NButton>
+        </span>
       </template>
-      {{ t('chat.screenshot.action') }}
+      {{ t(supported ? 'chat.screenshot.action' : 'chat.screenshot.systemUnavailable') }}
     </NTooltip>
     <NDropdown trigger="click" placement="top-start" :options="options" :disabled="disabled || busy" @select="selectOption">
       <NButton
@@ -92,6 +117,10 @@ onUnmounted(() => {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
       </NButton>
     </NDropdown>
+    <span v-if="busy && capabilities?.capture === 'portal-screenshot'" class="system-wait" role="status">
+      {{ t('chat.screenshot.systemWaiting') }}
+      <NButton size="tiny" quaternary @click="cancelCurrent">{{ t('common.cancel') }}</NButton>
+    </span>
   </span>
   <NModal
     v-if="available"
@@ -114,10 +143,19 @@ onUnmounted(() => {
   gap: 1px;
 }
 
+.screenshot-trigger { display: inline-flex; }
+
 .screenshot-options-button {
   width: 16px;
   min-width: 16px;
   height: 24px;
   padding: 0;
+}
+
+.system-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
 }
 </style>

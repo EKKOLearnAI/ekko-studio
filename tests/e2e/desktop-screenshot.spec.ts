@@ -252,3 +252,97 @@ test('web composer has no screenshot entry', async ({ page }) => {
   await expect(page.locator('.input-textarea')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Take screenshot' })).toHaveCount(0)
 })
+
+async function openImageEditor(page: Page, initialSelection = true) {
+  await openOverlay(page)
+  await page.evaluate(initial => {
+    const source = document.getElementById('screen') as HTMLCanvasElement
+    const canvas = document.createElement('canvas')
+    canvas.width = 2000; canvas.height = 1400
+    canvas.getContext('2d')!.drawImage(source, 0, 0, 2000, 1400)
+    ;(window as any).__INIT_SCREENSHOT__({
+      requestId: 'portal', frameId: 'image-frame', presentation: 'image-editor',
+      bitmap: { width: 2000, height: 1400, data: canvas.getContext('2d')!.getImageData(0, 0, 2000, 1400).data },
+      ...(initial ? { initialSelection: { x: 0, y: 0, width: 2000, height: 1400 } } : {}),
+      labels: { hint: '框选', confirm: '完成', reset: '重选', cancel: '取消', tools: { zoomIn: '放大', zoomOut: '缩小', fit: '适应窗口', source: '截图画面' } },
+    })
+  }, initialSelection)
+  await expect(page.locator('#view-controls')).toBeVisible()
+  await page.waitForFunction(() => (document.getElementById('screen') as HTMLCanvasElement).width === 2000)
+}
+
+async function imageDrag(page: Page, from: [number, number], to: [number, number]) {
+  const bounds = (await page.locator('#stage').boundingBox())!
+  const convert = ([x, y]: [number, number]): [number, number] => [bounds.x + x * bounds.width / 2000, bounds.y + y * bounds.height / 1400]
+  await drag(page, convert(from), convert(to))
+}
+
+test('image editor ignores margins and keeps full-resolution marks through zoom, scrolling, and resize', async ({ page }) => {
+  await openImageEditor(page)
+  await expect(page.locator('#size')).toHaveText('2000 × 1400')
+  await drag(page, [8, 80], [30, 120])
+  await expect(page.locator('#size')).toHaveText('2000 × 1400')
+  await page.locator('#rectangle').click()
+  await imageDrag(page, [400, 500], [1000, 800])
+  await expect.poll(() => annotationPixel(page, 400, 650)).toEqual([255, 69, 58, 255])
+  await page.locator('#zoom-in').click()
+  await page.setViewportSize({ width: 800, height: 600 })
+  await page.locator('#viewport').evaluate(node => { node.scrollTop = 120; node.scrollLeft = 40 })
+  await expect.poll(() => annotationPixel(page, 400, 650)).toEqual([255, 69, 58, 255])
+  await page.locator('#undo').click()
+  await expect.poll(() => annotationPixel(page, 400, 650)).toEqual([0, 0, 0, 0])
+  await page.locator('#redo').click()
+  await page.locator('#confirm').click()
+  await expect.poll(() => page.evaluate(() => (window as any).__SCREENSHOT__.submitted.length)).toBe(1)
+  const output = await page.evaluate(async () => {
+    const payload = (window as any).__SCREENSHOT__.submitted[0]
+    const bitmap = await createImageBitmap(new Blob([payload.png], { type: 'image/png' }))
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width; canvas.height = bitmap.height
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0)
+    return { frameId: payload.frameId, width: bitmap.width, height: bitmap.height, pixel: Array.from(canvas.getContext('2d')!.getImageData(400, 650, 1, 1).data) }
+  })
+  expect(output).toEqual({ frameId: 'image-frame', width: 2000, height: 1400, pixel: [255, 69, 58, 255] })
+})
+
+test('image selection stays in original pixels after fitting to a different window size', async ({ page }) => {
+  await openImageEditor(page, false)
+  await imageDrag(page, [200, 200], [1000, 800])
+  await expect(page.locator('#size')).toHaveText('800 × 600')
+  await page.setViewportSize({ width: 700, height: 520 })
+  await expect(page.locator('#size')).toHaveText('800 × 600')
+  await page.locator('#confirm').click()
+  await expect.poll(() => page.evaluate(() => (window as any).__SCREENSHOT__.submitted.length)).toBe(1)
+  const result = await page.evaluate(async () => {
+    const payload = (window as any).__SCREENSHOT__.submitted[0]
+    const bitmap = await createImageBitmap(new Blob([payload.png], { type: 'image/png' }))
+    return { width: bitmap.width, height: bitmap.height, region: payload.region }
+  })
+  expect(result.width).toBe(800)
+  expect(result.height).toBe(600)
+  expect(result.region.x).toBeCloseTo(200)
+  expect(result.region.y).toBeCloseTo(200)
+})
+
+test('image editor switches independent captured images and exports only the selected frame', async ({ page }) => {
+  await openImageEditor(page)
+  await page.evaluate(() => {
+    const bitmap = (width: number, height: number) => ({ width, height, data: new Uint8Array(width * height * 4).fill(255) })
+    ;(window as any).__INIT_SCREENSHOT__({
+      requestId: 'sources', frameId: 'a', presentation: 'image-editor', bitmap: bitmap(500, 400),
+      frames: [{ id: 'a', bitmap: bitmap(500, 400) }, { id: 'b', bitmap: bitmap(300, 200), initialSelection: { x: 0, y: 0, width: 300, height: 200 } }],
+      labels: { hint: '框选', confirm: '完成', reset: '重选', cancel: '取消' },
+    })
+  })
+  await expect(page.locator('#source')).toBeVisible()
+  await page.locator('#source').selectOption('b')
+  await expect(page.locator('#size')).toHaveText('300 × 200')
+  await page.locator('#confirm').click()
+  await expect.poll(() => page.evaluate(() => (window as any).__SCREENSHOT__.submitted.length)).toBe(1)
+  const result = await page.evaluate(async () => {
+    const payload = (window as any).__SCREENSHOT__.submitted[0]
+    const bitmap = await createImageBitmap(new Blob([payload.png], { type: 'image/png' }))
+    return { frameId: payload.frameId, width: bitmap.width, height: bitmap.height }
+  })
+  expect(result).toEqual({ frameId: 'b', width: 300, height: 200 })
+})

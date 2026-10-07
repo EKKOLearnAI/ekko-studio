@@ -2,10 +2,11 @@
 export function installScreenshotEditor() {
   type Point = { x: number; y: number }
   type Rect = Point & { width: number; height: number }
-  type Mark = { tool: string; color: string; width: number; start: Point; end: Point; points: Point[]; text?: string }
-  type Payload = { requestId: string; bitmap?: { data: Uint8Array; width: number; height: number }; dataUrl?: string; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }
+  type Mark = { tool: string; color: string; width: number; start: Point; end: Point; points: Point[]; text?: string; fontSize?: number }
+  type Frame = { id: string; bitmap: { data: Uint8Array; width: number; height: number }; initialSelection?: Rect }
+  type Payload = { requestId: string; frameId?: string; presentation?: 'desktop-overlay' | 'image-editor'; initialSelection?: Rect; frames?: Frame[]; bitmap?: { data: Uint8Array; width: number; height: number }; dataUrl?: string; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }
   const api = (window as unknown as { screenshotOverlay: {
-    submit: (value: { requestId: string; region: Rect; png: Uint8Array }) => void
+    submit: (value: { requestId: string; frameId: string; region: Rect; png: Uint8Array }) => void
     cancel: () => void
     select: () => void
     ready?: (requestId: string) => void
@@ -14,6 +15,10 @@ export function installScreenshotEditor() {
     onClear?: (callback: () => void) => void
   } }).screenshotOverlay
   const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
+  const viewport = element<HTMLDivElement>('viewport')
+  const stage = element<HTMLDivElement>('stage')
+  const viewControls = element<HTMLDivElement>('view-controls')
+  const sourceSelect = element<HTMLSelectElement>('source')
   const image = element<HTMLCanvasElement>('screen')
   const canvas = element<HTMLCanvasElement>('annotations')
   const context = canvas.getContext('2d')!
@@ -33,13 +38,33 @@ export function installScreenshotEditor() {
   let textPoint: Point | null = null
   let drag: { start: Point; mode: string; edge: string; original: Rect | null } | null = null
   let requestId = ''
+  let frameId = ''
+  let presentation = 'desktop-overlay'
+  let zoom = 1
+  let fit = true
+  let currentPayload: Payload | undefined
   let imageReady = false
   let exporting = false
   let paintFrame = 0
   let generation = 0
 
   function point(event: PointerEvent): Point {
-    return { x: clamp(event.clientX, innerWidth), y: clamp(event.clientY, innerHeight) }
+    const bounds = stage.getBoundingClientRect()
+    return { x: clamp(Math.round((event.clientX - bounds.left) * image.width / bounds.width), image.width), y: clamp(Math.round((event.clientY - bounds.top) * image.height / bounds.height), image.height) }
+  }
+  function screenPoint(p: Point): Point {
+    const bounds = stage.getBoundingClientRect()
+    return { x: bounds.left + p.x * bounds.width / image.width, y: bounds.top + p.y * bounds.height / image.height }
+  }
+  function pixelWidth() { return width * image.width / stage.getBoundingClientRect().width }
+  function layout() {
+    if (presentation === 'image-editor') {
+      if (fit) zoom = Math.min(1, Math.max(0.01, Math.min((viewport.clientWidth - 48) / image.width, (viewport.clientHeight - 48) / image.height)))
+      stage.style.width = `${image.width * zoom}px`
+      stage.style.height = `${image.height * zoom}px`
+      element<HTMLSpanElement>('zoom-value').textContent = `${Math.round(zoom * 100)}%`
+    } else { stage.style.width = '100%'; stage.style.height = '100%' }
+    render()
   }
   function inside(p: Point) {
     return !!rect && p.x >= rect.x && p.x <= rect.x + rect.width && p.y >= rect.y && p.y <= rect.y + rect.height
@@ -74,7 +99,7 @@ export function installScreenshotEditor() {
       if (mark.points.length === 1) ctx.lineTo(mark.points[0].x + 0.01, mark.points[0].y)
       ctx.stroke()
     } else if (mark.tool === 'text') {
-      const fontSize = 16 + mark.width * 2
+      const fontSize = mark.fontSize || 16 + mark.width * 2
       ctx.font = `${fontSize}px system-ui, sans-serif`
       ctx.textBaseline = 'top'
       for (const [index, line] of (mark.text || '').split('\n').entries()) ctx.fillText(line, mark.start.x, mark.start.y + index * fontSize * 1.3)
@@ -84,8 +109,7 @@ export function installScreenshotEditor() {
       sample.width = Math.max(1, Math.ceil(shape.width / block))
       sample.height = Math.max(1, Math.ceil(shape.height / block))
       sample.getContext('2d')!.drawImage(image,
-        shape.x * image.width / innerWidth, shape.y * image.height / innerHeight,
-        shape.width * image.width / innerWidth, shape.height * image.height / innerHeight,
+        shape.x, shape.y, shape.width, shape.height,
         0, 0, sample.width, sample.height)
       ctx.save()
       ctx.imageSmoothingEnabled = false
@@ -103,7 +127,6 @@ export function installScreenshotEditor() {
     context.clearRect(0, 0, canvas.width, canvas.height)
     if (!rect || !imageReady) return
     context.save()
-    context.scale(canvas.width / innerWidth, canvas.height / innerHeight)
     context.beginPath()
     context.rect(rect.x, rect.y, rect.width, rect.height)
     context.clip()
@@ -123,15 +146,18 @@ export function installScreenshotEditor() {
     document.body.dataset.tool = tool
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-tool]')) button.setAttribute('aria-pressed', String(button.dataset.tool === tool))
     if (rect) {
-      Object.assign(selection.style, { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` })
+      const bounds = stage.getBoundingClientRect()
+      const sx = bounds.width / image.width, sy = bounds.height / image.height
+      Object.assign(selection.style, { left: `${rect.x * sx}px`, top: `${rect.y * sy}px`, width: `${rect.width * sx}px`, height: `${rect.height * sy}px` })
       const size = element<HTMLSpanElement>('size')
       size.textContent = `${Math.round(rect.width)} × ${Math.round(rect.height)}`
-      size.style.bottom = rect.y < 32 ? 'auto' : 'calc(100% + 8px)'
-      size.style.top = rect.y < 32 ? '8px' : 'auto'
+      const origin = screenPoint(rect)
+      size.style.bottom = origin.y < 32 ? 'auto' : 'calc(100% + 8px)'
+      size.style.top = origin.y < 32 ? '8px' : 'auto'
       if (!toolbar.hidden) {
-        toolbar.style.left = `${clamp(rect.x + rect.width - toolbar.offsetWidth, Math.max(0, innerWidth - toolbar.offsetWidth))}px`
-        let top = rect.y + rect.height + 10
-        if (top + toolbar.offsetHeight > innerHeight) top = Math.max(0, rect.y - toolbar.offsetHeight - 10)
+        toolbar.style.left = `${clamp(origin.x + rect.width * sx - toolbar.offsetWidth, Math.max(0, innerWidth - toolbar.offsetWidth))}px`
+        let top = origin.y + rect.height * sy + 10
+        if (top + toolbar.offsetHeight > innerHeight) top = Math.max(viewControls.hidden ? 0 : 48, origin.y - toolbar.offsetHeight - 10)
         toolbar.style.top = `${top}px`
       }
     }
@@ -141,7 +167,7 @@ export function installScreenshotEditor() {
     if (!textPoint) return
     const text = textEditor.value.trim()
     if (text) {
-      marks.push({ tool: 'text', color, width, start: textPoint, end: textPoint, points: [], text })
+      marks.push({ tool: 'text', color, width: pixelWidth(), fontSize: (16 + width * 2) * image.width / stage.getBoundingClientRect().width, start: textPoint, end: textPoint, points: [], text })
       undone = []
     }
     textPoint = null
@@ -165,6 +191,8 @@ export function installScreenshotEditor() {
     generation++
     imageReady = false
     requestId = ''
+    frameId = ''
+    currentPayload = undefined
     exporting = false
     reset()
     image.width = 1
@@ -176,6 +204,22 @@ export function installScreenshotEditor() {
     clear()
     const version = generation
     requestId = payload.requestId
+    frameId = payload.frameId || 'preview'
+    presentation = payload.presentation || 'desktop-overlay'
+    document.body.dataset.presentation = presentation
+    viewControls.hidden = presentation !== 'image-editor'
+    fit = true
+    viewport.scrollLeft = viewport.scrollTop = 0
+    currentPayload = payload
+    sourceSelect.replaceChildren()
+    sourceSelect.hidden = !payload.frames || payload.frames.length < 2
+    for (const [index, frame] of (payload.frames || []).entries()) {
+      const option = document.createElement('option')
+      option.value = frame.id
+      option.textContent = `${index + 1} / ${payload.frames!.length}`
+      option.selected = frame.id === frameId
+      sourceSelect.append(option)
+    }
     hint.textContent = payload.labels.hint
     for (const key of ['confirm', 'cancel', 'reset']) {
       const label = payload.labels[key as 'confirm' | 'cancel' | 'reset']
@@ -207,7 +251,8 @@ export function installScreenshotEditor() {
       imageReady = true
       canvas.width = image.width
       canvas.height = image.height
-      render()
+      rect = payload.initialSelection ? { ...payload.initialSelection } : null
+      layout()
       // Signal readiness once the pixels and overlay have reached a paint frame.
       requestAnimationFrame(() => { if (version === generation) api.ready?.(requestId) })
     } catch { if (version === generation) api.cancel() }
@@ -217,23 +262,22 @@ export function installScreenshotEditor() {
     commitText()
     const version = generation
     const region = { ...rect }
-    const sx = image.width / innerWidth, sy = image.height / innerHeight
-    const left = Math.floor(region.x * sx), top = Math.floor(region.y * sy)
-    const right = Math.min(image.width, Math.ceil((region.x + region.width) * sx))
-    const bottom = Math.min(image.height, Math.ceil((region.y + region.height) * sy))
+    const left = Math.floor(region.x), top = Math.floor(region.y)
+    const right = Math.min(image.width, Math.ceil(region.x + region.width))
+    const bottom = Math.min(image.height, Math.ceil(region.y + region.height))
     const output = document.createElement('canvas')
     output.width = right - left
     output.height = bottom - top
     const ctx = output.getContext('2d')!
     ctx.drawImage(image, left, top, output.width, output.height, 0, 0, output.width, output.height)
-    ctx.setTransform(sx, 0, 0, sy, -left, -top)
+    ctx.setTransform(1, 0, 0, 1, -left, -top)
     drawMarks(ctx)
     exporting = true
     render()
     try {
       const blob = await new Promise<Blob>((resolve, reject) => output.toBlob(value => value ? resolve(value) : reject(new Error('PNG export failed')), 'image/png'))
       const png = new Uint8Array(await blob.arrayBuffer())
-      if (version === generation) api.submit({ requestId, region, png })
+      if (version === generation) api.submit({ requestId, frameId, region, png })
     } catch { if (version === generation) { exporting = false; render() } }
   }
   function undo() { commitText(); if (marks.length) undone.push(marks.pop()!); render() }
@@ -272,7 +316,9 @@ export function installScreenshotEditor() {
   })
   document.addEventListener('pointerdown', event => {
     const target = event.target as HTMLElement
-    if (!imageReady || exporting || event.button !== 0 || target.closest('#toolbar, #text-editor')) return
+    if (!imageReady || exporting || event.button !== 0 || target.closest('#toolbar, #text-editor, #view-controls')) return
+    const bounds = stage.getBoundingClientRect()
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) return
     commitText()
     const start = point(event), edge = target.dataset.edge || ''
     if (rect && tool !== 'select') {
@@ -281,15 +327,16 @@ export function installScreenshotEditor() {
         event.preventDefault()
         textPoint = start
         textEditor.hidden = false
-        textEditor.style.left = `${start.x}px`
-        textEditor.style.top = `${start.y}px`
-        textEditor.style.width = `${Math.max(40, Math.min(260, rect.x + rect.width - start.x))}px`
+        const sx = bounds.width / image.width, sy = bounds.height / image.height
+        textEditor.style.left = `${start.x * sx}px`
+        textEditor.style.top = `${start.y * sy}px`
+        textEditor.style.width = `${Math.max(40, Math.min(260, (rect.x + rect.width - start.x) * sx))}px`
         textEditor.style.color = color
         textEditor.style.fontSize = `${16 + width * 2}px`
         textEditor.focus()
         return
       }
-      draft = { tool, color, width, start, end: start, points: [start] }
+      draft = { tool, color, width: pixelWidth(), start, end: start, points: [start] }
     } else {
       const mode = edge ? 'resize' : target.closest('#selection') && rect ? 'move' : 'draw'
       drag = { start, mode, edge, original: rect ? { ...rect } : null }
@@ -310,7 +357,7 @@ export function installScreenshotEditor() {
     if (!drag) return
     const dx = current.x - drag.start.x, dy = current.y - drag.start.y, original = drag.original!
     if (drag.mode === 'draw') rect = normalized(drag.start, current)
-    else if (drag.mode === 'move') rect = { ...original, x: clamp(original.x + dx, innerWidth - original.width), y: clamp(original.y + dy, innerHeight - original.height) }
+    else if (drag.mode === 'move') rect = { ...original, x: clamp(original.x + dx, image.width - original.width), y: clamp(original.y + dy, image.height - original.height) }
     else {
       let left = original.x, right = left + original.width, top = original.y, bottom = top + original.height
       if (drag.edge.includes('w')) left = current.x
@@ -334,6 +381,21 @@ export function installScreenshotEditor() {
     render()
   })
   document.addEventListener('pointercancel', () => { draft = null; drag = null; render() })
+  function setZoom(value: number) {
+    commitText()
+    fit = false
+    zoom = Math.max(0.01, Math.min(4, value))
+    layout()
+  }
+  element<HTMLButtonElement>('zoom-in').onclick = () => setZoom(zoom * 1.25)
+  element<HTMLButtonElement>('zoom-out').onclick = () => setZoom(zoom / 1.25)
+  element<HTMLButtonElement>('fit').onclick = () => { commitText(); fit = true; layout() }
+  sourceSelect.onchange = () => {
+    const frame = currentPayload?.frames?.find(frame => frame.id === sourceSelect.value)
+    if (frame && currentPayload) void initialize({ ...currentPayload, frameId: frame.id, bitmap: frame.bitmap, initialSelection: frame.initialSelection })
+  }
+  viewport.addEventListener('scroll', () => { commitText(); render() })
+  window.addEventListener('resize', () => { commitText(); layout() })
   const initial = (window as unknown as { __screenshotInitial?: Payload }).__screenshotInitial
   if (initial) void initialize(initial)
 }

@@ -33,8 +33,8 @@ import { resetDesktopDefaultLogin } from './desktop-login-reset'
 import { installHermesStudioCliShim, installHermesStudioMcpShim } from './cli-shim'
 import { parseHermesCliArgs, runBundledHermesCli } from './hermes-cli'
 import { installSelectionContextMenu } from './selection-context-menu'
-import { cancelRegionScreenshot, captureRegionScreenshot, parseScreenshotRequest } from './screenshot'
-import { disposeScreenshotOverlays, prepareScreenshotOverlays } from './screenshot-windows'
+import { cancelRegionScreenshot, captureRegionScreenshot, parseScreenshotRequest, getScreenshotCapabilities } from './screenshot'
+import { disposeScreenshotOverlays, warmScreenshotEditor } from './screenshot-windows'
 import { groupChatAgentLinkPopupResponse } from './group-chat-agent-popup'
 import { isTrustedDesktopAppUrl, normalizeExternalHttpUrl } from './window-open-policy'
 import {
@@ -1087,16 +1087,21 @@ function screenshotWindow(event: IpcMainInvokeEvent): BrowserWindow {
 ipcMain.handle('hermes-desktop:screenshot-capture-region', (event, request?: unknown) => {
   const target = screenshotWindow(event)
   const parsed = parseScreenshotRequest(request)
-  if (parsed.hideWindows && windowFadeTimer) {
-    cancelWindowFade()
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setOpacity(1)
-  }
   const windows = [mainWindow, petWindow, ...chatWindows.values()].filter((window): window is BrowserWindow => !!window)
-  return captureRegionScreenshot(target, parsed, windows)
+  return captureRegionScreenshot(target, parsed, windows, () => {
+    if (windowFadeTimer) {
+      cancelWindowFade()
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setOpacity(1)
+    }
+  })
 })
 ipcMain.handle('hermes-desktop:screenshot-cancel', (event, requestId?: unknown) => {
   screenshotWindow(event)
   return typeof requestId === 'string' && cancelRegionScreenshot(event.sender.id, requestId)
+})
+ipcMain.handle('hermes-desktop:screenshot-capabilities', event => {
+  screenshotWindow(event)
+  return getScreenshotCapabilities()
 })
 
 ipcMain.handle('hermes-desktop:update-get-state', event => {
@@ -1404,7 +1409,7 @@ function runDesktopApp() {
     installMicrophonePermissionHandler()
     createTray()
     await createWindow()
-    void prepareScreenshotOverlays().catch(error => console.warn('[screenshot] could not preload editor:', error))
+    void warmScreenshotEditor().catch(error => console.warn('[screenshot] could not preload editor:', error))
     app.once('will-quit', disposeScreenshotOverlays)
     await initializeDesktopBrowser().catch(error => {
       console.error('[desktop-browser] failed to initialize:', error)

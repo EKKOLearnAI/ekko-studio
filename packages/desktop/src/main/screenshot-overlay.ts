@@ -44,8 +44,8 @@ const toolIcons: Record<string, string> = {
   confirm: '<path d="m4 12 5 5L20 6"/>',
 }
 
-export function screenshotOverlayHtml(dataUrl?: string, labels?: ScreenshotOverlayLabels): string {
-  const initial = dataUrl && labels ? JSON.stringify({ requestId: 'preview', dataUrl, labels }).replace(/</g, '\\u003c') : 'null'
+export function screenshotOverlayHtml(dataUrl?: string, labels?: ScreenshotOverlayLabels, presentation: 'desktop-overlay' | 'image-editor' = 'desktop-overlay'): string {
+  const initial = dataUrl && labels ? JSON.stringify({ requestId: 'preview', frameId: 'preview', dataUrl, labels, presentation }).replace(/</g, '\\u003c') : 'null'
   const icon = (key: string) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${toolIcons[key]}</svg>`
   const button = (key: string, tool = false) => `<button id="${key}" type="button" data-label="${key}" ${tool ? `data-tool="${key}" aria-pressed="${key === 'select'}"` : ''}>${icon(key)}</button>`
   return `<!doctype html>
@@ -53,6 +53,13 @@ export function screenshotOverlayHtml(dataUrl?: string, labels?: ScreenshotOverl
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'">
 <style>
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;user-select:none;font-family:system-ui,sans-serif;cursor:crosshair}
+#viewport{position:absolute;inset:0;overflow:hidden}#stage{position:relative;width:100%;height:100%}
+body[data-presentation=image-editor]{background:#181b22}
+body[data-presentation=image-editor] #viewport{top:48px;overflow:auto}
+body[data-presentation=image-editor] #stage{margin:24px auto}
+body[data-presentation=image-editor] #hint{top:72px}
+#view-controls{position:absolute;inset:0 0 auto;height:48px;display:flex;align-items:center;justify-content:center;gap:8px;background:#20232a;color:#fff;cursor:default}
+#view-controls button{width:auto;min-width:32px;padding:0 10px}#source{background:#30343d;color:#fff;border:0;padding:4px;border-radius:4px}
 #screen,#annotations{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 #shade{position:absolute;inset:0;background:#0006;pointer-events:none}
 #hint{position:absolute;top:24px;left:50%;transform:translateX(-50%);background:#181b22ee;color:#fff;padding:12px 20px;border-radius:8px;pointer-events:none;font-size:14px}
@@ -77,8 +84,10 @@ button:hover,button:focus-visible{background:#ffffff1c;outline:1px solid #59b7ff
 #text-editor{position:absolute;min-height:38px;resize:none;max-height:180px;background:#0005;border:1px dashed #59b7ff;outline:0;color:#ff453a;padding:2px;font:24px system-ui,sans-serif;user-select:text}
 [hidden]{display:none!important}
 </style></head><body>
-<canvas id="screen"></canvas><canvas id="annotations"></canvas><div id="shade"></div><div id="hint"></div>
+<div id="viewport"><div id="stage"><canvas id="screen"></canvas><canvas id="annotations"></canvas><div id="shade"></div>
 <div id="selection" hidden><span id="size"></span>${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(edge => `<span class="handle" data-edge="${edge}"></span>`).join('')}</div>
+<textarea id="text-editor" maxlength="2000" hidden></textarea></div></div><div id="hint"></div>
+<div id="view-controls" hidden><select id="source" data-label="source" hidden></select><button id="zoom-out" data-label="zoomOut">−</button><span id="zoom-value"></span><button id="zoom-in" data-label="zoomIn">+</button><button id="fit" data-label="fit">↔</button></div>
 <div id="toolbar" hidden><div class="toolbar-row">
 ${['select', 'rectangle', 'ellipse', 'arrow', 'pen', 'text', 'mosaic'].map(key => button(key, true)).join('')}
 <span class="divider"></span>${button('undo')}${button('redo')}<span class="divider"></span>${button('reset')}${button('cancel')}
@@ -86,7 +95,6 @@ ${button('confirm')}</div>
 <div class="toolbar-row toolbar-options" data-label="color">
 ${['#ff453a', '#ff9f0a', '#ffd60a', '#30d158', '#64d2ff', '#bf5af2', '#ffffff', '#000000'].map((color, index) => `<button type="button" class="swatch" data-color="${color}" style="--swatch:${color}" aria-label="${color}" aria-pressed="${index === 0}"></button>`).join('')}
 <select id="line-width" data-label="lineWidth"><option value="2">2 px</option><option value="4" selected>4 px</option><option value="8">8 px</option><option value="12">12 px</option></select></div></div>
-<textarea id="text-editor" maxlength="2000" hidden></textarea>
 <script>window.__screenshotInitial=${initial};(${installScreenshotEditor.toString()})();</script>
 </body></html>`
 }
