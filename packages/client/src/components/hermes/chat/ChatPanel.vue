@@ -152,6 +152,26 @@ const activeWorkspacePath = computed(() => chatStore.activeSession?.workspace &&
 const TOOL_PANEL_MIN_WIDTH = 360;
 const TOOL_PANEL_DEFAULT_WIDTH = 560;
 const TOOL_PANEL_STORAGE_KEY = "hermes.chat.toolPanelWidth";
+const NEW_CHAT_AGENT_STORAGE_KEY = "hermes.chat.selectedAgent";
+
+function loadStoredNewChatAgent(): "hermes" | ChatCodingAgentId {
+  if (typeof window === "undefined" || !window.localStorage) return "ekko-agent";
+  const stored = window.localStorage.getItem(NEW_CHAT_AGENT_STORAGE_KEY);
+  if (!stored) return "ekko-agent";
+  if (stored === "hermes" || AGENT_OPTIONS.some(option => option.value === stored)) {
+    return stored as "hermes" | ChatCodingAgentId;
+  }
+  return "ekko-agent";
+}
+
+function persistStoredNewChatAgent(agent: "hermes" | ChatCodingAgentId) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(NEW_CHAT_AGENT_STORAGE_KEY, agent);
+  } catch (error) {
+    console.warn("Failed to persist selected new chat agent:", error);
+  }
+}
 const toolPanelWidth = ref(loadToolPanelWidth());
 const toolResizeStart = ref<{ x: number; width: number; deltaSign: 1 | -1 } | null>(null);
 
@@ -819,7 +839,7 @@ const headerTitle = computed(() =>
 );
 
 const showNewChatModal = ref(false);
-const newChatAgent = ref<"hermes" | ChatCodingAgentId>("ekko-agent");
+const newChatAgent = ref<"hermes" | ChatCodingAgentId>(loadStoredNewChatAgent());
 const newChatAgentMode = ref<"global" | "scoped">("scoped");
 const newChatProfile = ref<string>("default");
 const newChatProvider = ref<string>("");
@@ -1200,6 +1220,7 @@ function ensureNewChatProviderSelection() {
 watch(
   () => [newChatAgent.value, newChatAgentMode.value, newChatProfile.value],
   () => {
+    persistStoredNewChatAgent(newChatAgent.value);
     ensureNewChatProviderSelection();
     // Reload workspace data when profile changes
     if (newChatProfile.value) {
@@ -1219,7 +1240,12 @@ async function refreshNewChatAgentAvailability(sequence: number) {
     if (!isCurrentNewChatOptionsLoad(sequence)) return;
     newChatAgentAvailability.value = availability;
     if (!newChatAgentOptions.value.some(option => option.value === newChatAgent.value)) {
-      newChatAgent.value = newChatAgentOptions.value[0]?.value || "ekko-agent";
+      const stored = loadStoredNewChatAgent();
+      if (newChatAgentOptions.value.some(option => option.value === stored)) {
+        newChatAgent.value = stored;
+      } else {
+        newChatAgent.value = newChatAgentOptions.value[0]?.value || "ekko-agent";
+      }
     }
   } catch {
     if (isCurrentNewChatOptionsLoad(sequence) && !newChatAgentAvailability.value) {
