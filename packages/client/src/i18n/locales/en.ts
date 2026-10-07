@@ -3750,6 +3750,11 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_31_1: 'Added authenticated P2P connections between the App and Studio, with automatic cloud relay fallback when direct connections are unavailable (#3290)',
+    new_0_7_31_2: 'Improved P2P connections on systems with multiple network interfaces and in Docker, and fixed direct connection failures caused by proxy fake-IP DNS (#3292, #3303)',
+    new_0_7_31_3: 'Unified model context, reasoning effort, and pricing lookup, improved matching for custom endpoints and prefixed model IDs, and prioritized manually configured prices (#3298, #3300)',
+    new_0_7_31_4: 'Fixed context queries for custom endpoints in the App and added model aliases and reasoning options to shared sessions (#3299)',
+    new_0_7_31_5: 'Fixed Comic theme preferences being lost after refresh or restart; saved theme styles now return during loading (#3302)',
     new_0_7_30_1: 'Added Qwen Code, Kimi Code, CodeBuddy, Qoder, GitHub Copilot, and ZCode for chats, group chats, and workflows; Qoder uses global mode, while the other five also support scoped models (#3280)',
     new_0_7_30_2: 'Ekko chats now appear under Built-in Agent in history and search, with /context, /usage, /status, and /compact commands (#3276)',
     new_0_7_30_3: 'New chats default to Ekko and show installed Agents without CLI probes; reopening unsent chats no longer waits for nonexistent history (#3284, #3288)',
@@ -3760,11 +3765,5 @@ export default {
     new_0_7_30_8: 'Removed the retired OpenCode Free provider and its model entry points (#3277)',
     new_0_7_29_1: 'Restored file downloads from workspace tree menus and diff toolbars in chats and group chats (#3268)',
     new_0_7_29_2: 'Fixed Antigravity being mislabeled as Ekko in Live Activity notifications (#3272)',
-    new_0_7_28_1: 'Added Antigravity CLI for chat, group chats, and workflows in global and scoped modes, with native settings, MCP, and skills management (#3256)',
-    new_0_7_28_2: 'Added an APIKEY.FAN relay page with balance, daily and total usage, and model breakdowns for configured API keys (#3257)',
-    new_0_7_28_3: 'Fixed Coding Agent manual update status and detection of the updated CLI version, with protection for active sessions (#3261)',
-    new_0_7_28_4: 'Fixed early completion, missing text, and duplicate Claude replies, preserving the complete final output (#3260, #3263)',
-    new_0_7_28_5: 'Fixed native login credential access for Antigravity global mode on macOS and corrected the sign-in hint (#3266)',
-    new_0_7_28_6: 'Updated Device Connections navigation to a monitor and phone icon for a clearer connection entry point (#3262)',
   },
 }
