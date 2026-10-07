@@ -23,6 +23,7 @@ import { clampChatInputHeight, isMobileChatInputViewport } from '@/utils/chat-in
 import { normalizeComposerVoiceTranscript, useComposerVoiceInput } from '@/composables/useComposerVoiceInput'
 import { extractRepresentativeVideoFrames, isVideoFile } from '@/utils/video-frame-extraction'
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
+import ScreenshotButton from './ScreenshotButton.vue'
 
 const chatStore = useChatStore()
 const appStore = useAppStore()
@@ -1246,6 +1247,8 @@ function openAttachmentPreview(attachment: Attachment) {
             </template>
             {{ t('chat.attachFiles') }}
           </NTooltip>
+
+          <ScreenshotButton :key="chatStore.activeSessionId || 'new'" :mobile="isMobileViewport" @capture="file => addFiles([file])" />
 
           <NPopover
             v-if="!isMoaSession && !isGlobalCodingAgentSession"

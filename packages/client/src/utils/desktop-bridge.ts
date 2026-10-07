@@ -139,6 +139,10 @@ export interface DesktopUpdaterBridge {
 }
 
 export interface HermesDesktopBridge {
+  screenshot?: {
+    captureRegion: (request: { requestId: string; hideWindows?: boolean; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }) => Promise<{ dataUrl: string; width: number; height: number } | null>
+    cancel: (requestId: string) => Promise<boolean>
+  }
   updater?: DesktopUpdaterBridge
   getToken: () => Promise<string>
   ensureAuth?: () => Promise<boolean>

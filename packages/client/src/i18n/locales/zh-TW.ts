@@ -1024,6 +1024,32 @@ export default {
 
   // 對話
   chat: {
+    screenshot: {
+      tools: {
+        select: "選取 / 移動",
+        rectangle: "矩形",
+        ellipse: "圓形",
+        arrow: "箭頭",
+        pen: "畫筆",
+        text: "文字",
+        mosaic: "馬賽克",
+        undo: "復原",
+        redo: "重做",
+        color: "顏色",
+        lineWidth: "線條粗細",
+        textPlaceholder: "輸入文字",
+      },
+      action: "擷取螢幕",
+      title: "擷取螢幕",
+      regionHint: "拖曳框選區域，Enter 確認，Esc 或右鍵取消。",
+      reset: "重新框選",
+      done: "完成",
+      options: "截圖選項",
+      hideWindow: "隱藏視窗截圖",
+      permissionDenied: "請在系統設定中授予 Ekko Studio 螢幕錄製權限，然後重新啟動應用程式。",
+      sourceUnavailable: "無法取得螢幕畫面，請檢查螢幕錄製權限後重試。",
+      failed: "擷取失敗，請重試。",
+    },
     runUsageOutput: "輸出 token",
     runUsageInput: "輸入 token",
     runUsageCacheRate: "快取命中率",

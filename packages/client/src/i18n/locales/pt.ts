@@ -1010,6 +1010,32 @@ export default {
 
   // Chat
   chat: {
+    screenshot: {
+      tools: {
+        select: "Selecionar / mover",
+        rectangle: "Retângulo",
+        ellipse: "Elipse",
+        arrow: "Seta",
+        pen: "Caneta",
+        text: "Texto",
+        mosaic: "Mosaico",
+        undo: "Desfazer",
+        redo: "Refazer",
+        color: "Cor",
+        lineWidth: "Espessura da linha",
+        textPlaceholder: "Digite o texto",
+      },
+      action: "Capturar tela",
+      title: "Captura de tela",
+      regionHint: "Arraste para selecionar. Enter confirma, Esc ou clique direito cancela.",
+      reset: "Selecionar novamente",
+      done: "Concluído",
+      options: "Opções de captura",
+      hideWindow: "Ocultar janela e capturar tela",
+      permissionDenied: "Permita a gravação de tela para Ekko Studio nas configurações do sistema e reinicie o aplicativo.",
+      sourceUnavailable: "Não foi possível capturar a tela. Verifique as permissões e tente novamente.",
+      failed: "Não foi possível capturar a tela. Tente novamente.",
+    },
     runUsageOutput: "Tokens de saída",
     runUsageInput: "Tokens de entrada",
     runUsageCacheRate: "Taxa de cache",

@@ -1024,6 +1024,32 @@ export default {
 
   // Chat
   chat: {
+    screenshot: {
+      tools: {
+        select: "تحديد / تحريك",
+        rectangle: "مستطيل",
+        ellipse: "قطع ناقص",
+        arrow: "سهم",
+        pen: "قلم",
+        text: "نص",
+        mosaic: "فسيفساء",
+        undo: "تراجع",
+        redo: "إعادة",
+        color: "لون",
+        lineWidth: "سُمك الخط",
+        textPlaceholder: "أدخل النص",
+      },
+      action: "التقاط الشاشة",
+      title: "لقطة شاشة",
+      regionHint: "اسحب لتحديد منطقة. Enter للتأكيد وEsc أو النقر الأيمن للإلغاء.",
+      reset: "تحديد من جديد",
+      done: "تم",
+      options: "خيارات لقطة الشاشة",
+      hideWindow: "إخفاء النافذة والتقاط الشاشة",
+      permissionDenied: "اسمح بتسجيل الشاشة لتطبيق Ekko Studio في إعدادات النظام، ثم أعد تشغيل التطبيق.",
+      sourceUnavailable: "تعذر التقاط الشاشة. تحقق من أذونات تسجيل الشاشة وحاول مجددًا.",
+      failed: "تعذر التقاط الشاشة. حاول مجددًا.",
+    },
     runUsageOutput: "رموز الإخراج",
     runUsageInput: "رموز الإدخال",
     runUsageCacheRate: "نسبة إصابة التخزين",

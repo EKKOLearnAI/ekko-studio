@@ -11,6 +11,10 @@ function desktopWindowKind(): DesktopWindowKind {
 }
 
 contextBridge.exposeInMainWorld('hermesDesktop', {
+  screenshot: {
+    captureRegion: (request: { requestId: string; hideWindows?: boolean; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }) => ipcRenderer.invoke('hermes-desktop:screenshot-capture-region', request),
+    cancel: (requestId: string) => ipcRenderer.invoke('hermes-desktop:screenshot-cancel', requestId),
+  },
   updater: {
     getState: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-get-state'),
     cancel: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-cancel'),

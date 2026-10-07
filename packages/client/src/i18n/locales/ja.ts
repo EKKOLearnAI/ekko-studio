@@ -1010,6 +1010,32 @@ export default {
 
   // チャット
   chat: {
+    screenshot: {
+      tools: {
+        select: "選択 / 移動",
+        rectangle: "長方形",
+        ellipse: "楕円",
+        arrow: "矢印",
+        pen: "ペン",
+        text: "テキスト",
+        mosaic: "モザイク",
+        undo: "元に戻す",
+        redo: "やり直す",
+        color: "色",
+        lineWidth: "線の太さ",
+        textPlaceholder: "テキストを入力",
+      },
+      action: "スクリーンショット",
+      title: "スクリーンショット",
+      regionHint: "ドラッグで範囲を選択。Enter で確定、Esc または右クリックでキャンセル。",
+      reset: "選択し直す",
+      done: "完了",
+      options: "スクリーンショットのオプション",
+      hideWindow: "ウィンドウを隠してスクリーンショット",
+      permissionDenied: "システム設定で Ekko Studio の画面収録を許可し、アプリを再起動してください。",
+      sourceUnavailable: "画面を取得できません。画面収録の権限を確認して再試行してください。",
+      failed: "キャプチャに失敗しました。もう一度お試しください。",
+    },
     runUsageOutput: "出力 token",
     runUsageInput: "入力 token",
     runUsageCacheRate: "キャッシュ命中率",

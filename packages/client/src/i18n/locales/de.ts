@@ -1010,6 +1010,32 @@ export default {
 
   // Chat
   chat: {
+    screenshot: {
+      tools: {
+        select: "Auswählen / Verschieben",
+        rectangle: "Rechteck",
+        ellipse: "Ellipse",
+        arrow: "Pfeil",
+        pen: "Stift",
+        text: "Text",
+        mosaic: "Mosaik",
+        undo: "Rückgängig",
+        redo: "Wiederholen",
+        color: "Farbe",
+        lineWidth: "Linienstärke",
+        textPlaceholder: "Text eingeben",
+      },
+      action: "Screenshot aufnehmen",
+      title: "Screenshot",
+      regionHint: "Bereich aufziehen. Enter bestätigt, Esc oder Rechtsklick bricht ab.",
+      reset: "Neu auswählen",
+      done: "Fertig",
+      options: "Screenshot-Optionen",
+      hideWindow: "Fenster ausblenden und Screenshot aufnehmen",
+      permissionDenied: "Erlauben Sie Ekko Studio die Bildschirmaufnahme in den Systemeinstellungen und starten Sie die App neu.",
+      sourceUnavailable: "Bildschirmaufnahme fehlgeschlagen. Prüfen Sie die Berechtigungen und versuchen Sie es erneut.",
+      failed: "Screenshot fehlgeschlagen. Bitte versuchen Sie es erneut.",
+    },
     runUsageOutput: "Ausgabe-Tokens",
     runUsageInput: "Eingabe-Tokens",
     runUsageCacheRate: "Cache-Trefferquote",

@@ -1031,6 +1031,32 @@ export default {
 
   // Chat
   chat: {
+    screenshot: {
+      tools: {
+        select: "Select / move",
+        rectangle: "Rectangle",
+        ellipse: "Ellipse",
+        arrow: "Arrow",
+        pen: "Pen",
+        text: "Text",
+        mosaic: "Mosaic",
+        undo: "Undo",
+        redo: "Redo",
+        color: "Color",
+        lineWidth: "Line width",
+        textPlaceholder: "Enter text",
+      },
+      action: "Take screenshot",
+      title: "Screenshot",
+      regionHint: "Drag to select an area. Enter to confirm, Esc or right-click to cancel.",
+      reset: "Reselect",
+      done: "Done",
+      options: "Screenshot options",
+      hideWindow: "Hide window and take screenshot",
+      permissionDenied: "Allow screen recording for Ekko Studio in system settings, then restart the app.",
+      sourceUnavailable: "The screen could not be captured. Check your screen recording permissions and try again.",
+      failed: "Could not capture the screenshot. Please try again.",
+    },
     runUsageOutput: "Output tokens",
     runUsageInput: "Input tokens",
     runUsageCacheRate: "Cache hit rate",

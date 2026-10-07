@@ -1031,6 +1031,32 @@ export default {
 
   // 对话
   chat: {
+    screenshot: {
+      tools: {
+        select: "选择 / 移动",
+        rectangle: "矩形",
+        ellipse: "圆形",
+        arrow: "箭头",
+        pen: "画笔",
+        text: "文字",
+        mosaic: "马赛克",
+        undo: "撤销",
+        redo: "重做",
+        color: "颜色",
+        lineWidth: "线条粗细",
+        textPlaceholder: "输入文字",
+      },
+      action: "截屏",
+      title: "截屏",
+      regionHint: "拖动框选区域，Enter 确认，Esc 或右键取消。",
+      reset: "重新框选",
+      done: "完成",
+      options: "截屏选项",
+      hideWindow: "隐藏窗口截屏",
+      permissionDenied: "请在系统设置中授予 Ekko Studio 屏幕录制权限，然后重启应用。",
+      sourceUnavailable: "无法获取屏幕画面，请检查屏幕录制权限后重试。",
+      failed: "截屏失败，请重试。",
+    },
     runUsageOutput: "输出 token",
     runUsageInput: "输入 token",
     runUsageCacheRate: "缓存命中率",

@@ -1010,6 +1010,32 @@ export default {
 
   // Chat
   chat: {
+    screenshot: {
+      tools: {
+        select: "Sélectionner / déplacer",
+        rectangle: "Rectangle",
+        ellipse: "Ellipse",
+        arrow: "Flèche",
+        pen: "Crayon",
+        text: "Texte",
+        mosaic: "Mosaïque",
+        undo: "Annuler",
+        redo: "Rétablir",
+        color: "Couleur",
+        lineWidth: "Épaisseur du trait",
+        textPlaceholder: "Saisir du texte",
+      },
+      action: "Capturer l’écran",
+      title: "Capture d’écran",
+      regionHint: "Faites glisser pour sélectionner. Entrée confirme, Échap ou clic droit annule.",
+      reset: "Sélectionner à nouveau",
+      done: "Terminé",
+      options: "Options de capture",
+      hideWindow: "Masquer la fenêtre et capturer l’écran",
+      permissionDenied: "Autorisez l’enregistrement de l’écran pour Ekko Studio dans les réglages système, puis redémarrez l’application.",
+      sourceUnavailable: "Impossible de capturer l’écran. Vérifiez les autorisations et réessayez.",
+      failed: "Impossible de capturer l’écran. Veuillez réessayer.",
+    },
     runUsageOutput: "Tokens de sortie",
     runUsageInput: "Tokens d’entrée",
     runUsageCacheRate: "Taux de cache",

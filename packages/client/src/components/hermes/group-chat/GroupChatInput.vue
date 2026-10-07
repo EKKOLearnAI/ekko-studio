@@ -7,6 +7,7 @@ import { useSettingsStore } from '@/stores/hermes/settings'
 import { useToolTraceVisibility } from '@/composables/useToolTraceVisibility'
 import { extractClipboardFiles } from '@/utils/clipboard-files'
 import ImagePreviewOverlay from '@/components/hermes/chat/ImagePreviewOverlay.vue'
+import ScreenshotButton from '@/components/hermes/chat/ScreenshotButton.vue'
 import { buildMentionOptions, type MentionOption } from './mention-options'
 import type { GroupChatMention } from '@/api/studio/group-chat'
 import type { Attachment } from '@/stores/hermes/chat'
@@ -806,6 +807,7 @@ function openAttachmentPreview(attachment: Attachment) {
                         </template>
                         {{ t('chat.attachFiles') }}
                     </NTooltip>
+                    <ScreenshotButton v-if="props.allowAttachments" :key="props.roomId || 'new'" :mobile="isMobileViewport" :disabled="isSending" @capture="file => addFiles([file])" />
                     <NDropdown
                         v-if="props.showSettings"
                         trigger="click"

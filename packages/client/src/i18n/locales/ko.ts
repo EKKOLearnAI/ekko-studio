@@ -1010,6 +1010,32 @@ export default {
 
   // 채팅
   chat: {
+    screenshot: {
+      tools: {
+        select: "선택 / 이동",
+        rectangle: "사각형",
+        ellipse: "타원",
+        arrow: "화살표",
+        pen: "펜",
+        text: "텍스트",
+        mosaic: "모자이크",
+        undo: "실행 취소",
+        redo: "다시 실행",
+        color: "색상",
+        lineWidth: "선 두께",
+        textPlaceholder: "텍스트 입력",
+      },
+      action: "스크린샷 찍기",
+      title: "스크린샷",
+      regionHint: "드래그하여 영역을 선택하세요. Enter로 확인, Esc 또는 우클릭으로 취소합니다.",
+      reset: "다시 선택",
+      done: "완료",
+      options: "스크린샷 옵션",
+      hideWindow: "창을 숨기고 스크린샷 찍기",
+      permissionDenied: "시스템 설정에서 Ekko Studio의 화면 기록을 허용한 뒤 앱을 다시 시작하세요.",
+      sourceUnavailable: "화면을 캡처하지 못했습니다. 화면 기록 권한을 확인하고 다시 시도하세요.",
+      failed: "캡처하지 못했습니다. 다시 시도하세요.",
+    },
     runUsageOutput: "출력 토큰",
     runUsageInput: "입력 토큰",
     runUsageCacheRate: "캐시 적중률",

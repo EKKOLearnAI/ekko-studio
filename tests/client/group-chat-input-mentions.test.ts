@@ -14,6 +14,7 @@ vi.mock('vue-i18n', () => ({
 vi.mock('naive-ui', () => ({
   NButton: { emits: ['click'], template: '<button type="button" v-bind="$attrs" @click="$emit(\'click\', $event)"><slot /><slot name="icon" /></button>' },
   NTooltip: { template: '<div><slot name="trigger" /><slot /></div>' },
+  NModal: { template: '<div><slot /><slot name="footer" /></div>' },
   NSwitch: { template: '<button type="button"></button>' },
   NDropdown: { template: '<div><slot /></div>' },
 }))
