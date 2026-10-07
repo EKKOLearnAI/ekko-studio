@@ -8,7 +8,7 @@ import { useSessionSearch } from '@/composables/useSessionSearch'
 import DesktopUpdateDownloadTab from './DesktopUpdateDownloadTab.vue'
 import { useNavigationRail } from '@/composables/useNavigationRail'
 
-type ActiveSection = 'chat' | 'history' | 'connections' | 'agents' | 'models' | 'group' | 'global' | 'workflow'
+type ActiveSection = 'chat' | 'history' | 'connections' | 'agents' | 'models' | 'apiRelay' | 'group' | 'global' | 'workflow'
 
 const props = defineProps<{
   active: ActiveSection
@@ -63,8 +63,8 @@ function openWorkflow() {
 }
 
 function openApiRelay() {
-  if (typeof window === 'undefined') return
-  window.open('https://apikey.fan/register?aff=LIBAPI', '_blank', 'noopener,noreferrer')
+  if (props.active === 'apiRelay') return
+  void router.push({ name: 'hermes.apiRelay' })
 }
 </script>
 
@@ -131,10 +131,7 @@ function openApiRelay() {
           stroke-linejoin="round"
           aria-hidden="true"
         >
-          <circle cx="18" cy="5" r="2.5" />
-          <circle cx="6" cy="12" r="2.5" />
-          <circle cx="18" cy="19" r="2.5" />
-          <path d="m8.2 10.7 7.6-4.4M8.2 13.3l7.6 4.4" />
+          <path d="M3 4h14a1 1 0 0 1 1 1v4M3 4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h9M7 16v4M5 20h7M15 9h6a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1M17 18h2" />
         </svg>
         <span>{{ t('sidebar.connections') }}</span>
       </button>
@@ -187,19 +184,8 @@ function openApiRelay() {
         </svg>
         <span>{{ t('sidebar.models') }}</span>
       </button>
-      <button v-if="!hasNavigationRail" class="page-sidebar-tab" type="button" @click="openApiRelay">
-        <svg
-          width="15"
-          height="15"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-        >
-          <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-          <polyline points="15 3 21 3 21 9" />
-          <line x1="10" y1="14" x2="21" y2="3" />
-        </svg>
+      <button v-if="!hasNavigationRail" class="page-sidebar-tab" :class="{ active: active === 'apiRelay' }" type="button" :aria-current="active === 'apiRelay' ? 'page' : undefined" @click="openApiRelay">
+        <img class="api-relay-logo" src="/relay-logo.png" width="18" height="18" alt="" aria-hidden="true" />
         <span>{{ t('sidebar.apiRelay') }}</span>
       </button>
     </div>
@@ -328,6 +314,8 @@ function openApiRelay() {
   .page-sidebar-primary { order: 1; flex: 0 0 32px; width: 32px; padding: 0; justify-content: center; }
   .page-sidebar-primary span { display: none; }
 }
+
+.api-relay-logo { border-radius: 4px; }
 
 .page-sidebar-tab {
   width: 100%;

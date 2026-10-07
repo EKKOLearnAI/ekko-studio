@@ -25,6 +25,7 @@ vi.mock('@/api/studio/chat', () => ({
   onPeerUserMessage: vi.fn(() => vi.fn()),
   onSessionCommand: vi.fn(() => vi.fn()),
   onSessionTitleUpdated: vi.fn(() => vi.fn()),
+  onRunUsageUpdated: vi.fn(() => vi.fn()),
   onSessionWorkspaceUpdated: vi.fn(() => vi.fn()),
   onSessionSettingsUpdated: vi.fn(() => vi.fn()),
 }))
@@ -892,8 +893,8 @@ describe('chat store reasoning/tool boundaries', () => {
     await store.sendMessage('check the weather')
 
     expect(chatApi.startRunViaSocket.mock.calls[0][0]).toEqual(expect.objectContaining({
-      source: 'coding_agent',
-      coding_agent_id: 'ekko-agent',
+      source: 'builtin_agent',
+      agent_id: 'ekko-agent',
       mode: 'scoped',
       provider: 'custom:fun-codex',
       model: 'gpt-5.5',

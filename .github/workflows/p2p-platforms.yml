@@ -1,0 +1,36 @@
+name: P2P platforms
+
+on:
+  pull_request:
+    paths:
+      - 'packages/server/src/modules/studio/services/app-relay/**'
+      - 'tests/server/*p2p*'
+      - 'tests/server/p2p-*'
+      - 'tests/fixtures/p2p-docker.mjs'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.github/workflows/p2p-platforms.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sockets:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test -- tests/server/p2p-network.test.ts tests/server/p2p-network-real.test.ts tests/server/app-p2p.test.ts --maxWorkers=1 --testTimeout=30000
+      - name: Verify Docker bridge and published UDP data channel
+        if: runner.os == 'Linux'
+        run: node tests/fixtures/p2p-docker.mjs

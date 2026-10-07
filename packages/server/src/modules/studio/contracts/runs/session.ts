@@ -1,6 +1,7 @@
 import type { AgentRuntime } from '../agents/runtime'
 import type { ChatMessage } from './messages'
 import type { RunMode } from './surface'
+import type { RunUsageSummary } from './run-usage'
 
 export interface EkkoBackgroundContinuationContext {
   version: 1
@@ -133,6 +134,9 @@ export interface QueueInsertionControl {
 }
 
 export interface SessionState {
+  /** Snapshot the owning runtime's interrupted turn without waiting for model IO. */
+  finalizeRunUsage?: () => RunUsageSummary | undefined
+  nativeUsageSource?: 'coding_agent'
   pushTargetId?: string
   messages: SessionMessage[]
   messageTotal?: number
@@ -159,13 +163,15 @@ export interface SessionState {
   cacheReadTokens?: number
   cacheWriteTokens?: number
   contextTokens?: number
+  /** Ekko's system/tool context, kept separately from conversation history. */
+  ekkoContext?: { fixedContextTokens: number }
   bridgeContext?: BridgeContextState
   isAborting?: boolean
   queue: QueuedRun[]
   queueInsertion?: QueueInsertionControl
   responseRun?: ResponseRunState
   source?: ChatRunSource
-  webhookAgent?: 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
+  webhookAgent?: 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
   webhookRoomId?: string
   webhookWorkflowId?: string
   webhookWorkflowNodeId?: string
@@ -212,8 +218,8 @@ export interface BridgeContextState {
   workspace?: string
 }
 
-export type ChatRunSource = 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
-export type ChatCodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'ekko-agent'
+export type ChatRunSource = 'api_server' | 'cli' | 'coding_agent' | 'builtin_agent' | 'global_agent' | 'workflow' | 'group_chat'
+export type ChatCodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode' | 'ekko-agent'
 
 export interface BridgeCompressionResult {
   messages: ChatMessage[]

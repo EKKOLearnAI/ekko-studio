@@ -705,9 +705,7 @@ onUnmounted(() => {
         <section class="app-download-hero">
           <div class="app-download-intro">
             <div class="app-download-brand">
-              <div class="app-download-logo">
-                <img src="/logo.png" alt="">
-              </div>
+              <img class="app-download-logo" src="/logo.png" alt="">
               <div>
                 <span>Ekko Studio Mobile</span>
                 <h3>{{ t('connections.app.downloadTitle') }}</h3>
@@ -1004,6 +1002,7 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
+@use '@/styles/promo-hero' as *;
 
 .app-connections-panel {
   height: 100%;
@@ -1205,34 +1204,7 @@ onUnmounted(() => {
 }
 
 .app-download-hero {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: center;
-  min-height: 230px;
-  padding: 28px 30px;
-  overflow: hidden;
-  border: 1px solid $border-color;
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at 82% 12%, rgba(var(--accent-primary-rgb), 0.09), transparent 32%),
-    linear-gradient(135deg, rgba(var(--bg-card-rgb), 0.98), rgba(var(--bg-primary-rgb), 0.92));
-
-  &::after {
-    position: absolute;
-    z-index: -1;
-    right: -72px;
-    bottom: -118px;
-    width: 280px;
-    height: 280px;
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.08);
-    border-radius: 50%;
-    box-shadow:
-      0 0 0 34px rgba(var(--accent-primary-rgb), 0.025),
-      0 0 0 72px rgba(var(--accent-primary-rgb), 0.018);
-    content: '';
-  }
+  @include promo-hero;
 }
 
 .app-download-intro {
@@ -1280,23 +1252,12 @@ onUnmounted(() => {
 }
 
 .app-download-logo {
+  display: block;
   width: 54px;
   height: 54px;
-  padding: 6px;
-  box-sizing: border-box;
   flex: 0 0 auto;
-  overflow: hidden;
-  background: $bg-card;
-  border: 1px solid $border-light;
-  border-radius: 15px;
-  box-shadow: 0 8px 24px rgba(var(--text-primary-rgb), 0.08);
-
-  img {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
+  object-fit: contain;
+  border-radius: 6px;
 }
 
 .app-download-meta {

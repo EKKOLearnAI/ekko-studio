@@ -13,13 +13,15 @@ const RETRY_MS = 5 * 60_000
 export interface CatalogModel {
   id?: string
   name?: string
+  canonical_model_id?: string
   limit?: { context?: number; input?: number; output?: number }
   cost?: Record<string, unknown>
   reasoning?: boolean
+  reasoning_options?: Array<{ type: string; values?: string[]; min?: number; max?: number }>
   attachment?: boolean
   modalities?: { input?: string[]; output?: string[] }
 }
-export type ModelCatalog = Record<string, { models?: Record<string, CatalogModel> }>
+export type ModelCatalog = Record<string, { api?: string; models?: Record<string, CatalogModel> }>
 export interface ModelCatalogSnapshot {
   data: ModelCatalog
   fetchedAt: number

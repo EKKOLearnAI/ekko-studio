@@ -1,0 +1,30 @@
+@mixin promo-hero {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  min-height: 230px;
+  padding: 28px 30px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 82% 12%, rgba(var(--accent-primary-rgb), 0.09), transparent 32%),
+    linear-gradient(135deg, rgba(var(--bg-card-rgb), 0.98), rgba(var(--bg-primary-rgb), 0.92));
+
+  &::after {
+    position: absolute;
+    z-index: -1;
+    right: -72px;
+    bottom: -118px;
+    width: 280px;
+    height: 280px;
+    border: 1px solid rgba(var(--accent-primary-rgb), 0.08);
+    border-radius: 50%;
+    box-shadow:
+      0 0 0 34px rgba(var(--accent-primary-rgb), 0.025),
+      0 0 0 72px rgba(var(--accent-primary-rgb), 0.018);
+    content: '';
+  }
+}

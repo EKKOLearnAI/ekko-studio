@@ -25,7 +25,6 @@ export interface ModelVisibilityRule {
 export type ModelVisibility = Record<string, ModelVisibilityRule>
 export type CustomModels = Record<string, string[]>
 export interface AvailableModelGroup {
-  catalog_status?: 'loading' | 'ready' | 'error' | 'unsupported'
   provider: string   // credential pool key (e.g. "zai", "custom:subrouter.ai")
   label: string      // display name (e.g. "zai", "subrouter.ai")
   base_url: string
@@ -45,8 +44,8 @@ export interface AvailableModelGroup {
   model_refreshable?: boolean
   model_refresh_reason?: string
   model_restore_available?: boolean
-  /** 可选：模型 ID -> 元数据（preview/disabled/alias）。alias 仅用于 Web UI 展示。 */
-  model_meta?: Record<string, { preview?: boolean; disabled?: boolean; alias?: string }>
+  /** 可选：模型 ID -> 展示与能力元数据。alias 仅用于 Web UI 展示。 */
+  model_meta?: Record<string, { preview?: boolean; disabled?: boolean; alias?: string; reasoning?: boolean; reasoning_efforts?: string[] }>
 }
 
 export interface ProfileAvailableModels {

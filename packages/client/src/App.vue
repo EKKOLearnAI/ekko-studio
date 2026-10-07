@@ -132,7 +132,7 @@ provide(mobileNavigationKey, {
   target: computed(() => !isWideViewport.value && hasNavigationRail.value ? mobileSidebarHost.value : null),
 });
 const hasMobileContextSidebar = computed(() =>
-  !['hermes.connections', 'hermes.agentManager', 'hermes.models'].includes(String(route.name)),
+  !['hermes.connections', 'hermes.agentManager', 'hermes.models', 'hermes.apiRelay'].includes(String(route.name)),
 );
 watch([hasNavigationRail, isWideViewport], () => { mobileNavigationOpen.value = false; });
 watch(sessionSearchOpen, (open) => { if (open) mobileNavigationOpen.value = false; });
@@ -151,6 +151,7 @@ const usesPageSidebar = computed(() =>
     "hermes.connections",
     "hermes.agentManager",
     "hermes.models",
+    "hermes.apiRelay",
     "hermes.history",
     "hermes.historySession",
     "hermes.globalAgent",

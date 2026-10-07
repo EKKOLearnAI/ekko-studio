@@ -1,12 +1,6 @@
+import { resolveCatalogModel } from '../models/model-metadata'
 import type { ModelCatalogSnapshot } from '../../public/model-catalog'
 import { estimateUsageCost, type UsageCost, type UsagePricing } from './usage-cost'
-
-const providerAliases: Record<string, string> = {
-  gemini: 'google', moonshot: 'moonshotai', kilocode: 'kilo', 'ai-gateway': 'vercel',
-  glm: 'zhipuai-coding-plan',
-  'opencode-zen': 'opencode', 'opencode-go': 'opencode', 'glm-coding-plan': 'zai-coding-plan',
-  'kimi-coding': 'kimi-for-coding', 'kimi-coding-cn': 'kimi-for-coding', 'xai-oauth': 'xai',
-}
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -19,14 +13,12 @@ export function estimateCatalogUsageCost(
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens?: number },
   scope: 'run' | 'model_call' = 'run',
   apiCalls?: number,
+  baseUrl?: string | null,
 ): UsageCost | undefined {
   if (!snapshot) return
-  const normalized = provider.trim().toLowerCase()
-  const providerId = Object.hasOwn(snapshot.data, normalized) ? normalized : providerAliases[normalized]
-  if (!providerId || !Object.hasOwn(snapshot.data, providerId)) return
-  const models = snapshot.data[providerId].models
-  // Prices are provider-specific. Never borrow a relay's price by a model-name suffix.
-  const entry = models && Object.hasOwn(models, model) ? models[model] : undefined
+  const match = resolveCatalogModel(snapshot.data, { provider, baseUrl, model })
+  if (!match) return
+  const entry = match.model
   const cost = object(entry?.cost)
   if (!cost) return
   let selected = { ...cost }
@@ -55,7 +47,7 @@ export function estimateCatalogUsageCost(
     selected = { ...selected, ...tier.rates }
     contextThreshold = tier.threshold
   }
-  const rates: UsagePricing = { provider: providerId, model, input: 0, output: 0 }
+  const rates: UsagePricing = { provider: match.provider, model: match.modelId, input: 0, output: 0 }
   for (const [field, key] of [
     ['input', 'input'], ['output', 'output'], ['cacheRead', 'cache_read'],
     ['cacheWrite', 'cache_write'], ['reasoning', 'reasoning'],

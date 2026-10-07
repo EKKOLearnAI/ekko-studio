@@ -43,6 +43,7 @@ import { healthRoutes } from '../../packages/server/src/bootstrap/health'
 import { GroupChatServer } from '../../packages/server/src/modules/studio/sockets/group-chat'
 import { AgentClients, mentionMessageToStoredContextMessage } from '../../packages/server/src/modules/studio/services/group-chat/agent-clients'
 import { sortGroupMessagesCanonical } from '../../packages/server/src/modules/studio/services/group-chat/group-message-ordering'
+import { groupRunUsageMessage } from '../../packages/server/src/modules/studio/services/group-chat/run-usage'
 import { GroupRoomSummaryService, type GroupSummaryRunner } from '../../packages/server/src/modules/studio/services/group-chat/room-summary'
 
 function makeDb(): DatabaseSync {
@@ -118,6 +119,25 @@ describe('group chat history windows', () => {
     expect(contextMessages.map(message => message.id)).toEqual(
       sortGroupMessagesCanonical(seeded as Array<{ id: string; timestamp: number }>).map(message => message.id),
     )
+  })
+
+  it('persists and updates one usage card without consuming room tokens or model context', () => {
+    const storage = groupServer.getStorage()
+    storage.saveRoom('room-1', 'Room 1')
+    storage.saveMessageAndRefreshRoom(makeMessage({ id: 'reply', role: 'assistant', content: 'Done', run_id: 'group-run' }) as any)
+    const originalTokens = storage.getRoom('room-1')!.totalTokens
+    const usage = { runId: 'runtime-run', assistantMessageId: 'reply', inputTokens: 1200, outputTokens: 200,
+      cacheReadTokens: 300, cacheHitRate: 0.25, costUsd: 0.0123, tokensPerSecond: 50, speedSource: 'model', isEstimated: false }
+    for (const outputTokens of [200, 250]) {
+      const card = groupRunUsageMessage('room-1', 'session', 'group-run', 'reply', { ...usage, outputTokens })!
+      storage.saveMessageAndRefreshRoom(makeMessage({ ...card, ...card.extra, senderId: 'agent', senderType: 'agent', timestamp: 2 }) as any)
+    }
+    const cards = storage.getRecentMessagesForUI('room-1').filter(message => message.tool_name === 'run_usage')
+    expect(cards).toHaveLength(1)
+    expect(JSON.parse(cards[0].content)).toMatchObject({ outputTokens: 250 })
+    expect(storage.getRoom('room-1')!.totalTokens).toBe(originalTokens)
+    expect(storage.getMessagesForContext('room-1').map(message => message.id)).toEqual(['reply'])
+    expect(() => storage.saveMessageAndRefreshRoom({ ...cards[0], run_id: 'other-run' })).toThrow('Invalid group run usage')
   })
 
   it('bounds tool results only in the outbound UI page and retains full group history', () => {

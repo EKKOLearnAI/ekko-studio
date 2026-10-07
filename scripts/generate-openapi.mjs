@@ -354,6 +354,22 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
       }
     }
   }
+  if (method === 'get' && ['/api/studio/sessions/hermes', '/api/studio/sessions/hermes/groups'].includes(openapiPath)) {
+    for (const parameter of parameters) {
+      if (parameter.name === 'agent_groups') {
+        parameter.schema = { type: 'string', enum: ['0', '1'], default: '0' }
+        parameter.description = 'Set to 1 to include legacy native Ekko identities in the builtin_agent history group. Native direct chats are stored as builtin_agent.'
+      } else if (parameter.name === 'source') {
+        parameter.schema = { type: 'string' }
+        parameter.description = 'History source to page. With agent_groups=1, builtin_agent selects native Ekko and coding_agent excludes it. Other sources retain their names.'
+      } else if (parameter.name === 'include') {
+        parameter.schema = { type: 'array', items: { type: 'string' } }
+        parameter.style = 'form'
+        parameter.explode = true
+        parameter.description = 'Repeat for each deep-linked session ID. Included and pinned sessions do not advance group pagination cursors.'
+      }
+    }
+  }
   if (parameters.length) operation.parameters = parameters
 
   const requestBody = generateRequestBody(method, controllerSource)
@@ -1037,12 +1053,12 @@ openapi.paths['/api/studio/chat-run/runs'] = {
               },
               source: {
                 type: 'string',
-                enum: ['cli', 'coding_agent', 'global_agent'],
-                description: 'Run backend source. Use cli for Hermes bridge runs, coding_agent for Claude Code/Codex, or global_agent for global-agent sessions. Omit source for normal Hermes chat runs; do not use the legacy api_server source.',
+                enum: ['cli', 'builtin_agent', 'coding_agent', 'global_agent', 'workflow', 'group_chat'],
+                description: 'Session source. Use cli for Hermes bridge runs, builtin_agent for native Ekko direct chats, coding_agent for external CLIs, or the matching group_chat/workflow/global_agent surface. Omit source for normal Hermes chat runs; do not use the legacy api_server source.',
               },
               session_source: {
                 type: 'string',
-                enum: ['global_agent'],
+                enum: ['global_agent', 'workflow', 'group_chat'],
                 description: 'Marks a coding-agent or bridge session as launched from the global agent.',
               },
               instructions: {
@@ -1061,12 +1077,12 @@ openapi.paths['/api/studio/chat-run/runs'] = {
               coding_agent_id: {
                 type: 'string',
                 enum: ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'ekko-agent'],
-                description: 'Coding agent id when source is coding_agent.',
+                description: 'External coding-agent runtime id. ekko-agent is accepted for legacy clients; new native Ekko requests use agent_id.',
               },
               agent_id: {
                 type: 'string',
                 enum: ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'ekko-agent'],
-                description: 'Alias for coding_agent_id.',
+                description: 'Runtime id. Use ekko-agent for native Ekko with source=builtin_agent; external CLI ids remain accepted.',
               },
               mode: {
                 type: 'string',

@@ -23,6 +23,7 @@ vi.mock('@/api/studio/chat', () => ({
   onPeerUserMessage: vi.fn(() => vi.fn()),
   onSessionCommand: vi.fn(() => vi.fn()),
   onSessionTitleUpdated: vi.fn(() => vi.fn()),
+  onRunUsageUpdated: vi.fn(() => vi.fn()),
   onSessionWorkspaceUpdated: vi.fn(() => vi.fn()),
   onSessionSettingsUpdated: vi.fn(() => vi.fn()),
 }))
@@ -63,6 +64,19 @@ vi.mock('@/utils/completion-sound', () => ({
 }))
 
 import { useChatStore, type Message, type Session } from '@/stores/hermes/chat'
+import agentCatalog from '../../config/agents.json'
+
+type NewChatOptions = NonNullable<Parameters<ReturnType<typeof useChatStore>['newChat']>[0]>
+const newChatCases = agentCatalog.agents.flatMap(agent => agent.modes.map(mode => ({
+  name: agent.name,
+  mode,
+  options: {
+    agent: agent.sessionId as NewChatOptions['agent'],
+    codingAgentId: agent.kind === 'hermes' ? undefined : agent.id as NewChatOptions['codingAgentId'],
+    codingAgentMode: mode as NewChatOptions['codingAgentMode'],
+    source: agent.kind === 'hermes' ? 'cli' : agent.kind === 'built-in' ? 'builtin_agent' : 'coding_agent',
+  } satisfies NewChatOptions,
+})))
 
 function makeSession(id: string): Session {
   return {
@@ -122,6 +136,57 @@ describe('chat store compression state', () => {
       messageCount: 6,
       beforeTokens: 1234,
     }))
+  })
+
+  it.each(newChatCases)('opens a new $name $mode chat without resuming an unpersisted session', async ({ options, mode }) => {
+    const store = useChatStore()
+    const session = store.newChat({ ...options, workspace: '/workspace/draft', model: 'chosen-model', provider: 'chosen-provider' })
+
+    expect(store.activeSessionId).toBe(session.id)
+    expect(store.isLoadingMessages).toBe(false)
+    expect(chatApi.resumeSession).not.toHaveBeenCalled()
+    expect(session.isLocalOnly).toBe(true)
+    expect(session.workspace).toBe('/workspace/draft')
+    expect(session.model).toBe(mode === 'global' ? undefined : 'chosen-model')
+
+    await expect(store.switchSession(session.id)).resolves.toBe(true)
+    expect(chatApi.resumeSession).not.toHaveBeenCalled()
+
+    session.isLocalOnly = false
+    await store.switchSession(session.id)
+    expect(chatApi.resumeSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('resumes a new session once its first message has been sent', async () => {
+    const store = useChatStore()
+    const session = store.newChat({ model: 'chosen-model', provider: 'chosen-provider' })
+    await store.sendMessage('First message')
+    expect(chatApi.startRunViaSocket).toHaveBeenCalled()
+
+    await store.switchSession(session.id)
+    expect(chatApi.resumeSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps an unsent draft ready while an older session resume is pending', async () => {
+    const store = useChatStore()
+    const draft = store.newChat({ workspace: '/workspace/draft' })
+    store.sessions.push(makeSession('persisted-session'))
+    let completeResume!: (data: any) => void
+    chatApi.resumeSession.mockImplementationOnce((_sessionId, onResumed) => {
+      completeResume = onResumed
+      return {} as any
+    })
+
+    const pending = store.switchSession('persisted-session')
+    expect(store.isLoadingMessages).toBe(true)
+    await expect(store.switchSession(draft.id)).resolves.toBe(true)
+    expect(store.isLoadingMessages).toBe(false)
+    expect(store.activeSession?.workspace).toBe('/workspace/draft')
+
+    completeResume({ session_id: 'persisted-session', messages: [], isWorking: false })
+    await pending
+    expect(store.activeSessionId).toBe(draft.id)
+    expect(store.isLoadingMessages).toBe(false)
   })
 
   it('keeps message loading scoped to the active session during rapid switches', async () => {

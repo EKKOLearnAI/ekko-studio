@@ -61,7 +61,10 @@ beforeEach(async () => {
   vi.doMock('../../packages/server/src/modules/studio/public/session-agent-runtime', async importOriginal => ({
     ...await importOriginal<any>(),
     getSessionAvailableModelGroups: async () => [{ provider: 'custom:test', label: 'Test', models: ['model-a', 'disabled'],
-      api_key: 'private-provider-key', base_url: 'https://private-provider.test', api_mode: 'chat_completions', model_meta: { disabled: { disabled: true } } }],
+      api_key: 'private-provider-key', base_url: 'https://private-provider.test', api_mode: 'chat_completions', model_meta: {
+        'model-a': { alias: 'Model A', reasoning: true, reasoning_efforts: ['low', 'high'], api_key: 'private-provider-key' },
+        disabled: { disabled: true, reasoning_efforts: ['ultra'] },
+      } }],
     notifyHermesSessionModelChanged: vi.fn(),
     getHermesModelContextLength: ({ profile, provider, model }: any) => {
       const row = db.prepare('SELECT context_limit FROM model_context WHERE profile = ? AND provider = ? AND model = ?')
@@ -277,6 +280,7 @@ describe('existing APIs with session share credentials', () => {
     const model = await issue({ switchModel: true })
     const catalog = await request(model.token, '/api/studio/sessions/s1/share-models')
     expect(catalog).toMatchObject({ status: 200, body: { groups: [{ provider: 'custom:test', models: ['model-a'] }] } })
+    expect(catalog.body.groups[0].model_meta).toEqual({ 'model-a': { alias: 'Model A', reasoning: true, reasoning_efforts: ['low', 'high'] } })
     expect(JSON.stringify(catalog.body)).not.toMatch(/private-provider|api_key|base_url/)
     expect((await request(model.token, '/api/studio/sessions/s2/model', 'POST', { model: 'model-a', provider: 'custom:test' })).status).toBe(403)
     for (const body of [{ model: 'disabled', provider: 'custom:test' }, { model: 'not-listed', provider: 'custom:test' }, { model: 'model-a', provider: 'custom:test', reasoningEffort: 'low' }, { model: 'model-a', provider: 'custom:test', apiKey: 'injected' }]) {

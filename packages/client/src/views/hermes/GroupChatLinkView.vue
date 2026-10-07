@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -131,7 +133,7 @@ function getAgentModelGroups(profile: string) {
             ? 'pi'
             : selectedAgentType.value === 'grok'
               ? 'grok'
-            : selectedAgentType.value === 'cursor'
+            : (isGlobalOnlyCodingAgent(selectedAgentType.value) || (selectedAgentType.value === 'antigravity' || isNativeCodingAgent(selectedAgentType.value)))
               ? 'cursor'
             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
               ? 'opencode'
@@ -174,20 +176,24 @@ const agentApiModeOptions = computed(() => [
 ])
 const agentReasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.default'), value: '' },
-  { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-  { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-  { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-  { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-  { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-  { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-  { label: t('chat.reasoningEffort.options.max'), value: 'max' },
+  ...modelReasoningEfforts(
+    getAgentModelGroups(selectedProfile.value),
+    selectedAgentProvider.value,
+    selectedAgentModel.value,
+  ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
 ])
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
   { label: t('codingAgents.launchModeScoped'), value: 'scoped' },
 ])
+
+watch([agentReasoningEffortOptions, selectedAgentReasoningEffort], ([options, effort]) => {
+  if (!usesGlobalAgentMode.value && effort && !options.some(option => option.value === effort)) {
+    selectedAgentReasoningEffort.value = ''
+  }
+})
 const agentAvatarPreview = computed(() => (
   agentAvatar.value || defaultGroupAgentAvatar(selectedAgentType.value)
 ))

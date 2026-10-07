@@ -1,4 +1,5 @@
 import { parseGroupTaskPlanMessage, isOlderGroupTaskPlan } from '@/utils/task-plan'
+import { parseGroupRunUsageMessage } from '@/utils/run-usage'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useSettingsStore } from './settings'
@@ -2252,6 +2253,11 @@ function mapGroupMessages(msgs: ChatMessage[], activeAgentNames = new Set<string
         const taskPlan = parseGroupTaskPlanMessage(msg)
         if (taskPlan) {
             result.push({ ...msg, role: 'assistant', content: '', taskPlan })
+            continue
+        }
+        const runUsage = parseGroupRunUsageMessage(msg)
+        if (runUsage) {
+            result.push({ ...msg, role: 'assistant', content: '', runUsage })
             continue
         }
         if (msg.role === 'tool') {

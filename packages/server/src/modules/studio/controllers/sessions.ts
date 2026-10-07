@@ -1,3 +1,5 @@
+import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
+import { withRunUsage } from '../public/usage'
 import { businessEvents } from '../services/webhooks/business-events'
 import { getUsagePricing, saveUsagePricing, validateUsagePricing } from '../services/usage/usage-pricing'
 import { emptyCostCoverage, addCostCoverage } from '../services/usage/usage-cost'
@@ -6,6 +8,7 @@ import { ensureBusinessConsumers } from '../services/webhooks/business-consumers
 import { authorizeSessionShare, authorizeShareFile } from '../services/session-shares/access'
 import { sessionShareService } from '../services/session-shares/service'
 import { getSessionTaskPlans } from '../services/task-plans'
+import { historySessionSource, isBuiltinEkkoAgent } from '../contracts/history-source'
 import {
   deleteHermesSessionForProfile,
   getHermesCliSession,
@@ -155,10 +158,11 @@ function denySessionAccess(ctx: any, session: any | null | undefined): boolean {
 }
 
 function isVisibleWebUiSessionSource(source?: string | null): boolean {
-  return source === 'api_server' || source === 'cli' || source === 'coding_agent' || source === 'global_agent'
+  return source === 'api_server' || source === 'cli' || source === 'builtin_agent' || source === 'coding_agent' || source === 'global_agent'
 }
 
 function isRequestedSessionSource(source: string | undefined, sessionSource?: string | null): boolean {
+  if (source === 'builtin_agent') return sessionSource === 'builtin_agent'
   if (source === 'global_agent') return sessionSource === 'global_agent'
   if (source === 'workflow') return sessionSource === 'workflow'
   if (source === 'group_chat') return sessionSource === 'group_chat'
@@ -166,10 +170,11 @@ function isRequestedSessionSource(source: string | undefined, sessionSource?: st
 }
 
 function requestedSessionSources(source?: string): string[] {
+  if (source === 'builtin_agent') return ['builtin_agent']
   if (source === 'global_agent') return ['global_agent']
   if (source === 'workflow') return ['workflow']
   if (source === 'group_chat') return ['group_chat']
-  return ['api_server', 'cli', 'coding_agent', 'global_agent']
+  return ['api_server', 'cli', 'builtin_agent', 'coding_agent', 'global_agent']
 }
 
 function isHermesHistorySessionSource(source?: string | null): boolean {
@@ -201,6 +206,7 @@ function mergeHermesHistorySessions(
   hermesSessions: any[],
   localSessions: any[],
   source?: string,
+  agentGroups = false,
 ): any[] {
   const importedIds = new Set(localSessions.map(session => session.id))
   const historySessionsById = new Map<string, any>()
@@ -229,19 +235,19 @@ function mergeHermesHistorySessions(
   }
 
   return filterPendingDeletedSessions(filterByAllowedProfiles(ctx, [...historySessionsById.values()]).filter(session =>
-    (!source || session.source === source) &&
+    (!source || (agentGroups ? historySessionSource(session) : session.source) === source) &&
     (isHermesHistorySessionSource(session.source) || (isArchivedSession(session) && session.source !== 'global_agent')),
   ))
 }
 
-function isCodingAgentSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null } | null): boolean {
-  return session?.source === 'coding_agent' ||
+function isProviderAgentSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null } | null): boolean {
+  return session?.source === 'builtin_agent' || isBuiltinEkkoAgent(session?.agent) || session?.source === 'coding_agent' ||
     session?.agent === 'claude' ||
     session?.agent === 'codex' ||
     session?.agent === 'pi' ||
     session?.agent === 'grok' ||
     session?.agent === 'opencode' ||
-    session?.agent === 'cursor' ||
+    (session?.agent === 'cursor' || (session?.agent === 'antigravity' || isNativeCodingAgent(session?.agent))) ||
     Boolean(session?.agent_session_id)
 }
 
@@ -638,11 +644,26 @@ export async function listHermesSessions(ctx: any) {
   const normalizedOffset = Number.isFinite(offset) && offset > 0 ? offset : 0
   const paginated = Boolean(source) || normalizedOffset > 0
   const candidateLimit = paginated ? normalizedOffset + effectiveLimit + 1 : effectiveLimit
-  const localSessions = localListSessions(profile, source, candidateLimit)
-  const allSessions = isHermesAgentAvailable()
+  // Opt in so released clients that group by the raw source keep their contract.
+  const agentGroups = ctx.query.agent_groups === '1'
+  const allowedProfiles = allowedProfileSet(ctx)
+  const physicalSource = agentGroups && source === 'builtin_agent' ? undefined : source
+  const localSessions = agentGroups && source
+    ? localListSessions(profile, physicalSource, candidateLimit, {
+        historySource: source,
+        ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}),
+      })
+    : localListSessions(profile, source, candidateLimit)
+  const allSessions = isHermesAgentAvailable() && !(agentGroups && source === 'builtin_agent')
     ? await listHermesSessionSummaries(source, candidateLimit, profile)
     : []
-  const merged = mergeHermesHistorySessions(ctx, profile, allSessions, localSessions, source)
+  if (agentGroups && allSessions.length) {
+    localSessions.push(...localListSessions(profile, undefined, allSessions.length, {
+      includeSessionIds: allSessions.map(session => session.id),
+      ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}),
+    }))
+  }
+  const merged = mergeHermesHistorySessions(ctx, profile, allSessions, localSessions, source, agentGroups)
 
   if (paginated) {
     const sorted = [...merged].sort(compareSessionsNewestFirst)
@@ -669,6 +690,8 @@ export async function listHermesSessionGroups(ctx: any) {
   const requestedLimit = ctx.query.limit ? parseInt(ctx.query.limit as string, 10) : 20
   const limit = Number.isFinite(requestedLimit) ? Math.min(100, Math.max(1, requestedLimit)) : 20
   const profile = requestedProfile(ctx)
+  const agentGroups = ctx.query.agent_groups === '1'
+  const allowedProfiles = allowedProfileSet(ctx)
   const rawIncluded = ctx.query.include
   const includedIds = (Array.isArray(rawIncluded) ? rawIncluded : rawIncluded ? [rawIncluded] : [])
     .map(value => String(value || '').trim())
@@ -685,20 +708,33 @@ export async function listHermesSessionGroups(ctx: any) {
   const sources = new Set<string>([
     ...hermesGroups.keys(),
     ...localSessions
-      .map(session => session.source)
+      .map(session => agentGroups ? historySessionSource(session) : session.source)
       .filter((source): source is string => Boolean(source)),
+    ...(agentGroups ? ['builtin_agent', 'coding_agent', 'cli', 'api_server'] : []),
   ])
   const groups: Array<{ source: string; sessions: any[]; hasMore: boolean }> = []
 
   for (const source of sources) {
     const hermesGroup = hermesGroups.get(source)
-    const localSourceSessions = localSessions.filter(session => session.source === source)
+    const localSourceSessions = agentGroups
+      ? localListSessions(profile, source === 'builtin_agent' ? undefined : source, limit + 1, {
+          historySource: source,
+          ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}),
+        })
+      : localSessions.filter(session => session.source === source)
+    if (agentGroups && hermesGroup?.sessions.length) {
+      localSourceSessions.push(...localListSessions(profile, undefined, hermesGroup.sessions.length, {
+        includeSessionIds: hermesGroup.sessions.map(session => session.id),
+        ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}),
+      }))
+    }
     const merged = mergeHermesHistorySessions(
       ctx,
       profile,
       hermesGroup?.sessions || [],
       localSourceSessions,
       source,
+      agentGroups,
     ).sort(compareSessionsNewestFirst)
     const sessions = merged.slice(0, limit)
     if (sessions.length === 0) continue
@@ -709,7 +745,12 @@ export async function listHermesSessionGroups(ctx: any) {
     })
   }
 
-  const localIncluded = localSessions.filter(session => session.is_pinned || includedIds.includes(session.id))
+  const localIncluded = agentGroups
+    ? [
+        ...localListSessions(profile, undefined, 2000, { pinned: true, ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}) }),
+        ...(includedIds.length ? localListSessions(profile, undefined, includedIds.length, { includeSessionIds: includedIds, ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}) }) : []),
+      ]
+    : localSessions.filter(session => session.is_pinned || includedIds.includes(session.id))
   const included = mergeHermesHistorySessions(ctx, profile, hermesResult.included, localIncluded)
   ctx.body = { groups, included }
 }
@@ -1307,9 +1348,9 @@ export async function remove(ctx: any) {
   const existing = localGetSession(sessionId)
   if (denySessionAccess(ctx, existing)) return
   const hermesProfile = requestedProfile(ctx) || existing?.profile || getActiveProfileName()
-  const codingAgentSession = isCodingAgentSession(existing)
-  if (codingAgentSession) stopCodingAgentSessionRun(sessionId, { reportClosed: false })
-  const hermes = codingAgentSession
+  const providerAgentSession = isProviderAgentSession(existing)
+  if (providerAgentSession) stopCodingAgentSessionRun(sessionId, { reportClosed: false })
+  const hermes = providerAgentSession
     ? { attempted: false, deleted: false, profile: hermesProfile }
     : await deleteHermesSessionIfPresent(sessionId, hermesProfile)
   const localDeleted = existing ? localDeleteSession(sessionId) : true
@@ -1377,9 +1418,9 @@ export async function batchRemove(ctx: any) {
       continue
     }
 
-    const codingAgentSession = isCodingAgentSession(existing)
-    if (codingAgentSession) stopCodingAgentSessionRun(id, { reportClosed: false })
-    const hermes = codingAgentSession
+    const providerAgentSession = isProviderAgentSession(existing)
+    if (providerAgentSession) stopCodingAgentSessionRun(id, { reportClosed: false })
+    const hermes = providerAgentSession
       ? { attempted: false, deleted: false, profile: targetProfile || 'default' }
       : await deleteHermesSessionIfPresent(id, targetProfile)
     if (hermes.deleted) {
@@ -1626,8 +1667,8 @@ export async function setModel(ctx: any) {
   const cleanModel = model.trim()
   const cleanProvider = (provider || '').trim()
   const cleanApiMode = normalizeSessionApiMode(apiMode ?? api_mode)
-  const codingAgentSession = isCodingAgentSession(existing)
-  const workspace = !codingAgentSession
+  const providerAgentSession = isProviderAgentSession(existing)
+  const workspace = !providerAgentSession
     ? await ensureHermesRunWorkspace(profile, existing?.workspace)
     : undefined
   if (!existing) {
@@ -1637,10 +1678,10 @@ export async function setModel(ctx: any) {
   // A model-only share grant must never overwrite a concurrent reasoning update.
   if (!ctx.state?.sessionShare) updates.reasoning_effort = ''
   if (cleanApiMode) updates.api_mode = cleanApiMode
-  else if (codingAgentSession && existing && existing.provider !== cleanProvider) updates.api_mode = ''
-  if (!codingAgentSession && existing && !existing.workspace && workspace) updates.workspace = workspace
+  else if (providerAgentSession && existing && existing.provider !== cleanProvider) updates.api_mode = ''
+  if (!providerAgentSession && existing && !existing.workspace && workspace) updates.workspace = workspace
   if (
-    codingAgentSession &&
+    providerAgentSession &&
     existing &&
     (existing.model !== cleanModel || existing.provider !== cleanProvider || (cleanApiMode && existing.api_mode !== cleanApiMode))
   ) {
@@ -1654,7 +1695,7 @@ export async function setModel(ctx: any) {
     api_mode: updates.api_mode ?? existing?.api_mode ?? '',
     reasoning_effort: updates.reasoning_effort ?? getSession(id)?.reasoning_effort ?? '',
   })
-  if (!codingAgentSession) {
+  if (!providerAgentSession) {
     await notifyBridgeSessionModelChanged(id, cleanModel, cleanProvider, profile)
   }
   ctx.body = { ok: true }
@@ -1696,7 +1737,8 @@ export async function contextLength(ctx: any) {
   const profile = requestedProfile(ctx)
   const model = typeof ctx.query.model === 'string' ? ctx.query.model : undefined
   const provider = typeof ctx.query.provider === 'string' ? ctx.query.provider : undefined
-  ctx.body = { context_length: getHermesModelContextLength({ profile, model, provider }) }
+  const baseUrl = typeof ctx.query.base_url === 'string' ? ctx.query.base_url : undefined
+  ctx.body = { context_length: getHermesModelContextLength({ profile, model, provider, baseUrl }) }
 }
 
 export async function usageStats(ctx: any) {
@@ -2246,7 +2288,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
       input_tokens: session.input_tokens,
       output_tokens: session.output_tokens,
     },
-    messages: result.messages,
+    messages: withRunUsage(ctx.params.id, result.messages),
     taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),
     total: result.total,

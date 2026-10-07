@@ -214,7 +214,8 @@ function hasRenderableAssistantContent(message: Message): boolean {
   return !!(
     assistantMessageBody(message) ||
     message.attachments?.length ||
-    message.workspaceChanges?.length
+    message.workspaceChanges?.length ||
+    message.runUsage
   );
 }
 
@@ -278,7 +279,7 @@ const displayMessagesWithForkDivider = computed<Message[]>(() => {
 const canForkActiveSession = computed(() => {
   const session = chatStore.activeSession;
   const hasConversation = displayMessages.value.some((message) => message.role === "user" || message.role === "assistant");
-  return !!session && session.source !== "coding_agent" && !chatStore.isStreaming && !chatStore.isForkPending && hasConversation;
+  return !!session && session.source !== "coding_agent" && session.source !== "builtin_agent" && !chatStore.isStreaming && !chatStore.isForkPending && hasConversation;
 });
 
 const lastForkActionMessageId = computed(() => {
@@ -309,9 +310,9 @@ const canInsertQueuedMessages = computed(() => {
   if (!session) return false;
   const agent = session.codingAgentId || session.agent;
   if (agent === "ekko-agent") {
-    return session.source === "coding_agent" || session.source === "global_agent";
+    return session.source === "builtin_agent" || session.source === "coding_agent" || session.source === "global_agent";
   }
-  if (agent === "codex" || agent === "pi" || agent === "grok" || agent === "cursor" || (agent === "opencode" || agent === "dsh") || agent === "claude" || agent === "claude-code") return true;
+  if (agent === "codex" || agent === "pi" || agent === "grok" || agent === "antigravity" || agent === "cursor" || (agent === "opencode" || agent === "dsh") || agent === "claude" || agent === "claude-code") return true;
   return !session.source || session.source === "cli" || session.source === "global_agent";
 });
 const visibleApproval = computed(() => chatStore.activePendingApproval);

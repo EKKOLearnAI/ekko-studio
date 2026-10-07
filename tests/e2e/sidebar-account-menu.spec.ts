@@ -52,7 +52,6 @@ test('opens account controls from chat without navigating and keeps nested dialo
 for (const path of ['history', 'workflow', 'group-chat']) {
   test(`shares the account entry in ${path}`, async ({ page }) => {
     await page.goto(`/#/hermes/${path}`)
-    if (path === 'group-chat') await page.getByRole('dialog').getByRole('button', { name: 'Confirm', exact: true }).click()
     const account = page.locator('.page-sidebar-account-btn')
     await expect(account).toContainText('playwright')
     await account.click()

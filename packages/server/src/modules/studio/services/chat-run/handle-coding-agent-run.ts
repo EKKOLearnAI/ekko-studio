@@ -1,3 +1,4 @@
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
 import { codingAgentId } from './types'
 import { studioMcpCapabilities, type StudioMcpCapabilities } from '../../public/runs/mcp-capabilities'
 import { clarificationTurnInstruction } from '../clarification-runs'
@@ -91,7 +92,7 @@ export async function handleCodingAgentRun(
   }
 
   let runId = codingAgentRunManager.runIdForSession(sessionId)
-  const mode = agentId === 'cursor' || data.mode === 'global' ? 'global' : 'scoped'
+  const mode = isGlobalOnlyCodingAgent(agentId) || data.mode === 'global' ? 'global' : 'scoped'
   const storedSession = getSession(sessionId)
   if (storedSession && !storedSession.user_id && socketUser?.id != null) {
     updateSession(sessionId, { user_id: String(socketUser.id) })
@@ -167,7 +168,7 @@ export async function handleCodingAgentRun(
   try {
     const codingInput = convertContentBlocksForCodingAgent(data.input)
     if (!data.studio_mcp_token_file) await writeModelRunProfileToken(socketUser, profile)
-    const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || agentId === 'cursor' || (agentId === 'opencode' || agentId === 'dsh')
+    const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || (agentId === 'cursor' || agentId === 'antigravity' || isNativeCodingAgent(agentId)) || (agentId === 'opencode' || agentId === 'dsh')
     const runPrompt = [
       groupSystemPrompt
         ? [groupSystemPrompt, studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')

@@ -475,28 +475,21 @@ describe('coding agent resumed session config', () => {
     expect(startRunMock).not.toHaveBeenCalled()
   })
 
-  it('starts and resumes OpenCode Free using profile compression settings without resolving upstream credentials', async () => {
+  it('rejects retired OpenCode Free in both new and resumed sessions', async () => {
     makeHome()
     getSessionMock.mockReturnValue({
       id: 'session-free', profile: 'default', source: 'coding_agent', agent: 'codex',
       agent_session_id: 'agent-session-1', provider: 'opencode-free', model: 'muse-spark-free',
     })
-    safeReadFileMock.mockResolvedValue('')
     const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
-    await startCodingAgentRun('codex', { sessionId: 'session-free' })
-    const resumed = startRunMock.mock.calls[0][0]
-    expect(resumed.provider).toBe('opencode-free')
-    expect(resumed.model).toBe('muse-spark-free')
-    expect(readConfigYamlForProfileMock).toHaveBeenCalledWith('default')
+    await expect(startCodingAgentRun('codex', { sessionId: 'session-free' }))
+      .rejects.toThrow('OpenCode Free is no longer supported')
     getSessionMock.mockReturnValue(null)
-    await startCodingAgentRun('codex', {
+    await expect(startCodingAgentRun('codex', {
       sessionId: 'session-new-free', provider: 'opencode-free', model: 'mimo-v2.5-free',
       apiKey: 'stale-key', baseUrl: 'https://stale.example/v1',
-    })
-    expect(startRunMock).toHaveBeenCalledTimes(2)
-    const started = startRunMock.mock.calls[1][0]
-    expect(started.provider).toBe('opencode-free')
-    expect(started.model).toBe('mimo-v2.5-free')
+    })).rejects.toThrow('OpenCode Free is no longer supported')
+    expect(startRunMock).not.toHaveBeenCalled()
   })
 
   it('fails clearly instead of launching Claude without scoped credentials', async () => {

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { isBuiltinEkkoSession, isExternalCodingAgentSession } from '@/utils/hermes/session-agent'
+import { EKKO_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
 import type { Attachment } from '@/stores/hermes/chat'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
@@ -49,13 +52,11 @@ const emit = defineEmits<{
 
 const reasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.default'), value: '' },
-  { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-  { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-  { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-  { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-  { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-  { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-  { label: t('chat.reasoningEffort.options.max'), value: 'max' },
+  ...modelReasoningEfforts(
+    appStore.profileModelGroups?.find(entry => entry.profile === (chatStore.activeSession?.profile || profilesStore.activeProfileName))?.groups || appStore.modelGroups || [],
+    chatStore.activeSession?.provider || appStore.selectedProvider || '',
+    chatStore.activeSession?.model || appStore.selectedModel || '',
+  ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
 ])
 const currentReasoningEffort = computed<string>(() =>
   chatStore.activeSession?.reasoningEffort || ''
@@ -64,19 +65,20 @@ const reasoningEffortSliderValue = computed(() => {
   const index = reasoningEffortOptions.value.findIndex(option => option.value === currentReasoningEffort.value)
   return index >= 0 ? index : 0
 })
-const reasoningEffortAccentColors = [
-  '#94a3b8',
-  '#2ac8e9',
-  '#2bd9b4',
-  '#4ed786',
-  '#b9d93a',
-  '#f9c33c',
-  '#f77734',
-  '#ef4444',
-] as const
+const reasoningEffortAccentColors: Record<string, string> = {
+  '': '#94a3b8',
+  none: '#2ac8e9',
+  minimal: '#2bd9b4',
+  low: '#4ed786',
+  medium: '#b9d93a',
+  high: '#f9c33c',
+  xhigh: '#f77734',
+  max: '#ef4444',
+  ultra: '#ef4444',
+}
 const reasoningEffortAccentStyle = computed(() => ({
-  '--reasoning-effort-accent-color': reasoningEffortAccentColors[reasoningEffortSliderValue.value]
-    || reasoningEffortAccentColors[0],
+  '--reasoning-effort-accent-color': reasoningEffortAccentColors[currentReasoningEffort.value]
+    || reasoningEffortAccentColors[''],
 }))
 const isMoaSession = computed(() => chatStore.activeSession?.provider === 'moa')
 const isGlobalCodingAgentSession = computed(() =>
@@ -93,6 +95,12 @@ function onReasoningEffortChange(value: string | null | undefined) {
   if (!sid) return
   chatStore.setSessionReasoningEffort(sid, value || '')
 }
+watch([reasoningEffortOptions, currentReasoningEffort], ([options]) => {
+  if (isMoaSession.value || isGlobalCodingAgentSession.value) return
+  if (currentReasoningEffort.value && !options.some(option => option.value === currentReasoningEffort.value)) {
+    onReasoningEffortChange('')
+  }
+}, { immediate: true })
 function reasoningEffortSliderLabel(value: number) {
   return reasoningEffortOptions.value[Math.round(value)]?.label || reasoningEffortLabel.value
 }
@@ -230,28 +238,13 @@ let bundlesLoadRequestKey = ''
 const isBridgeSession = computed(() => {
   const session = chatStore.activeSession
   if (!session) return chatStore.runtimeMode !== 'global_agent'
-  return session.source === 'cli'
+  return session.source === 'cli' && !isBuiltinEkkoSession(session)
 })
-const isCodingAgentSession = computed(() => {
-  const session = chatStore.activeSession
-  return !!session && (
-    session.source === 'coding_agent'
-    || !!session.codingAgentId
-    || session.agent === 'claude'
-    || session.agent === 'codex'
-    || session.agent === 'claude-code'
-    || session.agent === 'pi'
-    || session.agent === 'grok'
-    || session.agent === 'opencode'
-    || session.agent === 'cursor'
-  )
-})
-const isCursorSession = computed(() => chatStore.activeSession?.codingAgentId === 'cursor' || chatStore.activeSession?.agent === 'cursor')
-const showSessionUsage = computed(() => {
-  const session = chatStore.activeSession
-  return isCodingAgentSession.value && session?.codingAgentId !== 'ekko-agent' && session?.agent !== 'ekko-agent'
-})
-const isForkCommandSession = computed(() => !!chatStore.activeSession && chatStore.activeSession.source !== 'coding_agent')
+const isEkkoSession = computed(() => isBuiltinEkkoSession(chatStore.activeSession))
+const isCodingAgentSession = computed(() => isExternalCodingAgentSession(chatStore.activeSession))
+const isCursorSession = computed(() => (chatStore.activeSession?.codingAgentId === 'cursor' || chatStore.activeSession?.codingAgentId === 'antigravity') || (chatStore.activeSession?.agent === 'cursor' || chatStore.activeSession?.agent === 'antigravity'))
+const showSessionUsage = computed(() => isCodingAgentSession.value)
+const isForkCommandSession = computed(() => !!chatStore.activeSession && !isEkkoSession.value && !isCodingAgentSession.value)
 const skillPickerItems = computed(() => {
   const byName = new Map<string, SkillInfo>()
   for (const category of skillCategories.value) {
@@ -272,7 +265,9 @@ const skillPickerItems = computed(() => {
 })
 const filteredBridgeCommands = computed(() => {
   const query = slashQuery.value.trim().toLowerCase()
-  const commands = isBridgeSession.value
+  const commands = isEkkoSession.value
+    ? EKKO_SESSION_COMMAND_DEFINITIONS.map(command => ({ ...command, args: command.args || '', description: t(command.descriptionKey) }))
+    : isBridgeSession.value
     ? bridgeCommands.value
     : isCodingAgentSession.value
       ? bridgeCommands.value.filter(command => CODING_AGENT_SLASH_COMMANDS.includes(command.name)
@@ -586,7 +581,7 @@ function scrollCommandIntoView() {
 }
 
 function updateSlashState() {
-  if (!isBridgeSession.value && !isCodingAgentSession.value && !isForkCommandSession.value) {
+  if (!isEkkoSession.value && !isBridgeSession.value && !isCodingAgentSession.value && !isForkCommandSession.value) {
     slashActive.value = false
     return
   }
@@ -1293,6 +1288,7 @@ function openAttachmentPreview(attachment: Attachment) {
                 :value="reasoningEffortSliderValue"
                 :min="0"
                 :max="reasoningEffortOptions.length - 1"
+                :disabled="reasoningEffortOptions.length <= 1"
                 :step="1"
                 :format-tooltip="reasoningEffortSliderLabel"
                 @update:value="onReasoningEffortSliderChange"

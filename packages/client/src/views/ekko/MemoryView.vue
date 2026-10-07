@@ -62,7 +62,6 @@ const graphHeight = ref(640)
 const selectedId = ref('')
 const hoverId = ref('')
 const detailDrawerOpen = ref(false)
-const drawerWidth = ref(420)
 
 let disposed = false
 let loadGeneration = 0
@@ -277,7 +276,6 @@ function miniMapNodeColor(node: { data?: MemoryFlowNodeData }): string {
   return node.data?.color || '#7f8c9a'
 }
 function updateViewportMetrics() {
-  drawerWidth.value = window.innerWidth <= 640 ? window.innerWidth : 420
   const rect = graphWrapRef.value?.getBoundingClientRect()
   if (rect?.height) graphHeight.value = rect.height
 }
@@ -408,7 +406,7 @@ watch(viewMode, (mode) => {
       </div>
     </main>
 
-    <NDrawer :show="detailDrawerOpen" :width="drawerWidth" placement="right" @update:show="handleDrawerShow">
+    <NDrawer :show="detailDrawerOpen" width="var(--studio-drawer-width)" placement="right" @update:show="handleDrawerShow">
       <NDrawerContent v-if="selectedMemory" class="memory-detail-drawer" :native-scrollbar="false" closable>
         <template #header>
           <div class="drawer-title-row">

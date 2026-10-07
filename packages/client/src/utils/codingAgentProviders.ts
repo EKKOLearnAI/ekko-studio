@@ -27,14 +27,3 @@ export function usesServerManagedProviderAuth(
 ): boolean {
   return agentId === 'ekko-agent' && isAuthModelProvider(provider)
 }
-
-export function isKeylessModelProvider(provider?: string): boolean {
-  return provider === 'opencode-free'
-}
-
-export function openCodeFreeApiMode(model: string): 'chat_completions' | 'anthropic_messages' | 'codex_responses' {
-  const normalized = model.toLowerCase()
-  if (/^(claude-|qwen)/.test(normalized)) return 'anthropic_messages'
-  if (/^(gpt-|grok-|muse-spark)/.test(normalized)) return 'codex_responses'
-  return 'chat_completions'
-}

@@ -27,7 +27,7 @@ export interface StartRunRequest {
   provider?: string
   model_groups?: Array<{ provider: string; models: string[] }>
   queue_id?: string
-  source?: 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
+  source?: 'api_server' | 'cli' | 'coding_agent' | 'builtin_agent' | 'global_agent' | 'workflow' | 'group_chat'
   session_source?: 'global_agent' | 'workflow' | 'group_chat'
   coding_agent_id?: ChatCodingAgentId
   agent_preset?: string
@@ -57,6 +57,7 @@ export interface StartRunResponse {
 
 // SSE event types from /v1/runs/{id}/events
 export interface RunEvent {
+  run_usage?: import('@/utils/run-usage').RunUsageSummary
   event: string
   run_id?: string
   run_marker?: string
@@ -137,7 +138,7 @@ export interface RunEvent {
   }>
   generation?: string
   queue_id?: string
-  runtime?: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
+  runtime?: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
   phase?: 'requesting' | 'waiting_for_tool_batch' | 'stopping_current_turn' | 'starting_queued_message' | 'cancelled'
   guarantee?: 'strict' | 'immediate'
   requested_at?: number
@@ -193,7 +194,7 @@ export interface ResumeSessionPayload {
     generation: string
     run_id?: string
     queue_id: string
-    runtime: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
+    runtime: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     phase: 'requesting' | 'waiting_for_tool_batch' | 'stopping_current_turn' | 'starting_queued_message'
     guarantee: 'strict' | 'immediate'
     requested_at: number
@@ -260,6 +261,17 @@ const sessionCommandHandlers = new Set<(event: RunEvent) => void>()
 const sessionTitleUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionWorkspaceUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionSettingsUpdatedHandlers = new Set<(event: RunEvent) => void>()
+const runUsageUpdatedHandlers = new Set<(event: RunEvent) => void>()
+
+export function onRunUsageUpdated(handler: (event: RunEvent) => void): () => void {
+  runUsageUpdatedHandlers.add(handler)
+  return () => { runUsageUpdatedHandlers.delete(handler) }
+}
+
+function globalRunUsageUpdatedHandler(event: RunEvent): void {
+  if (!event.session_id) return
+  for (const handler of runUsageUpdatedHandlers) handler(event)
+}
 
 /**
  * Global message.delta event handler
@@ -871,6 +883,7 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
 
     // Usage and task-plan events
     on('usage.updated', globalUsageUpdatedHandler)
+    on('run.usage.updated', globalRunUsageUpdatedHandler)
     on('plan.updated', globalAgentEventHandler)
     on('agent.event', globalAgentEventHandler)
     on('run.reattach_failed', globalRunReattachFailedHandler)

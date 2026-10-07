@@ -5,6 +5,7 @@ import { createTestingPinia } from '@pinia/testing'
 import { nextTick } from 'vue'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useSettingsStore } from '@/stores/hermes/settings'
+import { useAppStore } from '@/stores/hermes/app'
 import ChatInput from '@/components/hermes/chat/ChatInput.vue'
 
 enableAutoUnmount(afterEach)
@@ -425,6 +426,26 @@ describe('ChatInput draft persistence', () => {
     expect(store.sessions[0].reasoningEffort).toBe('max')
     expect(wrapper.get('.reasoning-effort-button').attributes('style')).toContain('--reasoning-effort-accent-color: #ef4444')
     expect(wrapper.get('.n-slider-stub').classes()).toContain('reasoning-effort-slider--max')
+  })
+
+  it('uses the selected model effort ladder and resets an unsupported effort after switching models', async () => {
+    const wrapper = mountForSession('session-model-efforts', { provider: 'custom:work', model: 'glm', profile: 'research' })
+    const appStore = useAppStore()
+    appStore.profileModelGroups = [{ profile: 'research', default: 'glm', default_provider: 'custom:work', groups: [{
+      provider: 'custom:work', label: 'Work', base_url: 'https://api.z.ai/v1', api_key: '', models: ['glm', 'fast'],
+      model_meta: { glm: { reasoning: true, reasoning_efforts: ['low', 'high', 'max'] }, fast: { reasoning: false } },
+    }] }]
+    await nextTick()
+    expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('3')
+    await wrapper.get('.n-slider-stub').setValue('3')
+    expect(wrapper.get('.reasoning-effort-button').attributes('style')).toContain('--reasoning-effort-accent-color: #ef4444')
+    await wrapper.get('.n-slider-stub').setValue('2')
+    const store = useChatStore()
+    expect(store.sessions[0].reasoningEffort).toBe('high')
+    store.sessions[0].model = 'fast'
+    await flushPromises()
+    expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('0')
+    expect(store.sessions[0].reasoningEffort).toBeUndefined()
   })
 
   it('stores the selected reasoning effort for the active session', async () => {

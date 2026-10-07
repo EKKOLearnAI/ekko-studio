@@ -8,6 +8,8 @@ type TranslationKey =
   | 'tray.checkForUpdates'
   | 'tray.resetLogin'
   | 'tray.openAtLogin'
+  | 'tray.openAtLoginFailedTitle'
+  | 'tray.openAtLoginFailedMessage'
   | 'tray.quit'
   | 'update.upToDateTitle'
   | 'update.upToDateMessage'
@@ -70,6 +72,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'tray.checkForUpdates': 'Check for Updates',
     'tray.resetLogin': 'Reset Login',
     'tray.openAtLogin': 'Open at Login',
+    'tray.openAtLoginFailedTitle': 'Could not change Open at Login',
+    'tray.openAtLoginFailedMessage': 'The startup setting could not be saved. Check access to your startup configuration and try again.',
     'tray.quit': 'Quit Ekko Studio',
     'update.upToDateTitle': 'Ekko Studio',
     'update.upToDateMessage': 'Ekko Studio is up to date.',
@@ -129,6 +133,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'tray.checkForUpdates': '检查更新',
     'tray.resetLogin': '重置登录',
     'tray.openAtLogin': '开机启动',
+    'tray.openAtLoginFailedTitle': '无法更改开机启动设置',
+    'tray.openAtLoginFailedMessage': '无法保存开机启动设置，请检查自启动配置的访问权限后重试。',
     'tray.quit': '退出 Ekko Studio',
     'update.upToDateTitle': 'Ekko Studio',
     'update.upToDateMessage': 'Ekko Studio 已是最新版本。',
@@ -188,6 +194,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'tray.checkForUpdates': '檢查更新',
     'tray.resetLogin': '重置登入',
     'tray.openAtLogin': '開機啟動',
+    'tray.openAtLoginFailedTitle': '無法變更開機啟動設定',
+    'tray.openAtLoginFailedMessage': '無法儲存開機啟動設定，請檢查自動啟動設定的存取權限後重試。',
     'tray.quit': '結束 Ekko Studio',
     'update.upToDateTitle': 'Ekko Studio',
     'update.upToDateMessage': 'Ekko Studio 已是最新版本。',
@@ -247,6 +255,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'tray.checkForUpdates': 'アップデートを確認',
     'tray.resetLogin': 'Reset Login',
     'tray.openAtLogin': 'ログイン時に開く',
+    'tray.openAtLoginFailedTitle': 'ログイン時の起動設定を変更できません',
+    'tray.openAtLoginFailedMessage': '起動設定を保存できませんでした。自動起動設定へのアクセス権限を確認して再試行してください。',
     'tray.quit': 'Ekko Studio を終了',
     'update.upToDateTitle': 'Ekko Studio',
     'update.upToDateMessage': 'Ekko Studio は最新です。',
@@ -306,6 +316,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'tray.checkForUpdates': '업데이트 확인',
     'tray.resetLogin': 'Reset Login',
     'tray.openAtLogin': '로그인 시 열기',
+    'tray.openAtLoginFailedTitle': '로그인 시 시작 설정을 변경할 수 없습니다',
+    'tray.openAtLoginFailedMessage': '시작 설정을 저장할 수 없습니다. 자동 시작 설정에 대한 접근 권한을 확인한 후 다시 시도하세요.',
     'tray.quit': 'Ekko Studio 종료',
     'update.upToDateTitle': 'Ekko Studio',
     'update.upToDateMessage': 'Ekko Studio가 최신 버전입니다.',
@@ -365,6 +377,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'tray.checkForUpdates': 'Rechercher les mises a jour',
     'tray.resetLogin': 'Reset Login',
     'tray.openAtLogin': 'Ouvrir a la connexion',
+    'tray.openAtLoginFailedTitle': 'Impossible de modifier le démarrage à la connexion',
+    'tray.openAtLoginFailedMessage': 'Impossible d’enregistrer ce réglage. Vérifiez les droits d’accès à votre configuration de démarrage et réessayez.',
     'tray.quit': 'Quitter Ekko Studio',
     'update.upToDateTitle': 'Ekko Studio',
     'update.upToDateMessage': 'Ekko Studio est a jour.',
@@ -424,6 +438,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'tray.checkForUpdates': 'Buscar actualizaciones',
     'tray.resetLogin': 'Reset Login',
     'tray.openAtLogin': 'Abrir al iniciar sesion',
+    'tray.openAtLoginFailedTitle': 'No se pudo cambiar el inicio automático',
+    'tray.openAtLoginFailedMessage': 'No se pudo guardar el ajuste. Comprueba los permisos de acceso a la configuración de inicio y vuelve a intentarlo.',
     'tray.quit': 'Salir de Ekko Studio',
     'update.upToDateTitle': 'Ekko Studio',
     'update.upToDateMessage': 'Ekko Studio esta actualizado.',
@@ -483,6 +499,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'tray.checkForUpdates': 'Nach Updates suchen',
     'tray.resetLogin': 'Reset Login',
     'tray.openAtLogin': 'Beim Anmelden offnen',
+    'tray.openAtLoginFailedTitle': 'Autostart konnte nicht geändert werden',
+    'tray.openAtLoginFailedMessage': 'Die Einstellung konnte nicht gespeichert werden. Prüfen Sie die Zugriffsrechte für Ihre Autostart-Konfiguration und versuchen Sie es erneut.',
     'tray.quit': 'Ekko Studio beenden',
     'update.upToDateTitle': 'Ekko Studio',
     'update.upToDateMessage': 'Ekko Studio ist auf dem neuesten Stand.',
@@ -542,6 +560,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'tray.checkForUpdates': 'Verificar atualizacoes',
     'tray.resetLogin': 'Reset Login',
     'tray.openAtLogin': 'Abrir ao iniciar sessao',
+    'tray.openAtLoginFailedTitle': 'Não foi possível alterar a inicialização automática',
+    'tray.openAtLoginFailedMessage': 'Não foi possível salvar a configuração. Verifique as permissões de acesso à configuração de inicialização e tente novamente.',
     'tray.quit': 'Sair do Ekko Studio',
     'update.upToDateTitle': 'Ekko Studio',
     'update.upToDateMessage': 'Ekko Studio esta atualizado.',

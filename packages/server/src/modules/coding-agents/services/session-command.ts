@@ -1,3 +1,4 @@
+import { isNativeCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
 import type { Server, Socket } from 'socket.io'
 import { addMessage, getSession, updateSessionStats } from '../../studio/public/sessions'
 import { getModelContextLength } from '../../studio/public/provider-runtime'
@@ -149,7 +150,7 @@ export async function handleCodingAgentSessionCommand(
       }
       // A native turn can contain many model calls. Cursor's aggregate is not
       // a context snapshot, and it does not report a context limit here.
-      const isCursor = row?.agent === 'cursor' || runInfo?.agentId === 'cursor'
+      const isCursor = (row?.agent === 'cursor' || row?.agent === 'antigravity') || (runInfo?.agentId === 'cursor' || runInfo?.agentId === 'antigravity')
       const contextInput = usage.contextInputTokens
       const contextOutput = usage.contextOutputTokens
       const model = usage.nativeModel || runInfo?.model || row?.model || data.model
@@ -230,7 +231,7 @@ export async function handleCodingAgentSessionCommand(
     }
     const running = Boolean(info?.running)
     const agent = row?.agent || info?.agentId || '-'
-    const model = agent === 'cursor'
+    const model = (agent === 'cursor' || agent === 'antigravity')
       ? info?.model || getUsage(sessionId, 'coding_agent')?.model || '-'
       : row?.model || info?.model || data.model || '-'
     const provider = row?.provider || info?.provider || data.provider || '-'
@@ -267,13 +268,13 @@ export async function handleCodingAgentSessionCommand(
       })
       return
     }
-    if (compactAgentId === 'cursor') {
+    if (isNativeCodingAgent(compactAgentId) || (compactAgentId === 'cursor' || compactAgentId === 'antigravity')) {
       emitCommand({
         ok: false,
         action: 'compact',
         terminal: !compactInfo?.running && !state.isWorking,
         messageKey: 'nativeCompactUnavailable',
-        message: 'Cursor /compact is not available through the Studio print-mode integration.',
+        message: `${compactAgentId === 'antigravity' ? 'Antigravity' : 'Cursor'} /compact is not available through the Studio print-mode integration.`,
         compacted: false,
       })
       return

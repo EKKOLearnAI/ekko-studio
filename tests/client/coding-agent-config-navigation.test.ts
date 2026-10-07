@@ -9,7 +9,7 @@ describe('coding Agent configuration navigation', () => {
 
     expect(manager).toContain(':data-testid="`agent-settings-${agent.id}`"')
     expect(manager).toContain("name: 'codingAgent.config'")
-    expect(manager).toContain("params: { agentId: agent.id, section: 'settings' }")
+    expect(manager).toContain("params: { agentId: agent.id, section: agentMetadata(agent.id)?.config.settings || agentMetadata(agent.id)?.config.memory ? 'settings' : 'mcp' }")
   })
 
   it('shows skills, MCP, and settings in the Agent configuration sidebar', () => {

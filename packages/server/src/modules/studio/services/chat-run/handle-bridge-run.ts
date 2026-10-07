@@ -1,3 +1,4 @@
+import { completeRunUsage } from '../../repositories/run-usage-store'
 import { hermesStudioMcpCapabilities } from './studio-mcp'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 /**
@@ -9,7 +10,7 @@ import type { Server, Socket } from 'socket.io'
 import { getSystemPrompt } from '../../public/runs/prompt'
 import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
 import { logger, bridgeLogger } from '../../public/logging'
-import { normalizeTokenUsage, recordSessionUsage } from '../usage/usage-recorder'
+import { recordBridgeModelUsage } from '../usage/bridge-model-usage'
 import type {
   PrimaryAgentBridgeClient as AgentBridgeClient,
   PrimaryAgentBridgeContextEstimate as AgentBridgeContextEstimate,
@@ -577,6 +578,8 @@ export async function handleBridgeRun(
   state.bridgeOutput = ''
   state.bridgePendingAssistantContent = ''
   state.bridgeAssistantMessageId = undefined
+  state.finalizeRunUsage = undefined
+  state.nativeUsageSource = undefined
   state.bridgePendingReasoningContent = ''
   state.bridgePendingToolCallMarkup = ''
   state.bridgeToolCounter = 0
@@ -1250,50 +1253,6 @@ async function estimateSnapshotAwareMessageTokens(args: {
   }
 }
 
-function recordBridgeModelUsage(
-  sessionId: string,
-  bridgeRunId: string,
-  event: Record<string, unknown>,
-  profile: string,
-  modelContext: { model?: string | null; provider?: string | null },
-): void {
-  const usage = normalizeTokenUsage(event.usage)
-  if (usage.isEstimated) {
-    bridgeLogger.warn({
-      sessionId,
-      bridgeRunId,
-      apiRequestId: event.api_request_id,
-    }, '[chat-run-socket] ignoring incomplete Hermes model usage event')
-    return
-  }
-
-  const apiRequestId = stringValue(event.api_request_id)
-  const turnId = stringValue(event.turn_id)
-  const apiCallCount = Number(event.api_call_count)
-  const fallbackId = turnId && Number.isFinite(apiCallCount)
-    ? `${turnId}:${Math.max(0, Math.floor(apiCallCount))}`
-    : ''
-  const requestKey = apiRequestId || fallbackId
-  if (!requestKey) {
-    bridgeLogger.warn({ sessionId, bridgeRunId }, '[chat-run-socket] ignoring Hermes model usage event without request identity')
-    return
-  }
-
-  recordSessionUsage({
-    sessionId,
-    runId: `${bridgeRunId}:api:${requestKey}`,
-    source: 'hermes',
-    agent: 'hermes',
-    usageScope: 'model_call',
-    apiCalls: 1,
-    usage: event.usage,
-    model: stringValue(event.model) || modelContext.model,
-    provider: stringValue(event.provider) || modelContext.provider,
-    profile,
-    isEstimated: false,
-  })
-}
-
 async function applyBridgeChunkAsync(
   nsp: ReturnType<Server['of']>,
   socket: Socket,
@@ -1891,6 +1850,7 @@ async function applyBridgeChunkAsync(
     delegation_id: runMetadata?.delegationId,
     queue_id: runMetadata?.queueId,
     workspace_run_change: workspaceRunChange,
+    run_usage: completeRunUsage(sessionId, chunk.run_id, state.bridgeAssistantMessageId),
   }
   emit(eventName, payload)
 

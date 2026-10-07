@@ -21,20 +21,11 @@ export interface CursorTurnProcessInput {
   onClose: (code: number | null) => void
 }
 
-function cursorPrompt(input: string, images: CodingAgentImageInput[]): string {
-  const text = String(input || '').trim()
-  const imageNotes = images
-    .map(image => String(image.path || '').trim())
-    .filter(Boolean)
-    .map(path => `Image: ${path}`)
-  return [text, ...imageNotes].filter(Boolean).join('\n')
-}
-
 export function buildCursorTurnArgs(
   baseArgs: string[],
   nativeSessionId: string,
   resume: boolean,
-  prompt: string,
+  images: CodingAgentImageInput[] = [],
 ): string[] {
   const resumeArgs = resume && String(nativeSessionId || '').trim()
     ? ['--resume', String(nativeSessionId).trim()]
@@ -47,7 +38,7 @@ export function buildCursorTurnArgs(
     '--stream-partial-output',
     ...resumeArgs,
     ...baseArgs,
-    prompt,
+    ...images.flatMap(image => ['--image', image.path]),
   ]
 }
 
@@ -78,7 +69,7 @@ function spawnCursor(command: string, args: string[], input: CursorTurnProcessIn
     return spawn(execution.command, execution.args, {
       cwd: input.workspaceDir,
       env: input.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       windowsVerbatimArguments: execution.windowsVerbatimArguments,
     })
@@ -86,7 +77,7 @@ function spawnCursor(command: string, args: string[], input: CursorTurnProcessIn
   return spawn(normalizedCommand, args, {
     cwd: input.workspaceDir,
     env: input.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     // The shared stop path signals -pid to terminate the CLI and its tools.
     detached: process.platform !== 'win32',
     windowsHide: true,
@@ -94,8 +85,7 @@ function spawnCursor(command: string, args: string[], input: CursorTurnProcessIn
 }
 
 export function startCursorTurnProcess(input: CursorTurnProcessInput): ChildProcess {
-  const prompt = cursorPrompt(input.input, input.images)
-  const args = buildCursorTurnArgs(input.baseArgs, input.nativeSessionId, input.resume, prompt)
+  const args = buildCursorTurnArgs(input.baseArgs, input.nativeSessionId, input.resume, input.images)
   const child = spawnCursor(input.command, args, input)
   const stdout = createCursorStdoutReader()
   child.stdout?.on('data', (chunk: Buffer) => {
@@ -113,5 +103,8 @@ export function startCursorTurnProcess(input: CursorTurnProcessInput): ChildProc
     }
     input.onClose(code)
   })
+  child.stdin?.on('error', input.onError)
+  // Cursor reads stdin when no positional prompt is supplied.
+  child.stdin?.end(input.input || (input.images.length ? 'Inspect the attached images.' : ''))
   return child
 }

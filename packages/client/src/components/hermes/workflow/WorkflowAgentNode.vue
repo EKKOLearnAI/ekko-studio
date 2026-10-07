@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { isGlobalOnlyCodingAgent } from "@/utils/agent-catalog"
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { NodeResizer } from '@vue-flow/node-resizer'
 import { NInput, NSelect, NSwitch, NTooltip, useMessage } from 'naive-ui'
@@ -31,8 +33,8 @@ const statusTip = computed(() => (
     : ''
 ))
 const isCodingAgent = computed(() => props.data.agent !== 'hermes')
-const supportsGlobalMode = computed(() => ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(props.data.agent))
-const usesScopedModel = computed(() => !supportsGlobalMode.value || props.data.agentMode !== 'global')
+const supportsGlobalMode = computed(() => ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(props.data.agent))
+const usesScopedModel = computed(() => !isGlobalOnlyCodingAgent(props.data.agent) && (!supportsGlobalMode.value || props.data.agentMode !== 'global'))
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
   { label: t('codingAgents.launchModeScoped'), value: 'scoped' },
@@ -52,14 +54,17 @@ const apiModeOptions = computed(() => [
 ])
 const reasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.default'), value: 'default' },
-  { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-  { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-  { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-  { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-  { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-  { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-  { label: t('chat.reasoningEffort.options.max'), value: 'max' },
+  ...modelReasoningEfforts(
+    props.data.modelGroups,
+    props.data.provider,
+    props.data.model,
+  ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
 ])
+watch([reasoningEffortOptions, () => props.data.reasoningEffort], ([options, effort]) => {
+  if (!props.data.readonly && usesScopedModel.value && effort && !options.some(option => option.value === effort)) {
+    updateField('reasoningEffort', 'default')
+  }
+}, { immediate: true })
 const imageAttachments = computed(() => props.data.images.filter(isImagePath))
 const fileAttachments = computed(() => props.data.images.filter(path => !isImagePath(path)))
 
@@ -191,7 +196,7 @@ async function uploadImages(files: File[]) {
       <DshSessionPresetSelect v-if="data.agent === 'dsh'" :model-value="data.agentPreset" :disabled="data.readonly"
         @update:model-value="updateField('agentPreset', $event)" @valid="updateField('agentPresetReady', $event)" />
       <NSelect
-        v-if="supportsGlobalMode && data.agent !== 'cursor'"
+        v-if="supportsGlobalMode && !isGlobalOnlyCodingAgent(data.agent)"
         :value="data.agentMode"
         :options="agentModeOptions"
         size="small"

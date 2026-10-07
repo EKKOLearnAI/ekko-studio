@@ -12,6 +12,7 @@ import { useProfilesStore } from '@/stores/hermes/profiles'
 import { NSpin, NButton, NDropdown, NPopconfirm, NTooltip, useMessage, type DropdownOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getSourceLabel } from '@/shared/session-display'
+import { historySessionSource, sessionAgentFields } from '@/utils/hermes/session-agent'
 import { copyToClipboard } from '@/utils/clipboard'
 import { mergeTaskPlanMessages } from '@/utils/task-plan'
 import HistoryMessageList from '@/components/hermes/chat/HistoryMessageList.vue'
@@ -202,28 +203,13 @@ function mapHistoryMessages(messages: HermesMessage[]): Session['messages'] {
   })
 }
 
-function codingAgentFields(summary: SessionSummary): Pick<Session, 'agent' | 'agentSessionId' | 'agentNativeSessionId' | 'codingAgentId' | 'codingAgentMode'> {
-  const isCodingAgentSession = summary.source === 'coding_agent' || summary.agent === 'claude' || summary.agent === 'codex' || summary.agent === 'pi' || summary.agent === 'grok' || summary.agent === 'cursor' || (summary.agent === 'opencode' || summary.agent === 'dsh')
-  return {
-    agent: summary.agent || undefined,
-    agentSessionId: summary.agent_session_id || undefined,
-    agentNativeSessionId: summary.agent_native_session_id || undefined,
-    codingAgentId: summary.agent === 'codex' ? 'codex' : summary.agent === 'pi' ? 'pi' : summary.agent === 'grok' ? 'grok' : summary.agent === 'cursor' ? 'cursor' : summary.agent === 'dsh' ? 'dsh' : summary.agent === 'opencode' ? 'opencode' : summary.agent === 'claude' ? 'claude-code' : undefined,
-    codingAgentMode: isCodingAgentSession
-      ? (summary.agent_mode === 'global' || summary.agent_mode === 'scoped'
-          ? summary.agent_mode
-          : summary.provider === 'global' ? 'global' : 'scoped')
-      : undefined,
-  }
-}
-
 function sessionFromSummary(summary: SessionSummary, messages: Session['messages'] = []): Session {
   return {
     id: summary.id,
     profile: summary.profile || undefined,
     title: summary.title || '',
-    source: summary.source,
-    ...codingAgentFields(summary),
+    source: historySessionSource(summary),
+    ...sessionAgentFields(summary),
     createdAt: summary.started_at * 1000,
     updatedAt: (summary.last_active || summary.ended_at || summary.started_at) * 1000,
     model: summary.model,
@@ -282,7 +268,8 @@ async function loadHistorySession(sessionId: string, profile?: string | null) {
         id: sessionDetail.id,
         profile: sessionDetail.profile || sessionProfile || undefined,
         title: sessionDetail.title || '',
-        source: sessionDetail.source,
+        source: historySessionSource(sessionDetail),
+        ...sessionAgentFields(sessionDetail),
         createdAt: sessionDetail.started_at * 1000,
         updatedAt: (sessionDetail.last_active || sessionDetail.started_at) * 1000,
         model: sessionDetail.model,
@@ -367,8 +354,8 @@ async function openDefaultHistorySession(replace = false) {
     return
   }
 
-  if (collapsedGroups.value.has(firstSession.source)) {
-    collapsedGroups.value = new Set([...collapsedGroups.value].filter(source => source !== firstSession.source))
+  if (collapsedGroups.value.has(historySessionSource(firstSession))) {
+    collapsedGroups.value = new Set([...collapsedGroups.value].filter(source => source !== historySessionSource(firstSession)))
   }
 
   const location = {
@@ -392,8 +379,8 @@ async function syncRouteSession() {
     return
   }
 
-  if (collapsedGroups.value.has(summary.source)) {
-    collapsedGroups.value = new Set([...collapsedGroups.value].filter(source => source !== summary.source))
+  if (collapsedGroups.value.has(historySessionSource(summary))) {
+    collapsedGroups.value = new Set([...collapsedGroups.value].filter(source => source !== historySessionSource(summary)))
     localStorage.setItem('hermes_collapsed_groups', JSON.stringify([...collapsedGroups.value]))
   }
 
@@ -465,8 +452,8 @@ function sessionSummaryToSession(summary: SessionSummary): Session {
     id: summary.id,
     profile: summary.profile || undefined,
     title: summary.title || '',
-    source: summary.source,
-    ...codingAgentFields(summary),
+    source: historySessionSource(summary),
+    ...sessionAgentFields(summary),
     createdAt: summary.started_at * 1000,
     updatedAt: (summary.last_active || summary.started_at) * 1000,
     model: summary.model,
@@ -542,6 +529,10 @@ const allSessionsSelected = computed(() =>
 )
 
 // Source sort order: api_server first, cron last, others alphabetical
+function historySourceLabel(source: string): string {
+  return source === 'builtin_agent' ? t('chat.builtinAgent') : source ? getSourceLabel(source) : t('chat.other')
+}
+
 function sourceSortKey(source: string): number {
   if (source === 'api_server') return -1
   if (source === 'cron') return 999
@@ -571,7 +562,7 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   const map = new Map<string, Session[]>()
   for (const s of historySessions.value) {
     if (s.isPinned) continue
-    const key = s.source || ''
+    const key = historySessionSource(s)
     if (!map.has(key)) map.set(key, [])
     map.get(key)!.push(s)
   }
@@ -590,7 +581,7 @@ const groupedSessions = computed<SessionGroup[]>(() => {
     const sessions = sortSessionsWithActiveFirst(map.get(key) || [])
     return {
       source: key,
-      label: key ? getSourceLabel(key) : t('chat.other'),
+      label: historySourceLabel(key),
       sessions,
       hasMore: Boolean(sourceHasMore.value[key]),
       loading: Boolean(sourceLoading.value[key]),
@@ -656,7 +647,7 @@ function toggleGroup(source: string) {
 
 watch(groupedSessions, groups => {
   if (localStorage.getItem('hermes_collapsed_groups') !== null) {
-    const activeSource = historySession.value?.source
+    const activeSource = historySessionSource(historySession.value)
     if (activeSource && collapsedGroups.value.has(activeSource)) {
       collapsedGroups.value = new Set([...collapsedGroups.value].filter(source => source !== activeSource))
       localStorage.setItem('hermes_collapsed_groups', JSON.stringify([...collapsedGroups.value]))
@@ -682,7 +673,7 @@ const activeSessionTitle = computed(() =>
 )
 
 const activeSessionSource = computed(() =>
-  historySession.value?.source || '',
+  historySessionSource(historySession.value),
 )
 
 async function copySessionId(id?: string) {
@@ -792,10 +783,11 @@ async function handleDeleteSession(id: string, profile?: string | null) {
   }
 
   hermesSessions.value = hermesSessions.value.filter(s => s.id !== id)
-  if (summary?.source && sourceOffsets.value[summary.source]) {
+  const source = historySessionSource(summary)
+  if (source && sourceOffsets.value[source]) {
     sourceOffsets.value = {
       ...sourceOffsets.value,
-      [summary.source]: Math.max(0, sourceOffsets.value[summary.source] - 1),
+      [source]: Math.max(0, sourceOffsets.value[source] - 1),
     }
   }
 
@@ -1044,7 +1036,7 @@ function handleBatchDeleteConfirm() {
             @toggle="showSessions = !showSessions"
           />
           <span class="header-session-title">{{ activeSessionTitle }}</span>
-          <span v-if="activeSessionSource" class="source-badge">{{ getSourceLabel(activeSessionSource) }}</span>
+          <span v-if="activeSessionSource" class="source-badge">{{ historySourceLabel(activeSessionSource) }}</span>
         </div>
         <div class="header-actions">
           <NTooltip trigger="hover">

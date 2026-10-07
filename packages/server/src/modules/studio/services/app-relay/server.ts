@@ -4,6 +4,7 @@ import { authenticateUserToken, inspectAppUserToken } from '../../middleware/aut
 import { config } from '../../public/config'
 import { logger } from '../../public/logging'
 import { getDeviceId } from '../../public/system-info'
+import { P2PRelaySessions } from './p2p'
 import type { AppConnectionType } from '../../repositories/app-connections-store'
 import {
   inspectAppEntitlementToken,
@@ -151,6 +152,7 @@ export class LocalAppRelayServer {
   private readonly downloadSessions = new RelayDownloadSessions()
   private readonly localBaseUrl: string
   private readonly fetchImpl: typeof fetch
+  private readonly p2p: P2PRelaySessions
   private readonly configuredMachineId: string
   private readonly entitlementRequired: boolean
   private readonly verifyEntitlementToken: (token: string) => AppEntitlementClaims | null
@@ -163,6 +165,7 @@ export class LocalAppRelayServer {
     this.localBaseUrl = (options.localBaseUrl || `http://127.0.0.1:${config.port}`).replace(/\/$/, '')
     this.configuredMachineId = String(options.machineId || '').trim()
     this.fetchImpl = options.fetchImpl || fetch
+    this.p2p = new P2PRelaySessions(this.localBaseUrl)
     this.entitlementRequired = options.entitlementRequired ?? config.appRelay.entitlementRequired
     this.verifyEntitlementToken = options.verifyEntitlementToken || verifyAppEntitlementToken
     this.inspectEntitlementToken = options.inspectEntitlementToken
@@ -314,10 +317,32 @@ export class LocalAppRelayServer {
       role: 'app',
       machineId,
       hostConnected: true,
-      capabilities: ['http.request', 'http.download.chunked', 'socket.chat-run', 'socket.group-chat', 'socket.workflow', 'app.entitlement'],
+      capabilities: ['http.request', 'http.download.chunked', 'socket.chat-run', 'socket.group-chat', 'socket.workflow', 'app.entitlement', 'p2p.direct.v1'],
     })
     if (socket.data.localUserToken) this.scheduleTokenExpiry(socket)
     if (socket.data.appEntitlement) this.scheduleEntitlementExpiry(socket)
+
+    socket.on('p2p.offer', (request: Record<string, any> = {}, ack?: (response: unknown) => void) => {
+      void (async () => {
+        if (!await this.authorized(socket)) return { ok: false, error: 'p2p_unauthorized' }
+        const now = Date.now()
+        if (now - Number(socket.data.p2pLastOffer || 0) < 5000) return { ok: false, error: 'p2p_rate_limited' }
+        socket.data.p2pLastOffer = now
+        return this.p2p.offer(socket.id, { type: request.type, sdp: request.sdp, auth: {
+          role: 'app', machineId: socket.data.machineId, token: socket.data.localUserToken,
+          deviceCode: socket.data.appDeviceCode,
+          cloudUserId: socket.data.appCloudUserId,
+          entitlementToken: socket.handshake.auth.entitlementToken,
+        } })
+      })().then(response => ack?.(response)).catch(() => ack?.({ ok: false, error: 'p2p_unavailable' }))
+    })
+    socket.on('p2p.keepalive', (_request: unknown, ack?: (response: unknown) => void) => {
+      void this.authorized(socket).then(ok => {
+        if (!ok) { this.p2p.close(socket.id); ack?.({ ok: false }); return }
+        ack?.(this.p2p.keepalive(socket.id))
+      })
+    })
+    socket.on('p2p.close', (_request: unknown, ack?: (response: unknown) => void) => { ack?.(this.p2p.close(socket.id)) })
 
     socket.on('http.request', (request: AppRelayHttpRequest = {}, ack?: (response: AppRelayHttpResponse) => void) => {
       void this.handleHttpRequest(socket, request).then(response => ack?.(response))
@@ -346,6 +371,7 @@ export class LocalAppRelayServer {
       ack?.(this.closeSocket(socket, request))
     })
     socket.on('disconnect', () => {
+      this.p2p.close(socket.id)
       this.appSockets.delete(socket.id)
       this.downloadSessions.cancelOwner(socket.id)
       this.closeOwnerBridges(socket.id)

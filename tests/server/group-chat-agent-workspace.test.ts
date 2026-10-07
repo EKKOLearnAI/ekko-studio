@@ -53,6 +53,7 @@ vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => 
   readConfigYamlForProfile: vi.fn(async () => ({ model: { default: 'model-a', provider: 'provider-a' }, mcp_servers: { 'ekko-studio-interaction': { command: 'studio' } } })),
 }))
 vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () => ({ updateUsage: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/services/usage/bridge-model-usage', () => ({ recordBridgeModelUsage: vi.fn() }))
 vi.mock('../../packages/server/src/modules/studio/public/group-chat-agent-runtime', () => ({
   createGroupPrimaryAgentBridge: vi.fn(() => bridgeMock),
   cancelGroupEkkoClarification: vi.fn(() => ({ resolved: false })),
@@ -358,7 +359,7 @@ describe('group chat agent workspace bridge runs', () => {
   it('clears exhausted Hermes tool recovery state after surfacing terminal persistence loss', async () => {
     let toolResultAttempts = 0
     mockSocket.emit.mockImplementation((event: string, data?: any, ack?: Function) => {
-      if (event === 'message' && data?.role === 'tool') {
+      if (event === 'message' && data?.role === 'tool' && data?.tool_name !== 'run_usage') {
         toolResultAttempts += 1
         ack?.({ error: 'persistent Room persistence failure' })
       } else if (event === 'message') {
@@ -1416,6 +1417,87 @@ describe('group chat agent workspace bridge runs', () => {
     await first
     expect(replyToMention).toHaveBeenCalledTimes(2)
     expect(statuses).toEqual(['replying', 'ready'])
+  })
+
+  it.each(['run.completed', 'run.failed', 'abort.completed'])('forwards %s usage onto the exact group response', async event => {
+    const { AgentClients } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-clients')
+    const clients = new AgentClients()
+    let client: any
+    let onEvent: any
+    const usage = { runId: 'native-run', assistantMessageId: 'native-message', inputTokens: 1200, outputTokens: 200,
+      cacheReadTokens: 300, cacheHitRate: 0.25, costUsd: 0.0123, tokensPerSecond: 50, speedSource: 'model', isEstimated: false }
+    clients.setChatRunService({
+      abortSession: vi.fn(async () => { onEvent('abort.completed', { run_usage: usage }) }),
+      runAndWait: vi.fn(async (_data: any, options: any) => {
+        onEvent = options.onEvent
+        if (event === 'abort.completed') await client.interrupt('room-1')
+        else onEvent(event, { run_usage: usage })
+        return { ok: event === 'run.completed', output: 'Done', error: 'Stopped' }
+      }),
+    })
+    client = await clients.createAgent({ agentId: 'agent-codex', agent: 'codex', profile: 'default', name: 'Coder',
+      description: '', invited: 0, backgroundDelegationEnabled: false } as any)
+    client.setStorage({ getRoom: () => ({ workspace: '' }), getMessagesForContext: () => [], getContextSnapshot: () => null })
+    await client.replyToMention('room-1', { content: '@Coder inspect', senderName: 'Alice', senderId: 'user-1', timestamp: 1 })
+    const cards = mockSocket.emit.mock.calls.filter(call => call[0] === 'message' && call[1]?.tool_name === 'run_usage').map(call => call[1])
+    expect(cards).toHaveLength(1)
+    expect(JSON.parse(cards[0].content)).toMatchObject({ runId: cards[0].run_id, inputTokens: 1200, outputTokens: 200 })
+    expect(JSON.parse(cards[0].content).assistantMessageId).toBe(`${cards[0].run_id}_part_0`)
+    expect(cards[0].run_id).not.toBe('native-run')
+    client.disconnect()
+  })
+
+  it('records Hermes model usage and delivers a completed card through the group transport', async () => {
+    const { recordBridgeModelUsage } = await import('../../packages/server/src/modules/studio/services/usage/bridge-model-usage')
+    const usageEvent = { event: 'model.usage', api_request_id: 'call-1', usage: { input_tokens: 1200, output_tokens: 200 } }
+    bridgeMock.streamOutput.mockImplementation(async function* (runId: string) {
+      yield { ok: true, run_id: runId, session_id: 'session-1', status: 'complete', delta: 'Done', output: 'Done',
+        done: true, cursor: 1, event_cursor: 1, events: [usageEvent] }
+    })
+    const client = await createClient('')
+    await client.replyToMention('room-1', { content: '@Worker inspect', senderName: 'Alice', senderId: 'user-1', timestamp: 1 })
+    expect(recordBridgeModelUsage).toHaveBeenCalledWith(expect.stringMatching(/^gc_run_/), 'bridge-run-id', usageEvent, 'default', expect.any(Object))
+    const cards = mockSocket.emit.mock.calls.filter(call => call[0] === 'message' && call[1]?.tool_name === 'run_usage').map(call => call[1])
+    expect(cards).toHaveLength(1)
+    expect(JSON.parse(cards[0].content).runId).toBe(cards[0].run_id)
+    client.disconnect()
+  })
+
+  it('restores stopped native run usage from the ledger before disposing its temporary session', async () => {
+    const { AgentClients } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-clients')
+    const usageStore = await import('../../packages/server/src/modules/studio/repositories/run-usage-store')
+    const usage = { runId: 'native-run', assistantMessageId: 'native-message', inputTokens: 1200, outputTokens: 200,
+      cacheReadTokens: 300, cacheHitRate: 0.25, costUsd: 0.0123, tokensPerSecond: 50, speedSource: 'model' as const, isEstimated: false }
+    const complete = vi.spyOn(usageStore, 'completeRunUsage').mockReturnValue(usage)
+    const clients = new AgentClients()
+    let client: any
+    let onEvent: any
+    const dispose = vi.fn(async () => {})
+    clients.setChatRunService({
+      abortSession: vi.fn(async () => { onEvent('run.failed', { error: 'Stopped' }) }),
+      disposeSession: dispose,
+      runAndWait: vi.fn(async (_data: any, options: any) => {
+        onEvent = options.onEvent
+        onEvent('run.started', { run_id: 'native-run' })
+        await client.interrupt('room-1')
+        return { ok: false, run_id: 'native-run', error: 'Stopped' }
+      }),
+    })
+    try {
+      client = await clients.createAgent({ agentId: 'agent-codex', agent: 'codex', profile: 'default', name: 'Coder',
+        description: '', invited: 0, backgroundDelegationEnabled: false } as any)
+      client.setStorage({ getRoom: () => ({ workspace: '' }), getMessagesForContext: () => [], getContextSnapshot: () => null })
+      await client.replyToMention('room-1', { content: '@Coder inspect', senderName: 'Alice', senderId: 'user-1', timestamp: 1 })
+      const cards = mockSocket.emit.mock.calls.filter(call => call[0] === 'message' && call[1]?.tool_name === 'run_usage').map(call => call[1])
+      expect(cards).toHaveLength(1)
+      expect(JSON.parse(cards[0].content)).toMatchObject({ runId: cards[0].run_id, inputTokens: 1200, outputTokens: 200 })
+      expect(complete).toHaveBeenCalledWith(expect.stringMatching(/^gc_run_/), 'native-run', `${cards[0].run_id}_part_0`)
+      expect(dispose).toHaveBeenCalledOnce()
+      expect(complete.mock.invocationCallOrder[0]).toBeLessThan(dispose.mock.invocationCallOrder[0])
+    } finally {
+      complete.mockRestore()
+      client?.disconnect()
+    }
   })
 
   async function createClient(

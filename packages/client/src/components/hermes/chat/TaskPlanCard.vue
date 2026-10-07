@@ -34,7 +34,7 @@ const stateLabel = computed(() => completed.value === props.plan.plan.length
 </template>
 
 <style scoped lang="scss">
-.task-plan-card { color: var(--text-primary, #1a1a1a); background: var(--bg-card, #fff); width: 100%; max-width: 680px; border: 1px solid var(--border-color, #8884); border-radius: 12px; overflow: hidden; }
+.task-plan-card { color: var(--text-primary, #1a1a1a); background: var(--msg-assistant-bg, #f5f5f5); width: 100%; max-width: 680px; border: 1px solid var(--border-color, #8884); border-radius: 12px; overflow: hidden; }
 .plan-header { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; border: 0; color: inherit; background: transparent; cursor: pointer; text-align: start; font: inherit; }
 .plan-header:focus-visible { outline: 2px solid var(--accent-primary, #333333); outline-offset: -3px; }
 .plan-title { font-weight: 600; }

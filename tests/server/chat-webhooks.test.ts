@@ -374,6 +374,8 @@ describe('chat run webhooks', () => {
       const { publishGroupMessage, publishGroupInteraction, publishDomainEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/domain-events')
       const room = { id: 'room', name: 'Room', summaryProfile: 'default' }
       publishGroupMessage(room, { id: 'message', senderType: 'agent', role: 'assistant', content: 'Group answer' }, [])
+      publishGroupMessage(room, { id: 'usage', senderType: 'agent', role: 'tool', tool_name: 'run_usage',
+        content: JSON.stringify({ runId: 'group-run', inputTokens: 1200, outputTokens: 200 }) }, [])
       publishGroupInteraction(room, 'group.clarification.requested', 'group-run', 'question')
       publishDomainEvent('workflow.run.completed', 'default', { workflow_id: 'workflow', run_id: 'workflow-run' }, { title: 'Workflow' })
       await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(3))

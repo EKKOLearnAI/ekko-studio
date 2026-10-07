@@ -1254,7 +1254,12 @@ test('workflow workspace stays available as a right-side icon when the title is 
   await expect(workspaceButton).toHaveAttribute('title', '/tmp/mobile-workspace')
   await expect(page.locator('.workspace-badge')).toHaveCount(0)
   await workspaceButton.click()
-  await expect(page.getByRole('dialog')).toBeVisible()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toHaveCSS('width', '358px')
+  await expect(dialog.locator('.folder-picker')).toBeVisible()
+  await page.setViewportSize({ width: 1280, height: 844 })
+  await expect(dialog).toHaveCSS('width', '520px')
+  await expect(dialog.locator('.folder-picker').getByRole('textbox')).toHaveValue('/tmp/mobile-workspace')
 })
 
 test('workflow schedules can be created, edited, disabled, and deleted from the Workflow page', async ({ page }) => {

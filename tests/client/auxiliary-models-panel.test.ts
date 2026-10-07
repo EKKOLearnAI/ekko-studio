@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const apiMocks = vi.hoisted(() => ({
@@ -23,7 +23,12 @@ const modelsStore = vi.hoisted(() => ({
       label: 'Studio Images',
       models: ['seedream-4', 'qwen-image-edit'],
     },
-  ],
+  ] as Array<{
+    provider: string
+    label: string
+    models: string[]
+    model_meta?: Record<string, { reasoning?: boolean; reasoning_efforts?: string[] }>
+  }>,
 }))
 
 const profilesStore = vi.hoisted(() => ({
@@ -106,12 +111,36 @@ describe('AuxiliaryModelsPanel', () => {
     apiMocks.fetchDelegationModel.mockResolvedValue({
       delegation: { provider: 'openrouter', model: 'old-model', reasoning_effort: 'low' },
     })
-    apiMocks.saveDelegationModel
+    apiMocks.saveDelegationModel.mockReset()
       .mockResolvedValueOnce({
         success: true,
         delegation: { provider: 'anthropic', model: 'claude-sonnet', reasoning_effort: 'high' },
       })
       .mockResolvedValueOnce({ success: true, delegation: {} })
+  })
+
+  afterEach(() => {
+    for (const group of modelsStore.providers) delete group.model_meta
+  })
+
+  it('uses model-specific delegation effort options and clears unsupported settings when switching models', async () => {
+    modelsStore.providers[0].model_meta = { 'old-model': { reasoning: true, reasoning_efforts: ['low', 'high', 'max'] } }
+    modelsStore.providers[1].model_meta = { 'claude-sonnet': { reasoning: false } }
+    const wrapper = mount(AuxiliaryModelsPanel)
+    await flushPromises()
+    await wrapper.get('[data-testid="delegation-edit"]').trigger('click')
+    const selects = wrapper.findAllComponents({ name: 'NSelect' })
+    expect(selects[2].props('options').map((option: { value: string }) => option.value)).toEqual(['low', 'high', 'max'])
+    selects[0].vm.$emit('update:value', 'anthropic')
+    await wrapper.vm.$nextTick()
+    selects[1].vm.$emit('update:value', 'claude-sonnet')
+    await wrapper.vm.$nextTick()
+    expect(selects[2].props('options')).toEqual([])
+    expect(selects[2].props('value')).toBeNull()
+    await wrapper.get('[data-testid="delegation-save"]').trigger('click')
+    await flushPromises()
+    expect(apiMocks.saveDelegationModel).toHaveBeenCalledWith({ provider: 'anthropic', model: 'claude-sonnet' })
+    wrapper.unmount()
   })
 
   it('loads, saves, and resets the Profile delegation route from server responses', async () => {

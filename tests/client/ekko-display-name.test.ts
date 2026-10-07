@@ -23,20 +23,20 @@ describe('Ekko display name', () => {
 
   it.each([
     ['single chat', 'packages/client/src/components/hermes/chat/ChatPanel.vue',
-      AGENT_OPTIONS, 'AGENT_OPTIONS', 'const newChatAgentOptions = computed(() => AGENT_OPTIONS.map('],
+      AGENT_OPTIONS, 'AGENT_OPTIONS', 'const newChatAgentOptions = computed(() => AGENT_OPTIONS.filter('],
     ['group chat', 'packages/client/src/components/hermes/group-chat/GroupChatPanel.vue',
       GROUP_AGENT_OPTIONS, 'GROUP_AGENT_OPTIONS', 'const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS'],
     ['group chat link', 'packages/client/src/views/hermes/GroupChatLinkView.vue',
       GROUP_AGENT_OPTIONS, 'GROUP_AGENT_OPTIONS', 'const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS'],
     ['workflow', 'packages/client/src/views/hermes/WorkflowView.vue',
       AGENT_OPTIONS, 'AGENT_OPTIONS', 'const workflowAgentDefinitions = AGENT_OPTIONS'],
-  ] as const)('uses the shared order with Ekko second in the %s Agent dropdown', (_name, path, options, exportName, binding) => {
+  ] as const)('uses the shared order with Ekko first in the %s Agent dropdown', (_name, path, options, exportName, binding) => {
     const source = readFileSync(path, 'utf8')
 
     expect(source).toMatch(new RegExp(`import\\s+\\{\\s*${exportName}\\s*\\}\\s+from\\s+['"]@/utils/agent-options['"]`))
     expect(source).toContain(binding)
     expect(options.map(option => option.label)).toEqual([
-      'Hermes', 'Ekko', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor',
+      'Ekko', 'Hermes', 'Claude', 'Codex', 'Pi', 'Grok', 'OpenCode', 'DeepSeek Harness', 'Cursor', 'Antigravity', 'Qwen Code', 'Kimi Code', 'CodeBuddy', 'Qoder', 'GitHub Copilot', 'ZCode',
     ])
   })
 

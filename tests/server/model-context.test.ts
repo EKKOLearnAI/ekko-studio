@@ -81,6 +81,22 @@ describe('getModelContextLength', () => {
     expect(getModelRuntimeCapabilities(input).contextWindow).toBe(80_000)
   })
 
+  it('resolves reasoning efforts through the same provider mapping and observes refreshed metadata', async () => {
+    writeModelsCache({ 'kimi-code-plan-global': { models: { 'kimi-for-coding': {
+      limit: { context: 256_000 }, reasoning: true,
+      reasoning_options: [{ type: 'toggle' }, { type: 'effort', values: ['low', 'high', 'max'] }],
+    } } } })
+    const { getModelRuntimeCapabilities } = await loadModelContext()
+    const input = { provider: 'kimi-coding', model: 'kimi-for-coding' }
+    expect(getModelRuntimeCapabilities(input).reasoningEfforts).toEqual(['none', 'low', 'high', 'max'])
+    const { refreshModelCatalog } = await import('../../packages/server/src/modules/studio/public/model-catalog')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ 'kimi-code-plan-global': { models: {
+      'kimi-for-coding': { reasoning: true, reasoning_options: [{ type: 'effort', values: ['low', 'high'] }] },
+    } } }))))
+    await refreshModelCatalog(true)
+    expect(getModelRuntimeCapabilities(input).reasoningEfforts).toEqual(['low', 'high'])
+  })
+
   it.each([false, true])('prefers the manually edited model window (config file exists: %s)', async withConfig => {
     if (withConfig) writeConfig('model:\n  default: policy-model\n  provider: test\n  context_length: 256000\n')
     const readModelContextRecord = vi.fn(() => ({ available: true, row: { context_limit: 80000 } }))
@@ -90,7 +106,7 @@ describe('getModelContextLength', () => {
     expect(readModelContextRecord).toHaveBeenCalledWith('default', 'test', 'policy-model')
   })
 
-  it('does not borrow a same-named model context from another provider when the configured provider is uncached', async () => {
+  it('falls back to a unique model ID when the configured provider is uncached', async () => {
     writeConfig(`model:\n  default: gpt-5.5\n  provider: openai-codex\n`)
     writeModelsCache({
       openai: {
@@ -102,7 +118,7 @@ describe('getModelContextLength', () => {
 
     const { getModelContextLength } = await loadModelContext()
 
-    expect(getModelContextLength()).toBe(256_000)
+    expect(getModelContextLength()).toBe(1_050_000)
   })
 
   it('matches Studio glm to the domestic Coding Plan for context and output limits', async () => {
@@ -133,7 +149,7 @@ describe('getModelContextLength', () => {
     expect(getModelContextLength()).toBe(131_072)
     expect(getModelRuntimeCapabilities({ provider, model: 'glm-4.5' }))
       .toEqual({ contextWindow: 131_072, outputLimit: 98_304, reasoning: true, input: ['text'] })
-    expect(getModelContextLength({ provider: 'custom:relay', model: 'glm-4.5' })).toBe(256_000)
+    expect(getModelContextLength({ provider: 'custom:relay', model: 'glm-4.5' })).toBe(131_072)
     writeConfig(`model:\n  default: glm-4.5\n  provider: ${provider}\n  context_length: 80000\n`)
     expect(getModelContextLength()).toBe(80_000)
   })
@@ -146,7 +162,7 @@ describe('getModelContextLength', () => {
     expect(getModelContextLength({ provider: 'custom:grok', model: 'grok-4.6', fallbackContextLength: 128_000 })).toBe(128_000)
   })
 
-  it('does not scan other providers when the configured provider exists without that model', async () => {
+  it('falls back to a unique model ID when the provider omits it', async () => {
     writeConfig(`model:\n  default: gpt-5.5\n  provider: openai-codex\n`)
     writeModelsCache({
       'openai-codex': {
@@ -163,7 +179,7 @@ describe('getModelContextLength', () => {
 
     const { getModelContextLength } = await loadModelContext()
 
-    expect(getModelContextLength()).toBe(256_000)
+    expect(getModelContextLength()).toBe(1_050_000)
   })
 
   it('uses the configured provider cache entry when the provider matches', async () => {
@@ -317,7 +333,7 @@ describe('getModelContextLength', () => {
     expect(getModelContextLength()).toBe(1_000_000)
   })
 
-  it('does not trust a stale custom:name provider hint without a matching custom provider entry', async () => {
+  it('uses the model ID when a stale custom provider has no endpoint', async () => {
     writeConfig(`model:\n  default: deepseek-v4-pro\n  provider: custom:deepseek\n`)
     writeModelsCache({
       deepseek: {
@@ -329,10 +345,10 @@ describe('getModelContextLength', () => {
 
     const { getModelContextLength } = await loadModelContext()
 
-    expect(getModelContextLength()).toBe(256_000)
+    expect(getModelContextLength()).toBe(1_000_000)
   })
 
-  it('does not trust custom:name alone when the matched custom provider entry points at an unknown proxy url', async () => {
+  it('uses the model ID when the custom endpoint is absent from the catalog', async () => {
     writeConfig(`model:\n  default: deepseek-v4-pro\n  provider: custom:deepseek\n\ncustom_providers:\n  - name: deepseek\n    base_url: https://proxy.example.com/v1\n    model: deepseek-v4-pro\n`)
     writeModelsCache({
       deepseek: {
@@ -344,10 +360,10 @@ describe('getModelContextLength', () => {
 
     const { getModelContextLength } = await loadModelContext()
 
-    expect(getModelContextLength()).toBe(256_000)
+    expect(getModelContextLength()).toBe(1_000_000)
   })
 
-  it('does not fall through to a unique global match after a resolved custom:name provider misses in its scoped cache provider', async () => {
+  it('uses the model ID after the endpoint directory omits it', async () => {
     writeConfig(`model:\n  default: gpt-5.5\n  provider: custom:deepseek\n\ncustom_providers:\n  - name: deepseek\n    base_url: https://api.deepseek.com\n    model: gpt-5.5\n`)
     writeModelsCache({
       openai: {
@@ -364,7 +380,7 @@ describe('getModelContextLength', () => {
 
     const { getModelContextLength } = await loadModelContext()
 
-    expect(getModelContextLength()).toBe(256_000)
+    expect(getModelContextLength()).toBe(400_000)
   })
 
   it('allows a unique global model-name fallback for unresolved custom providers', async () => {
@@ -397,19 +413,19 @@ describe('getModelContextLength', () => {
     expect(getModelContextLength()).toBe(1_000_000)
   })
 
-  it('keeps the unresolved custom-provider fallback strict to exact or case-insensitive model-name matches', async () => {
-    writeConfig(`model:\n  default: gpt-5\n  provider: custom\n  base_url: https://proxy.example.com/v1\n`)
+  it.each(['gpt-5', 'vendor/nested/gpt-5'])('matches the final ID segment for an unresolved custom provider: %s', async model => {
+    writeConfig(`model:\n  default: ${model}\n  provider: custom\n  base_url: https://proxy.example.com/v1\n`)
     writeModelsCache({
       vercel: {
         models: {
-          'openai/gpt-5': { limit: { context: 1_000_000 } },
+          'openai/catalog/gpt-5': { limit: { context: 1_000_000 } },
         },
       },
     })
 
     const { getModelContextLength } = await loadModelContext()
 
-    expect(getModelContextLength()).toBe(256_000)
+    expect(getModelContextLength()).toBe(1_000_000)
   })
 
   it('does not guess across multiple cache providers when a custom provider remains unresolved', async () => {
@@ -430,6 +446,18 @@ describe('getModelContextLength', () => {
     const { getModelContextLength } = await loadModelContext()
 
     expect(getModelContextLength()).toBe(256_000)
+  })
+
+
+  it('resolves a profile endpoint before global model IDs for both context and reasoning', async () => {
+    writeConfig('providers:\n  work:\n    base_url: https://relay.test/custom/path\n')
+    writeModelsCache({
+      maker: { models: { shared: { canonical_model_id: 'maker/shared', limit: { context: 100_000 }, reasoning: false } } },
+      relay: { api: 'https://relay.test/v1', models: { shared: { canonical_model_id: 'maker/shared', limit: { context: 500_000 }, reasoning: true, reasoning_options: [{ type: 'effort', values: ['high', 'max'] }] } } },
+    })
+    const { getModelRuntimeCapabilities } = await loadModelContext()
+    expect(getModelRuntimeCapabilities({ provider: 'work', model: 'shared' })).toMatchObject({ contextWindow: 500_000, reasoningEfforts: ['high', 'max'] })
+    expect(getModelRuntimeCapabilities({ provider: 'work', model: 'shared', baseUrl: 'https://unlisted.test' })).toMatchObject({ contextWindow: 100_000, reasoningEfforts: [] })
   })
 
   it('uses the MoA preset aggregator context length for the virtual provider', async () => {

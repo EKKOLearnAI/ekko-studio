@@ -73,6 +73,10 @@ state and does not require a running Gateway.
 
 - Build workflow: installs dependencies, runs coverage, and builds production
   assets on pushes and pull requests.
+- Coding agent platforms workflow: runs environment/discovery checks and real
+  CLI protocol fixtures on Windows, Linux and macOS, including long stdin prompts,
+  non-ASCII installation paths and process cancellation. Vendor authentication
+  and paid API calls are not required.
 - Playwright workflow: runs all browser tests across four independent shards,
   then merges their blob reports into the `playwright-report` HTML artifact.
   The final `e2e` check requires every shard to pass. Keep route/viewport sweeps
@@ -83,6 +87,38 @@ state and does not require a running Gateway.
 - Desktop release and manual desktop build workflows build and upload
   platform-specific desktop artifacts.
 - Docker workflow: builds and publishes release images.
+
+## Desktop startup failure evidence
+
+`Web UI server exited before becoming ready code=1 signal=null` reports a
+failed backend process, without identifying its cause. Desktop captures the
+last stdout/stderr separately, waits for the child pipes to close, and includes
+that output in the startup error. Failed attempts are also recorded under
+`HERMES_WEB_UI_HOME/logs/desktop-startup.log`, including Desktop/Electron/Node
+versions and the actual Web UI entry path. Log history is bounded and retains
+both active and bundled Web UI failures. `logs/server.log` can be missing or
+stale if module loading fails before the backend logger is initialized.
+
+On Windows the default data home is `%USERPROFILE%\.hermes-web-ui`. Reinstalling
+the app preserves this home, including its database and downloaded runtime
+selection. Collect the failed app version, startup log, and recent server log
+before changing state. Do not delete the database or Hermes profiles to diagnose
+a startup crash.
+
+To distinguish retained Web UI state from an installation/environment problem,
+fully quit Studio, then launch its installed executable from PowerShell with
+`HERMES_WEB_UI_HOME` set to a new temporary directory. A successful launch with
+that directory points to state/cache/migration behavior; a failure still needs
+the child-process exception to distinguish missing modules, native DLL loading,
+permissions, and port conflicts. This check preserves the original data and is
+not a complete reset of Electron userData, Hermes profiles, or system environment.
+
+Focused regression coverage:
+
+```bash
+npm run test -- tests/desktop/webui-startup-diagnostics.test.ts tests/desktop/runtime-bootstrap-lazy.test.ts tests/server/crash-isolation.test.ts
+npm --prefix packages/desktop run build:main
+```
 
 ## Release Workflow Guardrail
 

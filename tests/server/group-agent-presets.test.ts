@@ -40,6 +40,15 @@ afterAll(async () => {
 })
 
 describe('group Agent presets', () => {
+  it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('preserves %s preset scoped model where supported', async agent => {
+    const { normalizeGroupAgentPresetInput, validateGroupAgentPresetCapability } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-presets')
+    const preset = normalizeGroupAgentPresetInput({ agent, agentMode: 'scoped', profile: 'research', name: agent,
+      provider: 'custom:test', model: 'test-model', apiMode: 'codex_responses', reasoningEffort: 'high' })
+    expect(preset).toMatchObject(agent === 'qoder' ? { agent, agentMode: 'global', provider: '', model: '', apiMode: '', reasoningEffort: '' } : { agent, agentMode: 'scoped', provider: 'custom:test', model: 'test-model', apiMode: 'codex_responses', reasoningEffort: 'high' })
+    expect(() => validateGroupAgentPresetCapability(preset, [{ provider: 'custom:test', models: ['test-model'], api_mode: 'chat_completions' }])).not.toThrow()
+    if (agent !== 'qoder') expect(() => validateGroupAgentPresetCapability(preset, [])).toThrow()
+  })
+
   it('returns an application conflict for owner-scoped duplicate names without leaking SQLite details', async () => {
     const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const controller = await import('../../packages/server/src/modules/studio/controllers/group-agent-presets')

@@ -1,9 +1,36 @@
 export const DSH_STREAM_METHOD = '_ekko/assistant_stream'
+export const DSH_USAGE_METHOD = '_ekko/model_usage'
 
 /** Loaded only in Studio's private ACP profile, never in the user's DSH install. */
 export const DSH_STREAM_PLUGIN = `
+import { randomUUID } from 'node:crypto'
 export const name = 'ekko-studio-assistant-stream'
 export function apply(ctx) {
+  // Includes compaction and child model calls, with the same disjoint buckets
+  // as DSH's TokenUsage contract. Never forward prompts, content or credentials.
+  ctx.on('llm/stream', async function* (options, next) {
+    const requestId = randomUUID()
+    const started = performance.now()
+    let usage
+    try {
+      for await (const chunk of next()) {
+        if (chunk.type === 'usage') usage = chunk.usage
+        yield chunk
+      }
+    } finally {
+      // Accounting must not turn a successful model stream into a failure, or
+      // replace its original error if serialization/the notification fails.
+      try { if (usage) process.stdout.write(JSON.stringify({
+        jsonrpc: '2.0', method: '${DSH_USAGE_METHOD}', params: {
+          requestId, sessionId: options.sessionId, model: options.model, provider: options.provider,
+          usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+            cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens,
+            reasoningTokens: usage.reasoningTokens },
+          apiDuration: (performance.now() - started) / 1000,
+        },
+      }) + '\\n') } catch { /* Usage stays unknown when reporting fails. */ }
+    }
+  })
   const attempts = new WeakMap()
   const notify = (session, frame) => process.stdout.write(JSON.stringify({
     jsonrpc: '2.0', method: '${DSH_STREAM_METHOD}',

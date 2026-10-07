@@ -29,7 +29,7 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
       responseFinished = false
       const released = new Promise<void>(resolve => { releaseStream = resolve })
       const item = { id: `msg_${id}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'DSH 测试通过', annotations: [] }] }
-      const response = { id, object: 'response', status: 'completed', model: 'studio-test', output: [item], usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } }
+      const response = { id, object: 'response', status: 'completed', model: 'studio-test', output: [item], usage: { input_tokens: 30, output_tokens: 5, total_tokens: 35, input_tokens_details: { cached_tokens: 20 } } }
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       for (const event of [
         { type: 'response.created', response: { ...response, status: 'in_progress', output: [] } },
@@ -87,6 +87,7 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
         let stderr = ''
         child.stderr?.on('data', chunk => { stderr += chunk.toString() })
         const updates: any[] = []
+        const usage: any[] = []
         let firstChunkBeforeCompletion = false
         let sawFirstChunk!: () => void
         const firstChunk = new Promise<void>(resolve => { sawFirstChunk = resolve })
@@ -97,7 +98,7 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
             firstChunkBeforeCompletion = !responseFinished
             sawFirstChunk()
           }
-        }, session: id => { nativeSessionId = id }, config: () => {} })
+        }, usage: event => usage.push(event), session: id => { nativeSessionId = id }, config: () => {} })
         try {
           const prompted = turn.prompt({ cwd: workspace, nativeSessionId: previousId || undefined,
             modelValue: mode === 'scoped' ? JSON.stringify([DSH_MODEL_PROVIDER, 'studio-test']) : undefined, reasoningEffort: 'high', text: `Test round ${round}`, images: [] })
@@ -114,6 +115,9 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
           expect(await prompted).toBe('end_turn')
           expect(updates.filter(update => update.sessionUpdate === 'agent_message_chunk').map(update => update.content.text).join('')).toBe('DSH 测试通过')
           expect((await exited)[0], stderr).toBe(0)
+          expect(usage).toHaveLength(1)
+          expect(usage[0]).toMatchObject({ model: 'studio-test', provider: mode === 'global' ? 'native-web' : DSH_MODEL_PROVIDER,
+            usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 20 }, sessionId: nativeSessionId })
           if (round) expect(nativeSessionId).toBe(previousId)
         } catch (error) { throw new Error(`${String(error)}\nDSH stderr: ${stderr}`) }
         finally { turn.dispose() }

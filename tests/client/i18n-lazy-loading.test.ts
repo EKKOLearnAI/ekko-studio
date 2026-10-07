@@ -23,5 +23,7 @@ describe('i18n lazy loading', () => {
     expect(document.documentElement.lang).toBe('zh')
     expect(localStorage.getItem('hermes_locale')).toBe('zh')
     expect(i18n.global.t('common.cancel')).not.toBe('common.cancel')
+    expect(i18n.global.t('usage.pricing.selectionHelp')).toBe('可选择已配置的供应商及其模型，也可输入 ID 后按回车。')
+    expect(i18n.global.t('usage.pricing.catalogError')).toBe('无法加载已配置的供应商和模型，仍可手动输入 ID。')
   })
 })

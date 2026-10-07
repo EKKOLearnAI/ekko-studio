@@ -4,6 +4,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import GroupMessageItem from '@/components/hermes/group-chat/GroupMessageItem.vue'
 import GroupMessageList from '@/components/hermes/group-chat/GroupMessageList.vue'
+import GroupAgentRunCard from '@/components/hermes/group-chat/GroupAgentRunCard.vue'
 import type { ChatMessage, GroupWorkspaceDiffPayload } from '@/api/studio/group-chat'
 
 const toolTraceVisibleState = vi.hoisted(() => ({ value: true }))
@@ -198,6 +199,38 @@ describe('group chat workspace diff client rendering', () => {
 
     await wrapper.find('.tool-change-card-header').trigger('click')
     expect(wrapper.find('.tool-change-file-row').text()).toContain('a.ts')
+  })
+
+  it('places one run usage card inside the exact reply bubble before its workspace diff', async () => {
+    toolTraceVisibleState.value = false
+    const { useGroupChatStore, groupAgentRunMessages } = await import('@/stores/hermes/group-chat')
+    const store = useGroupChatStore()
+    store.currentRoomId = 'room-1'
+    store.messages = [
+      { ...assistantMessage(), id: 'progress', run_id: 'group-run', content: 'Checking the files.' },
+      { ...assistantMessage(), run_id: 'group-run', timestamp: 2 },
+      workspaceDiffMessage({ run_id: 'group-run', timestamp: 3,
+        content: JSON.stringify({ ...payload, run_id: 'group-run', parent_message_id: 'assistant-1' }) }),
+      { ...assistantMessage(), id: 'usage', role: 'tool', tool_name: 'run_usage', run_id: 'group-run', timestamp: 4,
+        content: JSON.stringify({ runId: 'group-run', assistantMessageId: 'assistant-1', inputTokens: 1200,
+          outputTokens: 200, cacheReadTokens: 300, cacheHitRate: 0.25, costUsd: 0.0123, tokensPerSecond: 50, isEstimated: false }) },
+    ]
+    const wrapper = mount(GroupAgentRunCard, {
+      props: {
+        message: groupAgentRunMessages(store.sortedMessages)[0],
+        agents: [{ id: 'a1', roomId: 'room-1', agentId: 'agent-1', profile: 'default', name: 'Worker', description: '', invited: 0 }],
+        currentUserId: 'user-1',
+      },
+      global: { stubs: { MarkdownRenderer: true, ProfileAvatar: true, GroupAgentMessageAvatar: true } },
+    })
+    const bubble = wrapper.get('.run-card .run-transcript-item[data-message-id="assistant-1"] .msg-content')
+    const usage = bubble.get('.run-usage-card')
+    const diff = bubble.get('.assistant-workspace-change')
+    expect(usage.element.compareDocumentPosition(diff.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.findAll('.run-usage-card')).toHaveLength(1)
+    expect(wrapper.find('.run-transcript-item[data-message-id="progress"] .run-usage-card').exists()).toBe(false)
+    expect(wrapper.find('.run-tools').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('hides realtime workspace diffs until their parent assistant arrives', async () => {

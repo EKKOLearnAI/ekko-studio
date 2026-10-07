@@ -41,6 +41,7 @@ const getGroupChatServerMock = vi.fn()
 const getLocalUsageStatsMock = vi.fn()
 const getRecordedUsageSessionIdsMock = vi.fn()
 const getActiveProfileNameMock = vi.fn()
+const getHermesModelContextLengthMock = vi.fn()
 const loggerWarnMock = vi.fn()
 const getCompressionSnapshotMock = vi.fn()
 const deleteCompressionSnapshotMock = vi.fn()
@@ -240,7 +241,7 @@ vi.mock('../../packages/server/src/modules/studio/services/context-compressor/ex
 vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime', () => ({
   deleteHermesSessionForProfile: deleteHermesSessionForProfileMock,
   getHermesCliSession: getSessionMock,
-  getHermesModelContextLength: vi.fn(),
+  getHermesModelContextLength: getHermesModelContextLengthMock,
   getHermesSessionDetail: getSessionDetailFromDbMock,
   getHermesSessionDetailForProfile: getSessionDetailFromDbWithProfileMock,
   getHermesSessionDetailPaginatedForProfile: getSessionDetailPaginatedFromDbWithProfileMock,
@@ -262,11 +263,27 @@ vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime',
   invalidateCodingAgentSessionRuntime: invalidateCodingAgentSessionRuntimeMock,
 }))
 
+vi.mock('../../packages/server/src/modules/studio/services/task-plans', () => ({
+  getSessionTaskPlans: vi.fn(() => []),
+}))
+
 vi.mock('../../packages/server/src/modules/studio/public/agent-status-registry', () => ({
   isHermesAgentAvailable: vi.fn(() => agentStatusMocks.hermesAvailable),
 }))
 
 describe('session conversations controller', () => {
+  it('forwards the optional model endpoint to context resolution without changing legacy requests', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    getHermesModelContextLengthMock.mockReturnValue(202800)
+    const ctx: any = { query: { profile: 'coding', provider: 'custom:glm', model: 'glm-5.3', base_url: 'https://api.z.ai/api/coding/paas/v4' } }
+    await mod.contextLength(ctx)
+    expect(getHermesModelContextLengthMock).toHaveBeenLastCalledWith({
+      profile: 'coding', provider: 'custom:glm', model: 'glm-5.3', baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    })
+    expect(ctx.body).toEqual({ context_length: 202800 })
+    await mod.contextLength({ query: { profile: 'default', model: 'glm-5.3', base_url: ['untrusted'] } })
+    expect(getHermesModelContextLengthMock).toHaveBeenLastCalledWith({ profile: 'default', model: 'glm-5.3', provider: undefined, baseUrl: undefined })
+  })
   beforeEach(() => {
     vi.resetModules()
     agentStatusMocks.hermesAvailable = true
@@ -1016,7 +1033,7 @@ describe('session conversations controller', () => {
     await mod.list(ctx)
 
     expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 2000, {
-      sources: ['api_server', 'cli', 'coding_agent', 'global_agent'],
+      sources: ['api_server', 'cli', 'builtin_agent', 'coding_agent', 'global_agent'],
       profiles: ['default', 'travel'],
       includeArchived: false,
       excludeSessionIds: [],
@@ -1036,7 +1053,7 @@ describe('session conversations controller', () => {
     await mod.list(ctx)
 
     expect(localListSessionsMock).toHaveBeenCalledWith('travel', undefined, 2000, {
-      sources: ['api_server', 'cli', 'coding_agent', 'global_agent'],
+      sources: ['api_server', 'cli', 'builtin_agent', 'coding_agent', 'global_agent'],
       profiles: undefined,
       includeArchived: false,
       excludeSessionIds: [],
@@ -1453,6 +1470,44 @@ describe('session conversations controller', () => {
     ])
   })
 
+  it('separates native history groups and cursors without changing legacy summaries', async () => {
+    const { historySessionSource } = await import('../../packages/server/src/modules/studio/contracts/history-source')
+    const rows = [
+      { id: 'code-1', source: 'coding_agent', agent: 'codex', last_active: 10 },
+      { id: 'code-2', source: 'coding_agent', agent: 'claude', last_active: 9 },
+      { id: 'ekko-1', source: 'coding_agent', agent: 'ekko-agent', last_active: 8 },
+      { id: 'ekko-2', source: 'cli', agent: 'ekko', last_active: 7 },
+      { id: 'ekko-3', source: 'coding_agent', agent: 'ekko_agent', last_active: 6, is_archived: 1, is_pinned: 1 },
+    ].map(row => ({ profile: 'travel', started_at: row.last_active, ...row }))
+    localListSessionsMock.mockImplementation((_profile, source, limit, options = {}) => rows
+      .filter(row => (!source || row.source === source)
+        && (!options.historySource || historySessionSource(row) === options.historySource)
+        && (!options.pinned || row.is_pinned)
+        && (!options.includeSessionIds || options.includeSessionIds.includes(row.id)))
+      .slice(0, limit))
+    listSessionSummaryGroupsMock.mockResolvedValue({ groups: [], included: [] })
+    listSessionSummariesMock.mockResolvedValue([])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const grouped: any = { query: { profile: 'travel', limit: '2', agent_groups: '1', include: 'ekko-3' }, state: {}, body: null }
+    await mod.listHermesSessionGroups(grouped)
+    expect(grouped.body.groups).toEqual([
+      expect.objectContaining({ source: 'coding_agent', hasMore: false, sessions: [expect.objectContaining({ id: 'code-1' }), expect.objectContaining({ id: 'code-2' })] }),
+      expect.objectContaining({ source: 'builtin_agent', hasMore: true, sessions: [expect.objectContaining({ id: 'ekko-1', source: 'coding_agent' }), expect.objectContaining({ id: 'ekko-2', source: 'cli' })] }),
+    ])
+    expect(grouped.body.included).toEqual([expect.objectContaining({ id: 'ekko-3', agent: 'ekko_agent', source: 'coding_agent', is_pinned: 1 })])
+    const page: any = { query: { profile: 'travel', source: 'builtin_agent', limit: '2', offset: '2', agent_groups: '1' }, state: {}, body: null }
+    await mod.listHermesSessions(page)
+    expect(page.body).toMatchObject({ sessions: [expect.objectContaining({ id: 'ekko-3', source: 'coding_agent', is_archived: 1 })], hasMore: false, offset: 2, limit: 2 })
+    expect(listSessionSummariesMock).not.toHaveBeenCalled()
+    const coding: any = { query: { profile: 'travel', source: 'coding_agent', limit: '1', offset: '1', agent_groups: '1' }, state: {}, body: null }
+    await mod.listHermesSessions(coding)
+    expect(coding.body).toMatchObject({ sessions: [expect.objectContaining({ id: 'code-2' })], hasMore: false })
+    const legacy: any = { query: { profile: 'travel', limit: '10' }, state: {}, body: null }
+    await mod.listHermesSessionGroups(legacy)
+    expect(legacy.body.groups.some((group: any) => group.source === 'builtin_agent')).toBe(false)
+    expect(legacy.body.groups.find((group: any) => group.source === 'coding_agent').sessions.map((row: any) => row.id)).toEqual(['code-1', 'code-2', 'ekko-1', 'ekko-3'])
+  })
+
   it('archives an existing accessible session', async () => {
     getSessionMock.mockReturnValue({ id: 'session-1', profile: 'default', source: 'cli' })
     localSetSessionArchivedMock.mockReturnValue(true)
@@ -1677,7 +1732,7 @@ describe('session conversations controller', () => {
     await mod.search(ctx)
 
     expect(localSearchSessionsMock).toHaveBeenCalledWith(undefined, 'docker', 10, {
-      sources: ['api_server', 'cli', 'coding_agent', 'global_agent'],
+      sources: ['api_server', 'cli', 'builtin_agent', 'coding_agent', 'global_agent'],
       profiles: ['default', 'travel'],
       includeArchived: false,
       excludeSessionIds: [],

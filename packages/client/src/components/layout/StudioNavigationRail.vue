@@ -16,7 +16,7 @@ const entries = computed(() => [
   { key: 'group', route: 'hermes.groupChat', label: 'sidebar.groupChat', path: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' },
   { key: 'workflow', route: 'hermes.workflow', label: 'sidebar.workflow', path: 'M8 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0M22 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0M22 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0M8 12h3a4 4 0 0 0 4-4V6M8 12h3a4 4 0 0 1 4 4v2' },
   { key: 'history', route: 'hermes.history', label: 'sidebar.history', path: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 7v5l3 2' },
-  { key: 'connections', route: 'hermes.connections', label: 'sidebar.connections', path: 'M20.5 5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0M8.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0M20.5 19a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0M8.2 10.7l7.6-4.4M8.2 13.3l7.6 4.4' },
+  { key: 'connections', route: 'hermes.connections', label: 'sidebar.connections', path: 'M3 4h14a1 1 0 0 1 1 1v4M3 4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h9M7 16v4M5 20h7M15 9h6a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1M17 18h2' },
   ...(canManageAgents.value ? [{ key: 'agents', route: 'hermes.agentManager', label: 'sidebar.agentManager', path: 'M12 8V4H8M7 8h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-6a3 3 0 0 1 3-3M2 14h2M20 14h2M9 13v2M15 13v2' }] : []),
   { key: 'models', route: 'hermes.models', label: 'sidebar.models', path: 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1' },
 ])
@@ -26,11 +26,12 @@ const activeKey = computed(() => {
   if (['hermes.chat', 'hermes.session', 'hermes.globalAgent', 'hermes.globalAgentSession'].includes(name)) return 'chat'
   if (name.startsWith('hermes.groupChat')) return 'group'
   if (name.startsWith('hermes.history')) return 'history'
+  if (name === 'hermes.apiRelay') return 'apiRelay'
   return entries.value.find(entry => entry.route === name)?.key || 'settings'
 })
 const mobileNavigation = useMobileNavigation()
 function handleNavigate(key: string) {
-  if (mobileNavigation && ['connections', 'agents', 'models'].includes(key)) {
+  if (mobileNavigation && ['connections', 'agents', 'models', 'apiRelay'].includes(key)) {
     mobileNavigation.open.value = false
   }
 }
@@ -48,16 +49,16 @@ function handleNavigate(key: string) {
         </template>
         {{ t(entry.label) }}
       </NTooltip>
-    </nav>
-    <div class="studio-navigation-rail__bottom">
       <NTooltip placement="right" trigger="hover">
         <template #trigger>
-          <a class="studio-navigation-rail__item" href="https://apikey.fan/register?aff=LIBAPI" target="_blank" rel="noopener noreferrer" :aria-label="t('sidebar.apiRelay')">
-            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3" /></svg>
-          </a>
+          <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: 'hermes.apiRelay' }" :active="activeKey === 'apiRelay'" :aria-label="t('sidebar.apiRelay')" @click="handleNavigate('apiRelay')">
+            <img class="api-relay-logo" src="/relay-logo.png" width="24" height="24" alt="" aria-hidden="true" />
+          </RouteLinkItem>
         </template>
         {{ t('sidebar.apiRelay') }}
       </NTooltip>
+    </nav>
+    <div class="studio-navigation-rail__bottom">
       <NTooltip placement="right" trigger="hover">
         <template #trigger>
           <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: 'hermes.settings' }" :active="activeKey === 'settings'" :aria-label="t('sidebar.settings')">
@@ -100,6 +101,7 @@ function handleNavigate(key: string) {
   scrollbar-width: none;
 }
 .studio-navigation-rail__bottom { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; }
+.api-relay-logo { border-radius: 4px; }
 .studio-navigation-rail__item {
   display: grid;
   place-items: center;

@@ -13,6 +13,8 @@ export const USAGE_SCHEMA: Record<string, string> = {
   id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
   session_id: 'TEXT NOT NULL',
   run_id: "TEXT NOT NULL DEFAULT ''",
+  parent_run_id: "TEXT NOT NULL DEFAULT ''",
+  api_duration: 'REAL',
   source: "TEXT NOT NULL DEFAULT ''",
   agent: "TEXT NOT NULL DEFAULT ''",
   usage_scope: "TEXT NOT NULL DEFAULT 'run'",
@@ -35,6 +37,30 @@ export const USAGE_SCHEMA: Record<string, string> = {
 
 export const USAGE_RUN_INDEX = `CREATE UNIQUE INDEX IF NOT EXISTS idx_session_usage_run
   ON ${USAGE_TABLE}(session_id, run_id, source) WHERE run_id <> ''`
+
+export const RUN_USAGE_TABLE = 'run_usage'
+export const RUN_USAGE_SCHEMA = {
+  session_id: 'TEXT NOT NULL',
+  run_id: 'TEXT NOT NULL',
+  assistant_message_id: "TEXT NOT NULL DEFAULT ''",
+  input_tokens: 'INTEGER',
+  output_tokens: 'INTEGER',
+  cache_read_tokens: 'INTEGER',
+  cache_write_tokens: 'INTEGER',
+  cache_hit_rate: 'REAL',
+  cost_usd: 'REAL',
+  model_duration_seconds: 'REAL',
+  run_duration_seconds: 'REAL',
+  tool_duration_seconds: 'REAL',
+  tokens_per_second: 'REAL',
+  is_estimated: 'INTEGER NOT NULL DEFAULT 0',
+  completed_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+export const RUN_USAGE_INDEXES = {
+  idx_run_usage_session_run: `CREATE UNIQUE INDEX IF NOT EXISTS idx_run_usage_session_run ON ${RUN_USAGE_TABLE}(session_id, run_id)`,
+  idx_run_usage_assistant: `CREATE INDEX IF NOT EXISTS idx_run_usage_assistant ON ${RUN_USAGE_TABLE}(session_id, assistant_message_id)`,
+}
 
 export const USAGE_PRICING_TABLE = 'usage_pricing'
 export const USAGE_PRICING_SCHEMA = {
@@ -1161,6 +1187,7 @@ export const GC_SESSION_PROFILES_SCHEMA: Record<string, string> = {
 // ============================================================================
 
 import { getDb, getStoragePath } from './index'
+import { BUILTIN_EKKO_AGENT_IDS, BUILTIN_HISTORY_SOURCES } from '../../contracts/history-source'
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`
@@ -1620,6 +1647,11 @@ export function initAllHermesTables(): void {
     syncTable(USAGE_TABLE, USAGE_SCHEMA, { primaryKey: 'id' })
     syncTable(USAGE_PRICING_TABLE, USAGE_PRICING_SCHEMA, { primaryKey: 'profile' })
     db.exec(USAGE_RUN_INDEX)
+    syncTable(RUN_USAGE_TABLE, RUN_USAGE_SCHEMA, { indexes: RUN_USAGE_INDEXES })
+    // syncTable only creates indexes for a new table. Existing tables need
+    // these on every startup as well: completion uses the unique run key.
+    createIndexes(db, RUN_USAGE_INDEXES)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_parent_run ON ${USAGE_TABLE}(session_id, parent_run_id)`)
 
     // Session store
     syncTable(SESSION_CATEGORIES_TABLE, SESSION_CATEGORIES_SCHEMA, {
@@ -1635,6 +1667,13 @@ export function initAllHermesTables(): void {
     syncTable(SESSIONS_TABLE, SESSIONS_SCHEMA, {
       indexes: SESSIONS_INDEXES,
     })
+    // Idempotent classification migration. Messages, timestamps and metadata
+    // stay intact; group/workflow/global-agent sessions keep their source.
+    db.prepare(`UPDATE ${SESSIONS_TABLE} SET source = 'builtin_agent', agent = 'ekko-agent'
+      WHERE source IN (${BUILTIN_HISTORY_SOURCES.map(() => '?').join(', ')})
+      AND LOWER(TRIM(COALESCE(agent, ''))) IN (${BUILTIN_EKKO_AGENT_IDS.map(() => '?').join(', ')})
+      AND (source <> 'builtin_agent' OR agent <> 'ekko-agent')`)
+      .run(...BUILTIN_HISTORY_SOURCES, ...BUILTIN_EKKO_AGENT_IDS)
     createIndexes(db, SESSION_CATEGORIES_INDEXES)
     createIndexes(db, SESSIONS_INDEXES)
     syncTable(MESSAGES_TABLE, MESSAGES_SCHEMA)

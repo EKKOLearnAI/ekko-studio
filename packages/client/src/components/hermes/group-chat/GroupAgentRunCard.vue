@@ -7,6 +7,7 @@ import type { ChatMessage, MemberInfo, RoomAgent } from '@/api/studio/group-chat
 import { groupMessageAgent, parseStoredAvatar } from '@/utils/group-agent-avatar'
 import GroupMessageItem from './GroupMessageItem.vue'
 import ToolRunSummary from '../chat/ToolRunSummary.vue'
+import RunUsageCard from '../chat/RunUsageCard.vue'
 import GroupAgentMessageAvatar from './GroupAgentMessageAvatar.vue'
 import GroupAgentRobotIcon from './GroupAgentRobotIcon.vue'
 
@@ -35,10 +36,13 @@ const runToolItems = computed(() =>
 )
 const toolsActive = computed(() => !!props.message.isStreaming || runToolItems.value.some(item => item.toolStatus === 'running'))
 const transcriptItems = computed(() =>
-    runToolItems.value.length > 0
-        ? items.value.filter(item => item.role !== 'tool')
-        : items.value
+    items.value.filter(item => !item.runUsage && (runToolItems.value.length === 0 || item.role !== 'tool'))
 )
+const runUsage = computed(() => [...items.value].reverse().find(item => item.runUsage)?.runUsage)
+const runUsageMessageId = computed(() => {
+    const replies = transcriptItems.value.filter(item => item.role === 'assistant' && !item.taskPlan)
+    return replies.find(item => item.id === runUsage.value?.assistantMessageId)?.id || replies.at(-1)?.id
+})
 const stableAgentId = computed(() =>
     props.message.senderAgentRecordId || props.message.senderId
 )
@@ -106,7 +110,7 @@ function handleToolListWheel(event: WheelEvent): void {
                 <span class="run-agent-name">{{ message.senderName }}</span>
                 <GroupAgentRobotIcon v-if="agentInfo" class="run-agent-icon" />
             </div>
-            <div class="run-card" :class="{ streaming: message.isStreaming }">
+            <div v-if="transcriptItems.length || runToolItems.length || (runUsage && !message.isStreaming)" class="run-card" :class="{ streaming: message.isStreaming }">
                 <ToolRunSummary
                     v-if="runToolItems.length"
                     class="run-tools"
@@ -154,8 +158,15 @@ function handleToolListWheel(event: WheelEvent): void {
                             :current-user-id="currentUserId"
                             :allow-speech="props.allowSpeech"
                             embedded
-                        />
+                        >
+                            <template v-if="runUsage && !message.isStreaming && item.id === runUsageMessageId" #before-workspace-changes>
+                                <RunUsageCard :usage="runUsage" />
+                            </template>
+                        </GroupMessageItem>
                     </div>
+                </div>
+                <div v-if="runUsage && !message.isStreaming && !runUsageMessageId" class="run-usage-only">
+                    <RunUsageCard :usage="runUsage" />
                 </div>
             </div>
             <span class="run-time">{{ timeText }}</span>
@@ -349,6 +360,11 @@ function handleToolListWheel(event: WheelEvent): void {
     font-size: 12px;
     opacity: 0.6;
     user-select: none;
+}
+
+.run-usage-only {
+    min-width: 0;
+    padding: 0 14px 10px;
 }
 
 :global(html.theme-has-custom-background .run-card) {

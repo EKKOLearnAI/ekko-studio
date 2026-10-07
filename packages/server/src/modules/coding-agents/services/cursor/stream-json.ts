@@ -1,3 +1,5 @@
+import { normalizeUsageCost } from '../../../studio/public/usage'
+
 export type CursorStreamEvent =
   | { type: 'session'; sessionId: string; model?: string }
   | { type: 'text'; data: string }
@@ -79,6 +81,9 @@ function usageFromResult(event: any): unknown {
     : {}
   if (event.duration_ms != null) usage.duration_ms = event.duration_ms
   if (event.duration_api_ms != null) usage.duration_api_ms = event.duration_api_ms
+  const cost = normalizeUsageCost(event, 'estimated')
+  if (cost) Object.assign(usage, cost)
+  if (cost?.costSource === 'reported') usage.actual_cost_usd = cost.costUsd
   return Object.keys(usage).length > 0 ? usage : undefined
 }
 

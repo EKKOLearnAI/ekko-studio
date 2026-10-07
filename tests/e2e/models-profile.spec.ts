@@ -11,11 +11,11 @@ async function selectProfile(page: Page, name: string) {
 
 test('switches the model catalog and scopes provider additions, edits and deletion to the selected Profile', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY)
-  const freeGroup = { provider: 'opencode-free', label: 'OpenCode Free', base_url: 'https://opencode.ai/zen/v1', api_key: '', builtin: true, models: ['free-test-model'], catalog_status: 'ready' }
-  const api = await mockHermesApi(page, { modelGroups: [TEST_MODEL_GROUP, freeGroup] })
+  const zenGroup = { provider: 'opencode-zen', label: 'OpenCode Zen', base_url: 'https://opencode.ai/zen/v1', api_key: '', builtin: true, models: ['kimi-k2.6'] }
+  const api = await mockHermesApi(page, { modelGroups: [TEST_MODEL_GROUP, zenGroup] })
   await page.route('**/api/hermes/available-models?*', async route => {
     const profile = new URL(route.request().url()).searchParams.get('profile')
-    const groups = [{ ...TEST_MODEL_GROUP, label: `${profile} Provider`, builtin: false, provider_source: 'providers', provider_key: 'test-provider' }, freeGroup]
+    const groups = [{ ...TEST_MODEL_GROUP, label: `${profile} Provider`, builtin: false, provider_source: 'providers', provider_key: 'test-provider' }, zenGroup]
     await route.fulfill({ json: { groups, allProviders: groups, default: 'test-model', default_provider: 'test-provider' } })
   })
   let addedProfile = ''
@@ -38,7 +38,8 @@ test('switches the model catalog and scopes provider additions, edits and deleti
   await page.getByRole('button', { name: 'Add Provider', exact: true }).click()
   const form = page.getByRole('dialog')
   await form.locator('.n-base-selection').first().click()
-  await page.locator('.n-base-select-option').filter({ hasText: 'OpenCode Free' }).click()
+  await page.locator('.n-base-select-option').filter({ hasText: 'OpenCode Zen' }).click()
+  await form.locator('input[type="password"]').fill('zen-test-key')
   await form.getByRole('button', { name: 'Add', exact: true }).click()
   await expect(form).toHaveCount(0)
   expect(addedProfile).toBe('research')

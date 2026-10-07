@@ -1,7 +1,7 @@
 // Keep every Agent picker in the same order as single chat.
 export const AGENT_OPTIONS = [
-  { label: 'Hermes', value: 'hermes' },
   { label: 'Ekko', value: 'ekko-agent' },
+  { label: 'Hermes', value: 'hermes' },
   { label: 'Claude', value: 'claude-code' },
   { label: 'Codex', value: 'codex' },
   { label: 'Pi', value: 'pi' },
@@ -9,6 +9,14 @@ export const AGENT_OPTIONS = [
   { label: 'OpenCode', value: 'opencode' },
   { label: 'DeepSeek Harness', value: 'dsh' },
   { label: 'Cursor', value: 'cursor' },
+  { label: 'Antigravity', value: 'antigravity' },
+  { label: 'Qwen Code', value: 'qwen' },
+  { label: 'Kimi Code', value: 'kimi' },
+  { label: 'CodeBuddy', value: 'codebuddy' },
+  { label: 'Qoder', value: 'qoder' },
+  { label: 'GitHub Copilot', value: 'copilot' },
+  { label: 'ZCode', value: 'zcode' },
+
 ] as const
 
 export const GROUP_AGENT_OPTIONS = AGENT_OPTIONS.map(option => ({

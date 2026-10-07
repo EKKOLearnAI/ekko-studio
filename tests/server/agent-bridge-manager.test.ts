@@ -251,33 +251,34 @@ describe('agent bridge manager command resolution', () => {
     expect(client.connectRetryMs).toBe(120000)
   })
 
-  it('waits briefly for a restarting bridge socket before failing', async () => {
-    const endpoint = `tcp://127.0.0.1:${32000 + (process.pid % 10000)}`
-    let server: Server | undefined
-
-    const ready = new Promise<void>((resolve) => {
-      setTimeout(() => {
-        server = createServer((socket) => {
-          socket.once('data', () => {
-            socket.end(`${JSON.stringify({ ok: true, pong: true })}\n`)
-          })
-        })
-        if (endpoint.startsWith('ipc://')) {
-          server.listen(endpoint.slice('ipc://'.length), resolve)
-        } else {
-          const url = new URL(endpoint)
-          server.listen(Number(url.port), url.hostname, resolve)
-        }
-      }, 150)
+  it('retries a refused bridge connection before succeeding', async () => {
+    const server = createServer((socket) => {
+      socket.once('data', () => {
+        socket.end(`${JSON.stringify({ ok: true, pong: true })}\n`)
+      })
     })
+    const endpoint = await listenOnRandomTcpPort(server)
+    const net = await vi.importActual<typeof import('net')>('net')
+    const refusedSocket = new net.Socket()
+    // Keep the OS-assigned port bound and force the retry without a delayed-listen race.
+    const createConnection = vi.fn(net.createConnection).mockImplementationOnce(() => {
+      process.nextTick(() => {
+        refusedSocket.destroy(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }))
+      })
+      return refusedSocket
+    })
+    vi.doMock('net', () => ({ ...net, createConnection }))
 
     try {
       const { AgentBridgeClient } = await import('../../packages/server/src/modules/hermes/services/bridge/client')
       const client = new AgentBridgeClient({ endpoint, connectRetryMs: 1000, timeoutMs: 1000 })
       await expect(client.ping()).resolves.toMatchObject({ ok: true, pong: true })
-      await ready
+      expect(createConnection).toHaveBeenCalledTimes(2)
+      expect(refusedSocket.destroyed).toBe(true)
     } finally {
-      await new Promise<void>((resolve) => server?.close(() => resolve()) ?? resolve())
+      vi.doUnmock('net')
+      refusedSocket.destroy()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
     }
   })
 

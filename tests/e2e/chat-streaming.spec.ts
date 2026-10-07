@@ -1603,3 +1603,113 @@ test('restores named resumed tool traces from assistant tool calls after session
   await expect(page.locator('.message.tool .tool-details')).toContainText('/tmp/history.txt')
   expect(api.unexpectedRequests).toEqual([])
 })
+
+test('restores per-turn usage cards on resume and reload, including a summary-only reply', async ({ page }) => {
+  const sessionId = 'session-history-run-usage'
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript((sid) => {
+    const message = (id: number, role: string, content: string) => ({
+      id, session_id: sid, role, content, timestamp: id, tool_call_id: null, tool_calls: null,
+      tool_name: null, token_count: null, finish_reason: role === 'assistant' ? 'stop' : null, reasoning: null,
+    })
+    ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = {
+      [sid]: { session_id: sid, isWorking: false, events: [], messages: [
+        message(1, 'user', 'First turn'),
+        { ...message(2, 'assistant', 'First answer.'), run_usage: {
+          runId: 'r1', assistantMessageId: '2', inputTokens: 10960, outputTokens: 32,
+          cacheReadTokens: 10752, cacheHitRate: 10752 / 10960, costUsd: 0.000082656, tokensPerSecond: 43.6, speedSource: 'model',
+        } },
+        message(3, 'user', 'Second turn'),
+        { ...message(4, 'assistant', ''), run_usage: {
+          runId: 'r2', assistantMessageId: '4', inputTokens: 22515, outputTokens: 354,
+          cacheReadTokens: 21888, cacheHitRate: 21888 / 22515, costUsd: 0.000372114, tokensPerSecond: 141.6, speedSource: 'estimated',
+        } },
+      ] },
+    }
+  }, sessionId)
+  const api = await mockHermesApi(page, { sessions: [{
+    id: sessionId, source: 'api_server', model: 'test-model', title: 'Run usage history', preview: 'First answer.',
+    started_at: 1, ended_at: 4, last_active: 4, message_count: 4, tool_call_count: 0,
+    input_tokens: 33475, output_tokens: 386, cache_read_tokens: 32640, cache_write_tokens: 0,
+    reasoning_tokens: 0, billing_provider: 'test-provider', estimated_cost_usd: 0.00045477,
+    actual_cost_usd: null, cost_status: 'estimated', workspace: null,
+  }] })
+  await mockChatSocket(page)
+  await page.goto('/#/hermes/chat')
+  const cards = page.locator('.run-usage-card')
+  for (const reload of [false, true]) {
+    if (reload) await page.reload()
+    await expect(cards).toHaveCount(2)
+    await expect(cards.first().locator('.run-usage-value').first()).toHaveText('32')
+    await expect(cards.last().locator('.run-usage-value').first()).toHaveText('354')
+    await expect(cards.first().locator('.run-usage-cache-rate')).toHaveText('98.1%')
+    await expect(cards.last().locator('.run-usage-cache-rate')).toHaveText('97.2%')
+    await expect(cards.first()).toContainText('43.6 tok/s')
+    await expect(cards.last()).toContainText('≈ 141.6 tok/s')
+    await expect(cards.last()).toContainText('Est. speed')
+    await expect(cards.last().locator('.run-usage-metric').last()).toHaveAttribute('title', /Overlapping tools count once/)
+    await expect(cards.last()).toBeVisible()
+  }
+  expect(api.unexpectedRequests).toEqual([])
+})
+
+test('shows completed run usage above diff with matching colors and no disclosure', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await mockChatSocket(page)
+  await page.goto('/#/hermes/chat')
+  await sendChatMessage(page, 'Update the file')
+  const { run } = await waitForRun(page)
+  await page.evaluate(({ sid, queueId }) => {
+    const socket = (window as any).__PW_CHAT_SOCKET__.latest
+    socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'usage-1', queue_id: queueId })
+    socket.__trigger('message.delta', { event: 'message.delta', session_id: sid, run_id: 'usage-1', delta: 'Updated the file.' })
+  }, { sid: run.session_id, queueId: run.queue_id })
+  await expect(page.locator('.run-usage-card')).toHaveCount(0)
+  await expect(page.locator('.thinking-token-speed')).toHaveCount(0)
+  await page.evaluate(({ sid }) => {
+    (window as any).__PW_CHAT_SOCKET__.latest.__trigger('run.completed', { event: 'run.completed',
+      session_id: sid, run_id: 'usage-1', message_id: 'usage-answer-1', output: 'Updated the file.',
+      run_usage: { runId: 'usage-1', assistantMessageId: 'usage-answer-1', inputTokens: 12400, outputTokens: 1600, cacheReadTokens: 8000, cacheHitRate: 8000 / 12400, costUsd: 0.0123, tokensPerSecond: 42.5, isEstimated: false },
+      workspace_run_change: { change_id: 'change-1', source: 'run', session_id: sid, run_id: 'usage-1', assistant_message_id: 'usage-answer-1', files_changed: 1, additions: 4, deletions: 1, files: [{ id: 1, path: 'hello.ts', additions: 4, deletions: 1, change_type: 'modified' }] },
+    })
+  }, { sid: run.session_id })
+  const card = page.locator('.run-usage-card')
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('1,600')
+  await expect(card).toContainText('12.4K')
+  await expect(card).toContainText('8,000')
+  await expect(card.locator('.run-usage-cache-rate')).toHaveText('64.5%')
+  await expect(card).toContainText('$0.0123')
+  await expect(card).toContainText('42.5 tok/s')
+  await expect(card.locator('button, [role="button"], details')).toHaveCount(0)
+  const diff = page.locator('.assistant-workspace-change')
+  await expect(diff).toBeVisible()
+  expect((await card.boundingBox())!.y).toBeLessThan((await diff.boundingBox())!.y)
+  for (const dark of [false, true]) {
+    await page.evaluate(dark => document.documentElement.classList.toggle('dark', dark), dark)
+    const color = await card.evaluate(el => [getComputedStyle(el).backgroundColor, getComputedStyle(el).borderColor])
+    expect(await diff.evaluate(el => [getComputedStyle(el).backgroundColor, getComputedStyle(el).borderColor])).toEqual(color)
+  }
+  await expect(page.locator('.streaming-indicator .thinking-status')).toHaveCount(0)
+  await page.screenshot({ path: '/tmp/hermes-run-usage-studio.png' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  const overflow = await card.evaluate(el => Array.from(el.querySelectorAll('.run-usage-value')).some(value => value.scrollWidth > value.clientWidth))
+  expect(overflow).toBe(false)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await sendChatMessage(page, 'Continue')
+  const next = (await waitForRun(page, 1)).run
+  await page.evaluate(({ sid }) => {
+    const socket = (window as any).__PW_CHAT_SOCKET__.latest
+    socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'usage-2' })
+    socket.__trigger('message.delta', { event: 'message.delta', session_id: sid, run_id: 'usage-2', delta: 'No file changes.' })
+    socket.__trigger('run.completed', { event: 'run.completed', session_id: sid, run_id: 'usage-2', message_id: 'usage-answer-2', output: 'No file changes.',
+      run_usage: { runId: 'usage-2', assistantMessageId: 'usage-answer-2', outputTokens: 12, inputTokens: 25, cacheReadTokens: 0, costUsd: null, tokensPerSecond: 2.4, speedSource: 'estimated' } })
+  }, { sid: next.session_id })
+  await expect(card).toHaveCount(2)
+  await expect(card.first()).toContainText('42.5 tok/s')
+  await expect(card.last()).toContainText('—')
+  await expect(card.last().locator('.run-usage-value').first()).toHaveText('12')
+  await expect(card.last()).toContainText('Est. speed')
+  await expect(card.last()).toContainText('≈ 2.4 tok/s')
+})

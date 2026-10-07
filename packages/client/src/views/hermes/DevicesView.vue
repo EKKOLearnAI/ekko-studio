@@ -405,7 +405,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <NDrawer v-model:show="showRequests" width="min(420px, 100vw)" placement="right">
+    <NDrawer v-model:show="showRequests" width="var(--studio-drawer-width)" placement="right">
       <NDrawerContent :title="t('devices.requests')" closable>
         <div v-if="state.requests.length === 0" class="request-empty">
           {{ t('devices.noRequests') }}

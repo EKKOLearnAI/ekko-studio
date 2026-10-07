@@ -15,6 +15,14 @@ const AGENT_ALIASES: Record<string, AgentStatusId> = {
   opencode: 'opencode',
   dsh: 'dsh',
   cursor: 'cursor',
+  antigravity: 'antigravity',
+  qwen: 'qwen',
+  kimi: 'kimi',
+  codebuddy: 'codebuddy',
+  qoder: 'qoder',
+  copilot: 'copilot',
+  zcode: 'zcode',
+
 }
 
 const AGENT_NAMES: Record<AgentStatusId, string> = {
@@ -27,6 +35,14 @@ const AGENT_NAMES: Record<AgentStatusId, string> = {
   opencode: 'OpenCode',
   dsh: 'DeepSeek Harness',
   cursor: 'Cursor',
+  antigravity: 'Antigravity',
+  qwen: 'Qwen Code',
+  kimi: 'Kimi Code',
+  codebuddy: 'CodeBuddy',
+  qoder: 'Qoder',
+  copilot: 'GitHub Copilot',
+  zcode: 'ZCode',
+
 }
 
 export const AGENT_NOT_INSTALLED = 'AGENT_NOT_INSTALLED'

@@ -4,7 +4,7 @@ import { join } from 'path'
 import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
 import { updateConfigYamlForProfile, saveEnvValueForProfile, PROVIDER_ENV_MAP } from '../../studio/public/profile-config'
 import { getCompatibleCustomProviders, normalizeCustomProviderEntry } from '../../studio/contracts/provider-compat'
-import { PROVIDER_PRESETS } from '../../studio/contracts/providers'
+import { PROVIDER_PRESETS, isRetiredProvider, RETIRED_PROVIDER_MESSAGE } from '../../studio/contracts/providers'
 import { logger } from '../../studio/public/logging'
 import {
   getProviderEditorDetail,
@@ -17,10 +17,9 @@ import {
 import { refreshProviderModels, restoreProviderModels } from '../services/providers/provider-model-refresh'
 import { appendProviderAuditEvent } from '../../studio/public/provider-audit'
 import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
-import { OPENCODE_FREE_PROVIDER, OPENCODE_FREE_BASE_URL, isOpenCodeFreeModel } from '../../studio/contracts/opencode-free'
 
-const OPTIONAL_API_KEY_PROVIDERS = new Set(['cliproxyapi', 'xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth', OPENCODE_FREE_PROVIDER])
-const DIRECT_CONFIG_PROVIDERS = new Set(['xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth', OPENCODE_FREE_PROVIDER])
+const OPTIONAL_API_KEY_PROVIDERS = new Set(['cliproxyapi', 'xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth'])
+const DIRECT_CONFIG_PROVIDERS = new Set(['xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth'])
 type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
 
 function requestedProfile(ctx: any): string {
@@ -294,17 +293,17 @@ export async function create(ctx: any) {
   }
   const normalizedName = String(name || '').trim()
   const poolKey = providerKey || `custom:${normalizedName.toLowerCase().replace(/ /g, '-')}`
+  if (isRetiredProvider(poolKey)) {
+    ctx.status = 400; ctx.body = { error: RETIRED_PROVIDER_MESSAGE }; return
+  }
   const isBuiltin = poolKey in PROVIDER_ENV_MAP
-  const effectiveBaseUrl = poolKey === OPENCODE_FREE_PROVIDER ? OPENCODE_FREE_BASE_URL : isBuiltin ? builtinBaseUrl(poolKey, base_url) : base_url
+  const effectiveBaseUrl = isBuiltin ? builtinBaseUrl(poolKey, base_url) : base_url
   const customApiMode = normalizeApiMode(api_mode)
   if (!normalizedName || !effectiveBaseUrl || !model) {
     ctx.status = 400; ctx.body = { error: 'Missing name, base_url, or model' }; return
   }
   if (!api_key && !OPTIONAL_API_KEY_PROVIDERS.has(String(providerKey || ''))) {
     ctx.status = 400; ctx.body = { error: 'Missing API key' }; return
-  }
-  if (poolKey === OPENCODE_FREE_PROVIDER && !isOpenCodeFreeModel(model)) {
-    ctx.status = 400; ctx.body = { error: 'Select an OpenCode Free model' }; return
   }
   try {
     const profile = requestedProfile(ctx)

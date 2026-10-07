@@ -7,7 +7,7 @@ const policy = new AgentUpdatePolicy(config.appHome, {
  ids:()=>getCodingAgentDefinitions().map(v=>v.id),
  check:checkUpdateAgent,
  busy:id=>agentPreparing(id) || codingAgentRunManager.isAgentBusyForUpdate(id),
- safelyManaged:id=>id!=='cursor' && getCodingAgentDefinitions().some(agent=>agent.id===id),
+ safelyManaged:id=>id!=='cursor' && id!=='antigravity' && getCodingAgentDefinitions().some(agent=>agent.id===id && Boolean(agent.packageName)),
  activityRevision:agentActivityRevision,
  install:async id=>{
   const release=lockAgentUpdate(id)
@@ -35,5 +35,11 @@ export async function getAgentUpdateManager():Promise<AgentUpdatePolicy>{
 
 export async function installAgentAndPublish(id: string) {
   await loadPolicy()
-  return policy.installAndRefresh(id, () => installCodingAgent(id))
+  return policy.installAndRefresh(id, async () => {
+    const release = lockAgentUpdate(id)
+    try {
+      if (codingAgentRunManager.isAgentBusyForUpdate(id)) throw Object.assign(new Error('Agent session is active; stop it before updating'), { status: 409 })
+      return await installCodingAgent(id)
+    } finally { release() }
+  })
 }

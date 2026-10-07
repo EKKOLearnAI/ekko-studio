@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import { StringDecoder } from 'node:string_decoder'
 import type { CodingAgentImageInput } from '../../protocol/types'
 import { dshReasoningEffort } from './runtime-config'
-import { DSH_STREAM_METHOD } from './stream-plugin'
+import { DSH_STREAM_METHOD, DSH_USAGE_METHOD } from './stream-plugin'
+import { logger } from '../../../studio/public/logging'
 
 interface StreamedText { agent_message_chunk: string; agent_thought_chunk: string }
 
@@ -28,6 +29,7 @@ export class DshAcpTurn {
     update(update: any): void
     session(id: string): void
     config(options: any[]): void
+    usage?(event: any): void
     permissionRequired?: boolean
   }) {
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -72,7 +74,10 @@ export class DshAcpTurn {
   private receive(message: any) {
     if (this.closed) return
     if (message.method) {
-      if (message.method === 'session/update' && message.params?.sessionId === this.sessionId) {
+      if (message.method === DSH_USAGE_METHOD && this.sessionId) {
+        try { this.callbacks.usage?.(message.params) }
+        catch (err) { logger.warn({ err }, '[dsh] failed to record native usage') }
+      } else if (message.method === 'session/update' && message.params?.sessionId === this.sessionId) {
         this.receiveUpdate(message.params.update)
       } else if (message.method === DSH_STREAM_METHOD && message.params?.sessionId === this.sessionId) {
         this.receiveStream(message.params.frame)

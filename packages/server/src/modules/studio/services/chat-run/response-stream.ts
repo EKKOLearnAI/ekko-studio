@@ -474,7 +474,7 @@ export function flushResponseRunToDb(state: SessionState, sessionId: string): st
     if (persistedId != null) {
       const previousId = previousIds[index]
       if (run.reasoningMessageId === previousId) run.reasoningMessageId = persistedId
-      if (msg.role === 'assistant' && String(msg.content || '').trim()) {
+      if (msg.role === 'assistant') {
         finalAssistantMessageId = String(persistedId)
       }
     }

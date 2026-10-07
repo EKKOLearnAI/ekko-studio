@@ -60,7 +60,8 @@ vi.mock('../../packages/server/src/modules/studio/public/provider-catalog', () =
   fetchProviderModels: mockFetchProviderModels,
 }))
 
-vi.mock('../../packages/server/src/modules/studio/contracts/providers', () => ({
+vi.mock('../../packages/server/src/modules/studio/contracts/providers', async importOriginal => ({
+  ...await importOriginal<typeof import('../../packages/server/src/modules/studio/contracts/providers')>(),
   buildProviderModelMap: () => ({
     deepseek: ['deepseek-chat', 'deepseek-reasoner'],
     'xai-oauth': ['grok-4.3', 'grok-4.20-0309-reasoning'],

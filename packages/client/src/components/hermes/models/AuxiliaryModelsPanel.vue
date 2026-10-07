@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { modelReasoningEfforts, DEFAULT_REASONING_EFFORTS } from '@/utils/model-reasoning-effort'
 import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { NSpin, NButton, NInput, NInputNumber, NModal, NSelect, useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -75,17 +76,11 @@ const delegationModelOptions = computed(() => {
   return options
 })
 
-const reasoningEffortOptions = computed(() => [
-  { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-  { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-  { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-  { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-  { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-  { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-  { label: t('chat.reasoningEffort.options.max'), value: 'max' },
-  { label: t('chat.reasoningEffort.options.ultra'), value: 'ultra' },
-])
-
+const reasoningEffortOptions = computed(() => modelReasoningEfforts(modelsStore.providers, delegationForm.value.provider, delegationForm.value.model, [...DEFAULT_REASONING_EFFORTS, 'ultra'])
+  .map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })))
+watch([reasoningEffortOptions, () => delegationForm.value.reasoning_effort], ([options, effort]) => {
+  if (effort && !options.some(option => option.value === effort)) delegationForm.value.reasoning_effort = null
+})
 const delegationModelLabel = computed(() => {
   if (!delegation.value.model) return t('models.delegationInheritMain')
   return delegation.value.provider

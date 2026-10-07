@@ -1,3 +1,6 @@
+import { geminiToResponses, responsesToGemini } from '../antigravity/gemini-adapter'
+import { isNativeCodingAgent } from '../../../studio/contracts/agents/native-coding-agents'
+import { chatCompletionsToResponses, responsesToChatCompletion, responsesToChatCompletionSse } from '../../protocol/adapters/chat-completions'
 import { Readable } from 'stream'
 import type { Context } from 'koa'
 import { config } from '../../../studio/public/config'
@@ -75,6 +78,8 @@ function findTarget(routeKey: string): CodexProxyTarget | null {
 }
 
 function authToken(ctx: Context): string {
+  const geminiKey = ctx.get('x-goog-api-key').trim()
+  if (geminiKey && ctx.path.includes('/gemini/')) return geminiKey
   const apiKey = ctx.get('x-api-key').trim()
   if (apiKey) return apiKey
   const auth = ctx.get('authorization').trim()
@@ -83,7 +88,7 @@ function authToken(ctx: Context): string {
 }
 
 export function isAuthorizedCodexProxyRequest(ctx: Context): boolean {
-  const routeKey = /^\/api\/codex-proxy\/([^/]+)\/v1\/responses$/.exec(ctx.path)?.[1] || ''
+  const routeKey = /^\/api\/codex-proxy\/([^/]+)\/(?:v1\/responses|gemini\/v1beta\/models\/[^/]+)$/.exec(ctx.path)?.[1] || ''
   const target = findTarget(routeKey)
   return Boolean(target && authToken(ctx) === target.token)
 }
@@ -125,17 +130,6 @@ export function normalizeGrokResponsesRequest(body: any): any {
   return withoutMaxOutputTokens
 }
 
-export function normalizeGrokChatCompletionsRequest(body: any): any {
-  if (!body || typeof body !== 'object' || !Array.isArray(body.messages)) return body
-  let changed = false
-  const messages = body.messages.map((message: any) => {
-    if (!message || typeof message !== 'object' || message.role !== 'system') return message
-    changed = true
-    return { ...message, role: 'developer' }
-  })
-  return changed ? { ...body, messages } : body
-}
-
 function nativeResponsesBody(target: CodexProxyTarget, body: any, stream?: boolean): any {
   const normalized = target.agentId === 'grok' ? normalizeGrokResponsesRequest(body) : body
   return truncateResponsesToolOutputs({
@@ -145,31 +139,37 @@ function nativeResponsesBody(target: CodexProxyTarget, body: any, stream?: boole
   })
 }
 
-async function callOpenAiChat(target: CodexProxyTarget, body: any): Promise<any> {
+async function callOpenAiChat(target: CodexProxyTarget, body: any, signal?: AbortSignal): Promise<any> {
+  const startedAt = performance.now()
   if (target.apiMode !== 'chat_completions') {
     const err = new Error(`Codex proxy only supports chat_completions targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
-  const adapted = responsesToOpenAiChat(body, target)
-  const chatBody = target.agentId === 'grok' ? normalizeGrokChatCompletionsRequest(adapted) : adapted
-  return agentRunGateway.completeJson({
+  // Keep the adapter's system role: Chat Completions providers such as
+  // DeepSeek reject developer messages, regardless of the originating agent.
+  const chatBody = responsesToOpenAiChat(body, target)
+  const response = await agentRunGateway.completeJson({
     url: chatCompletionsUrl(target),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: chatBody,
+    signal,
   })
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
+  return response
 }
 
-async function callAnthropicMessages(target: CodexProxyTarget, body: any): Promise<any> {
+async function callAnthropicMessages(target: CodexProxyTarget, body: any, signal?: AbortSignal): Promise<any> {
+  const startedAt = performance.now()
   if (target.apiMode !== 'anthropic_messages') {
     const err = new Error(`Codex proxy Anthropic adapter only supports anthropic_messages targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
   const anthropicBody = responsesToAnthropicMessages(body, target)
-  return agentRunGateway.completeJson({
+  const response = await agentRunGateway.completeJson({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
@@ -179,23 +179,30 @@ async function callAnthropicMessages(target: CodexProxyTarget, body: any): Promi
       'anthropic-version': '2023-06-01',
     },
     body: anthropicBody,
+    signal,
   })
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
+  return response
 }
 
-async function callOpenAiResponses(target: CodexProxyTarget, body: any): Promise<any> {
+async function callOpenAiResponses(target: CodexProxyTarget, body: any, signal?: AbortSignal): Promise<any> {
+  const startedAt = performance.now()
   if (target.apiMode !== 'codex_responses') {
     const err = new Error(`Codex proxy Responses adapter only supports codex_responses targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
   const responsesBody = nativeResponsesBody(target, body)
-  return agentRunGateway.completeJson({
+  const response = await agentRunGateway.completeJson({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: responsesBody,
+    signal,
   })
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
+  return response
 }
 
 function responsesEventStream(events: AsyncIterable<CanonicalResponsesEvent>): Readable {
@@ -243,15 +250,15 @@ function responseEventForCodexClient(target: CodexProxyTarget, event: CanonicalR
   }
 }
 
-function observableResponsesEvents(target: CodexProxyTarget, events: AsyncIterable<CanonicalResponsesEvent>): AsyncIterable<CanonicalResponsesEvent> {
+function observableResponsesEvents(target: CodexProxyTarget, events: AsyncIterable<CanonicalResponsesEvent>, startedAt: number): AsyncIterable<CanonicalResponsesEvent> {
 async function* observe() {
     for await (const event of normalizeResponsesSseEvents(events)) {
-      codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event)
+      codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event, (performance.now() - startedAt) / 1000, target.baseUrl)
       const clientEvent = responseEventForCodexClient(target, event)
       // Grok, OpenCode and DSH report the same model activity through their native
       // stdout streams. The proxy remains responsible for transport and usage
       // accounting, but must not become a second chat lifecycle source.
-      if (target.agentId !== 'grok' && target.agentId !== 'opencode' && target.agentId !== 'dsh') {
+      if (!isNativeCodingAgent(target.agentId) && target.agentId !== 'grok' && target.agentId !== 'opencode' && target.agentId !== 'dsh' && target.agentId !== 'antigravity') {
         codingAgentRunManager.handleResponseEvent(target.agentSessionId, clientEvent)
       }
       yield clientEvent
@@ -260,15 +267,14 @@ async function* observe() {
   return observe()
 }
 
-async function openAiChatToResponsesSseStream(target: CodexProxyTarget, body: any): Promise<Readable> {
+async function openAiChatToResponsesSseStream(target: CodexProxyTarget, body: any, startedAt = performance.now()): Promise<Readable> {
   if (target.apiMode !== 'chat_completions') {
     const err = new Error(`Codex proxy only supports chat_completions targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
 
-  const adapted = responsesToOpenAiChat(body, target, true)
-  const chatBody = target.agentId === 'grok' ? normalizeGrokChatCompletionsRequest(adapted) : adapted
+  const chatBody = responsesToOpenAiChat(body, target, true)
   const stream = await agentRunGateway.streamBytes({
     url: chatCompletionsUrl(target),
     apiKey: target.apiKey,
@@ -279,10 +285,10 @@ async function openAiChatToResponsesSseStream(target: CodexProxyTarget, body: an
   return responsesEventStream(observableResponsesEvents(target, openAiChatSseToResponsesEvents(stream, {
     ...target,
     annotateMcpToolNamespaces: true,
-  })))
+  }), startedAt))
 }
 
-async function anthropicMessagesToResponsesSseStream(target: CodexProxyTarget, body: any): Promise<Readable> {
+async function anthropicMessagesToResponsesSseStream(target: CodexProxyTarget, body: any, startedAt = performance.now()): Promise<Readable> {
   if (target.apiMode !== 'anthropic_messages') {
     const err = new Error(`Codex proxy Anthropic adapter only supports anthropic_messages targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -304,10 +310,10 @@ async function anthropicMessagesToResponsesSseStream(target: CodexProxyTarget, b
   return responsesEventStream(observableResponsesEvents(target, anthropicMessagesSseToResponsesEvents(stream, {
     ...target,
     annotateMcpToolNamespaces: true,
-  })))
+  }), startedAt))
 }
 
-async function openAiResponsesSseStream(target: CodexProxyTarget, body: any): Promise<Readable> {
+async function openAiResponsesSseStream(target: CodexProxyTarget, body: any, startedAt = performance.now()): Promise<Readable> {
   if (target.apiMode !== 'codex_responses') {
     const err = new Error(`Codex proxy Responses adapter only supports codex_responses targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -322,7 +328,7 @@ async function openAiResponsesSseStream(target: CodexProxyTarget, body: any): Pr
     provider: target.provider,
     body: responsesBody,
   })
-  return responsesEventStream(observableResponsesEvents(target, openAiResponsesSseToResponsesEvents(stream)))
+  return responsesEventStream(observableResponsesEvents(target, openAiResponsesSseToResponsesEvents(stream), startedAt))
 }
 
 export async function codexProxyResponses(ctx: Context) {
@@ -375,4 +381,58 @@ export async function codexProxyModels(ctx: Context) {
       owned_by: target.provider,
     }],
   }
+}
+
+export async function codingAgentProxyChatCompletions(ctx: Context) {
+  const target = requireTarget(ctx)
+  if (!target) return
+  const requestBody = ctx.request.body as any || {}
+  try {
+    ctx.request.body = chatCompletionsToResponses(requestBody)
+    await codexProxyResponses(ctx)
+    if (ctx.status >= 400) return
+    if (requestBody.stream === true) {
+      const source = ctx.body as AsyncIterable<Uint8Array | string>
+      async function* bytes() { for await (const chunk of source) yield typeof chunk === 'string' ? Buffer.from(chunk) : chunk }
+      const stream = bytes()
+      ctx.body = Readable.from(responsesToChatCompletionSse(openAiResponsesSseToResponsesEvents(stream), target.model,
+        requestBody.stream_options?.include_usage === true))
+    } else ctx.body = responsesToChatCompletion(ctx.body, target.model)
+  } catch (err: any) {
+    ctx.status = err.status || 502
+    ctx.body = { error: { type: 'api_error', message: err.message || 'Coding agent proxy request failed' } }
+  } finally {
+    ctx.request.body = requestBody
+  }
+}
+
+/** Antigravity issues Gemini requests (including auxiliary title models). The
+ * registered scoped target always selects the Studio model, never the URL model. */
+export async function antigravityProxyGenerate(ctx: Context) {
+  const target = requireTarget(ctx)
+  if (!target) return
+  if (target.agentId !== 'antigravity') { ctx.status = 403; ctx.body = { error: { message: 'Not an Antigravity target' } }; return }
+  if (!/^[^/:]+:(?:streamGenerateContent|generateContent)$/.test(String(ctx.params.operation))) { ctx.status = 400; ctx.body = { error: { message: 'Unsupported Gemini operation' } }; return }
+  const abort = new AbortController()
+  const onClose = () => { if (!ctx.res.writableEnded) abort.abort() }
+  ctx.res.once('close', onClose)
+  const timeout = setTimeout(() => abort.abort(), 120_000)
+  timeout.unref?.()
+  try {
+    const body = geminiToResponses(ctx.request.body || {})
+    const response = target.apiMode === 'anthropic_messages'
+      ? anthropicMessageToResponses(await callAnthropicMessages(target, body, abort.signal), target)
+      : target.apiMode === 'codex_responses'
+        ? await callOpenAiResponses(target, body, abort.signal)
+        : openAiChatToResponses(await callOpenAiChat(target, body, abort.signal), target)
+    const payload = responsesToGemini(response)
+    ctx.set('Cache-Control', 'no-cache')
+    if (String(ctx.params.operation).includes('streamGenerateContent')) {
+      ctx.set('Content-Type', 'text/event-stream; charset=utf-8')
+      ctx.body = Readable.from([`data: ${JSON.stringify(payload)}\n\n`])
+    } else ctx.body = payload
+  } catch (err: any) {
+    ctx.status = err.status || 502
+    ctx.body = { error: { message: err.message || 'Antigravity provider request failed' } }
+  } finally { clearTimeout(timeout); ctx.res.off('close', onClose) }
 }

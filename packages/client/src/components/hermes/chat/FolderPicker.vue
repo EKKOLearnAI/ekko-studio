@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { request } from '@/api/client'
 import { copyToClipboard } from '@/utils/clipboard'
 import StarIcon from '@/components/common/StarIcon.vue'
+import FolderIcon from '@/components/common/FolderIcon.vue'
 
 interface FolderEntry {
   name: string
@@ -311,68 +312,94 @@ const flatNodes = computed<FlatNode[]>(() => {
 
 <template>
   <div class="folder-picker">
-    <NInput
-      :value="selectedPath"
-      :placeholder="t('chat.workspacePlaceholder')"
-      clearable
-      size="small"
-      class="folder-path-input"
-      @update:value="updateSelectedPath"
-    />
+    <div class="folder-path-bar">
+      <NInput
+        :value="selectedPath"
+        :placeholder="t('chat.workspacePlaceholder')"
+        :input-props="{ 'aria-label': t('chat.workspacePlaceholder') }"
+        clearable
+        class="folder-path-input"
+        @update:value="updateSelectedPath"
+      >
+        <template #prefix><FolderIcon class="folder-path-icon" /></template>
+      </NInput>
+    </div>
     <div v-if="loading" class="folder-picker-loading">
       <NSpin size="small" />
+      <span>{{ t('common.loading') }}</span>
     </div>
     <div v-else class="folder-tree">
-      <!-- Base path as root -->
-      <div
+      <button
         v-if="basePath"
         class="folder-item root"
+        type="button"
         :class="{ selected: selectedPath === basePath }"
+        :aria-pressed="selectedPath === basePath"
+        :title="basePath"
         @click="selectBase"
         @contextmenu="showContextMenu($event, null)"
       >
-        <span class="folder-icon">📂</span>
-        <span class="folder-name">{{ basePath || '/' }}</span>
-      </div>
+        <FolderIcon class="folder-icon" open />
+        <span class="folder-name">{{ basePath }}</span>
+        <svg v-if="selectedPath === basePath" class="folder-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m5 12 4 4L19 6" />
+        </svg>
+      </button>
 
-      <!-- Flat rendered tree -->
-      <div
-        v-for="node in flatNodes"
-        :key="node.folder.path"
-        class="folder-item"
-        :class="{ selected: selectedPath === node.folder.fullPath }"
-        :style="{ paddingLeft: `${12 + node.depth * 16}px` }"
-        @click="selectFolder(node.folder)"
-        @contextmenu="showContextMenu($event, node.folder)"
-      >
-        <span class="folder-expand" @click.stop="toggleExpand(node.folder)">
-          <NSpin v-if="node.isLoading" :size="16" />
-          <template v-else>{{ node.isExpanded ? '▼' : '▶' }}</template>
-        </span>
-        <span class="folder-icon">📁</span>
-        <span class="folder-name">{{ node.folder.name }}</span>
-      </div>
-
-      <!-- Empty children indicator for expanded folders with no children -->
-      <template v-for="node in flatNodes" :key="'empty-' + node.folder.path">
+      <template v-for="node in flatNodes" :key="node.folder.path">
+        <div
+          class="folder-item"
+          :class="{ selected: selectedPath === node.folder.fullPath }"
+          :style="{ paddingInlineStart: `${4 + node.depth * 20}px` }"
+          @contextmenu="showContextMenu($event, node.folder)"
+        >
+          <button
+            class="folder-expand"
+            type="button"
+            :aria-label="`${t(node.isExpanded ? 'common.collapse' : 'common.expand')}: ${node.folder.name}`"
+            :aria-expanded="node.isExpanded"
+            :aria-busy="node.isLoading"
+            @click.stop="toggleExpand(node.folder)"
+          >
+            <NSpin v-if="node.isLoading" :size="14" />
+            <svg v-else class="folder-chevron" :class="{ expanded: node.isExpanded }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m9 5 7 7-7 7" />
+            </svg>
+          </button>
+          <button
+            class="folder-select"
+            type="button"
+            :aria-pressed="selectedPath === node.folder.fullPath"
+            :title="node.folder.fullPath"
+            @click="selectFolder(node.folder)"
+          >
+            <FolderIcon class="folder-icon" :open="node.isExpanded" />
+            <span class="folder-name">{{ node.folder.name }}</span>
+            <svg v-if="selectedPath === node.folder.fullPath" class="folder-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m5 12 4 4L19 6" />
+            </svg>
+          </button>
+        </div>
         <div
           v-if="node.isExpanded && !node.isLoading && node.hasChildren === false"
           class="folder-item empty"
-          :style="{ paddingLeft: `${28 + node.depth * 16}px` }"
+          :style="{ paddingInlineStart: `${58 + node.depth * 20}px` }"
         >
           <span class="folder-empty-text">{{ t('chat.folderPickerEmpty') }}</span>
         </div>
       </template>
 
-      <div v-if="(folders.length === 0 || loadFailed) && !loading" class="folder-empty">
-        {{ t('chat.folderPickerNoFolders') }}
+      <div v-if="folders.length === 0 || loadFailed" class="folder-empty">
+        <FolderIcon open />
+        <span>{{ t('chat.folderPickerNoFolders') }}</span>
       </div>
     </div>
 
-    <!-- Selected path display -->
     <div v-if="selectedPath" class="folder-selected">
-      <span class="folder-selected-label">{{ t('chat.folderPickerSelected') }}</span>
-      <span class="folder-selected-path" :title="selectedPath">{{ selectedPath }}</span>
+      <div class="folder-selected-info">
+        <span class="folder-selected-label">{{ t('chat.folderPickerSelected') }}</span>
+        <span class="folder-selected-path" :title="selectedPath">{{ selectedPath }}</span>
+      </div>
       <button
         v-if="props.showFavorite"
         class="folder-selected-favorite"
@@ -424,144 +451,234 @@ const flatNodes = computed<FlatNode[]>(() => {
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/variables' as *;
+
 .folder-picker {
   max-height: 360px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.2);
+  min-width: 0;
+  border: 1px solid $border-color;
+  border-radius: $radius-md;
+  background: $bg-card;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.folder-path-input {
-  margin-bottom: 8px;
+.folder-path-bar {
+  padding: 10px;
+  border-bottom: 1px solid $border-light;
   flex-shrink: 0;
+}
+
+.folder-path-input {
+  font-family: $font-code;
+  font-size: 12px;
+
+  :deep(.n-input__prefix) {
+    margin-inline-end: 8px;
+  }
+}
+
+.folder-path-icon {
+  color: $text-muted;
 }
 
 .folder-tree {
   max-height: 260px;
+  min-height: 0;
+  padding: 6px;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  font-size: 13px;
 }
 
 .folder-picker-loading {
   display: flex;
+  align-items: center;
   justify-content: center;
-  padding: 24px;
-}
-
-.folder-tree {
-  font-size: 13px;
+  gap: 10px;
+  padding: 32px 16px;
+  color: $text-muted;
+  font-size: 12px;
 }
 
 .folder-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background 0.15s;
+  min-height: 36px;
+  min-width: 0;
+  border-radius: $radius-sm;
+  color: $text-secondary;
+  transition: background $transition-fast, color $transition-fast;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: $bg-card-hover;
+    color: $text-primary;
   }
 
   &.selected {
-    background: rgba(64, 158, 255, 0.15);
-    outline: 1px solid rgba(64, 158, 255, 0.4);
+    background: rgba(var(--accent-primary-rgb), 0.08);
+    color: $accent-primary;
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-primary-rgb), 0.12);
   }
 
   &.root {
-    font-weight: 600;
-    margin-bottom: 4px;
+    width: 100%;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 0;
+    background: $bg-secondary;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    margin-bottom: 6px;
+
+    &.selected {
+      background: rgba(var(--accent-primary-rgb), 0.08);
+    }
+
+    .folder-name {
+      font-family: $font-code;
+      font-size: 12px;
+    }
   }
 
   &.empty {
-    opacity: 0.5;
-    cursor: default;
+    min-height: 28px;
+    color: $text-muted;
+    background: transparent;
   }
 }
 
-.folder-expand {
-  width: 14px;
-  font-size: 10px;
-  text-align: center;
-  flex-shrink: 0;
-  user-select: none;
-  opacity: 0.6;
+.folder-select,
+.folder-expand,
+.folder-selected-favorite {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: $radius-sm;
 }
 
-.folder-icon {
+.folder-select:focus-visible,
+.folder-expand:focus-visible,
+.folder-selected-favorite:focus-visible,
+.folder-item.root:focus-visible {
+  outline: 2px solid $accent-primary;
+  outline-offset: -2px;
+}
+
+.folder-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px 6px 4px;
+  font: inherit;
+  text-align: start;
+}
+
+.folder-expand {
+  width: 26px;
+  height: 30px;
+  flex: 0 0 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: $text-muted;
+
+  &:hover {
+    background: rgba(var(--accent-primary-rgb), 0.06);
+    color: $text-primary;
+  }
+}
+
+.folder-chevron {
+  transition: transform $transition-fast;
+
+  &.expanded {
+    transform: rotate(90deg);
+  }
+}
+
+.folder-icon,
+.folder-check {
   flex-shrink: 0;
 }
 
 .folder-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .folder-empty-text {
-  font-size: 11px;
-  opacity: 0.5;
-  font-style: italic;
+  font-size: 12px;
 }
 
 .folder-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   text-align: center;
-  padding: 16px;
-  opacity: 0.5;
+  padding: 24px 16px;
+  color: $text-muted;
 }
 
 .folder-selected {
-  margin-top: 8px;
-  padding: 6px 8px;
-  background: rgba(64, 158, 255, 0.08);
-  border-radius: 4px;
-  font-size: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid $border-light;
+  background: $bg-secondary;
   display: flex;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
   min-width: 0;
   flex-shrink: 0;
 }
 
-.folder-selected-label {
-  opacity: 0.6;
-  flex-shrink: 0;
-}
-
-.folder-selected-path {
-  font-family: monospace;
+.folder-selected-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   min-width: 0;
 }
 
+.folder-selected-label {
+  font-size: 11px;
+  line-height: 16px;
+  color: $text-muted;
+}
+
+.folder-selected-path {
+  font: 12px/18px $font-code;
+  color: $text-primary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .folder-selected-favorite {
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 4px;
+  width: 30px;
+  height: 30px;
   padding: 0;
-  margin-inline-start: 2px;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-muted);
-  background: transparent;
-  cursor: pointer;
-  transition: background 0.15s, transform 0.15s, color 0.15s;
+  color: $text-muted;
+  transition: background $transition-fast, color $transition-fast;
 
   &:hover:not(:disabled) {
-    color: var(--accent-primary);
+    color: $accent-primary;
     background: rgba(var(--accent-primary-rgb), 0.08);
-    transform: scale(1.08);
   }
 
   &:disabled {
@@ -569,7 +686,13 @@ const flatNodes = computed<FlatNode[]>(() => {
     cursor: not-allowed;
   }
   &.is-pinned {
-    color: var(--accent-primary);
+    color: $accent-primary;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folder-chevron {
+    transition: none;
   }
 }
 </style>

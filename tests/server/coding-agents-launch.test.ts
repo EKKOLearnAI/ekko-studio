@@ -12,7 +12,6 @@ import {
   codexProxyModels,
   codexProxyResponses,
   isAuthorizedCodexProxyRequest,
-  normalizeGrokChatCompletionsRequest,
   normalizeGrokResponsesRequest,
   registerCodexProxyTarget,
 } from '../../packages/server/src/modules/coding-agents/services/codex/proxy'
@@ -31,10 +30,18 @@ import {
   piModelSupportsThinking,
 } from '../../packages/server/src/modules/coding-agents/services/pi/thinking'
 import { codingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
+import { getCodingAgentDefinition } from '../../packages/server/src/modules/coding-agents/services'
 import { configureProfileConfig } from '../../packages/server/src/modules/studio/public/profile-config'
 import * as providerRuntime from '../../packages/server/src/modules/studio/public/provider-runtime'
 import { upsertCodingAgentMcpServer } from '../../packages/server/src/modules/coding-agents/services/mcp-manager'
 import { getCodingAgentManagedMcpServerConfigs } from '../../packages/server/src/modules/coding-agents/services'
+import { resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/zcode/installation'
+
+// Keep launch fixtures independent of desktop applications installed on the host.
+// Actual ZCode desktop command resolution is covered by zcode-desktop-command.
+vi.mock('../../packages/server/src/modules/coding-agents/services/zcode/installation', () => ({
+  resolveZcodeCommand: vi.fn(async (args: string[]) => ({ command: 'zcode', args, env: {}, path: 'zcode' })),
+}))
 
 // Registry tests verify isolated homes/model injection without requiring a
 // machine-wide DSH install. Real Web composition is covered by dsh-web-real.
@@ -241,6 +248,21 @@ function makeProxyContext(routeKey: string, token: string, body: any): any {
 }
 
 describe('coding agent launch preparation', () => {
+  it('prepares Antigravity in global mode with private MCP configuration and supported effort', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'studio-antigravity-launch-'))
+    homes.push(home)
+    process.env.HERMES_CODING_AGENT_GLOBAL_HOME = home
+    const launch = await prepareCodingAgentLaunch('antigravity', { profile: 'default', mode: 'global', sessionId: 'agy-test', reasoningEffort: 'high' })
+    expect(launch).toMatchObject({ agentId: 'antigravity', mode: 'global', command: 'agy', reasoningEffort: 'high' })
+    expect(launch.args).toEqual(['--dangerously-skip-permissions', '--effort', 'high'])
+    expect(launch.env.HOME).not.toBe(home)
+    const mcp = launch.files.find(file => file.key === 'mcp')!
+    const config = JSON.parse(readFileSync(mcp.absolutePath, 'utf8'))
+    expect(config.mcpServers['ekko-studio-interaction'].env.ELECTRON_RUN_AS_NODE).toBe('1')
+    expect(existsSync(join(home, '.gemini', 'config', 'mcp_config.json'))).toBe(false)
+    await expect(prepareCodingAgentLaunch('antigravity', { mode: 'global', reasoningEffort: 'xhigh' })).rejects.toThrow('Antigravity effort')
+  })
+
   it('refreshes all scoped agent kinds only within the changed profile', () => {
     const predicate = vi.spyOn(codingAgentRunManager, 'invalidateMatching').mockReturnValue({ invalidated: 6, deferred: 2 })
     expect(invalidateCodingAgentProviderRuntime('research')).toEqual({ invalidatedRuns: 6, deferredRuns: 2 })
@@ -349,25 +371,6 @@ describe('coding agent launch preparation', () => {
     })
     expect(body.input[0].role).toBe('system')
     expect(body.max_output_tokens).toBe(4096)
-  })
-
-  it('maps Grok Chat Completions system messages to developer messages', () => {
-    const body = {
-      model: 'grok-test',
-      messages: [
-        { role: 'system', content: 'Project rules' },
-        { role: 'user', content: 'Hello' },
-      ],
-    }
-
-    expect(normalizeGrokChatCompletionsRequest(body)).toEqual({
-      ...body,
-      messages: [
-        { role: 'developer', content: 'Project rules' },
-        body.messages[1],
-      ],
-    })
-    expect(body.messages[0].role).toBe('system')
   })
 
   it('gates Codex tool_search feature flags by CLI version', () => {
@@ -1352,8 +1355,8 @@ describe('coding agent launch preparation', () => {
       workspaceDir,
       command: 'claude',
       args,
-      env: {},
-      shellCommand: shellCommandFor(workspaceDir, 'claude', args),
+      env: { IS_SANDBOX: '1' },
+      shellCommand: shellCommandFor(workspaceDir, 'claude', args, { IS_SANDBOX: '1' }),
       files: [{
         key: 'prompt',
         path: 'hermes-rules.md',
@@ -1367,8 +1370,8 @@ describe('coding agent launch preparation', () => {
     expect(existsSync(join(home, 'global-home', '.claude', 'hermes-rules.md'))).toBe(false)
   })
 
-  it('uses Claude Code auto permission mode instead of dangerous bypass when running as root', async () => {
-    mockProcessUid(0)
+  it.each([0, 1000])('uses sandbox permission bypass for global Claude Code with uid %s', async (uid) => {
+    mockProcessUid(uid)
     const home = makeHome()
 
     const result = await prepareCodingAgentLaunch('claude-code', {
@@ -1379,14 +1382,11 @@ describe('coding agent launch preparation', () => {
     const rootDir = join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code')
     const workspaceDir = join(home, 'coding-agent', 'workspace', 'default', 'global')
     const promptPath = join(rootDir, 'hermes-rules.md')
-    const usesUnixRootPermissions = process.platform !== 'win32'
     const args = [
       '--append-system-prompt-file',
       promptPath,
       '--mcp-config', join(rootDir, 'mcp.json'),
-      ...(usesUnixRootPermissions
-        ? ['--permission-mode', 'auto', '--allowedTools', 'mcp__ekko-studio-interaction__ekko_studio_update_plan']
-        : ['--dangerously-skip-permissions']),
+      '--dangerously-skip-permissions',
     ]
 
     expect(result).toMatchObject({
@@ -1395,7 +1395,8 @@ describe('coding agent launch preparation', () => {
       rootDir,
       command: 'claude',
       args,
-      shellCommand: shellCommandFor(workspaceDir, 'claude', args),
+      env: { IS_SANDBOX: '1' },
+      shellCommand: shellCommandFor(workspaceDir, 'claude', args, { IS_SANDBOX: '1' }),
     })
   })
 
@@ -2234,9 +2235,14 @@ describe('coding agent launch preparation', () => {
     ))).toBe(false)
   })
 
-  it('uses Claude Code auto permission mode for scoped root launches', async () => {
-    mockProcessUid(0)
+  it.each([0, 1000])('uses sandbox permission bypass for scoped Claude Code with uid %s', async (uid) => {
+    mockProcessUid(uid)
     const home = makeHome()
+    vi.stubEnv('IS_SANDBOX', '0')
+    const globalSettingsPath = join(home, 'global-home', '.claude', 'settings.json')
+    mkdirSync(dirname(globalSettingsPath), { recursive: true })
+    const globalSettings = JSON.stringify({ env: { IS_SANDBOX: '0' } })
+    writeFileSync(globalSettingsPath, globalSettings)
 
     const result = await prepareCodingAgentLaunch('claude-code', {
       profile: 'default',
@@ -2247,9 +2253,7 @@ describe('coding agent launch preparation', () => {
       isolateSettings: true,
     })
 
-    const permissionArgs = process.platform === 'win32'
-      ? ['--dangerously-skip-permissions']
-      : ['--permission-mode', 'auto', '--allowedTools', 'mcp__ekko-studio-interaction__ekko_studio_update_plan']
+    const permissionArgs = ['--dangerously-skip-permissions']
     expect(result.args).toEqual([
       '--settings',
       join(result.rootDir, 'settings.json'),
@@ -2262,13 +2266,14 @@ describe('coding agent launch preparation', () => {
       ...permissionArgs,
     ])
     const launcher = readFileSync(launcherFile(result.rootDir), 'utf-8')
-    if (process.platform === 'win32') {
-      expectLauncherFragment(launcher, '--dangerously-skip-permissions')
-    } else {
-      expectLauncherFragment(launcher, '--permission-mode auto')
-      expectLauncherFragment(launcher, '--allowedTools mcp__ekko-studio-interaction__ekko_studio_update_plan')
-      expect(launcher).not.toContain('--dangerously-skip-permissions')
-    }
+    expectLauncherFragment(launcher, '--dangerously-skip-permissions')
+    expect(launcher).not.toContain('--permission-mode')
+    expect(launcher).not.toContain('--allowedTools')
+    expect(result.env.IS_SANDBOX).toBe('1')
+    const settings = JSON.parse(readFileSync(join(result.rootDir, 'settings.json'), 'utf-8'))
+    expect(settings.env.IS_SANDBOX).toBe('1')
+    expect(readFileSync(globalSettingsPath, 'utf-8')).toBe(globalSettings)
+    expect(launcher).toContain(process.platform === 'win32' ? "$env:IS_SANDBOX = '1'" : 'export IS_SANDBOX=1')
     expect(result.rootDir).toBe(join(home, 'coding-agent', 'model', 'default', 'openrouter', 'claude-code'))
   })
 
@@ -3353,40 +3358,75 @@ describe('coding agent launch preparation', () => {
     expect(forwarded).not.toHaveProperty('max_output_tokens')
   })
 
-  it('normalizes Grok requests before forwarding to Chat Completions providers', async () => {
-    const target = registerCodexProxyTarget({
-      profile: 'default',
-      provider: 'custom',
-      model: 'grok-chat-test',
-      baseUrl: 'https://api.example.com/v1',
-      apiKey: 'sk-upstream',
-      apiMode: 'chat_completions',
-      agentId: 'grok',
-    })
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      id: 'chatcmpl_grok',
-      choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }],
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-    vi.stubGlobal('fetch', fetchMock)
+  it.each([
+    { provider: 'deepseek', model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com' },
+    { provider: 'custom:relay', model: 'relay-model', baseUrl: 'https://api.example.com/v1' },
+  ].flatMap(target => [false, true].map(stream => ({ ...target, stream }))))(
+    'keeps Grok instructions as system messages for $provider Chat Completions (stream=$stream)',
+    async ({ provider, model, baseUrl, stream }) => {
+      const target = registerCodexProxyTarget({
+        profile: 'default',
+        provider,
+        model,
+        baseUrl,
+        apiKey: 'sk-upstream',
+        apiMode: 'chat_completions',
+        agentId: 'grok',
+      })
+      const fetchMock = vi.fn(async (_url: string, init: any) => {
+        const request = JSON.parse(init.body)
+        if (request.messages.some((message: any) => message.role === 'developer')) {
+          return new Response(JSON.stringify({ error: { message: 'messages[0].role: unknown variant `developer`' } }), {
+            status: 422, headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        const choice = { role: 'assistant', content: 'ok' }
+        const response = {
+          id: 'chatcmpl_grok', model,
+          choices: [{ index: 0, finish_reason: 'stop', ...(stream ? { delta: choice } : { message: choice }) }],
+        }
+        return new Response(stream ? `data: ${JSON.stringify(response)}\n\ndata: [DONE]\n\n` : JSON.stringify(response), {
+          status: 200, headers: { 'Content-Type': stream ? 'text/event-stream' : 'application/json' },
+        })
+      })
+      vi.stubGlobal('fetch', fetchMock)
 
-    await codexProxyResponses(makeProxyContext(target.routeKey, target.token, {
-      instructions: 'Top-level rules',
-      max_output_tokens: 4096,
-      input: [
-        { role: 'system', content: [{ type: 'input_text', text: 'Project rules' }] },
-        { role: 'user', content: [{ type: 'input_text', text: 'Hello' }] },
-      ],
-    }))
+      const body = {
+        stream,
+        instructions: 'Top-level rules',
+        max_output_tokens: 4096,
+        input: [
+          { role: 'system', content: [{ type: 'input_text', text: 'Project rules' }] },
+          { role: 'user', content: [{ type: 'input_text', text: 'Hello' }] },
+          { role: 'developer', content: [{ type: 'input_text', text: 'Follow-up rules' }] },
+        ],
+      }
+      const originalBody = structuredClone(body)
+      const ctx = makeProxyContext(target.routeKey, target.token, body)
+      await codexProxyResponses(ctx)
 
-    const forwarded = JSON.parse(fetchMock.mock.calls[0][1].body)
-    expect(forwarded.messages[0]).toMatchObject({
-      role: 'developer',
-      content: expect.stringContaining('Top-level rules'),
-    })
-    expect(forwarded.messages[0].content).toContain('Project rules')
-    expect(forwarded).not.toHaveProperty('max_tokens')
-    expect(forwarded).not.toHaveProperty('max_output_tokens')
-  })
+      expect(ctx.status).not.toBe(422)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const forwarded = JSON.parse(fetchMock.mock.calls[0][1].body)
+      expect(forwarded).toMatchObject({ model, stream, messages: [
+        { role: 'system', content: 'Top-level rules\n\nProject rules\n\nFollow-up rules' },
+        { role: 'user', content: 'Hello' },
+      ] })
+      expect(forwarded).not.toHaveProperty('max_tokens')
+      expect(forwarded).not.toHaveProperty('max_output_tokens')
+      expect(body).toEqual(originalBody)
+      if (stream) {
+        const chunks: string[] = []
+        for await (const chunk of ctx.body) chunks.push(String(chunk))
+        expect(chunks.join('')).toContain('event: response.completed')
+        expect(chunks.join('')).toContain('"text":"ok"')
+      } else {
+        expect(ctx.body).toMatchObject({ status: 'completed', output: [
+          { role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] },
+        ] })
+      }
+    },
+  )
 
   it('normalizes image response annotations before streaming them to Grok', async () => {
     const target = registerCodexProxyTarget({
@@ -3858,63 +3898,19 @@ describe('coding agent launch preparation', () => {
 })
 
 
-describe('OpenCode Free coding agents', () => {
-  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode'])('prepares %s with a protected local proxy and no upstream key', async (id) => {
-    const home = makeHome()
-    if (id === 'pi') {
-      const adapter = join(home, 'coding-agent', 'pi-mcp-adapter', 'node_modules', 'pi-mcp-adapter', 'index.ts')
-      mkdirSync(dirname(adapter), { recursive: true })
-      writeFileSync(adapter, 'export default {}')
-    }
-    const launch = await prepareCodingAgentLaunch(id as any, {
-      profile: 'default', provider: 'opencode-free', model: 'mimo-v2.5-free', mode: 'scoped',
-    })
-    const contents = launch.files.map(file => readFileSync(file.absolutePath, 'utf8')).join('\n')
-    expect(contents).toMatch(/api\/(codex-proxy|claude-code-proxy)\//)
-    expect(contents + JSON.stringify(launch.env)).toContain('hwui_')
-    if (id === 'codex' || id === 'pi') {
-      revokeCodexProxyTargets('default', 'opencode-free')
-      const restored = id === 'pi' ? await restorePersistedPiProxyTargets() : await restorePersistedCodexProxyTargets()
-      expect(restored).toBeGreaterThan(0)
-    }
-  })
-
-  it.each([
-    ['mimo-v2.5-free', 'chat/completions'],
-    ['muse-spark-free', 'responses'],
-    ['qwen3-free', 'messages'],
-  ])('routes %s anonymously through both proxy protocols', async (model, endpoint) => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      id: 'test', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'ok' }],
-      output: [], choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }],
-    }), { headers: { 'Content-Type': 'application/json' } }))
-    vi.stubGlobal('fetch', fetchMock)
-    for (const claude of [false, true]) {
-      const input = { profile: 'default', provider: 'opencode-free', model, baseUrl: 'https://stale.example', apiKey: 'stale-key' }
-      const target = claude ? registerClaudeCodeProxyTarget(input) : registerCodexProxyTarget(input)
-      const handler = claude ? claudeProxyMessages : codexProxyResponses
-      const body = { model, max_tokens: 16, messages: [{ role: 'user', content: 'hello' }], input: 'hello' }
-      const denied = makeProxyContext(target.routeKey, '', body)
-      await handler(denied)
-      expect(denied.status).toBe(401)
-      fetchMock.mockClear()
-      const ctx = makeProxyContext(target.routeKey, target.token, body)
-      await handler(ctx)
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-      const [url, init] = fetchMock.mock.calls[0] as any
-      expect(url).toBe(`https://opencode.ai/zen/v1/${endpoint}`)
-      const headers = new Headers(init.headers)
-      expect(headers.has('authorization')).toBe(false)
-      expect(headers.has('x-api-key')).toBe(false)
-      expect(JSON.parse(init.body).model).toBe(model)
-    }
-  })
-
-  it('rejects paid model IDs for the native anonymous provider', async () => {
+describe('coding agent provider validation and managed MCP guidance', () => {
+  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode'])('rejects retired OpenCode Free for scoped %s', async (id) => {
     makeHome()
-    await expect(prepareCodingAgentLaunch('codex', {
-      provider: 'opencode-free', model: 'gpt-5', mode: 'scoped',
-    })).rejects.toMatchObject({ status: 400 })
+    await expect(prepareCodingAgentLaunch(id as any, {
+      profile: 'default', provider: 'opencode-free', model: 'mimo-v2.5-free', mode: 'scoped',
+      baseUrl: 'https://opencode.ai/zen/v1', apiKey: 'stale-key',
+    })).rejects.toMatchObject({ status: 400, message: expect.stringContaining('OpenCode Free is no longer supported') })
+  })
+
+  it('rejects retired provider proxy targets even with stale supplied credentials', () => {
+    const input = { profile: 'default', provider: 'opencode-free', model: 'mimo-v2.5-free', baseUrl: 'https://stale.example', apiKey: 'stale-key' }
+    expect(() => registerClaudeCodeProxyTarget(input)).toThrow('OpenCode Free is no longer supported')
+    expect(() => registerCodexProxyTarget(input)).toThrow('OpenCode Free is no longer supported')
   })
 
   it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'] as const)('updates %s launch guidance when managed MCPs are disabled, isolated by profile', async agent => {
@@ -3936,4 +3932,158 @@ describe('OpenCode Free coding agents', () => {
     expect(readFileSync(other.promptFile!, 'utf8')).toContain('ekko_studio_api_openapi_get')
   })
 
+})
+
+describe('Antigravity scoped launch', () => {
+  it('configures a local provider bridge without passing the upstream key to the CLI', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'agy-scoped-launch-')); homes.push(home)
+    process.env.HERMES_CODING_AGENT_GLOBAL_HOME = home
+    const launch = await prepareCodingAgentLaunch('antigravity', { mode: 'scoped', profile: 'default', provider: 'custom:test', model: 'selected', apiMode: 'chat_completions', baseUrl: 'https://example.test/v1', apiKey: 'upstream-test-secret', sessionId: 'scope-chat', agentSessionId: 'scope-run' })
+    expect(launch).toMatchObject({ mode: 'scoped', provider: 'custom:test', model: 'selected' })
+    expect(launch.env.GEMINI_API_KEY).toMatch(/^hwui_/)
+    expect(launch.env.GOOGLE_GEMINI_BASE_URL).toContain('/gemini')
+    expect(JSON.stringify(launch.env)).not.toContain('upstream-test-secret')
+    expect(JSON.parse(readFileSync(launch.files.find(file => file.key === 'settings')!.absolutePath, 'utf8')).modelProvider).toBe('gemini')
+  })
+})
+
+it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('prepares %s with native auth and truthful global capabilities', async id => {
+  expect(getCodingAgentDefinition(id)?.capabilities?.images).toBe(true)
+  const home = makeHome()
+  const tokenFile = join(home, 'group-auth.json')
+  const launch = await prepareCodingAgentLaunch(id, {
+    mode: 'global', profile: 'research', workspace: join(home, 'workspace'),
+    studioMcpTokenFile: tokenFile, groupSystemPrompt: 'Review the repository',
+    provider: 'custom:test', model: 'must-not-override-native-model', apiKey: 'must-not-write-upstream-key',
+  })
+  expect(launch).toMatchObject({ agentId: id, mode: 'global', provider: 'global', model: '', args: [], env: {} })
+  expect(launch.nativeSystemPrompt).toContain('Review the repository')
+  expect(JSON.stringify(launch)).not.toContain('must-not-write-upstream-key')
+  expect(launch.command).toBe(id)
+  if (id === 'zcode') expect(launch.nativeMcpServers).toEqual({})
+  else {
+    const server = launch.nativeMcpServers!['ekko-studio-interaction']
+    expect(server.env.ELECTRON_RUN_AS_NODE).toBe('1')
+    expect(Object.values(server.env)).toContain(tokenFile)
+  }
+})
+
+it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot'])('loads %s supplemental MCP configuration from Studio state', async id => {
+  const home = makeHome()
+  await upsertCodingAgentMcpServer(id, 'project-tools', {
+    command: 'node', args: ['project-mcp.mjs'], env: { PROJECT: 'fixture' }, enabled: true,
+  }, { profile: 'research', provider: 'global' })
+  const file = join(home, 'coding-agent', 'native', id, 'mcp.json')
+  expect(JSON.parse(readFileSync(file, 'utf8')).mcpServers['project-tools'].env).toEqual({ PROJECT: 'fixture' })
+  const launch = await prepareCodingAgentLaunch(id, { mode: 'global', profile: 'research', workspace: join(home, 'workspace') })
+  expect(launch.nativeMcpServers!['project-tools']).toMatchObject({ command: 'node', args: ['project-mcp.mjs'], env: { PROJECT: 'fixture' } })
+  expect(launch.nativeMcpServers!['ekko-studio-interaction']).toBeDefined()
+})
+
+
+it('uses desktop provider paths globally while retaining scoped ZCode configuration in chat and terminal launchers', async () => {
+  const home = makeHome()
+  const cli = '/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs'
+  const defaults = { ELECTRON_RUN_AS_NODE: '1',
+    ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: '/desktop/config/provider/zcode-builtin.json',
+    ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: join(home, '.zcode', 'v2', 'provider_config.json'),
+    ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE: '' }
+  vi.mocked(resolveZcodeCommand).mockResolvedValueOnce({ command: process.execPath, args: [cli], env: defaults, path: cli })
+  const global = await prepareCodingAgentLaunch('zcode', { mode: 'global', workspace: join(home, 'workspace') })
+  expect(global.command).toBe(process.execPath)
+  expect(global.env).toEqual(defaults)
+  expect(global.args).toEqual([cli])
+  expect(global.shellCommand).toContain('ZCODE_BUILTIN_PROVIDER_CONFIG_FILE')
+  expect(global.shellCommand).toContain(cli)
+
+  vi.mocked(resolveZcodeCommand).mockResolvedValueOnce({ command: process.execPath, args: [cli], env: defaults, path: cli })
+  const scoped = await prepareCodingAgentLaunch('zcode', { mode: 'scoped', profile: 'default',
+    provider: 'custom:test', model: 'model-a', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test',
+    workspace: join(home, 'workspace'), sessionId: 'desktop-scoped' })
+  expect(scoped.command).toBe(process.execPath)
+  expect(scoped.env.ELECTRON_RUN_AS_NODE).toBe('1')
+  expect(scoped.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(join(scoped.rootDir, 'zcode-builtin.json'))
+  expect(scoped.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE).toBe(join(scoped.rootDir, 'personal-providers.json'))
+  expect(scoped.env.ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE).toBe('')
+  const launcher = readFileSync(launcherFile(scoped.rootDir), 'utf8')
+  expect(launcher).toContain(cli)
+  expect(launcher).toContain(scoped.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE)
+})
+
+it.each(['qwen', 'kimi', 'codebuddy', 'copilot', 'zcode'].flatMap(id =>
+  ['chat_completions', 'codex_responses', 'anthropic_messages'].map(apiMode => [id, apiMode] as const)
+))('isolates %s scoped model with %s upstream API', async (id, apiMode) => {
+  const home = makeHome()
+  const globalFile = join(home, 'global-home', '.native-fixture')
+  mkdirSync(dirname(globalFile), { recursive: true })
+  writeFileSync(globalFile, 'original native account')
+  const input = { mode: 'scoped' as const, profile: 'research', provider: 'custom:test',
+    model: 'model-a', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-secret-upstream', apiMode,
+    sessionId: 'session-a', agentSessionId: `run-${id}`, workspace: join(home, 'workspace'),
+    groupSystemPrompt: 'Scoped instructions' }
+  const launch = await prepareCodingAgentLaunch(id, input)
+  expect(launch).toMatchObject({ agentId: id, mode: 'scoped', provider: 'custom:test', model: 'model-a', apiMode })
+  expect(launch.nativeSystemPrompt).toContain('Scoped instructions')
+  expect(JSON.stringify(launch)).not.toContain('sk-secret-upstream')
+  const contents = launch.files.map(file => readFileSync(file.absolutePath, 'utf8')).join('\n')
+  expect(contents).not.toContain('sk-secret-upstream')
+  expect(contents).toContain('model-a')
+  expect(JSON.stringify(launch.env) + contents).toContain(id === 'codebuddy' || id === 'copilot' ? '/api/codex-proxy/' : '/api/claude-code-proxy/')
+  const second = await prepareCodingAgentLaunch(id, { ...input, sessionId: 'session-b', model: 'model-b' })
+  expect(second.rootDir).not.toBe(launch.rootDir)
+  expect(launch.files.map(file => readFileSync(file.absolutePath, 'utf8')).join('\n')).toBe(contents)
+  expect(readFileSync(globalFile, 'utf8')).toBe('original native account')
+  if (id === 'codebuddy') {
+    // ACP authenticates before looking up the selected custom model.
+    expect(launch.env.CODEBUDDY_API_KEY).toBe(launch.env.EKKO_SCOPED_MODEL_TOKEN)
+    expect(launch.env.CODEBUDDY_API_KEY).toMatch(/^hwui_/)
+    expect(launch.env.CODEBUDDY_BASE_URL).toContain('/api/codex-proxy/')
+  }
+  if (id !== 'zcode') expect(launch.nativeMcpServers!['ekko-studio-interaction']).toBeDefined()
+  else {
+    expect(launch.args).toEqual([]) // Official headless parser has no --model flag.
+    const config = JSON.parse(readFileSync(launch.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE, 'utf8'))
+    expect(config.config.defaultModelSelection).toMatchObject({ providerId: 'ekko-scoped', modelId: 'model-a' })
+  }
+})
+
+
+it.each(['chat_completions', 'codex_responses', 'anthropic_messages'] as const)(
+  'uses the generic Copilot BYOK client for scoped GLM with %s upstream', async apiMode => {
+    const home = makeHome()
+    const launch = await prepareCodingAgentLaunch('copilot', {
+      mode: 'scoped', profile: 'research', provider: 'custom:test', model: 'glm-5.3-flash',
+      baseUrl: 'https://api.example.com/v1', apiKey: 'sk-secret-upstream', apiMode,
+      sessionId: `glm-${apiMode}`, workspace: join(home, 'workspace'),
+    })
+    expect(launch.env).toMatchObject({
+      COPILOT_PROVIDER_TYPE: 'openai', COPILOT_PROVIDER_WIRE_API: 'completions',
+      COPILOT_PROVIDER_TRANSPORT: 'http', COPILOT_PROVIDER_MODEL_ID: 'glm-5.3-flash',
+      COPILOT_PROVIDER_WIRE_MODEL: 'glm-5.3-flash', COPILOT_MODEL: 'glm-5.3-flash',
+      COPILOT_HOME: launch.rootDir, COPILOT_OFFLINE: 'true',
+      COPILOT_PROVIDERS_CONFIG: '', COPILOT_PROVIDER_API_KEY_COMMAND: '',
+      COPILOT_PROVIDER_BEARER_TOKEN: '', COPILOT_PROVIDER_HEADERS: '',
+      COPILOT_GITHUB_TOKEN: '', GH_TOKEN: '', GITHUB_TOKEN: '',
+    })
+    expect(launch.env.COPILOT_PROVIDER_BASE_URL).toContain('/api/codex-proxy/')
+    expect(launch.env.COPILOT_PROVIDER_API_KEY).toMatch(/^hwui_/)
+    expect(Number(launch.env.COPILOT_PROVIDER_MAX_PROMPT_TOKENS)).toBeGreaterThan(0)
+    expect(Number(launch.env.COPILOT_PROVIDER_MAX_OUTPUT_TOKENS)).toBeGreaterThan(0)
+    expect(launch.args).toEqual(['--model', 'glm-5.3-flash'])
+    expect(JSON.parse(readFileSync(join(launch.rootDir, 'config.json'), 'utf8'))).toEqual({ model: 'glm-5.3-flash' })
+    expect(JSON.stringify(launch)).not.toContain('sk-secret-upstream')
+  },
+)
+
+it('retains the Anthropic BYOK client for scoped Copilot Claude models', async () => {
+  const home = makeHome()
+  const launch = await prepareCodingAgentLaunch('copilot', {
+    mode: 'scoped', profile: 'research', provider: 'custom:test', model: 'claude-sonnet-4-6',
+    baseUrl: 'https://api.example.com/v1', apiKey: 'sk-secret-upstream', apiMode: 'anthropic_messages',
+    sessionId: 'copilot-claude', workspace: join(home, 'workspace'),
+  })
+  expect(launch.env).toMatchObject({ COPILOT_PROVIDER_TYPE: 'anthropic',
+    COPILOT_PROVIDER_MODEL_ID: 'claude-sonnet-4-6', COPILOT_PROVIDER_WIRE_MODEL: 'claude-sonnet-4-6',
+    COPILOT_PROVIDER_WIRE_API: '', COPILOT_PROVIDER_TRANSPORT: 'http' })
+  expect(launch.env.COPILOT_PROVIDER_BASE_URL).toContain('/api/claude-code-proxy/')
 })

@@ -9,6 +9,7 @@ export interface ModelGroupResult {
 }
 
 export interface ProfileConfigDependencies {
+  resolveModelBaseUrl?: (profile: string, provider: string, model: string) => string | undefined
   buildModelGroups: (config: Record<string, any>) => ModelGroupResult
   getProfilesBaseDir: () => string
   getProfileDir: (profile: string) => string
@@ -99,4 +100,8 @@ export function updateConfigYamlForProfile<T = void>(
   updater: (config: Record<string, any>) => any,
 ): Promise<T | undefined> {
   return configured().updateConfigYamlForProfile<T>(profile, updater)
+}
+
+export function resolveModelBaseUrl(profile: string, provider: string, model: string): string | undefined {
+  return profileConfigDependencies?.resolveModelBaseUrl?.(profile, provider, model)
 }

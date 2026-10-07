@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { modelReasoningEfforts, DEFAULT_REASONING_EFFORTS } from '@/utils/model-reasoning-effort'
 import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { NSpin, NButton, NInput, NInputNumber, NModal, NSelect, NSwitch, useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -82,16 +83,17 @@ function clonePreset(preset: MoaPreset): MoaPreset {
   return JSON.parse(JSON.stringify(preset))
 }
 
-const reasoningEffortOptions = computed(() => [
-  { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-  { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-  { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-  { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-  { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-  { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-  { label: t('chat.reasoningEffort.options.max'), value: 'max' },
-  { label: t('chat.reasoningEffort.options.ultra'), value: 'ultra' },
-])
+function reasoningEffortOptions(slot: MoaModelSlot) {
+  return modelReasoningEfforts(modelsStore.providers, slot.provider, slot.model, [...DEFAULT_REASONING_EFFORTS, 'ultra'])
+    .map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value }))
+}
+watch(() => [formPreset.value, modelsStore.providers], () => {
+  for (const slot of [...formPreset.value.reference_models, formPreset.value.aggregator]) {
+    if (slot.reasoning_effort && !reasoningEffortOptions(slot).some(option => option.value === slot.reasoning_effort)) {
+      slot.reasoning_effort = undefined
+    }
+  }
+}, { deep: true })
 
 function slotLabel(slot?: MoaModelSlot): string {
   if (!slot?.provider || !slot?.model) return t('models.combinationNotSet')
@@ -372,7 +374,7 @@ usePageLoadingTask(() => loading.value)
               <span class="slot-pair">{{ slotLabel(slot) }}</span>
               <NSelect
                 v-model:value="slot.reasoning_effort"
-                :options="reasoningEffortOptions"
+                :options="reasoningEffortOptions(slot)"
                 size="small"
                 clearable
                 :placeholder="t('chat.reasoningEffort.tooltip')"
@@ -398,7 +400,7 @@ usePageLoadingTask(() => loading.value)
             <span class="slot-pair">{{ slotLabel(formPreset.aggregator) }}</span>
             <NSelect
               v-model:value="formPreset.aggregator.reasoning_effort"
-              :options="reasoningEffortOptions"
+              :options="reasoningEffortOptions(formPreset.aggregator)"
               size="small"
               clearable
               :placeholder="t('chat.reasoningEffort.tooltip')"

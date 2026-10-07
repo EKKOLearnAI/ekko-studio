@@ -92,24 +92,7 @@ onMounted(async () => {
   }
 })
 
-let catalogPoll: ReturnType<typeof setInterval> | undefined
-let pollingCatalog = false
-onMounted(() => {
-  catalogPoll = setInterval(async () => {
-    const freeProvider = modelsStore.providers.find(group => group.provider === 'opencode-free')
-    if (profileLoading.value || pollingCatalog || !freeProvider || !['loading', 'error'].includes(freeProvider.catalog_status || '')) return
-    pollingCatalog = true
-    try {
-      await modelsStore.fetchProviders({ background: true })
-      if (modelsStore.providers.find(group => group.provider === 'opencode-free')?.catalog_status === 'ready') {
-        await appStore.reloadModels({ preserveSelection: true })
-      }
-    } finally {
-      pollingCatalog = false
-    }
-  }, 3000)
-})
-onUnmounted(() => { loadId++; if (catalogPoll) clearInterval(catalogPoll) })
+onUnmounted(() => { loadId++ })
 
 function openCreateModal() {
   showModal.value = true

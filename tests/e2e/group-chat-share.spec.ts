@@ -335,6 +335,66 @@ const groupPlan = (revision: number, agent = 'worker') => ({
       { id: 'b', step: 'Verify results', status: 'pending' }] }),
 })
 
+const groupUsage = (agent = 'worker', outputTokens: number | null = 200) => ({
+  id: `usage-${agent}`, roomId: 'room-shared', senderId: `agent-${agent}`, senderName: agent,
+  role: 'tool', tool_name: 'run_usage', tool_call_id: `usage-${agent}`, run_id: 'shared-run', timestamp: 4,
+  content: JSON.stringify({ runId: 'shared-run', assistantMessageId: 'shared-message-2', inputTokens: 1200,
+    outputTokens, cacheReadTokens: 300, cacheHitRate: 0.25, costUsd: 0.0123, tokensPerSecond: 50,
+    speedSource: 'model', isEstimated: false }),
+})
+
+const usageWorkspaceDiff = {
+  id: 'usage-diff', roomId: 'room-shared', senderId: 'agent-worker', senderName: 'Worker',
+  role: 'tool', tool_name: 'workspace_diff', tool_call_id: 'workspace_diff:shared-run', run_id: 'shared-run', timestamp: 4,
+  content: JSON.stringify({ kind: 'workspace_diff', version: 1, room_id: 'room-shared', session_id: 'session-worker',
+    run_id: 'shared-run', parent_message_id: 'shared-message-2', status: 'completed', change_id: 'usage-change',
+    workspace_basename: 'studio', files_changed: 1, additions: 2, deletions: 1, truncated: false,
+    files: [{ id: 1, path: 'src/chat.ts', change_type: 'modified', additions: 2, deletions: 1,
+      patch: 'diff --git a/src/chat.ts b/src/chat.ts\n-old\n+new\n', binary: false, truncated: false }] }),
+}
+
+for (const theme of ['light', 'dark']) {
+  test(`group usage cards restore and update independently in ${theme} mode`, async ({ page }) => {
+    await page.addInitScript(theme => {
+      localStorage.setItem('hermes_brightness', theme)
+      localStorage.setItem('hermes_show_tool_calls', 'false')
+    }, theme)
+    await mockInviteSocket(page, null, 'Task output', false, [groupUsage(), usageWorkspaceDiff])
+    await mockInviteApi(page)
+    await page.goto('/#/share/group-chat/ROOM1')
+    await page.locator('#group-chat-guest-name input').fill('Visitor')
+    await page.getByRole('button', { name: 'Enter room' }).click()
+    const cards = page.locator('.run-usage-card')
+    const worker = page.locator('.group-agent-run').filter({ hasText: 'Task output' })
+    await expect(cards).toHaveCount(1)
+    await expect(cards).toContainText('1,200')
+    await expect(cards).toContainText('25.0%')
+    await expect(cards).toContainText('$0.0123')
+    await expect(cards).toContainText('50.0 tok/s')
+    await expect(worker.locator('.run-transcript-item')).toHaveCount(1)
+    await expect(worker.locator('.run-tools')).toHaveCount(0)
+    await expect(worker.locator('.run-card .msg-content .run-usage-card')).toHaveCount(1)
+    await expect(worker.locator('.run-card .msg-content .assistant-workspace-change')).toHaveCount(1)
+    await expect.poll(() => worker.locator('.run-usage-card').evaluate(element =>
+      element.nextElementSibling?.classList.contains('assistant-workspace-change'))).toBe(true)
+    await page.evaluate(message => (window as any).__PW_SHARED_GROUP_SOCKET__.socket.__trigger('message', message), groupUsage('worker', 250))
+    await expect(worker.locator('.run-usage-card .run-usage-value').first()).toHaveText('250')
+    await page.evaluate(message => (window as any).__PW_SHARED_GROUP_SOCKET__.socket.__trigger('message', message), groupUsage('reviewer', null))
+    await expect(cards).toHaveCount(2)
+    await expect(page.locator('.group-agent-run').filter({ hasText: 'reviewer' }).locator('.run-usage-value').first()).toHaveText('—')
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect.poll(() => cards.evaluateAll(elements => elements.every(element => element.scrollWidth <= element.clientWidth))).toBe(true)
+      if (width === 390) await worker.locator('.run-column').screenshot({ path: `/tmp/studio-group-token-card-${theme}.png` })
+    }
+    await page.reload()
+    await page.locator('#group-chat-guest-name input').fill('Visitor')
+    await page.getByRole('button', { name: 'Enter room' }).click()
+    await expect(cards).toHaveCount(1)
+    await expect(cards.locator('.run-usage-value').first()).toHaveText('200')
+  })
+}
+
 test('group task cards survive history reload and live stale updates with tool traces hidden', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('hermes_show_tool_calls', 'false'))
   await mockInviteSocket(page, null, 'Task output', false, [groupPlan(2)])

@@ -3,9 +3,6 @@ import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
 test('loads and saves the signed-in user theme without profile scoping', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
-  await page.addInitScript(() => {
-    localStorage.setItem('hermes_style', 'comic')
-  })
   const api = await mockHermesApi(page, {
     theme: {
       fontSize: 16,
@@ -86,6 +83,38 @@ test('loads and saves the signed-in user theme without profile scoping', async (
   await expect(activeSwitchRail).toHaveCSS('background-color', 'rgb(51, 102, 255)')
   expect(api.unexpectedRequests).toEqual([])
 })
+
+for (const brightness of ['light', 'dark'] as const) {
+  test(`keeps the selected theme style after reload in ${brightness} mode`, async ({ page }) => {
+    await authenticate(page)
+    await page.addInitScript((mode) => {
+      localStorage.setItem('hermes_brightness', mode)
+    }, brightness)
+    const api = await mockHermesApi(page)
+
+    await page.goto('/#/hermes/theme')
+    await expect(page.getByRole('heading', { name: 'Theme' })).toBeVisible()
+    const styleSelect = page.locator('.theme-select').nth(1)
+
+    for (const [style, label] of [['comic', 'Comic'], ['ink', 'Ink']] as const) {
+      await styleSelect.click()
+      await page.locator('.n-base-select-option:visible').getByText(label, { exact: true }).click()
+      await expect.poll(() => page.evaluate(() => localStorage.getItem('hermes_style'))).toBe(style)
+      await expect.poll(() => page.locator('html').evaluate(root => root.classList.contains('comic')))
+        .toBe(style === 'comic')
+
+      await page.reload()
+      await expect(page.getByRole('heading', { name: 'Theme' })).toBeVisible()
+      await expect(styleSelect).toHaveText(label)
+      await expect.poll(() => page.locator('html').evaluate(root => root.classList.contains('comic')))
+        .toBe(style === 'comic')
+      await expect.poll(() => page.locator('html').evaluate(root => root.classList.contains('dark')))
+        .toBe(brightness === 'dark')
+    }
+
+    expect(api.unexpectedRequests).toEqual([])
+  })
+}
 
 test('tints transparent app surfaces with the active theme background color', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')

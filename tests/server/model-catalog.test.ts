@@ -119,9 +119,9 @@ describe('catalog cost estimates', () => {
     expect(estimateCatalogUsageCost(snapshot(data), 'openai', 'model', request, 'model_call')?.costPricing?.rates.input).toBe(6)
   })
 
-  it('never guesses relay prices or treats incomplete/malformed prices as free', () => {
-    expect(estimateCatalogUsageCost(snapshot(), 'custom:relay', 'model', usage)).toBeUndefined()
-    expect(estimateCatalogUsageCost(snapshot(), 'openai', 'Model', usage)).toBeUndefined()
+  it('falls back to unique model IDs but never treats incomplete or malformed prices as free', () => {
+    expect(estimateCatalogUsageCost(snapshot(), 'custom:relay', 'model', usage)?.costUsd).toBeCloseTo(0.00485)
+    expect(estimateCatalogUsageCost(snapshot(), 'openai', 'Model', usage)?.costUsd).toBeCloseTo(0.00485)
     for (const bad of [undefined, null, -1, Infinity, '2']) {
       const data: any = catalog(); data.openai.models.model.cost.input = bad
       expect(estimateCatalogUsageCost(snapshot(data), 'openai', 'model', usage)).toBeUndefined()
@@ -140,7 +140,7 @@ describe('catalog cost estimates', () => {
     expect(estimateCatalogUsageCost(snapshot(data), 'gemini', 'model', usage)).toBeUndefined()
   })
 
-  it('matches glm to domestic Coding Plan rates without borrowing metered API prices', () => {
+  it('prefers domestic Coding Plan rates before model ID fallback', () => {
     const data = {
       'zhipuai-coding-plan': { models: { 'glm-5.3-flash': { cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 } } } },
       zai: { models: { 'glm-5.3-flash': { cost: { input: 0.15, output: 0.5, cache_read: 0.03, cache_write: 0 } } } },
@@ -148,8 +148,8 @@ describe('catalog cost estimates', () => {
     expect(estimateCatalogUsageCost(snapshot(data), 'glm', 'glm-5.3-flash', usage)).toMatchObject({
       costUsd: 0, costSource: 'estimated', costPricing: { rates: { provider: 'zhipuai-coding-plan' } },
     })
-    expect(estimateCatalogUsageCost(snapshot({ zai: data.zai }), 'glm', 'glm-5.3-flash', usage)).toBeUndefined()
-    expect(estimateCatalogUsageCost(snapshot({ zhipuai: data.zai }), 'glm', 'glm-5.3-flash', usage)).toBeUndefined()
+    expect(estimateCatalogUsageCost(snapshot({ zai: data.zai }), 'glm', 'glm-5.3-flash', usage)?.costPricing?.rates.provider).toBe('zai')
+    expect(estimateCatalogUsageCost(snapshot({ zhipuai: data.zai }), 'glm', 'glm-5.3-flash', usage)?.costPricing?.rates.provider).toBe('zhipuai')
     expect(estimateCatalogUsageCost(snapshot(data), 'custom:glm', 'glm-5.3-flash', usage)).toBeUndefined()
   })
 })

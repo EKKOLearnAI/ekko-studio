@@ -230,6 +230,7 @@ class AgentPool:
             "usage": usage,
             "model": kwargs.get("response_model") or kwargs.get("model"),
             "provider": kwargs.get("provider"),
+            "base_url": kwargs.get("base_url"),
             "api_mode": kwargs.get("api_mode"),
             "api_duration": kwargs.get("api_duration"),
             "started_at": kwargs.get("started_at"),

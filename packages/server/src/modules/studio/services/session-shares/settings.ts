@@ -50,6 +50,16 @@ export async function sessionShareModels(access: SessionShareAccess) {
     models: (Array.isArray(group.models) ? group.models : []).filter((model: unknown) =>
       typeof model === 'string' && group.model_meta?.[model]?.disabled !== true),
     api_mode: ['chat_completions', 'codex_responses', 'anthropic_messages'].includes(group.api_mode) ? group.api_mode : undefined,
+    model_meta: Object.fromEntries((Array.isArray(group.models) ? group.models : []).flatMap((model: string) => {
+      const meta = group.model_meta?.[model]
+      if (!meta || meta.disabled) return []
+      // Only public model capabilities/labels may cross the share boundary.
+      return [[model, {
+        ...(typeof meta.alias === 'string' ? { alias: meta.alias } : {}),
+        ...(typeof meta.reasoning === 'boolean' ? { reasoning: meta.reasoning } : {}),
+        ...(Array.isArray(meta.reasoning_efforts) ? { reasoning_efforts: meta.reasoning_efforts } : {}),
+      }]]
+    })),
   })).filter(group => group.models.length)
 }
 

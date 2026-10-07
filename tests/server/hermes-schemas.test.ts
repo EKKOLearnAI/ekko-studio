@@ -20,6 +20,34 @@ describe('Hermes schema initialization', () => {
     vi.resetModules()
   })
 
+  it('migrates only Ekko direct-chat identity and preserves history and other surfaces', async () => {
+    const { initAllHermesTables, SESSIONS_TABLE, MESSAGES_TABLE } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    initAllHermesTables()
+    const directSources = ['cli', 'api_server', 'coding_agent', 'builtin_agent']
+    const sources = [...directSources, 'group_chat', 'workflow', 'global_agent']
+    const aliases = ['ekko', 'ekko-agent', ' EKKO_AGENT ']
+    const agents = [...aliases, 'codex', 'hermes']
+    const insert = db.prepare(`INSERT INTO ${SESSIONS_TABLE}
+      (id, source, agent, profile, title, model, provider, workspace, is_archived, is_pinned, started_at, last_active, input_tokens, output_tokens)
+      VALUES (?, ?, ?, 'travel', 'Keep title', 'model', 'provider', '/tmp/workspace', 1, 1, 100, 200, 123, 45)`)
+    for (const source of sources) {
+      for (const agent of agents) {
+        const id = `${source}-${agent}`
+        insert.run(id, source, agent)
+        db.prepare(`INSERT INTO ${MESSAGES_TABLE} (session_id, role, content, timestamp) VALUES (?, 'user', 'Keep message', 100)`).run(id)
+      }
+    }
+    const before = db.prepare(`SELECT * FROM ${SESSIONS_TABLE} ORDER BY id`).all()
+    const messagesBefore = db.prepare(`SELECT * FROM ${MESSAGES_TABLE} ORDER BY id`).all()
+    initAllHermesTables()
+    const expected = before.map((row: any) => directSources.includes(row.source) && aliases.includes(row.agent)
+      ? { ...row, source: 'builtin_agent', agent: 'ekko-agent' } : row)
+    expect(db.prepare(`SELECT * FROM ${SESSIONS_TABLE} ORDER BY id`).all()).toEqual(expected)
+    expect(db.prepare(`SELECT * FROM ${MESSAGES_TABLE} ORDER BY id`).all()).toEqual(messagesBefore)
+    initAllHermesTables()
+    expect(db.prepare(`SELECT * FROM ${SESSIONS_TABLE} ORDER BY id`).all()).toEqual(expected)
+  })
+
   it('initializes all tables with correct schemas', async () => {
     const { initAllHermesTables, USAGE_TABLE, SESSIONS_TABLE, SESSION_CATEGORIES_TABLE, MESSAGES_TABLE, GC_ROOMS_TABLE, GC_MESSAGES_TABLE, GC_ROOM_AGENTS_TABLE, USERS_TABLE, USER_PROFILES_TABLE, SOCIAL_MESSAGE_ACCOUNTS_TABLE, SOCIAL_MESSAGE_RUNTIME_STATES_TABLE, DEVICES_TABLE, MCU_DEVICES_TABLE } =
       await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')

@@ -3,6 +3,8 @@ import { ref, nextTick } from 'vue'
 import { NDropdown, useMessage, useDialog } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useFilesStore, isTextFile, isPreviewableFile } from '@/stores/hermes/files'
+import { downloadSessionWorkspaceFile } from '@/api/studio/sessions'
+import { downloadGroupWorkspaceFile } from '@/api/studio/group-chat'
 import { downloadFile } from '@/api/studio/download'
 import type { FileEntry } from '@/api/studio/files'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -55,9 +57,7 @@ function getOptions() {
     if (isPreviewableFile(entry.name)) {
       options.push({ label: t('files.preview'), key: 'preview' })
     }
-    if (!filesStore.currentWorkspaceSessionId && !filesStore.currentWorkspaceRoomId) {
-      options.push({ label: t('files.download'), key: 'download' })
-    }
+    options.push({ label: t('files.download'), key: 'download' })
   }
   options.push({ type: 'divider', key: 'd1' })
   options.push({ label: t('files.copyPath'), key: 'copyPath' })
@@ -87,8 +87,12 @@ async function handleSelect(key: string) {
       try { await filesStore.openPreview(entry) } catch { message.error(t('files.backendError')) }
       break
     case 'download':
-      if (filesStore.currentWorkspaceSessionId || filesStore.currentWorkspaceRoomId) return
-      try { await downloadFile(entry.path, entry.name, filesStore.currentProfile) } catch (err: any) { message.error(err.message) }
+      if (entry.isDir) return
+      try {
+        if (filesStore.currentWorkspaceRoomId) await downloadGroupWorkspaceFile(filesStore.currentWorkspaceRoomId, entry.path, entry.name)
+        else if (filesStore.currentWorkspaceSessionId) await downloadSessionWorkspaceFile(filesStore.currentWorkspaceSessionId, entry.path, entry.name)
+        else await downloadFile(entry.path, entry.name, filesStore.currentProfile)
+      } catch (err: any) { message.error(err.message) }
       break
     case 'copyPath': {
       const ok = await copyToClipboard(getClipboardPathForEntry(entry))

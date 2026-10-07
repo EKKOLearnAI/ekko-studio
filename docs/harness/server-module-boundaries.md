@@ -19,13 +19,16 @@ Do not use one `source` or `agent` field for all of these concepts:
 | Concept | Allowed values | Meaning |
 | --- | --- | --- |
 | `AgentFamily` | `hermes`, `ekko`, `coding` | Product/domain owner of an agent implementation. |
-| `AgentRuntime` | `hermes`, `ekko`, `claude-code`, `codex`, `pi`, `grok`, `opencode`, `dsh`, `cursor` | Concrete runtime selected for a run. |
+| `AgentRuntime` | `hermes`, `ekko`, `claude-code`, `codex`, `pi`, `grok`, `opencode`, `dsh`, `cursor`, `antigravity`, `qwen`, `kimi`, `codebuddy`, `qoder`, `copilot`, `zcode` | Concrete runtime selected for a run. |
 | `RunSurface` | `chat`, `workflow`, `group-chat`, `global-agent`, `api` | Studio surface that initiated a run. |
 | `RunMode` | `scoped`, `global` | Whether the run is workspace/profile scoped or global. |
 
 Hermes and Ekko are both a family and a runtime. Claude Code, Codex, Pi, Grok,
-OpenCode, DSH, and Cursor are seven runtimes in the Coding family. Persist and
+OpenCode, DSH, Cursor, Antigravity, Qwen Code, Kimi Code, CodeBuddy, Qoder,
+GitHub Copilot, and ZCode are fourteen runtimes in the Coding family. Persist and
 transport these concepts separately whenever a schema is introduced or revised.
+The six native CLI adapters and App catalog publication are described in
+[`native-coding-agents.md`](../native-coding-agents.md).
 
 ## Target Directory
 
@@ -286,12 +289,13 @@ packages/server/src/
       sockets/
         chat.ts
 
-    coding-agents/                 # Claude Code, Codex, Pi, Grok, OpenCode, DSH, and Cursor family
+    coding-agents/                 # Coding-family CLI runtimes
       index.ts
       public/
         runner.ts
       contracts/
       protocol/                    # shared only inside the Coding family
+        acp/                       # reusable ACP session and event transport
         events.ts
         messages.ts
         sse.ts
@@ -310,7 +314,7 @@ packages/server/src/
         registry/
         credentials/
         sessions/
-        run-manager/
+        runtime/                   # shared process lifecycle and usage
         claude-code/
         codex/
         pi/
@@ -318,6 +322,13 @@ packages/server/src/
         opencode/
         dsh/
         cursor/
+        antigravity/
+        qwen/
+        kimi/
+        codebuddy/
+        qoder/
+        copilot/
+        zcode/
       sockets/
         runs.ts
 ```
@@ -326,6 +337,19 @@ packages/server/src/
 that another allowed layer can import. Concrete agent `public/runner.ts` files
 are consumed by `bootstrap/modules.ts`, which injects them into Studio's agent
 registry. Studio orchestration never imports a concrete agent module.
+
+Inside the Coding family, each runtime owns a `services/<runtime>/` directory.
+Its `definition.ts` declares CLI metadata, capabilities and editable config
+files. Agent-specific configuration, installation discovery and event parsing
+belong beside that definition. `services/registry/` composes the definitions
+and protocol adapters; `services/runtime/` manages shared process lifecycle and
+usage. Reusable ACP sessions and updates live in `protocol/acp/`. There is no
+`services/native/` catch-all for multiple agent implementations.
+
+The existing `services/index.ts` remains the public preparation and management
+entrypoint. Agent implementations receive shared platform helpers rather than
+importing that entrypoint or the registry. Moving source ownership must preserve
+CLI arguments, environment precedence and persisted configuration paths.
 
 ## Ownership Decisions
 
@@ -414,6 +438,12 @@ The unified harness invokes `scripts/server-module-boundaries.mjs`, which enforc
 - no file, download, preview, or App upload implementation under Hermes;
   these capabilities are mechanically reserved for Studio.
 - legacy Studio URLs are declared only in the centralized App compatibility middleware.
+
+The harness also invokes `scripts/coding-agent-module-harness.mjs`. It requires
+an owned definition for every Coding runtime, rejects the old native source
+directory, prevents concrete agents from importing the shared registry, and
+keeps the extracted agent implementations and ACP transport in their owner
+directories.
 
 Resolve cross-module behavior through Studio contracts/public APIs and inject
 concrete runtime adapters from `bootstrap`.

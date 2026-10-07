@@ -370,6 +370,44 @@ describe('ChatRunSocket reports when the run started', () => {
     expect(handleBridgeRunMock).toHaveBeenCalledTimes(1)
   })
 
+  it('queues a second send when HTTP refresh invalidates state during push authentication', async () => {
+    const pushRegistration = await import('../../packages/server/src/modules/studio/services/notifications/push-registration')
+    let finishAuthentication!: (value: null) => void
+    const authentication = new Promise<null>(resolve => { finishAuthentication = resolve })
+    const authenticate = vi.spyOn(pushRegistration, 'authenticatedPushActor')
+      .mockResolvedValue(null)
+      .mockImplementationOnce(() => authentication)
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 1, username: 'admin', role: 'super_admin' }
+    const server = new ChatRunSocket(io as any)
+    let finishLookup!: () => void
+    const lookup = new Promise<void>(resolve => { finishLookup = resolve })
+    reconcileHermesSessionHistoryMock.mockImplementationOnce(async () => {
+      await lookup
+      return { changed: false, added: 0 }
+    })
+    loadSessionStateFromDbMock.mockResolvedValueOnce({
+      messages: [{ id: 1, role: 'assistant', content: 'persisted native history' }],
+      events: [], queue: [], isWorking: false,
+    })
+    ;(server as any).onConnection(socket)
+    const first = handlers.get('run')?.({ session_id: 'authentication-refresh-race', input: 'first', source: 'cli' })
+    await vi.waitFor(() => expect(authenticate).toHaveBeenCalledTimes(1))
+    expect(server.invalidateSessionHistory('authentication-refresh-race')).toBe(true)
+    finishAuthentication(null)
+    await vi.waitFor(() => expect(reconcileHermesSessionHistoryMock).toHaveBeenCalledTimes(1))
+    await handlers.get('run')?.({ session_id: 'authentication-refresh-race', input: 'second', source: 'cli' })
+    finishLookup()
+    await first
+
+    const current = (server as any).sessionMap.get('authentication-refresh-race')
+    expect(current.messages.map((message: any) => message.content)).toEqual(['persisted native history'])
+    expect(current.isWorking).toBe(true)
+    expect(current.queue.map((item: any) => item.input)).toEqual(['second'])
+    expect(handleBridgeRunMock).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps a live send state when an idle resume lookup finishes afterward', async () => {
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const { handlers, io, socket } = makeServerHarness()

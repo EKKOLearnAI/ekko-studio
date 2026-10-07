@@ -6,6 +6,8 @@
 
 :root {
   --font-size-base: 14px;
+  --studio-drawer-width: min(520px, 100vw);
+  --studio-workspace-picker-width: min(520px, calc(100vw - 32px));
 
   // Backgrounds
   --bg-primary: #fafafa;
@@ -233,3 +235,9 @@ $radius-lg: 8px;
 // Transition
 $transition-fast: 0.15s ease;
 $transition-normal: 0.25s ease;
+
+@media (max-width: $breakpoint-mobile) {
+  :root {
+    --studio-drawer-width: 100vw;
+  }
+}

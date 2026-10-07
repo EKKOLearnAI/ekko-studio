@@ -109,6 +109,19 @@ describe('group chat context projection', () => {
     ])
   })
 
+  it('excludes usage metadata from projected history and room summaries', () => {
+    const messages = [
+      makeMessage({ id: 'reply', senderId: 'agent-1', senderName: 'Worker', role: 'assistant', content: 'Answer' }),
+      makeMessage({ id: 'usage', senderId: 'agent-1', senderName: 'Worker', role: 'tool', tool_name: 'run_usage',
+        content: JSON.stringify({ runId: 'run-1', inputTokens: 1000, outputTokens: 200 }), timestamp: 2 }),
+    ]
+
+    expect(buildProjectedGroupChatHistory('', messages, { agentId: 'agent-1', name: 'Worker' })).toEqual([
+      { role: 'assistant', content: '[Worker]: Answer' },
+    ])
+    expect(cleanGroupMessages(messages as any).map(message => message.id)).toEqual(['reply'])
+  })
+
   it('combines the persisted room summary with clean messages after its anchor', () => {
     const messages = [
       makeMessage({ id: 'm1', senderName: 'Alice', senderId: 'user-1', role: 'user', content: 'older request', timestamp: 1 }),

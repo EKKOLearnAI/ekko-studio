@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { NAlert, NButton, NInput, NInputNumber, NModal } from 'naive-ui'
+import { computed, ref } from 'vue'
+import { NAlert, NButton, NInputNumber, NModal, NSelect } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api/client'
+import { fetchAvailableModelsForProfile, type AvailableModelGroup } from '@/api/hermes/system'
+import { useProfilesStore } from '@/stores/hermes/profiles'
 
 interface Rate {
   provider: string
@@ -13,17 +15,62 @@ interface Rate {
   cacheWrite?: number | null
 }
 const { t } = useI18n()
+const profilesStore = useProfilesStore()
 const show = ref(false)
 const busy = ref(false)
 const error = ref(false)
+const catalogError = ref(false)
+const providers = ref<AvailableModelGroup[]>([])
 const rates = ref<Rate[]>([])
 const fields = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
+
+const providerOptions = computed(() => {
+  const options = new Map([['global', { label: 'global', value: 'global' }]])
+  for (const group of providers.value) {
+    options.set(group.provider, { label: group.label || group.provider, value: group.provider })
+  }
+  for (const rate of rates.value) {
+    if (rate.provider && !options.has(rate.provider)) {
+      options.set(rate.provider, { label: rate.provider, value: rate.provider })
+    }
+  }
+  return [...options.values()]
+})
+
+function modelOptions(provider: string) {
+  const groups = provider === 'global'
+    ? providers.value
+    : providers.value.filter(group => group.provider === provider)
+  const models = new Set(groups.flatMap(group => [...group.models, ...(group.available_models || [])]))
+  for (const rate of rates.value) {
+    if (rate.provider === provider && rate.model) models.add(rate.model)
+  }
+  return [...models].map(model => ({ label: model, value: model }))
+}
+
+function selectProvider(rate: Rate, provider: string) {
+  if (rate.provider === provider) return
+  rate.provider = provider
+  rate.model = ''
+}
 
 async function open() {
   busy.value = true
   error.value = false
+  catalogError.value = false
+  providers.value = []
   try {
-    rates.value = (await request<{ rates: Rate[] }>('/api/studio/usage/pricing')).rates
+    const [pricing, catalog] = await Promise.allSettled([
+      request<{ rates: Rate[] }>('/api/studio/usage/pricing'),
+      fetchAvailableModelsForProfile(profilesStore.activeProfileName || 'default'),
+    ])
+    if (pricing.status === 'rejected') throw pricing.reason
+    rates.value = pricing.value.rates
+    if (catalog.status === 'fulfilled') {
+      providers.value = catalog.value.groups.filter(group => group.provider !== 'moa')
+    } else {
+      catalogError.value = true
+    }
     show.value = true
   } catch {
     error.value = true
@@ -46,12 +93,36 @@ async function save() {
   <NButton size="small" quaternary :loading="busy && !show" @click="open">{{ t('usage.pricing.title') }}</NButton>
   <span v-if="error && !show" role="alert">{{ t('usage.pricing.error') }}</span>
   <NModal v-model:show="show" preset="card" :title="t('usage.pricing.title')" class="usage-pricing" style="width: min(920px, 94vw)" :mask-closable="!busy" :closable="!busy">
-    <p class="pricing-help">{{ t('usage.pricing.help') }}</p>
+    <p class="pricing-help">{{ t('usage.pricing.selectionHelp') }} {{ t('usage.pricing.help') }}</p>
+    <NAlert v-if="catalogError" type="warning" class="pricing-error">{{ t('usage.pricing.catalogError') }}</NAlert>
     <NAlert v-if="error" type="error" class="pricing-error">{{ t('usage.pricing.error') }}</NAlert>
     <div class="pricing-rows">
       <div v-for="(rate, index) in rates" :key="index" class="pricing-row">
-        <label>{{ t('usage.pricing.provider') }}<NInput v-model:value="rate.provider" :disabled="busy" :input-props="{ 'aria-label': t('usage.pricing.provider') }" placeholder="global" /></label>
-        <label>{{ t('usage.pricing.model') }}<NInput v-model:value="rate.model" :disabled="busy" :input-props="{ 'aria-label': t('usage.pricing.model') }" placeholder="model-id" /></label>
+        <label>
+          {{ t('usage.pricing.provider') }}
+          <NSelect
+            :value="rate.provider"
+            :options="providerOptions"
+            :disabled="busy"
+            :input-props="{ 'aria-label': t('usage.pricing.provider') }"
+            :placeholder="t('models.chooseProvider')"
+            filterable
+            tag
+            @update:value="value => selectProvider(rate, value)"
+          />
+        </label>
+        <label>
+          {{ t('usage.pricing.model') }}
+          <NSelect
+            v-model:value="rate.model"
+            :options="modelOptions(rate.provider)"
+            :disabled="busy"
+            :input-props="{ 'aria-label': t('usage.pricing.model') }"
+            :placeholder="t('models.selectModel')"
+            filterable
+            tag
+          />
+        </label>
         <label v-for="field in fields" :key="field">{{ t(`usage.pricing.${field}`) }}<NInputNumber v-model:value="rate[field]" :disabled="busy" :input-props="{ 'aria-label': t(`usage.pricing.${field}`) }" :min="0" :max="1000000" :show-button="false" :placeholder="t('usage.costStates.unknown')" /></label>
         <NButton :disabled="busy" @click="rates.splice(index, 1)">{{ t('common.delete') }}</NButton>
       </div>
@@ -70,7 +141,7 @@ async function save() {
 .pricing-error { margin-bottom: 12px; }
 .pricing-rows { max-height: 60vh; overflow: auto; }
 .pricing-row { display: grid; grid-template-columns: repeat(2, minmax(110px, 1.5fr)) repeat(4, minmax(85px, 1fr)) auto; align-items: end; gap: 10px; margin-bottom: 14px; }
-.pricing-row label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.pricing-row label { display: flex; flex-direction: column; min-width: 0; gap: 6px; font-size: 12px; }
 .pricing-actions { display: flex; justify-content: space-between; }
 @media (max-width: 800px) { .pricing-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

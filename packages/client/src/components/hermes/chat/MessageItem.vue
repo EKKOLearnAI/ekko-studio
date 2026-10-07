@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import RunUsageCard from "./RunUsageCard.vue";
 import {
   formatReferencedContentForDisplay,
   parseMessageReference,
@@ -1224,6 +1225,8 @@ onBeforeUnmount(() => {
               :content="message.content"
               :heading-id-prefix="effectiveHeadingIdPrefix"
             />
+
+            <RunUsageCard v-if="message.runUsage && !message.isStreaming" :usage="message.runUsage" />
 
             <ToolChangeCard
               v-for="change in workspaceChanges"
