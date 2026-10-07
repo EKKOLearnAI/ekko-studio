@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopUpdateState } from '../main/updater-types'
+import type { ScreenshotShortcutConfig, ScreenshotShortcutState } from '../main/screenshot-shortcut'
 import type { BrowserBounds, BrowserProfileCreateInput, BrowserProfileSwitchImpact, BrowserProfileUpdateInput, BrowserSelection, DesktopBrowserProfile, DesktopBrowserState, DesktopBrowserTab } from '../main/browser/browser-types'
 
 type DesktopWindowKind = 'main' | 'pet' | 'chat'
@@ -12,6 +13,22 @@ function desktopWindowKind(): DesktopWindowKind {
 
 contextBridge.exposeInMainWorld('hermesDesktop', {
   screenshot: {
+    shortcut: {
+      getState: (): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-get'),
+      save: (config: ScreenshotShortcutConfig): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-save', config),
+      setTarget: (targetId: string, active: boolean | null): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-target', targetId, active),
+      setEditing: (targetId: string, editing: boolean): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-editing', targetId, editing),
+      onTrigger: (callback: (request: { targetId: string; hideWindows: boolean }) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, request: { targetId: string; hideWindows: boolean }) => callback(request)
+        ipcRenderer.on('hermes-desktop:screenshot-shortcut-trigger', listener)
+        return () => ipcRenderer.removeListener('hermes-desktop:screenshot-shortcut-trigger', listener)
+      },
+      onStateChange: (callback: (state: ScreenshotShortcutState) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: ScreenshotShortcutState) => callback(state)
+        ipcRenderer.on('hermes-desktop:screenshot-shortcut-state', listener)
+        return () => ipcRenderer.removeListener('hermes-desktop:screenshot-shortcut-state', listener)
+      },
+    },
     getCapabilities: () => ipcRenderer.invoke('hermes-desktop:screenshot-capabilities'),
     captureRegion: (request: { requestId: string; hideWindows?: boolean; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }) => ipcRenderer.invoke('hermes-desktop:screenshot-capture-region', request),
     cancel: (requestId: string) => ipcRenderer.invoke('hermes-desktop:screenshot-cancel', requestId),

@@ -3,12 +3,18 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { NButton, NDropdown, NModal, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { desktopBridge } from '@/utils/desktop-bridge'
+import ScreenshotShortcutSettings from './ScreenshotShortcutSettings.vue'
 
 const props = defineProps<{ disabled?: boolean; mobile?: boolean }>()
 const emit = defineEmits<{ capture: [file: File] }>()
 const { t } = useI18n()
 const desktop = desktopBridge()
 const screenshot = desktop?.isDesktop ? desktop.screenshot : undefined
+const shortcut = screenshot?.shortcut
+const targetId = shortcut ? crypto.randomUUID() : ''
+const controls = ref<HTMLElement | null>(null)
+const settingsOpen = ref(false)
+const shortcutKey = ref('')
 const available = typeof screenshot?.captureRegion === 'function' && typeof screenshot.cancel === 'function'
 const busy = ref(false)
 const error = ref('')
@@ -20,9 +26,29 @@ const options = computed(() => [{
   key: 'hide-window',
   label: t(capabilities.value?.hideWindows === false ? 'chat.screenshot.hideUnavailable' : 'chat.screenshot.hideWindow'),
   disabled: busy.value || props.disabled || checking.value || !canHide.value || !supported.value,
-}])
+}, ...(shortcut ? [{ key: 'shortcut-settings', label: t('chat.screenshot.shortcut.settings'), disabled: busy.value || checking.value }] : [])])
 let requestId: string | null = null
 let disposed = false
+let composer: Element | null = null
+let removeTrigger: (() => void) | undefined
+let removeStateChange: (() => void) | undefined
+
+function activateTarget() {
+  void shortcut?.setTarget(targetId, true).catch(() => undefined)
+}
+
+onMounted(() => {
+  if (!available || !shortcut) return
+  removeTrigger = shortcut.onTrigger(request => {
+    if (request.targetId === targetId && !disposed && !settingsOpen.value) void start(request.hideWindows)
+  })
+  removeStateChange = shortcut.onStateChange(state => { shortcutKey.value = state.accelerator })
+  void shortcut.getState().then(state => { if (!disposed) shortcutKey.value = state.accelerator }).catch(() => undefined)
+  void shortcut.setTarget(targetId, false).catch(() => undefined)
+  composer = controls.value?.closest('.chat-input-area') ?? controls.value
+  composer?.addEventListener('focusin', activateTarget)
+  composer?.addEventListener('pointerdown', activateTarget)
+})
 
 onMounted(async () => {
   if (!screenshot?.getCapabilities) return
@@ -73,6 +99,7 @@ async function start(hideWindows = false) {
 
 function selectOption(key: string | number) {
   if (key === 'hide-window') void start(true)
+  if (key === 'shortcut-settings' && shortcut && !busy.value) { activateTarget(); settingsOpen.value = true }
 }
 
 function cancelCurrent() {
@@ -81,12 +108,17 @@ function cancelCurrent() {
 
 onUnmounted(() => {
   disposed = true
+  removeTrigger?.()
+  removeStateChange?.()
+  composer?.removeEventListener('focusin', activateTarget)
+  composer?.removeEventListener('pointerdown', activateTarget)
+  void shortcut?.setTarget(targetId, null).catch(() => undefined)
   if (requestId) void screenshot?.cancel(requestId).catch(() => undefined)
 })
 </script>
 
 <template>
-  <span v-if="available" class="screenshot-controls">
+  <span v-if="available" ref="controls" class="screenshot-controls">
     <NTooltip trigger="hover" :disabled="mobile || busy">
       <template #trigger>
         <span class="screenshot-trigger">
@@ -107,6 +139,7 @@ onUnmounted(() => {
         </span>
       </template>
       {{ t(supported ? 'chat.screenshot.action' : 'chat.screenshot.systemUnavailable') }}
+      <span v-if="shortcutKey"> ({{ shortcutKey }})</span>
     </NTooltip>
     <NDropdown trigger="click" placement="top-start" :options="options" :disabled="disabled || busy" @select="selectOption">
       <NButton
@@ -133,6 +166,7 @@ onUnmounted(() => {
   >
     <p role="alert">{{ error }}</p>
   </NModal>
+  <ScreenshotShortcutSettings v-if="available && shortcut && settingsOpen" :bridge="shortcut" :target-id="targetId" :platform="desktop?.platform || ''" :can-hide="canHide" @close="settingsOpen = false" />
 </template>
 
 <style scoped lang="scss">

@@ -253,6 +253,99 @@ test('web composer has no screenshot entry', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Take screenshot' })).toHaveCount(0)
 })
 
+async function installShortcutBridge(page: Page, platform: string, hideSupported = true) {
+  await page.addInitScript(({ platform, hideSupported }) => {
+    const config = JSON.parse(localStorage.getItem('test-screenshot-shortcut') || '{"accelerator":"","hideWindows":false}')
+    const listeners = new Set<(request: unknown) => void>()
+    const state = {
+      config, editing: false, targetId: '', captures: [] as boolean[],
+      fire: () => { if (config.accelerator && !state.editing) for (const listener of listeners) listener({ targetId: state.targetId, hideWindows: config.hideWindows }) },
+    }
+    ;(window as any).__SHORTCUT__ = state
+    ;(window as any).hermesDesktop = {
+      isDesktop: true, platform, windowKind: 'main',
+      screenshot: {
+        getCapabilities: async () => ({ capture: 'electron', presentation: 'desktop-overlay', hideWindows: hideSupported, regionSelection: 'studio' }),
+        shortcut: {
+          getState: async () => ({ ...config, registered: !!config.accelerator && !state.editing, error: '' }),
+          setTarget: async (targetId: string, active: boolean | null) => { if (active !== null) state.targetId = targetId; else if (state.targetId === targetId) state.targetId = ''; return true },
+          setEditing: async (_targetId: string, editing: boolean) => { state.editing = editing; return { ...config, registered: !editing && !!config.accelerator, error: '' } },
+          save: async (next: typeof config) => {
+            if (next.accelerator === 'Control+Alt+C') return { ...config, registered: false, error: 'conflict' }
+            Object.assign(config, next)
+            localStorage.setItem('test-screenshot-shortcut', JSON.stringify(config))
+            return { ...config, registered: false, error: '' }
+          },
+          onTrigger: (callback: (request: unknown) => void) => { listeners.add(callback); return () => listeners.delete(callback) },
+          onStateChange: () => () => {},
+        },
+        captureRegion: async (request: { hideWindows: boolean }) => {
+          state.captures.push(request.hideWindows)
+          const canvas = document.createElement('canvas')
+          canvas.width = 200; canvas.height = 100
+          canvas.getContext('2d')!.fillRect(0, 0, 200, 100)
+          return { dataUrl: canvas.toDataURL('image/png'), width: 200, height: 100 }
+        },
+        cancel: async () => true,
+      },
+    }
+  }, { platform, hideSupported })
+}
+
+test('shortcut settings record, persist and clear a global capture binding', async ({ page }, testInfo) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  const api = await mockHermesApi(page)
+  await mockChatSocket(page)
+  await installShortcutBridge(page, 'darwin')
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'Screenshot options' }).click()
+  await page.getByText('Set screenshot shortcut', { exact: true }).click()
+  await expect(page.locator('.screenshot-shortcut-dialog')).toBeVisible()
+  await page.getByLabel('Global shortcut', { exact: true }).press('Meta+Shift+s')
+  await expect(page.locator('.shortcut-key')).toHaveValue('Shift + Cmd + S')
+  await page.locator('.shortcut-modes .n-radio').filter({ hasText: 'Hide window and take screenshot' }).click()
+  await expect(page.getByRole('radio', { name: 'Hide window and take screenshot', exact: true })).toBeChecked()
+  await page.screenshot({ path: testInfo.outputPath('shortcut-settings.png') })
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.locator('.screenshot-shortcut-dialog')).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => (window as any).__SHORTCUT__.editing)).toBe(false)
+  await page.evaluate(() => (window as any).__SHORTCUT__.fire())
+  await expect(page.locator('.attachment-thumb')).toHaveCount(1)
+  expect(await page.evaluate(() => (window as any).__SHORTCUT__.captures)).toEqual([true])
+  await page.reload()
+  await page.getByRole('button', { name: 'Screenshot options' }).click()
+  await page.getByText('Set screenshot shortcut', { exact: true }).click()
+  await expect(page.locator('.shortcut-key')).toHaveValue('Shift + Cmd + S')
+  await expect(page.getByRole('radio', { name: 'Hide window and take screenshot', exact: true })).toBeChecked()
+  await page.getByRole('button', { name: 'Clear', exact: true }).click()
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.locator('.screenshot-shortcut-dialog')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__SHORTCUT__.config.accelerator)).toBe('')
+  expect(api.unexpectedRequests).toEqual([])
+})
+
+test('Linux shortcuts explain conflicts and keep unsupported hiding disabled', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await mockChatSocket(page)
+  await installShortcutBridge(page, 'linux', false)
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'Screenshot options' }).click()
+  await page.getByText('Set screenshot shortcut', { exact: true }).click()
+  await expect(page.getByRole('radio', { name: 'Hide window and take screenshot', exact: true })).toBeDisabled()
+  await page.getByLabel('Global shortcut', { exact: true }).press('Control+Alt+c')
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByRole('alert')).toHaveText('The shortcut is in use or unavailable on this system. Try another combination.')
+  await expect(page.locator('.screenshot-shortcut-dialog')).toBeVisible()
+  await page.getByLabel('Global shortcut', { exact: true }).press('Control+Alt+s')
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.locator('.screenshot-shortcut-dialog')).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => (window as any).__SHORTCUT__.editing)).toBe(false)
+  await page.evaluate(() => (window as any).__SHORTCUT__.fire())
+  await expect(page.locator('.attachment-thumb')).toHaveCount(1)
+  expect(await page.evaluate(() => (window as any).__SHORTCUT__.captures)).toEqual([false])
+})
+
 async function openImageEditor(page: Page, initialSelection = true) {
   await openOverlay(page)
   await page.evaluate(initial => {

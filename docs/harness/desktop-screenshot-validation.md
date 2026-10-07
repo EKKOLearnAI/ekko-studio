@@ -34,7 +34,7 @@ cleanup restores only affected windows. Ordinary capture does not change opacity
 
 ```bash
 npm run harness:check
-npm run test -- tests/desktop/screenshot*.test.ts tests/client/screenshot-button.test.ts tests/client/group-chat-input-mentions.test.ts
+npm run test -- tests/desktop/screenshot*.test.ts tests/client/screenshot*.test.ts tests/client/group-chat-input-mentions.test.ts
 npm run test:e2e -- tests/e2e/desktop-screenshot.spec.ts
 npm run build
 npm --prefix packages/desktop run build
@@ -47,11 +47,53 @@ optional addons omitted, creates an asar, and imports D-Bus messages in Electron
 If Electron was installed with scripts disabled, pass `--electron=/absolute/binary`.
 This verifies the dependency closure; it is not a Windows/Linux installation test.
 
-79 focused unit tests and 12 screenshot browser tests passed. A focused coverage run
+95 focused unit tests and 14 screenshot browser tests passed. A focused coverage run
 also passed. Browser tests cover original pixels through zoom, scroll, resize, and
 image switching, plus selection, all annotation tools, undo/redo, and composer attachment.
 Portal tests cover v1/v2/v3, early responses, changed handles, sender checks, cancellation,
 timeouts, missing targets, and local URI validation.
+
+## Global screenshot shortcut
+
+The dropdown places **Set screenshot shortcut** directly below hidden capture. It
+records a modified physical key, offers ordinary/hidden capture, and can clear the
+binding. No global shortcut is enabled by default. The desktop shell validates the
+accelerator and hiding capability, atomically stores preferences in
+`HERMES_WEB_UI_HOME/desktop-screenshot-shortcut.json`, and restores registration on
+startup. Conflicts and save failures preserve the previous preference. Only the
+screenshot binding is released during recording or shutdown; recording leases are
+also released when a renderer closes, crashes, or navigates away.
+
+The global callback targets one eligible composer in the focused Studio window,
+otherwise the most recently operated composer. Composer IDs and event cleanup prevent
+duplicate attachments and stale-session captures. The existing native capture path
+and localized editor produce the attachment; no chat message is automatically sent.
+Linux hiding remains unavailable in both the menu and shortcut settings.
+
+Electron 42 enables `GlobalShortcutsPortal` before startup on Linux. Packaging sets
+`desktopName` and `linux.syncDesktopName` so the installed launcher, window identity,
+and Portal identity use `com.hermeswebui.studio.desktop`. The Debian installation hook
+uses the same filename. Portal consent, actual global registration, and AppImage
+desktop integration still require GNOME/KDE/wlroots acceptance.
+
+The macOS arm64 shortcut probe passed 13 checks in Electron 42.11.11. Three actual
+system keyboard injections invoked the production shortcut manager while its app
+was unfocused: ordinary, hidden, and restored-from-disk modes. Recording pause,
+resume, and clearing also passed. This checks native binding/dispatch, separately
+from the browser tests that verify composer attachment; it is not a combined
+end-to-end acceptance of the packaged app. Raw report:
+[macOS shortcut report](fixtures/desktop-screenshot-shortcut-macos-20261007.json).
+
+```bash
+electron packages/desktop/scripts/verify-screenshot-shortcut.cjs --output=/absolute/shortcut-report.json
+```
+
+This automated probe is macOS-only and requires existing System Events keyboard
+access. On Windows/Linux, verify registration with another application focused,
+conflicting shortcuts, recording the current binding, changing modes, restart,
+clear/cancel, two detached chats, composer/session changes, and quitting. On Wayland,
+also verify consent denial, compositor-assigned bindings, and the installed desktop
+entry. These cases remain untested on native Windows/Linux desktops.
 
 The initial full regression run had 753 passing test files, 31 failing files and
 11 skipped files (7,345 passing tests, 60 failing tests, 29 skipped tests). Rechecking

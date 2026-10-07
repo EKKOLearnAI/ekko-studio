@@ -2,7 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import ScreenshotButton from '@/components/hermes/chat/ScreenshotButton.vue'
-import { NDropdown } from 'naive-ui'
+import { NDropdown, NRadioGroup } from 'naive-ui'
+import ScreenshotShortcutSettings from '@/components/hermes/chat/ScreenshotShortcutSettings.vue'
 
 enableAutoUnmount(afterEach)
 const desktop = vi.hoisted(() => ({ bridge: undefined as any }))
@@ -12,7 +13,9 @@ vi.mock('naive-ui', () => ({
   NButton: { template: '<button type="button" v-bind="$attrs"><slot /><slot name="icon" /></button>' },
   NTooltip: { template: '<div><slot name="trigger" /></div>' },
   NDropdown: { props: ['options', 'disabled'], emits: ['select'], template: '<div><slot /></div>' },
-  NModal: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
+  NModal: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
+  NRadio: { props: ['value', 'disabled'], template: '<span><slot /></span>' },
+  NRadioGroup: { props: ['value', 'disabled'], emits: ['update:value'], template: '<div><slot /></div>' },
 }))
 
 beforeEach(() => { desktop.bridge = undefined })
@@ -22,9 +25,28 @@ function nativeBridge(captureRegion = vi.fn().mockResolvedValue({ dataUrl: 'data
   return desktop.bridge.screenshot
 }
 
+function shortcutBridge() {
+  const native = nativeBridge()
+  let trigger!: (request: { targetId: string; hideWindows: boolean }) => void
+  const stop = vi.fn()
+  const shortcut = {
+    getState: vi.fn().mockResolvedValue({ accelerator: 'Control+Shift+S', hideWindows: false, registered: true, error: '' }),
+    save: vi.fn().mockResolvedValue({ accelerator: 'Control+Alt+S', hideWindows: true, registered: false, error: '' }),
+    setEditing: vi.fn().mockResolvedValue({ error: '' }),
+    setTarget: vi.fn().mockResolvedValue(true),
+    onTrigger: vi.fn(callback => { trigger = callback; return stop }),
+    onStateChange: vi.fn(() => stop),
+  }
+  native.shortcut = shortcut
+  return { native, shortcut, fire: (targetId: string, hideWindows = false) => trigger({ targetId, hideWindows }), stop }
+}
+
 describe('screenshot composer button', () => {
   it('has no screenshot entry in the web UI', () => {
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => { throw new Error('UUID unavailable on an HTTP LAN origin') })
     expect(mount(ScreenshotButton).find('button').exists()).toBe(false)
+    expect(uuid).not.toHaveBeenCalled()
+    uuid.mockRestore()
   })
 
   it('emits a PNG attachment immediately after native region confirmation', async () => {
@@ -126,5 +148,77 @@ describe('screenshot composer button', () => {
     await flushPromises()
     expect(wrapper.get('button.screenshot-button').attributes('disabled')).toBeDefined()
     expect(wrapper.getComponent(NDropdown).props('options')[0].disabled).toBe(true)
+  })
+
+  it('places shortcut settings below hiding and captures only for its own composer', async () => {
+    const state = shortcutBridge()
+    const onCapture = vi.fn()
+    const wrapper = mount(ScreenshotButton, { props: { onCapture } })
+    await flushPromises()
+    expect(wrapper.getComponent(NDropdown).props('options').map((option: any) => option.key)).toEqual(['hide-window', 'shortcut-settings'])
+    const targetId = state.shortcut.setTarget.mock.calls[0][0]
+    state.fire('another-composer')
+    expect(state.native.captureRegion).not.toHaveBeenCalled()
+    state.fire(targetId, true)
+    await flushPromises()
+    expect(state.native.captureRegion).toHaveBeenCalledWith(expect.objectContaining({ hideWindows: true }))
+    expect(onCapture).toHaveBeenCalledOnce()
+    wrapper.unmount()
+    expect(state.shortcut.setTarget).toHaveBeenLastCalledWith(targetId, null)
+    expect(state.stop).toHaveBeenCalledTimes(2)
+  })
+
+  it('records and saves a new global shortcut without capturing while settings are open', async () => {
+    const state = shortcutBridge()
+    desktop.bridge.platform = 'win32'
+    const wrapper = mount(ScreenshotButton)
+    await flushPromises()
+    const targetId = state.shortcut.setTarget.mock.calls[0][0]
+    wrapper.getComponent(NDropdown).vm.$emit('select', 'shortcut-settings')
+    await flushPromises()
+    expect(state.shortcut.setEditing).toHaveBeenCalledWith(targetId, true)
+    const settings = wrapper.getComponent(ScreenshotShortcutSettings)
+    expect(settings.get('input').element.value).toBe('Ctrl + Shift + S')
+    state.fire(targetId)
+    expect(state.native.captureRegion).not.toHaveBeenCalled()
+    await settings.get('input').trigger('keydown', { key: 's', code: 'KeyS', ctrlKey: true, altKey: true })
+    settings.getComponent(NRadioGroup).vm.$emit('update:value', true)
+    await settings.findAll('button').at(-1)!.trigger('click')
+    await flushPromises()
+    expect(state.shortcut.save).toHaveBeenCalledWith({ accelerator: 'Control+Alt+S', hideWindows: true })
+    expect(state.shortcut.setEditing).toHaveBeenLastCalledWith(targetId, false)
+    expect(wrapper.findComponent(ScreenshotShortcutSettings).exists()).toBe(false)
+  })
+
+  it('keeps the settings open on conflict and can clear a saved binding', async () => {
+    const state = shortcutBridge()
+    const wrapper = mount(ScreenshotButton)
+    await flushPromises()
+    state.shortcut.save.mockResolvedValueOnce({ accelerator: 'Control+Shift+S', hideWindows: false, registered: false, error: 'conflict' })
+    wrapper.getComponent(NDropdown).vm.$emit('select', 'shortcut-settings')
+    await flushPromises()
+    const settings = wrapper.getComponent(ScreenshotShortcutSettings)
+    await settings.findAll('button').at(-1)!.trigger('click')
+    await flushPromises()
+    expect(settings.get('[role="alert"]').text()).toBe('chat.screenshot.shortcut.conflict')
+    await settings.findAll('button')[0].trigger('click')
+    await settings.findAll('button').at(-1)!.trigger('click')
+    await flushPromises()
+    expect(state.shortcut.save).toHaveBeenLastCalledWith({ accelerator: '', hideWindows: false })
+    expect(wrapper.findComponent(ScreenshotShortcutSettings).exists()).toBe(false)
+  })
+
+  it('cancels recording with Escape without saving or capturing', async () => {
+    const state = shortcutBridge()
+    const wrapper = mount(ScreenshotButton)
+    await flushPromises()
+    wrapper.getComponent(NDropdown).vm.$emit('select', 'shortcut-settings')
+    await flushPromises()
+    await wrapper.getComponent(ScreenshotShortcutSettings).get('input').trigger('keydown', { key: 'Escape', code: 'Escape' })
+    await flushPromises()
+    expect(state.shortcut.save).not.toHaveBeenCalled()
+    expect(state.native.captureRegion).not.toHaveBeenCalled()
+    expect(state.shortcut.setEditing).toHaveBeenLastCalledWith(state.shortcut.setTarget.mock.calls[0][0], false)
+    expect(wrapper.findComponent(ScreenshotShortcutSettings).exists()).toBe(false)
   })
 })

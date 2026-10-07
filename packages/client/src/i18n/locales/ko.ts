@@ -1011,6 +1011,18 @@ export default {
   // 채팅
   chat: {
     screenshot: {
+      shortcut: {
+        settings: "스크린샷 단축키 설정",
+        description: "어떤 앱에서든 사용할 수 있습니다. 스크린샷은 마지막으로 사용한 채팅에 추가됩니다.",
+        key: "전역 단축키",
+        record: "여기를 클릭하고 키 조합을 누르세요",
+        clear: "지우기",
+        hint: "Ctrl, Alt 또는 Command/Windows를 포함하세요. 지운 후 저장하면 단축키가 비활성화됩니다.",
+        mode: "스크린샷 방식",
+        invalid: "Ctrl, Alt 또는 Command/Windows가 포함된 조합을 입력하세요.",
+        conflict: "사용 중이거나 시스템에서 사용할 수 없는 단축키입니다. 다른 조합을 시도하세요.",
+        saveFailed: "단축키를 저장할 수 없습니다. 다시 시도하세요.",
+      },
       tools: {
         select: "선택 / 이동",
         rectangle: "사각형",

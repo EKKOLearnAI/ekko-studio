@@ -138,8 +138,25 @@ export interface DesktopUpdaterBridge {
   onStateChange: (callback: (state: DesktopUpdateState) => void) => () => void
 }
 
+export interface DesktopScreenshotShortcutState {
+  accelerator: string
+  hideWindows: boolean
+  registered: boolean
+  error: '' | 'invalid' | 'conflict' | 'saveFailed' | 'hideUnavailable'
+}
+
+export interface DesktopScreenshotShortcutBridge {
+  getState: () => Promise<DesktopScreenshotShortcutState>
+  save: (config: { accelerator: string; hideWindows: boolean }) => Promise<DesktopScreenshotShortcutState>
+  setTarget: (targetId: string, active: boolean | null) => Promise<boolean>
+  setEditing: (targetId: string, editing: boolean) => Promise<DesktopScreenshotShortcutState>
+  onTrigger: (callback: (request: { targetId: string; hideWindows: boolean }) => void) => () => void
+  onStateChange: (callback: (state: DesktopScreenshotShortcutState) => void) => () => void
+}
+
 export interface HermesDesktopBridge {
   screenshot?: {
+    shortcut?: DesktopScreenshotShortcutBridge
     getCapabilities?: () => Promise<{
       capture: 'electron' | 'portal-screenshot' | 'unavailable'
       presentation: 'desktop-overlay' | 'image-editor'

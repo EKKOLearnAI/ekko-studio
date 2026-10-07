@@ -1025,6 +1025,18 @@ export default {
   // 對話
   chat: {
     screenshot: {
+      shortcut: {
+        settings: "設定截圖快捷鍵",
+        description: "在任何應用程式中按快捷鍵，截圖會加入最近操作的聊天。",
+        key: "全域快捷鍵",
+        record: "點擊這裡並按組合鍵",
+        clear: "清除",
+        hint: "包含 Ctrl、Alt 或 Command/Windows 鍵。清除後儲存可停用快捷鍵。",
+        mode: "截圖方式",
+        invalid: "請輸入包含 Ctrl、Alt 或 Command/Windows 鍵的組合鍵。",
+        conflict: "快捷鍵已被佔用或系統不支援此組合，請換一個。",
+        saveFailed: "無法儲存快捷鍵，請重試。",
+      },
       tools: {
         select: "選取 / 移動",
         rectangle: "矩形",

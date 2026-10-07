@@ -1011,6 +1011,18 @@ export default {
   // Chat
   chat: {
     screenshot: {
+      shortcut: {
+        settings: "Definir atalho de captura",
+        description: "Use em qualquer aplicativo. A captura é adicionada ao último chat utilizado.",
+        key: "Atalho global",
+        record: "Clique aqui e pressione uma combinação",
+        clear: "Limpar",
+        hint: "Inclua Ctrl, Alt ou Command/Windows. Limpe e salve para desativar o atalho.",
+        mode: "Modo de captura",
+        invalid: "Use uma combinação com Ctrl, Alt ou Command/Windows.",
+        conflict: "O atalho está em uso ou indisponível neste sistema. Tente outra combinação.",
+        saveFailed: "Não foi possível salvar o atalho. Tente novamente.",
+      },
       tools: {
         select: "Selecionar / mover",
         rectangle: "Retângulo",

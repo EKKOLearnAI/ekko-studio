@@ -1011,6 +1011,18 @@ export default {
   // チャット
   chat: {
     screenshot: {
+      shortcut: {
+        settings: "スクリーンショットのショートカットを設定",
+        description: "どのアプリからでも使えます。画像は最後に操作したチャットに追加されます。",
+        key: "グローバルショートカット",
+        record: "ここをクリックしてキーの組み合わせを押す",
+        clear: "クリア",
+        hint: "Ctrl、Alt、または Command/Windows を含めてください。クリアして保存すると無効になります。",
+        mode: "撮影方法",
+        invalid: "Ctrl、Alt、または Command/Windows を含む組み合わせを入力してください。",
+        conflict: "使用中またはシステムで利用できないショートカットです。別の組み合わせを試してください。",
+        saveFailed: "ショートカットを保存できませんでした。もう一度お試しください。",
+      },
       tools: {
         select: "選択 / 移動",
         rectangle: "長方形",

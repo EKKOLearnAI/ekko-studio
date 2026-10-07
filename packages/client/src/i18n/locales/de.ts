@@ -1011,6 +1011,18 @@ export default {
   // Chat
   chat: {
     screenshot: {
+      shortcut: {
+        settings: "Screenshot-Tastenkürzel festlegen",
+        description: "Aus jeder App nutzbar. Der Screenshot wird dem zuletzt verwendeten Chat hinzugefügt.",
+        key: "Globales Tastenkürzel",
+        record: "Hier klicken und Tastenkombination drücken",
+        clear: "Löschen",
+        hint: "Strg, Alt oder Command/Windows verwenden. Zum Deaktivieren löschen und speichern.",
+        mode: "Screenshot-Modus",
+        invalid: "Eine Kombination mit Strg, Alt oder Command/Windows verwenden.",
+        conflict: "Das Tastenkürzel ist belegt oder auf diesem System nicht verfügbar. Eine andere Kombination versuchen.",
+        saveFailed: "Das Tastenkürzel konnte nicht gespeichert werden. Bitte erneut versuchen.",
+      },
       tools: {
         select: "Auswählen / Verschieben",
         rectangle: "Rechteck",

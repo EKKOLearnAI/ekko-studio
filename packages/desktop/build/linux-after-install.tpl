@@ -2,7 +2,7 @@
 
 install_dir='/opt/${sanitizedProductName}'
 compat_dir='/opt/${executable}'
-desktop_file='/usr/share/applications/${executable}.desktop'
+desktop_file='/usr/share/applications/com.hermeswebui.studio.desktop'
 
 if [ "$install_dir" != "$compat_dir" ]; then
     ln -sfn "$install_dir" "$compat_dir"

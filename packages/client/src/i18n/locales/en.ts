@@ -1032,6 +1032,18 @@ export default {
   // Chat
   chat: {
     screenshot: {
+      shortcut: {
+        settings: "Set screenshot shortcut",
+        description: "Use the shortcut from any app. The screenshot is added to the chat you used most recently.",
+        key: "Global shortcut",
+        record: "Click here and press a key combination",
+        clear: "Clear",
+        hint: "Include Ctrl, Alt, or Command/Windows. Clear and save to disable the shortcut.",
+        mode: "Screenshot mode",
+        invalid: "Use a combination with Ctrl, Alt, or Command/Windows.",
+        conflict: "The shortcut is in use or unavailable on this system. Try another combination.",
+        saveFailed: "Could not save the shortcut. Please try again.",
+      },
       tools: {
         select: "Select / move",
         rectangle: "Rectangle",

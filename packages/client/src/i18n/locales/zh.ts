@@ -1032,6 +1032,18 @@ export default {
   // 对话
   chat: {
     screenshot: {
+      shortcut: {
+        settings: "设置截图快捷键",
+        description: "在任何应用中按快捷键，截图会添加到最近操作的聊天。",
+        key: "全局快捷键",
+        record: "点击这里并按组合键",
+        clear: "清除",
+        hint: "包含 Ctrl、Alt 或 Command/Windows 键。清除后保存可关闭快捷键。",
+        mode: "截图方式",
+        invalid: "请输入包含 Ctrl、Alt 或 Command/Windows 键的组合键。",
+        conflict: "快捷键被占用或系统不支持该组合键，请换一个。",
+        saveFailed: "无法保存快捷键，请重试。",
+      },
       tools: {
         select: "选择 / 移动",
         rectangle: "矩形",

@@ -1011,6 +1011,18 @@ export default {
   // Chat
   chat: {
     screenshot: {
+      shortcut: {
+        settings: "Configurar atajo de captura",
+        description: "Úsalo desde cualquier aplicación. La captura se añade al último chat utilizado.",
+        key: "Atajo global",
+        record: "Haz clic aquí y pulsa una combinación",
+        clear: "Borrar",
+        hint: "Incluye Ctrl, Alt o Command/Windows. Borra y guarda para desactivar el atajo.",
+        mode: "Modo de captura",
+        invalid: "Usa una combinación con Ctrl, Alt o Command/Windows.",
+        conflict: "El atajo está ocupado o no está disponible en este sistema. Prueba otra combinación.",
+        saveFailed: "No se pudo guardar el atajo. Inténtalo de nuevo.",
+      },
       tools: {
         select: "Seleccionar / mover",
         rectangle: "Rectángulo",

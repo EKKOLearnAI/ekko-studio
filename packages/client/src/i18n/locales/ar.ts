@@ -1025,6 +1025,18 @@ export default {
   // Chat
   chat: {
     screenshot: {
+      shortcut: {
+        settings: "تعيين اختصار لقطة الشاشة",
+        description: "استخدمه من أي تطبيق. تُضاف اللقطة إلى آخر محادثة استخدمتها.",
+        key: "اختصار عام",
+        record: "انقر هنا واضغط مجموعة مفاتيح",
+        clear: "مسح",
+        hint: "ضمّن Ctrl أو Alt أو Command/Windows. امسح ثم احفظ لتعطيل الاختصار.",
+        mode: "وضع لقطة الشاشة",
+        invalid: "استخدم مجموعة تتضمن Ctrl أو Alt أو Command/Windows.",
+        conflict: "الاختصار مستخدم أو غير متاح على هذا النظام. جرّب مجموعة أخرى.",
+        saveFailed: "تعذر حفظ الاختصار. حاول مرة أخرى.",
+      },
       tools: {
         select: "تحديد / تحريك",
         rectangle: "مستطيل",

@@ -1011,6 +1011,18 @@ export default {
   // Chat
   chat: {
     screenshot: {
+      shortcut: {
+        settings: "Définir le raccourci de capture",
+        description: "Utilisable depuis toute application. La capture est ajoutée au dernier chat utilisé.",
+        key: "Raccourci global",
+        record: "Cliquez ici et appuyez sur une combinaison",
+        clear: "Effacer",
+        hint: "Incluez Ctrl, Alt ou Command/Windows. Effacez puis enregistrez pour désactiver le raccourci.",
+        mode: "Mode de capture",
+        invalid: "Utilisez une combinaison avec Ctrl, Alt ou Command/Windows.",
+        conflict: "Ce raccourci est utilisé ou indisponible sur ce système. Essayez une autre combinaison.",
+        saveFailed: "Impossible d’enregistrer le raccourci. Réessayez.",
+      },
       tools: {
         select: "Sélectionner / déplacer",
         rectangle: "Rectangle",
