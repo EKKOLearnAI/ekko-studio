@@ -150,6 +150,37 @@ describe('screenshot composer button', () => {
     expect(wrapper.getComponent(NDropdown).props('options')[0].disabled).toBe(true)
   })
 
+  it('disables capture quietly when checking native capabilities rejects', async () => {
+    const native = nativeBridge()
+    native.getCapabilities = vi.fn().mockRejectedValue(new Error('Native service unavailable'))
+    const wrapper = mount(ScreenshotButton)
+    await flushPromises()
+    expect(wrapper.get('button.screenshot-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(native.captureRegion).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['SCREENSHOT_SOURCE_UNAVAILABLE', 'sourceUnavailable'],
+    ['SCREENSHOT_PORTAL_UNAVAILABLE', 'systemUnavailable'],
+    ['SCREENSHOT_TIMEOUT', 'timedOut'],
+    ['native window unavailable', 'failed'],
+  ])('shows guidance for %s and successfully captures on retry', async (failure, message) => {
+    const native = nativeBridge(vi.fn().mockRejectedValueOnce(new Error(failure)).mockResolvedValue({ dataUrl: 'data:image/png;base64,aW1hZ2U=', width: 100, height: 80 }))
+    const onCapture = vi.fn()
+    const wrapper = mount(ScreenshotButton, { props: { onCapture } })
+    await wrapper.get('button.screenshot-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe(`chat.screenshot.${message}`)
+    expect(onCapture).not.toHaveBeenCalled()
+    expect(wrapper.get('button.screenshot-button').attributes('disabled')).toBeUndefined()
+    await wrapper.get('button.screenshot-button').trigger('click')
+    await flushPromises()
+    expect(native.captureRegion).toHaveBeenCalledTimes(2)
+    expect(onCapture).toHaveBeenCalledOnce()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  })
+
   it('places shortcut settings below hiding and captures only for its own composer', async () => {
     const state = shortcutBridge()
     const onCapture = vi.fn()
