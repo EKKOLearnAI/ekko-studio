@@ -80,6 +80,8 @@ export interface AgentRuntimeOptions {
   toolFailureRecoveryThreshold?: number
   /** @deprecated Use toolFailureRecoveryThreshold. Tool failures no longer terminate the run. */
   maxConsecutiveToolFailures?: number
+  /** Consecutive identical-argument tool failures that terminate the run. */
+  maxIdenticalToolFailures?: number
   /** Default background delegation policy for runs that do not override it. */
   backgroundDelegationEnabled?: boolean
   /** Maximum step budget for each delegated subagent. */
@@ -106,6 +108,8 @@ export interface AgentRuntimeRunInput {
   toolFailureRecoveryThreshold?: number
   /** @deprecated Use toolFailureRecoveryThreshold. Tool failures no longer terminate the run. */
   maxConsecutiveToolFailures?: number
+  /** Consecutive identical-argument tool failures that terminate the run. */
+  maxIdenticalToolFailures?: number
   toolContext?: AgentToolContext
   model?: string
   temperature?: number
