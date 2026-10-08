@@ -6,6 +6,7 @@ import { NATIVE_CODING_AGENTS, startNativeChatTurn } from '../registry/native-ag
 import type { NativeAcpTurn } from '../../protocol/acp/turn'
 import type { DshAcpTurn } from '../dsh/acp-turn'
 import { startDshChatTurn } from '../dsh/chat-turn'
+import { DSH_AUTO_CONTINUE_NUDGE } from '../dsh/runtime-config'
 import { agentUpdateLocked, noteAgentActivity } from '../update-lock'
 import { dirname, join } from 'path'
 import { existsSync, accessSync, chmodSync, constants as fsConstants, readFileSync, writeFileSync } from 'fs'
@@ -202,6 +203,11 @@ export interface ManagedCodingAgentRun {
   exited: boolean
   nativeAcpTurn?: NativeAcpTurn
   dshTurn?: DshAcpTurn
+  /** #3326 hard-fallback: auto-continuations dispatched this user turn (capped). */
+  dshAutoContinueCount?: number
+  /** #3326 hard-fallback: an auto-continue is in flight; the old child's close
+   * must not surface the turn as failed (the new child owns completion). */
+  dshAutoContinuePending?: boolean
   currentChild?: ChildProcess
   currentChildKillTimer?: ReturnType<typeof setTimeout>
   currentChildStderr?: string
@@ -923,6 +929,9 @@ export class CodingAgentRunManager {
       return { runId: run.id, messageId }
     }
     if (run.launch.agentId === 'dsh') {
+      // A fresh user turn gets a fresh auto-continue budget (the cap is per
+      // user turn, not cumulative across the session).
+      run.dshAutoContinueCount = 0
       this.startDshTurn(run, text, systemPrompt, images)
       return { runId: run.id, messageId }
     }
@@ -2676,7 +2685,35 @@ export class CodingAgentRunManager {
       emit: (event, payload) => this.emitToChat(run.launch.sessionId, event, payload),
       completeAfterUsage: (event, payload) => this.emitAndMarkPrintChatRunCompletedAfterUsage(run, event, payload),
       complete: () => this.completeClaudePrintTurn(run), fail: message => this.failClaudePrintTurn(run, message),
+      // #3326 hard fallback: a narration-only stall re-dispatches this turn with
+      // the nudge (no new user row), reusing the original turn's usageRunId so the
+      // nudge's tokens roll into the same accounting as the turn that stalled.
+      autoContinue: () => this.autoContinueDshTurn(run),
     })
+  }
+
+  private autoContinueDshTurn(run: ManagedCodingAgentRun) {
+    run.dshAutoContinueCount = (run.dshAutoContinueCount || 0) + 1
+    this.touch(run)
+    // startDshChatTurn guards on isRunning(run.currentChild). When the stall is
+    // detected the old child has called stdin.end() but may still be flushing
+    // persistence, so it can be momentarily alive. If it is, defer the re-dispatch
+    // until it exits; otherwise spawn immediately. startDshChatTurn resets the
+    // per-turn print state (printText, codexToolBlocks, responseId) itself.
+    // run.dshAutoContinuePending was armed synchronously in chat-turn.ts's .then
+    // (before we get here), so the old child's close handler will not surface this
+    // clean end_turn exit as a turn failure. It clears the flag on observation.
+    const dispatch = () => this.startDshTurn(run, DSH_AUTO_CONTINUE_NUDGE, '', [])
+    const oldChild = run.currentChild
+    if (oldChild && childIsRunning(oldChild)) {
+      const onExit = () => {
+        if (run.exited || run.stoppedByUser) return
+        dispatch()
+      }
+      oldChild.once('close', onExit)
+    } else {
+      dispatch()
+    }
   }
 
   private startGrokPrintTurn(

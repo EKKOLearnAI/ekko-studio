@@ -6,7 +6,7 @@ import { updateContextTokenUsage } from '../../../studio/public/run-state'
 import { updateManagedPromptFileSync } from '../prompt-file'
 import { isolatedCodingAgentChildEnv } from '../runtime/child-env'
 import { DshAcpTurn } from './acp-turn'
-import { DSH_MODEL_PROVIDER } from './runtime-config'
+import { DSH_MAX_AUTO_CONTINUES, DSH_MODEL_PROVIDER, dshIsNarrationOnlyStall } from './runtime-config'
 import { normalizeTokenUsage, recordSessionUsage } from '../../../studio/public/usage'
 
 export interface DshTurnHost {
@@ -27,6 +27,9 @@ export interface DshTurnHost {
   completeAfterUsage(event: any, payload: any): Promise<void>
   complete(): void
   fail(message: string): void
+  /** Re-dispatch this DSH run with the auto-continue nudge (no new user row).
+   * Present only when the caller opts into the #3326 hard-fallback. */
+  autoContinue?: () => void
 }
 
 /** ACP lifecycle and event translation belong to DSH; the shared manager only
@@ -109,6 +112,10 @@ export function startDshChatTurn(run: ManagedCodingAgentRun, input: string, syst
     if (run.exited || run.stoppedByUser) return
     if (run.pendingChatCompletionEvent) {
       void host.completeAfterUsage(run.pendingChatCompletionEvent, run.pendingChatCompletionPayload)
+    } else if (run.dshAutoContinuePending) {
+      // A narration-only stall triggered an auto-continue: the new child owns the
+      // turn's completion/failure. Do not surface this old child's exit as a fail.
+      run.dshAutoContinuePending = undefined
     } else if (!run.printCompleted) host.fail(host.exitError(code, run.currentChildStderr))
   })
   void turn.prompt({
@@ -119,8 +126,23 @@ export function startDshChatTurn(run: ManagedCodingAgentRun, input: string, syst
     reasoningEffort: run.launch.mode === 'scoped' ? run.launch.reasoningEffort : undefined,
   }).then(reason => {
     if (run.exited || run.stoppedByUser) return
-    if (reason === 'end_turn' || reason === 'max_tokens') host.complete()
-    else host.fail(`DSH stopped: ${reason}`)
+    if (reason === 'end_turn' || reason === 'max_tokens') {
+      // #3326 hard fallback: a tool-less step ending in "Let me …:" is a
+      // narration-only stall. If we still have auto-continue budget and the
+      // caller opted in, re-dispatch the nudge instead of surfacing a completed
+      // turn that just waits for the user to type "继续".
+      const stalled = dshIsNarrationOnlyStall(reason, run.printText ?? '', run.codexToolBlocks?.size || 0)
+      const budgetLeft = (run.dshAutoContinueCount || 0) < DSH_MAX_AUTO_CONTINUES
+      if (stalled && budgetLeft && host.autoContinue) {
+        // Arm the guard synchronously, before the old child's close handler can
+        // observe turn state, so a clean end_turn exit is not misreported as a
+        // failure while the re-dispatched child owns completion.
+        run.dshAutoContinuePending = true
+        host.autoContinue()
+        return
+      }
+      host.complete()
+    } else host.fail(`DSH stopped: ${reason}`)
   }).catch(error => {
     if (!run.exited && !run.stoppedByUser) host.fail(host.processError(error))
     host.terminate(child)

@@ -32,8 +32,8 @@ export const DSH_AGENT_CONTINUATION_INSTRUCTIONS = [
  *
  * The agent loop ends the turn on the first step with no tool call, so a
  * text-only "I will do X next" answer halts the run until the user types
- * "继续". DeepSeek models reliably pair narration with the tool call in the same
- * step and never stall, so the guideline is redundant for them; non-DeepSeek
+ * "继续". DeepSeek models reliably pair narration with the tool call in the
+ * same step and never stall, so the guideline is redundant for them; non-DeepSeek
  * models (e.g. Qwen) intermittently emit standalone narration steps and need
  * it. Detect DeepSeek by the model id prefix — the only family DSH ships
  * natively.
@@ -41,6 +41,65 @@ export const DSH_AGENT_CONTINUATION_INSTRUCTIONS = [
 export function dshNeedsContinuationInstructions(model?: string): boolean {
   if (!model) return true
   return !/^deepseek/i.test(model)
+}
+
+/**
+ * A DSH turn can end on `end_turn` without any tool call — the agent's internal
+ * loop treats the first tool-less step as "done". Non-DeepSeek models (e.g.
+ * Qwen) intermittently emit such a step as a *narration-only* "Let me do X:"
+ * answer, so the run halts and waits for the user to type "继续" (the
+ * one-question-one-answer dummy from PR #3326). The AGENTS.md guideline
+ * above asks the model to avoid this, but as a soft hint it is not always
+ * obeyed at the exact decision point.
+ *
+ * This is the *hard* fallback: detect that stall and let the turn auto-continue.
+ * A step is a narration-only stall when the turn made NO tool call and the final
+ * text reads as "about to act" rather than a completed answer. Two tells:
+ *   (1) the text ends in a colon ("Let me investigate the font setup:") — the
+ *       incident pattern, where the action was declared but never emitted;
+ *   (2) the text ends in a period and its LAST sentence begins with an
+ *       action-intent phrase ("Let me fix the totals." / "接下来我来处理…").
+ * We only act on `end_turn`/`max_tokens` — real errors already surface as a turn
+ * failure, not a stall.
+ *
+ * No `\b` is used around CJK phrases (word boundaries don't exist in Han), and
+ * "let me know" is excluded from the intent set so the softener ("Let me know if
+ * you need anything else.") does not count. A completed final answer that merely
+ * contains an intent phrase mid-sentence ("I will send it tomorrow. The work is
+ * complete.") fails (2) because its last sentence has no intent lead-in. The one
+ * residual false-positive class ("Let me note the total was X.") is accepted: a
+ * false positive only costs at most DSH_MAX_AUTO_CONTINUES nudge turns (capped),
+ * whereas a false negative reproduces the original stuck-at-继续 bug.
+ */
+const DSH_STALL_COLON_TAIL_RE = /\s*[:：]\s*$/
+const DSH_STALL_PERIOD_TAIL_RE = /\s*[。\.]\s*$/
+const DSH_STALL_INTENT_RE =
+  /(?:\blet me\b(?! know)|\blet's\b|\bI'll\b|\bI will\b|\bI'm about to\b|\bI am about to\b|\bI'm going to\b|\bnow I'll\b|\bnow I will\b|接下来|现在我(?:要|将|来|需要)|让我(?:先|来)?|我来|待会儿|稍后)/i
+
+/** Return the final sentence of `text` (split on 。/.), trimmed. */
+function dshLastSentence(text: string): string {
+  const parts = text.split(/(?<=[。\.])\s+/)
+  return parts[parts.length - 1].trim()
+}
+
+/** The prompt re-sent to a stalled DSH session. Neutral, model-agnostic. */
+export const DSH_AUTO_CONTINUE_NUDGE =
+  '上一轮你只描述了要做什么（例如"让我……"/"Let me……"）而没有发出工具调用，任务尚未完成。不要只叙述——现在直接在本次回复里执行你接下来要做的那个动作（调用对应的工具），然后继续，直到任务真正完成或你确实在向用户提问。'
+
+/** Safety cap: max auto-continuations per user turn before we stop and complete. */
+export const DSH_MAX_AUTO_CONTINUES = 2
+
+export function dshIsNarrationOnlyStall(reason: string, finalText: string, toolCallCount: number): boolean {
+  if (reason !== 'end_turn' && reason !== 'max_tokens') return false
+  if (toolCallCount > 0) return false // a real tool ran this step — not a stall
+  const text = String(finalText || '').trim()
+  if (!text) return false
+  // Tell (1): trailing colon — the model declared the next action but emitted no
+  // tool call. This is the incident pattern; high precision, no intent scan needed.
+  if (DSH_STALL_COLON_TAIL_RE.test(text)) return true
+  // Tell (2): trailing period whose last sentence leads with an action-intent phrase.
+  if (DSH_STALL_PERIOD_TAIL_RE.test(text) && DSH_STALL_INTENT_RE.test(dshLastSentence(text))) return true
+  return false
 }
 
 export function dshReasoningEffort(value?: string): string | undefined {
