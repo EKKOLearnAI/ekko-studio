@@ -508,6 +508,8 @@ export class EkkoAgentSetup {
       toolFailureRecoveryThreshold: runtimeOverrides.toolFailureRecoveryThreshold
         ?? runtimeOverrides.maxConsecutiveToolFailures
         ?? config.runtime.toolFailureRecoveryThreshold,
+      maxIdenticalToolFailures: runtimeOverrides.maxIdenticalToolFailures
+        ?? config.runtime.maxIdenticalToolFailures,
       backgroundDelegationEnabled: runtimeOverrides.backgroundDelegationEnabled
         ?? config.delegation.backgroundEnabled,
       subtaskMaxSteps: runtimeOverrides.subtaskMaxSteps ?? config.delegation.subtaskMaxSteps,
