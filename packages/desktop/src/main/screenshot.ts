@@ -148,6 +148,7 @@ export async function captureRegionScreenshot(owner: BrowserWindow, request: Scr
         dismiss = null
         error ? reject(error) : resolve(result)
       }
+      const fail = (reason: unknown) => finish(null, reason instanceof Error ? reason : new Error('SCREENSHOT_CAPTURE_FAILED', { cause: reason }))
       const trustedOverlay = (event: IpcMainEvent) => event.senderFrame === event.sender.mainFrame ? overlays.get(event.sender.id) : undefined
       const submit = (event: IpcMainEvent, value: unknown) => {
         const overlay = trustedOverlay(event)
@@ -167,7 +168,9 @@ export async function captureRegionScreenshot(owner: BrowserWindow, request: Scr
       const onCancel = (event: IpcMainEvent) => { if (trustedOverlay(event)) finish(null) }
       const select = (event: IpcMainEvent) => {
         if (!trustedOverlay(event)) return
-        for (const [id, entry] of overlays) if (id !== event.sender.id && !entry.window.isDestroyed()) entry.window.webContents.send('hermes-desktop:screenshot-overlay-reset')
+        try {
+          for (const [id, entry] of overlays) if (id !== event.sender.id && !entry.window.isDestroyed()) entry.window.webContents.send('hermes-desktop:screenshot-overlay-reset')
+        } catch (error) { fail(error) }
       }
       const ready = (event: IpcMainEvent, requestId: unknown) => {
         if (!trustedOverlay(event) || requestId !== request.requestId || settled || shown) return
@@ -175,27 +178,31 @@ export async function captureRegionScreenshot(owner: BrowserWindow, request: Scr
         if (prepared.size !== entries.length) return
         shown = true
         clearTimeout(loadTimeout)
-        if (usesDesktopBounds) {
-          const activeDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-          for (const entry of entries) entry.window.showInactive()
-          entries.find(entry => entry.display?.id === activeDisplay.id)?.window.focus()
-        } else entries[0].window.show()
+        try {
+          if (usesDesktopBounds) {
+            const activeDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+            for (const entry of entries) entry.window.showInactive()
+            entries.find(entry => entry.display?.id === activeDisplay.id)?.window.focus()
+          } else entries[0].window.show()
+        } catch (error) { fail(error) }
       }
       dismiss = () => finish(null)
       ipcMain.on('hermes-desktop:screenshot-overlay-submit', submit)
       ipcMain.on('hermes-desktop:screenshot-overlay-cancel', onCancel)
       ipcMain.on('hermes-desktop:screenshot-overlay-select', select)
       ipcMain.on('hermes-desktop:screenshot-overlay-ready', ready)
-      for (const entry of entries) {
-        entry.window.once('closed', closed)
-        const frame = usesDesktopBounds ? frames.find(frame => frame.displayId === String(entry.display?.id))! : frames[0]
-        entry.window.webContents.send('hermes-desktop:screenshot-overlay-init', {
-          requestId: request.requestId, frameId: frame.id, bitmap: frame.bitmap,
-          presentation: usesDesktopBounds ? 'desktop-overlay' : 'image-editor',
-          initialSelection: frame.initialSelection, labels: request.labels,
-          ...(!usesDesktopBounds && frames.length > 1 ? { frames } : {}),
-        })
-      }
+      try {
+        for (const entry of entries) {
+          entry.window.once('closed', closed)
+          const frame = usesDesktopBounds ? frames.find(frame => frame.displayId === String(entry.display?.id))! : frames[0]
+          entry.window.webContents.send('hermes-desktop:screenshot-overlay-init', {
+            requestId: request.requestId, frameId: frame.id, bitmap: frame.bitmap,
+            presentation: usesDesktopBounds ? 'desktop-overlay' : 'image-editor',
+            initialSelection: frame.initialSelection, labels: request.labels,
+            ...(!usesDesktopBounds && frames.length > 1 ? { frames } : {}),
+          })
+        }
+      } catch (error) { fail(error) }
       if (signal.aborted) finish(null)
     })
   } catch (error) {
@@ -208,14 +215,22 @@ export async function captureRegionScreenshot(owner: BrowserWindow, request: Scr
     screen.removeListener('display-removed', onDisplayRemoved)
     screen.removeListener('display-metrics-changed', onDisplayMetricsChanged)
     for (const entry of entries) if (!entry.window.isDestroyed()) {
-      entry.window.hide()
-      entry.window.webContents.send('hermes-desktop:screenshot-overlay-clear')
+      try {
+        entry.window.hide()
+        entry.window.webContents.send('hermes-desktop:screenshot-overlay-clear')
+      } catch (error) {
+        // An unusable overlay must not prevent restoring the chat windows below it.
+        console.warn('[screenshot] could not clear overlay:', error)
+        try { entry.window.destroy() } catch (error) { console.warn('[screenshot] could not dispose overlay:', error) }
+      }
     }
     // Restore only windows actually changed, including if hiding failed partway through.
     for (const [window, opacity] of hidden) if (!window.isDestroyed()) {
       try { window.setOpacity(opacity) } catch (error) { console.warn('[screenshot] could not restore opacity:', error) }
       try { window.showInactive() } catch (error) { console.warn('[screenshot] could not restore window:', error) }
     }
-    if (!owner.isDestroyed() && owner.isVisible() && !owner.isMinimized()) owner.focus()
+    if (!owner.isDestroyed() && owner.isVisible() && !owner.isMinimized()) {
+      try { owner.focus() } catch (error) { console.warn('[screenshot] could not restore focus:', error) }
+    }
   }
 }

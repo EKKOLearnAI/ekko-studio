@@ -47,11 +47,27 @@ optional addons omitted, creates an asar, and imports D-Bus messages in Electron
 If Electron was installed with scripts disabled, pass `--electron=/absolute/binary`.
 This verifies the dependency closure; it is not a Windows/Linux installation test.
 
-96 focused unit tests and 14 screenshot browser tests passed. A focused coverage run
-also passed. Browser tests cover original pixels through zoom, scroll, resize, and
+109 focused unit tests passed after failure-isolation hardening. The earlier 14 screenshot
+browser tests and focused coverage run also passed. Browser tests cover original pixels through zoom, scroll, resize, and
 image switching, plus selection, all annotation tools, undo/redo, and composer attachment.
 Portal tests cover v1/v2/v3, early responses, changed handles, sender checks, cancellation,
 timeouts, missing targets, and local URI validation.
+
+### Failure isolation
+
+Screenshot warming catches initialization failures without blocking desktop startup.
+Capability checks that fail disable the capture button. Capture IPC rejections show
+localized guidance for denied permission, unavailable sources/Portal, timeout, or a
+generic capture failure; cancelling returns no image and displays no error.
+
+Native overlay show/focus/reset errors settle the capture request instead of escaping
+IPC event callbacks. Initialization-send failures release all capture listeners.
+Cleanup catches hide/clear failures and tries to discard the broken overlay; it continues
+restoring the chat windows even if disposal also fails. Restoring focus is best effort
+and cannot turn a successful screenshot into a failure.
+Regression tests inject these failures and verify restoration, listener release,
+button recovery, and successful retry. These checks cover handled API failures, not
+process-level native crashes such as an OS graphics-driver fault.
 
 ## Global screenshot shortcut
 

@@ -254,6 +254,99 @@ describe('desktop region screenshots', () => {
     expect(window.setOpacity).toHaveBeenLastCalledWith(0.85)
   })
 
+  it.each(['showInactive', 'focus'])('contains an overlay %s failure in the IPC callback and permits retry', async method => {
+    const window = owner()
+    const result = captureRegionScreenshot(window, { ...request, hideWindows: true }, [window])
+    const rejected = expect(result).rejects.toThrow('native window unavailable')
+    await vi.advanceTimersByTimeAsync(34)
+    const overlay = state.overlays[method === 'focus' ? 1 : 0]
+    overlay[method].mockImplementationOnce(() => { throw new Error('native window unavailable') })
+    for (const entry of state.overlays) {
+      expect(() => emit('hermes-desktop:screenshot-overlay-ready', entry, request.requestId)).not.toThrow()
+    }
+    await rejected
+    expect(window.setOpacity).toHaveBeenLastCalledWith(0.85)
+    expect(window.showInactive).toHaveBeenCalledOnce()
+    expect(ipcMain.listenerCount('hermes-desktop:screenshot-overlay-ready')).toBe(0)
+    const retry = await openCapture()
+    cancelRegionScreenshot(1, request.requestId)
+    await expect(retry.result).resolves.toBeNull()
+  })
+
+  it('releases capture IPC listeners when sending the editor initialization fails', async () => {
+    state.load.mockImplementationOnce(() => {
+      state.overlays[0].webContents.send.mockImplementationOnce(() => { throw new Error('renderer unavailable') })
+      return Promise.resolve()
+    })
+    const window = owner()
+    const result = captureRegionScreenshot(window, { ...request, hideWindows: true }, [window])
+    const rejected = expect(result).rejects.toThrow('renderer unavailable')
+    await vi.advanceTimersByTimeAsync(34)
+    await rejected
+    for (const channel of ['submit', 'cancel', 'select', 'ready']) {
+      expect(ipcMain.listenerCount(`hermes-desktop:screenshot-overlay-${channel}`)).toBe(0)
+    }
+    expect(window.setOpacity).toHaveBeenLastCalledWith(0.85)
+    expect(window.showInactive).toHaveBeenCalledOnce()
+    const retry = await openCapture()
+    cancelRegionScreenshot(1, request.requestId)
+    await expect(retry.result).resolves.toBeNull()
+  })
+
+  it('contains a reset IPC failure from a second overlay', async () => {
+    const { window, result } = await openCapture(true)
+    const rejected = expect(result).rejects.toThrow('renderer unavailable')
+    state.overlays[1].webContents.send.mockImplementationOnce(() => { throw new Error('renderer unavailable') })
+    expect(() => emit('hermes-desktop:screenshot-overlay-select', state.overlays[0])).not.toThrow()
+    await rejected
+    expect(window.showInactive).toHaveBeenCalledOnce()
+    expect(ipcMain.listenerCount('hermes-desktop:screenshot-overlay-select')).toBe(0)
+  })
+
+  it.each(['hide', 'clear'])('restores Studio and disposes a broken overlay when cleanup %s fails', async operation => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const { window, result } = await openCapture(true)
+      const broken = state.overlays[0]
+      const method = operation === 'hide' ? broken.hide : broken.webContents.send
+      method.mockImplementationOnce(() => { throw new Error('native cleanup failure') })
+      cancelRegionScreenshot(1, request.requestId)
+      await expect(result).resolves.toBeNull()
+      expect(broken.destroyed).toBe(true)
+      expect(state.overlays[1].hide).toHaveBeenCalledOnce()
+      expect(window.setOpacity).toHaveBeenLastCalledWith(0.85)
+      expect(window.showInactive).toHaveBeenCalledOnce()
+      const retry = await openCapture()
+      cancelRegionScreenshot(1, request.requestId)
+      await expect(retry.result).resolves.toBeNull()
+    } finally { warning.mockRestore() }
+  })
+
+  it('restores Studio even when both hiding and destroying an overlay fail', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { window, result } = await openCapture(true)
+    const destroy = vi.spyOn(state.overlays[0], 'destroy').mockImplementationOnce(() => { throw new Error('destroy failure') })
+    try {
+      state.overlays[0].hide.mockImplementationOnce(() => { throw new Error('hide failure') })
+      cancelRegionScreenshot(1, request.requestId)
+      await expect(result).resolves.toBeNull()
+      expect(state.overlays[1].hide).toHaveBeenCalledOnce()
+      expect(window.setOpacity).toHaveBeenLastCalledWith(0.85)
+      expect(window.showInactive).toHaveBeenCalledOnce()
+    } finally { destroy.mockRestore(); warning.mockRestore() }
+  })
+
+  it('preserves a successful capture when restoring owner focus fails', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const { window, result } = await openCapture(true)
+      vi.mocked(window.focus).mockImplementationOnce(() => { throw new Error('focus failure') })
+      emit('hermes-desktop:screenshot-overlay-submit', state.overlays[0], { requestId: request.requestId, region: { x: 0, y: 0, width: 20, height: 10 }, png: png(20, 10) })
+      await expect(result).resolves.toMatchObject({ width: 20, height: 10 })
+      expect(window.showInactive).toHaveBeenCalledOnce()
+    } finally { warning.mockRestore() }
+  })
+
   it('cleans up overlays when their renderer exits', async () => {
     const { result } = await openCapture()
     state.overlays[0].webContents.emit('render-process-gone')
