@@ -1914,9 +1914,14 @@ function isToolCallable(name) {
   return activeToolsetTools().some(tool => tool.name === resolved)
 }
 
+function exampleOperationName() {
+  const catalog = categoryToolCatalog()
+  return catalog[0]?.name ?? '<operation>'
+}
+
 function selfReferenceMessage(toolName, category) {
   return errorText(
-    `Error: 'tool' must be an inner operation name returned by action=list (e.g. '${category.operations[0]?.name ?? '<operation>'}'), `
+    `Error: 'tool' must be an inner operation name returned by action=list (e.g. '${exampleOperationName()}'), `
     + `not this toolset's own MCP name '${toolName}'. `
     + `Expected call: { "action": "list" | "describe" | "call", "tool": "<inner operation name>", "arguments": {...} }.`,
   )
@@ -1990,7 +1995,7 @@ async function callCategoryToolset(args = {}, signal) {
   if (!target) {
     const response = errorText(
       `Unknown '${ACTIVE_TOOLSET}' tool: ${String(args.tool || '')}. `
-      + `Expected a full inner operation name like '${category.operations[0]?.name ?? '<operation>'}' (see action=list output). `
+      + `Expected a full inner operation name like '${exampleOperationName()}' (see action=list output). `
       + `The 'tool' field must not be empty and must not be this toolset's own MCP name.`,
     )
     noteIdenticalFailure(args, true)
