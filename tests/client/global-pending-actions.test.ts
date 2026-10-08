@@ -501,7 +501,48 @@ describe('GlobalPendingActions', () => {
     await content.get('input').setValue('staging')
     const action = await render(created[0].options.action)
     await action.get('button').trigger('click')
-    expect(chatState.respondToClarifyFor).toHaveBeenCalledWith('session-b', 'clarify-b', 'staging')
+    expect(chatState.respondToClarifyFor).toHaveBeenCalledWith('session-b', 'clarify-b', 'staging', { q0: 'staging' })
+  })
+
+  it('renders every clarify question and submits one answer per question', async () => {
+    chatState.sessions = [{ id: 'session-b', title: 'B' }]
+    chatState.pendingClarifies = new Map([['session-b', {
+      sessionId: 'session-b',
+      clarifyId: 'clarify-b',
+      question: '1. Which environment?\n2. Which checks?\n3. Anything else?',
+      choices: null,
+      questions: [
+        { qid: 'q0', question: 'Which environment?', choices: ['staging (Recommended)', 'production'], multiSelect: false },
+        { qid: 'q1', question: 'Which checks?', choices: ['unit', 'e2e'], multiSelect: true },
+        { qid: 'q2', question: 'Anything else?', choices: null, multiSelect: false },
+      ],
+    }]])
+
+    mount(GlobalPendingActions)
+    await nextTick()
+
+    const content = await render(created[0].options.content)
+    expect(content.findAll('.global-clarify-question').map(node => node.text())).toEqual([
+      'Which environment?',
+      'Which checks?',
+      'Anything else?',
+    ])
+    expect(content.findAll('input')).toHaveLength(3)
+
+    const choiceButtons = content.findAll('.global-clarify-choices button')
+    await choiceButtons[1].trigger('click')
+    await choiceButtons[2].trigger('click')
+    await choiceButtons[3].trigger('click')
+    await content.findAll('input')[2].setValue('ship on Friday')
+
+    const action = await render(created[0].options.action)
+    await action.get('button').trigger('click')
+    expect(chatState.respondToClarifyFor).toHaveBeenCalledWith(
+      'session-b',
+      'clarify-b',
+      'Which environment? production\nWhich checks? unit, e2e\nAnything else? ship on Friday',
+      { q0: 'production', q1: ['unit', 'e2e'], q2: 'ship on Friday' },
+    )
   })
 
   it('warns when a timed-out interaction is closed after an attempted response', async () => {
@@ -528,7 +569,44 @@ describe('GlobalPendingActions', () => {
     await content.get('input').setValue('staging')
     const action = await render(created[0].options.action)
     await action.get('button').trigger('click')
-    expect(groupState.respondClarifyFor).toHaveBeenCalledWith('room-b', 'clarify-b', 'staging')
+    expect(groupState.respondClarifyFor).toHaveBeenCalledWith('room-b', 'clarify-b', 'staging', { q0: 'staging' })
+  })
+
+  it('renders every clarify question relayed by a group room', async () => {
+    groupState.rooms = [{ id: 'room-b', name: 'Room B' }]
+    groupState.pendingClarifies = new Map([['room-b:clarify-multi', {
+      roomId: 'room-b', agentName: 'Builder', clarifyId: 'clarify-multi',
+      question: '1. Which environment?\n2. Which checks?',
+      choices: null,
+      questions: [
+        { qid: 'q0', question: 'Which environment?', choices: ['staging', 'production'], multiSelect: false },
+        { qid: 'q1', question: 'Which checks?', choices: ['unit', 'e2e'], multiSelect: true },
+      ],
+      timeoutMs: 300000,
+    }]])
+
+    mount(GlobalPendingActions)
+    await nextTick()
+
+    const content = await render(created[0].options.content)
+    expect(content.findAll('.global-clarify-question').map(node => node.text())).toEqual([
+      'Which environment?',
+      'Which checks?',
+    ])
+
+    const choiceButtons = content.findAll('.global-clarify-choices button')
+    await choiceButtons[1].trigger('click')
+    await choiceButtons[2].trigger('click')
+    await choiceButtons[3].trigger('click')
+
+    const action = await render(created[0].options.action)
+    await action.get('button').trigger('click')
+    expect(groupState.respondClarifyFor).toHaveBeenCalledWith(
+      'room-b',
+      'clarify-multi',
+      'Which environment? production\nWhich checks? unit, e2e',
+      { q0: 'production', q1: ['unit', 'e2e'] },
+    )
   })
 
   it('opens the source room from the title and handles its approval in place', async () => {

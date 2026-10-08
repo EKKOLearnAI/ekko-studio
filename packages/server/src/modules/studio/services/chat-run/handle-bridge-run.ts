@@ -1555,6 +1555,7 @@ async function applyBridgeChunkAsync(
         clarify_id: ev.clarify_id,
         question: ev.question,
         choices: Array.isArray(ev.choices) ? ev.choices : null,
+        questions: Array.isArray(ev.questions) ? ev.questions : null,
         timeout_ms: ev.timeout_ms,
         remaining_timeout_ms: ev.timeout_ms,
         requested_at: requestedAt,

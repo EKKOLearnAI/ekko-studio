@@ -13,6 +13,7 @@ import { playCompletionSound } from '@/utils/completion-sound'
 import { showSystemNotification } from '@/utils/completion-notification'
 import { workflowApprovalKey } from '@/utils/workflow-approval-key'
 import { PENDING_INTERACTION_EXPIRED_EVENT } from '@/utils/pending-interaction'
+import { buildClarifySubmission, normalizeClarifyQuestions, type ClarifyDraft, type ClarifyQuestion } from '@/utils/clarify-questions'
 import { approveWorkflowNode, type WorkflowRecord } from '@/api/studio/workflows'
 import { listWorkflowsSocket, onWorkflowStatusUpdated, subscribeWorkflowStatuses, disconnectWorkflowSocket, type WorkflowRuntimeStatus } from '@/api/studio/workflow-socket'
 
@@ -30,7 +31,7 @@ const handles = new Map<string, NotificationReactive>()
 const announcedKeys = new Set<string>()
 const pendingSoundKeys = new Set<string>()
 const pendingNotificationKeys = new Set<string>()
-const clarifyDrafts = reactive<Record<string, string>>({})
+const clarifyDrafts = reactive<Record<string, Record<string, ClarifyDraft>>>({})
 const submitting = reactive<Record<string, boolean>>({})
 const copiedCommandKey = ref<string | null>(null)
 const workflows = ref<WorkflowRecord[]>([])
@@ -251,38 +252,60 @@ async function submitApproval(action: Extract<GlobalPendingAction, { kind: 'chat
   }
 }
 
+function clarifyQuestionsOf(action: Extract<GlobalPendingAction, { kind: 'chat-clarify' | 'group-clarify' }>): ClarifyQuestion[] {
+  if (action.pending.questions?.length) return action.pending.questions
+  return normalizeClarifyQuestions(null, action.pending.question, action.pending.choices)
+}
+
+function clarifyDraftOf(key: string, qid: string): ClarifyDraft {
+  const drafts = clarifyDrafts[key] || (clarifyDrafts[key] = {})
+  return drafts[qid] || (drafts[qid] = { choices: [], text: '' })
+}
+
 function clarifyContent(action: Extract<GlobalPendingAction, { kind: 'chat-clarify' | 'group-clarify' }>) {
   return h('div', { class: 'global-clarify-content' }, [
     interactionCountdown(action),
-    h('div', { class: 'global-clarify-question' }, action.pending.question),
-    action.pending.choices?.length
-      ? h('div', { class: 'global-clarify-choices' }, action.pending.choices.map(choice => h(NButton, {
-          size: 'small', secondary: clarifyDrafts[action.key] !== choice,
-          type: clarifyDrafts[action.key] === choice ? 'primary' : 'default',
-          onClick: () => { clarifyDrafts[action.key] = choice },
-        }, { default: () => choice })))
-      : null,
-    h(NInput, {
-      value: clarifyDrafts[action.key] || '',
-      placeholder: t('chat.clarifyPlaceholder'),
-      'onUpdate:value': (value: string) => { clarifyDrafts[action.key] = value },
-      onKeydown: (event: KeyboardEvent) => {
-        if (event.key === 'Enter' && !event.shiftKey) {
-          event.preventDefault()
-          void submitClarify(action)
-        }
-      },
-    }),
+    ...clarifyQuestionsOf(action).map(question => h('div', { class: 'global-clarify-question-block' }, [
+      h('div', { class: 'global-clarify-question' }, question.question),
+      question.choices?.length
+        ? h('div', { class: 'global-clarify-choices' }, question.choices.map(choice => h(NButton, {
+            size: 'small',
+            secondary: !clarifyDraftOf(action.key, question.qid).choices.includes(choice),
+            type: clarifyDraftOf(action.key, question.qid).choices.includes(choice) ? 'primary' : 'default',
+            onClick: () => {
+              const draft = clarifyDraftOf(action.key, question.qid)
+              if (!question.multiSelect) {
+                draft.choices = draft.choices.includes(choice) ? [] : [choice]
+                return
+              }
+              draft.choices = draft.choices.includes(choice)
+                ? draft.choices.filter(item => item !== choice)
+                : [...draft.choices, choice]
+            },
+          }, { default: () => choice })))
+        : null,
+      h(NInput, {
+        value: clarifyDraftOf(action.key, question.qid).text,
+        placeholder: t('chat.clarifyPlaceholder'),
+        'onUpdate:value': (value: string) => { clarifyDraftOf(action.key, question.qid).text = value },
+        onKeydown: (event: KeyboardEvent) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault()
+            void submitClarify(action)
+          }
+        },
+      }),
+    ])),
   ])
 }
 
 async function submitClarify(action: Extract<GlobalPendingAction, { kind: 'chat-clarify' | 'group-clarify' }>) {
-  const response = (clarifyDrafts[action.key] || '').trim()
+  const { response, answers } = buildClarifySubmission(clarifyQuestionsOf(action), clarifyDrafts[action.key] || {})
   if (!response || submitting[action.key]) return
   submitting[action.key] = true
   try {
-    if (action.kind === 'chat-clarify') chatStore.respondToClarifyFor(action.pending.sessionId, action.pending.clarifyId, response)
-    else await groupChatStore.respondClarifyFor(action.pending.roomId, action.pending.clarifyId, response)
+    if (action.kind === 'chat-clarify') chatStore.respondToClarifyFor(action.pending.sessionId, action.pending.clarifyId, response, answers)
+    else await groupChatStore.respondClarifyFor(action.pending.roomId, action.pending.clarifyId, response, answers)
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
   } finally {
@@ -391,7 +414,8 @@ function createGlobalNotification(action: GlobalPendingAction): NotificationReac
           ]),
     action: clarify
       ? () => h(NButton, {
-          size: 'small', type: 'primary', disabled: !(clarifyDrafts[action.key] || '').trim(),
+          size: 'small', type: 'primary',
+          disabled: !buildClarifySubmission(clarifyQuestionsOf(action), clarifyDrafts[action.key] || {}).response,
           loading: submitting[action.key], onClick: () => void submitClarify(action),
         }, { default: () => t('chat.clarifySubmit') })
       : action.kind === 'workflow-approval'
@@ -503,6 +527,7 @@ onUnmounted(() => {
 .global-approval-command pre { max-height: 240px; margin: 0; padding: 12px; overflow: auto; overscroll-behavior: contain; white-space: pre; }
 .global-approval-command code { display: block; width: max-content; min-width: 100%; color: var(--text-primary); font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace; font-size: 12px; line-height: 1.55; }
 .global-clarify-question { font-weight: 600; }
+.global-clarify-question-block { display: grid; gap: 8px; }
 
 @media (max-width: 600px) {
   .n-notification:has(.global-approval-content, .global-clarify-content) { width: calc(100vw - 24px); }

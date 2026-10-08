@@ -170,9 +170,13 @@ describe('ChatRunSocket clarify responses', { timeout: 15_000 }, () => {
       session_id: 'session-1',
       clarify_id: 'clarify-1',
       response: 'Use option A',
+      answers: { q0: 'Use option A', q1: ['unit', 'lint'] },
     })
 
-    expect(bridgeMock.clarifyRespond).toHaveBeenCalledWith('clarify-1', 'Use option A')
+    expect(bridgeMock.clarifyRespond).toHaveBeenCalledWith('clarify-1', 'Use option A', {
+      q0: 'Use option A',
+      q1: ['unit', 'lint'],
+    })
     expect(namespace.to).toHaveBeenCalledWith('session:session-1')
     expect(namespaceEmit).toHaveBeenCalledWith('clarify.resolved', {
       event: 'clarify.resolved',

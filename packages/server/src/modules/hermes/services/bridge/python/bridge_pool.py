@@ -75,6 +75,63 @@ def _clear_session_workspace_cwd() -> None:
         pass
 
 
+CLARIFY_TIMEOUT_MS = 300_000
+CLARIFY_MAX_ANSWER_CHARS = 8000  # matches the clarify tool's MAX_CHOICE_CHARS
+
+
+def _clarify_wire_questions(questions: Any, choices: Any = None) -> list[dict[str, Any]]:
+    """Clarify card payload: the Hermes clarify tool passes a normalized question list, older
+    Hermes passes one question string plus optional choices."""
+    if not isinstance(questions, list):
+        return [{
+            "qid": "q0",
+            "question": str(questions or ""),
+            "choices": [str(choice) for choice in choices] if choices else None,
+            "multi_select": False,
+        }]
+    wire: list[dict[str, Any]] = []
+    for index, item in enumerate(questions):
+        entry = item if isinstance(item, dict) else {"question": item}
+        entry_choices = entry.get("choices")
+        wire.append({
+            "qid": str(entry.get("qid") or f"q{index}"),
+            "question": str(entry.get("question") or ""),
+            "choices": [str(choice) for choice in entry_choices] if entry_choices else None,
+            "multi_select": bool(entry.get("multi_select")),
+        })
+    return wire
+
+
+def _clarify_question_text(wire: list[dict[str, Any]]) -> str:
+    """Readable text for clients that render a single question, so they never show a raw payload."""
+    if len(wire) == 1:
+        return wire[0]["question"]
+    return "\n".join(f"{index + 1}. {entry['question']}" for index, entry in enumerate(wire))
+
+
+def _clarify_answer_value(raw: Any) -> Any:
+    """One answer: trimmed text, or a list of texts for multi-select; empty means skipped. Any other
+    value is not something the card can send and counts as skipped, never as its Python repr."""
+    if isinstance(raw, str):
+        return raw.strip()[:CLARIFY_MAX_ANSWER_CHARS] or None
+    if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+        values = [item.strip()[:CLARIFY_MAX_ANSWER_CHARS] for item in raw if item.strip()]
+        return values or None
+    return None
+
+
+def _clarify_reply(answers: Any, response: str, qids: list[str]) -> dict[str, Any]:
+    """Clarify tool reply over the asked question ids only: structured answers when the client sent
+    them, else the legacy single answer string keyed to ``q0``. No asked question answered means the
+    card was dismissed."""
+    if not isinstance(answers, dict):
+        answers = {"q0": response} if str(response or "").strip() else {}
+    cleaned = {qid: _clarify_answer_value(answers[qid]) for qid in qids if qid in answers}
+    if any(value is not None for value in cleaned.values()):
+        return {"answers": cleaned, "outcome": "submitted"}
+    return {"answers": cleaned, "outcome": "cancelled", "notice": "The user dismissed the clarification card."}
+
+
 def _set_bridge_session_vars(
     session_id: str,
     profile: str | None,
@@ -192,7 +249,7 @@ class AgentPool:
         self._compression_requests: dict[str, queue.Queue[dict[str, Any]]] = {}
         self._background_notification_claims: dict[tuple[str, str], dict[str, Any]] = {}
         self._suppressed_background_delegations: set[str] = set()
-        self._clarify_requests: dict[str, queue.Queue[str]] = {}
+        self._clarify_requests: dict[str, tuple[queue.Queue[dict[str, Any]], list[str]]] = {}
         self._run_context = threading.local()
         self._approval_handlers: dict[str, Callable[..., str]] = {}
         self._exec_ask_depth = 0
@@ -1435,26 +1492,38 @@ class AgentPool:
         return callback
 
     def _clarify_callback(self, session_id: str):
-        def callback(question: str, choices: list[str] | None = None) -> str:
+        def callback(question: Any, choices: list[str] | None = None) -> Any:
+            # New Hermes contract: one positional list of normalized questions, reply is a dict.
+            # Older Hermes still calls (question, choices) and expects the answer string back.
+            structured = isinstance(question, list)
+            wire = _clarify_wire_questions(question, choices)
             clarify_id = uuid.uuid4().hex
-            response_queue: queue.Queue[str] = queue.Queue(maxsize=1)
+            response_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
             with self._lock:
-                self._clarify_requests[clarify_id] = response_queue
+                self._clarify_requests[clarify_id] = (response_queue, [entry["qid"] for entry in wire])
             self._append_event(session_id, {
                 "event": "clarify.requested",
                 "clarify_id": clarify_id,
-                "question": str(question or ""),
-                "choices": list(choices) if choices else None,
-                "timeout_ms": 300_000,
+                "question": _clarify_question_text(wire),
+                "choices": wire[0]["choices"] if len(wire) == 1 else None,
+                "questions": wire,
+                "timeout_ms": CLARIFY_TIMEOUT_MS,
             })
             try:
-                user_response = response_queue.get(timeout=300)
+                reply = response_queue.get(timeout=CLARIFY_TIMEOUT_MS / 1000)
             except queue.Empty:
-                user_response = "[user did not respond within 5m]"
+                reply = {"answers": {}, "outcome": "timed_out", "notice": "No response within five minutes."}
             finally:
                 with self._lock:
                     self._clarify_requests.pop(clarify_id, None)
-            return user_response
+            if structured:
+                return reply
+            if reply["outcome"] == "timed_out":
+                return "[user did not respond within 5m]"
+            answer = reply["answers"].get("q0")
+            if isinstance(answer, list):
+                return json.dumps(answer, ensure_ascii=False)
+            return answer or ""
 
         return callback
 
@@ -2339,13 +2408,14 @@ class AgentPool:
             return {"approval_id": approval_id, "resolved": resolved, "choice": cleaned}
         return {"approval_id": approval_id, "resolved": True, "choice": cleaned}
 
-    def respond_clarify(self, clarify_id: str, response: str) -> dict[str, Any]:
+    def respond_clarify(self, clarify_id: str, response: str, answers: Any = None) -> dict[str, Any]:
         with self._lock:
-            response_queue = self._clarify_requests.get(clarify_id)
-        if response_queue is None:
+            pending = self._clarify_requests.get(clarify_id)
+        if pending is None:
             return {"clarify_id": clarify_id, "resolved": False}
+        response_queue, qids = pending
         try:
-            response_queue.put_nowait(response)
+            response_queue.put_nowait(_clarify_reply(answers, response, qids))
         except queue.Full:
             pass
         return {"clarify_id": clarify_id, "resolved": True}

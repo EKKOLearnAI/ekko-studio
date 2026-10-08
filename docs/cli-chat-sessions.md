@@ -671,11 +671,19 @@ Bridge event：
 {
   "event": "clarify.requested",
   "clarify_id": "...",
-  "question": "...",
-  "choices": ["..."],
-  "timeout_ms": 60000
+  "question": "1. 问题一\n2. 问题二",
+  "choices": null,
+  "questions": [
+    { "qid": "q0", "question": "问题一", "choices": ["A (Recommended)", "B"], "multi_select": false },
+    { "qid": "q1", "question": "问题二", "choices": null, "multi_select": false }
+  ],
+  "timeout_ms": 300000
 }
 ```
+
+clarify 工具一次最多问 5 个问题。`questions` 是权威列表（每个问题一张卡片）；
+顶层 `question` 是可读回退文本（单问题原文，多问题为编号列表），`choices` 只在单问题时给出，
+供只认老字段的客户端（App、pet、global agent）降级显示。
 
 前端显示澄清 UI，并发送：
 
@@ -683,15 +691,19 @@ Bridge event：
 socket.emit("clarify.respond", {
   session_id,
   clarify_id,
-  response
+  response, // 兼容老消费者的单串回答
+  answers: { q0: "A", q1: ["X", "Y"] } // qid → string | string[] | null（null = 跳过）
 })
 ```
 
 服务端转发到：
 
 ```ts
-bridge.clarifyRespond(clarifyId, response)
+bridge.clarifyRespond(clarifyId, response, answers)
 ```
+
+Bridge 把回答交回 clarify 工具：`{ answers, outcome }`，`outcome` 为
+`submitted`（至少回答一题）、`cancelled`（全部跳过或忽略卡片）或 `timed_out`（5 分钟无响应）。
 
 然后通过 `clarify.resolved` 清理 UI 状态。
 

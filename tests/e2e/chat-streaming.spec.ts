@@ -999,6 +999,7 @@ test('renders free-text and choice clarifications and sends responses over the c
   await expect(page.getByRole('button', { name: 'Replace', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Dismiss' })).toBeVisible()
   await page.getByRole('button', { name: 'Replace', exact: true }).click()
+  await page.getByRole('button', { name: 'Reply' }).click()
 
   await expect(page.getByText('Keep or replace the existing file?')).toHaveCount(0)
   await expect.poll(async () => page.evaluate(() => {
@@ -1011,6 +1012,7 @@ test('renders free-text and choice clarifications and sends responses over the c
         session_id: run.session_id,
         clarify_id: 'clarify-free-text',
         response: 'packages/client',
+        answers: { q0: 'packages/client' },
       },
     },
     {
@@ -1019,6 +1021,7 @@ test('renders free-text and choice clarifications and sends responses over the c
         session_id: run.session_id,
         clarify_id: 'clarify-choice',
         response: 'Replace',
+        answers: { q0: 'Replace' },
       },
     },
   ])
@@ -1099,6 +1102,7 @@ test('reports and closes timed-out approval and clarification prompts after an a
   await expect(prompt.locator('.pending-interaction-countdown')).toContainText('00:00 · Awaiting server confirmation')
   await expect(prompt.locator('.float-panel-close')).toHaveCount(0)
   await prompt.locator('.approval-float-actions button').first().click()
+  await prompt.getByRole('button', { name: 'Reply' }).click()
   await expect(prompt).toHaveCount(0)
   await page.evaluate((sid) => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
@@ -1130,6 +1134,7 @@ test('reports and closes timed-out approval and clarification prompts after an a
         session_id: run.session_id,
         clarify_id: 'clarify-stale',
         response: 'staging',
+        answers: { q0: 'staging' },
       },
     },
   ])

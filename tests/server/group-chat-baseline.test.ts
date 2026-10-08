@@ -932,12 +932,21 @@ describe('group chat baseline behavior', () => {
         clarify_id: 'remote-clarify',
         question: 'Which environment?',
         choices: ['staging', 'production'],
+        questions: [
+          { qid: 'q0', question: 'Which environment?', choices: ['staging', 'production'] },
+          { qid: 'q1'.padEnd(80, 'x'), question: 'Which regions?', choices: ['eu', 'us'], multi_select: true },
+          { qid: 'q2', question: '' },
+        ],
         timeout_ms: 300_000,
         agentSessionId: 'remote-session',
       },
     })).resolves.toEqual({ ok: true })
     const cloudClarifyId = String(proxyClarifyRequested.mock.calls.at(-1)?.[1]?.clarify_id || '')
     expect(cloudClarifyId).toMatch(/^gcc_[a-f0-9]{32}$/)
+    expect(proxyClarifyRequested.mock.calls.at(-1)?.[1]?.questions).toEqual([
+      { qid: 'q0', question: 'Which environment?', choices: ['staging', 'production'], multi_select: false },
+      { qid: 'q1'.padEnd(64, 'x'), question: 'Which regions?', choices: ['eu', 'us'], multi_select: true },
+    ])
 
     intendedTarget.once('approval.respond', (data: any, ack: (response: any) => void) => {
       expect(data).toEqual({ approvalId: 'remote-approval', choice: 'once' })
@@ -945,10 +954,14 @@ describe('group chat baseline behavior', () => {
     })
     await expect(executor.respondApproval!(cloudApprovalId, 'once')).resolves.toBe(true)
     intendedTarget.once('clarify.respond', (data: any, ack: (response: any) => void) => {
-      expect(data).toEqual({ clarifyId: 'remote-clarify', response: 'staging' })
+      expect(data).toEqual({
+        clarifyId: 'remote-clarify',
+        response: 'staging',
+        answers: { q0: 'staging', q1: ['eu', 'us'] },
+      })
       ack({ resolved: true })
     })
-    await expect(executor.respondClarify!(cloudClarifyId, 'staging')).resolves.toBe(true)
+    await expect(executor.respondClarify!(cloudClarifyId, 'staging', { q0: 'staging', q1: ['eu', 'us'] })).resolves.toBe(true)
 
     await expect(emitAck<any>(intendedTarget as any, 'agent.event', {
       runId: interactionRun.runId,

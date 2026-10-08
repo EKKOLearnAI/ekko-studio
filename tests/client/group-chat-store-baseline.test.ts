@@ -1261,6 +1261,56 @@ describe('group chat store baseline lifecycle', () => {
     expect(store.pendingClarifies.size).toBe(0)
   })
 
+  it('keeps every asked clarify question and submits a structured answers map', async () => {
+    const store = await loadStore()
+    await store.connect()
+    await store.joinRoom('room-1')
+
+    emitSocket('clarify.requested', {
+      roomId: 'room-1', agentName: 'Agent', clarify_id: 'clarify-multi',
+      question: '1. Which environment?\n2. Which regions?\n3. Anything else?',
+      choices: null,
+      questions: [
+        { qid: 'q0', question: 'Which environment?', choices: ['staging', 'production'], multi_select: false },
+        { qid: 'q1', question: 'Which regions?', choices: ['eu', 'us'], multi_select: true },
+        { qid: 'q2', question: 'Anything else?' },
+      ],
+      timeout_ms: 300000,
+    })
+
+    expect(store.activePendingClarify!.questions).toEqual([
+      { qid: 'q0', question: 'Which environment?', choices: ['staging', 'production'], multiSelect: false },
+      { qid: 'q1', question: 'Which regions?', choices: ['eu', 'us'], multiSelect: true },
+      { qid: 'q2', question: 'Anything else?', choices: null, multiSelect: false },
+    ])
+
+    groupChatApiMock.socket.emit.mockImplementationOnce((event: string, _data: any, ack?: Function) => {
+      if (event === 'clarify.respond') ack?.({ ok: true, resolved: true })
+      return groupChatApiMock.socket
+    })
+    const answers = { q0: 'staging', q1: ['eu', 'us'], q2: null }
+    expect(await store.respondClarifyFor('room-1', 'clarify-multi', 'staging\neu, us', answers)).toBe('submitted')
+
+    expect(groupChatApiMock.socket.emit).toHaveBeenCalledWith('clarify.respond', {
+      roomId: 'room-1', clarify_id: 'clarify-multi', response: 'staging\neu, us', answers,
+    }, expect.any(Function))
+  })
+
+  it('falls back to a single question when an Agent relays no question list', async () => {
+    const store = await loadStore()
+    await store.connect()
+    await store.joinRoom('room-1')
+
+    emitSocket('clarify.requested', {
+      roomId: 'room-1', agentName: 'Agent', clarify_id: 'clarify-legacy',
+      question: 'Which environment?', choices: ['staging'], timeout_ms: 300000,
+    })
+
+    expect(store.activePendingClarify!.questions).toEqual([
+      { qid: 'q0', question: 'Which environment?', choices: ['staging'], multiSelect: false },
+    ])
+  })
+
   it('does not use the browser clock to expire old group interactions', async () => {
     const store = await loadStore()
     const expired = vi.fn()
