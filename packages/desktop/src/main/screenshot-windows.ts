@@ -65,6 +65,9 @@ export async function prepareScreenshotOverlays(displays = screen.getAllDisplays
       ...display.bounds, frame: false, show: false, resizable: false, movable: false,
       minimizable: false, maximizable: false, skipTaskbar: true, alwaysOnTop: true,
       hasShadow: false, enableLargerThanScreen: true, backgroundColor: '#000000',
+      // Win32's default frameless caption/resize frame can shrink or offset the
+      // client area. A screenshot overlay needs edge-to-edge rectangular content.
+      ...(process.platform === 'win32' ? { thickFrame: false, roundedCorners: false, useContentSize: true } : {}),
       ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
       webPreferences: webPreferences(),
     })
@@ -79,6 +82,11 @@ export async function prepareScreenshotOverlays(displays = screen.getAllDisplays
     return entry
   })
   await Promise.all(entries.map(entry => entry.loaded))
+  if (process.platform === 'win32') {
+    // Reapply after native initialization, including warmed windows. These are
+    // Electron DIP bounds, not the taskbar work area or bitmap pixel dimensions.
+    for (const entry of entries) entry.window.setBounds(entry.display!.bounds, false)
+  }
   return entries
 }
 

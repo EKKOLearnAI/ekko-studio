@@ -47,7 +47,7 @@ optional addons omitted, creates an asar, and imports D-Bus messages in Electron
 If Electron was installed with scripts disabled, pass `--electron=/absolute/binary`.
 This verifies the dependency closure; it is not a Windows/Linux installation test.
 
-95 focused unit tests and 14 screenshot browser tests passed. A focused coverage run
+96 focused unit tests and 14 screenshot browser tests passed. A focused coverage run
 also passed. Browser tests cover original pixels through zoom, scroll, resize, and
 image switching, plus selection, all annotation tools, undo/redo, and composer attachment.
 Portal tests cover v1/v2/v3, early responses, changed handles, sender checks, cancellation,
@@ -104,6 +104,30 @@ baseline failures visible in PR validation; do not describe the full suites as g
 GitHub Build and all four Playwright shards for the initial screenshot PR #3310 passed.
 
 ## Interactive pixel probe
+
+### Windows overlay edges
+
+A Windows 10 test on 2026-10-08 reported uncovered strips at the right and bottom.
+The Windows overlay now explicitly disables the default native thick frame and
+rounded corners, sizes its content to the display, and reapplies full `display.bounds`
+after initialization and on warmed reuse. Bounds stay in Electron DIP; bitmap pixels
+and the taskbar work area never determine overlay size. This addresses native frame
+insets and initialization geometry without requiring a user scaling change.
+
+The manual Windows build runs a native overlay coverage probe at forced Electron
+scales 1/1.25/1.5/2. It checks each attached display on first show and warmed reuse:
+window bounds, content bounds, renderer viewport/stage, and Win32 client edges from
+`GetClientRect`/`ClientToScreen` in a per-monitor DPI-aware thread. Reports identify
+the actual OS, display scale and geometry; one-pixel rounding is tolerated.
+
+```bash
+node packages/desktop/scripts/verify-screenshot-overlay.cjs --matrix --output-dir=/absolute/geometry-reports
+```
+
+Reports are uploaded as `desktop-win32-x64-screenshot-geometry`. CI's attached display
+and forced Electron scale matrix are not acceptance of Windows 10, real mixed-DPI
+monitors, or Windows Display Settings scaling. Native user-machine verification
+remains necessary. A direct macOS geometry probe also passed after the change.
 
 Build desktop first, then run with the Electron executable on the actual desktop:
 

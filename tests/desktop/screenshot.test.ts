@@ -27,6 +27,7 @@ vi.mock('electron', async () => {
     setAlwaysOnTop = vi.fn()
     setVisibleOnAllWorkspaces = vi.fn()
     setMenu = vi.fn()
+    setBounds = vi.fn()
     loadURL = state.load
     showInactive = vi.fn()
     show = vi.fn()
@@ -339,12 +340,38 @@ describe('desktop region screenshots', () => {
     expect(invisible.hide).not.toHaveBeenCalled()
     for (const entry of state.overlays) {
       expect(entry.options.type).toBeUndefined()
+      expect(entry.options).toMatchObject({ thickFrame: false, roundedCorners: false, useContentSize: true })
       expect(entry.setVisibleOnAllWorkspaces).not.toHaveBeenCalled()
     }
     cancelRegionScreenshot(1, request.requestId)
     await expect(result).resolves.toBeNull()
     expect(minimized.showInactive).not.toHaveBeenCalled()
     expect(invisible.showInactive).not.toHaveBeenCalled()
+  })
+
+  it('covers each complete Windows display in DIP, including the taskbar and mixed-DPI negative origins, on every capture', async () => {
+    platform('win32')
+    const displays = state.getDisplays()
+    displays[0].scaleFactor = 1.25
+    displays[0].workArea = { x: 0, y: 0, width: 1440, height: 852 }
+    displays[1].scaleFactor = 1.5
+    displays[1].workArea = { x: -1880, y: 0, width: 1880, height: 1080 }
+    const first = await openCapture()
+    for (const [index, overlay] of state.overlays.entries()) {
+      expect(overlay.setBounds).toHaveBeenCalledWith(displays[index].bounds, false)
+      expect(overlay.setBounds.mock.invocationCallOrder[0]).toBeGreaterThan(state.load.mock.invocationCallOrder[index])
+      expect(overlay.setBounds.mock.invocationCallOrder[0]).toBeLessThan(overlay.showInactive.mock.invocationCallOrder[0])
+    }
+    cancelRegionScreenshot(1, request.requestId)
+    await first.result
+    const second = await openCapture()
+    expect(state.overlays).toHaveLength(2)
+    for (const [index, overlay] of state.overlays.entries()) {
+      expect(overlay.setBounds).toHaveBeenCalledTimes(2)
+      expect(overlay.setBounds).toHaveBeenLastCalledWith(displays[index].bounds, false)
+    }
+    cancelRegionScreenshot(1, request.requestId)
+    await second.result
   })
 
   it('edits unmapped sources as independent images, with no guessed desktop bounds', async () => {
