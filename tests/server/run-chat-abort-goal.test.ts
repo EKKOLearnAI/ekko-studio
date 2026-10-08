@@ -114,6 +114,9 @@ describe('run chat abort goal handling', () => {
     expect(bridge.destroy).toHaveBeenCalledTimes(1)
     expect(bridge.goalPause).toHaveBeenCalledTimes(1)
     expect(emit).toHaveBeenCalledWith('abort.completed', expect.objectContaining({ synced: false }))
+    expect(emit).toHaveBeenCalledWith('run.queued', expect.objectContaining({
+      session_id: 'session-1', queue_length: 0, dequeued_queue_id: 'next',
+    }))
   })
 
   it('claims abort completion before accounting and rechecks the generation afterwards', async () => {

@@ -315,6 +315,7 @@ export async function markAbortCompleted(
     emitToSession(nsp, socket, sessionId, 'run.queued', {
       event: 'run.queued',
       queue_length: state.queue.length,
+      dequeued_queue_id: next.queue_id,
     })
     state.events = []
     runQueuedItem(socket, sessionId, next, profile || 'default')
