@@ -105,7 +105,7 @@ onUnmounted(() => {
   font: inherit;
   &:focus { outline: 2px solid var(--accent-primary); outline-offset: 1px; }
 }
-.shortcut-hint { font-size: 12px; }
+.shortcut-hint { margin: 12px 0; font-size: 12px; }
 .shortcut-modes { display: flex; flex-direction: column; gap: 8px; }
 .shortcut-error { color: var(--error); }
 .shortcut-actions { display: flex; justify-content: flex-end; gap: 8px; }
