@@ -114,20 +114,27 @@ after initialization and on warmed reuse. Bounds stay in Electron DIP; bitmap pi
 and the taskbar work area never determine overlay size. This addresses native frame
 insets and initialization geometry without requiring a user scaling change.
 
-The manual Windows build runs a native overlay coverage probe at forced Electron
-scales 1/1.25/1.5/2. It checks each attached display on first show and warmed reuse:
+The manual Windows build runs a native overlay coverage probe at the actual system
+DPI. It checks each attached display on first show and warmed reuse:
 window bounds, content bounds, renderer viewport/stage, and Win32 client edges from
-`GetClientRect`/`ClientToScreen` in a per-monitor DPI-aware thread. Reports identify
+`GetClientRect`/`ClientToScreen` against the independent physical monitor rectangle
+from `GetMonitorInfo`, in a per-monitor DPI-aware thread. Reports identify
 the actual OS, display scale and geometry; one-pixel rounding is tolerated.
 
 ```bash
-node packages/desktop/scripts/verify-screenshot-overlay.cjs --matrix --output-dir=/absolute/geometry-reports
+node packages/desktop/scripts/verify-screenshot-overlay.cjs --output-dir=/absolute/geometry-reports
 ```
 
-Reports are uploaded as `desktop-win32-x64-screenshot-geometry`. CI's attached display
-and forced Electron scale matrix are not acceptance of Windows 10, real mixed-DPI
-monitors, or Windows Display Settings scaling. Native user-machine verification
-remains necessary. A direct macOS geometry probe also passed after the change.
+Reports are uploaded as `desktop-win32-x64-screenshot-geometry`. Do not simulate
+Windows system DPI with `--force-device-scale-factor`: it can divide Electron screen
+bounds twice ([upstream report](https://github.com/electron/electron/issues/26344)).
+The first forced-scale CI run demonstrated this: at scale 2 a 1024×768 physical
+monitor appeared as 256×192 DIP and the overlay covered only 512×384 physical pixels;
+the original comparison against Electron-derived dimensions missed that gap.
+The corrected probe independently checks the OS monitor and rejects forced scaling.
+CI's virtual display is not acceptance of Windows 10 or real mixed-DPI monitors.
+Run the probe on Windows with each actual Display Settings scale for that acceptance.
+A direct macOS geometry probe also passed after the change.
 
 Build desktop first, then run with the Electron executable on the actual desktop:
 
