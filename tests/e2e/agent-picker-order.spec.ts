@@ -35,5 +35,50 @@ for (const mobile of [false, true]) {
     await expect(drawer.locator('.new-chat-field').filter({ hasText: /^Models/ })).toHaveCount(0)
     await drawer.locator('.n-radio-button').filter({ hasText: 'Provider and model' }).click()
     await expect(drawer.locator('.new-chat-field').filter({ hasText: /^Models/ })).toBeVisible()
+    await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await page.reload()
+    if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
+    await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+    await expect(drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first()).toContainText('Qwen Code')
+    await expect(drawer.getByRole('button', { name: 'Create', exact: true })).toBeEnabled()
   })
 }
+
+test('a saved unavailable Agent falls back to the first installed option and is restored when available', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript(() => localStorage.setItem('hermes_new_chat_agent_v1', 'codex'))
+  await mockHermesApi(page)
+  await mockChatSocket(page)
+  let codexInstalled = false
+  await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+    revision: 1, updatedAt: new Date().toISOString(), agents: [
+      { id: 'ekko-agent', installed: false, source: 'not-installed' },
+      { id: 'hermes', installed: true, source: 'user-cli' },
+      { id: 'codex', installed: codexInstalled, source: codexInstalled ? 'user-cli' : 'not-installed' },
+    ],
+  } }))
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  const drawer = page.locator('.new-chat-drawer')
+  const agent = drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first()
+  await expect(agent).toContainText('Hermes')
+  await expect(drawer.getByRole('button', { name: 'Create', exact: true })).toBeEnabled()
+  expect(await page.evaluate(() => localStorage.getItem('hermes_new_chat_agent_v1'))).toBe('codex')
+  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(drawer).toBeHidden()
+  codexInstalled = true
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  await expect(agent).toContainText('Codex')
+})
+
+test('an unknown cached Agent falls back to the first option', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript(() => localStorage.setItem('hermes_new_chat_agent_v1', 'removed-agent'))
+  await mockHermesApi(page)
+  await mockChatSocket(page)
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  const drawer = page.locator('.new-chat-drawer')
+  await expect(drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first()).toContainText('Ekko')
+  await expect(drawer.getByRole('button', { name: 'Create', exact: true })).toBeEnabled()
+})

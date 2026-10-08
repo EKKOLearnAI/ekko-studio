@@ -819,7 +819,17 @@ const headerTitle = computed(() =>
 );
 
 const showNewChatModal = ref(false);
-const newChatAgent = ref<"hermes" | ChatCodingAgentId>("ekko-agent");
+const NEW_CHAT_AGENT_STORAGE_KEY = "hermes_new_chat_agent_v1";
+function loadNewChatAgent(): "hermes" | ChatCodingAgentId {
+  try {
+    const saved = localStorage.getItem(NEW_CHAT_AGENT_STORAGE_KEY);
+    return AGENT_OPTIONS.find(option => option.value === saved)?.value || AGENT_OPTIONS[0].value;
+  } catch {
+    return AGENT_OPTIONS[0].value;
+  }
+}
+let preferredNewChatAgent = loadNewChatAgent();
+const newChatAgent = ref<"hermes" | ChatCodingAgentId>(preferredNewChatAgent);
 const newChatAgentMode = ref<"global" | "scoped">("scoped");
 const newChatProfile = ref<string>("default");
 const newChatProvider = ref<string>("");
@@ -1189,15 +1199,25 @@ function isCurrentNewChatOptionsLoad(sequence: number) {
   return showNewChatModal.value && sequence === newChatOptionsLoadSequence;
 }
 
+function handleNewChatAgentChange(value: "hermes" | ChatCodingAgentId) {
+  if (!newChatAgentOptions.value.some(option => option.value === value)) return;
+  preferredNewChatAgent = value;
+  newChatAgent.value = value;
+  try {
+    localStorage.setItem(NEW_CHAT_AGENT_STORAGE_KEY, value);
+  } catch {
+    // Keep the selection in memory when local storage is unavailable.
+  }
+}
+
 async function refreshNewChatAgentAvailability(sequence: number) {
   newChatAgentLoading.value = !newChatAgentAvailability.value;
   try {
     const availability = await fetchAgentAvailabilitySnapshot();
     if (!isCurrentNewChatOptionsLoad(sequence)) return;
     newChatAgentAvailability.value = availability;
-    if (!newChatAgentOptions.value.some(option => option.value === newChatAgent.value)) {
-      newChatAgent.value = newChatAgentOptions.value[0]?.value || "ekko-agent";
-    }
+    newChatAgent.value = newChatAgentOptions.value.find(option => option.value === preferredNewChatAgent)?.value
+      || newChatAgentOptions.value[0]?.value || AGENT_OPTIONS[0].value;
   } catch {
     if (isCurrentNewChatOptionsLoad(sequence) && !newChatAgentAvailability.value) {
       message.error(t("codingAgents.loadFailed"));
@@ -2902,7 +2922,8 @@ async function handleSessionModelCustomSubmit() {
           <label class="new-chat-field">
             <span class="new-chat-label">{{ t("chat.agent") }}</span>
             <NSelect
-              v-model:value="newChatAgent"
+              :value="newChatAgent"
+              @update:value="handleNewChatAgentChange"
               :options="newChatAgentOptions"
                 :virtual-scroll="false"
               :loading="newChatAgentLoading"
