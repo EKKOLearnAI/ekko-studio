@@ -92,15 +92,28 @@ describe('native ACP session transport', () => {
     turn.dispose(new Error('test cancelled'))
     await rejected
   })
-  it('fails pending work on protocol corruption and early exit', async () => {
-    for (const corrupt of [true, false]) {
+  it('fails pending work on a corrupt frame or early exit', async () => {
+    for (const kind of ['corrupt-frame', 'early-exit'] as const) {
       const { turn, child } = connection({ hold: true })
       const pending = turn.prompt({ cwd: '/workspace', text: 'go', mcpServers: [] })
       const rejected = expect(pending).rejects.toThrow()
-      if (corrupt) child.stdout.write('not json\n')
+      if (kind === 'corrupt-frame') child.stdout.write('{"jsonrpc":"2.0",\n')
       else child.emit('close', 1)
       await rejected
+      turn.dispose()
     }
+  })
+  it('skips a dependency log line on stdout without disposing the turn', async () => {
+    const { turn, sent, child, receive, update } = connection({ hold: true })
+    const pending = turn.prompt({ cwd: '/workspace', text: 'go', mcpServers: [] })
+    await vi.waitFor(() => expect(sent.at(-1).method).toBe('session/prompt'))
+    // A plain-text line (e.g. an SDK console.debug) is not an ACP frame; it must
+    // not be mistaken for protocol corruption and kill the turn.
+    child.stdout.write('Client.listResourceTemplates() called but server does not advertise resources capability\n')
+    receive({ method: 'session/update', params: { sessionId: 'native', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'after noise' } } } })
+    receive({ id: sent.find(message => message.method === 'session/prompt').id, result: { stopReason: 'end_turn' } })
+    await expect(pending).resolves.toBe('end_turn')
+    expect(update).toHaveBeenCalledExactlyOnceWith({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'after noise' } })
   })
 })
 

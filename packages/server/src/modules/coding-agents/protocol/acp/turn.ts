@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
 import { readFileSync } from 'node:fs'
 import type { CodingAgentImageInput } from '../../protocol/types'
+import { logger } from '../../../studio/public/logging'
 
 interface Pending {
   resolve(value: any): void
@@ -31,7 +32,7 @@ export class NativeAcpTurn {
           const line = this.buffer.slice(0, end).trim()
           this.buffer = this.buffer.slice(end + 1)
           if (line.length > 16 * 1024 * 1024) throw new Error('ACP message exceeds 16 MiB')
-          if (line) this.receive(JSON.parse(line))
+          if (line) this.receiveLine(line)
         }
         if (this.buffer.length > 16 * 1024 * 1024) throw new Error('ACP message exceeds 16 MiB')
       } catch (error) { this.dispose(error instanceof Error ? error : new Error(String(error))) }
@@ -39,6 +40,18 @@ export class NativeAcpTurn {
     child.on('error', error => this.dispose(error))
     child.on('close', () => this.dispose(new Error('ACP connection closed before the request completed')))
     child.stdin?.on('error', error => this.dispose(error))
+  }
+
+  // A valid ACP frame is always a JSON object, so any line not starting with '{'
+  // is dependency stdout noise (e.g. the MCP SDK's console.debug), not the
+  // protocol. Skip and warn instead of disposing the whole turn; only a line that
+  // looks like JSON but fails to parse is a real protocol break and stays fatal.
+  private receiveLine(line: string) {
+    if (!line.startsWith('{')) {
+      logger.warn({ line: line.slice(0, 500) }, 'skipping non-JSON line on ACP stdout')
+      return
+    }
+    this.receive(JSON.parse(line))
   }
 
   private write(message: object) {
