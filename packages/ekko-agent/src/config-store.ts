@@ -588,6 +588,12 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig {
         'runtime.maxConsecutiveToolFailures',
         1,
       ),
+      maxIdenticalToolFailures: integer(
+        runtime.maxIdenticalToolFailures,
+        DEFAULT_EKKO_CONFIG.runtime.maxIdenticalToolFailures,
+        'runtime.maxIdenticalToolFailures',
+        1,
+      ),
     },
     model: {
       ...model,

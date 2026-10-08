@@ -59,6 +59,7 @@ import {
   DEFAULT_AGENT_MAX_STEPS,
   DEFAULT_AGENT_MODEL_MAX_RETRIES,
   DEFAULT_AGENT_SUBTASK_MAX_STEPS,
+  DEFAULT_AGENT_MAX_IDENTICAL_TOOL_FAILURES,
   DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD,
   DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL,
 } from '../config'
@@ -114,14 +115,25 @@ interface ToolFailureStreak {
   failures: number
 }
 
+/**
+ * Tracks consecutive failures where the tool name AND the serialized arguments
+ * are identical. Catches the "model repeats the exact same broken call" loop
+ * that a name-only streak (ToolFailureStreak) would keep nudging forever.
+ */
+interface IdenticalToolFailureStreak {
+  toolName: string
+  argumentsSignature: string
+  failures: number
+}
+
 function toolFailureRecoveryPrompt(streak: ToolFailureStreak, result: AgentToolResult): string {
   const detail = String(result.error || result.content || 'Unknown tool failure.')
     .slice(0, TOOL_FAILURE_RECOVERY_DETAIL_CHARS)
   return [
     `Tool recovery required: "${streak.toolName}" failed ${streak.failures} consecutive times.`,
-    'Do not repeat the same call unchanged and do not stop the run because of these tool failures.',
+    'If the tool call arguments were the same as before, change them or try a different tool before calling again.',
     'Diagnose the latest error, correct the arguments or prerequisites, or switch to a different tool or approach.',
-    'Continue working toward the user\'s goal.',
+    'If no further progress is possible after correcting the call, stop and explain the situation to the user instead of retrying the same call.',
     `Latest failure: ${detail}`,
   ].join('\n')
 }
@@ -181,6 +193,7 @@ export class AgentRuntime {
   private readonly modelDefaults?: AgentRuntimeOptions['modelDefaults']
   private readonly maxModelRetries: number
   private readonly toolFailureRecoveryThreshold: number
+  private readonly maxIdenticalToolFailures: number
   private readonly backgroundDelegationEnabled: boolean
   private readonly subtaskMaxSteps: number
   private readonly defaultContextKey?: string
@@ -228,6 +241,10 @@ export class AgentRuntime {
       options.toolFailureRecoveryThreshold
       ?? options.maxConsecutiveToolFailures
       ?? DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD,
+    ))
+    this.maxIdenticalToolFailures = Math.max(1, Math.floor(
+      options.maxIdenticalToolFailures
+      ?? DEFAULT_AGENT_MAX_IDENTICAL_TOOL_FAILURES,
     ))
     this.backgroundDelegationEnabled = options.backgroundDelegationEnabled !== false
     this.subtaskMaxSteps = Math.max(
@@ -380,6 +397,10 @@ export class AgentRuntime {
       ?? input.maxConsecutiveToolFailures
       ?? this.toolFailureRecoveryThreshold,
     ))
+    const maxIdenticalToolFailures = Math.max(1, Math.floor(
+      input.maxIdenticalToolFailures
+      ?? this.maxIdenticalToolFailures,
+    ))
     const pendingBackgroundSubagentIds = new Set<string>()
     const taskPlan = new RunTaskPlan(runId, plan => {
       input.onPlanUpdate?.(plan)
@@ -457,6 +478,7 @@ export class AgentRuntime {
     const contextKey = this.contextKeyFor(input)
     let contextEstimate: AgentRuntimeContextEstimate | undefined
     let toolFailureStreak: ToolFailureStreak | undefined
+    let identicalToolFailureStreak: IdenticalToolFailureStreak | undefined
     const completeBoundaryInterrupt = (completedSteps: number): AgentRuntimeRunResult => {
       if (activeBoundaryRun) activeBoundaryRun.terminal = true
       output = {
@@ -623,6 +645,7 @@ export class AgentRuntime {
             if (input.skillReviewEnabled !== false) this.recordSkillToolCall(contextKey, toolCall.name)
             if (result.ok) {
               toolFailureStreak = undefined
+              identicalToolFailureStreak = undefined
               continue
             }
             toolFailureStreak = toolFailureStreak?.toolName === toolCall.name
@@ -637,6 +660,52 @@ export class AgentRuntime {
               })
               toolRecoveryPrompts.push(toolFailureRecoveryPrompt(toolFailureStreak, result))
               toolFailureStreak = undefined
+            }
+            const argsSignature = JSON.stringify(toolCall.arguments ?? {})
+            if (
+              identicalToolFailureStreak?.toolName === toolCall.name
+              && identicalToolFailureStreak.argumentsSignature === argsSignature
+            ) {
+              identicalToolFailureStreak = {
+                toolName: toolCall.name,
+                argumentsSignature: argsSignature,
+                failures: identicalToolFailureStreak.failures + 1,
+              }
+            } else {
+              identicalToolFailureStreak = {
+                toolName: toolCall.name,
+                argumentsSignature: argsSignature,
+                failures: 1,
+              }
+            }
+            if (identicalToolFailureStreak.failures >= maxIdenticalToolFailures) {
+              emit({
+                type: 'run.identical_tool_failure_limit',
+                runId,
+                toolName: toolCall.name,
+                failures: identicalToolFailureStreak.failures,
+                limit: maxIdenticalToolFailures,
+              })
+              const limitDetail = String(result.error || result.content || 'Unknown tool failure.')
+                .slice(0, TOOL_FAILURE_RECOVERY_DETAIL_CHARS)
+              const limitPrompt = [
+                `Identical tool failure limit reached: "${toolCall.name}" was called with the same arguments ${identicalToolFailureStreak.failures} consecutive times and failed each time.`,
+                'The run is stopping to avoid a repeated-failure loop.',
+                `Last error: ${limitDetail}`,
+                'If this is a bug or the tool is unavailable, tell the user what happened and stop. Do not retry the same call.',
+              ].join('\n')
+              messages.push(createSystemMessage(limitPrompt))
+              output = {
+                role: 'assistant',
+                content: `Stopped after ${identicalToolFailureStreak.failures} consecutive identical-argument failures calling "${toolCall.name}".`,
+                finishReason: 'identical_tool_failure_limit',
+              }
+              const ctx = contextKey ? this.modelContexts.get(contextKey) : assistantMessage.context
+              if (activeBoundaryRun) activeBoundaryRun.terminal = true
+              emit({ type: 'run.completed', runId, output, steps: step, context: ctx, contextEstimate })
+              this.completeMemory(memoryIdentity, messages, input)
+              this.completeSkillReview(runId, contextKey, messages, input, input.onEvent)
+              return { runId, messages, output, steps, events, context: ctx, contextEstimate, memoryContext }
             }
           }
         }
