@@ -3794,6 +3794,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_32_1: 'Added region screenshots and annotation tools to desktop chats and group chats, with configurable global shortcuts and capture support for Windows, macOS, and Linux (#3312)',
+    new_0_7_32_2: 'Fixed screenshot overlay failures leaving chat windows hidden; the original window state is now restored when capture ends or fails (#3318)',
+    new_0_7_32_3: 'New chats remember the last selected Agent, including after a refresh (#3320)',
+    new_0_7_32_4: 'Favorite and recent workspace folders are now saved per account and available across browsers (#3317)',
+    new_0_7_32_5: 'Fixed missing token usage for Coding Agents using vLLM and other streaming Chat Completions providers (#3314)',
+    new_0_7_32_6: 'Improved Hermes chat recovery after reconnects, fixed runs remaining busy after completion or stop, and ensured queued messages continue (#3321)',
+    new_0_7_32_7: 'Fixed Linux desktop Open at Login and improved error messages and diagnostics for desktop startup failures (#3307, #3308)',
+    new_0_7_32_8: 'Removed the outdated group chat upgrade notice (#3306)',
     new_0_7_31_1: 'Added authenticated P2P connections between the App and Studio, with automatic cloud relay fallback when direct connections are unavailable (#3290)',
     new_0_7_31_2: 'Improved P2P connections on systems with multiple network interfaces and in Docker, and fixed direct connection failures caused by proxy fake-IP DNS (#3292, #3303)',
     new_0_7_31_3: 'Unified model context, reasoning effort, and pricing lookup, improved matching for custom endpoints and prefixed model IDs, and prioritized manually configured prices (#3298, #3300)',
@@ -3807,7 +3815,5 @@ export default {
     new_0_7_30_6: 'Fixed incomplete Copilot tool arguments when streaming through the Responses API (#3286)',
     new_0_7_30_7: 'Fixed Claude tool execution without confirmation when running as root, with consistent launch permissions in global and scoped modes (#3287)',
     new_0_7_30_8: 'Removed the retired OpenCode Free provider and its model entry points (#3277)',
-    new_0_7_29_1: 'Restored file downloads from workspace tree menus and diff toolbars in chats and group chats (#3268)',
-    new_0_7_29_2: 'Fixed Antigravity being mislabeled as Ekko in Live Activity notifications (#3272)',
   },
 }
