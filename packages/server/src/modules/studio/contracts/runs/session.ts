@@ -155,6 +155,8 @@ export interface SessionState {
   abortController?: AbortController
   runId?: string
   activeRunMarker?: string
+  /** Generation owned by a live Hermes output consumer, including finalization. */
+  bridgeRunPollMarker?: string
   profile?: string
   inputTokens?: number
   outputTokens?: number

@@ -656,6 +656,53 @@ describe('ChatRunSocket bridge readiness gating', () => {
     })
   })
 
+  it('recovers the terminal result of a cached run that lost its consumer', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).sessionMap.set('session-1', {
+      messages: [], events: [], queue: [], source: 'cli', isWorking: true,
+      runId: 'old-run', activeRunMarker: 'old-marker',
+    })
+    ;(server as any).onConnection(socket)
+    await handlers.get('resume')?.({ session_id: 'session-1' })
+    expect(bridgeMock.statusIfLoaded).toHaveBeenCalledWith('session-1', 'default', { timeoutMs: 1000 })
+    expect(resumeBridgeRunMock).toHaveBeenCalledWith(expect.anything(), socket,
+      expect.objectContaining({ sessionId: 'session-1', runId: 'old-run' }), expect.anything(), bridgeMock, expect.any(Function))
+  })
+
+  it('preserves a live consumer while its terminal accounting is pending', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).sessionMap.set('session-1', {
+      messages: [], events: [], queue: [], source: 'cli', isWorking: true,
+      runId: 'old-run', activeRunMarker: 'old-marker', bridgeRunPollMarker: 'old-marker',
+    })
+    ;(server as any).onConnection(socket)
+    await handlers.get('resume')?.({ session_id: 'session-1' })
+    expect(bridgeMock.statusIfLoaded).toHaveBeenCalled()
+    expect(resumeBridgeRunMock).not.toHaveBeenCalled()
+    expect(socket.emit).toHaveBeenCalledWith('resumed', expect.objectContaining({ isWorking: true }))
+  })
+
+  it('ignores a status reply for a run superseded during reconnect', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const state = { messages: [], events: [], queue: [], source: 'cli', isWorking: true,
+      runId: 'old-run', activeRunMarker: 'old-marker' }
+    ;(server as any).sessionMap.set('session-1', state)
+    bridgeMock.statusIfLoaded.mockImplementationOnce(async () => {
+      Object.assign(state, { runId: 'new-run', activeRunMarker: 'new-marker' })
+      return { running: true, current_run_id: 'old-run' }
+    })
+    ;(server as any).onConnection(socket)
+    await handlers.get('resume')?.({ session_id: 'session-1' })
+    expect(resumeBridgeRunMock).not.toHaveBeenCalled()
+    expect(state).toMatchObject({ runId: 'new-run', activeRunMarker: 'new-marker' })
+  })
+
   it('reattaches a loaded running bridge run without probing manager readiness again', async () => {
     bridgeMock.statusIfLoaded
       .mockResolvedValueOnce({

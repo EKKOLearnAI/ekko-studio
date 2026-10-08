@@ -152,6 +152,7 @@ class RunRecord:
     error: str | None = None
     deltas: list[str] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
+    worker_thread: threading.Thread | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -1709,11 +1710,15 @@ class AgentPool:
             session.boundary_pending_run_id = None
             session.boundary_reached_run_id = None
             session.last_used_at = time.time()
-            session_cwd_bound = _bind_session_workspace_cwd(session.session_id, workspace)
+            session_cwd_bound = False
             try:
+                session_cwd_bound = _bind_session_workspace_cwd(session.session_id, workspace)
                 context_event = self._bridge_context_ready_event(session, instructions, profile)
                 if context_event:
                     record.events.append(_jsonable(context_event))
+            except BaseException as exc:
+                self._fail_unexpected_run(session, record, exc)
+                raise
             finally:
                 if session_cwd_bound:
                     _clear_session_workspace_cwd()
@@ -1724,10 +1729,49 @@ class AgentPool:
             daemon=True,
             name=f"hermes-bridge-run-{run_id[:8]}",
         )
-        thread.start()
+        # Status readers take the same session lock, so they cannot mistake a
+        # registered thread which has not started yet for a dead worker.
+        with session.lock:
+            record.worker_thread = thread
+            try:
+                thread.start()
+            except BaseException as exc:
+                self._fail_unexpected_run(session, record, exc)
+                raise
         return record
 
     def _run_chat(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None) -> None:
+        try:
+            self._run_chat_inner(session, record, message, storage_message, instructions, conversation_history, profile, force_compress, workspace, source, reasoning_effort)
+        except BaseException as exc:
+            # Includes setup failures outside the inner try and SystemExit from
+            # agent/tool code. These terminate this run, not the bridge worker.
+            self._fail_unexpected_run(session, record, exc)
+        finally:
+            self._fail_unexpected_run(session, record, RuntimeError("Hermes run worker exited without a terminal result"))
+
+    def _fail_unexpected_run(self, session: AgentSession | None, record: RunRecord, exc: BaseException) -> None:
+        with session.lock if session else self._lock:
+            if record.status != "running":
+                return
+            record.error = f"{type(exc).__name__}: {exc}"
+            record.result = {"error": record.error, "failed": True}
+            record.ended_at = time.time()
+            record.status = "error"
+            if session is not None and session.current_run_id == record.run_id:
+                self._reset_boundary_run(session, record.run_id)
+                session.running = False
+                session.current_run_id = None
+                session.last_used_at = time.time()
+
+    def _check_run_worker(self, record: RunRecord) -> None:
+        with self._lock:
+            session = self._sessions.get(record.session_id)
+        with session.lock if session else self._lock:
+            if record.status == "running" and record.worker_thread is not None and not record.worker_thread.is_alive():
+                self._fail_unexpected_run(session, record, RuntimeError("Hermes run worker exited without a terminal result"))
+
+    def _run_chat_inner(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None) -> None:
         with _profile_env(profile):
             _refresh_approval_allowlist()
             _install_execute_code_approval_memory_patch()
@@ -1900,7 +1944,6 @@ class AgentPool:
                 with session.lock:
                     if isinstance(result.get("messages"), list):
                         session.history = result["messages"]
-                    record.status = "interrupted" if result.get("interrupted") else "complete"
                     record.result = result
                     record.ended_at = time.time()
                     if boundary_interrupted:
@@ -1910,6 +1953,7 @@ class AgentPool:
                             "finish_reason": "boundary_interrupt",
                         })
                         self._clear_completed_boundary_interrupt(session.agent)
+                    record.status = "interrupted" if result.get("interrupted") else "complete"
                     self._reset_boundary_run(session, record.run_id)
                     session.running = False
                     session.current_run_id = None
@@ -1933,7 +1977,6 @@ class AgentPool:
                         pass
                 with session.lock:
                     if boundary_interrupted:
-                        record.status = "interrupted"
                         record.error = None
                         record.result = {
                             "interrupted": True,
@@ -1947,10 +1990,10 @@ class AgentPool:
                         })
                         self._clear_completed_boundary_interrupt(session.agent)
                     else:
-                        record.status = "error"
                         record.error = str(exc)
                         record.result = {"error": str(exc), "traceback": traceback.format_exc()}
                     record.ended_at = time.time()
+                    record.status = "interrupted" if boundary_interrupted else "error"
                     self._reset_boundary_run(session, record.run_id)
                     session.running = False
                     session.current_run_id = None
@@ -2697,6 +2740,7 @@ class AgentPool:
             record = self._runs.get(run_id)
         if record is None:
             raise KeyError(f"unknown run: {run_id}")
+        self._check_run_worker(record)
         return {
             "run_id": record.run_id,
             "session_id": record.session_id,
@@ -2715,6 +2759,10 @@ class AgentPool:
             record = self._runs.get(run_id)
         if record is None:
             raise KeyError(f"unknown run: {run_id}")
+        self._check_run_worker(record)
+        # Read status first. If the worker finishes while deltas are copied,
+        # report running once more so the next poll can include the final tail.
+        status = record.status
         cursor = max(0, int(cursor or 0))
         deltas = list(record.deltas)
         next_cursor = len(deltas)
@@ -2725,12 +2773,12 @@ class AgentPool:
         return {
             "run_id": record.run_id,
             "session_id": record.session_id,
-            "status": record.status,
+            "status": status,
             "delta": "".join(deltas[cursor:]),
             "cursor": next_cursor,
             "output": "".join(deltas),
-            "done": record.status != "running",
-            "result": record.result if record.status != "running" else None,
+            "done": status != "running",
+            "result": record.result if status != "running" else None,
             "error": record.error,
             "events": new_events,
             "event_cursor": next_event_cursor,
@@ -2847,6 +2895,7 @@ class AgentPool:
     def status(self, session_id: str) -> dict[str, Any]:
         with self._lock:
             session = self._sessions.get(session_id)
+            record = self._runs.get(session.current_run_id) if session else None
         if session is None:
             return {
                 "session_id": session_id,
@@ -2854,6 +2903,8 @@ class AgentPool:
                 "running": False,
                 "message_count": 0,
             }
+        if record is not None:
+            self._check_run_worker(record)
         with session.lock:
             return {
                 "session_id": session_id,

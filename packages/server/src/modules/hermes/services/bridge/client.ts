@@ -616,13 +616,15 @@ export class AgentBridgeClient {
 
   async *streamOutput(
     runId: string,
-    options: AgentBridgeRequestOptions & { intervalMs?: number } = {},
+    options: AgentBridgeRequestOptions & { intervalMs?: number; shouldContinue?: () => boolean } = {},
   ): AsyncGenerator<AgentBridgeOutput> {
     const intervalMs = options.intervalMs || 100
     let cursor = 0
     let eventCursor = 0
     for (;;) {
+      if (options.shouldContinue && !options.shouldContinue()) return
       const chunk = await this.getOutput(runId, cursor, eventCursor, options)
+      if (options.shouldContinue && !options.shouldContinue()) return
       cursor = chunk.cursor
       eventCursor = chunk.event_cursor
       if (chunk.delta || chunk.done || (chunk.events && chunk.events.length > 0)) yield chunk
