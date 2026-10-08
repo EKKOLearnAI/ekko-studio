@@ -24605,6 +24605,274 @@
         ]
       }
     },
+    "/api/studio/workspace/directories": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "List directories",
+        "description": "Directory history and favorites for the authenticated Studio account, shared by Studio and App across Profiles. System-generated workspaces are excluded. Timestamps are Unix milliseconds.",
+        "operationId": "listWorkspaceDirectories",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account directory shortcuts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "directories"
+                  ],
+                  "properties": {
+                    "directories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path",
+                          "isFavorite",
+                          "lastUsed",
+                          "useCount",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "isFavorite": {
+                            "type": "boolean"
+                          },
+                          "lastUsed": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "useCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "createdAt": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "updatedAt": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated account required"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create directories",
+        "description": "Directory history and favorites for the authenticated Studio account, shared by Studio and App across Profiles. System-generated workspaces are excluded. Timestamps are Unix milliseconds.",
+        "operationId": "recordWorkspaceDirectory",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account directory shortcuts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "directories"
+                  ],
+                  "properties": {
+                    "directories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path",
+                          "isFavorite",
+                          "lastUsed",
+                          "useCount",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "isFavorite": {
+                            "type": "boolean"
+                          },
+                          "lastUsed": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "useCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "createdAt": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "updatedAt": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid directory path or favorite value"
+          },
+          "401": {
+            "description": "Authenticated account required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Update directories",
+        "description": "Directory history and favorites for the authenticated Studio account, shared by Studio and App across Profiles. System-generated workspaces are excluded. Timestamps are Unix milliseconds.",
+        "operationId": "setWorkspaceDirectoryFavorite",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account directory shortcuts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "directories"
+                  ],
+                  "properties": {
+                    "directories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path",
+                          "isFavorite",
+                          "lastUsed",
+                          "useCount",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "isFavorite": {
+                            "type": "boolean"
+                          },
+                          "lastUsed": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "useCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "createdAt": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "updatedAt": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid directory path or favorite value"
+          },
+          "401": {
+            "description": "Authenticated account required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "favorite"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "favorite": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/workspace/folders": {
       "get": {
         "tags": [

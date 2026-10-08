@@ -1,5 +1,6 @@
 import Router from '@koa/router'
 import * as shares from '../controllers/session-shares'
+import * as directories from '../controllers/workspace-directories'
 import * as ctrl from '../controllers/sessions'
 
 export const sessionRoutes = new Router()
@@ -57,6 +58,9 @@ sessionRoutes.get('/api/studio/sessions/:id/share-workspaces', shares.workspaces
 sessionRoutes.post('/api/studio/sessions/:id/model', ctrl.setModel)
 sessionRoutes.post('/api/studio/sessions/:id/reasoning-effort', ctrl.setReasoningEffort)
 sessionRoutes.get('/api/studio/workspace/folders', ctrl.listWorkspaceFolders)
+sessionRoutes.get('/api/studio/workspace/directories', directories.list)
+sessionRoutes.post('/api/studio/workspace/directories', directories.record)
+sessionRoutes.patch('/api/studio/workspace/directories', directories.setFavorite)
 sessionRoutes.post('/api/studio/workspace/folders', ctrl.createWorkspaceFolder)
 sessionRoutes.post('/api/studio/workspace/folders/rename', ctrl.renameWorkspaceFolder)
 sessionRoutes.delete('/api/studio/workspace/folders', ctrl.deleteWorkspaceFolder)

@@ -3,6 +3,7 @@ import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { NSpin, NButton, NDropdown, NInput, NModal, NSpace, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api/client'
+import { recordWorkspaceDirectory } from '@/api/studio/workspace-directories'
 import { copyToClipboard } from '@/utils/clipboard'
 import StarIcon from '@/components/common/StarIcon.vue'
 import FolderIcon from '@/components/common/FolderIcon.vue'
@@ -139,10 +140,19 @@ async function toggleExpand(folder: FolderEntry) {
 
 function selectFolder(folder: FolderEntry) {
   updateSelectedPath(folder.fullPath)
+  void rememberSelection()
 }
 
 function selectBase() {
   updateSelectedPath(basePath.value)
+  void rememberSelection()
+}
+
+async function rememberSelection() {
+  const path = selectedPath.value.trim()
+  if (!path) return
+  try { await recordWorkspaceDirectory(path) }
+  catch { message.error(t('chat.workspaceSetFailed')) }
 }
 
 async function openFolder(folder: FolderEntry | null) {
@@ -320,6 +330,7 @@ const flatNodes = computed<FlatNode[]>(() => {
         clearable
         class="folder-path-input"
         @update:value="updateSelectedPath"
+        @blur="rememberSelection"
       >
         <template #prefix><FolderIcon class="folder-path-icon" /></template>
       </NInput>

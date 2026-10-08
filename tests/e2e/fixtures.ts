@@ -168,6 +168,9 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
   const skillBundles = [...(options.bundles ?? [])]
   let channelCredentialsPresent = options.channelCredentials ?? false
   let delegationModel: Record<string, string> = {}
+  const workspaceDirectories = new Map<string, {
+    path: string; isFavorite: boolean; lastUsed: number; useCount: number; createdAt: number; updatedAt: number
+  }>()
   let theme: MockThemePayload = {
     fontSize: 14,
     textColor: null,
@@ -543,6 +546,22 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
 
     if (pathname === '/api/studio/sessions/context-length') {
       await route.fulfill(jsonResponse({ context_length: 256000 }))
+      return
+    }
+
+    if (pathname === '/api/studio/workspace/directories') {
+      if (request.method() !== 'GET') {
+        const body = request.postDataJSON() as { path: string; favorite?: boolean }
+        const now = Date.now()
+        const entry = workspaceDirectories.get(body.path) || {
+          path: body.path, isFavorite: false, lastUsed: 0, useCount: 0, createdAt: now, updatedAt: now,
+        }
+        if (request.method() === 'PATCH') entry.isFavorite = Boolean(body.favorite)
+        else { entry.lastUsed = now; entry.useCount++ }
+        entry.updatedAt = now
+        workspaceDirectories.set(body.path, entry)
+      }
+      await route.fulfill(jsonResponse({ directories: [...workspaceDirectories.values()] }))
       return
     }
 
