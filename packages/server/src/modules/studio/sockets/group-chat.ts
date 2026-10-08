@@ -591,7 +591,8 @@ export const GROUP_CHAT_MESSAGE_WINDOW = 500
 const GROUP_CHAT_CONTEXT_MESSAGE_WINDOW = GROUP_CHAT_MESSAGE_WINDOW
 const GROUP_CHAT_TIMESTAMP_BOUNDARY_OVERFLOW = 100
 const GROUP_CHAT_SUMMARY_SCAN_LIMIT = 10_000
-const GROUP_CHAT_TOKEN_ACCOUNTING_VERSION = 1
+// 2: array tool_calls are counted by their JSON size instead of "[object Object]".
+const GROUP_CHAT_TOKEN_ACCOUNTING_VERSION = 2
 
 function storedGroupAgentRunIdentity(row: any): {
     ownerId: string
@@ -1767,7 +1768,7 @@ class ChatStorage {
         if (role !== 'assistant' && role !== 'tool') return 0
         const reasoning = message.reasoning_content ?? message.reasoning
         return countTokens(this.contentToUsageText(message.content))
-            + countTokens(String(message.tool_calls || ''))
+            + countTokens(typeof message.tool_calls === 'string' ? message.tool_calls : message.tool_calls ? JSON.stringify(message.tool_calls) : '')
             + countTokens(String(reasoning || ''))
     }
 

@@ -459,6 +459,19 @@ describe('group chat history windows', () => {
     expect(storage.getRoom('room-1')?.totalTokens).toBe(countTokens('a'))
   })
 
+  it('rebuilds version 1 totals that counted array tool_calls as [object Object]', () => {
+    const storage = groupServer.getStorage()
+    storage.saveRoom('room-1', 'Room 1')
+    const toolCalls = [{ id: 'call_1', type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ content: 'long body '.repeat(200) }) } }]
+    storage.addMessage(makeMessage({ id: 'tool-call', role: 'assistant', content: 'calling', tool_calls: toolCalls, timestamp: 1 }) as any)
+    storage.updateRoomTotalTokens('room-1', countTokens('calling') + countTokens(String(toolCalls)))
+    dbMock.current!.prepare('UPDATE gc_rooms SET tokenAccountingVersion = 1 WHERE id = ?').run('room-1')
+
+    const saved = storage.saveMessageAndRefreshRoom(makeMessage({ id: 'next', content: 'a', timestamp: 2 }) as any)
+
+    expect(saved.totalTokens).toBe(countTokens('calling') + countTokens(JSON.stringify(toolCalls)) + countTokens('a'))
+  })
+
   it('marks new rooms with the current token-accounting version', () => {
     const storage = groupServer.getStorage()
     storage.saveRoom('room-1', 'Room 1')
@@ -467,7 +480,7 @@ describe('group chat history windows', () => {
       'SELECT tokenAccountingVersion FROM gc_rooms WHERE id = ?',
     ).get('room-1') as { tokenAccountingVersion: number }
 
-    expect(row.tokenAccountingVersion).toBe(1)
+    expect(row.tokenAccountingVersion).toBe(2)
   })
 
   it('marks rooms from the legacy schema for bounded token-accounting rebuild', () => {

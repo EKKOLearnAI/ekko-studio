@@ -51,6 +51,7 @@ export interface HermesSessionRow {
   workspace: string | null
   category_id: number | null
   history_revision: number
+  history_cleared_at?: number
   parent_title?: string | null
   parent_last_message?: string | null
   parent_last_message_role?: string | null
@@ -176,6 +177,7 @@ function mapStoredSessionRow(row: Record<string, unknown>): HermesSessionRow {
     workspace: row.workspace != null ? String(row.workspace) : null,
     category_id: row.category_id != null ? Number(row.category_id) : null,
     history_revision: Number(row.history_revision || 0),
+    history_cleared_at: Number(row.history_cleared_at || 0),
     parent_title: row.parent_title != null ? String(row.parent_title) : null,
     parent_last_message: row.parent_last_message != null ? String(row.parent_last_message) : null,
     parent_last_message_role: row.parent_last_message_role != null ? String(row.parent_last_message_role) : null,
@@ -523,10 +525,11 @@ export function clearSessionMessages(id: string): number {
     db.prepare(
       `UPDATE ${SESSIONS_TABLE}
        SET history_revision = history_revision + 1,
+           history_cleared_at = ?,
            message_count = 0,
            last_active = started_at
        WHERE id = ?`,
-    ).run(id)
+    ).run(Date.now(), id)
     db.exec('COMMIT')
     return Number(result.changes)
   } catch (error) {

@@ -20,19 +20,14 @@ describe('run-chat usage token estimates', () => {
     expect(usage.inputTokens + usage.outputTokens).toBeLessThan(countTokens(JSON.stringify(messages)))
   })
 
-  it('keeps assistant tool call tokens on the output side', () => {
-    const messages = [
-      {
-        role: 'assistant',
-        content: 'calling tool',
-        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{"q":"x"}' } }],
-      },
-    ]
+  it('counts array tool_calls by their JSON size on the output side', () => {
+    const toolCalls = [{ id: 'call_1', type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ content: 'x'.repeat(4_000) }) } }]
+    const messages = [{ role: 'assistant', content: 'calling tool', tool_calls: toolCalls }]
 
     const usage = estimateUsageTokensFromMessages(messages)
 
     expect(usage.inputTokens).toBe(0)
-    expect(usage.outputTokens).toBe(countTokens('calling tool') + countTokens(String(messages[0].tool_calls || '')))
+    expect(usage.outputTokens).toBe(countTokens('calling tool') + countTokens(JSON.stringify(toolCalls)))
   })
 
   it('counts assistant reasoning_content toward output tokens', () => {

@@ -196,6 +196,8 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   workspace: 'TEXT',
   category_id: 'INTEGER',
   history_revision: 'INTEGER NOT NULL DEFAULT 0',
+  /** Milliseconds of the last history clear; provider usage before it describes deleted history. */
+  history_cleared_at: 'INTEGER NOT NULL DEFAULT 0',
 }
 
 export const SESSIONS_INDEXES = {

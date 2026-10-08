@@ -5,6 +5,7 @@
 
 import { getSession } from '../../repositories/session-store'
 import { deleteCompressionSnapshot, getCompressionSnapshot } from '../../repositories/compression-snapshot'
+import { getUsage } from '../../repositories/usage-store'
 import { ChatContextCompressor, SUMMARY_PREFIX } from '../context-compressor'
 import { getModelContextLength } from '../../public/provider-runtime'
 import { readConfigYamlForProfile } from '../../public/profile-config'
@@ -269,15 +270,24 @@ export async function buildCompressedHistory(
     const currentRunInputTokens = typeof currentInputTokens === 'number' && Number.isFinite(currentInputTokens) && currentInputTokens > 0
       ? Math.floor(currentInputTokens)
       : 0
+    // Exact prompt size the provider reported for this session's latest Hermes call since the last
+    // compression. The local cl100k estimate can undercount it badly, so it is a floor for the decision.
+    // Usage from before the last history clear (ms cutoff on the session) describes deleted history.
+    const contextStartMs = Math.max(snapshot?.updatedAt ?? 0, getSession(sessionId)?.history_cleared_at ?? 0)
+    const lastUsage = getUsage(sessionId, 'hermes')
+    const realPromptTokens = lastUsage && lastUsage.created_at > contextStartMs
+      ? lastUsage.input_tokens + lastUsage.cache_read_tokens + lastUsage.cache_write_tokens
+      : 0
     const estimateLocalContextTokens = async (messages: ChatMessage[], messageTokens: number) => {
       const localMessageTokens = Math.max(0, Math.floor(messageTokens))
+      const floor = messages.length > 0 ? realPromptTokens : 0
       try {
         const estimate = await contextTokenEstimator?.(messages, localMessageTokens)
-        if (typeof estimate === 'number' && Number.isFinite(estimate) && estimate > 0) return Math.floor(estimate)
+        if (typeof estimate === 'number' && Number.isFinite(estimate) && estimate > 0) return Math.max(Math.floor(estimate), floor)
       } catch (err) {
         logger.warn(err, '[context-compress] session=%s: fixed context token estimate failed; using message-only estimate', sessionId)
       }
-      return localMessageTokens
+      return Math.max(localMessageTokens, floor)
     }
     const emitContextUsage = (contextTokens: number) => {
       cState.contextTokens = contextTokens
@@ -468,6 +478,8 @@ export async function compressHistory(
       historyRevision: session?.history_revision ?? 0,
       workerKey: `${summarizerProfile}:compression:${sessionId}`,
       allowHermesFallback: modelContext.allowHermesFallback !== false,
+      // Only called after the caller's threshold check (which may use the provider floor) said compress.
+      overBudget: true,
     })
     const afterTokens = await calcAndUpdateUsage(sessionId, cState, emit, {
       truncateToolResultsForContext: true,
@@ -533,6 +545,8 @@ export async function compressHistory(
     replaceState(sessionMap, sessionId, 'compression.completed', failedMeta)
     logger.warn(err, '[chat-run-socket] compression failed for session %s, using assembled context', sessionId)
     emit('compression.completed', failedMeta)
+    // Nothing compressible remains while still over budget: callers must see the too-small error.
+    if (isContextWindowTooSmallError(err)) throw err
     return history
   }
 }
@@ -548,6 +562,8 @@ export async function forceCompressBridgeHistory(
     apiMode?: string
     excludeLastUser?: boolean
     force?: boolean
+    /** Hermes measured the context over budget and requested this compression. */
+    overBudget?: boolean
   } = {},
 ): Promise<BridgeCompressionResult> {
   const initialSnapshot = getCompressionSnapshot(sessionId)
@@ -616,6 +632,7 @@ export async function forceCompressBridgeHistory(
     workerKey: `${summarizerProfile}:compression:${sessionId}`,
     allowHermesFallback: options.allowHermesFallback !== false,
     force: options.force,
+    overBudget: options.overBudget,
   })
   const compressedMessages = result.messages.map(m => {
     const msg: any = { role: m.role, content: m.content }

@@ -716,49 +716,50 @@ export async function handleBridgeRun(
     return
   }
 
-  const history = callbackContext
-    ? structuredClone(callbackContext.messages)
-    : await buildCompressedHistory(
-      session_id, profile,
-      '',
-      undefined,
-      emit,
-      sessionMap,
-      { model: resolvedModel, provider: resolvedProvider },
-      async (_messages, localMessageTokens) => {
-        const fixedContextTokens = await ensureBridgeFixedContext({
-          sessionId: session_id,
-          profile,
-          model: resolvedModel,
-          provider: resolvedProvider,
-          workspace,
-          instructions: fullInstructions,
-          state,
-          bridge,
-          refresh: true,
-          backgroundDelegationEnabled,
-        })
-        const contextTokens = fixedContextTokens == null
-          ? localMessageTokens
-          : fixedContextTokens + localMessageTokens
-        bridgeLogger.info({
-          sessionId: session_id,
-          profile,
-          model: resolvedModel,
-          provider: resolvedProvider,
-          fixedContextTokens,
-          messageTokens: localMessageTokens,
-          contextTokens,
-        }, '[chat-run-socket] local context estimate')
-        return contextTokens
-      },
-      currentInputTokens,
-    )
-  const bridgeHistory = history
   let backgroundNotificationAccepted = false
 
   state.bridgeRunPollMarker = runMarker
+  // Inside the run's failure cleanup: a pre-run error (e.g. context window too small) must settle this run.
   try {
+    const history = callbackContext
+      ? structuredClone(callbackContext.messages)
+      : await buildCompressedHistory(
+        session_id, profile,
+        '',
+        undefined,
+        emit,
+        sessionMap,
+        { model: resolvedModel, provider: resolvedProvider },
+        async (_messages, localMessageTokens) => {
+          const fixedContextTokens = await ensureBridgeFixedContext({
+            sessionId: session_id,
+            profile,
+            model: resolvedModel,
+            provider: resolvedProvider,
+            workspace,
+            instructions: fullInstructions,
+            state,
+            bridge,
+            refresh: true,
+            backgroundDelegationEnabled,
+          })
+          const contextTokens = fixedContextTokens == null
+            ? localMessageTokens
+            : fixedContextTokens + localMessageTokens
+          bridgeLogger.info({
+            sessionId: session_id,
+            profile,
+            model: resolvedModel,
+            provider: resolvedProvider,
+            fixedContextTokens,
+            messageTokens: localMessageTokens,
+            contextTokens,
+          }, '[chat-run-socket] local context estimate')
+          return contextTokens
+        },
+        currentInputTokens,
+      )
+    const bridgeHistory = history
     const originalBridgeInput = isContentBlockArray(input)
       ? await convertContentBlocksForAgent(input)
       : input
@@ -1612,6 +1613,9 @@ async function applyBridgeChunkAsync(
             profile,
             ev.messages as ChatMessage[],
             tokenCount,
+            // Hermes requests compression when it measured the context over budget; the debug
+            // force-compress path reuses the event below threshold and keeps its old behaviour.
+            { overBudget: ev.focus_topic !== 'debug_force_compress' },
           )
           state.bridgeCompressionResults = state.bridgeCompressionResults || {}
           state.bridgeCompressionResults[String(ev.request_id)] = compressed

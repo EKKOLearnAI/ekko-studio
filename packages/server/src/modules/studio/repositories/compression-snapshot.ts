@@ -14,6 +14,7 @@ export interface CompressionSnapshot {
   compressedThroughMessageId: number | null
   protectedHeadThroughMessageId: number | null
   historyRevision: number
+  updatedAt: number
 }
 
 export interface CompressionSnapshotCursorWrite {
@@ -31,7 +32,8 @@ export function getCompressionSnapshot(sessionId: string): CompressionSnapshot |
        message_count_at_time AS messageCountAtTime,
        compressed_through_message_id AS compressedThroughMessageId,
        protected_head_through_message_id AS protectedHeadThroughMessageId,
-       history_revision AS historyRevision
+       history_revision AS historyRevision,
+       updated_at AS updatedAt
      FROM ${TABLE}
      WHERE session_id = ?`,
   ).get(sessionId) as CompressionSnapshot | undefined ?? null

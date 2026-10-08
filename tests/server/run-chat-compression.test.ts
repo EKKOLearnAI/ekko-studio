@@ -6,6 +6,7 @@ const getSessionMock = vi.fn()
 const getSessionContextMessagesMock = vi.fn()
 const getSessionContextMessageMock = vi.fn()
 const getCompressionSnapshotMock = vi.fn()
+const getUsageMock = vi.fn()
 const getModelContextLengthMock = vi.fn()
 const calcAndUpdateUsageMock = vi.fn()
 const estimateUsageTokensFromMessagesMock = vi.fn()
@@ -33,6 +34,10 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
 
 vi.mock('../../packages/server/src/modules/studio/repositories/compression-snapshot', () => ({
   getCompressionSnapshot: getCompressionSnapshotMock,
+}))
+
+vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () => ({
+  getUsage: getUsageMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/context-compressor', () => ({
@@ -85,6 +90,7 @@ describe('run chat compression trigger', () => {
     getSessionContextMessagesMock.mockReset()
     getSessionContextMessageMock.mockReset()
     getCompressionSnapshotMock.mockReset()
+    getUsageMock.mockReset()
     getModelContextLengthMock.mockReset()
     calcAndUpdateUsageMock.mockReset()
     estimateUsageTokensFromMessagesMock.mockReset()
@@ -775,6 +781,35 @@ describe('run chat compression trigger', () => {
       1_000,
       { inputTokens: 1_000, outputTokens: 0 },
     )
+  })
+
+  it('uses the latest real Hermes prompt size as a floor when it is newer than the snapshot', async () => {
+    const messages = Array.from({ length: 10 }, (_, index) => ({
+      id: index + 1,
+      session_id: 'session-1',
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content: `message ${index}`,
+      timestamp: index + 1,
+    }))
+    getSessionDetailMock.mockReturnValue({ messages })
+    compressorCompressMock.mockResolvedValue({
+      messages: [{ role: 'user', content: 'compressed by real usage' }],
+      meta: { compressed: true, llmCompressed: true, totalMessages: 9, summaryTokenEstimate: 1, verbatimCount: 0, compressedStartIndex: 0 },
+    })
+    // Local estimate says 1k; the provider already reported 160k of prompt (input + cache) for this session.
+    getUsageMock.mockReturnValue({ input_tokens: 10_000, cache_read_tokens: 140_000, cache_write_tokens: 10_000, created_at: 2_000 })
+    const { buildCompressedHistory } = await import('../../packages/server/src/modules/studio/services/chat-run/compression')
+    const run = () => buildCompressedHistory('session-1', 'default', 'http://upstream', undefined, vi.fn(), new Map(), {}, vi.fn(async () => 1_000))
+
+    expect(await run()).toEqual([{ role: 'user', content: 'compressed by real usage' }])
+    expect(getUsageMock).toHaveBeenCalledWith('session-1', 'hermes')
+    expect(compressorCompressMock).toHaveBeenCalledTimes(1)
+
+    // Usage recorded before the latest compression snapshot describes the old, uncompressed context.
+    compressorCompressMock.mockClear()
+    getCompressionSnapshotMock.mockReturnValue({ summary: 'previous summary', lastMessageIndex: 4, messageCountAtTime: 5, compressedThroughMessageId: null, protectedHeadThroughMessageId: null, historyRevision: 0, updatedAt: 3_000 })
+    await run()
+    expect(compressorCompressMock).not.toHaveBeenCalled()
   })
 
   it('emits local context token usage when the local estimate is under threshold', async () => {
