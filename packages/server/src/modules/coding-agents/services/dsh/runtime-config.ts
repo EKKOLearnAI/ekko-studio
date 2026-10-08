@@ -53,6 +53,15 @@ export function dshNeedsContinuationInstructions(model?: string): boolean {
  * obeyed at the exact decision point.
  *
  * This is the *hard* fallback: detect that stall and let the turn auto-continue.
+ *
+ * CALLER CONTRACT (important): DSH's `session/prompt` runs a MULTI-STEP loop in
+ * one child process, so a prompt can contain several tool-call steps and then a
+ * terminal narration-only step. The caller must pass `finalText` = the text of
+ * the TERMINAL step only (the text emitted since the last tool call), and
+ * `toolCallCount` = 0 (the terminal step made no tool call). Passing the whole
+ * prompt's accumulated text or its total tool count lets an earlier tool mask
+ * the terminal stall — see chat-turn.ts `textSinceLastTool`.
+ *
  * A step is a narration-only stall when the turn made NO tool call and the final
  * text reads as "about to act" rather than a completed answer. Two tells:
  *   (1) the text ends in a colon ("Let me investigate the font setup:") — the
