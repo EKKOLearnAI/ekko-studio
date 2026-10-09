@@ -143,6 +143,46 @@ test('exiting or selecting a session restores the current conversation without c
   expect(await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.filter((item: any) => item.event === 'run'))).toEqual([])
 })
 
+test('Agent cards stop dragging after a fast exit and mouse release outside the list', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await mockChatSocket(page)
+  await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+    revision: 1, updatedAt: new Date().toISOString(), agents: catalog.agents.map(agent => ({ id: agent.id, installed: true, source: 'user-cli' })),
+  } }))
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  const viewport = page.locator('.agent-card-viewport')
+  await expect(page.locator('.agent-card.active')).toHaveAttribute('data-agent', 'ekko-agent')
+  await expect(page.locator('.page-loading-overlay:visible')).toHaveCount(0)
+  const card = (await page.locator('.agent-card.active').boundingBox())!
+  const bounds = (await viewport.boundingBox())!
+  const x = card.x + card.width / 2, y = card.y + card.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  // One move skips the drag threshold inside the viewport, so capture has not started.
+  await page.mouse.move(x - 120, bounds.y - 20)
+  await page.mouse.up()
+  const releasedLeft = await viewport.evaluate(el => el.scrollLeft)
+  await page.mouse.move(x - 120, y)
+  await page.mouse.move(x + 120, y)
+  expect(await viewport.evaluate(el => el.scrollLeft)).toBe(releasedLeft)
+
+  // A fresh drag still scrolls, and releasing its captured pointer stops it too.
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x - 80, y, { steps: 4 })
+  await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).not.toBe(releasedLeft)
+  await page.mouse.move(x - 120, bounds.y - 20)
+  await page.mouse.up()
+  const draggedLeft = await viewport.evaluate(el => el.scrollLeft)
+  await page.mouse.move(x + 120, y)
+  expect(await viewport.evaluate(el => el.scrollLeft)).toBe(draggedLeft)
+  await selectNewChatAgent(page, 'Codex')
+  await expect(page.locator('.agent-card.active')).toHaveAttribute('data-agent', 'codex')
+})
+
 test('Agent cards support keyboard selection and continuous scrolling in dark mode', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await page.addInitScript(() => localStorage.setItem('hermes_brightness', 'dark'))

@@ -121,6 +121,7 @@ function animateEffects(now: number) {
 }
 function syncEffectVisibility() {
   if (document.hidden) {
+    stopPointerDrag()
     if (effectFrame !== null) cancelAnimationFrame(effectFrame)
     effectFrame = null
   } else if (effectFrame === null) effectFrame = requestAnimationFrame(animateEffects)
@@ -227,17 +228,26 @@ function onPointerDown(event: PointerEvent) {
 
 function onPointerMove(event: PointerEvent) {
   if (!pointer || !viewport.value || event.pointerId !== pointer.id) return
+  // Mouseup may occur outside the window before the row captures the pointer.
+  if (!(event.buttons & 1)) { stopPointerDrag(); return }
   const delta = event.clientX - pointer.x
-  if (Math.abs(delta) > 5) {
+  if (!pointer.moved && Math.abs(delta) > 5) {
     pointer.moved = true
     viewport.value.setPointerCapture(event.pointerId)
   }
   if (pointer.moved) { event.preventDefault(); viewport.value.scrollLeft = pointer.left - delta }
 }
 
-function onPointerUp() {
-  suppressClick = Boolean(pointer?.moved)
+function stopPointerDrag() {
+  if (!pointer) return
+  const id = pointer.id
+  suppressClick = pointer.moved
   pointer = null
+  if (viewport.value?.hasPointerCapture(id)) viewport.value.releasePointerCapture(id)
+}
+
+function onPointerUp(event: PointerEvent) {
+  if (event.pointerId === pointer?.id) stopPointerDrag()
 }
 
 function finishScroll() {
@@ -311,6 +321,10 @@ onMounted(() => {
   if (viewport.value) observer.observe(viewport.value)
   motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
   motionQuery.addEventListener('change', syncEffectMotion)
+  // Listen before bubbling can be stopped by controls outside the card row.
+  window.addEventListener('pointerup', onPointerUp, true)
+  window.addEventListener('pointercancel', onPointerUp, true)
+  window.addEventListener('blur', stopPointerDrag)
   document.addEventListener('visibilitychange', syncEffectVisibility)
   emberElements = Array.from(effects.value?.querySelectorAll<HTMLElement>('.agent-card-ember') || [])
   syncEffectMotion()
@@ -318,10 +332,14 @@ onMounted(() => {
   void syncSelection()
 })
 onUnmounted(() => {
+  stopPointerDrag()
   observer?.disconnect(); clearTimeout(selectionTimer)
   if (rebaseFrame !== undefined) cancelAnimationFrame(rebaseFrame)
   if (effectFrame !== null) cancelAnimationFrame(effectFrame)
   motionQuery?.removeEventListener('change', syncEffectMotion)
+  window.removeEventListener('pointerup', onPointerUp, true)
+  window.removeEventListener('pointercancel', onPointerUp, true)
+  window.removeEventListener('blur', stopPointerDrag)
   document.removeEventListener('visibilitychange', syncEffectVisibility)
 })
 </script>
@@ -329,7 +347,7 @@ onUnmounted(() => {
 <template>
   <div class="agent-cards" :aria-label="t('chat.agent')" :aria-busy="loading">
     <div ref="viewport" class="agent-card-viewport" @scroll.passive="onScroll" @scrollend="finishScroll" @wheel.passive="onWheel" @keydown="onKeydown"
-      @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp">
+      @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp" @lostpointercapture="onPointerUp">
       <div class="agent-card-track">
         <div v-for="(option, position) in cards" :key="`${option.value}-${position}`" class="agent-card-slot">
           <button type="button" class="agent-card" :data-agent="option.value" :class="{ active: position === activePosition }"
