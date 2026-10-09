@@ -2,6 +2,7 @@ import { openCodeSessionHeaders } from '../../studio/public/opencode-session'
 import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
 import { openRouterAttributionHeaders } from '../../studio/public/openrouter-attribution'
 import { readFile } from 'fs/promises'
+import { isAuthorizedRuntimeProvider, readAuthorizedProviderStoredAuth } from '../services/providers/authorized-provider-credentials'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { getActiveEnvPath, getActiveAuthPath, getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../services/profiles/profile'
@@ -295,6 +296,20 @@ function storedOAuthCredential(auth: any, providerKey: string): StoredOAuthCrede
   return { authorized: false, baseUrl: '' }
 }
 
+async function storedOAuthCredentialsForProfile(profile: string, storedAuth: any): Promise<Map<string, StoredOAuthCredential>> {
+  const credentials = new Map<string, StoredOAuthCredential>()
+  await Promise.all(Object.keys(PROVIDER_ENV_MAP).map(async providerKey => {
+    let auth = storedAuth
+    // Qwen uses its own external OAuth store rather than Hermes profile/root grants.
+    if (providerKey !== 'qwen-oauth' && isAuthorizedRuntimeProvider(providerKey)) {
+      try { auth = await readAuthorizedProviderStoredAuth(profile, providerKey) }
+      catch { auth = null }
+    }
+    credentials.set(providerKey, storedOAuthCredential(auth, providerKey))
+  }))
+  return credentials
+}
+
 function includeConfiguredDefaultModel(providerKey: string, modelsList: string[], currentDefault: string, currentDefaultProvider: string): string[] {
   if (!currentDefault || providerKey !== currentDefaultProvider) return modelsList
   return [...new Set([...modelsList, currentDefault])]
@@ -412,8 +427,9 @@ async function buildAvailableForProfile(
     const authPath = profileAuthPath(profile)
     if (existsSync(authPath)) storedAuth = JSON.parse(readFileSync(authPath, 'utf-8'))
   } catch {}
+  const oauthCredentials = await storedOAuthCredentialsForProfile(profile, storedAuth)
   const oauthCredential = (providerKey: string): StoredOAuthCredential => (
-    storedOAuthCredential(storedAuth, providerKey)
+    oauthCredentials.get(providerKey) || { authorized: false, baseUrl: '' }
   )
   const isOAuthAuthorized = (providerKey: string): boolean => oauthCredential(providerKey).authorized
 
