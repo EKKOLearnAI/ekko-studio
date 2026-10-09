@@ -97,6 +97,16 @@ import {
 
 type AgentBridgeBackgroundNotification = any
 type AgentBridgeBackgroundSession = any
+/** Worker-accepted Hermes plugin `ctx.inject_message` notice (bridge `background_poll.plugin_notices`). */
+interface AgentBridgePluginNotice {
+  session_id: string
+  profile?: string
+  content: string
+  plugin_id?: string
+}
+
+/** Idle cadence for fetching inbound Hermes plugin notices; the 500 ms timer keeps the gap at or below 5 s. */
+const BACKGROUND_IDLE_POLL_MS = 4_500
 
 export type { ContentBlock } from '../services/chat-run/types'
 
@@ -441,6 +451,7 @@ export class ChatRunSocket {
   private backgroundBrokerId?: string
   private backgroundPollRetryAt = 0
   private backgroundActivityGraceUntil = 0
+  private backgroundLastPollAt = 0
   private closing = false
   private stopUsageUpdates: () => void
 
@@ -1995,16 +2006,51 @@ export class ChatRunSocket {
       autonomous: true,
     }
 
-    if (state.isWorking) {
-      state.queue.push(next)
+    if (!this.startOrQueueAutonomousRun(sessionId, state, next)) {
       logger.info('[chat-run-socket] queued background delegation %s for busy session %s', delegationId, sessionId)
+    }
+  }
+
+  /** Hermes plugin notice (ctx.inject_message): no claim protocol; the companion re-arms notices no turn read. */
+  private async schedulePluginNotice(notice: AgentBridgePluginNotice) {
+    const sessionId = String(notice.session_id || '').trim()
+    const content = notice.content
+    if (!sessionId || typeof content !== 'string' || !content.trim()) return
+    const session = getSession(sessionId)
+    const state = session ? await this.sessionStateForBackground(sessionId) : null
+    if (!session || !state || this.closing) {
+      logger.warn('[chat-run-socket] dropping plugin notice from %s for unavailable session %s', notice.plugin_id, sessionId)
       return
     }
+    const next: QueuedRun = {
+      queue_id: `plugin_notice_${randomUUID()}`,
+      // Verbatim: the plugin matches its own notice tag in the user message to mark it delivered.
+      input: content,
+      displayInput: null,
+      storageMessage: content,
+      model: session.model || undefined,
+      provider: session.provider || undefined,
+      profile: notice.profile || session.profile || 'default',
+      workspace: session.workspace,
+      source: resolveRunSource(session.source || undefined, sessionId),
+      autonomous: true,
+    }
+    if (!this.startOrQueueAutonomousRun(sessionId, state, next)) {
+      logger.info('[chat-run-socket] queued plugin notice from %s for busy session %s', notice.plugin_id, sessionId)
+    }
+  }
 
+  /** Returns false when the session is busy and the run was queued behind it. */
+  private startOrQueueAutonomousRun(sessionId: string, state: SessionState, next: QueuedRun): boolean {
+    if (state.isWorking) {
+      state.queue.push(next)
+      return false
+    }
     state.isWorking = true
     state.profile = next.profile
     state.source = next.source
     this.runQueuedItem(this.socketForBackgroundRun(sessionId), sessionId, next, next.profile)
+    return true
   }
 
   private needsBackgroundPoll(): boolean {
@@ -2017,7 +2063,8 @@ export class ChatRunSocket {
       if (Object.values(state.backgroundTasks || {})
         .some(task => task.status === 'running' && task.runtime !== 'ekko')) return true
     }
-    return false
+    // Idle: plugin notices can arrive at any time, so still poll at a slow cadence.
+    return Date.now() - this.backgroundLastPollAt >= BACKGROUND_IDLE_POLL_MS
   }
 
   private backgroundRecoveryRoutes() {
@@ -2037,6 +2084,7 @@ export class ChatRunSocket {
   private async pollBackgroundWork() {
     if (this.closing || this.backgroundPollInFlight || Date.now() < this.backgroundPollRetryAt || !this.needsBackgroundPoll()) return
     this.backgroundPollInFlight = true
+    this.backgroundLastPollAt = Date.now()
     try {
       const recovering = this.backgroundRecoveryNeeded
       const routes = recovering ? this.backgroundRecoveryRoutes() : undefined
@@ -2067,6 +2115,9 @@ export class ChatRunSocket {
       }
       for (const notification of result.notifications || []) {
         await this.scheduleBackgroundNotification(notification)
+      }
+      for (const notice of result.plugin_notices || []) {
+        await this.schedulePluginNotice(notice)
       }
     } catch (err) {
       this.backgroundPollRetryAt = Date.now() + 5000

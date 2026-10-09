@@ -37,6 +37,7 @@ const bridgeMock = vi.hoisted(() => ({
   status: vi.fn(),
   statusIfLoaded: vi.fn(),
   releaseBackgroundNotification: vi.fn(async () => ({ ok: true, released: true })),
+  backgroundPoll: vi.fn(),
   close: vi.fn(async () => {}),
   approvalRespond: vi.fn(async () => ({ resolved: true })),
   clarifyRespond: vi.fn(async () => ({ resolved: true })),
@@ -1058,6 +1059,36 @@ describe('ChatRunSocket bridge readiness gating', () => {
     expect(order.slice(1)).toEqual(['close', 'close'])
     expect((server as any).sessionMap.size).toBe(0)
     expect((server as any).closing).toBe(true)
+  })
+
+  it('turns polled plugin notices into verbatim autonomous runs and queues them behind busy sessions', async () => {
+    const notice = '<system-notice run="car_0123456789abcdef" source="coding-agent">Run finished.</system-notice>'
+    const pluginNotice = (session_id: string) => ({
+      session_id, profile: 'default', content: notice, plugin_id: 'coding-agent-mcp-companion', received_at: 1,
+    })
+    bridgeMock.backgroundPoll.mockResolvedValueOnce({
+      sessions: [], notifications: [], plugin_notices: [pluginNotice('session-idle'), pluginNotice('session-busy')],
+    })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const busy = { messages: [], events: [], queue: [] as Array<Record<string, unknown>>, isWorking: true, isAborting: false, profile: 'default' }
+    ;(server as any).sessionMap.set('session-busy', busy)
+    ;(server as any).backgroundRecoveryNeeded = false
+
+    await (server as any).pollBackgroundWork()
+
+    await vi.waitFor(() => expect(handleBridgeRunMock).toHaveBeenCalledTimes(1))
+    expect(handleBridgeRunMock.mock.calls[0][2]).toEqual(expect.objectContaining({
+      session_id: 'session-idle', input: notice, storage_message: notice, autonomous: true,
+    }))
+    expect(busy.queue).toEqual([expect.objectContaining({ input: notice, storageMessage: notice, autonomous: true })])
+    expect(busy.queue[0]?.backgroundClaimId).toBeUndefined()
+
+    // No background work: the idle cadence still polls within 5 s so the next notice is fetched.
+    expect((server as any).needsBackgroundPoll()).toBe(false)
+    ;(server as any).backgroundLastPollAt = Date.now() - 4_500
+    expect((server as any).needsBackgroundPoll()).toBe(true)
   })
 })
 
