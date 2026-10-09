@@ -3,6 +3,54 @@ import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY, TEST_MODE
 import catalog from '../../config/agents.json'
 import { expectNewChatEffectsMoving, selectNewChatAgent } from './new-chat-helpers'
 
+for (const mobile of [false, true]) test(`Agent loop preserves card scale when clicking Ekko and Zcode (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
+  await page.setViewportSize(mobile ? {width:390,height:844} : {width:1440,height:1000})
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await mockChatSocket(page)
+  await page.route('**/api/agents/availability', route => route.fulfill({json:{
+    revision:1, updatedAt:new Date().toISOString(), agents:catalog.agents.map(agent => ({id:agent.id,installed:true,source:'user-cli'})),
+  }}))
+  await page.goto('/#/hermes/chat')
+  if (mobile) await page.getByRole('button',{name:'Menu',exact:true}).click()
+  await page.getByRole('button',{name:'New Chat',exact:true}).click()
+  await expect(page.locator('.agent-card.active')).toHaveAttribute('data-agent','ekko-agent')
+  await expect(page.locator('.page-loading-overlay:visible')).toHaveCount(0)
+  await page.waitForTimeout(200)
+  for (const agent of ['zcode','ekko-agent','zcode']) {
+    const point = await page.locator('.agent-card-viewport').evaluate((viewport, agent) => {
+      const bounds=viewport.getBoundingClientRect()
+      const card=Array.from(viewport.querySelectorAll<HTMLElement>('.agent-card')).find(card => {
+        const r=card.getBoundingClientRect()
+        return card.dataset.agent===agent&&Math.min(r.right,bounds.right)-Math.max(r.left,bounds.left)>8
+      })!
+      const r=card.getBoundingClientRect()
+      const x=(Math.max(r.left,bounds.left)+Math.min(r.right,bounds.right))/2,y=r.top+r.height/2
+      const hit=document.elementFromPoint(x,y) as HTMLElement
+      return {x,y,hitAgent:hit.closest<HTMLElement>('.agent-card')?.dataset.agent,hit:hit.className}
+    },agent)
+    expect(point.hitAgent,JSON.stringify(point)).toBe(agent)
+    await page.evaluate(() => {
+      const state={frames:[] as {agent:string;position:number;scale:number}[],until:performance.now()+900}
+      ;(window as any).agentLoopFrames=state
+      const sample=()=>{
+        const card=document.querySelector<HTMLElement>('.agent-card.active')!
+        state.frames.push({agent:card.dataset.agent!,position:Array.from(document.querySelectorAll('.agent-card-slot')).indexOf(card.parentElement!),scale:new DOMMatrix(getComputedStyle(card).transform).a})
+        if(performance.now()<state.until) requestAnimationFrame(sample)
+      }
+      requestAnimationFrame(sample)
+    })
+    await page.mouse.click(point.x,point.y)
+    await page.waitForTimeout(950)
+    const frames=await page.evaluate(()=>(window as any).agentLoopFrames.frames as {agent:string;position:number;scale:number}[])
+    await expect(page.locator('.agent-card.active'),JSON.stringify(frames.filter((frame,i)=>!i||frame.position!==frames[i-1].position))).toHaveAttribute('data-agent',agent)
+    const selected=frames.filter(frame=>frame.agent===agent)
+    expect(selected.length).toBeGreaterThan(10)
+    for(let i=1;i<selected.length;i++) expect(selected[i].scale,JSON.stringify(selected.slice(Math.max(0,i-2),i+2))).toBeGreaterThanOrEqual(selected[i-1].scale-.01)
+    if(agent==='zcode') expect(new Set(selected.map(frame=>frame.position)).size,'click crosses the repeat boundary').toBeGreaterThan(1)
+  }
+})
+
 for (const mobile of [false, true]) test(`new chat uses cards and the existing composer (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
   await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 })
   await authenticate(page, TEST_ACCESS_KEY, 'research')

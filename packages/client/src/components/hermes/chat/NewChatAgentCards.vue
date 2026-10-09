@@ -146,6 +146,7 @@ let movingTo: number | null = null
 let centeredLayout: { width: number; height: number; cardWidth: number } | undefined
 let pointer: { id: number; x: number; left: number; moved: boolean } | null = null
 let suppressClick = false
+let rebaseFrame: number | undefined
 
 function slots() {
   return Array.from(viewport.value?.querySelectorAll<HTMLElement>('.agent-card-slot') || [])
@@ -161,7 +162,7 @@ function center(position: number, smooth = false) {
   clearTimeout(selectionTimer)
   el.scrollTo({ left: slot.offsetLeft + slot.offsetWidth / 2 - el.clientWidth / 2,
     behavior: smooth && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'instant' })
-  selectionTimer = setTimeout(() => { movingTo = null }, smooth ? 1200 : 50)
+  selectionTimer = setTimeout(() => { finishScroll(); movingTo = null }, smooth ? 1200 : 50)
 }
 
 async function syncSelection() {
@@ -239,8 +240,37 @@ function finishScroll() {
   const target = movingTo === null ? null : slots()[movingTo]
   // An earlier scroll can finish before the new centering animation has reached its card.
   if (el && target && Math.abs(el.scrollLeft - (target.offsetLeft + target.offsetWidth / 2 - el.clientWidth / 2)) > 1) return
+  const position = movingTo
   clearTimeout(selectionTimer)
   movingTo = null
+  const count = props.options.length
+  if (el && position !== null && loop.value && (position < count || position >= count * 2)) {
+    // The clicked card has already animated to its selected size. Switching
+    // to the middle copy must not replay that animation on a different node.
+    const next = position < count ? position + count : position - count
+    const allSlots = slots()
+    const source = allSlots[position].querySelector<HTMLElement>('.agent-card')!
+    const destination = allSlots[next].querySelector<HTMLElement>('.agent-card')!
+    for (const key of ['--px', '--py', '--mx', '--my', '--sheen']) {
+      const value = source.style.getPropertyValue(key)
+      if (value) destination.style.setProperty(key, value)
+      else destination.style.removeProperty(key)
+    }
+    el.classList.add('agent-card-viewport--rebasing')
+    activePosition.value = next
+    el.scrollLeft += allSlots[next].offsetLeft - allSlots[position].offsetLeft
+    if (rebaseFrame !== undefined) cancelAnimationFrame(rebaseFrame)
+    void nextTick(() => {
+      if (!el.isConnected) return
+      // Apply the selected styles before restoring normal transitions.
+      void destination.offsetWidth
+      rebaseFrame = requestAnimationFrame(() => {
+        el.classList.remove('agent-card-viewport--rebasing')
+        rebaseFrame = undefined
+      })
+    })
+    return
+  }
   onScroll()
 }
 
@@ -284,6 +314,7 @@ onMounted(() => {
 })
 onUnmounted(() => {
   observer?.disconnect(); clearTimeout(selectionTimer)
+  if (rebaseFrame !== undefined) cancelAnimationFrame(rebaseFrame)
   if (effectFrame !== null) cancelAnimationFrame(effectFrame)
   motionQuery?.removeEventListener('change', syncEffectMotion)
   document.removeEventListener('visibilitychange', syncEffectVisibility)
@@ -338,6 +369,8 @@ onUnmounted(() => {
   overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain;
   &::-webkit-scrollbar { display: none; }
 }
+.agent-card-viewport--rebasing .agent-card,
+.agent-card-viewport--rebasing .agent-card * { transition: none !important; }
 .agent-card-track {
   display: flex; flex: none; align-items: center; gap: var(--card-gap); width: max-content;
   // Keep the entire upward particle path inside the scrolling viewport.
