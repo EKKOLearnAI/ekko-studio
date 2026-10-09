@@ -18,18 +18,6 @@ const effects = ref<HTMLElement>()
 const loop = computed(() => props.options.length > 5)
 const cards = computed(() => Array.from({ length: loop.value ? 3 : 1 }, () => props.options).flat())
 const activePosition = ref(0)
-const colors: Record<string, string> = {
-  'ekko-agent': '#e4efdf', hermes: '#eee8db', 'claude-code': '#f2e4d8', codex: '#e0e9ee',
-  pi: '#e8e1ef', grok: '#e7e8e2', opencode: '#e4e9ed', dsh: '#e0e9f3', cursor: '#e6e6e6',
-  antigravity: '#e6e4f2', qwen: '#eae3f4', kimi: '#e5e9ef', codebuddy: '#deecf0',
-  qoder: '#e2ece5', copilot: '#e8e2f0', zcode: '#e6e8ef',
-}
-const glows: Record<string, string> = {
-  'ekko-agent': '#b6d2b5', hermes: '#dac8a4', 'claude-code': '#e1bca0', codex: '#b1c8d5',
-  pi: '#c8b5d9', grok: '#c3c7b4', opencode: '#b9c9d9', dsh: '#b2c6e3', cursor: '#babcc8',
-  antigravity: '#c5bee5', qwen: '#ccb8e9', kimi: '#bfcbdc', codebuddy: '#aed1d8',
-  qoder: '#b6d3bc', copilot: '#c6b5d7', zcode: '#bdc3dc',
-}
 type EmberEdge = 'left' | 'right' | 'top' | 'bottom'
 const random = (min: number, max: number) => min + Math.random() * (max - min)
 const emberSlots = (['left', 'right', 'top', 'bottom'] as const).flatMap(edge => {
@@ -57,7 +45,25 @@ let effectCard: HTMLElement | null = null
 let halos: HTMLElement[] = []
 let rim: HTMLElement | null = null
 let foil: HTMLElement | null = null
+let foilBeams: HTMLElement[] = []
+let sweep: HTMLElement | null = null
 let emberElements: HTMLElement[] = []
+
+function paintCardInterior(now: number) {
+  const seconds = motionQuery?.matches ? 0 : now / 1000
+  const phase = seconds / 8 * Math.PI * 2
+  const x = Math.sin(phase), y = Math.cos(phase)
+  if (foil) foil.style.transform = `translate(${7 * x}%, ${5 * y}%) rotate(${24 * x}deg) scale(1.08)`
+  foilBeams.forEach((beam, index) => {
+    beam.style.transform = `translateX(${(index ? -1 : 1) * 13 * x}%) rotate(${29 + 7 * y}deg)`
+    beam.style.opacity = String(.25 + (index ? .2 : .5) * (1 + y) / 2)
+  })
+  if (sweep) {
+    const progress = (seconds / 4 + .2) % 1
+    sweep.style.transform = `translateX(${-72 + 144 * progress}%)`
+    sweep.style.opacity = String(.2 + .45 * Math.sin(progress * Math.PI))
+  }
+}
 
 function paintEffects(now: number) {
   // A foreground layer and numeric transforms also work with desktop CSS animations disabled.
@@ -69,6 +75,8 @@ function paintEffects(now: number) {
     halos = Array.from(card.querySelectorAll<HTMLElement>('.agent-card-halo'))
     rim = card.querySelector<HTMLElement>('.agent-card-rim')
     foil = card.querySelector<HTMLElement>('.agent-card-foil')
+    foilBeams = Array.from(card.querySelectorAll<HTMLElement>('.agent-card-foil-beam'))
+    sweep = card.querySelector<HTMLElement>('.agent-card-sweep')
   }
   const root = layer.parentElement!.getBoundingClientRect()
   const rect = card.getBoundingClientRect()
@@ -102,10 +110,7 @@ function paintEffects(now: number) {
   if (halos[0]) halos[0].style.opacity = String(.24 + pulse * .16)
   if (halos[1]) halos[1].style.opacity = String(.1 + (1 - pulse) * .08)
   if (rim) rim.style.backgroundPosition = `${100 - pulse * 100}% ${20 + pulse * 60}%`
-  if (foil) {
-    if (card.matches(':hover') && !motionQuery?.matches) foil.style.removeProperty('background-position')
-    else foil.style.backgroundPosition = `${20 + pulse * 60}% ${35 + pulse * 35}%`
-  }
+  paintCardInterior(now)
 }
 
 function animateEffects(now: number) {
@@ -328,7 +333,6 @@ onUnmounted(() => {
       <div class="agent-card-track">
         <div v-for="(option, position) in cards" :key="`${option.value}-${position}`" class="agent-card-slot">
           <button type="button" class="agent-card" :data-agent="option.value" :class="{ active: position === activePosition }"
-            :style="{ '--card-tint': colors[option.value] || '#e4e9ed', '--art-glow': glows[option.value] || '#b9c9d9' }"
             :disabled="disabled" :aria-label="option.label" :aria-pressed="position === activePosition"
             :aria-hidden="loop && Math.abs(position - activePosition) > 2 ? true : undefined"
             :tabindex="position === activePosition ? 0 : -1" @click="select(position)"
@@ -338,12 +342,14 @@ onUnmounted(() => {
             </span>
             <span class="agent-card-surface">
               <span class="agent-card-art" aria-hidden="true">
-                <span class="agent-card-orbit"></span><span class="agent-card-orbit second"></span><span class="agent-card-orbit third"></span>
                 <span class="agent-card-stone"><img :src="chatSessionAgentAvatar({ codingAgentId: option.value }).src" alt="" draggable="false" /></span>
               </span>
               <span class="agent-card-name" :class="{ long: option.label.length > 11 }">{{ option.label }}</span>
+              <span class="agent-card-mark" aria-hidden="true"></span>
               <span class="agent-card-foil-lines" aria-hidden="true"></span>
               <span class="agent-card-foil" aria-hidden="true"></span>
+              <span class="agent-card-foil-beam" aria-hidden="true"></span><span class="agent-card-foil-beam second" aria-hidden="true"></span>
+              <span class="agent-card-sweep" aria-hidden="true"></span>
               <span class="agent-card-glare" aria-hidden="true"></span>
             </span>
             <span class="agent-card-rim" aria-hidden="true"></span>
@@ -395,11 +401,13 @@ onUnmounted(() => {
 .agent-card-surface {
   position: relative; isolation: isolate; overflow: hidden; display: flex; height: 100%; align-items: center;
   justify-content: center; flex-direction: column; gap: var(--logo-gap); padding: calc(var(--card-width) * .08); border-radius: 13px;
-  color: #25392c;
-  background: radial-gradient(ellipse at 50% 68%, var(--art-glow), transparent 66%),
-    linear-gradient(155deg, #ffffff00 40%, #ffffff51), var(--card-tint);
+  color: #fffbea;
+  background: radial-gradient(ellipse at 100% 100%, #dcece066, transparent 62%),
+    radial-gradient(ellipse at 6% 8%, #fce8aa88, transparent 56%),
+    radial-gradient(ellipse at 100% 35%, #73c6b755, transparent 54%),
+    linear-gradient(145deg, #8e977f 0%, #646f60 23%, #bead73 46%, #828d79 65%, #8eac9b 100%);
   &::before {
-    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .36;
+    content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none; opacity: .36;
     background-image: radial-gradient(#fff 1px, transparent 1px); background-size: 25px 25px;
     mask-image: linear-gradient(transparent, #000);
   }
@@ -429,19 +437,12 @@ onUnmounted(() => {
   opacity: 0; transition: opacity .45s;
   .active & { opacity: .9; }
 }
-.agent-card-art { position: relative; width: calc(var(--logo-size) * 1.16); height: calc(var(--logo-size) * 1.16); flex: none; }
-.agent-card-orbit {
-  position: absolute; width: calc(var(--card-width) * .77); height: calc(var(--card-width) * .77); left: 50%; top: 50%; border: 1px solid #ffffffce;
-  border-radius: 50%; transform: translate(-50%, -50%) rotateX(62deg) rotateZ(-30deg);
-  box-shadow: 0 0 0 calc(var(--card-width) * .068) #ffffff1c, 0 0 0 calc(var(--card-width) * .15) #ffffff19;
-  &.second { width: calc(var(--card-width) * .59); height: calc(var(--card-width) * .59); transform: translate(-50%, -50%) rotateY(48deg) rotateZ(39deg); border-color: #ffffff99; box-shadow: none; }
-  &.third { width: calc(var(--card-width) * .44); height: calc(var(--card-width) * .44); transform: translate(-50%, -50%) rotateX(60deg) rotateZ(45deg); border-color: var(--art-glow); box-shadow: none; }
-}
+.agent-card-art { position: relative; z-index: 4; width: calc(var(--logo-size) * 1.16); height: calc(var(--logo-size) * 1.16); flex: none; }
 .agent-card-stone {
   position: absolute; width: var(--logo-size); height: var(--logo-size); left: 50%; top: 50%;
   display: grid; place-items: center; border-radius: 26%;
   background: linear-gradient(135deg, #ffffffeb, #ffffff95); border: 1px solid #ffffffee;
-  box-shadow: 10px 18px 26px #455b3622, inset 0 1px 2px #fff;
+  box-shadow: 10px 18px 26px #9b895522, inset 0 1px 2px #fff;
   transform: translate(-50%, -50%) rotate(-9deg) rotateX(7deg); transition: transform .2s;
   .active & { transform: translate(calc(-50% - var(--px, 0px)), calc(-50% - var(--py, 0px))) rotate(-9deg) rotateX(7deg); }
   img { width: 62%; height: 62%; object-fit: contain; border-radius: 22%; clip-path: inset(0 round 22%); pointer-events: none; }
@@ -449,19 +450,40 @@ onUnmounted(() => {
 .agent-card-name {
   position: relative; z-index: 5; flex: none; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: clamp(11px, calc(var(--card-width) * .108), 19px); font-weight: 650; letter-spacing: -.7px; text-align: center; line-height: 1.1;
+  text-shadow: 0 2px 8px #22332977;
   &.long { font-size: clamp(9px, calc(var(--card-width) * .08), 14px); }
 }
+.agent-card-mark {
+  position: relative; z-index: 4; flex: none; width: 18%; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, #e8d598b3, transparent);
+}
 .agent-card-foil-lines {
-  position: absolute; inset: 0; z-index: 3; pointer-events: none; opacity: .25;
+  position: absolute; inset: 0; z-index: 3; pointer-events: none; opacity: .65;
   background: repeating-linear-gradient(115deg, transparent 0 4px, #fff2 5px, transparent 6px);
 }
 .agent-card-foil {
-  position: absolute; inset: 0; z-index: 4; border-radius: inherit; pointer-events: none;
-  background: linear-gradient(115deg, transparent 10%, #84ead53d 23%, #f3d77938 35%, #dba7ef47 44%, #94cdf141 54%, transparent 64%, #fff5 78%, transparent 89%);
-  background-size: 260% 200%; background-position: var(--mx) var(--my); mix-blend-mode: screen;
-  opacity: .15; transition: opacity .45s;
-  .active & { opacity: .64; }
-  .active:hover & { opacity: .86; }
+  position: absolute; inset: -35%; z-index: 1; pointer-events: none;
+  background: conic-gradient(from 190deg at 42% 38%, #303d3300 0deg, #fff2c199 20deg,
+    #bde0d499 40deg, #e6eadd55 53deg, #e8c77c88 68deg, #3f483500 99deg,
+    #3f473755 150deg, #ffe4a899 179deg, #ebf2d888 193deg, #7acbbb55 211deg,
+    #f0ddac55 229deg, #34392e00 260deg, #c3d1bd55 315deg, #313a2e00);
+  mix-blend-mode: screen; filter: blur(calc(var(--card-width) * .009));
+  opacity: .55; transition: opacity .45s;
+  .active & { opacity: .86; will-change: transform; }
+  .active:hover & { opacity: .95; }
+}
+.agent-card-foil-beam {
+  position: absolute; z-index: 2; left: 24%; top: -38%; width: 100%; height: 210%; pointer-events: none;
+  background: linear-gradient(90deg, transparent, #fff9e322 1%, transparent 3%, #d6efdf35 44%, #fffbe277 47%, transparent 48%);
+  transform: rotate(29deg); opacity: .45;
+  &.second { left: -44%; top: -22%; opacity: .25; }
+  .active & { will-change: transform, opacity; }
+}
+.agent-card-sweep {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: .2;
+  background: linear-gradient(112deg, transparent 30%, #fffbea55 45%, #fffffaaa 49%, #e0f6e944 53%, transparent 64%);
+  transform: translateX(-43.2%);
+  .active & { will-change: transform, opacity; }
 }
 .agent-card-glare {
   position: absolute; inset: 0; z-index: 8; pointer-events: none; border-radius: inherit;
@@ -486,10 +508,7 @@ onUnmounted(() => {
   .agent-card-rim { padding: 1.5px; }
   .agent-card-halo { inset: -2px; border-radius: 11px; filter: blur(5px); }
   .agent-card-halo.second { inset: -3px; border-radius: 12px; filter: blur(8px); }
-  .agent-card-stone { border-radius: 26%; box-shadow: 3px 6px 10px #455b3622, inset 0 1px 2px #fff; img { width: calc(var(--card-width) * .4); height: calc(var(--card-width) * .4); } }
-  .agent-card-orbit { width: calc(var(--card-width) * .92); height: calc(var(--card-width) * .92); box-shadow: 0 0 0 5px #ffffff1c, 0 0 0 10px #ffffff19; }
-  .agent-card-orbit.second { width: calc(var(--card-width) * .7); height: calc(var(--card-width) * .7); }
-  .agent-card-orbit.third { width: calc(var(--card-width) * .52); height: calc(var(--card-width) * .52); }
+  .agent-card-stone { border-radius: 26%; box-shadow: 3px 6px 10px #9b895522, inset 0 1px 2px #fff; img { width: calc(var(--card-width) * .4); height: calc(var(--card-width) * .4); } }
   .agent-card-name, .agent-card-name.long { font-size: clamp(9px, 2.55vw, 12px); letter-spacing: -.15px; line-height: 1.3; }
   .agent-card-side-fade { width: 6px; }
 }
