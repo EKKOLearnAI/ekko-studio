@@ -386,7 +386,9 @@ test('image editor ignores margins and keeps full-resolution marks through zoom,
   await expect.poll(() => annotationPixel(page, 400, 650)).toEqual([0, 0, 0, 0])
   await page.locator('#redo').click()
   await page.locator('#confirm').click()
-  await expect.poll(() => page.evaluate(() => (window as any).__SCREENSHOT__.submitted.length)).toBe(1)
+  // Chromium schedules PNG encoding in idle tasks; large exports can exceed the
+  // default five-second assertion budget on CI runners.
+  await expect.poll(() => page.evaluate(() => (window as any).__SCREENSHOT__.submitted.length), { timeout: 15_000 }).toBe(1)
   const output = await page.evaluate(async () => {
     const payload = (window as any).__SCREENSHOT__.submitted[0]
     const bitmap = await createImageBitmap(new Blob([payload.png], { type: 'image/png' }))
