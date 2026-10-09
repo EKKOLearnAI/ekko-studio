@@ -1,6 +1,6 @@
 export type LocaleMessages = Record<string, any>
 
-export const supportedLocales = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'es', 'de', 'pt', 'ru', 'ar'] as const
+export const supportedLocales = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'es', 'de', 'pt', 'ru', 'ar', 'tr'] as const
 export type SupportedLocale = (typeof supportedLocales)[number]
 
 function isPlainObject(value: unknown): value is LocaleMessages {
@@ -35,6 +35,7 @@ const localeLoaders: Record<SupportedLocale, () => Promise<{ default: LocaleMess
   pt: () => import('./locales/pt'),
   ru: () => import('./locales/ru'),
   ar: () => import('./locales/ar'),
+  tr: () => import('./locales/tr'),
 }
 
 const localeMessagePromises = new Map<SupportedLocale, Promise<LocaleMessages>>()
