@@ -632,6 +632,7 @@ export default {
   },
 
   codingAgents: {
+    launchModeGlobalShort: "Общая",
     nativeUsage: "Использование: вход {inputTokens}, выход {outputTokens}, чтение кэша {cacheReadTokens}, запись кэша {cacheWriteTokens}, всего {totalTokens} токенов.",
     nativeUsageUnknown: "Использование неизвестно. Для этой сессии ещё не получены данные о токенах от CLI.",
     nativeContextUnknown: "Контекст неизвестен. Текущий размер нативного контекста и его предел недоступны.",
@@ -1147,6 +1148,10 @@ export default {
     searchEnterHint: 'Enter — открыть · Esc — закрыть',
     searchFailed: 'Ошибка поиска сеансов',
     newChat: 'Новый диалог',
+    newChatCardTitle: "Каждой идее нужен хороший партнёр.",
+    newChatCardSubtitle: "Выберите Agent для нового разговора.",
+    newChatSettings: "Настройки чата",
+    newChatCredentialsHint: "Заполните настройки подключения для отправки",
     category: 'Категория',
     uncategorized: 'Без категории',
     categoryPlaceholder: 'Выберите или создайте категорию',
@@ -1236,6 +1241,9 @@ export default {
     workspaceDefault: 'По умолчанию',
     workspaceDefaultTooltip: 'Эта рабочая область задана по умолчанию и будет автоматически подставляться в новых чатах',
     workspacePin: 'Сделать рабочей областью по умолчанию',
+    workspaceFavorite: "Добавить рабочую папку в избранное",
+    workspaceUnfavorite: "Убрать из избранного",
+    favoriteWorkspaces: "Избранные рабочие папки",
     workspaceUnpin: 'Убрать рабочую область по умолчанию',
     workspaceRecent: 'Недавние',
     defaultWorkspace: 'Рабочая область по умолчанию',

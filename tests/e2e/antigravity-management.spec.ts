@@ -1,3 +1,4 @@
+import { selectNewChatAgent, selectNewChatLaunchMode } from './new-chat-helpers'
 import { expect, test } from '@playwright/test'
 import { authenticate, mockHermesApi, mockChatSocket, TEST_ACCESS_KEY } from './fixtures'
 
@@ -35,11 +36,12 @@ test('Antigravity picker offers scoped provider selection and global config', as
   } }))
   await page.goto('/#/hermes/chat')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
-  const drawer = page.locator('.new-chat-drawer')
-  await drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first().locator('.n-base-selection').click()
-  await page.locator('.n-base-select-option:visible').filter({ hasText: /^Antigravity$/ }).click()
-  await expect(drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first()).toContainText('Antigravity')
-  await expect(drawer.locator('.new-chat-field').filter({ hasText: 'Global config' })).toHaveCount(1)
+  const draft = page.locator('.new-chat-page')
+  await selectNewChatAgent(page, 'Antigravity')
+  await expect(draft.locator('.agent-card.active')).toContainText('Antigravity')
+  await expect(draft.getByRole('radiogroup', { name: 'Launch mode', exact: true }).getByRole('radio', { name: 'Model', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await selectNewChatLaunchMode(page, 'global')
+  await expect(draft.locator('.input-model-button')).toBeDisabled()
 })
 
 for (const mode of ['global', 'scoped']) {

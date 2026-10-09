@@ -1,3 +1,4 @@
+import { selectNewChatAgent, selectNewChatLaunchMode } from './new-chat-helpers'
 import { expect, test } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY, TEST_MODEL_GROUP } from './fixtures'
 
@@ -118,12 +119,8 @@ for (const mode of ['scoped', 'global']) test(`DSH ${mode} chat selects its mode
   await page.route('**/api/coding-agents', route => route.fulfill({ json: { tools: [{ id: 'dsh', name: 'DeepSeek Harness', installed: true }] } }))
   await page.goto('/#/hermes/chat')
   await page.getByRole('button', { name: 'New Chat' }).click()
-  const form = page.locator('.new-chat-drawer')
-  await form.locator('.new-chat-field').filter({ hasText: /^Agent/ }).locator('.n-base-selection').click()
-  await page.getByText('DeepSeek Harness', { exact: true }).last().click()
-  if (mode === 'global') await form.getByText('Global config', { exact: true }).click()
-  await form.getByRole('button', { name: 'Create', exact: true }).click()
-  await expect(page).toHaveURL(/#\/hermes\/session\//)
+  await selectNewChatAgent(page, 'DeepSeek Harness')
+  if (mode === 'global') await selectNewChatLaunchMode(page, 'global')
   const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')
   await input.fill('DSH integration check')
   await page.getByRole('button', { name: 'Send', exact: true }).click()

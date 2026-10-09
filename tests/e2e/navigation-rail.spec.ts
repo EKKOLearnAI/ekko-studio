@@ -60,7 +60,7 @@ test('keeps global navigation and account controls available when the conversati
   await expect(page.locator('.session-search-modal')).toBeVisible()
   await page.keyboard.press('Escape')
   await sidebar.getByRole('button', { name: 'New Chat', exact: true }).click()
-  await expect(page.locator('.new-chat-drawer')).toBeVisible()
+  await expect(page.locator('.new-chat-page')).toBeVisible()
 })
 
 test('opens the two-column mobile drawer and restores the desktop rail after resizing', async ({ page }) => {

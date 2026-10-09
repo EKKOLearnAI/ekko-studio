@@ -1,3 +1,4 @@
+import { selectNewChatAgent, selectNewChatLaunchMode, sendNewChatMessage } from './new-chat-helpers'
 import { expect, test, type Page } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 import agentCatalog from '../../config/agents.json'
@@ -8,21 +9,23 @@ function gate() {
   return { pending, release }
 }
 
-async function warmDrawer(page: Page) {
+async function warmDraft(page: Page) {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await mockHermesApi(page)
   await mockChatSocket(page)
   await page.goto('/#/hermes/chat')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
-  const drawer = page.locator('.new-chat-drawer')
-  await expect(drawer.getByRole('button', { name: 'Create', exact: true })).toBeEnabled()
-  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await expect(drawer).toBeHidden()
-  return drawer
+  const draft = page.locator('.new-chat-page')
+  await draft.locator('textarea').fill('Hello')
+  await expect(draft.getByRole('button', { name: 'Send', exact: true })).toBeEnabled()
+  await draft.locator('textarea').focus()
+  await page.keyboard.press('Escape')
+  await expect(draft).toBeHidden()
+  return draft
 }
 
 test('cached configuration stays usable while installation and category refreshes are pending', async ({ page }) => {
-  const drawer = await warmDrawer(page)
+  const draft = await warmDraft(page)
   const delayed = gate()
   let pendingRequests = 0
   for (const endpoint of ['/api/agents/availability', '/api/studio/session-categories']) {
@@ -35,13 +38,15 @@ test('cached configuration stays usable while installation and category refreshe
   try {
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()
     await expect.poll(() => pendingRequests).toBe(2)
-    const profile = drawer.locator('.new-chat-field').filter({ hasText: /^Profiles/ })
+    await draft.locator('textarea').fill('Hello')
+    await draft.getByRole('button', { name: 'Chat settings', exact: true }).click()
+    const profile = page.locator('.new-chat-field').filter({ hasText: /^Profiles/ })
     await expect(profile).toContainText('research')
     await expect(profile.locator('.n-base-loading__container')).toHaveCount(0)
-    const category = drawer.locator('.new-chat-field').filter({ hasText: /^Category/ })
+    const category = page.locator('.new-chat-field').filter({ hasText: /^Category/ })
     await expect(category.locator('.n-base-loading__container')).toBeVisible()
-    await expect(drawer.locator('.new-chat-field').filter({ hasText: /^Provider/ })).toContainText('Test Provider')
-    await expect(drawer.getByRole('button', { name: 'Create', exact: true })).toBeEnabled()
+    await expect(draft.locator('.input-model-button')).toContainText('test-model')
+    await expect(draft.getByRole('button', { name: 'Send', exact: true })).toBeEnabled()
     await profile.locator('.n-base-selection').click()
     await page.locator('.n-base-select-option:visible').filter({ hasText: /^default$/ }).click()
     await expect(profile).toContainText('default')
@@ -53,8 +58,8 @@ test('cached configuration stays usable while installation and category refreshe
   }
 })
 
-test('a closed drawer cannot apply its late installation response to a reopened draft', async ({ page }) => {
-  const drawer = await warmDrawer(page)
+test('a closed draft cannot apply its late installation response to a reopened draft', async ({ page }) => {
+  const draft = await warmDraft(page)
   const oldRequest = gate()
   let requests = 0
   await page.route('**/api/agents/availability', async route => {
@@ -68,20 +73,21 @@ test('a closed drawer cannot apply its late installation response to a reopened 
   try {
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()
     await expect.poll(() => requests).toBe(1)
-    await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(drawer).toBeHidden()
+    await draft.locator('textarea').focus()
+    await page.keyboard.press('Escape')
+    await expect(draft).toBeHidden()
     const newResponse = page.waitForResponse('**/api/agents/availability')
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()
     await newResponse
-    const agent = drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first()
-    await agent.locator('.n-base-selection').click()
-    await page.locator('.n-base-select-option:visible').filter({ hasText: /^Codex$/ }).click()
+    const agent = draft.locator('.agent-card.active')
+    await selectNewChatAgent(page, 'Codex')
     const oldResponse = page.waitForResponse('**/api/agents/availability')
     oldRequest.release()
     await oldResponse
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
     await expect(agent).toContainText('Codex')
-    await expect(drawer.getByRole('button', { name: 'Create', exact: true })).toBeEnabled()
+    await draft.locator('textarea').fill('Hello')
+    await expect(draft.getByRole('button', { name: 'Send', exact: true })).toBeEnabled()
   } finally {
     oldRequest.release()
   }
@@ -96,11 +102,12 @@ test('an unavailable inventory disables creation without holding the configurati
   const failedResponse = page.waitForResponse('**/api/agents/availability')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await failedResponse
-  const drawer = page.locator('.new-chat-drawer')
-  const profile = drawer.locator('.new-chat-field').filter({ hasText: /^Profiles/ })
+  const draft = page.locator('.new-chat-page')
+  await draft.getByRole('button', { name: 'Chat settings', exact: true }).click()
+  const profile = page.locator('.new-chat-field').filter({ hasText: /^Profiles/ })
   await expect(profile).toContainText('research')
   await expect(profile.locator('.n-base-loading__container')).toHaveCount(0)
-  await expect(drawer.getByRole('button', { name: 'Create', exact: true })).toBeDisabled()
+  await expect(draft.getByRole('button', { name: 'Send', exact: true })).toBeDisabled()
 })
 
 for (const mode of ['scoped', 'global']) {
@@ -123,19 +130,16 @@ for (const mode of ['scoped', 'global']) {
     try {
       await page.goto('/#/hermes/chat')
       await page.getByRole('button', { name: 'New Chat', exact: true }).click()
-      const drawer = page.locator('.new-chat-drawer')
-      const agent = drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first()
-      await agent.locator('.n-base-selection').click()
-      await page.locator('.n-base-select-option:visible').filter({ hasText: /^Codex$/ }).click()
-      if (mode === 'global') await drawer.getByText('Global config', { exact: true }).click()
-      await drawer.getByRole('button', { name: 'Create', exact: true }).click()
+      const draft = page.locator('.new-chat-page')
+      const agent = draft.locator('.agent-card.active')
+      await selectNewChatAgent(page, 'Codex')
+      if (mode === 'global') await selectNewChatLaunchMode(page, 'global')
+      await sendNewChatMessage(page, 'Start coding')
       // The probe gate remains closed until the chat is created.
-      await expect(drawer).toBeHidden()
+      await expect(draft).toBeHidden()
       await expect(page).toHaveURL(/#\/hermes\/session\//)
       expect(probeRequests).toBe(0)
       expect(availabilityRequests).toBe(2)
-      await page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)').fill('Start coding')
-      await page.getByRole('button', { name: 'Send', exact: true }).click()
       await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted
         ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({ coding_agent_id: 'codex', mode })
       expect(api.unexpectedRequests).toEqual([])
@@ -154,8 +158,8 @@ for (const entry of ['/hermes/chat', '/studio/agents']) {
     await page.goto(`/#${entry}`)
     if (entry !== '/hermes/chat') await page.getByRole('link', { name: 'Chat', exact: true }).click()
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()
-    const drawer = page.locator('.new-chat-drawer')
-    await drawer.getByRole('button', { name: 'Create', exact: true }).click()
+    const draft = page.locator('.new-chat-page')
+    await sendNewChatMessage(page)
     await expect(page).toHaveURL(/#\/hermes\/session\//)
     const sessionId = new URL(page.url()).hash.split('/').pop()!
     const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')
@@ -163,8 +167,6 @@ for (const entry of ['/hermes/chat', '/studio/agents']) {
     await expect(page.locator('.chat-view > .page-loading-overlay')).toHaveCount(0)
     expect(await page.evaluate(sid => (window as any).__PW_CHAT_SOCKET__?.emitted
       ?.filter((item: any) => item.event === 'resume' && item.payload.session_id === sid) || [], sessionId)).toEqual([])
-    await input.fill('First message')
-    await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted
       ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({ session_id: sessionId, agent_id: 'ekko-agent' })
     expect(api.unexpectedRequests).toEqual([])
@@ -186,21 +188,18 @@ for (const agent of agentCatalog.agents) {
       } }))
       await page.goto('/#/hermes/chat')
       await page.getByRole('button', { name: 'New Chat', exact: true }).click()
-      const drawer = page.locator('.new-chat-drawer')
+      const draft = page.locator('.new-chat-page')
       if (agent.id !== 'ekko-agent') {
-        await drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first().locator('.n-base-selection').click()
-        await page.locator('.n-base-select-option:visible').getByText(agent.name, { exact: true }).click()
+        await selectNewChatAgent(page, agent.name)
       }
-      if (mode === 'global' && agent.modes.includes('scoped')) await drawer.getByText('Global config', { exact: true }).click()
-      await drawer.getByRole('button', { name: 'Create', exact: true }).click()
+      if (mode === 'global' && agent.modes.includes('scoped')) await selectNewChatLaunchMode(page, 'global')
+      await sendNewChatMessage(page)
       await expect(page).toHaveURL(/#\/hermes\/session\//)
       const sessionId = new URL(page.url()).hash.split('/').pop()!
       expect(await page.evaluate(sid => (window as any).__PW_CHAT_SOCKET__?.emitted
         ?.filter((item: any) => item.event === 'resume' && item.payload.session_id === sid) || [], sessionId)).toEqual([])
       const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')
       await expect(input).toBeVisible({ timeout: 2000 })
-      await input.fill('First message')
-      await page.getByRole('button', { name: 'Send', exact: true }).click()
       await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted
         ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({
           session_id: sessionId,
@@ -219,26 +218,25 @@ for (const failure of ['not-installed', 'unavailable']) {
     await mockChatSocket(page)
     await page.goto('/#/hermes/chat')
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()
-    const drawer = page.locator('.new-chat-drawer')
-    await drawer.locator('.new-chat-field').filter({ hasText: /^Agent/ }).first().locator('.n-base-selection').click()
-    await page.locator('.n-base-select-option:visible').filter({ hasText: /^Codex$/ }).click()
+    const draft = page.locator('.new-chat-page')
+    await selectNewChatAgent(page, 'Codex')
     await page.route('**/api/agents/availability', route => route.fulfill(failure === 'unavailable'
       ? { status: 503, json: { error: 'Inventory unavailable' } }
       : { json: { revision: 2, updatedAt: new Date().toISOString(), agents: [
         { id: 'codex', installed: false, source: 'not-installed' },
       ] } }))
     const response = page.waitForResponse('**/api/agents/availability')
-    await drawer.getByRole('button', { name: 'Create', exact: true }).click()
+    await sendNewChatMessage(page)
     await response
     if (failure === 'unavailable') {
       await expect(page.locator('.n-message')).toContainText('Failed to inspect coding agents')
-      await expect(drawer.getByRole('button', { name: 'Create', exact: true })).toBeEnabled()
-      await expect(drawer).toBeVisible()
+      await expect(draft.getByRole('button', { name: 'Send', exact: true })).toBeEnabled()
+      await expect(draft).toBeVisible()
       await expect(page).toHaveURL(/#\/hermes\/chat$/)
     } else {
       await expect(page.locator('.n-message')).toContainText('Codex')
       await expect(page).toHaveURL(/#\/studio\/agents$/)
-      await expect(drawer).toBeHidden()
+      await expect(draft).toBeHidden()
     }
   })
 }

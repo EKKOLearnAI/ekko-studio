@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { expectNewChatEffectsMoving } from './new-chat-helpers'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
 type DesktopPlatform = 'darwin' | 'linux' | 'win32'
@@ -171,6 +172,31 @@ async function openDesktopPageSidebar(page: Page, platform: DesktopPlatform, pat
   await mockHermesApi(page)
   await page.goto(path)
 }
+
+const softwareTest = test.extend({ launchOptions: { args: ['--disable-gpu'] } })
+
+softwareTest.describe('Windows new-chat effects with software rendering', () => {
+  for (const reducedMotion of ['no-preference', 'reduce'] as const) softwareTest(`Windows new-chat cards keep animating with ${reducedMotion} motion settings`, async ({ page }) => {
+    await installDesktopBridge(page, 'win32')
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await page.emulateMedia({ reducedMotion })
+    await authenticate(page, TEST_ACCESS_KEY, 'research')
+    await mockChatSocket(page)
+    await mockHermesApi(page)
+    await page.goto('/#/hermes/chat')
+    await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+    const draft = page.locator('.new-chat-page')
+    await expect(draft.locator('.agent-cards')).toHaveAttribute('aria-busy', 'false')
+    // Verify visible movement even when the desktop environment disables CSS animations.
+    await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; }' })
+    await expectNewChatEffectsMoving(page)
+    const halo = draft.locator('.agent-card.active .agent-card-halo').first()
+    const initialOpacity = await halo.evaluate(el => Number(getComputedStyle(el).opacity))
+    await expect.poll(() => halo.evaluate(el => Number(getComputedStyle(el).opacity))).not.toBe(initialOpacity)
+    await expect.poll(() => draft.evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
+    if (reducedMotion === 'no-preference') await page.screenshot({ path: '/tmp/studio-windows-stars.png', animations: 'allow' })
+  })
+})
 
 for (const platform of ['win32', 'linux'] as const) {
   test(`keeps browser settings header actions visible at the minimum ${platform} width`, async ({ page }) => {
@@ -606,13 +632,13 @@ test('embeds the desktop browser beside workspace and terminal', async ({ page }
   await expect(profileSwitcher).toContainText('Default')
 
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
-  await expect(page.locator('.new-chat-drawer')).toBeVisible()
+  await expect(page.locator('.new-chat-page')).toBeVisible()
   await expect.poll(() => page.evaluate(() => {
     const calls = (window as typeof window & { __PW_DESKTOP_BROWSER__?: { viewportCalls: Array<{ visible: boolean }> } }).__PW_DESKTOP_BROWSER__?.viewportCalls || []
     return calls.at(-1)?.visible
   })).toBe(false)
   await page.keyboard.press('Escape')
-  await expect(page.locator('.new-chat-drawer')).not.toBeVisible()
+  await expect(page.locator('.new-chat-page')).not.toBeVisible()
   await expect.poll(() => page.evaluate(() => {
     const calls = (window as typeof window & { __PW_DESKTOP_BROWSER__?: { viewportCalls: Array<{ visible: boolean }> } }).__PW_DESKTOP_BROWSER__?.viewportCalls || []
     return calls.at(-1)?.visible

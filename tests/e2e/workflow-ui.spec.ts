@@ -83,7 +83,7 @@ for (const agent of ['Codex', 'DeepSeek Harness']) test(`workflow ${agent} nodes
   })
 
   await page.goto('/#/hermes/workflow')
-  const node = page.locator('.vue-flow__node[data-id="agent"]')
+  const node = page.locator('.vue-flow__node')
   await expect(node.locator('.model-trigger')).toContainText('gpt-5-codex')
 
   await node.locator('.n-select').first().click()

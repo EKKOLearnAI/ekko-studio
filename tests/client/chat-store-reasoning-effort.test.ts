@@ -94,6 +94,24 @@ describe('chat store per-session reasoning effort', () => {
     expect(sessionsApi.setSessionReasoningEffort).toHaveBeenCalledWith('s1', 'low')
   })
 
+  it('carries a draft effort into the new session first run without a settings write', async () => {
+    const store = useChatStore()
+    const session = store.newChat({ model: 'draft-model', provider: 'draft-provider', reasoningEffort: 'max' })
+    await store.sendMessage('First message')
+    expect(chatApi.startRunViaSocket.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({
+      session_id: session.id, reasoning_effort: 'max', model: 'draft-model', provider: 'draft-provider',
+    }))
+    expect(sessionsApi.setSessionReasoningEffort).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { provider: 'moa', model: 'ensemble' },
+    { codingAgentId: 'codex' as const, codingAgentMode: 'global' as const },
+  ])('does not carry a draft effort into MoA or global CLI configuration: %j', options => {
+    const session = useChatStore().newChat({ ...options, reasoningEffort: 'max' })
+    expect(session.reasoningEffort).toBeUndefined()
+  })
+
   it('persists the default value as an empty server setting', async () => {
     const store = useChatStore()
     const session = makeSession('s2')

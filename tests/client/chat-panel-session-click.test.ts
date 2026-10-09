@@ -65,7 +65,7 @@ describe('ChatPanel session clicks', () => {
     const modal = source.slice(modalStart, modalEnd)
     const standardList = modal.indexOf('<div v-if="sessionModelKind === \'model\'" class="session-model-list"')
     const moaList = modal.indexOf('<div v-else class="session-model-list"', standardList)
-    const customFooter = modal.indexOf('<div v-if="sessionModelKind === \'model\'" class="session-model-custom"', moaList)
+    const customFooter = modal.indexOf('class="session-model-custom"', moaList)
 
     expect(standardList).toBeGreaterThanOrEqual(0)
     expect(moaList).toBeGreaterThan(standardList)
@@ -119,10 +119,12 @@ describe('ChatPanel session clicks', () => {
     expect(source).toContain('await applySessionModelSwitch(pending.model, pending.provider, sessionModelApiMode.value)')
   })
 
-  it('uses a create action in the new chat drawer instead of duplicating the new chat trigger label', () => {
+  it('creates a conversation from the inline composer submission', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
 
-    expect(source).toContain('{{ t("common.create") }}')
+    expect(source).toContain('class="new-chat-page"')
+    expect(source).toContain(':submit="submitNewChat"')
+    expect(source).not.toContain('<NDrawer')
     expect(source).not.toContain('{{ t("chat.newChat") }}\n            </NButton>')
   })
 
@@ -130,9 +132,7 @@ describe('ChatPanel session clicks', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
 
     expect(source).toContain('if (group.provider === "moa") return newChatAgent.value === "hermes"')
-    expect(source).toContain('newChatAgent.value === "hermes" && Boolean(newChatMoaGroup.value?.models.length)')
     expect(source).toContain('group.provider === "moa"\n          ? !isSessionModelCodingAgent.value')
-    expect(source).toContain('name="new-chat-model-kind"')
     expect(source).toContain('name="session-model-kind"')
     expect(source).toContain("{{ t('chat.modelType') }}")
     expect(source).toContain('<NRadioButton value="model">{{ t(\'chat.standardModels\') }}</NRadioButton>')

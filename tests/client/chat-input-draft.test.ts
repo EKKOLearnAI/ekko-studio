@@ -93,7 +93,7 @@ function mountForSession(
   sessionId: string,
   sessionOverrides: Partial<ReturnType<typeof useChatStore>['sessions'][number]> = {},
   displayOverrides: Record<string, any> = {},
-  componentProps: { initialText?: string; persistDraft?: boolean } = {},
+  componentProps: Partial<InstanceType<typeof ChatInput>['$props']> = {},
 ) {
   const pinia = createTestingPinia({ stubActions: false, createSpy: vi.fn })
   const chatStore = useChatStore()
@@ -128,6 +128,73 @@ describe('ChatInput draft persistence', () => {
       configurable: true,
       value: vi.fn(),
     })
+  })
+
+  it('isolates the new-chat composer from the active session draft and reference', async () => {
+    localStorage.setItem('hermes_chat_input_drafts_v1', JSON.stringify({ 'existing': 'Keep this draft' }))
+    const wrapper = mountForSession('existing', { inputTokens: 900, reasoningEffort: 'high' }, {}, { draft: true, persistDraft: false })
+    const store = useChatStore()
+    store.setMessageReference('existing', { id: 'reference', role: 'assistant', content: 'Previous answer', timestamp: 1 })
+    await nextTick()
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+    expect(wrapper.find('.message-reference-preview').exists()).toBe(false)
+    expect(wrapper.find('.context-usage-row').exists()).toBe(false)
+    expect(wrapper.find('.reasoning-effort-button').exists()).toBe(false)
+    await wrapper.get('textarea').setValue('New conversation')
+    expect(JSON.parse(localStorage.getItem('hermes_chat_input_drafts_v1')!)).toEqual({ existing: 'Keep this draft' })
+  })
+
+  it('keeps the first message when creation fails and prevents duplicate submissions', async () => {
+    let finish!: (value: boolean) => void
+    const submit = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+    const wrapper = mountForSession('existing', {}, {}, { draft: true, persistDraft: false, submit })
+    const send = vi.spyOn(useChatStore(), 'sendMessage').mockResolvedValue(undefined)
+    await wrapper.get('textarea').setValue('First message')
+    await wrapper.get('.send-button').trigger('click')
+    await wrapper.get('textarea').trigger('keydown', { key: 'Enter' })
+    expect(submit).toHaveBeenCalledOnce()
+    expect(send).not.toHaveBeenCalled()
+    finish(false)
+    await flushPromises()
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('First message')
+    await wrapper.setProps({ submit: vi.fn().mockResolvedValue(true) })
+    await wrapper.get('.send-button').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('uses the draft model effort levels and value without inheriting existing session settings', async () => {
+    const wrapper = mountForSession('existing', { provider: 'old-provider', model: 'old-model', reasoningEffort: 'low' }, {}, {
+      draft: true,
+      draftConfig: { provider: 'draft-provider', model: 'draft-model', profile: 'research' },
+    })
+    const app = useAppStore()
+    app.profileModelGroups = [{ profile: 'research', default: 'draft-model', default_provider: 'draft-provider', groups: [{
+      provider: 'draft-provider', label: 'Draft provider', models: ['draft-model', 'simple-model'],
+      model_meta: { 'draft-model': { reasoning_efforts: ['high', 'max'] }, 'simple-model': { reasoning: false } },
+    }] }]
+    await nextTick()
+    expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('2')
+    expect(useChatStore().setSessionReasoningEffort).not.toHaveBeenCalled()
+    expect(useChatStore().activeSession?.reasoningEffort).toBe('low')
+    await wrapper.setProps({ reasoningEffort: 'max' })
+    expect(wrapper.get('.reasoning-effort-button').classes()).toContain('active')
+    expect(wrapper.get('.reasoning-effort-slider-popover').attributes('style')).toContain('#ef4444')
+    await wrapper.setProps({ draftConfig: { provider: 'draft-provider', model: 'simple-model', profile: 'research' } })
+    expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('0')
+    await wrapper.setProps({ draftConfig: { provider: 'moa', model: 'ensemble', profile: 'research' } })
+    expect(wrapper.find('.reasoning-effort-button').exists()).toBe(false)
+    await wrapper.setProps({ draftConfig: { provider: 'draft-provider', model: 'draft-model', codingAgentMode: 'global' } })
+    expect(wrapper.find('.reasoning-effort-button').exists()).toBe(false)
+  })
+
+  it('blocks Enter submission until the new-chat configuration is ready', async () => {
+    const submit = vi.fn().mockResolvedValue(true)
+    const wrapper = mountForSession('existing', {}, {}, { draft: true, sendDisabled: true, submit })
+    await wrapper.get('textarea').setValue('First message')
+    await wrapper.get('textarea').trigger('keydown', { key: 'Enter' })
+    expect(submit).not.toHaveBeenCalled()
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('First message')
   })
 
   it('adds a pasted non-image file to the attachment list', async () => {
@@ -424,7 +491,7 @@ describe('ChatInput draft persistence', () => {
     await nextTick()
 
     expect(store.sessions[0].reasoningEffort).toBe('max')
-    expect(wrapper.get('.reasoning-effort-button').attributes('style')).toContain('--reasoning-effort-accent-color: #ef4444')
+    expect(wrapper.get('.reasoning-effort-slider-popover').attributes('style')).toContain('--reasoning-effort-accent-color: #ef4444')
     expect(wrapper.get('.n-slider-stub').classes()).toContain('reasoning-effort-slider--max')
   })
 
@@ -438,7 +505,7 @@ describe('ChatInput draft persistence', () => {
     await nextTick()
     expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('3')
     await wrapper.get('.n-slider-stub').setValue('3')
-    expect(wrapper.get('.reasoning-effort-button').attributes('style')).toContain('--reasoning-effort-accent-color: #ef4444')
+    expect(wrapper.get('.reasoning-effort-slider-popover').attributes('style')).toContain('--reasoning-effort-accent-color: #ef4444')
     await wrapper.get('.n-slider-stub').setValue('2')
     const store = useChatStore()
     expect(store.sessions[0].reasoningEffort).toBe('high')
@@ -456,7 +523,7 @@ describe('ChatInput draft persistence', () => {
     await nextTick()
 
     expect(store.sessions[0].reasoningEffort).toBe('high')
-    expect(wrapper.get('.reasoning-effort-button').attributes('style')).toContain('--reasoning-effort-accent-color: #f9c33c')
+    expect(wrapper.get('.reasoning-effort-slider-popover').attributes('style')).toContain('--reasoning-effort-accent-color: #f9c33c')
     expect(wrapper.get('.n-slider-stub').classes()).not.toContain('reasoning-effort-slider--max')
   })
 

@@ -23,7 +23,7 @@ import {
 import type { AvailableModelGroup } from "@/api/hermes/system";
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
 import { agentInstallationState, fetchAgentAvailabilitySnapshot, type AgentAvailabilitySnapshot } from "@/api/agent-status";
-import { useChatStore, type Session } from "@/stores/hermes/chat";
+import { useChatStore, type Session, type Attachment } from "@/stores/hermes/chat";
 import { useAppStore } from "@/stores/hermes/app";
 import { useProfilesStore } from "@/stores/hermes/profiles";
 import { useFilesStore } from "@/stores/hermes/files";
@@ -32,8 +32,6 @@ import { useSessionBrowserPrefsStore } from "@/stores/hermes/session-browser-pre
 import {
   NSpin,
   NButton,
-  NDrawer,
-  NDrawerContent,
   NDropdown,
   NInput,
   NInputNumber,
@@ -53,6 +51,7 @@ import { copyToClipboard } from "@/utils/clipboard";
 import FolderPicker from "./FolderPicker.vue";
 import StarIcon from "@/components/common/StarIcon.vue";
 import ChatInput from "./ChatInput.vue";
+import NewChatAgentCards from "./NewChatAgentCards.vue";
 import RealtimeVoiceStage from "./RealtimeVoiceStage.vue";
 import ConversationMonitorPane from "./ConversationMonitorPane.vue";
 import MessageList from "./MessageList.vue";
@@ -67,7 +66,8 @@ import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } f
 import { buildActiveSessionMenuOptions, buildSessionContextMenuOptions } from "./session-menu-options";
 import PageSidebarNav from "@/components/layout/PageSidebarNav.vue";
 import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
-import { isStoredSuperAdmin } from "@/api/client";
+import { getStoredUserId, isStoredSuperAdmin } from "@/api/client";
+import { loadNewChatFormPreferences, saveNewChatFormPreferences } from "@/utils/new-chat-form-preferences";
 import { useDefaultWorkspace } from "@/composables/useDefaultWorkspace";
 import { useCollapsedProviderGroups } from "@/composables/useCollapsedProviderGroups";
 import { canScopedCodingAgentUseProvider, usesServerManagedProviderAuth } from "@/utils/codingAgentProviders";
@@ -357,6 +357,7 @@ async function handleSessionClick(
   sessionId: string,
   options: { preserveCategoryCollapse?: boolean } = {},
 ) {
+  closeNewChatPage();
   if (!options.preserveCategoryCollapse) {
     setCategoryRevealSuppressedSessionId(null);
   }
@@ -495,6 +496,7 @@ onMounted(() => {
   window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.addEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
   window.addEventListener("resize", handleToolPanelViewportResize);
+  window.addEventListener("keydown", handleNewChatEscape);
   handleToolPanelViewportResize();
   if (profilesStore.profiles.length === 0) {
     void profilesStore.fetchProfiles();
@@ -547,6 +549,7 @@ onUnmounted(() => {
   window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.removeEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
   window.removeEventListener("resize", handleToolPanelViewportResize);
+  window.removeEventListener("keydown", handleNewChatEscape);
   stopToolResize();
   sessionFadeAnimation?.cancel();
   workspacePreviewRequestSeq += 1;
@@ -813,12 +816,52 @@ const activeSessionModelLabel = computed(() => {
 });
 
 const headerTitle = computed(() =>
-  currentMode.value === "live"
+  showNewChatPage.value ? t("chat.newChat") : currentMode.value === "live"
     ? t("chat.liveSessions")
     : activeSessionTitle.value,
 );
 
-const showNewChatModal = ref(false);
+const showNewChatPage = ref(false);
+const showNewChatSettings = ref(false);
+const showNewChatPresetMode = ref(false);
+const newChatComposerRevision = ref(0);
+const newChatPreviousToolPanel = ref(false);
+const newChatModelLabel = computed(() => isNewChatGlobalCodingAgent.value
+  ? t("codingAgents.launchModeGlobal")
+  : newChatModel.value ? appStore.displayModelName(newChatModel.value, newChatProvider.value)
+    : newChatHasNoModels.value ? t("models.noModels") : t("models.selectModel"));
+
+function closeNewChatPage() {
+  if (showNewChatPage.value) persistNewChatForm();
+  showNewChatPage.value = false;
+  if (sessionModelIsDraft.value) {
+    showSessionModelModal.value = false;
+    showSessionModelModeModal.value = false;
+    pendingSessionModelSwitch.value = null;
+    sessionModelIsDraft.value = false;
+  }
+  if (workspaceIsDraft.value) {
+    showWorkspaceModal.value = false;
+    workspaceIsDraft.value = false;
+  }
+  showNewChatSettings.value = false;
+  showNewChatPresetMode.value = false;
+  newChatOptionsLoadSequence++;
+}
+
+function cancelNewChatPage() {
+  if (newChatLoading.value) return;
+  closeNewChatPage();
+  showToolPanel.value = newChatPreviousToolPanel.value;
+}
+
+function handleNewChatEscape(event: KeyboardEvent) {
+  if (event.key !== "Escape" || !showNewChatPage.value || showSessionModelModal.value || showSessionModelModeModal.value || showWorkspaceModal.value || showNewChatSettings.value || showNewChatPresetMode.value) return;
+  if (event.target instanceof Element && event.target.closest('.n-modal')) return;
+  cancelNewChatPage();
+}
+
+watch(() => router.currentRoute.value.fullPath, () => closeNewChatPage());
 const NEW_CHAT_AGENT_STORAGE_KEY = "hermes_new_chat_agent_v1";
 function loadNewChatAgent(): "hermes" | ChatCodingAgentId {
   try {
@@ -834,7 +877,8 @@ const newChatAgentMode = ref<"global" | "scoped">("scoped");
 const newChatProfile = ref<string>("default");
 const newChatProvider = ref<string>("");
 const newChatModel = ref<string>("");
-const newChatModelKind = ref<"model" | "moa">("model");
+const newChatCustomModel = ref(false);
+const newChatReasoningEffort = ref("");
 const newChatBaseUrl = ref<string>("");
 const newChatApiKey = ref<string>("");
 const newChatApiMode = ref<CodingAgentApiMode>("codex_responses");
@@ -848,6 +892,22 @@ const newChatLoading = ref(false);
 const newChatAgentLoading = ref(false);
 const newChatModelsLoading = ref(false);
 let newChatOptionsLoadSequence = 0;
+let restoringNewChatForm = false;
+
+function persistNewChatForm() {
+  if (restoringNewChatForm) return;
+  saveNewChatFormPreferences(getStoredUserId(), {
+    agent: preferredNewChatAgent, mode: newChatAgentMode.value, profile: newChatProfile.value,
+    provider: newChatProvider.value, model: newChatModel.value, customModel: newChatCustomModel.value,
+    apiMode: newChatApiMode.value, reasoningEffort: newChatReasoningEffort.value,
+    workspace: newChatWorkspace.value, categoryId: newChatCategoryId.value,
+    agentPreset: newChatAgentPreset.value, baseUrl: newChatBaseUrl.value, apiKey: newChatApiKey.value,
+  });
+}
+
+watch([newChatAgent, newChatAgentMode, newChatProfile, newChatProvider, newChatModel, newChatCustomModel,
+  newChatApiMode, newChatReasoningEffort, newChatWorkspace, newChatCategoryId, newChatAgentPreset, newChatBaseUrl, newChatApiKey],
+  () => { if (showNewChatPage.value) persistNewChatForm(); }, { flush: "post" });
 
 const newChatCategoryOptions = computed(() => [
   { label: t("chat.uncategorized"), value: 0 },
@@ -906,34 +966,21 @@ async function initWorkspaceComposable() {
   catch { message.error(t("chat.workspaceSetFailed")); }
 }
 
-async function handleToggleDefaultWorkspace() {
-  if (newChatWorkspace.value) await handleTogglePinRecent(newChatWorkspace.value);
-}
-
-function handleSelectRecentWorkspace(path: string) {
-  newChatWorkspace.value = path;
-}
-
-function handleSelectDefaultWorkspace(path: string) {
-  newChatWorkspace.value = path;
-  showDefaultWorkspaceMenu.value = false;
-}
-
-async function handleTogglePinRecent(path: string) {
+async function handleToggleWorkspaceFavorite() {
+  const path = workspaceValue.value;
+  if (!path) return;
   try {
     await workspaceComposable.toggleDefaultWorkspace(path);
   } catch { message.error(t("chat.workspaceSetFailed")); }
 }
 
-const isCurrentWorkspaceDefault = computed(() => {
-  return Boolean(newChatWorkspace.value && workspaceComposable.isDefaultWorkspace(newChatWorkspace.value));
+const isWorkspacePickerFavorite = computed(() => {
+  return Boolean(workspaceValue.value && workspaceComposable.isDefaultWorkspace(workspaceValue.value));
 });
-
-const showDefaultWorkspaceMenu = ref(false);
 
 function getFolderName(path: string | null): string {
   if (!path) return '';
-  const parts = path.split('/');
+  const parts = path.replace(/\\/g, '/').split('/');
   return parts[parts.length - 1] || path;
 }
 
@@ -952,25 +999,6 @@ const mostRecentDefaultWorkspace = computed(() => {
   return defaultWorkspaces.value[0];
 });
 
-// 动态计算可见的工作区数量（根据容器宽度）
-const visibleDefaultWorkspaces = computed(() => {
-  if (defaultWorkspaces.value.length === 0) return [];
-  
-  // 简单策略：前2个总是可见，其余通过"更多"菜单
-  // 未来可以根据实际容器宽度动态调整
-  const maxVisible = Math.min(2, defaultWorkspaces.value.length);
-  return defaultWorkspaces.value.slice(0, maxVisible);
-});
-
-const hasHiddenDefaults = computed(() => {
-  return defaultWorkspaces.value.length > visibleDefaultWorkspaces.value.length;
-});
-
-const hiddenDefaultWorkspaces = computed(() => {
-  const visible = new Set(visibleDefaultWorkspaces.value);
-  return defaultWorkspaces.value.filter(ws => !visible.has(ws));
-});
-
 const newChatAgentAvailability = ref<AgentAvailabilitySnapshot | null>(null);
 const newChatAgentOptions = computed(() => AGENT_OPTIONS.filter(option =>
   agentInstallationState(newChatAgentAvailability.value, option.value) === "installed",
@@ -982,10 +1010,17 @@ const newChatApiModeOptions = computed(() => [
   { label: t("codingAgents.protocolAnthropicMessages"), value: "anthropic_messages" },
 ]);
 
-const newChatAgentModeOptions = computed(() => [
-  { label: t("codingAgents.launchModeGlobal"), value: "global" },
-  { label: t("codingAgents.launchModeScoped"), value: "scoped" },
-]);
+function handleNewChatLaunchModeChange(global: boolean) {
+  if (!newChatLoading.value) newChatAgentMode.value = global ? "global" : "scoped";
+}
+
+function handleNewChatLaunchModeKeydown(event: KeyboardEvent) {
+  if (newChatLoading.value || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  handleNewChatLaunchModeChange(event.key === "End" || (event.key !== "Home" && newChatAgentMode.value !== "global"));
+  const group = event.currentTarget as HTMLElement;
+  nextTick(() => group.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus());
+}
 
 function effectiveNewChatMode(
   agent: typeof newChatAgent.value,
@@ -1015,7 +1050,9 @@ function getSelectableModelGroupsForProfile(profile: string) {
 }
 
 function getDefaultModelForProfile(profile: string) {
-  const groups = getSelectableModelGroupsForProfile(profile);
+  const groups = getSelectableModelGroupsForProfile(profile).map(group => ({
+    ...group, models: group.models.filter(model => !group.model_meta?.[model]?.disabled),
+  }));
   const activeProfileName = profilesStore.activeProfileName || "default";
   const selectedProvider = appStore.selectedProvider || "";
   const selectedModel = appStore.selectedModel || "";
@@ -1055,40 +1092,8 @@ const newChatProfileOptions = computed(() =>
   })),
 );
 
-const newChatModelGroups = computed(() => {
-  const groups = getSelectableModelGroupsForProfile(newChatProfile.value);
-  return newChatModelKind.value === "moa"
-    ? groups.filter((group) => group.provider === "moa")
-    : groups.filter((group) => group.provider !== "moa");
-});
-
-const newChatMoaGroup = computed(() =>
-  getSelectableModelGroupsForProfile(newChatProfile.value).find((group) => group.provider === "moa"),
-);
-
-const newChatCanUseMoa = computed(() =>
-  newChatAgent.value === "hermes" && Boolean(newChatMoaGroup.value?.models.length),
-);
-
-const newChatProviderOptions = computed(() =>
-  newChatModelGroups.value.map((group) => ({
-    label: group.label || group.provider,
-    value: group.provider,
-  })),
-);
-
-const newChatModelOptions = computed(() => {
-  const group = newChatModelGroups.value.find(
-    (item) => item.provider === newChatProvider.value,
-  );
-  return (group?.models || []).map((model) => ({
-    label: appStore.displayModelName(model, group?.provider),
-    value: model,
-  }));
-});
-
 const selectedNewChatProviderGroup = computed(() =>
-  newChatModelGroups.value.find((item) => item.provider === newChatProvider.value),
+  getSelectableModelGroupsForProfile(newChatProfile.value).find((item) => item.provider === newChatProvider.value),
 );
 
 const isNewChatCodingAgent = computed(() => newChatAgent.value !== "hermes");
@@ -1099,6 +1104,28 @@ const effectiveNewChatAgentMode = computed(() =>
 const isNewChatGlobalCodingAgent = computed(() =>
   isNewChatCodingAgent.value && effectiveNewChatAgentMode.value === "global",
 );
+const newChatDraftConfig = computed(() => ({
+  profile: newChatProfile.value,
+  provider: newChatProvider.value,
+  model: newChatModel.value,
+  codingAgentMode: isNewChatCodingAgent.value ? effectiveNewChatAgentMode.value : undefined,
+}));
+const newChatModelCatalogKnown = computed(() => appStore.profileModelGroups.some(entry => entry.profile === newChatProfile.value));
+function isNewChatModelAvailable(group = selectedNewChatProviderGroup.value) {
+  return !!group && !group.model_meta?.[newChatModel.value]?.disabled && (
+    group.models.includes(newChatModel.value) || (appStore.customModels[group.provider] || []).includes(newChatModel.value)
+    || (newChatCustomModel.value && !!newChatModel.value)
+  );
+}
+const newChatHasNoModels = computed(() => !isNewChatGlobalCodingAgent.value && !newChatModelsLoading.value
+  && newChatModelCatalogKnown.value && !isNewChatModelAvailable() && !getSelectableModelGroupsForProfile(newChatProfile.value)
+    .some(group => group.models.some(model => !group.model_meta?.[model]?.disabled)
+      || (appStore.customModels[group.provider] || []).length > 0));
+function openNewChatModelSettings() {
+  showSessionModelModal.value = false;
+  void router.push({ name: "hermes.models", query: { modelProfile: newChatProfile.value } });
+}
+
 const newChatUsesProviderModel = computed(() => !isNewChatGlobalCodingAgent.value);
 const newChatNeedsBaseUrl = computed(() =>
   isNewChatCodingAgent.value && effectiveNewChatAgentMode.value === "scoped" && !selectedNewChatProviderGroup.value?.base_url,
@@ -1114,18 +1141,25 @@ const newChatNeedsApiKey = computed(() =>
 );
 const canConfirmNewChat = computed(() => {
   if (newChatCategoryCreating.value || newChatLoading.value) return false;
+  if (newChatCategoryId.value !== null && (sessionCategoriesLoading.value
+    || !sessionCategories.value.some(category => category.id === newChatCategoryId.value))) return false;
   if (!newChatAgentOptions.value.some(option => option.value === newChatAgent.value)) return false;
   if (newChatAgent.value === "dsh" && (!newChatAgentPreset.value || !newChatPresetReady.value)) return false;
   if (!profilesStore.profiles.some(profile => profile.name === newChatProfile.value)) return false;
   if (!newChatUsesProviderModel.value) return true;
   if (newChatModelsLoading.value) return false;
-  if (!newChatProvider.value || !newChatModel.value) return false;
+  if (!newChatProvider.value || !newChatModel.value || !isNewChatModelAvailable()) return false;
   if (!isNewChatCodingAgent.value) return true;
   if (isNewChatCodingAgent.value && effectiveNewChatAgentMode.value === "scoped" && !newChatApiMode.value) return false;
   if (newChatNeedsBaseUrl.value && !newChatBaseUrl.value.trim()) return false;
   if (newChatNeedsApiKey.value && !newChatApiKey.value.trim()) return false;
   return true;
 });
+
+const newChatMissingCredentials = computed(() =>
+  !!newChatProvider.value && !!newChatModel.value && ((newChatNeedsBaseUrl.value && !newChatBaseUrl.value.trim())
+  || (newChatNeedsApiKey.value && !newChatApiKey.value.trim())),
+);
 
 function defaultNewChatApiMode(group?: AvailableModelGroup): CodingAgentApiMode {
   const providerKey = String(group?.provider || newChatProvider.value || "").toLowerCase();
@@ -1142,65 +1176,35 @@ function syncNewChatApiMode() {
 
 function syncNewChatModelSelection() {
   const defaults = getDefaultModelForProfile(newChatProfile.value);
-  newChatModelKind.value = defaults.provider === "moa" && newChatAgent.value === "hermes"
-    ? "moa"
-    : "model";
   newChatProvider.value = defaults.provider;
   newChatModel.value = defaults.model;
-  newChatBaseUrl.value = "";
-  newChatApiKey.value = "";
-  syncNewChatApiMode();
-}
-
-function handleNewChatModelKindChange(value: "model" | "moa") {
-  if (value === "moa") {
-    const group = newChatMoaGroup.value;
-    if (!group?.models.length) return;
-    newChatModelKind.value = "moa";
-    newChatProvider.value = "moa";
-    newChatModel.value = group.models[0];
-  } else {
-    newChatModelKind.value = "model";
-    const groups = getSelectableModelGroupsForProfile(newChatProfile.value)
-      .filter((group) => group.provider !== "moa");
-    const profileModels = appStore.profileModelGroups.find(
-      (entry) => entry.profile === newChatProfile.value,
-    );
-    const defaultGroup = groups.find((group) => group.provider === profileModels?.default_provider);
-    const group = defaultGroup || groups.find((item) => item.models.length > 0);
-    newChatProvider.value = group?.provider || "";
-    newChatModel.value = group?.models.includes(profileModels?.default || "")
-      ? profileModels?.default || ""
-      : group?.models[0] || "";
-  }
+  newChatCustomModel.value = false;
   newChatBaseUrl.value = "";
   newChatApiKey.value = "";
   syncNewChatApiMode();
 }
 
 function ensureNewChatProviderSelection() {
-  if (!newChatUsesProviderModel.value) return;
-  const currentGroup = selectedNewChatProviderGroup.value;
-  if (currentGroup && currentGroup.models.includes(newChatModel.value)) {
-    syncNewChatApiMode();
-    return;
-  }
+  if (!newChatUsesProviderModel.value || newChatModelsLoading.value || !newChatModelCatalogKnown.value) return;
+  if (isNewChatModelAvailable()) return;
   syncNewChatModelSelection();
 }
 
 watch(
   () => [newChatAgent.value, newChatAgentMode.value, newChatProfile.value],
   () => {
-    ensureNewChatProviderSelection();
+    if (!restoringNewChatForm) ensureNewChatProviderSelection();
   },
+  { flush: "sync" },
 );
 
 function isCurrentNewChatOptionsLoad(sequence: number) {
-  return showNewChatModal.value && sequence === newChatOptionsLoadSequence;
+  return showNewChatPage.value && sequence === newChatOptionsLoadSequence;
 }
 
 function handleNewChatAgentChange(value: "hermes" | ChatCodingAgentId) {
   if (!newChatAgentOptions.value.some(option => option.value === value)) return;
+  showNewChatPresetMode.value = false;
   preferredNewChatAgent = value;
   newChatAgent.value = value;
   try {
@@ -1228,8 +1232,7 @@ async function refreshNewChatAgentAvailability(sequence: number) {
 }
 
 async function loadNewChatProfiles(sequence: number) {
-  if (profilesStore.profiles.length > 0) return;
-  await profilesStore.fetchProfiles();
+  if (profilesStore.profiles.length === 0) await profilesStore.fetchProfiles();
   if (!isCurrentNewChatOptionsLoad(sequence)) return;
   if (!profilesStore.profiles.some(profile => profile.name === newChatProfile.value)) {
     newChatProfile.value = profilesStore.activeProfileName || profilesStore.profiles[0]?.name || "default";
@@ -1238,41 +1241,66 @@ async function loadNewChatProfiles(sequence: number) {
 }
 
 async function loadNewChatModels(sequence: number) {
-  newChatModelsLoading.value = appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0;
-  if (!newChatModelsLoading.value) return;
+  newChatModelsLoading.value = !newChatModelCatalogKnown.value;
+  if (!newChatModelsLoading.value) { ensureNewChatProviderSelection(); return; }
   try {
     await appStore.loadModels();
-    if (isCurrentNewChatOptionsLoad(sequence)) ensureNewChatProviderSelection();
   } finally {
-    if (isCurrentNewChatOptionsLoad(sequence)) newChatModelsLoading.value = false;
+    if (isCurrentNewChatOptionsLoad(sequence)) {
+      newChatModelsLoading.value = false;
+      ensureNewChatProviderSelection();
+    }
   }
 }
 
-function openNewChatModal() {
+async function openNewChatPage() {
+  if (newChatLoading.value) return;
+  if (props.contentMode !== "chat") await router.push({ name: "hermes.chat" });
+  const previousToolPanel = showNewChatPage.value ? newChatPreviousToolPanel.value : showToolPanel.value;
+  closeNewChatPage();
+  newChatPreviousToolPanel.value = previousToolPanel;
+  currentMode.value = "chat";
+  showToolPanel.value = false;
+  showRealtimeVoice.value = false;
+  showOutline.value = false;
+  newChatComposerRevision.value++;
   const sequence = ++newChatOptionsLoadSequence;
   isBatchMode.value = false;
   selectedSessionKeys.value.clear();
   showBatchDeleteConfirm.value = false;
-  newChatAgentPreset.value = undefined;
+  const saved = loadNewChatFormPreferences(getStoredUserId());
+  restoringNewChatForm = true;
+  preferredNewChatAgent = saved?.agent || loadNewChatAgent();
+  newChatAgent.value = preferredNewChatAgent;
+  newChatAgentMode.value = saved?.mode || "scoped";
+  newChatAgentPreset.value = saved?.agentPreset;
+  newChatReasoningEffort.value = saved?.reasoningEffort || "";
   newChatPresetReady.value = false;
+  newChatCategoryId.value = saved?.categoryId ?? null;
+  newChatProfile.value = saved?.profile || profilesStore.activeProfileName
+    || profilesStore.profiles.find(profile => profile.active)?.name || profilesStore.profiles[0]?.name || "default";
+  newChatWorkspace.value = saved?.workspace || "";
+  newChatProvider.value = saved?.provider || "";
+  newChatModel.value = saved?.model || "";
+  newChatCustomModel.value = saved?.customModel || false;
+  newChatBaseUrl.value = saved?.baseUrl || "";
+  newChatApiKey.value = saved?.apiKey || "";
+  newChatApiMode.value = saved?.apiMode || "chat_completions";
+  newChatModelsLoading.value = !newChatModelCatalogKnown.value;
+  if (!saved) syncNewChatModelSelection();
+  restoringNewChatForm = false;
   if (isMobile.value) showSessions.value = false;
-  showNewChatModal.value = true;
-  newChatCategoryId.value = null;
-  newChatProfile.value =
-    profilesStore.activeProfileName ||
-    profilesStore.profiles.find((profile) => profile.active)?.name ||
-    profilesStore.profiles[0]?.name ||
-    "default";
-  newChatWorkspace.value = "";
+  showNewChatPage.value = true;
   void initWorkspaceComposable().then(() => {
-    if (isCurrentNewChatOptionsLoad(sequence) && !newChatWorkspace.value) {
+    if (isCurrentNewChatOptionsLoad(sequence) && !saved && !newChatWorkspace.value) {
       newChatWorkspace.value = mostRecentDefaultWorkspace.value || "";
     }
   });
-  syncNewChatModelSelection();
-
   void refreshNewChatAgentAvailability(sequence);
-  void loadSessionCategories();
+  void loadSessionCategories().then(() => {
+    if (isCurrentNewChatOptionsLoad(sequence) && !sessionCategoriesLoadFailed.value && newChatCategoryId.value !== null
+      && !sessionCategories.value.some(category => category.id === newChatCategoryId.value)) newChatCategoryId.value = null;
+  });
   void loadNewChatProfiles(sequence);
   void loadNewChatModels(sequence);
 }
@@ -1282,104 +1310,101 @@ function handleNewChatProfileChange(value: string) {
   syncNewChatModelSelection();
 }
 
-function handleNewChatProviderChange(value: string) {
-  newChatProvider.value = value;
-  newChatModel.value = newChatModelOptions.value[0]?.value || "";
-  newChatBaseUrl.value = "";
-  newChatApiKey.value = "";
-  syncNewChatApiMode();
-}
-
-async function confirmNewChat() {
-  if (!canConfirmNewChat.value) return;
-  if (newChatAgent.value === "hermes") {
-    newChatLoading.value = true;
-    try {
-      const status = await fetchAgentAvailabilitySnapshot();
-      if (agentInstallationState(status, "hermes") === "not-installed") {
-        showNewChatModal.value = false;
-        if (isSuperAdmin.value) {
-          await router.push({ name: "hermes.agentManager", query: { runtime: "install" } });
-        } else {
-          message.warning(t("codingAgents.installRequired", { agent: "Hermes" }));
+async function submitNewChat(text: string, attachments?: Attachment[]): Promise<boolean> {
+  if (!canConfirmNewChat.value || !showNewChatPage.value) return false;
+  const sequence = newChatOptionsLoadSequence;
+  newChatLoading.value = true;
+  try {
+    if (newChatAgent.value === "hermes") {
+      try {
+        const status = await fetchAgentAvailabilitySnapshot();
+        if (agentInstallationState(status, "hermes") === "not-installed") {
+          showNewChatPage.value = false;
+          if (isSuperAdmin.value) {
+            await router.push({ name: "hermes.agentManager", query: { runtime: "install" } });
+          } else {
+            message.warning(t("codingAgents.installRequired", { agent: "Hermes" }));
+          }
+          return false;
         }
-        return;
+      } catch (error) {
+        console.warn("Failed to read Hermes Agent availability before creating a chat:", error);
       }
-    } catch (error) {
-      console.warn("Failed to read Hermes Agent availability before creating a chat:", error);
-    } finally {
-      newChatLoading.value = false;
     }
-  }
 
-  if (isNewChatExternalCodingAgent.value) {
-    newChatLoading.value = true;
-    try {
-      const agentId = newChatAgent.value as CodingAgentId;
-      // Reuse the server inventory; probing every CLI's version delays creation.
-      const status = await fetchAgentAvailabilitySnapshot();
-      if (agentInstallationState(status, agentId) !== "installed") {
-        const agentName = newChatAgentOptions.value.find(option => option.value === agentId)?.label || agentId;
-        message.warning(t("codingAgents.installRequired", { agent: agentName }));
-        showNewChatModal.value = false;
-        await router.push({ name: "hermes.agentManager" });
-        return;
+    if (isNewChatExternalCodingAgent.value) {
+      try {
+        const agentId = newChatAgent.value as CodingAgentId;
+        // Reuse the server inventory; probing every CLI's version delays creation.
+        const status = await fetchAgentAvailabilitySnapshot();
+        if (agentInstallationState(status, agentId) !== "installed") {
+          const agentName = newChatAgentOptions.value.find(option => option.value === agentId)?.label || agentId;
+          message.warning(t("codingAgents.installRequired", { agent: agentName }));
+          showNewChatPage.value = false;
+          await router.push({ name: "hermes.agentManager" });
+          return false;
+        }
+      } catch {
+        message.error(t("codingAgents.loadFailed"));
+        return false;
       }
-    } catch {
-      message.error(t("codingAgents.loadFailed"));
-      return;
-    } finally {
-      newChatLoading.value = false;
     }
-  }
 
-  const group = selectedNewChatProviderGroup.value;
-  const source = newChatAgent.value === "hermes" ? "cli" : newChatAgent.value === "ekko-agent" ? "builtin_agent" : "coding_agent";
-  const codingAgentMode = effectiveNewChatAgentMode.value;
-  const isGlobalCodingAgent = source === "coding_agent" && codingAgentMode === "global";
-  const agent = newChatAgent.value === "codex"
-    ? "codex"
-    : newChatAgent.value === "claude-code"
-      ? "claude"
-      : newChatAgent.value === "pi"
-        ? "pi"
-      : newChatAgent.value === "grok"
-        ? "grok"
-      : newChatAgent.value === "dsh" ? "dsh" : newChatAgent.value === "opencode"
-        ? "opencode"
-      : isNativeCodingAgent(newChatAgent.value) ? newChatAgent.value
-      : newChatAgent.value === "antigravity" ? "antigravity" : newChatAgent.value === "cursor"
-        ? "cursor"
-      : newChatAgent.value === "ekko-agent"
-        ? "ekko-agent"
-      : "hermes";
-  const session = chatStore.newChat({
-    profile: newChatProfile.value,
-    provider: isGlobalCodingAgent ? undefined : newChatProvider.value,
-    model: isGlobalCodingAgent ? undefined : newChatModel.value,
-    source,
-    agent,
-    codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value,
-    codingAgentMode: source === "coding_agent" || source === "builtin_agent" ? codingAgentMode : undefined,
-    agentPreset: newChatAgent.value === "dsh" ? newChatAgentPreset.value : undefined,
-    workspace: newChatWorkspace.value || null,
-    categoryId: newChatCategoryId.value,
-    baseUrl: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
-    apiKey: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
-    apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined,
-  });
-  // Record workspace to recent list
-  if (newChatWorkspace.value) {
-    try { await workspaceComposable.recordWorkspaceUsage(newChatWorkspace.value); }
-    catch { message.error(t("chat.workspaceSetFailed")); }
+    if (!isCurrentNewChatOptionsLoad(sequence)) return false;
+    const group = selectedNewChatProviderGroup.value;
+    const source = newChatAgent.value === "hermes" ? "cli" : newChatAgent.value === "ekko-agent" ? "builtin_agent" : "coding_agent";
+    const codingAgentMode = effectiveNewChatAgentMode.value;
+    const isGlobalCodingAgent = source === "coding_agent" && codingAgentMode === "global";
+    const agent = newChatAgent.value === "codex"
+      ? "codex"
+      : newChatAgent.value === "claude-code"
+        ? "claude"
+        : newChatAgent.value === "pi"
+          ? "pi"
+        : newChatAgent.value === "grok"
+          ? "grok"
+        : newChatAgent.value === "dsh" ? "dsh" : newChatAgent.value === "opencode"
+          ? "opencode"
+        : isNativeCodingAgent(newChatAgent.value) ? newChatAgent.value
+        : newChatAgent.value === "antigravity" ? "antigravity" : newChatAgent.value === "cursor"
+          ? "cursor"
+        : newChatAgent.value === "ekko-agent"
+          ? "ekko-agent"
+        : "hermes";
+    const session = chatStore.newChat({
+      profile: newChatProfile.value,
+      provider: isGlobalCodingAgent ? undefined : newChatProvider.value,
+      model: isGlobalCodingAgent ? undefined : newChatModel.value,
+      source,
+      agent,
+      codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value,
+      codingAgentMode: source === "coding_agent" || source === "builtin_agent" ? codingAgentMode : undefined,
+      agentPreset: newChatAgent.value === "dsh" ? newChatAgentPreset.value : undefined,
+      workspace: newChatWorkspace.value || null,
+      categoryId: newChatCategoryId.value,
+      baseUrl: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
+      apiKey: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
+      apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined,
+      reasoningEffort: !isGlobalCodingAgent && newChatProvider.value !== "moa" ? newChatReasoningEffort.value : undefined,
+    });
+    // Send the first message before changing the route so it belongs to this session.
+    void chatStore.sendMessage(text, attachments);
+    closeNewChatPage();
+    if (newChatWorkspace.value) {
+      void workspaceComposable.recordWorkspaceUsage(newChatWorkspace.value)
+        .catch(() => message.error(t("chat.workspaceSetFailed")));
+    }
+
+    await router.push({
+      name: chatStore.runtimeMode === "global_agent" ? "hermes.globalAgentSession" : "hermes.session",
+      params: { sessionId: session.id },
+    });
+    showNewChatPage.value = false;
+    if (isMobile.value) showSessions.value = false;
+    return true;
+  } finally {
+    newChatLoading.value = false;
   }
-  
-  await router.push({
-    name: chatStore.runtimeMode === "global_agent" ? "hermes.globalAgentSession" : "hermes.session",
-    params: { sessionId: session.id },
-  });
-  showNewChatModal.value = false;
-  if (isMobile.value) showSessions.value = false;
 }
 
 function sessionProfile(sessionId: string): string | null {
@@ -1923,12 +1948,14 @@ async function handleContextMenuSelect(key: string) {
       message.error(t("chat.exportFailed"));
     }
   } else if (key === "workspace") {
+    workspaceIsDraft.value = false;
     const session = chatStore.sessions.find(
       (s) => s.id === contextSessionId.value,
     );
     workspaceSessionId.value = contextSessionId.value;
     workspaceValue.value = session?.workspace || "";
     showWorkspaceModal.value = true;
+    void initWorkspaceComposable();
   } else if (key === "model") {
     await openSessionModelModal(contextSessionId.value);
   } else if (key === "rename") {
@@ -2036,16 +2063,39 @@ async function handleRenameConfirm() {
 const showWorkspaceModal = ref(false);
 const workspaceValue = ref("");
 const workspaceSessionId = ref<string | null>(null);
+const workspaceIsDraft = ref(false);
+
+function openNewChatWorkspace() {
+  if (newChatLoading.value) return;
+  workspaceIsDraft.value = true;
+  workspaceSessionId.value = null;
+  workspaceValue.value = newChatWorkspace.value;
+  showWorkspaceModal.value = true;
+  void initWorkspaceComposable();
+}
 
 function openActiveSessionWorkspace() {
   const session = chatStore.activeSession;
   if (!session?.id) return;
+  workspaceIsDraft.value = false;
   workspaceSessionId.value = session.id;
   workspaceValue.value = session.workspace || "";
   showWorkspaceModal.value = true;
+  void initWorkspaceComposable();
 }
 
 async function handleWorkspaceConfirm() {
+  if (workspaceIsDraft.value) {
+    if (!showNewChatPage.value || newChatLoading.value) return false;
+    newChatWorkspace.value = workspaceValue.value;
+    if (workspaceValue.value) {
+      void workspaceComposable.recordWorkspaceUsage(workspaceValue.value)
+        .catch(() => message.error(t("chat.workspaceSetFailed")));
+    }
+    showWorkspaceModal.value = false;
+    workspaceIsDraft.value = false;
+    return;
+  }
   if (!workspaceSessionId.value) return;
   const ok = await setSessionWorkspace(
     workspaceSessionId.value,
@@ -2069,6 +2119,7 @@ async function handleWorkspaceConfirm() {
 const showSessionModelModal = ref(false);
 const showSessionModelModeModal = ref(false);
 const sessionModelSessionId = ref<string | null>(null);
+const sessionModelIsDraft = ref(false);
 const sessionModelSearch = ref("");
 const sessionModelKind = ref<"model" | "moa">("model");
 const {
@@ -2084,14 +2135,24 @@ const pendingSessionModelSwitch = ref<{ model: string; provider: string } | null
 const sessionModelSwitching = ref(false);
 
 const sessionModelProfile = computed<string | null>(() => {
+  if (sessionModelIsDraft.value) return newChatProfile.value;
   const session = chatStore.sessions.find((s) => s.id === sessionModelSessionId.value);
   return session?.profile || null;
 });
 
-const sessionModelSession = computed(() =>
-  chatStore.sessions.find((s) => s.id === sessionModelSessionId.value) ||
-  (chatStore.activeSession?.id === sessionModelSessionId.value ? chatStore.activeSession : undefined),
-);
+const sessionModelSession = computed<Pick<Session, 'profile' | 'provider' | 'model' | 'source' | 'codingAgentId' | 'codingAgentMode' | 'apiMode' | 'agent'> | undefined>(() => {
+  if (sessionModelIsDraft.value) return {
+    profile: newChatProfile.value,
+    provider: newChatProvider.value,
+    model: newChatModel.value,
+    source: isNewChatCodingAgent.value ? 'coding_agent' : 'cli',
+    codingAgentId: isNewChatCodingAgent.value ? newChatAgent.value as ChatCodingAgentId : undefined,
+    codingAgentMode: effectiveNewChatAgentMode.value,
+    apiMode: newChatApiMode.value,
+  };
+  return chatStore.sessions.find((s) => s.id === sessionModelSessionId.value) ||
+    (chatStore.activeSession?.id === sessionModelSessionId.value ? chatStore.activeSession : undefined);
+});
 
 const isSessionModelScopedCodingAgent = computed(() =>
   (sessionModelSession.value?.source === "coding_agent" || sessionModelSession.value?.source === "builtin_agent") &&
@@ -2180,7 +2241,10 @@ const filteredSessionMoaModels = computed(() => {
   return query ? models.filter((model) => model.toLowerCase().includes(query)) : models;
 });
 
-async function openSessionModelModal(sessionId: string) {
+async function openSessionModelModal(sessionId: string | null) {
+  const isDraft = sessionId === null;
+  const draftSequence = newChatOptionsLoadSequence;
+  if (isDraft && (!showNewChatPage.value || isNewChatGlobalCodingAgent.value || newChatLoading.value)) return;
   const requestedSession =
     chatStore.sessions.find((s) => s.id === sessionId) ||
     (chatStore.activeSession?.id === sessionId ? chatStore.activeSession : undefined);
@@ -2191,10 +2255,10 @@ async function openSessionModelModal(sessionId: string) {
   if (appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0) {
     await appStore.loadModels();
   }
-  const session =
-    chatStore.sessions.find((s) => s.id === sessionId) ||
-    (chatStore.activeSession?.id === sessionId ? chatStore.activeSession : undefined);
+  if (isDraft && !isCurrentNewChatOptionsLoad(draftSequence)) return;
   sessionModelSessionId.value = sessionId;
+  sessionModelIsDraft.value = isDraft;
+  const session = sessionModelSession.value;
   const groups = sessionModelBaseGroups.value;
   const providerGroup = session?.provider
     ? groups.find((group) => group.provider === session.provider)
@@ -2217,6 +2281,8 @@ async function openSessionModelModal(sessionId: string) {
   sessionModelCustomProvider.value = usesMoa ? defaults.provider : sessionModelProvider.value;
   sessionModelSearch.value = "";
   sessionModelCustomInput.value = "";
+  pendingSessionModelSwitch.value = null;
+  showSessionModelModeModal.value = false;
   showSessionModelModal.value = true;
 }
 
@@ -2230,7 +2296,7 @@ function handleHeaderModelClick() {
   if (activeSessionUsesGlobalCodingAgentConfig.value) return;
   const sessionId = chatStore.activeSession?.id;
   if (!sessionId) {
-    openNewChatModal();
+    openNewChatPage();
     return;
   }
   openSessionModelModal(sessionId);
@@ -2264,7 +2330,24 @@ function defaultSessionModelApiMode(provider: string): CodingAgentApiMode {
 }
 
 async function applySessionModelSwitch(model: string, provider: string, apiMode?: CodingAgentApiMode) {
-  if (!sessionModelSessionId.value || sessionModelSwitching.value) return;
+  if (sessionModelSwitching.value) return;
+  if (sessionModelIsDraft.value) {
+    if (!showNewChatPage.value || newChatLoading.value) return;
+    if (newChatProvider.value !== provider) {
+      newChatBaseUrl.value = "";
+      newChatApiKey.value = "";
+    }
+    newChatProvider.value = provider;
+    newChatModel.value = model;
+    newChatCustomModel.value = !selectedNewChatProviderGroup.value?.models.includes(model);
+    syncNewChatApiMode();
+    if (apiMode) newChatApiMode.value = apiMode;
+    pendingSessionModelSwitch.value = null;
+    showSessionModelModeModal.value = false;
+    showSessionModelModal.value = false;
+    return;
+  }
+  if (!sessionModelSessionId.value) return;
   sessionModelSwitching.value = true;
   try {
     const ok = await chatStore.switchSessionModel(model, provider, sessionModelSessionId.value, apiMode);
@@ -2286,7 +2369,7 @@ async function applySessionModelSwitch(model: string, provider: string, apiMode?
 
 async function selectSessionModel(model: string, provider: string) {
   const meta = sessionModelBaseGroups.value.find((group) => group.provider === provider)?.model_meta?.[model];
-  if (meta?.disabled || !sessionModelSessionId.value || sessionModelSwitching.value) return;
+  if (meta?.disabled || (!sessionModelSessionId.value && !sessionModelIsDraft.value) || sessionModelSwitching.value) return;
   if (isSessionModelScopedCodingAgent.value) {
     pendingSessionModelSwitch.value = { model, provider };
     sessionModelApiMode.value = sessionModelSession.value?.provider === provider && sessionModelSession.value.apiMode
@@ -2335,7 +2418,7 @@ async function handleSessionModelCustomSubmit() {
         <PageSidebarNav
           :active="contentMode === 'connections' ? 'connections' : contentMode === 'agents' ? 'agents' : contentMode === 'models' ? 'models' : chatStore.runtimeMode === 'global_agent' ? 'global' : 'chat'"
           :primary-label="t('chat.newChat')"
-          @primary="openNewChatModal"
+          @primary="openNewChatPage"
         >
           <template #actions>
             <ListActionsMenu
@@ -2627,6 +2710,71 @@ async function handleSessionModelCustomSubmit() {
       @clickoutside="handleClickOutside"
     />
 
+    <NModal v-model:show="showNewChatSettings">
+      <div class="new-chat-settings-panel" role="dialog" aria-modal="true" :aria-label="t('chat.newChatSettings')">
+        <header class="new-chat-settings-header">
+          <h2>{{ t('chat.newChatSettings') }}</h2>
+          <NButton quaternary circle size="small" :aria-label="t('common.close')" @click="showNewChatSettings = false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </NButton>
+        </header>
+        <div class="new-chat-settings-body" :inert="newChatLoading || undefined">
+          <div class="new-chat-settings-group">
+            <label class="new-chat-field">
+              <span class="new-chat-label">{{ t("sidebar.profiles") }}</span>
+              <NSelect
+                :value="newChatProfile"
+                :options="newChatProfileOptions"
+                :loading="profilesStore.loading && profilesStore.profiles.length === 0"
+                @update:value="handleNewChatProfileChange"
+              />
+            </label>
+            <label class="new-chat-field">
+              <span class="new-chat-label">{{ t("chat.category") }}</span>
+              <NSelect
+                :key="newChatCategorySelectRevision"
+                :value="newChatCategoryId ?? 0"
+                :options="newChatCategoryOptions"
+                :placeholder="t('chat.categoryPlaceholder')"
+                :loading="sessionCategoriesLoading || newChatCategoryCreating"
+                :disabled="newChatLoading || sessionCategoriesLoading || newChatCategoryCreating"
+                filterable
+                tag
+                @update:value="handleNewChatCategoryChange"
+              />
+              <span class="new-chat-field-hint">{{ t("chat.categoryCreateHint") }}</span>
+            </label>
+          </div>
+          <div v-if="(isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped') || newChatNeedsBaseUrl || newChatNeedsApiKey" class="new-chat-settings-group">
+            <label v-if="isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped'" class="new-chat-field">
+              <span class="new-chat-label">{{ t("codingAgents.protocolScope") }}</span>
+              <NSelect
+                v-model:value="newChatApiMode"
+                :options="newChatApiModeOptions"
+                :disabled="newChatLoading"
+              />
+            </label>
+            <label v-if="newChatNeedsBaseUrl" class="new-chat-field">
+              <span class="new-chat-label">{{ t("models.baseUrl") }}</span>
+              <NInput
+                v-model:value="newChatBaseUrl"
+                :placeholder="t('models.baseUrlPlaceholder')"
+              />
+            </label>
+            <label v-if="newChatNeedsApiKey" class="new-chat-field">
+              <span class="new-chat-label">{{ t("models.apiKey") }}</span>
+              <NInput
+                v-model:value="newChatApiKey"
+                type="password"
+                show-password-on="click"
+                :placeholder="t('models.apiKeyPlaceholder')"
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+    </NModal>
+
     <NModal
       v-model:show="showRecentCountModal"
       preset="dialog"
@@ -2728,7 +2876,28 @@ async function handleSessionModelCustomSubmit() {
       style="width: var(--studio-workspace-picker-width)"
       @positive-click="handleWorkspaceConfirm"
     >
-      <FolderPicker v-model="workspaceValue" />
+      <div class="workspace-picker-content">
+        <div v-if="defaultWorkspaces.length" class="default-workspace-chips">
+          <span class="default-workspace-label">{{ t('chat.favoriteWorkspaces') }}:</span>
+          <NButton v-for="path in defaultWorkspaces" :key="path" size="tiny" :title="path"
+            :type="workspaceValue === path ? 'primary' : 'default'" @click="workspaceValue = path">
+            {{ getFolderName(path) }}
+          </NButton>
+        </div>
+        <FolderPicker v-model="workspaceValue" show-favorite :favorite="isWorkspacePickerFavorite" :favorite-disabled="!workspaceValue"
+          :favorite-title="isWorkspacePickerFavorite ? t('chat.workspaceUnfavorite') : t('chat.workspaceFavorite')"
+          @toggle-favorite="handleToggleWorkspaceFavorite" />
+        <div v-if="recentWorkspaces.length" class="recent-workspaces">
+          <span class="recent-workspaces-label">{{ t('chat.workspaceRecent') }}:</span>
+          <div class="recent-workspaces-chips">
+            <NButton v-for="entry in recentWorkspaces" :key="entry.path" size="tiny" :title="entry.path"
+              :type="workspaceValue === entry.path ? 'primary' : 'default'" @click="workspaceValue = entry.path">
+              <template v-if="workspaceComposable.isDefaultWorkspace(entry.path)" #icon><StarIcon filled width="14" height="14" /></template>
+              {{ getFolderName(entry.path) }}
+            </NButton>
+          </div>
+        </div>
+      </div>
     </NModal>
 
     <NModal
@@ -2821,8 +2990,9 @@ async function handleSessionModelCustomSubmit() {
             </div>
           </div>
         </div>
-        <div v-if="filteredSessionModelGroups.length === 0" class="session-model-empty">
-          {{ sessionModelSearch ? 'No results' : 'No models' }}
+        <div v-if="!filteredSessionModelGroups.some(group => group.models.length > 0)" class="session-model-empty">
+          {{ sessionModelSearch ? t('models.noResults') : t('models.noModels') }}
+          <NButton v-if="sessionModelIsDraft && !sessionModelSearch" size="small" quaternary @click="openNewChatModelSettings">{{ t('models.noProviderPromptAction') }}</NButton>
         </div>
         </div>
         <div v-else class="session-model-list" :aria-busy="sessionModelSwitching">
@@ -2861,7 +3031,7 @@ async function handleSessionModelCustomSubmit() {
             {{ t('chat.noMoaPresets') }}
           </div>
         </div>
-        <div v-if="sessionModelKind === 'model'" class="session-model-custom">
+        <div v-if="sessionModelKind === 'model' && sessionModelProviderOptions.length" class="session-model-custom">
           <div class="session-model-custom-row">
             <NSelect
               v-model:value="sessionModelCustomProvider"
@@ -2876,7 +3046,7 @@ async function handleSessionModelCustomSubmit() {
               :disabled="sessionModelSwitching"
               size="small"
               class="session-model-custom-input"
-              @keydown.enter="handleSessionModelCustomSubmit"
+              @keydown.enter.stop.prevent="handleSessionModelCustomSubmit"
             />
           </div>
           <div class="session-model-custom-hint">
@@ -2910,222 +3080,7 @@ async function handleSessionModelCustomSubmit() {
       </template>
     </NModal>
 
-    <NDrawer
-      v-model:show="showNewChatModal"
-      class="new-chat-drawer"
-      placement="right"
-      width="var(--studio-drawer-width)"
-      :mask-closable="true"
-    >
-      <NDrawerContent :title="t('chat.newChat')" closable>
-        <div class="new-chat-form">
-          <label class="new-chat-field">
-            <span class="new-chat-label">{{ t("chat.agent") }}</span>
-            <NSelect
-              :value="newChatAgent"
-              @update:value="handleNewChatAgentChange"
-              :options="newChatAgentOptions"
-                :virtual-scroll="false"
-              :loading="newChatAgentLoading"
-              :disabled="newChatLoading || newChatAgentLoading"
-            />
-          </label>
-          <DshSessionPresetSelect
-            v-if="showNewChatModal && newChatAgent === 'dsh'"
-            v-model="newChatAgentPreset" :disabled="newChatLoading" @valid="newChatPresetReady = $event"
-          />
-          <label v-if="isNewChatExternalCodingAgent && !isGlobalOnlyCodingAgent(newChatAgent)" class="new-chat-field">
-            <span class="new-chat-label">{{ t("codingAgents.launchModeScope") }}</span>
-            <NRadioGroup v-model:value="newChatAgentMode" name="new-chat-coding-agent-mode">
-              <NRadioButton
-                v-for="option in newChatAgentModeOptions"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </NRadioButton>
-            </NRadioGroup>
-          </label>
-          <label class="new-chat-field">
-            <span class="new-chat-label">{{ t("sidebar.profiles") }}</span>
-            <NSelect
-              :value="newChatProfile"
-              :options="newChatProfileOptions"
-              :loading="profilesStore.loading && profilesStore.profiles.length === 0"
-              @update:value="handleNewChatProfileChange"
-            />
-          </label>
-          <label class="new-chat-field">
-            <span class="new-chat-label">{{ t("chat.category") }}</span>
-            <NSelect
-              :key="newChatCategorySelectRevision"
-              :value="newChatCategoryId ?? 0"
-              :options="newChatCategoryOptions"
-              :placeholder="t('chat.categoryPlaceholder')"
-              :loading="sessionCategoriesLoading || newChatCategoryCreating"
-              :disabled="newChatLoading || sessionCategoriesLoading || newChatCategoryCreating"
-              filterable
-              tag
-              @update:value="handleNewChatCategoryChange"
-            />
-            <span class="new-chat-field-hint">{{ t("chat.categoryCreateHint") }}</span>
-          </label>
-          <label v-if="newChatUsesProviderModel && newChatCanUseMoa" class="new-chat-field">
-            <span class="new-chat-label">{{ t('chat.modelType') }}</span>
-            <NRadioGroup
-              :value="newChatModelKind"
-              name="new-chat-model-kind"
-              @update:value="handleNewChatModelKindChange"
-            >
-              <NRadioButton value="model">{{ t('chat.standardModels') }}</NRadioButton>
-              <NRadioButton value="moa">{{ t('chat.moaPresets') }}</NRadioButton>
-            </NRadioGroup>
-          </label>
-          <label v-if="newChatUsesProviderModel && newChatModelKind === 'model'" class="new-chat-field">
-            <span class="new-chat-label">{{ t("models.provider") }}</span>
-            <NSelect
-              :value="newChatProvider"
-              :options="newChatProviderOptions"
-              :loading="newChatModelsLoading"
-              :disabled="newChatLoading || newChatModelsLoading"
-              @update:value="handleNewChatProviderChange"
-            />
-          </label>
-          <label v-if="newChatUsesProviderModel" class="new-chat-field">
-            <span class="new-chat-label">
-              {{ newChatModelKind === 'moa' ? t('chat.moaPresets') : t('models.models') }}
-            </span>
-            <NSelect
-              v-model:value="newChatModel"
-              :options="newChatModelOptions"
-              :loading="newChatModelsLoading"
-              :disabled="newChatLoading || newChatModelsLoading || !newChatProvider"
-              filterable
-            />
-          </label>
-          <label v-if="isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped'" class="new-chat-field">
-            <span class="new-chat-label">{{ t("codingAgents.protocolScope") }}</span>
-            <NSelect
-              v-model:value="newChatApiMode"
-              :options="newChatApiModeOptions"
-              :disabled="newChatLoading"
-            />
-          </label>
-          <label v-if="newChatNeedsBaseUrl" class="new-chat-field">
-            <span class="new-chat-label">{{ t("models.baseUrl") }}</span>
-            <NInput
-              v-model:value="newChatBaseUrl"
-              :placeholder="t('models.baseUrlPlaceholder')"
-            />
-          </label>
-          <label v-if="newChatNeedsApiKey" class="new-chat-field">
-            <span class="new-chat-label">{{ t("models.apiKey") }}</span>
-            <NInput
-              v-model:value="newChatApiKey"
-              type="password"
-              show-password-on="click"
-              :placeholder="t('models.apiKeyPlaceholder')"
-            />
-          </label>
-          <div class="new-chat-field">
-            <span class="new-chat-label">
-              {{ t("chat.workspace") }}
-              <NTooltip v-if="isCurrentWorkspaceDefault">
-                <template #trigger>
-                  <span class="workspace-default-badge">{{ t("chat.workspaceDefault") }}</span>
-                </template>
-                {{ t("chat.workspaceDefaultTooltip") }}
-              </NTooltip>
-            </span>
-            <!-- Default workspace chips -->
-            <div v-if="defaultWorkspaces.length > 0" class="default-workspace-chips">
-              <span class="default-workspace-label">{{ t("chat.defaultWorkspace") }}:</span>
-              <div class="workspace-chips-container">
-                <template v-for="(ws, index) in visibleDefaultWorkspaces" :key="ws">
-                  <div
-                    class="workspace-chip"
-                    :class="{ active: newChatWorkspace === ws }"
-                    @click="handleSelectDefaultWorkspace(ws)"
-                    :title="ws"
-                  >
-                    {{ getFolderName(ws) }}
-                  </div>
-                  <span v-if="index < visibleDefaultWorkspaces.length - 1 || hasHiddenDefaults" class="workspace-chip-separator">/</span>
-                </template>
-                <div v-if="hasHiddenDefaults" class="workspace-chip-dropdown">
-                  <button
-                    class="workspace-chip-more"
-                    type="button"
-                    :aria-expanded="showDefaultWorkspaceMenu"
-                    @click="showDefaultWorkspaceMenu = !showDefaultWorkspaceMenu"
-                  >
-                    <span>{{ t("chat.more") }}</span>
-                    <svg class="workspace-more-chevron" :class="{ expanded: showDefaultWorkspaceMenu }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <path d="m6 9 6 6 6-6" />
-                    </svg>
-                  </button>
-                  <div v-if="showDefaultWorkspaceMenu" class="workspace-dropdown-menu">
-                    <div
-                      v-for="ws in hiddenDefaultWorkspaces"
-                      :key="ws"
-                      class="workspace-dropdown-item"
-                      @click="handleSelectDefaultWorkspace(ws)"
-                      :title="ws"
-                    >
-                      {{ getFolderName(ws) }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <FolderPicker
-              v-model="newChatWorkspace"
-              show-favorite
-              :favorite="isCurrentWorkspaceDefault"
-              :favorite-disabled="!newChatWorkspace"
-              :favorite-title="isCurrentWorkspaceDefault ? t('chat.workspaceUnpin') : t('chat.workspacePin')"
-              @toggle-favorite="handleToggleDefaultWorkspace"
-            />
-            <div v-if="recentWorkspaces.length > 0" class="recent-workspaces">
-              <span class="recent-workspaces-label">{{ t("chat.workspaceRecent") }}:</span>
-              <div class="recent-workspaces-chips">
-                <NButton
-                  v-for="ws in recentWorkspaces"
-                  :key="ws.path"
-                  size="tiny"
-                  :type="ws.path === newChatWorkspace ? 'primary' : 'default'"
-                  @click="handleSelectRecentWorkspace(ws.path)"
-                >
-                  <template #icon>
-                    <span
-                      class="recent-pin-icon"
-                      :class="{ 'is-pinned': defaultWorkspaces.includes(ws.path) }"
-                      @click.stop="handleTogglePinRecent(ws.path)"
-                      :title="defaultWorkspaces.includes(ws.path) ? t('chat.workspaceUnpin') : t('chat.workspacePin')"
-                    >
-                      <StarIcon :filled="defaultWorkspaces.includes(ws.path)" width="14" height="14" />
-                    </span>
-                  </template>
-                  {{ getFolderName(ws.path) }}
-                </NButton>
-              </div>
-            </div>
-          </div>
-        </div>
-        <template #footer>
-          <div class="new-chat-actions">
-            <NButton @click="showNewChatModal = false">{{ t("common.cancel") }}</NButton>
-            <NButton
-              type="primary"
-              :disabled="!canConfirmNewChat"
-              @click="confirmNewChat"
-            >
-              {{ t("common.create") }}
-            </NButton>
-          </div>
-        </template>
-      </NDrawerContent>
-    </NDrawer>
+
 
     <div
       class="chat-main"
@@ -3154,7 +3109,7 @@ async function handleSessionModelCustomSubmit() {
         </div>
         <div class="header-actions">
           <NButton
-            v-if="chatStore.activeSession?.workspace"
+            v-if="!showNewChatPage && chatStore.activeSession?.workspace"
             class="header-workspace-button"
             quaternary
             size="small"
@@ -3170,7 +3125,7 @@ async function handleSessionModelCustomSubmit() {
             </template>
           </NButton>
           <!-- chat/live mode toggle hidden -->
-          <template v-if="currentMode === 'chat'">
+          <template v-if="currentMode === 'chat' && !showNewChatPage">
             <NTooltip v-if="isSuperAdmin" trigger="hover">
               <template #trigger>
                 <NButton
@@ -3259,6 +3214,56 @@ async function handleSessionModelCustomSubmit() {
           @drop="handleChatDrop"
         >
           <div ref="chatMainContentRef" class="chat-main-content">
+            <section v-if="showNewChatPage" class="new-chat-page" :aria-label="t('chat.newChat')">
+              <div class="new-chat-intro">
+                <h1>{{ t('chat.newChatCardTitle') }}</h1>
+                <p>{{ t('chat.newChatCardSubtitle') }}</p>
+              </div>
+              <NewChatAgentCards :value="newChatAgent" :options="newChatAgentOptions"
+                :loading="newChatAgentLoading" :disabled="newChatLoading || newChatAgentLoading"
+                @update:value="handleNewChatAgentChange" />
+              <div class="new-chat-compose">
+                <div class="new-chat-config-bar">
+                  <div class="new-chat-config-actions">
+                    <NButton quaternary circle size="small" class="new-chat-config-icon" :disabled="newChatLoading" :title="newChatWorkspace || t('chat.workspace')"
+                      :aria-label="t('chat.workspace')" :aria-expanded="showWorkspaceModal && workspaceIsDraft" @click="openNewChatWorkspace">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+                    </NButton>
+                    <DshSessionPresetSelect v-if="newChatAgent === 'dsh'" v-model="newChatAgentPreset" v-model:show="showNewChatPresetMode"
+                      compact :disabled="newChatLoading" @valid="newChatPresetReady = $event" />
+                    <NButton quaternary circle size="small" class="new-chat-config-icon" :disabled="newChatLoading" :title="t('chat.newChatSettings')"
+                      :aria-label="t('chat.newChatSettings')" :aria-expanded="showNewChatSettings" @click="showNewChatSettings = true">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--bg-card)"/><circle cx="15" cy="17" r="2" fill="var(--bg-card)"/></svg>
+                    </NButton>
+                    <div v-if="isNewChatExternalCodingAgent && !isGlobalOnlyCodingAgent(newChatAgent)"
+                      class="new-chat-launch-toggle" role="radiogroup" :aria-label="t('codingAgents.launchModeScope')"
+                      @keydown="handleNewChatLaunchModeKeydown">
+                      <button type="button" role="radio" :aria-checked="newChatAgentMode === 'scoped'"
+                        :tabindex="newChatAgentMode === 'scoped' ? 0 : -1" :disabled="newChatLoading"
+                        :title="t('codingAgents.launchModeScoped')" @click="handleNewChatLaunchModeChange(false)">
+                        {{ t('codingAgents.modelScope') }}
+                      </button>
+                      <button type="button" role="radio" :aria-checked="newChatAgentMode === 'global'"
+                        :tabindex="newChatAgentMode === 'global' ? 0 : -1" :disabled="newChatLoading"
+                        :title="t('codingAgents.launchModeGlobal')" @click="handleNewChatLaunchModeChange(true)">
+                        {{ t('codingAgents.launchModeGlobalShort') }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <ChatInput :key="newChatComposerRevision" ref="chatInputRef" draft :send-disabled="!canConfirmNewChat"
+                  :draft-config="newChatDraftConfig" v-model:reasoning-effort="newChatReasoningEffort"
+                  :submit="submitNewChat" :model-label="newChatModelLabel" :model-disabled="isNewChatGlobalCodingAgent || newChatLoading || newChatModelsLoading"
+                  :persist-draft="false" :initial-text="initialComposerText" @model-click="openSessionModelModal(null)" />
+                <button v-if="newChatHasNoModels" type="button" class="new-chat-config-hint" @click="openNewChatModelSettings">
+                  {{ t('models.noModels') }} · {{ t('models.noProviderPromptAction') }}
+                </button>
+                <button v-else-if="newChatMissingCredentials" type="button" class="new-chat-config-hint" @click="showNewChatSettings = true">
+                  {{ t('chat.newChatCredentialsHint') }}
+                </button>
+              </div>
+            </section>
+            <template v-else>
             <MessageList
               ref="messageListRef"
               :approval-portal-to-body="showRealtimeVoice"
@@ -3273,6 +3278,7 @@ async function handleSessionModelCustomSubmit() {
               @model-click="handleHeaderModelClick"
               @voice-click="openRealtimeVoice"
             />
+            </template>
           </div>
           <OutlinePanel
             v-if="showOutline"
@@ -3828,78 +3834,114 @@ async function handleSessionModelCustomSubmit() {
   }
 }
 
-.new-chat-form {
+.new-chat-settings-panel {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-}
-
-:deep(.new-chat-drawer .n-drawer-content) {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-:deep(.new-chat-drawer .n-drawer-header),
-:deep(.new-chat-drawer .n-drawer-footer) {
-  flex-shrink: 0;
-}
-
-:deep(.new-chat-drawer .n-drawer-body) {
-  flex: 1 1 auto;
-  min-height: 0;
+  width: min(400px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
   overflow: hidden;
+  border: 1px solid $border-light;
+  border-radius: 16px;
+  background: $bg-card;
+  color: $text-primary;
+  box-shadow: 0 16px 60px #00000024;
 }
-
-:deep(.new-chat-drawer .n-drawer-body-content-wrapper) {
-  height: 100%;
+.new-chat-settings-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid $border-light;
+  h2 { margin: 0; font-size: 15px; font-weight: 600; line-height: 22px; }
+}
+.new-chat-settings-body {
+  min-height: 0;
+  padding: 16px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.new-chat-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  & + & { margin-top: 16px; padding-top: 16px; border-top: 1px solid $border-light; }
 }
 
-:deep(.new-chat-drawer .folder-picker) {
-  max-height: 260px;
+.new-chat-page {
+  flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
+  justify-content: center; padding: clamp(12px, 2vh, 24px) 0;
 }
-
-:deep(.new-chat-drawer .folder-tree) {
-  max-height: 170px;
+.new-chat-intro {
+  flex: none; text-align: center; padding: 0 20px;
+  h1 { margin: 0 0 8px; font-size: clamp(22px, 2.4vw, 30px); font-weight: 600; letter-spacing: -.6px; }
+  p { margin: 0; color: $text-secondary; font-size: 13px; }
 }
-
+.new-chat-page > :deep(.agent-cards) {
+  flex: 1; min-height: 0; max-height: calc(176px * 1.4 + 84px); max-width: 1040px; margin: 8px auto 0;
+}
+.new-chat-compose { flex: none; width: min(760px, calc(100% - 48px)); margin: 12px auto 0; }
+.new-chat-config-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px 12px; margin-bottom: 8px; }
+.new-chat-config-actions { display: flex; justify-content: flex-start; align-items: center; gap: 8px; max-width: 100%; }
+.new-chat-config-icon { width: 28px; height: 28px; padding: 0; }
+.new-chat-launch-toggle {
+  display: inline-flex; flex: none; gap: 2px; margin: 0 2px; padding: 2px;
+  border-radius: 8px; background: rgba(var(--text-primary-rgb), .045);
+  button {
+    min-width: 44px; height: 24px; padding: 0 9px; border: 0; border-radius: 6px;
+    background: transparent; color: $text-secondary; font: inherit; font-size: 12px; line-height: 20px;
+    white-space: nowrap; cursor: pointer; transition: background-color .15s, color .15s, box-shadow .15s;
+    &[aria-checked="true"] {
+      background: $bg-card; color: $text-primary;
+      box-shadow: 0 1px 4px #00000014, inset 0 0 0 1px rgba(var(--text-primary-rgb), .1);
+    }
+    &:focus-visible { outline: 2px solid $accent-primary; outline-offset: 2px; }
+    &:disabled { cursor: default; opacity: .45; }
+  }
+}
+.new-chat-compose :deep(.chat-input-area) { padding: 0; border-top: 0; background: transparent; }
+.new-chat-config-hint { display: block; margin: 10px auto 0; padding: 0; border: 0; background: transparent; color: $text-secondary; font: inherit; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.workspace-picker-content { display: flex; flex-direction: column; gap: 12px; max-height: 65vh; overflow-y: auto; }
+.workspace-picker-content :deep(.n-button__content) { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: $breakpoint-mobile) {
-  :deep(.new-chat-drawer .n-drawer-body-content-wrapper) {
-    padding-top: 12px;
-    padding-bottom: 12px;
+  .new-chat-page { justify-content: flex-start; padding: 16px 0; }
+  .new-chat-intro {
+    margin-top: auto;
+    padding: 0 24px;
+    h1 { margin-bottom: 6px; font-size: clamp(19px, 5.1vw, 24px); line-height: 1.35; }
+    p { font-size: 12px; line-height: 1.5; }
   }
-
-  :deep(.new-chat-drawer .folder-picker) {
-    max-height: 210px;
-  }
-
-  :deep(.new-chat-drawer .folder-tree) {
-    max-height: 128px;
-  }
+  .new-chat-page > :deep(.agent-cards) { flex: none; max-height: none; }
+  .new-chat-compose { width: calc(100% - 32px); margin-top: 8px; margin-bottom: auto; }
+  .new-chat-config-bar { flex-wrap: wrap; gap: 6px; }
+  .new-chat-config-actions { width: 100%; }
+}
+@media (max-width: $breakpoint-mobile) and (max-height: 640px) {
+  .new-chat-page { padding: 8px 0; }
 }
 
 .new-chat-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  min-width: 0;
+  gap: 8px;
+  :deep(.n-base-selection), :deep(.n-input) { border-radius: 8px; }
 }
 
 .new-chat-label {
   font-size: 12px;
-  color: $text-muted;
+  color: $text-secondary;
   font-weight: 500;
 }
 
 .new-chat-field-hint {
   font-size: 11px;
+  line-height: 1.5;
   color: $text-muted;
-}
-
-.new-chat-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 .session-group-header {
@@ -4419,132 +4461,6 @@ async function handleSessionModelCustomSubmit() {
   flex-shrink: 0;
 }
 
-.workspace-chips-container {
-  display: flex;
-  flex: 1 1 240px;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: nowrap;
-  position: relative;
-}
-
-.workspace-chip {
-  min-width: 0;
-  padding: 4px 12px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.workspace-chip:hover {
-  background: rgba(var(--accent-primary-rgb), 0.06);
-  border-color: var(--accent-muted);
-  color: var(--text-primary);
-}
-
-.workspace-chip.active {
-  background: rgba(var(--accent-primary-rgb), 0.12);
-  border-color: var(--accent-muted);
-  color: var(--accent-primary);
-  font-weight: 500;
-}
-
-.workspace-chip-separator {
-  flex-shrink: 0;
-  color: var(--n-text-color-3);
-  font-size: 13px;
-  user-select: none;
-}
-
-.workspace-chip-dropdown {
-  position: relative;
-  display: flex;
-  flex-shrink: 0;
-}
-
-.workspace-chip-more {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-  line-height: inherit;
-  padding: 4px 12px;
-  font-size: 13px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
-  color: var(--text-secondary);
-}
-
-.workspace-chip-more:hover {
-  background: rgba(var(--accent-primary-rgb), 0.06);
-  border-color: var(--accent-muted);
-  color: var(--text-primary);
-}
-
-.workspace-more-chevron {
-  flex-shrink: 0;
-
-  &.expanded {
-    transform: rotate(180deg);
-  }
-}
-
-.workspace-dropdown-menu {
-  position: absolute;
-  top: 100%;
-  inset-inline-end: 0;
-  margin-top: 4px;
-  width: 240px;
-  max-width: calc(100vw - 48px);
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 9999;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.workspace-dropdown-item {
-  padding: 8px 12px;
-  cursor: pointer;
-  font-size: 13px;
-  transition: background 0.15s;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-dropdown-item:hover {
-  background: var(--n-color-hover);
-}
-
-.workspace-default-badge {
-  display: inline-block;
-  margin-inline-start: 6px;
-  padding: 1px 6px;
-  font-size: 10px;
-  font-weight: 600;
-  color: #f5a623;
-  background: rgba(245, 166, 35, 0.12);
-  border: 1px solid rgba(245, 166, 35, 0.3);
-  border-radius: 3px;
-  vertical-align: middle;
-}
-
 .recent-workspaces {
   margin-top: 8px;
 }
@@ -4562,19 +4478,4 @@ async function handleSessionModelCustomSubmit() {
   gap: 4px;
 }
 
-.recent-pin-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  cursor: pointer;
-  color: inherit;
-  opacity: 0.6;
-  transition: opacity $transition-fast;
-
-  &:hover,
-  &.is-pinned {
-    opacity: 1;
-  }
-}
 </style>
