@@ -30,13 +30,16 @@ function clampOutputLimit(outputLimit: number | undefined, contextWindow: number
   return Math.max(1, Math.min(Math.floor(outputLimit || 8192), contextWindow - 1))
 }
 
-/** Synchronous model output budget for proxies that must fill a required max_tokens. */
+/** Synchronous model output budget for proxies that must fill a required max_tokens.
+ * Undefined without real model metadata: custom endpoints may reject a generic
+ * large default, so callers keep their own conservative fallback. */
 export function codingAgentOutputLimit(input: {
   profile: string
   provider: string
   model: string
-}): number {
+}): number | undefined {
   const capabilities = getModelRuntimeCapabilities(input)
+  if (!capabilities.outputLimitKnown) return undefined
   return clampOutputLimit(capabilities.outputLimit, Math.max(1, Math.floor(capabilities.contextWindow)))
 }
 
