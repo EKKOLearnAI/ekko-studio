@@ -44,6 +44,8 @@ from bridge_runtime import (
     _tool_names_from_definitions,
 )
 
+CLARIFY_TIMEOUT_SECONDS = 300
+
 
 def _bind_session_workspace_cwd(session_id: str, workspace: str | None) -> bool:
     workspace_cwd = str(workspace or "").strip()
@@ -1435,28 +1437,108 @@ class AgentPool:
         return callback
 
     def _clarify_callback(self, session_id: str):
-        def callback(question: str, choices: list[str] | None = None) -> str:
-            clarify_id = uuid.uuid4().hex
-            response_queue: queue.Queue[str] = queue.Queue(maxsize=1)
+        def callback(
+            question: str | list[dict[str, Any]],
+            choices: list[str] | None = None,
+            *,
+            multi_select: bool = False,
+            questions: list[dict[str, Any]] | None = None,
+        ) -> str | dict[str, Any]:
+            # 5eea87882a calls callback(normalized_questions) directly. Earlier
+            # kernels use two positional arguments, optionally with batch kwargs.
+            modern = isinstance(question, list)
+            batch = question if modern else questions
+            deadline = time.monotonic() + CLARIFY_TIMEOUT_SECONDS
             with self._lock:
-                self._clarify_requests[clarify_id] = response_queue
+                session = self._sessions.get(session_id)
+                run_id = session.current_run_id if session else None
+            if session is None:
+                notice = "The Studio session is no longer available; no question was delivered."
+                if modern:
+                    return {"answers": {}, "outcome": "undelivered", "notice": notice}
+                if batch is not None:
+                    return {"answers": {}, "timed_out": True, "notice": notice}
+                return ""
+
+            def cancelled() -> bool:
+                with self._lock:
+                    return (
+                        self._sessions.get(session_id) is not session
+                        or session.current_run_id != run_id
+                        or bool(getattr(session.agent, "_interrupt_requested", False))
+                    )
+
+            if batch is not None:
+                answers: dict[str, Any] = {}
+                outcome = "submitted"
+                for entry in batch:
+                    response, outcome = self._clarify_question(
+                        session_id, entry["question"], entry.get("choices"),
+                        bool(entry.get("multi_select")), deadline, cancelled,
+                    )
+                    if outcome != "submitted":
+                        break
+                    # None is a deliberate skip; absent qids remain unanswered.
+                    answers[entry["qid"]] = response if response else None
+                if modern:
+                    return {"answers": answers, "outcome": outcome}
+                return {"answers": answers, "timed_out": outcome != "submitted"}
+
+            response, outcome = self._clarify_question(
+                session_id, str(question or ""), choices, multi_select, deadline, cancelled,
+            )
+            if outcome == "timed_out":
+                from tools import clarify_tool
+
+                return getattr(clarify_tool, "TIMEOUT_RESPONSE", "[user did not respond within 5m]")
+            return response or ""
+
+        return callback
+
+    def _clarify_question(
+        self, session_id: str, question: str, choices: list[str] | None,
+        multi_select: bool, deadline: float, cancelled: Callable[[], bool],
+    ) -> tuple[str | None, str]:
+        if cancelled():
+            return None, "cancelled"
+        if time.monotonic() >= deadline:
+            return None, "timed_out"
+        clarify_id = uuid.uuid4().hex
+        response_queue: queue.Queue[str] = queue.Queue(maxsize=1)
+        with self._lock:
+            self._clarify_requests[clarify_id] = response_queue
+        outcome = "submitted"
+        try:
             self._append_event(session_id, {
                 "event": "clarify.requested",
                 "clarify_id": clarify_id,
-                "question": str(question or ""),
+                "question": question,
                 "choices": list(choices) if choices else None,
-                "timeout_ms": 300_000,
+                "multi_select": multi_select,
+                "timeout_ms": max(0, int((deadline - time.monotonic()) * 1000)),
             })
-            try:
-                user_response = response_queue.get(timeout=300)
-            except queue.Empty:
-                user_response = "[user did not respond within 5m]"
-            finally:
-                with self._lock:
-                    self._clarify_requests.pop(clarify_id, None)
-            return user_response
-
-        return callback
+            while True:
+                if cancelled():
+                    outcome = "cancelled"
+                    return None, outcome
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    outcome = "timed_out"
+                    return None, outcome
+                try:
+                    return response_queue.get(timeout=min(0.1, remaining)), outcome
+                except queue.Empty:
+                    continue
+        finally:
+            with self._lock:
+                self._clarify_requests.pop(clarify_id, None)
+            if outcome != "submitted":
+                self._append_event(session_id, {
+                    "event": "clarify.resolved",
+                    "clarify_id": clarify_id,
+                    "resolved": False,
+                    "reason": outcome,
+                })
 
     def _approval_dispatcher(self, command: str, description: str, *, allow_permanent: bool = True) -> str:
         session_id = str(getattr(self._run_context, "session_id", "") or "")
