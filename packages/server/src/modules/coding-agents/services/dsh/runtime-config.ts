@@ -11,6 +11,38 @@ import type { CodingAgentContextPolicy } from '../context-policy'
 export const DSH_MODEL_PROVIDER = 'ekko-studio'
 export const DSH_API_KEY_ENV = 'HERMES_DSH_API_KEY'
 
+// DSH's agent loop ends the turn on the first step that has no tool call, so a
+// text-only "I will do X next" answer halts the run and waits for the user to
+// say "继续". These rules are written into the AGENTS.md base (outside the
+// managed upsert block) so they survive every per-turn prompt refresh.
+//
+// Phrased as a neutral agent-behavior guideline (not a harness-specific patch)
+// so it stays correct for any model routed through DSH.
+export const DSH_AGENT_CONTINUATION_INSTRUCTIONS = [
+  '## 工具调用行为准则',
+  '本会话中，一个"包含工具调用的步骤"会让任务继续执行，而"纯文字、不含工具调用的步骤"会结束本轮、等待你再次输入。',
+  '1. 只要任务尚未真正完成，或你下一步需要执行任何动作（读写文件、运行命令、查询、调用 MCP 工具等），就在同一条回复里直接发出对应的工具调用，不要只用文字描述"我接下来要……"而把动作留到下一步。',
+  '2. 只有当任务已全部完成、没有任何待执行的动作时，才用纯文字给出最终结论、总结或答案。',
+  '3. 若某一步因为缺少信息而必须停下来向你提问，那么该次回复只包含问题本身，不要附带任何工具调用。',
+].join('\n')
+
+/**
+ * Whether the DSH tool-call continuation guideline should be injected into the
+ * AGENTS.md base.
+ *
+ * The agent loop ends the turn on the first step with no tool call, so a
+ * text-only "I will do X next" answer halts the run until the user types
+ * "继续". DeepSeek models reliably pair narration with the tool call in the same
+ * step and never stall, so the guideline is redundant for them; non-DeepSeek
+ * models (e.g. Qwen) intermittently emit standalone narration steps and need
+ * it. Detect DeepSeek by the model id prefix — the only family DSH ships
+ * natively.
+ */
+export function dshNeedsContinuationInstructions(model?: string): boolean {
+  if (!model) return true
+  return !/^deepseek/i.test(model)
+}
+
 export function dshReasoningEffort(value?: string): string | undefined {
   const level = value === 'max' ? 'xhigh' : value === 'none' ? 'off' : value
   return level && ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(level) ? level : undefined
@@ -71,7 +103,11 @@ export async function prepareDshRuntime(input: {
   await writeFile(join(input.rootDir, 'cordis.patch.yml'), patch || '[]\n', { mode: 0o600 })
   const promptFile = join(input.rootDir, 'AGENTS.md')
   const pluginInstructions = web ? `\n\nDSH plugin configuration source: ${input.sourceHome}\nPlugin installation target: web profile. When invoking dsh plugin, explicitly set DSH_HOME to that source directory and pass --profile web. The inherited DSH_HOME is Studio's private conversation runtime; do not install packages into its profiles/web. Web backend plugins and the source default Agent preset are loaded when Studio next prepares an ACP runtime. Browser plugin interfaces are not hosted by Studio ACP.\n` : ''
-  await writeManagedPromptFile(promptFile, input.systemPrompt, (await read('AGENTS.md')) + pluginInstructions)
+  // Continuation rules live in the AGENTS.md base so the per-turn managed-block
+  // upsert (chat-turn.ts) does not overwrite them. Only non-DeepSeek models need
+  // them; DeepSeek self-pairs narration with tool calls and never stalls.
+  const continuation = dshNeedsContinuationInstructions(input.model) ? `\n\n${DSH_AGENT_CONTINUATION_INSTRUCTIONS}` : ''
+  await writeManagedPromptFile(promptFile, input.systemPrompt, (await read('AGENTS.md')) + pluginInstructions + continuation)
   const streamPluginPath = join(input.rootDir, 'studio-stream.mjs')
   await writeFile(streamPluginPath, DSH_STREAM_PLUGIN, { mode: 0o600 })
   const overlay: unknown[] = [

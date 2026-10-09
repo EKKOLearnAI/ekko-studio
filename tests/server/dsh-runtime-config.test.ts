@@ -3,11 +3,29 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
-import { prepareDshRuntime } from '../../packages/server/src/modules/coding-agents/services/dsh/runtime-config'
+import { prepareDshRuntime, dshNeedsContinuationInstructions } from '../../packages/server/src/modules/coding-agents/services/dsh/runtime-config'
 import { readDshMcpServers } from '../../packages/server/src/modules/coding-agents/services/dsh/config'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+
+describe('dshNeedsContinuationInstructions', () => {
+  it.each([
+    ['deepseek-v4-flash', false],
+    ['deepseek-flash', false],
+    ['DeepSeek-V4', false],
+    ['deepseek-reasoner', false],
+    ['Qwen3.8-27B', true],
+    ['gpt-5', true],
+    ['claude-opus-4-7', true],
+    ['custom/model', true],
+    ['test-model', true],
+    [undefined, true],
+    ['', true],
+  ])('model %j -> %s', (model, expected) => {
+    expect(dshNeedsContinuationInstructions(model)).toBe(expected)
+  })
+})
 
 describe('DSH runtime home', () => {
   it.each([
@@ -69,5 +87,20 @@ describe('DSH runtime home', () => {
     await prepareDshRuntime({ ...input, systemPrompt: 'Next turn' })
     expect(await readFile(join(rootDir, 'sessions/native.jsonl'), 'utf8')).toBe('persisted turn')
     expect(await readFile(prepared.promptFile, 'utf8')).not.toContain('Studio system prompt')
+  })
+
+  it.each([
+    ['Qwen3.8-27B', true],
+    ['deepseek-v4-flash', false],
+  ])('injects continuation rules for %s', async (model, shouldInject) => {
+    const root = await mkdtemp(join(tmpdir(), 'studio-dsh-continuation-'))
+    roots.push(root)
+    const sourceHome = join(root, 'native'), rootDir = join(root, 'runtime')
+    await mkdir(sourceHome)
+    await prepareDshRuntime({ sourceHome, rootDir, sharedSkills: join(root, 'shared'),
+      systemPrompt: '', managedMcp: {}, model, baseUrl: 'http://127.0.0.1:1234/v1' })
+    const agents = await readFile(join(rootDir, 'AGENTS.md'), 'utf8')
+    if (shouldInject) expect(agents).toContain('工具调用行为准则')
+    else expect(agents).not.toContain('工具调用行为准则')
   })
 })
