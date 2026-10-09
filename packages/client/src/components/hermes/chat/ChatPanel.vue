@@ -888,6 +888,11 @@ const newChatPresetReady = ref(false);
 const newChatCategoryId = ref<number | null>(null);
 const newChatCategoryCreating = ref(false);
 const newChatCategorySelectRevision = ref(0);
+const newChatSettingsSelectProps = {
+  to: true,
+  // Leave room for the trigger and screen edges when a long menu flips upward.
+  themeOverrides: { peers: { InternalSelectMenu: { height: "min(300px, calc(50dvh - 40px))" } } },
+};
 const newChatLoading = ref(false);
 const newChatAgentLoading = ref(false);
 const newChatModelsLoading = ref(false);
@@ -2719,10 +2724,12 @@ async function handleSessionModelCustomSubmit() {
           </NButton>
         </header>
         <div class="new-chat-settings-body" :inert="newChatLoading || undefined">
+          <!-- Float menus outside the modal panel so its overflow cannot clip them. -->
           <div class="new-chat-settings-group">
             <label class="new-chat-field">
               <span class="new-chat-label">{{ t("sidebar.profiles") }}</span>
               <NSelect
+                v-bind="newChatSettingsSelectProps"
                 :value="newChatProfile"
                 :options="newChatProfileOptions"
                 :loading="profilesStore.loading && profilesStore.profiles.length === 0"
@@ -2732,6 +2739,7 @@ async function handleSessionModelCustomSubmit() {
             <label class="new-chat-field">
               <span class="new-chat-label">{{ t("chat.category") }}</span>
               <NSelect
+                v-bind="newChatSettingsSelectProps"
                 :key="newChatCategorySelectRevision"
                 :value="newChatCategoryId ?? 0"
                 :options="newChatCategoryOptions"
@@ -2749,6 +2757,7 @@ async function handleSessionModelCustomSubmit() {
             <label v-if="isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped'" class="new-chat-field">
               <span class="new-chat-label">{{ t("codingAgents.protocolScope") }}</span>
               <NSelect
+                v-bind="newChatSettingsSelectProps"
                 v-model:value="newChatApiMode"
                 :options="newChatApiModeOptions"
                 :disabled="newChatLoading"
