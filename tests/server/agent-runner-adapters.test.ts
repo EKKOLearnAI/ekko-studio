@@ -488,6 +488,14 @@ describe('agent runner Responses adapters', () => {
     ])
   })
 
+  it('defaults Anthropic max_tokens to the target output limit', () => {
+    const body = { input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }] }
+
+    expect(responsesToAnthropicMessages(body, { ...target, outputLimit: 64_000 }).max_tokens).toBe(64_000)
+    expect(responsesToAnthropicMessages({ ...body, max_output_tokens: 2048 }, { ...target, outputLimit: 64_000 }).max_tokens).toBe(2048)
+    expect(responsesToAnthropicMessages(body, target).max_tokens).toBe(4096)
+  })
+
   it('converts Responses input to Anthropic messages', () => {
     const body = {
       instructions: 'system text',
