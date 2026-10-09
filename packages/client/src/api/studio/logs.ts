@@ -11,7 +11,7 @@ export interface LogEntry {
   level: string
   logger: string
   message: string
-  raw: string
+  raw?: string
 }
 
 export async function fetchLogFiles(): Promise<LogFileInfo[]> {
@@ -28,6 +28,8 @@ export async function fetchLogs(name: string, params?: {
   category?: string
   event?: string
   text?: string
+  raw?: boolean
+  cursor?: string
 }): Promise<LogEntry[]> {
   const query = new URLSearchParams()
   if (params?.lines) query.set('lines', String(params.lines))
@@ -38,6 +40,8 @@ export async function fetchLogs(name: string, params?: {
   if (params?.category) query.set('category', params.category)
   if (params?.event) query.set('event', params.event)
   if (params?.text) query.set('text', params.text)
+  if (params?.raw) query.set('raw', '1')
+  if (params?.cursor) query.set('cursor', params.cursor)
   const qs = query.toString()
   const res = await request<{ entries: (LogEntry | null)[] }>(`/api/studio/logs/${name}${qs ? `?${qs}` : ''}`)
   return res.entries.filter((e): e is LogEntry => e !== null)

@@ -25,6 +25,7 @@ export interface AgentLogQuery {
   event?: string
   text?: string
   after?: string
+  before?: string
   limit: number
 }
 
