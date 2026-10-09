@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { sendNewChatMessage } from './new-chat-helpers'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
 const session = {
@@ -227,12 +228,13 @@ test('opens the profiled session route in a browser tab when no desktop bridge e
   ])
 })
 
-test('keeps local-only session actions honest until the first message persists the chat', async ({ page }) => {
+test('keeps local-only session actions honest while the first message awaits persistence', async ({ page }) => {
   await openDesktopChat(page)
 
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
-  await page.getByRole('button', { name: 'Create', exact: true }).click()
+  await sendNewChatMessage(page)
   await expect(page).toHaveURL(/#\/hermes\/session\//)
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.filter((item: any) => item.event === 'run').length || 0)).toBe(1)
 
   await page.getByRole('button', { name: 'Session actions' }).click()
   await expect(visibleOption(page, 'Conversation Outline').locator(':scope > .n-dropdown-option-body'))

@@ -32,6 +32,8 @@ for (const [name, provider, model, metadata, max] of [
       for (let step = 0; step < max; step++) await page.keyboard.press('ArrowRight')
       await expect(page.locator('.reasoning-effort-button')).toHaveAttribute('aria-label', /max/i)
     }
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.reasoning-effort-slider-popover:visible')).toHaveCount(0)
     await input.click()
     await input.fill('Use selected effort')
     await page.getByRole('button', { name: 'Send', exact: true }).click()
