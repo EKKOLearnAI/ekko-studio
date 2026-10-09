@@ -856,7 +856,12 @@ export class ChatContextCompressor {
     const requestedTailStart = assembledOverBudget && !canKeepTailWindow
       ? newMessages.length
       : Math.max(0, newMessages.length - tailCount)
-    const tailStart = safeTailStart(newMessages, requestedTailStart)
+    let tailStart = safeTailStart(newMessages, requestedTailStart)
+    if (assembledOverBudget && tailStart === 0 && newMessages.length > 0) {
+      // The protected tail can start inside the first tool group. Fold that
+      // whole group so compression progresses, preserving the messages after it.
+      tailStart = safeHeadEnd(newMessages, requestedTailStart)
+    }
     const toCompress = newMessages.slice(0, tailStart)
     const tail = newMessages.slice(tailStart)
 

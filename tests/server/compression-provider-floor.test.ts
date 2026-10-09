@@ -51,6 +51,60 @@ describe('compression decisions with the provider usage floor', () => {
     return buildCompressedHistory(sessionId, 'default', '', undefined, vi.fn(), new Map(), { model: 'm', provider: 'p' })
   }
 
+  it.each(['provider-group', 'provider-tail', 'local-tail', 'under-budget'])('handles a tool group crossing the protected tail boundary (%s)', async scenario => {
+    const { addMessage, createSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    const { getCompressionSnapshot, saveCompressionSnapshot } = await import('../../packages/server/src/modules/studio/repositories/compression-snapshot')
+    const { updateUsage } = await import('../../packages/server/src/modules/studio/repositories/usage-store')
+    const sessionId = `tool-group-${scenario}`
+    createSession({ id: sessionId, source: 'cli' })
+    addMessage({ session_id: sessionId, role: 'user', content: 'old question', timestamp: 1 })
+    const cursor = addMessage({ session_id: sessionId, role: 'assistant', content: 'old answer', timestamp: 2 })!
+    expect(saveCompressionSnapshot(sessionId, 'short previous summary', 1, 2, {
+      compressedThroughMessageId: cursor, protectedHeadThroughMessageId: null, expectedHistoryRevision: 0,
+    })).toBe(true)
+    db.prepare('UPDATE chat_compression_snapshots SET updated_at = 1000 WHERE session_id = ?').run(sessionId)
+    const toolCalls = Array.from({ length: 21 }, (_, index) => ({
+      id: `call-${index}`, type: 'function', function: {
+        name: 'write_file',
+        arguments: JSON.stringify({ path: `/tmp/${index}.txt`, content: scenario === 'local-tail' ? 'detail '.repeat(6_000) : 'short body' }),
+      },
+    }))
+    addMessage({ session_id: sessionId, role: 'assistant', content: 'Write files', tool_calls: toolCalls, timestamp: 3 })
+    let lastTool = cursor
+    for (const call of toolCalls) {
+      lastTool = addMessage({ session_id: sessionId, role: 'tool', content: 'written', tool_call_id: call.id, tool_name: 'write_file', timestamp: 4 })!
+    }
+    const recent = scenario === 'provider-group' ? [] : [
+      { role: 'user', content: 'follow up' },
+      { role: 'assistant', content: 'recent answer' },
+    ]
+    for (const message of recent) addMessage({ ...message, session_id: sessionId, timestamp: 5 })
+    addMessage({ session_id: sessionId, role: 'user', content: 'current input', timestamp: 6 })
+    if (scenario.startsWith('provider-')) {
+      updateUsage(sessionId, { source: 'hermes', inputTokens: 160_000, outputTokens: 1, createdAt: 2_000 })
+    }
+
+    // The default 20-message tail starts inside the 21 tool results. Moving
+    // backward reaches zero; over-budget compression must fold the whole group.
+    const history = await run(sessionId)
+    if (scenario === 'under-budget') {
+      expect(summarizerRun).not.toHaveBeenCalled()
+      expect(history.filter(message => message.role === 'tool')).toHaveLength(21)
+      expect(getCompressionSnapshot(sessionId)?.compressedThroughMessageId).toBe(cursor)
+      return
+    }
+    expect(summarizerRun).toHaveBeenCalledTimes(1)
+    expect(history.map(message => [message.role, message.content])).toEqual([
+      ['user', expect.stringContaining('new summary')],
+      ...recent.map(message => [message.role, message.content]),
+    ])
+    expect(getCompressionSnapshot(sessionId)?.compressedThroughMessageId).toBe(lastTool)
+    // Once this group is summarized, the next run reuses its snapshot and tail.
+    expect((await run(sessionId)).map(message => [message.role, message.content]))
+      .toEqual(history.map(message => [message.role, message.content]))
+    expect(summarizerRun).toHaveBeenCalledTimes(1)
+  })
+
   it('saves a snapshot when the floor triggers compression, so the same usage does not trigger it again', async () => {
     const { addMessage, createSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     const { getCompressionSnapshot, saveCompressionSnapshot } = await import('../../packages/server/src/modules/studio/repositories/compression-snapshot')
