@@ -13,6 +13,55 @@ function dispatchPointer(target: EventTarget, type: string, clientX = 100, butto
   target.dispatchEvent(event)
 }
 
+describe('new chat Agent card interior motion', () => {
+  let wrapper: VueWrapper | undefined
+  let visibilityMock: { mockRestore(): void } | undefined
+
+  afterEach(() => {
+    wrapper?.unmount()
+    visibilityMock?.mockRestore()
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
+  it('renders identical animation frames under both system motion preferences', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    visibilityMock = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+
+    const sampleFrames = async (matches: boolean) => {
+      let frame: FrameRequestCallback
+      vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => { frame = callback; return 1 }))
+      vi.stubGlobal('matchMedia', vi.fn(() => ({
+        matches, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      })))
+      wrapper = mount(NewChatAgentCards, {
+        props: { value: 'ekko-agent', options: AGENT_OPTIONS.slice(0, 4) },
+        attachTo: document.body,
+      })
+      Object.assign(wrapper.get('.agent-card-viewport').element, { scrollTo: vi.fn() })
+      await nextTick()
+      const layers = wrapper.findAll('.agent-card.active .agent-card-foil, .agent-card.active .agent-card-foil-beam, .agent-card.active .agent-card-sweep')
+      expect(layers).toHaveLength(4)
+      const samples = [0, 800, 1700, 2600].map(now => {
+        frame(now)
+        return layers.map(layer => {
+          const { transform, opacity } = (layer.element as HTMLElement).style
+          return { transform, opacity }
+        })
+      })
+      wrapper.unmount()
+      wrapper = undefined
+      return samples
+    }
+
+    const normal = await sampleFrames(false)
+    const reduced = await sampleFrames(true)
+    expect(normal[1]).not.toEqual(normal[0])
+    expect(reduced).toEqual(normal)
+  })
+})
+
 describe('new chat Agent card dragging', () => {
   let wrapper: VueWrapper
   let viewport: HTMLElement
