@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from 'fs'
+import { existsSync, readFileSync, realpathSync, statSync } from 'fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 
 export interface HermesInstallationEnvironment {
@@ -21,22 +21,101 @@ function isPythonExecutable(command: string): boolean {
   return /^(?:python|pypy)(?:\d+(?:\.\d+)*)?(?:\.exe)?$/i.test(basename(command))
 }
 
-function launcherContents(hermesBin: string): string[] {
-  const candidates = [hermesBin]
+// The Unix git-install layout chains launchers: ~/.local/bin/hermes is a
+// two-line shell wrapper whose only job is `exec <repo>/.hermes/bin/hermes "$@"`,
+// and the inner script carries the absolute Python path plus the repo root.
+// Symlink resolution alone cannot see that inner script, so the chain must be
+// followed through the shell text. Depth is capped and visited paths are
+// canonicalized so a wrapper cycle cannot loop. The chain must never walk
+// past a real interpreter binary: static python builds are >100MB ELF files
+// and treating them as launcher text costs seconds per resolve, so only
+// files below this size are eligible for chain-following or text scans.
+const MAX_LAUNCHER_FOLLOW_DEPTH = 3
+const MAX_LAUNCHER_TEXT_BYTES = 1024 * 1024
+
+function isSmallExecutableFile(path: string): boolean {
   try {
-    const real = realpathSync(hermesBin)
-    if (real !== hermesBin) candidates.push(real)
-  } catch {}
+    return statSync(path).size <= MAX_LAUNCHER_TEXT_BYTES
+  } catch {
+    return false
+  }
+}
+
+function readSmallTextFile(path: string): string | undefined {
+  if (!isSmallExecutableFile(path)) return undefined
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return undefined
+  }
+}
+
+function execLaunchTarget(launcherPath: string): string | undefined {
+  const contents = readSmallTextFile(launcherPath)
+  if (!contents) return undefined
+  for (const line of contents.split(/\r?\n/).slice(0, 10)) {
+    const match = line.match(/^\s*exec\s+(")?([^"\s]+)\1(?:\s|$)/)
+    if (!match) continue
+    const target = match[2]
+    if (!target || !isAbsolute(target) || !isSmallExecutableFile(target)) continue
+    try {
+      if (realpathSync(target) === realpathSync(launcherPath)) continue
+    } catch {}
+    return target
+  }
+  return undefined
+}
+
+function launcherContents(hermesBin: string): string[] {
+  const candidates: string[] = []
+  const seen = new Set<string>()
+  let current: string | undefined = hermesBin
+  for (let depth = 0; current && depth <= MAX_LAUNCHER_FOLLOW_DEPTH; depth += 1) {
+    const path = current
+    let canonical: string
+    try {
+      canonical = realpathSync(path)
+    } catch {
+      canonical = resolve(path)
+    }
+    if (seen.has(canonical)) break
+    seen.add(canonical)
+    candidates.push(path)
+    try {
+      const real = realpathSync(path)
+      if (real !== path && !seen.has(real)) {
+        seen.add(real)
+        candidates.push(real)
+      }
+    } catch {}
+    current = execLaunchTarget(path)
+  }
 
   const contents: string[] = []
   for (const candidate of candidates) {
-    try {
-      contents.push(readFileSync(candidate, 'utf8'))
-    } catch {
-      // Native launchers are expected to be unreadable as text.
-    }
+    const text = readSmallTextFile(candidate)
+    if (text !== undefined) contents.push(text)
   }
   return contents
+}
+
+// Repo-root style wrappers embed absolute paths in their text (quoted
+// `sys.path.insert` arguments, bare `exec` targets). Those paths are the only
+// reliable agent-root hint for chained wrapper installs, where the executable
+// itself lives outside any recognizable install directory.
+function referencedAbsolutePaths(contents: string[]): string[] {
+  const found: string[] = []
+  for (const text of contents) {
+    for (const match of text.matchAll(/["']([^"'\r\n]+)["']/g)) {
+      const candidate = match[1]
+      if (isAbsolute(candidate) && existsSync(candidate)) found.push(candidate)
+    }
+    for (const line of text.split(/\r?\n/)) {
+      const bare = line.match(/^\s*exec\s+"?([^"\s]+)"?(?:\s|$)/)?.[1]
+      if (bare && isAbsolute(bare) && existsSync(bare)) found.push(bare)
+    }
+  }
+  return found
 }
 
 function resolveFromPath(command: string, env: NodeJS.ProcessEnv): string | undefined {
@@ -75,11 +154,20 @@ function pythonFromLauncher(hermesBin: string, env: NodeJS.ProcessEnv): string |
     }
 
     // The standard Unix installer writes a shell wrapper whose exec target is
-    // the selected Hermes virtualenv's absolute Python path.
+    // the selected Hermes virtualenv's absolute Python path. The path may be
+    // quoted, or appear bare on an exec line (the repo launcher embeds it
+    // unquoted in `python -I -c ...`), so scan both forms.
     for (const match of contents.matchAll(/["']([^"'\r\n]+)["']/g)) {
       const candidate = match[1]
       if (isAbsolute(candidate) && isPythonExecutable(candidate) && existsSync(candidate)) {
         return candidate
+      }
+    }
+    for (const line of contents.split(/\r?\n/)) {
+      const bare = line.match(/^\s*exec\s+"?([^"\s]+)"?(?:\s|$)/)?.[1]
+      if (!bare) continue
+      if (isAbsolute(bare) && isPythonExecutable(bare) && existsSync(bare)) {
+        return bare
       }
     }
   }
@@ -103,6 +191,16 @@ function agentRootCandidates(hermesBin: string, hermesHome: string): string[] {
       resolve(binDir, '..', 'lib', 'hermes-agent'),
       resolve(binDir, '..', '..', 'hermes-agent'),
     )
+  }
+  // Chained shell wrappers (the Unix git install) hide the repo root behind
+  // an exec target; the referenced absolute paths are the only structural
+  // hint back to it.
+  for (const referenced of referencedAbsolutePaths(launcherContents(hermesBin))) {
+    let directory = dirname(referenced)
+    for (let depth = 0; depth < 4; depth += 1) {
+      candidates.push(directory)
+      directory = dirname(directory)
+    }
   }
   candidates.push(join(hermesHome, 'hermes-agent'))
   if (basename(dirname(hermesHome)) === 'profiles') {

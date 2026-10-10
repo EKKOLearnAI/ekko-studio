@@ -57,3 +57,6 @@ packages/client/src/**/*.js
 .hermes/
 # Local npm release tarballs
 /release/npm/
+
+# Local manual backups
+*.bak.20*

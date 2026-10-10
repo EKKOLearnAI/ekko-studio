@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { dirname, join } from 'path'
 
 const execFileCalls = vi.hoisted(() => [] as Array<{ command: string; args: string[]; options: any }>)
 const spawnCalls = vi.hoisted(() => [] as Array<{ command: string; args: string[]; options: any }>)
@@ -177,6 +177,63 @@ describe('Hermes process invocation', () => {
         agentRoot,
         environmentRoot: join(agentRoot, 'venv'),
       })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('resolves python through a chained shell exec wrapper on Unix installs', async () => {
+    setPlatform('linux')
+    const root = mkdtempSync(join(tmpdir(), 'hermes-process-'))
+    try {
+      const hermesHome = join(root, '.hermes')
+      const repo = join(root, 'hermes-agent')
+      const python = join(root, 'tools', 'python3')
+      const innerBin = join(repo, '.hermes', 'bin')
+      const innerCli = join(innerBin, 'hermes')
+      const outerCli = join(root, '.local', 'bin', 'hermes')
+      mkdirSync(innerBin, { recursive: true })
+      mkdirSync(join(root, '.local', 'bin'), { recursive: true })
+      mkdirSync(dirname(python), { recursive: true })
+      writeFileSync(join(repo, 'run_agent.py'), '')
+      writeFileSync(python, '')
+      // Inner launcher carries the python path bare (unquoted), inside an
+      // exec line — the shape written by the git-install repo launcher.
+      writeFileSync(innerCli, [
+        '#!/bin/sh',
+        `exec ${python} -I -c 'import hermes_bootstrap' "$@"`,
+        '',
+      ].join('\n'))
+      chmodSync(innerCli, 0o755)
+      writeFileSync(outerCli, [
+        '#!/bin/sh',
+        `exec ${innerCli} "$@"`,
+        '',
+      ].join('\n'))
+      chmodSync(outerCli, 0o755)
+      const { resolveHermesInstallationEnvironment } = await import('../../packages/server/src/modules/hermes/services/runtime/installation')
+
+      expect(resolveHermesInstallationEnvironment(outerCli, hermesHome)).toEqual({
+        python,
+        agentRoot: repo,
+        environmentRoot: join(root, 'tools'),
+      })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not loop forever on a self-referencing exec wrapper', async () => {
+    setPlatform('linux')
+    const root = mkdtempSync(join(tmpdir(), 'hermes-process-'))
+    try {
+      const hermesHome = join(root, '.hermes')
+      const cli = join(root, 'hermes')
+      writeFileSync(cli, `#!/bin/sh\nexec ${cli} "$@"\n`)
+      chmodSync(cli, 0o755)
+      const { resolveHermesInstallationEnvironment } = await import('../../packages/server/src/modules/hermes/services/runtime/installation')
+
+      expect(resolveHermesInstallationEnvironment(cli, hermesHome)).toEqual({})
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
