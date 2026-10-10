@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { NTooltip } from 'naive-ui'
 import type { Message } from '@/stores/hermes/chat'
+import { mapHermesMessages } from '@/stores/hermes/chat'
+import { fetchHermesSession } from '@/api/studio/sessions'
 
 interface OutlineItem {
   id: string
@@ -10,73 +13,101 @@ interface OutlineItem {
   messageId: string
   level: number
   anchorId: string
+  isAnswer?: boolean
 }
 
 const props = defineProps<{
   messages: Message[]
+  sessionId?: string
+  sessionProfile?: string | null
+  showLoadAll?: boolean
 }>()
 
 const emit = defineEmits<{
   navigate: [target: { messageId: string; anchorId: string }]
+  messagesLoaded: [messages: Message[]]
 }>()
 
 const { t } = useI18n()
+const localFetching = ref(false)
 
-function extractAllHeadings(text: string, messageId: string): OutlineItem[] {
-  const items: OutlineItem[] = []
-  let cleanedText = text.replace(/<think>[\s\S]*?<\/think>/g, '')
-  const lines = cleanedText.split('\n')
-  
-  let headingIndex = 0
-  for (const line of lines) {
-    const trimmed = line.trim()
-    const h1Match = trimmed.match(/^#\s+(.+)/)
-    const h2Match = trimmed.match(/^##\s+(.+)/)
-    const h3Match = trimmed.match(/^###\s+(.+)/)
-    
-    if (h1Match) {
-      headingIndex++
-      items.push({
-        id: `outline-${messageId}-h${headingIndex}`,
-        type: 'outline',
-        content: h1Match[1].trim(),
-        messageId,
-        level: 1,
-        anchorId: `msg-${messageId}-heading-${headingIndex}`
-      })
-    } else if (h2Match) {
-      headingIndex++
-      items.push({
-        id: `outline-${messageId}-h${headingIndex}`,
-        type: 'outline',
-        content: h2Match[1].trim(),
-        messageId,
-        level: 2,
-        anchorId: `msg-${messageId}-heading-${headingIndex}`
-      })
-    } else if (h3Match) {
-      headingIndex++
-      items.push({
-        id: `outline-${messageId}-h${headingIndex}`,
-        type: 'outline',
-        content: h3Match[1].trim(),
-        messageId,
-        level: 3,
-        anchorId: `msg-${messageId}-heading-${headingIndex}`
-      })
+async function handleLoadAll() {
+  if (!props.sessionId) return
+
+  localFetching.value = true
+  try {
+    const sessionDetail = await fetchHermesSession(props.sessionId, props.sessionProfile)
+    if (sessionDetail && sessionDetail.messages) {
+      const mapped = mapHermesMessages(sessionDetail.messages)
+      emit('messagesLoaded', mapped)
+    }
+  } finally {
+    localFetching.value = false
+  }
+}
+
+// 清洗内联 markdown：链接→文字、加粗/斜体/代码标记去掉、
+// 去掉行首的列表符号和 emoji/符号（✅ ⚠️ 📌 等）
+function cleanOutlineText(text: string): string {
+  let out = text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')        // [text](url) → text
+    .replace(/[*_`~]{1,3}([^*_`~]+)[*_`~]{1,3}/g, '$1') // **b** / *i* / `c`
+    .replace(/^[#>\-\*\+\s\u200b]+/, '')              // 行首列表/引用符号
+    .replace(/^[\p{Extended_Pictographic}\u2600-\u27bf\u2b00-\u2bff\ufe0f\s]+/u, '') // 行首 emoji
+    .trim()
+  return out
+}
+
+// 用户消息可能是 multimodal JSON 数组，提取纯文本
+function extractMessageText(content: string): string {
+  if (!content) return ''
+  const t = content.trim()
+  if (t.startsWith('[') || t.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(t)
+      const parts = Array.isArray(parsed) ? parsed : [parsed]
+      const texts = parts
+        .filter((p: any) => p && (p.type === 'text' || typeof p.text === 'string'))
+        .map((p: any) => String(p.text || '').trim())
+        .filter(Boolean)
+      if (texts.length) return texts.join('\n')
+    } catch {
+      // 不是合法 JSON，按原文处理
     }
   }
-  
-  return items
+  return content
 }
 
 function extractUserQuestion(text: string): string {
-  const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/g, '')
-  const firstLine = cleanedText.split('\n')[0] || ''
-  if (firstLine.length > 50) {
-    return firstLine.slice(0, 50) + '...'
+  const cleanedText = extractMessageText(text).replace(/<think>[\s\S]*?<\/think>/g, '')
+  const lines = cleanedText.split('\n')
+  for (const rawLine of lines) {
+    const line = cleanOutlineText(rawLine)
+    if (!line) continue
+    if (line.length > 50) {
+      return line.slice(0, 50) + '...'
+    }
+    return line
   }
-  return firstLine || t('chat.outlineUserQuestion')
+  return t('chat.outlineUserQuestion')
+}
+
+function extractAnswerSummary(text: string): string {
+  const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/g, '')
+  const lines = cleanedText.split('\n')
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) continue
+    // 跳过 markdown 标题/列表/引用符号，取第一条真正的正文行
+    if (/^#{1,6}\s/.test(line)) continue
+    const stripped = cleanOutlineText(line)
+    if (!stripped) continue
+    if (stripped.length > 50) {
+      return stripped.slice(0, 50) + '...'
+    }
+    return stripped
+  }
+  return t('chat.outlineAnswer')
 }
 
 const outlineItems = computed<OutlineItem[]>(() => {
@@ -96,16 +127,29 @@ const outlineItems = computed<OutlineItem[]>(() => {
         anchorId: `message-${msg.id}`
       })
       i++
-      while (i < filteredMessages.length && filteredMessages[i].role !== 'assistant') {
+      // 一次回答可能拆成多条 assistant 行（tool-call 空行 + 正文行），
+      // 扫完整个连续 assistant 段，取首条非空正文行作为 A 摘要。
+      // 大纲只展示 Q&A 对，不混入回答里的 markdown 标题。
+      let answerShown = false
+      while (i < filteredMessages.length && filteredMessages[i].role === 'assistant') {
+        const assistantMsg = filteredMessages[i]
+        if (assistantMsg.content && assistantMsg.content.trim() && !answerShown) {
+          items.push({
+            id: `answer-${assistantMsg.id}`,
+            type: 'outline',
+            content: extractAnswerSummary(assistantMsg.content),
+            messageId: assistantMsg.id,
+            level: 1,
+            anchorId: `message-${assistantMsg.id}`,
+            isAnswer: true,
+          })
+          answerShown = true
+        }
         i++
       }
-      if (i < filteredMessages.length) {
-        const assistantMsg = filteredMessages[i]
-        const headings = extractAllHeadings(assistantMsg.content || '', assistantMsg.id)
-        items.push(...headings)
-      }
+    } else {
+      i++
     }
-    i++
   }
   return items
 })
@@ -122,6 +166,45 @@ function scrollToTarget(item: OutlineItem) {
   <div class="outline-panel">
     <div class="outline-header">
       <span class="outline-title">{{ t('chat.outlineTitle') }}</span>
+      <NTooltip v-if="showLoadAll" trigger="hover" placement="top">
+        <template #trigger>
+          <button
+            type="button"
+            class="load-all-btn"
+            :disabled="localFetching"
+            @click="handleLoadAll"
+          >
+            <svg
+              v-if="localFetching"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              class="load-all-spinner"
+            >
+              <path d="M21 12a9 9 0 11-6.219-8.56" />
+            </svg>
+            <svg
+              v-else
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
+        </template>
+        {{ t('chat.loadAllMessages') }}
+      </NTooltip>
     </div>
     <div class="outline-content">
       <template v-if="outlineItems.length > 0">
@@ -133,6 +216,16 @@ function scrollToTarget(item: OutlineItem) {
           >
             <div class="user-question">
               <span class="q-label">Q:</span>
+              <span class="q-text" dir="auto">{{ item.content }}</span>
+            </div>
+          </div>
+          <div
+            v-else-if="item.isAnswer"
+            class="outline-item answer-item"
+            @click="scrollToTarget(item)"
+          >
+            <div class="user-question">
+              <span class="q-label a-label">A:</span>
               <span class="q-text" dir="auto">{{ item.content }}</span>
             </div>
           </div>
@@ -180,9 +273,13 @@ function scrollToTarget(item: OutlineItem) {
   padding: 16px;
   border-bottom: 1px solid $border-color;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .outline-title {
+  flex: 1;
   font-size: 14px;
   font-weight: 600;
   color: $text-primary;
@@ -206,6 +303,24 @@ function scrollToTarget(item: OutlineItem) {
 
 .user-item {
   margin-bottom: 6px;
+}
+
+.answer-item {
+  margin-bottom: 10px;
+  margin-top: 2px;
+
+  .user-question {
+    background-color: rgba(var(--success-rgb), 0.12);
+    padding: 8px 12px;
+
+    .dark & {
+      background-color: rgba(var(--success-rgb), 0.14);
+    }
+
+    .a-label {
+      color: $success;
+    }
+  }
 }
 
 .user-question {
@@ -307,5 +422,48 @@ function scrollToTarget(item: OutlineItem) {
   color: $text-muted;
   font-size: 13px;
   padding: 20px 0;
+}
+
+.load-all-btn {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: $text-muted;
+  background: transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+
+  &:hover {
+    color: $text-primary;
+    background: $bg-secondary;
+
+    .dark & {
+      background: $bg-input;
+    }
+  }
+
+  &:active {
+    opacity: 0.7;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.load-all-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

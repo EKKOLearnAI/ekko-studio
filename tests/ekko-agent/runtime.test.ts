@@ -1145,6 +1145,7 @@ describe('ekko-agent runtime', () => {
       modelClient: client,
       tools: new AgentToolRegistry(),
       toolFailureRecoveryThreshold: 3,
+      maxIdenticalToolFailures: 999,
       maxSteps: 10,
     })
     const events: AgentRuntimeEvent[] = []
@@ -1173,6 +1174,41 @@ describe('ekko-agent runtime', () => {
     expect(requests[6].messages.filter(message => (
       message.role === 'system' && message.content.includes('Tool recovery required: "missing_tool"')
     ))).toHaveLength(2)
+  })
+
+  it('terminates the run after maxIdenticalToolFailures identical-argument failures', async () => {
+    const client = modelClient((_request, call) => call <= 3
+      ? {
+          content: '',
+          toolCalls: [{ id: `call_identical_${call}`, name: 'missing_tool', arguments: {} }],
+        }
+      : { content: 'should not reach here', finishReason: 'stop' })
+    const events: AgentRuntimeEvent[] = []
+    const runtime = new AgentRuntime({
+      modelClient: client,
+      tools: new AgentToolRegistry(),
+      toolFailureRecoveryThreshold: 3,
+      maxIdenticalToolFailures: 3,
+      maxSteps: 10,
+    })
+
+    const result = await runtime.run({
+      messages: ['call missing with same args'],
+      onEvent: event => events.push(event),
+    })
+
+    expect(result.output).toMatchObject({
+      finishReason: 'identical_tool_failure_limit',
+      content: expect.stringContaining('Stopped after 3 consecutive identical-argument failures'),
+    })
+    expect(result.steps.filter(step => step.type === 'tool')).toHaveLength(3)
+    expect(client.create).toHaveBeenCalledTimes(3)
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'run.identical_tool_failure_limit',
+      toolName: 'missing_tool',
+      failures: 3,
+      limit: 3,
+    }))
   })
 
   it('does not combine failures from different tools into one recovery streak', async () => {

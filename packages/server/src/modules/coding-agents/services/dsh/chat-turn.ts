@@ -6,7 +6,7 @@ import { updateContextTokenUsage } from '../../../studio/public/run-state'
 import { updateManagedPromptFileSync } from '../prompt-file'
 import { isolatedCodingAgentChildEnv } from '../runtime/child-env'
 import { DshAcpTurn } from './acp-turn'
-import { DSH_MODEL_PROVIDER } from './runtime-config'
+import { DSH_MAX_AUTO_CONTINUES, DSH_MODEL_PROVIDER, dshIsNarrationOnlyStall } from './runtime-config'
 import { normalizeTokenUsage, recordSessionUsage } from '../../../studio/public/usage'
 
 export interface DshTurnHost {
@@ -27,12 +27,24 @@ export interface DshTurnHost {
   completeAfterUsage(event: any, payload: any): Promise<void>
   complete(): void
   fail(message: string): void
+  /** Re-dispatch this DSH run with the auto-continue nudge (no new user row).
+   * Present only when the caller opts into the #3326 hard-fallback. */
+  autoContinue?: () => void
 }
 
 /** ACP lifecycle and event translation belong to DSH; the shared manager only
  * supplies its existing process, persistence and presentation primitives. */
 export function startDshChatTurn(run: ManagedCodingAgentRun, input: string, systemPrompt: string, images: CodingAgentImageInput[], host: DshTurnHost) {
   if (host.isRunning(run.currentChild)) throw new Error('DSH is still processing the previous input')
+  // DSH's session/prompt runs a MULTI-STEP agent loop inside one child process:
+  // the model alternates tool-call steps and text steps, and the prompt only
+  // returns once the model emits a tool-less step (stopReason end_turn). So a
+  // narration-only "Let me …:" can be the terminal step of a prompt whose
+  // EARLIER steps already ran real tools. The stall must therefore be judged on
+  // the text of the terminal step alone — the text emitted since the last tool
+  // call — not on run.printText / run.codexToolBlocks, which span the whole
+  // prompt and would let an earlier tool mask the terminal stall.
+  let textSinceLastTool = ''
   const responseId = `resp_${Date.now()}`
   Object.assign(run, {
     printResponseId: responseId, printMessageId: `msg_${responseId}`, printTextStarted: false,
@@ -84,11 +96,17 @@ export function startDshChatTurn(run: ManagedCodingAgentRun, input: string, syst
     update: update => {
       if (run.exited || run.stoppedByUser || run.printCompleted) return
       host.touch()
-      if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') host.text(update.content.text, true)
+      if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
+        textSinceLastTool += update.content.text
+        host.text(update.content.text, true)
+      }
       else if (update.sessionUpdate === 'agent_thought_chunk' && update.content?.type === 'text') host.reasoning(update.content.text)
-      else if (update.sessionUpdate === 'tool_call') host.toolStarted({
-        type: 'mcp_tool_call', id: update.toolCallId, tool: update.title || 'DSH tool', arguments: update.rawInput,
-      })
+      else if (update.sessionUpdate === 'tool_call') {
+        textSinceLastTool = '' // a real tool ran; any later text is a NEW step
+        host.toolStarted({
+          type: 'mcp_tool_call', id: update.toolCallId, tool: update.title || 'DSH tool', arguments: update.rawInput,
+        })
+      }
       else if (update.sessionUpdate === 'tool_call_update' && ['completed', 'failed'].includes(update.status)) {
         const output = update.rawOutput ?? (update.content || []).map((entry: any) => entry.content?.text || '').join('\n')
         host.toolCompleted({ type: 'mcp_tool_call', id: update.toolCallId, output,
@@ -109,6 +127,10 @@ export function startDshChatTurn(run: ManagedCodingAgentRun, input: string, syst
     if (run.exited || run.stoppedByUser) return
     if (run.pendingChatCompletionEvent) {
       void host.completeAfterUsage(run.pendingChatCompletionEvent, run.pendingChatCompletionPayload)
+    } else if (run.dshAutoContinuePending) {
+      // A narration-only stall triggered an auto-continue: the new child owns the
+      // turn's completion/failure. Do not surface this old child's exit as a fail.
+      run.dshAutoContinuePending = undefined
     } else if (!run.printCompleted) host.fail(host.exitError(code, run.currentChildStderr))
   })
   void turn.prompt({
@@ -119,8 +141,27 @@ export function startDshChatTurn(run: ManagedCodingAgentRun, input: string, syst
     reasoningEffort: run.launch.mode === 'scoped' ? run.launch.reasoningEffort : undefined,
   }).then(reason => {
     if (run.exited || run.stoppedByUser) return
-    if (reason === 'end_turn' || reason === 'max_tokens') host.complete()
-    else host.fail(`DSH stopped: ${reason}`)
+    if (reason === 'end_turn' || reason === 'max_tokens') {
+      // #3326 hard fallback: a tool-less step ending in "Let me …:" is a
+      // narration-only stall. If we still have auto-continue budget and the
+      // caller opted in, re-dispatch the nudge instead of surfacing a completed
+      // turn that just waits for the user to type "继续".
+      // Judge on the terminal step's text only. textSinceLastTool is the text
+      // emitted after the last tool call (i.e. the final step's narration); it is
+      // empty if the prompt ended on a tool call. The final step made no tool
+      // call (it is the tool-less end_turn step), so pass toolCallCount 0.
+      const stalled = dshIsNarrationOnlyStall(reason, textSinceLastTool, 0)
+      const budgetLeft = (run.dshAutoContinueCount || 0) < DSH_MAX_AUTO_CONTINUES
+      if (stalled && budgetLeft && host.autoContinue) {
+        // Arm the guard synchronously, before the old child's close handler can
+        // observe turn state, so a clean end_turn exit is not misreported as a
+        // failure while the re-dispatched child owns completion.
+        run.dshAutoContinuePending = true
+        host.autoContinue()
+        return
+      }
+      host.complete()
+    } else host.fail(`DSH stopped: ${reason}`)
   }).catch(error => {
     if (!run.exited && !run.stoppedByUser) host.fail(host.processError(error))
     host.terminate(child)

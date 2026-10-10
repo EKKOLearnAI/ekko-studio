@@ -163,6 +163,50 @@ describe('DSH chat runner', () => {
     finish(child)
     await vi.waitFor(() => expect(emitted).toHaveBeenCalledWith(sessionId, 'run.completed', expect.objectContaining({ output: text.repeat(4) })))
   })
+  it('auto-continues a terminal narration-only stall even when earlier steps ran tools', async () => {
+    // Regression for the real muzqiqmjokjagr incident: one session/prompt is a
+    // MULTI-STEP loop. Earlier steps ran real tools; the terminal step was a
+    // narration-only "I'll …:" with no tool. The old detector judged on the
+    // whole-prompt printText + codexToolBlocks, so the earlier tool masked the
+    // terminal stall and no auto-continue fired. The fix tracks text since the
+    // last tool call and judges the terminal step alone.
+    const first = await prompt('work')
+    // Step 1: a tool runs (resets the terminal-step text window).
+    update(first, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Checking the document:' } })
+    update(first, { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'read_file', rawInput: { path: 'bid.pdf' } })
+    update(first, { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', rawOutput: 'ok' })
+    // Terminal step: narration-only, ends in a colon, no tool after it.
+    update(first, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: "To fix the PDF, I'll map the font names to system fonts in a copy of the docx:" } })
+    finish(first)
+    // The first child is the old one; the nudge re-dispatch must spawn a SECOND
+    // child and resume the same native session with the continue nudge.
+    await vi.waitFor(() => expect(children.length).toBe(2))
+    const second = children.at(-1)!
+    await vi.waitFor(() => expect(second.sent.at(-1)?.method).toBe('session/prompt'))
+    expect(second.sent.some(message => message.method === 'session/resume' && message.params.sessionId === 'dsh-native')).toBe(true)
+    const nudge = second.sent.find(message => message.method === 'session/prompt')
+    expect(nudge.params.prompt).toEqual([{ type: 'text', text: expect.stringContaining('不要只叙述') }])
+    // Completing the continued turn surfaces exactly one run.completed for the
+    // whole auto-continue sequence (the first child's clean end_turn is not a
+    // failure, and the nudge adds no user row).
+    update(second, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The PDF now renders correctly. Done.' } })
+    finish(second)
+    await vi.waitFor(() => expect(emitted).toHaveBeenCalledWith(sessionId, 'run.completed', expect.objectContaining({ output: 'The PDF now renders correctly. Done.' })))
+    expect(emitted.mock.calls.filter(call => call[1] === 'run.failed')).toHaveLength(0)
+  })
+  it('does NOT auto-continue when the prompt ends on a tool call (terminal step is a tool, not narration)', async () => {
+    // The terminal step of the prompt made a tool call; there is no trailing
+    // narration to stall on. textSinceLastTool is empty at finish, so no
+    // auto-continue — the turn completes normally with one child.
+    const first = await prompt('work')
+    update(first, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Let me run the build:' } })
+    update(first, { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'exec', rawInput: { cmd: 'npm run build' } })
+    update(first, { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', rawOutput: 'built' })
+    finish(first)
+    await vi.waitFor(() => expect(emitted).toHaveBeenCalledWith(sessionId, 'run.completed', expect.anything()))
+    await new Promise(resolve => setImmediate(resolve))
+    expect(children.length).toBe(1)
+  })
   it('cancels its ACP session and terminates its owned child on shutdown', async () => {
     const child = await prompt('work')
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')
