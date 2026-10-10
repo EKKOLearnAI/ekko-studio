@@ -23,6 +23,12 @@ export const DEFAULT_AGENT_MODEL_MAX_RETRIES = 3
 export const DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD = 3
 /** @deprecated Tool failures now trigger model recovery instead of terminating the run. */
 export const DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES = 6
+/**
+ * Number of consecutive failed tool calls with the same tool name AND identical
+ * arguments that will terminate the run. This catches the "model keeps calling
+ * the same broken thing unchanged" loop that a name-only streak would miss.
+ */
+export const DEFAULT_AGENT_MAX_IDENTICAL_TOOL_FAILURES = 3
 export const DEFAULT_AGENT_SUBTASK_MAX_STEPS = 30
 export const DEFAULT_MODEL_REQUEST_TIMEOUT_MS = 5 * 60 * 1_000
 export const DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS = 5 * 60 * 1_000
@@ -50,6 +56,8 @@ export interface EkkoRuntimeConfig {
   toolFailureRecoveryThreshold: number
   /** @deprecated Retained for persisted-config compatibility; it no longer terminates runs. */
   maxConsecutiveToolFailures: number
+  /** Consecutive identical-argument tool failures that terminate the run (see DEFAULT_AGENT_MAX_IDENTICAL_TOOL_FAILURES). */
+  maxIdenticalToolFailures: number
 }
 
 /**
@@ -246,6 +254,7 @@ export const DEFAULT_EKKO_CONFIG: EkkoConfig = {
     maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES,
     toolFailureRecoveryThreshold: DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD,
     maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES,
+    maxIdenticalToolFailures: DEFAULT_AGENT_MAX_IDENTICAL_TOOL_FAILURES,
   },
   model: {
     defaultProvider: '',
