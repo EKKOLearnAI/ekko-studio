@@ -2123,7 +2123,7 @@ const showSessionModelPicker = ref(false);
 const showSessionModelModeModal = ref(false);
 const sessionModelSessionId = ref<string | null>(null);
 const sessionModelIsDraft = ref(false);
-const sessionModelAnchor = ref<HTMLElement | null>(null);
+const sessionModelTrigger = ref<HTMLElement | null>(null);
 const sessionModelValue = ref("");
 const sessionModelProvider = ref("");
 const sessionModelApiMode = ref<CodingAgentApiMode>("codex_responses");
@@ -2202,12 +2202,7 @@ const sessionCanUseMoa = computed(() =>
 );
 
 async function openSessionModelPicker(sessionId: string | null, event?: MouseEvent) {
-  const anchor = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
-  if (showSessionModelPicker.value && anchor && anchor === sessionModelAnchor.value) {
-    showSessionModelPicker.value = false;
-    return;
-  }
-  sessionModelAnchor.value = anchor;
+  sessionModelTrigger.value = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   const isDraft = sessionId === null;
   const draftSequence = newChatOptionsLoadSequence;
   if (isDraft && (!showNewChatPage.value || isNewChatGlobalCodingAgent.value || newChatLoading.value)) return;
@@ -2848,13 +2843,10 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
       :groups="sessionModelAllGroups"
       :provider="sessionModelProvider"
       :model="sessionModelValue"
-      :anchor="sessionModelAnchor"
-      :x="sessionModelAnchor ? undefined : contextMenuX"
-      :y="sessionModelAnchor ? undefined : contextMenuY"
+      :trigger-element="sessionModelTrigger"
       :title="t('chat.setModelTitle')"
       :loading="sessionModelSwitching"
       :close-on-select="false"
-      placement="top-start"
       @select="handleSessionModelSelect"
     >
       <template #empty>

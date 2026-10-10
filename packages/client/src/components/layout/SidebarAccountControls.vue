@@ -82,7 +82,7 @@ function handleUpdateClick() {
 <template>
   <div class="sidebar-account-controls">
     <ProfileSelector @modal-show-change="handleModalShow" />
-    <ModelSelector />
+    <ModelSelector @modal-show-change="handleModalShow" />
     <div class="language-row">
       <span class="language-label">{{ t("language.label") }}</span>
       <LanguageSwitch size="small" :theme-overrides="languageThemeOverrides" />

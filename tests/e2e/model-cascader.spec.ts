@@ -5,10 +5,16 @@ import { selectNewChatAgent } from './new-chat-helpers'
 const modelGroups = [TEST_MODEL_GROUP, {
   ...TEST_MODEL_GROUP, provider: 'other-provider', label: 'Other Provider', models: ['other-model', 'disabled-model'],
   model_meta: { 'other-model': { alias: 'Fast model', preview: true }, 'disabled-model': { disabled: true } },
-}]
+}, {
+  ...TEST_MODEL_GROUP, provider: 'long-provider', label: 'Long Provider', models: Array.from({ length: 40 }, (_, index) => `long-model-${index}`),
+}, {
+  ...TEST_MODEL_GROUP, provider: 'moa', label: 'MoA', models: ['review-combination'],
+}, ...Array.from({ length: 20 }, (_, index) => ({
+  ...TEST_MODEL_GROUP, provider: `provider-${index}`, label: `Provider ${index}`, models: [`model-${index}`],
+}))]
 const modelAliases = { 'other-provider': { 'other-model': 'Fast model' } }
 
-for (const mobile of [false, true]) test(`chooses provider then model in an anchored menu (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
+for (const mobile of [false, true]) test(`chooses provider then model in a fixed-height dialog (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
   await page.setViewportSize(mobile ? { width: 320, height: 568 } : { width: 1280, height: 900 })
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const api = await mockHermesApi(page, { modelGroups, modelAliases })
@@ -22,15 +28,31 @@ for (const mobile of [false, true]) test(`chooses provider then model in an anch
   const trigger = draft.locator('.input-model-button')
   await trigger.click()
   const menu = page.locator('.model-cascader:visible')
+  const modal = page.locator('.model-cascader-modal:visible')
+  const fixedHeight = mobile ? '544px' : '560px'
   await expect(menu).toBeVisible()
+  await expect(modal).toHaveAttribute('role', 'dialog')
+  await expect(modal).toHaveCSS('height', fixedHeight)
   await expect(menu.locator('.model-cascader-item')).toHaveCount(1)
+  await menu.locator('.model-cascader-provider').filter({ hasText: 'Long Provider' }).click()
+  for (const column of ['providers', 'models']) {
+    expect(await menu.locator(`.model-cascader-${column}`).evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
+  }
+  await expect(modal).toHaveCSS('height', fixedHeight)
+  await menu.locator('.model-cascader-search input').fill('no matching model')
+  await expect(menu.locator('.model-cascader-empty')).toBeVisible()
+  await expect(modal).toHaveCSS('height', fixedHeight)
+  await menu.locator('.model-cascader-search input').fill('')
+  await menu.locator('.model-cascader-provider').filter({ hasText: 'MoA' }).click()
+  await expect(menu.locator('.model-cascader-custom')).toBeHidden()
+  await expect(modal).toHaveCSS('height', fixedHeight)
   await menu.locator('.model-cascader-provider').filter({ hasText: 'Other Provider' }).click()
   await expect(trigger).toContainText('test-model')
   await expect(menu.getByRole('menuitemradio').filter({ hasText: 'Fast model' })).toBeVisible()
   await expect(menu.getByRole('menuitemradio').filter({ hasText: 'disabled-model' })).toBeDisabled()
   await menu.locator('.model-cascader-search input').fill('Other Provider')
   await expect(menu.getByRole('menuitemradio')).toHaveCount(2)
-  const bounds = await menu.boundingBox()
+  const bounds = await modal.boundingBox()
   expect(bounds!.x).toBeGreaterThanOrEqual(0)
   expect(bounds!.y).toBeGreaterThanOrEqual(0)
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(mobile ? 320 : 1280)
@@ -47,7 +69,7 @@ for (const mobile of [false, true]) test(`chooses provider then model in an anch
   expect(api.unexpectedRequests).toEqual([])
 })
 
-test('supports keyboard traversal, Escape and outside dismissal without closing the draft', async ({ page }) => {
+test('supports keyboard traversal, Escape, close and backdrop dismissal without closing the draft', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await mockHermesApi(page, { modelGroups, modelAliases })
   await mockChatSocket(page)
@@ -75,7 +97,13 @@ test('supports keyboard traversal, Escape and outside dismissal without closing 
   await expect(trigger).toBeFocused()
   await trigger.click()
   await expect(menu).toBeVisible()
-  await draft.locator('textarea').click({ position: { x: 10, y: 10 } })
+  await page.locator('.n-modal-mask:visible').click({ position: { x: 5, y: 5 } })
   await expect(menu).toBeHidden()
-  await expect(draft.locator('textarea')).toBeFocused()
+  await expect(trigger).toBeFocused()
+  await trigger.click()
+  await expect(menu).toBeVisible()
+  await page.locator('.model-cascader-modal .n-base-close').click()
+  await expect(menu).toBeHidden()
+  await expect(draft).toBeVisible()
+  await expect(trigger).toBeFocused()
 })

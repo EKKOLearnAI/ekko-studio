@@ -57,10 +57,10 @@ describe('ChatPanel session clicks', () => {
     expect(source).not.toContain('if (isActiveSessionCodingAgent.value) return')
   })
 
-  it('anchors the shared model cascader to the composer while preserving the session Profile', () => {
+  it('uses the shared model dialog while preserving the session Profile and composer focus', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
     expect(source).toContain(':groups="sessionModelAllGroups"')
-    expect(source).toContain(':anchor="sessionModelAnchor"')
+    expect(source).toContain(':trigger-element="sessionModelTrigger"')
     expect(source).toContain('session?.profile || null')
     expect(source).toContain('@model-click="openSessionModelPicker(null, $event)"')
   })

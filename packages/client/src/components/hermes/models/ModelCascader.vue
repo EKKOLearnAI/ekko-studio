@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
-import { NButton, NInput, NPopover, NSpin } from 'naive-ui'
+import { computed, nextTick, ref, useId, watch } from 'vue'
+import { NButton, NInput, NModal, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { AvailableModelGroup } from '@/api/hermes/system'
 import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
@@ -12,17 +12,14 @@ const props = withDefaults(defineProps<{
   provider?: string
   model?: string
   show?: boolean
-  anchor?: HTMLElement | null
-  x?: number
-  y?: number
+  triggerElement?: HTMLElement | null
   disabled?: boolean
   loading?: boolean
   allowCustom?: boolean
   removableCustom?: boolean
   closeOnSelect?: boolean
   title?: string
-  placement?: 'top-start' | 'bottom-start' | 'right-start'
-}>(), { provider: '', model: '', show: undefined, anchor: null, allowCustom: true, closeOnSelect: true, placement: 'bottom-start', title: '' })
+}>(), { provider: '', model: '', show: undefined, triggerElement: null, allowCustom: true, closeOnSelect: true, title: '' })
 const emit = defineEmits<{
   'update:show': [show: boolean]
   select: [value: { provider: string; model: string; apiMode?: ProviderApiMode }]
@@ -36,9 +33,7 @@ const search = ref('')
 const customInput = ref('')
 const activeProvider = ref('')
 const panel = ref<HTMLElement | null>(null)
-const position = ref({ x: 0, y: 0 })
 let returnFocus: HTMLElement | null = null
-const manual = computed(() => Boolean(props.anchor) || props.x !== undefined)
 const groups = computed(() => modelCascaderGroups(props.groups, appStore.customModels, search.value, appStore.displayModelName))
 const activeGroup = computed(() => groups.value.find(group => group.provider === activeProvider.value) || groups.value[0])
 const canAddCustom = computed(() => props.allowCustom && activeGroup.value && activeGroup.value.provider !== 'moa')
@@ -48,49 +43,29 @@ function setShow(show: boolean) {
   internalShow.value = show
   emit('update:show', show)
 }
-function syncPosition() {
-  const menuWidth = Math.min(500, window.innerWidth - 24)
-  const clampX = (x: number) => Math.max(12, Math.min(x, window.innerWidth - menuWidth - 12))
-  if (!props.anchor) {
-    position.value = { x: clampX(props.x ?? 12), y: props.y ?? 0 }
-    return
-  }
-  if (!props.anchor.isConnected) { setShow(false); return }
-  const rect = props.anchor.getBoundingClientRect()
-  position.value = { x: clampX(rect.left), y: props.placement === 'top-start' ? rect.top : rect.bottom }
-}
-function handleScroll(event: Event) {
-  if (panel.value?.contains(event.target as Node)) return
-  syncPosition()
-}
-function removeListeners() {
-  window.removeEventListener('resize', syncPosition)
-  window.removeEventListener('scroll', handleScroll, true)
-}
-onBeforeUnmount(removeListeners)
 watch(shown, async show => {
-  removeListeners()
-  if (!show) {
-    if (panel.value?.contains(document.activeElement)) returnFocus?.focus()
-    return
-  }
-  returnFocus = props.anchor || (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+  if (!show) return
+  returnFocus = props.triggerElement || (document.activeElement instanceof HTMLElement ? document.activeElement : null)
   search.value = ''
   customInput.value = ''
   activeProvider.value = props.provider || props.groups[0]?.provider || ''
-  syncPosition()
-  window.addEventListener('resize', syncPosition)
-  window.addEventListener('scroll', handleScroll, true)
   await nextTick()
+  focusPanel()
+})
+// Capture focus before Escape can reach an underlying mobile drawer.
+watch(panel, element => { if (element) focusPanel() }, { flush: 'post' })
+function focusPanel() {
   if (!shown.value) return
   if (window.matchMedia('(max-width: 600px)').matches) panel.value?.focus()
   else panel.value?.querySelector<HTMLInputElement>('.model-cascader-search input')?.focus()
   panel.value?.querySelector('.model-cascader-item.active')?.scrollIntoView({ block: 'nearest' })
-})
+}
+function restoreFocus() {
+  if (!shown.value && document.activeElement === document.body) returnFocus?.focus()
+}
 watch(groups, value => {
   if (!value.some(group => group.provider === activeProvider.value)) activeProvider.value = value[0]?.provider || ''
 })
-watch(() => props.anchor, syncPosition)
 
 function selectProvider(provider: string) {
   if (props.loading) return
@@ -110,16 +85,15 @@ function submitCustom() {
 function isCustom(model: string) {
   return (appStore.customModels[activeGroup.value?.provider || ''] || []).includes(model)
 }
-function handleOutside(event: MouseEvent) {
-  if (props.anchor?.contains(event.target as Node)) return
-  setShow(false)
+function open(event: MouseEvent) {
+  returnFocus = event.currentTarget as HTMLElement
+  setShow(true)
 }
 function dismiss(event: KeyboardEvent) {
   event.preventDefault()
   event.stopPropagation()
   if (props.loading) return
   setShow(false)
-  returnFocus?.focus()
 }
 function focusColumn(column: 'providers' | 'models') {
   const className = column === 'providers' ? 'model-cascader-provider' : 'model-cascader-item'
@@ -148,20 +122,19 @@ async function openWithKeyboard(event: KeyboardEvent) {
 </script>
 
 <template>
-  <NPopover
-    :show="shown" :trigger="manual ? 'manual' : 'click'" :placement="placement"
-    :x="manual ? position.x : undefined" :y="manual ? position.y : undefined"
-    :disabled="disabled" :show-arrow="false" :style="{ padding: '0', maxWidth: 'calc(100vw - 24px)' }"
-    @update:show="setShow" @clickoutside="handleOutside"
+  <slot name="trigger" :show="shown" :open="open" :open-with-keyboard="openWithKeyboard" />
+  <NModal
+    :show="shown" preset="card" class="model-cascader-modal" :title="title || t('models.title')"
+    :style="{ width: 'min(640px, calc(100vw - 24px))', height: 'min(560px, calc(100dvh - 24px))' }"
+    :content-style="{ padding: '0', minHeight: '0', display: 'flex', overflow: 'hidden' }"
+    :mask-closable="!loading" :close-on-esc="!loading" :closable="!loading" :auto-focus="false"
+    @update:show="setShow" @after-leave="restoreFocus"
   >
-    <template v-if="$slots.trigger" #trigger>
-      <slot name="trigger" :show="shown" :open-with-keyboard="openWithKeyboard" />
-    </template>
     <div ref="panel" class="model-cascader" role="group" :aria-label="title || t('models.title')" tabindex="-1" @keydown.esc="dismiss">
       <div class="model-cascader-search">
         <NInput v-model:value="search" :placeholder="t('models.searchPlaceholder')" :disabled="loading" clearable size="small" @keydown.down.prevent="focusColumn('providers')" />
       </div>
-      <NSpin :show="loading" :description="t('chat.modelSwitching')">
+      <NSpin class="model-cascader-lists" content-class="model-cascader-list-content" :show="loading" :description="t('chat.modelSwitching')">
         <div class="model-cascader-columns" :aria-busy="loading">
           <div class="model-cascader-column model-cascader-providers" role="menu" :aria-label="t('models.providerColumn')" @keydown="navigate($event, 'providers')">
             <div class="model-cascader-heading">{{ t('models.providerColumn') }}</div>
@@ -208,15 +181,17 @@ async function openWithKeyboard(event: KeyboardEvent) {
         <div class="model-cascader-hint">{{ t('models.customModelHint') }}</div>
       </div>
     </div>
-  </NPopover>
+  </NModal>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-.model-cascader { width: min(500px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); color: $text-primary; outline: none; }
-.model-cascader-search { padding: 10px; }
-.model-cascader-columns { display: grid; grid-template-columns: minmax(0, 38%) minmax(0, 1fr); border-top: 1px solid $border-color; }
-.model-cascader-column { max-height: min(320px, 40dvh); min-height: 120px; overflow-y: auto; scrollbar-width: thin; padding: 4px; min-width: 0; }
+.model-cascader { display: flex; flex-direction: column; width: 100%; min-height: 0; color: $text-primary; outline: none; }
+.model-cascader-search { padding: 10px; flex-shrink: 0; }
+.model-cascader-lists { flex: 1; min-height: 0; overflow: hidden; }
+.model-cascader-lists :deep(.model-cascader-list-content) { height: 100%; }
+.model-cascader-columns { display: grid; grid-template-columns: minmax(0, 38%) minmax(0, 1fr); height: 100%; min-height: 0; border-top: 1px solid $border-color; }
+.model-cascader-column { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 4px; min-width: 0; min-height: 0; }
 .model-cascader-providers { border-inline-end: 1px solid $border-color; }
 .model-cascader-heading { padding: 6px 8px; color: $text-muted; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-cascader-provider, .model-cascader-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px; border: 0; border-radius: $radius-sm; background: transparent; color: $text-secondary; cursor: pointer; text-align: start; font: inherit; font-size: 12px;
@@ -235,7 +210,7 @@ async function openWithKeyboard(event: KeyboardEvent) {
 .model-cascader-badges { display: flex; flex-wrap: wrap; gap: 4px; color: $text-muted; font-size: 10px; &:empty { display: none; } }
 .model-cascader-remove { border: 0; border-radius: $radius-sm; background: transparent; color: $text-muted; cursor: pointer; padding: 4px; &:hover { color: $error; } }
 .model-cascader-empty { display: flex; flex-direction: column; align-items: center; padding: 24px 8px; font-size: 12px; color: $text-muted; text-align: center; }
-.model-cascader-custom { padding: 10px; border-top: 1px solid $border-color; }
+.model-cascader-custom { flex-shrink: 0; padding: 10px; border-top: 1px solid $border-color; }
 .model-cascader-custom-row { display: flex; gap: 8px; }
 .model-cascader-hint { margin-top: 6px; font-size: 10px; color: $text-muted; }
 @media (max-width: 600px) {

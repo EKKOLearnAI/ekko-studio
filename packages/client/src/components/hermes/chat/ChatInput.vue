@@ -1325,7 +1325,7 @@ function openAttachmentPreview(attachment: Attachment) {
                 :disabled="props.modelDisabled"
                 :title="isMobileViewport ? undefined : props.modelLabel || t('models.selectModel')"
                 :aria-label="props.modelLabel || t('models.selectModel')"
-                aria-haspopup="menu"
+                aria-haspopup="dialog"
                 :aria-expanded="props.modelExpanded"
                 @click="handleModelButtonClick"
               >

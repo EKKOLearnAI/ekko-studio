@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import ModelCascader from '@/components/hermes/models/ModelCascader.vue'
 
 const { t } = useI18n()
+const emit = defineEmits<{ 'modal-show-change': [show: boolean] }>()
 const appStore = useAppStore()
 const profilesStore = useProfilesStore()
 const activeModelGroups = computed(() => appStore.profileModelGroups.find(
@@ -41,9 +42,9 @@ async function handleRefresh() {
       </button>
     </div>
     <ModelCascader :groups="activeModelGroups" :provider="appStore.selectedProvider" :model="appStore.selectedModel" removable-custom
-      @select="appStore.switchModel($event.model, $event.provider)">
-      <template #trigger="{ show, openWithKeyboard }">
-        <button class="model-trigger" type="button" aria-haspopup="menu" :aria-expanded="show" @keydown.down="openWithKeyboard">
+      @update:show="emit('modal-show-change', $event)" @select="appStore.switchModel($event.model, $event.provider)">
+      <template #trigger="{ show, open, openWithKeyboard }">
+        <button class="model-trigger" type="button" aria-haspopup="dialog" :aria-expanded="show" @click="open" @keydown.down="openWithKeyboard">
           <span class="model-name" :title="appStore.selectedModel">{{ selectedDisplayName || '—' }}</span>
           <svg class="model-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
         </button>

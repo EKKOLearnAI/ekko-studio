@@ -17,8 +17,8 @@ function findClosingDiv(source: string, start: number): number {
 describe('ModelCascader layout', () => {
   it('keeps the custom model controls below the scrollable model list', () => {
     const source = readFileSync('packages/client/src/components/hermes/models/ModelCascader.vue', 'utf8')
-    const modalStart = source.indexOf('<NPopover')
-    const modalEnd = source.indexOf('</NPopover>', modalStart)
+    const modalStart = source.indexOf('<NModal')
+    const modalEnd = source.indexOf('</NModal>', modalStart)
     const modal = source.slice(modalStart, modalEnd)
     const modelListStart = modal.indexOf('<div class="model-cascader-columns"')
     const modelListEnd = findClosingDiv(modal, modelListStart)
