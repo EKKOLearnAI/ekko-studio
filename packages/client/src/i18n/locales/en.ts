@@ -3802,6 +3802,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_33_1: 'New Chat now uses a responsive page with Agent cards, the shared chat composer, and session settings (#3333)',
+    new_0_7_33_2: 'New chats remember the last model, workspace, launch mode, and reasoning options for creating more conversations (#3333)',
+    new_0_7_33_3: 'Added gold borders and jade foil effects to Agent cards, with consistent interior animation speed across platforms (#3336, #3344)',
+    new_0_7_33_4: 'Fixed Agent card scale jumps across loop boundaries and dragging continuing after releasing the mouse outside the list (#3335, #3340)',
+    new_0_7_33_5: 'Fixed token calculation stalls and unresponsive chats caused by long runs of digits, symbols, or whitespace (#3325)',
+    new_0_7_33_6: 'Improved context estimates and automatic compression using tool calls and actual model usage; fixed compression of tool groups crossing the compression boundary (#3329)',
+    new_0_7_33_7: 'Fixed Coding Agent chats being interrupted by dependency debug output, improving DSH and other ACP Agent compatibility (#3327)',
+    new_0_7_33_8: 'Fixed clarification question and answer callback compatibility across Hermes kernel versions (#3330)',
     new_0_7_32_1: 'Added region screenshots and annotation tools to desktop chats and group chats, with configurable global shortcuts and capture support for Windows, macOS, and Linux (#3312)',
     new_0_7_32_2: 'Fixed screenshot overlay failures leaving chat windows hidden; the original window state is now restored when capture ends or fails (#3318)',
     new_0_7_32_3: 'New chats remember the last selected Agent, including after a refresh (#3320)',
@@ -3815,13 +3823,5 @@ export default {
     new_0_7_31_3: 'Unified model context, reasoning effort, and pricing lookup, improved matching for custom endpoints and prefixed model IDs, and prioritized manually configured prices (#3298, #3300)',
     new_0_7_31_4: 'Fixed context queries for custom endpoints in the App and added model aliases and reasoning options to shared sessions (#3299)',
     new_0_7_31_5: 'Fixed Comic theme preferences being lost after refresh or restart; saved theme styles now return during loading (#3302)',
-    new_0_7_30_1: 'Added Qwen Code, Kimi Code, CodeBuddy, Qoder, GitHub Copilot, and ZCode for chats, group chats, and workflows; Qoder uses global mode, while the other five also support scoped models (#3280)',
-    new_0_7_30_2: 'Ekko chats now appear under Built-in Agent in history and search, with /context, /usage, /status, and /compact commands (#3276)',
-    new_0_7_30_3: 'New chats default to Ekko and show installed Agents without CLI probes; reopening unsent chats no longer waits for nonexistent history (#3284, #3288)',
-    new_0_7_30_4: 'Improved Coding Agent image input according to native capabilities, with long and multiline prompt support on Windows (#3285)',
-    new_0_7_30_5: 'Improved Windows Agent prerequisite checks and ZCode desktop CLI detection, with reliable launches from paths containing spaces or non-ASCII characters (#3281)',
-    new_0_7_30_6: 'Fixed incomplete Copilot tool arguments when streaming through the Responses API (#3286)',
-    new_0_7_30_7: 'Fixed Claude tool execution without confirmation when running as root, with consistent launch permissions in global and scoped modes (#3287)',
-    new_0_7_30_8: 'Removed the retired OpenCode Free provider and its model entry points (#3277)',
   },
 }
