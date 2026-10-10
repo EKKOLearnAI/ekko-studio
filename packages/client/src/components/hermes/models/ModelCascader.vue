@@ -202,9 +202,9 @@ async function openWithKeyboard(event: KeyboardEvent) {
 .model-cascader-close { flex-shrink: 0; }
 .model-cascader-lists { flex: 1; min-height: 0; margin: 0 12px 12px; border: 1px solid $border-color; border-radius: 10px; overflow: hidden; }
 .model-cascader-lists :deep(.model-cascader-list-content) { height: 100%; }
-.model-cascader-columns { display: grid; grid-template-columns: minmax(0, 38%) minmax(0, 1fr); gap: 8px; height: 100%; min-height: 0; }
+.model-cascader-columns { display: grid; grid-template-columns: minmax(0, 38%) minmax(0, 1fr); height: 100%; min-height: 0; }
 .model-cascader-column { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 6px; min-width: 0; min-height: 0; }
-.model-cascader-model-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.model-cascader-model-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-inline-start: 1px solid $border-color; overflow: hidden; }
 .model-cascader-models { flex: 1; }
 .model-cascader-heading { padding: 6px 8px 8px; color: $text-muted; font-size: 11px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-cascader-provider, .model-cascader-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px; border: 0; border-radius: $radius-sm; background: transparent; color: $text-secondary; cursor: pointer; text-align: start; font: inherit; font-size: 12px;
@@ -230,6 +230,6 @@ async function openWithKeyboard(event: KeyboardEvent) {
 @media (max-width: 480px) {
   .model-cascader-search { padding: 10px; }
   .model-cascader-lists { margin: 0 8px 8px; }
-  .model-cascader-columns { grid-template-columns: minmax(0, 35%) minmax(0, 1fr); gap: 6px; }
+  .model-cascader-columns { grid-template-columns: minmax(0, 35%) minmax(0, 1fr); }
 }
 </style>
