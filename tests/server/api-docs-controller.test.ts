@@ -14,6 +14,12 @@ describe('api docs controller', () => {
     expect(ctx.set).toHaveBeenCalledWith('Cache-Control', 'no-store')
     expect(ctx.body.openapi).toBe('3.0.3')
     expect(ctx.body.paths['/api/openapi.json']).toBeTruthy()
+    expect(ctx.body.paths['/api/coding-agents/models'].get.parameters).toEqual([
+      expect.objectContaining({ name: 'agent', in: 'query', required: false }),
+      expect.objectContaining({ name: 'refresh', in: 'query', schema: { type: 'boolean', default: false } }),
+    ])
+    expect(ctx.body.paths['/api/coding-agents/models'].get.responses['200'].content['application/json'].schema.properties.agents.items.properties.status.enum)
+      .toContain('auth_required')
     expect(ctx.body.paths['/api/auth/login'].post.requestBody.content['application/json'].schema.required).toEqual([
       'password',
       'username',

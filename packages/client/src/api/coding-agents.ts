@@ -68,6 +68,37 @@ export interface CodingAgentsStatus {
   tools: CodingAgentToolStatus[]
 }
 
+export interface CodingAgentModel {
+  id: string
+  name: string
+  provider?: string
+  isDefault?: boolean
+  hidden?: boolean
+  contextWindow?: number
+  maxOutputTokens?: number
+  reasoningEfforts?: string[]
+  inputModalities?: string[]
+}
+
+export interface CodingAgentModelCatalog {
+  agentId: CodingAgentId
+  name: string
+  status: 'ready' | 'empty' | 'not_installed' | 'auth_required' | 'unsupported' | 'timeout' | 'error'
+  source: 'cli' | 'app-server' | 'control-protocol' | 'sdk' | 'acp' | 'config'
+  scope: 'available' | 'configured' | 'builtin'
+  models: CodingAgentModel[]
+  checkedAt: string
+  cached: boolean
+}
+
+export async function fetchCodingAgentModels(options: { agent?: CodingAgentId; refresh?: boolean } = {}) {
+  const params = new URLSearchParams()
+  if (options.agent) params.set('agent', options.agent)
+  if (options.refresh !== undefined) params.set('refresh', String(options.refresh))
+  const query = params.toString()
+  return request<{ agents: CodingAgentModelCatalog[] }>(`/api/coding-agents/models${query ? `?${query}` : ''}`)
+}
+
 export interface CodingAgentMutationResult extends CodingAgentsStatus {
   updateState?: AgentUpdatePolicyState
   success: boolean

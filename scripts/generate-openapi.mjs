@@ -1514,6 +1514,44 @@ for (const [method, operation] of Object.entries(workspaceDirectoriesPath)) {
   operation.responses['400'] = { description: 'Invalid directory path or favorite value' }
 }
 
+// One native model discovery endpoint for every Coding Agent.
+const codingAgentIds = ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode']
+const nativeModelSchema = {
+  type: 'object', required: ['id', 'name'], properties: {
+    id: { type: 'string', description: 'Native model ID or alias; preserve provider prefixes.' },
+    name: { type: 'string' }, provider: { type: 'string' },
+    isDefault: { type: 'boolean' }, hidden: { type: 'boolean' },
+    contextWindow: { type: 'number' }, maxOutputTokens: { type: 'number' },
+    reasoningEfforts: { type: 'array', items: { type: 'string' } },
+    inputModalities: { type: 'array', items: { type: 'string' } },
+  },
+}
+openapi.paths['/api/coding-agents/models'] = { get: {
+  tags: ['Coding Agents'], operationId: 'getCodingAgentModels', summary: 'Discover native models for one or all Coding Agents',
+  description: 'Reads native CLI/account/config model directories on this Studio server, independently of Hermes Profiles. No chat prompts are sent. Each agent has its own discovery status; an individual failure does not fail the aggregate request. Successful results cache for 60 seconds and failures for 5 seconds. Refresh bypasses the cache while sharing in-flight requests. Builtin/configured entries do not prove account access. Raw native errors and credentials are never returned.',
+  security: [{ BearerAuth: [] }],
+  parameters: [
+    { name: 'agent', in: 'query', required: false, schema: { type: 'string', enum: codingAgentIds }, description: 'Omit to discover all fourteen agents.' },
+    { name: 'refresh', in: 'query', required: false, schema: { type: 'boolean', default: false } },
+  ],
+  responses: {
+    '200': { description: 'Native directories and individual discovery statuses', content: { 'application/json': { schema: {
+      type: 'object', required: ['agents'], properties: { agents: { type: 'array', items: {
+        type: 'object', required: ['agentId', 'name', 'status', 'source', 'scope', 'models', 'checkedAt', 'cached'], properties: {
+          agentId: { type: 'string', enum: codingAgentIds }, name: { type: 'string' },
+          status: { type: 'string', enum: ['ready', 'empty', 'not_installed', 'auth_required', 'unsupported', 'timeout', 'error'] },
+          source: { type: 'string', enum: ['cli', 'app-server', 'control-protocol', 'sdk', 'acp', 'config'] },
+          scope: { type: 'string', enum: ['available', 'configured', 'builtin'] },
+          models: { type: 'array', items: nativeModelSchema }, checkedAt: { type: 'string', format: 'date-time' }, cached: { type: 'boolean' },
+        },
+      } } },
+    } } } },
+    '400': { description: 'Unknown agent or invalid query parameters' },
+    '401': { $ref: '#/components/responses/Unauthorized' },
+    '500': { description: 'Unable to initialize native model discovery' },
+  },
+} }
+
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')
 writeFileSync(outputPath, JSON.stringify(openapi, null, 2))
