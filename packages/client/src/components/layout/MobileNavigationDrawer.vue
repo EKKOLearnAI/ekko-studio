@@ -14,7 +14,7 @@ const { t } = useI18n()
 <template>
   <NDrawer
     :show="show"
-    :width="hasSidebar ? 'var(--studio-drawer-width)' : 64"
+    :width="hasSidebar ? 'min(380px, 90vw)' : 64"
     placement="left"
     display-directive="show"
     class="studio-mobile-drawer"
