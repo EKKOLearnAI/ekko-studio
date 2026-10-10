@@ -58,6 +58,7 @@ import { defaultCodingAgentWorkspace } from '../../studio/public/workspace-manag
 import { isolateUnhealthyRuntimeMcpServers } from './mcp-runtime-isolation'
 import { getCodingAgentGlobalHome } from '../../studio/public/coding-agent-global-home'
 import { codingAgentContextPolicy, compactionPercent, claudeCompactionPercent, piCompactionSettings, type CodingAgentContextPolicy } from './context-policy'
+import { createCodingAgentModelDiscovery } from './models'
 
 const execFileAsync = promisify(execFile)
 const LAUNCH_API_MODES = new Set<ApiMode>(['chat_completions', 'codex_responses', 'anthropic_messages'])
@@ -2440,6 +2441,24 @@ async function nativeAgentEnvironment(id: Parameters<typeof checkNativeCodingAge
     },
   })
 }
+
+export const getCodingAgentModels = createCodingAgentModelDiscovery({
+  definitions: TOOL_DEFINITIONS, commandEnv, commandExecution,
+  home: getCodingAgentGlobalHome, dataHome: getWebUiHome,
+  async resolveCommand(definition, env) {
+    if (definition.id === 'zcode') {
+      const resolved = await resolveZcodeCommand([], env, findCommandPaths)
+      return resolved.path === 'zcode' ? null : resolved
+    }
+    const paths = await findCommandPaths(definition.command, env)
+    if (!paths.length) return null
+    const command = process.platform === 'win32'
+      ? paths.find(windowsCommandNeedsShell) || paths[0]
+      : paths[0]
+    const nativeEnv = isNativeCodingAgent(definition.id) ? await nativeAgentEnvironment(definition.id, env) : {}
+    return { command, env: nativeEnv }
+  },
+})
 
 export function getCodingAgentDefinitions(): CodingAgentDefinition[] {
   return TOOL_DEFINITIONS.map(tool => ({ ...tool }))
