@@ -2841,6 +2841,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
     <ModelCascader
       v-model:show="showSessionModelPicker"
       :groups="sessionModelAllGroups"
+      :allow-moa="isSessionModelHermes"
       :provider="sessionModelProvider"
       :model="sessionModelValue"
       :trigger-element="sessionModelTrigger"

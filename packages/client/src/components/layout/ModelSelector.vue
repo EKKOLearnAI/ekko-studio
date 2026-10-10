@@ -9,9 +9,9 @@ const { t } = useI18n()
 const emit = defineEmits<{ 'modal-show-change': [show: boolean] }>()
 const appStore = useAppStore()
 const profilesStore = useProfilesStore()
-const activeModelGroups = computed(() => appStore.profileModelGroups.find(
+const activeModelGroups = computed(() => (appStore.profileModelGroups.find(
   entry => entry.profile === (profilesStore.activeProfileName || 'default'),
-)?.groups || [])
+)?.groups || []).filter(group => group.provider !== 'moa'))
 const selectedDisplayName = computed(() => activeModelGroups.value.some(group =>
   group.provider === appStore.selectedProvider && [...group.models, ...(appStore.customModels[group.provider] || [])].includes(appStore.selectedModel),
 ) ? appStore.displayModelName(appStore.selectedModel, appStore.selectedProvider) : '')

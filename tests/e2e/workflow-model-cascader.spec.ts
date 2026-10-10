@@ -36,7 +36,7 @@ test('workflow uses the shared dialog and saves aliases, protocol and custom mod
   await expect(dialog.locator('.n-card-header')).toHaveCount(0)
   await expect(menu).toBeFocused()
   await expect(menu.locator('.model-cascader-search input')).not.toBeFocused()
-  await expect(menu.locator('.model-cascader-provider').filter({ hasText: 'MoA combinations' })).toBeVisible()
+  await expect(menu.locator('.model-cascader-provider').filter({ hasText: 'MoA' })).toHaveCount(0)
   await menu.locator('.model-cascader-provider').filter({ hasText: 'Other Provider' }).click()
   await expect(menu.getByRole('menuitemradio').filter({ hasText: 'disabled-model' })).toBeDisabled()
   await menu.getByRole('menuitemradio').filter({ hasText: 'Fast model' }).click()
@@ -68,16 +68,17 @@ test('workflow uses the shared dialog and saves aliases, protocol and custom mod
 })
 
 for (const [agent, label] of [['ekko-agent', 'Ekko'], ['codex', 'Codex']]) {
-  test(`workflow switching Hermes MoA to ${label} resets and hides combinations`, async ({ page }) => {
+  test(`workflow excludes MoA for Hermes and ${label} and repairs old selections`, async ({ page }) => {
     await authenticate(page, TEST_ACCESS_KEY, 'research')
     const api = await mockHermesApi(page, { modelGroups, workflows: [workflow('moa', 'review-combination')], workflowRuns: [] })
     await page.goto('/#/hermes/workflow')
     const node = page.locator('.vue-flow__node[data-id="agent"]')
     const trigger = node.locator('.model-trigger')
-    await expect(trigger).toContainText('review-combination')
+    await expect(trigger).toContainText('test-model')
     await trigger.click()
     const menu = page.locator('.model-cascader:visible')
-    await expect(menu.getByRole('menuitemradio').filter({ hasText: 'review-combination' })).toHaveAttribute('aria-checked', 'true')
+    await expect(menu.locator('.model-cascader-provider').filter({ hasText: 'MoA' })).toHaveCount(0)
+    await expect(menu.getByRole('menuitemradio').filter({ hasText: 'review-combination' })).toHaveCount(0)
     await page.keyboard.press('Escape')
     await expect(menu).toBeHidden()
     await expect(trigger).toBeFocused()

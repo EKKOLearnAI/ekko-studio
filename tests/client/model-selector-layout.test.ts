@@ -15,18 +15,23 @@ function findClosingDiv(source: string, start: number): number {
 }
 
 describe('ModelCascader layout', () => {
-  it('keeps the custom model controls below the scrollable model list', () => {
+  it('keeps custom controls inside the right column and below its scrollable model list', () => {
     const source = readFileSync('packages/client/src/components/hermes/models/ModelCascader.vue', 'utf8')
     const modalStart = source.indexOf('<NModal')
     const modalEnd = source.indexOf('</NModal>', modalStart)
     const modal = source.slice(modalStart, modalEnd)
-    const modelListStart = modal.indexOf('<div class="model-cascader-columns"')
-    const modelListEnd = findClosingDiv(modal, modelListStart)
-    const customFooter = modal.indexOf('class="model-cascader-custom"')
+    const rightColumnStart = modal.indexOf('<div class="model-cascader-model-pane"')
+    const rightColumnEnd = findClosingDiv(modal, rightColumnStart)
+    const rightColumn = modal.slice(rightColumnStart, rightColumnEnd)
+    const modelListStart = rightColumn.indexOf('<div :id="menuId"')
+    const modelListEnd = findClosingDiv(rightColumn, modelListStart)
+    const customFooter = rightColumn.indexOf('class="model-cascader-custom"')
 
+    expect(rightColumnStart).toBeGreaterThanOrEqual(0)
+    expect(rightColumnEnd).toBeGreaterThan(rightColumnStart)
     expect(modelListStart).toBeGreaterThanOrEqual(0)
     expect(modelListEnd).toBeGreaterThan(modelListStart)
     expect(customFooter).toBeGreaterThan(modelListEnd)
-    expect(modal.slice(modelListStart, modelListEnd)).not.toContain('class="model-cascader-custom"')
+    expect(rightColumn.slice(modelListStart, modelListEnd)).not.toContain('class="model-cascader-custom"')
   })
 })

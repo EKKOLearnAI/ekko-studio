@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY, TEST_MODEL_GROUP } from './fixtures'
 import { selectNewChatAgent } from './new-chat-helpers'
 
@@ -13,6 +13,57 @@ const modelGroups = [TEST_MODEL_GROUP, {
   ...TEST_MODEL_GROUP, provider: `provider-${index}`, label: `Provider ${index}`, models: [`model-${index}`],
 }))]
 const modelAliases = { 'other-provider': { 'other-model': 'Fast model' } }
+
+async function expectCustomFooterAnchored(menu: Locator) {
+  const layout = await menu.evaluate(element => {
+    const bounds = (selector: string) => element.querySelector(selector)!.getBoundingClientRect()
+    const pane = bounds('.model-cascader-model-pane')
+    const list = bounds('.model-cascader-models')
+    const footer = bounds('.model-cascader-custom')
+    const providers = bounds('.model-cascader-providers')
+    const input = bounds('.model-cascader-custom .n-input')
+    const confirm = bounds('.model-cascader-custom .n-button')
+    return {
+      leftOffset: footer.left - pane.left, rightOffset: pane.right - footer.right,
+      bottomOffset: pane.bottom - footer.bottom, listGap: footer.top - list.bottom,
+      providerBottomOffset: providers.bottom - pane.bottom,
+      inputFits: input.left >= footer.left && input.right <= footer.right,
+      confirmFits: confirm.left >= footer.left && confirm.right <= footer.right,
+    }
+  })
+  for (const offset of [layout.leftOffset, layout.rightOffset, layout.bottomOffset, layout.listGap, layout.providerBottomOffset]) {
+    expect(Math.abs(offset)).toBeLessThanOrEqual(1)
+  }
+  expect(layout.inputFits).toBe(true)
+  expect(layout.confirmFits).toBe(true)
+}
+
+test('global model switching hides MoA while Hermes single chat retains it', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  const api = await mockHermesApi(page, { modelGroups, modelAliases })
+  await mockChatSocket(page)
+  await page.route('**/api/hermes/config/model', route => route.fulfill({ json: { success: true } }))
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  await selectNewChatAgent(page, 'Hermes')
+  const menu = page.locator('.model-cascader:visible')
+  await page.locator('.new-chat-page .input-model-button').click()
+  await expect(menu.locator('.model-cascader-provider').filter({ hasText: 'MoA' })).toBeVisible()
+  await menu.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.locator('.page-sidebar-account-btn').click()
+  await page.locator('.sidebar-account-menu .model-trigger').click()
+  await expect(menu).toBeVisible()
+  await expect(menu.locator('.model-cascader-provider').filter({ hasText: 'MoA' })).toHaveCount(0)
+  await menu.locator('.model-cascader-search input').fill('review-combination')
+  await expect(menu.getByRole('menuitemradio')).toHaveCount(0)
+  await menu.locator('.model-cascader-search input').fill('')
+  await menu.locator('.model-cascader-provider').filter({ hasText: 'Other Provider' }).click()
+  const modelUpdate = page.waitForRequest(request => request.url().endsWith('/api/hermes/config/model') && request.method() === 'PUT')
+  await menu.getByRole('menuitemradio').filter({ hasText: 'Fast model' }).click()
+  expect((await modelUpdate).postDataJSON()).toMatchObject({ default: 'other-model', provider: 'other-provider' })
+  await expect(menu).toBeHidden()
+  expect(api.unexpectedRequests).toEqual([])
+})
 
 for (const [label, identity, expectedMoa] of [
   ['legacy Hermes', { source: 'cli' }, true],
@@ -42,9 +93,10 @@ for (const [label, identity, expectedMoa] of [
   expect(api.unexpectedRequests).toEqual([])
 })
 
-for (const mobile of [false, true]) test(`chooses provider then model in a fixed-height dialog (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
+for (const { mobile, dark } of [{ mobile: false, dark: false }, { mobile: true, dark: false }, { mobile: false, dark: true }]) test(`chooses provider then model in a fixed-height dialog (${mobile ? 'mobile' : dark ? 'dark' : 'desktop'})`, async ({ page }) => {
   await page.setViewportSize(mobile ? { width: 320, height: 568 } : { width: 1280, height: 900 })
   await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript(dark => localStorage.setItem('hermes_brightness', dark ? 'dark' : 'light'), dark)
   const api = await mockHermesApi(page, { modelGroups, modelAliases })
   await mockChatSocket(page)
   await page.goto('/#/hermes/chat')
@@ -62,6 +114,7 @@ for (const mobile of [false, true]) test(`chooses provider then model in a fixed
   await expect(modal).toHaveAttribute('role', 'dialog')
   await expect(modal).toHaveAttribute('aria-label', 'Set Session Model')
   await expect(modal.locator('.n-card-header')).toHaveCount(0)
+  await expect(modal).not.toHaveClass(/n-card--bordered/)
   await expect(menu).toBeFocused()
   await expect(menu.locator('.model-cascader-search input')).not.toBeFocused()
   const rowLayout = await menu.locator('.model-cascader-search').evaluate(row => {
@@ -77,6 +130,9 @@ for (const mobile of [false, true]) test(`chooses provider then model in a fixed
   for (const column of ['providers', 'models']) {
     expect(await menu.locator(`.model-cascader-${column}`).evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
   }
+  await expectCustomFooterAnchored(menu)
+  await menu.locator('.model-cascader-models').evaluate(element => { element.scrollTop = element.scrollHeight })
+  await expectCustomFooterAnchored(menu)
   await expect(modal).toHaveCSS('height', fixedHeight)
   await menu.locator('.model-cascader-search input').fill('no matching model')
   await expect(menu.locator('.model-cascader-empty')).toBeVisible()
@@ -96,7 +152,7 @@ for (const mobile of [false, true]) test(`chooses provider then model in a fixed
   expect(bounds!.y).toBeGreaterThanOrEqual(0)
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(mobile ? 320 : 1280)
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(mobile ? 568 : 900)
-  await page.screenshot({ path: `/tmp/studio-model-cascader-${mobile ? 'mobile' : 'desktop'}.png`, animations: 'disabled' })
+  await page.screenshot({ path: `/tmp/studio-model-cascader-${mobile ? 'mobile' : dark ? 'dark' : 'desktop'}.png`, animations: 'disabled' })
   await menu.getByRole('menuitemradio').filter({ hasText: 'Fast model' }).click()
   await expect(menu).toBeHidden()
   await expect(trigger).toContainText('Fast model')

@@ -469,7 +469,7 @@ const workflowRunBudgetValid = computed(() => isWorkflowRunBudgetValid(
   workflowRunBudgetCustomMinutes.value,
 ))
 
-const modelGroups = computed<AvailableModelGroup[]>(() => appStore.modelGroups)
+const modelGroups = computed<AvailableModelGroup[]>(() => appStore.modelGroups.filter(group => group.provider !== 'moa'))
 
 const defaultWorkflowProfile = computed(() =>
   profilesStore.activeProfileName || profilesStore.profiles[0]?.name || 'default',
@@ -2350,6 +2350,7 @@ async function applyWorkflow(
       ...node,
       data: withRuntimeNodeData({
         ...node.data,
+        ...(node.data.provider === 'moa' ? normalizeNodeModel(node.data) : {}),
         status: options.resetRuntime ? 'idle' : workflowNodeStatusFromRuntime(runtimeStatus, node.id),
         statusError: options.resetRuntime ? null : workflowNodeErrorFromRuntime(runtimeStatus, node.id),
         readonly: false,
