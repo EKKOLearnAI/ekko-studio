@@ -20,6 +20,7 @@ vi.mock('../../packages/server/src/modules/studio/infrastructure/database/index'
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({
+  getWebUiHome: () => state.appHome,
   config: {
     appHome: state.appHome,
   },
