@@ -66,6 +66,7 @@ interface MockHermesApiOptions {
   channelConfig?: Record<string, unknown>
   providerEditor?: Record<string, unknown>
   modelAliases?: Record<string, Record<string, string>>
+  customModels?: Record<string, string[]>
   modelGroups?: Array<{
     provider: string
     label: string
@@ -708,6 +709,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
           groups,
         })),
         model_aliases: options.modelAliases || {},
+        custom_models: options.customModels || {},
         model_visibility: {},
       }))
       return

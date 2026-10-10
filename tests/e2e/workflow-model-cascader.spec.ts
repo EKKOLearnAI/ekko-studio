@@ -19,10 +19,11 @@ function workflow(provider = 'test-provider', model = 'test-model') {
   }
 }
 
-test('workflow uses the shared dialog and saves aliases, protocol and custom model IDs', async ({ page }) => {
+test('workflow uses the shared dialog and saves aliases, protocol and saved custom model IDs', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const api = await mockHermesApi(page, {
     modelGroups, modelAliases: { 'other-provider': { 'other-model': 'Fast model' } },
+    customModels: { 'other-provider': ['manual-workflow-model'] },
     workflows: [workflow()], workflowRuns: [],
   })
   await page.goto('/#/hermes/workflow')
@@ -50,8 +51,8 @@ test('workflow uses the shared dialog and saves aliases, protocol and custom mod
   })
 
   await trigger.click()
-  await menu.locator('.model-cascader-custom input').fill('manual-workflow-model')
-  await menu.locator('.model-cascader-custom input').press('Enter')
+  await expect(menu.getByRole('textbox')).toHaveCount(1)
+  await menu.getByRole('menuitemradio').filter({ hasText: 'manual-workflow-model' }).click()
   await expect(dialog).toBeHidden()
   await expect(trigger).toContainText('manual-workflow-model')
   await page.locator('.header-actions').getByRole('button', { name: 'Save', exact: true }).click()

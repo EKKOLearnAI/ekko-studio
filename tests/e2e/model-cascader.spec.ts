@@ -14,28 +14,34 @@ const modelGroups = [TEST_MODEL_GROUP, {
 }))]
 const modelAliases = { 'other-provider': { 'other-model': 'Fast model' } }
 
-async function expectCustomFooterAnchored(menu: Locator) {
+async function expectUnifiedCascader(menu: Locator) {
+  await expect(menu.getByRole('textbox')).toHaveCount(1)
+  await expect(menu.locator('.model-cascader-custom')).toHaveCount(0)
   const layout = await menu.evaluate(element => {
-    const bounds = (selector: string) => element.querySelector(selector)!.getBoundingClientRect()
-    const pane = bounds('.model-cascader-model-pane')
-    const list = bounds('.model-cascader-models')
-    const footer = bounds('.model-cascader-custom')
-    const providers = bounds('.model-cascader-providers')
-    const input = bounds('.model-cascader-custom .n-input')
-    const confirm = bounds('.model-cascader-custom .n-button')
+    const providers = element.querySelector('.model-cascader-providers')!
+    const models = element.querySelector('.model-cascader-models')!
+    const border = getComputedStyle(element.querySelector('.model-cascader-lists')!)
+    const background = (node: Element | null): string => {
+      while (node) {
+        const color = getComputedStyle(node).backgroundColor
+        if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') return color
+        node = node.parentElement
+      }
+      return 'transparent'
+    }
     return {
-      leftOffset: footer.left - pane.left, rightOffset: pane.right - footer.right,
-      bottomOffset: pane.bottom - footer.bottom, listGap: footer.top - list.bottom,
-      providerBottomOffset: providers.bottom - pane.bottom,
-      inputFits: input.left >= footer.left && input.right <= footer.right,
-      confirmFits: confirm.left >= footer.left && confirm.right <= footer.right,
+      heightDifference: providers.getBoundingClientRect().height - models.getBoundingClientRect().height,
+      providerBackground: background(providers), modelBackground: background(models),
+      modalBackground: background(element.closest('.model-cascader-modal')),
+      borderWidth: border.borderTopWidth, borderStyle: border.borderTopStyle, radius: parseFloat(border.borderTopLeftRadius),
     }
   })
-  for (const offset of [layout.leftOffset, layout.rightOffset, layout.bottomOffset, layout.listGap, layout.providerBottomOffset]) {
-    expect(Math.abs(offset)).toBeLessThanOrEqual(1)
-  }
-  expect(layout.inputFits).toBe(true)
-  expect(layout.confirmFits).toBe(true)
+  expect(Math.abs(layout.heightDifference)).toBeLessThanOrEqual(1)
+  expect(layout.providerBackground).toBe(layout.modelBackground)
+  expect(layout.modelBackground).toBe(layout.modalBackground)
+  expect(layout.borderWidth).toBe('1px')
+  expect(layout.borderStyle).toBe('solid')
+  expect(layout.radius).toBeGreaterThan(0)
 }
 
 test('global model switching hides MoA while Hermes single chat retains it', async ({ page }) => {
@@ -130,9 +136,9 @@ for (const { mobile, dark } of [{ mobile: false, dark: false }, { mobile: true, 
   for (const column of ['providers', 'models']) {
     expect(await menu.locator(`.model-cascader-${column}`).evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
   }
-  await expectCustomFooterAnchored(menu)
+  await expectUnifiedCascader(menu)
   await menu.locator('.model-cascader-models').evaluate(element => { element.scrollTop = element.scrollHeight })
-  await expectCustomFooterAnchored(menu)
+  await expectUnifiedCascader(menu)
   await expect(modal).toHaveCSS('height', fixedHeight)
   await menu.locator('.model-cascader-search input').fill('no matching model')
   await expect(menu.locator('.model-cascader-empty')).toBeVisible()

@@ -509,13 +509,13 @@ test('new chat shares the session model picker and sends the chosen model and pr
   expect(api.unexpectedRequests).toEqual([])
 })
 
-for (const choice of ['standard', 'custom', 'moa'] as const) test(`Hermes draft uses the shared ${choice} model selection without changing the existing conversation`, async ({ page }) => {
+for (const choice of ['standard', 'custom', 'moa'] as const) test(`Hermes draft uses the shared ${choice === 'custom' ? 'saved custom' : choice} model selection without changing the existing conversation`, async ({ page }) => {
   const session = { id: 'existing-model-chat', title: 'Existing conversation', source: 'cli', profile: 'research', model: 'test-model', provider: 'test-provider', started_at: 100, last_active: 101, message_count: 0 }
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await page.addInitScript(id => {
     (window as any).__PW_CHAT_SOCKET_RESUMES__ = { [id]: { session_id: id, messages: [], isWorking: false, messageLoadedCount: 0, messageTotal: 0 } }
   }, session.id)
-  const api = await mockHermesApi(page, { sessions: [session], modelGroups: [
+  const api = await mockHermesApi(page, { sessions: [session], customModels: { 'test-provider': ['custom-model'] }, modelGroups: [
     { ...TEST_MODEL_GROUP, models: ['test-model', 'other-model'] }, { provider: 'moa', label: 'MoA', models: ['ensemble'] },
   ] })
   await mockChatSocket(page)
@@ -535,8 +535,8 @@ for (const choice of ['standard', 'custom', 'moa'] as const) test(`Hermes draft 
   const models = page.locator('.model-cascader:visible')
   await expect(models.locator('.model-cascader-provider').filter({ hasText: 'MoA combinations' })).toHaveCount(1)
   if (choice === 'custom') {
-    await models.locator('.model-cascader-custom input').fill('custom-model')
-    await models.locator('.model-cascader-custom input').press('Enter')
+    await expect(models.getByRole('textbox')).toHaveCount(1)
+    await models.getByRole('menuitemradio').filter({ hasText: 'custom-model' }).click()
   } else if (choice === 'moa') {
     await models.getByText('MoA combinations', { exact: true }).click()
     await models.locator('.model-cascader-item').filter({ hasText: 'ensemble' }).click()
