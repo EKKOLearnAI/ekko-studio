@@ -92,8 +92,8 @@ for (const agent of ['Codex', 'DeepSeek Harness']) test(`workflow ${agent} nodes
 
   await node.locator('.model-trigger').click()
   const modelDialog = page.getByRole('dialog')
-  await expect(modelDialog.getByText('Test Provider', { exact: true })).toBeVisible()
-  await expect(modelDialog.getByText('OpenAI Codex Subscription', { exact: true })).toHaveCount(0)
+  await expect(modelDialog.locator('.model-cascader-provider').filter({ hasText: 'Test Provider' })).toBeVisible()
+  await expect(modelDialog.locator('.model-cascader-provider').filter({ hasText: 'OpenAI Codex Subscription' })).toHaveCount(0)
   if (agent === 'DeepSeek Harness') {
     await page.keyboard.press('Escape')
     const preset = node.getByTestId('dsh-session-preset')

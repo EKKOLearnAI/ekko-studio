@@ -6,6 +6,15 @@ import {
 } from '../../packages/client/src/utils/codingAgentProviders'
 
 describe('coding agent provider visibility', () => {
+  it.each([
+    'ekko-agent', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor',
+    'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode',
+  ] as const)('keeps Hermes MoA combinations hidden from %s', agentId => {
+    expect(canScopedCodingAgentUseProvider(agentId, 'moa')).toBe(false)
+    expect(canScopedCodingAgentUseProvider(agentId, ' MoA ')).toBe(false)
+    expect(canScopedCodingAgentUseProvider(agentId, 'test-provider')).toBe(true)
+  })
+
   it.each(['nous', 'openai-codex', 'copilot', 'xai-oauth', 'qwen-oauth', 'claude-oauth', 'minimax-oauth'])(
     'exposes %s to scoped Ekko sessions',
     (provider) => {

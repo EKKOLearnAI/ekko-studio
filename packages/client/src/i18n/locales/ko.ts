@@ -1693,6 +1693,7 @@ export default {
 
   // 모델
   models: {
+    providerColumn: '제공업체',
     title: '모델',
     addProvider: 'Provider 추가',
     noProviderPromptTitle: '모델 Provider가 설정되지 않음',

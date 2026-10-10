@@ -39,8 +39,6 @@ import {
   NSelect,
   NTooltip,
   NPopconfirm,
-  NRadioButton,
-  NRadioGroup,
   useMessage,
   type DropdownOption,
 } from "naive-ui";
@@ -61,6 +59,7 @@ import OutlinePanel from "./OutlinePanel.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import SubagentStreamPanel from "./SubagentStreamPanel.vue";
 import { chatSessionAgentAvatar } from "@/utils/chat-agent-avatar";
+import { isHermesSession } from "@/utils/hermes/session-agent";
 import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./session-category-groups";
 import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } from "./session-category-menu";
 import { buildActiveSessionMenuOptions, buildSessionContextMenuOptions } from "./session-menu-options";
@@ -69,7 +68,7 @@ import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
 import { getStoredUserId, isStoredSuperAdmin } from "@/api/client";
 import { loadNewChatFormPreferences, saveNewChatFormPreferences } from "@/utils/new-chat-form-preferences";
 import { useDefaultWorkspace } from "@/composables/useDefaultWorkspace";
-import { useCollapsedProviderGroups } from "@/composables/useCollapsedProviderGroups";
+import ModelCascader from "@/components/hermes/models/ModelCascader.vue";
 import { canScopedCodingAgentUseProvider, usesServerManagedProviderAuth } from "@/utils/codingAgentProviders";
 import { OPEN_SUBAGENT_STREAM_EVENT, type OpenSubagentStreamDetail } from "@/utils/hermes/subagent-stream";
 import { desktopBridge, hasDesktopBrowserBridge } from "@/utils/desktop-bridge";
@@ -835,7 +834,7 @@ function closeNewChatPage() {
   if (showNewChatPage.value) persistNewChatForm();
   showNewChatPage.value = false;
   if (sessionModelIsDraft.value) {
-    showSessionModelModal.value = false;
+    showSessionModelPicker.value = false;
     showSessionModelModeModal.value = false;
     pendingSessionModelSwitch.value = null;
     sessionModelIsDraft.value = false;
@@ -856,7 +855,7 @@ function cancelNewChatPage() {
 }
 
 function handleNewChatEscape(event: KeyboardEvent) {
-  if (event.key !== "Escape" || !showNewChatPage.value || showSessionModelModal.value || showSessionModelModeModal.value || showWorkspaceModal.value || showNewChatSettings.value || showNewChatPresetMode.value) return;
+  if (event.key !== "Escape" || !showNewChatPage.value || showSessionModelPicker.value || showSessionModelModeModal.value || showWorkspaceModal.value || showNewChatSettings.value || showNewChatPresetMode.value) return;
   if (event.target instanceof Element && event.target.closest('.n-modal')) return;
   cancelNewChatPage();
 }
@@ -1127,7 +1126,7 @@ const newChatHasNoModels = computed(() => !isNewChatGlobalCodingAgent.value && !
     .some(group => group.models.some(model => !group.model_meta?.[model]?.disabled)
       || (appStore.customModels[group.provider] || []).length > 0));
 function openNewChatModelSettings() {
-  showSessionModelModal.value = false;
+  showSessionModelPicker.value = false;
   void router.push({ name: "hermes.models", query: { modelProfile: newChatProfile.value } });
 }
 
@@ -1962,7 +1961,7 @@ async function handleContextMenuSelect(key: string) {
     showWorkspaceModal.value = true;
     void initWorkspaceComposable();
   } else if (key === "model") {
-    await openSessionModelModal(contextSessionId.value);
+    await openSessionModelPicker(contextSessionId.value);
   } else if (key === "rename") {
     openRenameSession(contextSessionId.value);
   }
@@ -2121,20 +2120,13 @@ async function handleWorkspaceConfirm() {
   showWorkspaceModal.value = false;
 }
 
-const showSessionModelModal = ref(false);
+const showSessionModelPicker = ref(false);
 const showSessionModelModeModal = ref(false);
 const sessionModelSessionId = ref<string | null>(null);
 const sessionModelIsDraft = ref(false);
-const sessionModelSearch = ref("");
-const sessionModelKind = ref<"model" | "moa">("model");
-const {
-  isGroupCollapsed: isSessionModelGroupCollapsed,
-  toggleGroup: toggleSessionModelCollapsedGroup,
-} = useCollapsedProviderGroups();
+const sessionModelTrigger = ref<HTMLElement | null>(null);
 const sessionModelValue = ref("");
 const sessionModelProvider = ref("");
-const sessionModelCustomInput = ref("");
-const sessionModelCustomProvider = ref("");
 const sessionModelApiMode = ref<CodingAgentApiMode>("codex_responses");
 const pendingSessionModelSwitch = ref<{ model: string; provider: string } | null>(null);
 const sessionModelSwitching = ref(false);
@@ -2150,6 +2142,7 @@ const sessionModelSession = computed<Pick<Session, 'profile' | 'provider' | 'mod
     profile: newChatProfile.value,
     provider: newChatProvider.value,
     model: newChatModel.value,
+    agent: newChatAgent.value === 'claude-code' ? 'claude' : newChatAgent.value,
     source: isNewChatCodingAgent.value ? 'coding_agent' : 'cli',
     codingAgentId: isNewChatCodingAgent.value ? newChatAgent.value as ChatCodingAgentId : undefined,
     codingAgentMode: effectiveNewChatAgentMode.value,
@@ -2182,15 +2175,15 @@ const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>
         ? "ekko-agent"
         : undefined),
 );
-const isSessionModelCodingAgent = computed(() =>
-  sessionModelSession.value?.source === "coding_agent" || Boolean(sessionModelSession.value?.codingAgentId),
+const isSessionModelHermes = computed(() =>
+  isHermesSession(sessionModelSession.value),
 );
 
 const sessionModelAllGroups = computed(() =>
   sessionModelProfile.value
     ? getModelGroupsForProfile(sessionModelProfile.value).filter((group) => (
         group.provider === "moa"
-          ? !isSessionModelCodingAgent.value
+          ? isSessionModelHermes.value
           : (!isSessionModelScopedCodingAgent.value ||
             !sessionModelCodingAgentId.value ||
             canScopedCodingAgentUseProvider(sessionModelCodingAgentId.value, group.provider))
@@ -2207,46 +2200,11 @@ const sessionMoaGroup = computed(() =>
 );
 
 const sessionCanUseMoa = computed(() =>
-  !isSessionModelCodingAgent.value && Boolean(sessionMoaGroup.value?.models.length),
+  isSessionModelHermes.value && Boolean(sessionMoaGroup.value?.models.length),
 );
 
-const sessionModelProviderOptions = computed(() =>
-  sessionModelBaseGroups.value.map((group) => ({ label: group.label, value: group.provider })),
-);
-
-const sessionModelGroupsWithCustom = computed(() =>
-  sessionModelBaseGroups.value.map((group) => ({
-    ...group,
-    models: [
-      ...group.models,
-      ...(appStore.customModels[group.provider] || []).filter(
-        (model) => !group.models.includes(model),
-      ),
-    ],
-  })),
-);
-
-const filteredSessionModelGroups = computed(() => {
-  const query = sessionModelSearch.value.trim().toLowerCase();
-  if (!query) return sessionModelGroupsWithCustom.value;
-  return sessionModelGroupsWithCustom.value
-    .map((group) => ({
-      ...group,
-      models: group.models.filter((model) => {
-        const displayName = appStore.displayModelName(model, group.provider);
-        return model.toLowerCase().includes(query) || displayName.toLowerCase().includes(query);
-      }),
-    }))
-    .filter((group) => group.models.length > 0 || group.label.toLowerCase().includes(query));
-});
-
-const filteredSessionMoaModels = computed(() => {
-  const models = sessionMoaGroup.value?.models || [];
-  const query = sessionModelSearch.value.trim().toLowerCase();
-  return query ? models.filter((model) => model.toLowerCase().includes(query)) : models;
-});
-
-async function openSessionModelModal(sessionId: string | null) {
+async function openSessionModelPicker(sessionId: string | null, event?: MouseEvent) {
+  sessionModelTrigger.value = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   const isDraft = sessionId === null;
   const draftSequence = newChatOptionsLoadSequence;
   if (isDraft && (!showNewChatPage.value || isNewChatGlobalCodingAgent.value || newChatLoading.value)) return;
@@ -2276,52 +2234,25 @@ async function openSessionModelModal(sessionId: string | null) {
       : fallbackGroup?.models[0] || "",
   };
   const usesMoa = session?.provider === "moa" && sessionCanUseMoa.value;
-  sessionModelKind.value = usesMoa ? "moa" : "model";
   sessionModelValue.value = usesMoa
     ? session?.model || ""
     : providerGroup ? session?.model || defaults.model || "" : defaults.model || "";
   sessionModelProvider.value = usesMoa
     ? "moa"
     : providerGroup ? session?.provider || "" : defaults.provider || "";
-  sessionModelCustomProvider.value = usesMoa ? defaults.provider : sessionModelProvider.value;
-  sessionModelSearch.value = "";
-  sessionModelCustomInput.value = "";
   pendingSessionModelSwitch.value = null;
   showSessionModelModeModal.value = false;
-  showSessionModelModal.value = true;
+  showSessionModelPicker.value = true;
 }
 
-function handleSessionModelKindChange(value: "model" | "moa") {
-  if (sessionModelSwitching.value || (value === "moa" && !sessionCanUseMoa.value)) return;
-  sessionModelKind.value = value;
-  sessionModelSearch.value = "";
-}
-
-function handleHeaderModelClick() {
+function handleHeaderModelClick(event: MouseEvent) {
   if (activeSessionUsesGlobalCodingAgentConfig.value) return;
   const sessionId = chatStore.activeSession?.id;
   if (!sessionId) {
     openNewChatPage();
     return;
   }
-  openSessionModelModal(sessionId);
-}
-
-function toggleSessionModelGroup(provider: string) {
-  if (sessionModelSwitching.value) return;
-  toggleSessionModelCollapsedGroup(provider);
-}
-
-function isCustomSessionModel(model: string, provider: string) {
-  return (appStore.customModels[provider] || []).includes(model);
-}
-
-function sessionModelDisplayName(model: string, provider: string) {
-  return appStore.displayModelName(model, provider);
-}
-
-function sessionModelAlias(model: string, provider: string) {
-  return appStore.getModelAlias(model, provider);
+  openSessionModelPicker(sessionId, event);
 }
 
 function defaultSessionModelApiMode(provider: string): CodingAgentApiMode {
@@ -2349,7 +2280,7 @@ async function applySessionModelSwitch(model: string, provider: string, apiMode?
     if (apiMode) newChatApiMode.value = apiMode;
     pendingSessionModelSwitch.value = null;
     showSessionModelModeModal.value = false;
-    showSessionModelModal.value = false;
+    showSessionModelPicker.value = false;
     return;
   }
   if (!sessionModelSessionId.value) return;
@@ -2362,7 +2293,7 @@ async function applySessionModelSwitch(model: string, provider: string, apiMode?
       if (apiMode) sessionModelApiMode.value = apiMode;
       pendingSessionModelSwitch.value = null;
       showSessionModelModeModal.value = false;
-      showSessionModelModal.value = false;
+      showSessionModelPicker.value = false;
       message.success(t("chat.modelSet"));
     } else {
       message.error(t("chat.modelSetFailed"));
@@ -2403,11 +2334,9 @@ function cancelSessionModelMode() {
   showSessionModelModeModal.value = false;
 }
 
-async function handleSessionModelCustomSubmit() {
-  const model = sessionModelCustomInput.value.trim();
-  const provider = sessionModelCustomProvider.value;
-  if (!model || !provider || sessionModelSwitching.value) return;
-  await selectSessionModel(model, provider);
+function handleSessionModelSelect(selection: { model: string; provider: string }) {
+  if (selection.provider === 'moa') void selectSessionMoaPreset(selection.model);
+  else void selectSessionModel(selection.model, selection.provider);
 }
 </script>
 
@@ -2909,161 +2838,22 @@ async function handleSessionModelCustomSubmit() {
       </div>
     </NModal>
 
-    <NModal
-      v-model:show="showSessionModelModal"
-      preset="card"
+    <ModelCascader
+      v-model:show="showSessionModelPicker"
+      :groups="sessionModelAllGroups"
+      :allow-moa="isSessionModelHermes"
+      :provider="sessionModelProvider"
+      :model="sessionModelValue"
+      :trigger-element="sessionModelTrigger"
       :title="t('chat.setModelTitle')"
-      :style="{ width: 'min(480px, calc(100vw - 32px))' }"
-      :mask-closable="!sessionModelSwitching"
-      :close-on-esc="!sessionModelSwitching"
-      :closable="!sessionModelSwitching"
+      :loading="sessionModelSwitching"
+      :close-on-select="false"
+      @select="handleSessionModelSelect"
     >
-      <NSpin :show="sessionModelSwitching" class="session-model-switch-spin">
-        <template #description>{{ t('chat.modelSwitching') }}</template>
-        <div v-if="sessionCanUseMoa" class="session-model-kind-field">
-          <span class="session-model-kind-label">{{ t('chat.modelType') }}</span>
-          <NRadioGroup
-            :value="sessionModelKind"
-            name="session-model-kind"
-            @update:value="handleSessionModelKindChange"
-          >
-            <NRadioButton value="model">{{ t('chat.standardModels') }}</NRadioButton>
-            <NRadioButton value="moa">{{ t('chat.moaPresets') }}</NRadioButton>
-          </NRadioGroup>
-        </div>
-        <NInput
-          v-model:value="sessionModelSearch"
-          :placeholder="t('models.searchPlaceholder')"
-          :disabled="sessionModelSwitching"
-          clearable
-          size="small"
-          class="session-model-search"
-        />
-        <div v-if="sessionModelKind === 'model'" class="session-model-list" :aria-busy="sessionModelSwitching">
-        <div v-for="group in filteredSessionModelGroups" :key="group.provider" class="session-model-group">
-          <div class="session-model-group-header" @click="toggleSessionModelGroup(group.provider)">
-            <svg
-              class="session-model-group-arrow"
-              :class="{ collapsed: isSessionModelGroupCollapsed(group.provider) }"
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-            <span class="session-model-group-label">{{ group.label }}</span>
-            <span class="session-model-group-count">{{ group.models.length }}</span>
-          </div>
-          <div v-show="!isSessionModelGroupCollapsed(group.provider)" class="session-model-group-items">
-            <div
-              v-for="model in group.models"
-              :key="model"
-              class="session-model-item"
-              :class="{
-                active: model === sessionModelValue && group.provider === sessionModelProvider,
-                disabled: !!group.model_meta?.[model]?.disabled,
-                switching: sessionModelSwitching,
-              }"
-              :aria-disabled="sessionModelSwitching || !!group.model_meta?.[model]?.disabled"
-              :title="group.model_meta?.[model]?.disabled ? t('models.disabledTooltip') : ''"
-              @click="selectSessionModel(model, group.provider)"
-            >
-              <span class="session-model-item-label">
-                <span class="session-model-item-name">{{ sessionModelDisplayName(model, group.provider) }}</span>
-                <span v-if="sessionModelAlias(model, group.provider)" class="session-model-item-id">
-                  {{ t('models.aliasCanonical', { model }) }}
-                </span>
-              </span>
-              <span v-if="group.model_meta?.[model]?.preview" class="session-model-badge-preview">{{ t('models.previewBadge') }}</span>
-              <span v-if="group.model_meta?.[model]?.disabled" class="session-model-badge-disabled">{{ t('models.disabledBadge') }}</span>
-              <span v-if="isCustomSessionModel(model, group.provider)" class="session-model-badge-custom">{{ t('models.customBadge') }}</span>
-              <svg
-                v-if="model === sessionModelValue && group.provider === sessionModelProvider"
-                class="session-model-check"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-          </div>
-        </div>
-        <div v-if="!filteredSessionModelGroups.some(group => group.models.length > 0)" class="session-model-empty">
-          {{ sessionModelSearch ? t('models.noResults') : t('models.noModels') }}
-          <NButton v-if="sessionModelIsDraft && !sessionModelSearch" size="small" quaternary @click="openNewChatModelSettings">{{ t('models.noProviderPromptAction') }}</NButton>
-        </div>
-        </div>
-        <div v-else class="session-model-list" :aria-busy="sessionModelSwitching">
-          <div class="session-model-group-items session-moa-items">
-            <div
-              v-for="preset in filteredSessionMoaModels"
-              :key="preset"
-              class="session-model-item"
-              :class="{
-                active: preset === sessionModelValue && sessionModelProvider === 'moa',
-                switching: sessionModelSwitching,
-              }"
-              :aria-disabled="sessionModelSwitching"
-              @click="selectSessionMoaPreset(preset)"
-            >
-              <span class="session-model-item-label">
-                <span class="session-model-item-name">{{ preset }}</span>
-              </span>
-              <svg
-                v-if="preset === sessionModelValue && sessionModelProvider === 'moa'"
-                class="session-model-check"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-          </div>
-          <div v-if="filteredSessionMoaModels.length === 0" class="session-model-empty">
-            {{ t('chat.noMoaPresets') }}
-          </div>
-        </div>
-        <div v-if="sessionModelKind === 'model' && sessionModelProviderOptions.length" class="session-model-custom">
-          <div class="session-model-custom-row">
-            <NSelect
-              v-model:value="sessionModelCustomProvider"
-              :options="sessionModelProviderOptions"
-              :disabled="sessionModelSwitching"
-              size="small"
-              class="session-model-custom-provider"
-            />
-            <NInput
-              v-model:value="sessionModelCustomInput"
-              :placeholder="t('models.customModelPlaceholder')"
-              :disabled="sessionModelSwitching"
-              size="small"
-              class="session-model-custom-input"
-              @keydown.enter.stop.prevent="handleSessionModelCustomSubmit"
-            />
-          </div>
-          <div class="session-model-custom-hint">
-            {{ t('models.customModelHint') }}
-          </div>
-        </div>
-      </NSpin>
-    </NModal>
+      <template #empty>
+        <NButton v-if="sessionModelIsDraft" size="small" quaternary @click="openNewChatModelSettings">{{ t('models.noProviderPromptAction') }}</NButton>
+      </template>
+    </ModelCascader>
 
     <NModal
       v-model:show="showSessionModelModeModal"
@@ -3263,7 +3053,8 @@ async function handleSessionModelCustomSubmit() {
                 <ChatInput :key="newChatComposerRevision" ref="chatInputRef" draft :send-disabled="!canConfirmNewChat"
                   :draft-config="newChatDraftConfig" v-model:reasoning-effort="newChatReasoningEffort"
                   :submit="submitNewChat" :model-label="newChatModelLabel" :model-disabled="isNewChatGlobalCodingAgent || newChatLoading || newChatModelsLoading"
-                  :persist-draft="false" :initial-text="initialComposerText" @model-click="openSessionModelModal(null)" />
+                  :model-expanded="showSessionModelPicker && sessionModelIsDraft"
+                  :persist-draft="false" :initial-text="initialComposerText" @model-click="openSessionModelPicker(null, $event)" />
                 <button v-if="newChatHasNoModels" type="button" class="new-chat-config-hint" @click="openNewChatModelSettings">
                   {{ t('models.noModels') }} · {{ t('models.noProviderPromptAction') }}
                 </button>
@@ -3282,6 +3073,7 @@ async function handleSessionModelCustomSubmit() {
               ref="chatInputRef"
               :model-label="activeSessionModelLabel"
               :model-disabled="activeSessionUsesGlobalCodingAgentConfig"
+              :model-expanded="showSessionModelPicker && !sessionModelIsDraft && sessionModelSessionId === chatStore.activeSessionId"
               :initial-text="initialComposerText"
               :persist-draft="composerPersistDraft"
               @model-click="handleHeaderModelClick"
@@ -3432,211 +3224,6 @@ async function handleSessionModelCustomSubmit() {
   max-width: 100%;
   overflow: hidden;
   background-color: $bg-card;
-}
-
-.session-model-search {
-  margin-bottom: 12px;
-}
-
-.session-model-kind-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-
-.session-model-kind-label {
-  font-size: 12px;
-  color: $text-muted;
-  font-weight: 500;
-}
-
-.session-model-switch-spin {
-  min-height: 180px;
-}
-
-.session-model-list {
-  max-height: 50vh;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-.session-model-group {
-  margin-bottom: 4px;
-}
-
-.session-model-group-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  color: $text-secondary;
-  cursor: pointer;
-  border-radius: $radius-sm;
-  user-select: none;
-  transition: background-color $transition-fast;
-
-  &:hover {
-    background-color: $bg-secondary;
-  }
-}
-
-.session-model-group-arrow {
-  flex-shrink: 0;
-  transition: transform $transition-fast;
-
-  &.collapsed {
-    transform: rotate(-90deg);
-  }
-}
-
-.session-model-group-label {
-  flex: 1;
-}
-
-.session-model-group-count {
-  font-size: 11px;
-  color: $text-muted;
-  font-weight: 400;
-}
-
-.session-model-group-items {
-  padding-inline-start: 8px;
-}
-
-.session-moa-items {
-  padding-inline-start: 0;
-}
-
-.session-model-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  font-size: 13px;
-  color: $text-secondary;
-  border-radius: $radius-sm;
-  cursor: pointer;
-  transition: all $transition-fast;
-
-  &:hover {
-    background-color: rgba(var(--accent-primary-rgb), 0.06);
-    color: $text-primary;
-  }
-
-  &.active {
-    color: $accent-primary;
-    font-weight: 500;
-  }
-
-  &.disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-
-    &:hover {
-      background-color: transparent;
-      color: $text-secondary;
-    }
-  }
-
-  &.switching {
-    cursor: wait;
-  }
-}
-
-.session-model-item-label {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.session-model-item-name,
-.session-model-item-id {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: $font-code;
-}
-
-.session-model-item-name {
-  font-size: 12px;
-}
-
-.session-model-item-id {
-  color: $text-muted;
-  font-size: 10px;
-  font-weight: 400;
-}
-
-.session-model-check {
-  flex-shrink: 0;
-  color: $accent-primary;
-}
-
-.session-model-badge-preview,
-.session-model-badge-custom,
-.session-model-badge-disabled {
-  flex-shrink: 0;
-  font-size: 9px;
-  font-weight: 600;
-  padding: 1px 5px;
-  border-radius: 3px;
-  margin-inline-end: 4px;
-  letter-spacing: 0.03em;
-}
-
-.session-model-badge-preview {
-  color: #fff;
-  background: #d97706;
-}
-
-.session-model-badge-custom {
-  color: #fff;
-  background: $accent-primary;
-}
-
-.session-model-badge-disabled {
-  color: $text-muted;
-  background: transparent;
-  border: 1px solid $border-color;
-  padding: 0 5px;
-}
-
-.session-model-empty {
-  padding: 24px 0;
-  text-align: center;
-  font-size: 13px;
-  color: $text-muted;
-}
-
-.session-model-custom {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid $border-color;
-}
-
-.session-model-custom-row {
-  display: flex;
-  gap: 8px;
-}
-
-.session-model-custom-provider {
-  width: 160px;
-  flex-shrink: 0;
-}
-
-.session-model-custom-input {
-  flex: 1;
-}
-
-.session-model-custom-hint {
-  margin-top: 6px;
-  font-size: 11px;
-  color: $text-muted;
 }
 
 .session-list {

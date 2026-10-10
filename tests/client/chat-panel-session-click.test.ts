@@ -51,26 +51,18 @@ describe('ChatPanel session clicks', () => {
     expect(source).toContain('const sessionModelSwitching = ref(false)')
     expect(source).toContain('sessionModelSwitching.value = true')
     expect(source).toContain('sessionModelSwitching.value = false')
-    expect(source).toContain(':show="sessionModelSwitching"')
-    expect(source).toContain("t('chat.modelSwitching')")
+    expect(readFileSync('packages/client/src/components/hermes/models/ModelCascader.vue', 'utf8')).toContain("t('chat.modelSwitching')")
     expect(source).toContain(':loading="sessionModelSwitching"')
     expect(source).not.toContain('header-model-button--readonly')
     expect(source).not.toContain('if (isActiveSessionCodingAgent.value) return')
   })
 
-  it('keeps the custom session model provider below the scrollable model lists', () => {
+  it('uses the shared model dialog while preserving the session Profile and composer focus', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
-    const modalStart = source.indexOf('v-model:show="showSessionModelModal"')
-    const modalEnd = source.indexOf('</NModal>', modalStart)
-    const modal = source.slice(modalStart, modalEnd)
-    const standardList = modal.indexOf('<div v-if="sessionModelKind === \'model\'" class="session-model-list"')
-    const moaList = modal.indexOf('<div v-else class="session-model-list"', standardList)
-    const customFooter = modal.indexOf('class="session-model-custom"', moaList)
-
-    expect(standardList).toBeGreaterThanOrEqual(0)
-    expect(moaList).toBeGreaterThan(standardList)
-    expect(customFooter).toBeGreaterThan(moaList)
-    expect(modal.slice(standardList, moaList)).not.toContain('session-model-custom')
+    expect(source).toContain(':groups="sessionModelAllGroups"')
+    expect(source).toContain(':trigger-element="sessionModelTrigger"')
+    expect(source).toContain('session?.profile || null')
+    expect(source).toContain('@model-click="openSessionModelPicker(null, $event)"')
   })
 
   it('uses codingAgentId to filter scoped agent models and requests an API mode for all scoped agents', () => {
@@ -132,11 +124,8 @@ describe('ChatPanel session clicks', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
 
     expect(source).toContain('if (group.provider === "moa") return newChatAgent.value === "hermes"')
-    expect(source).toContain('group.provider === "moa"\n          ? !isSessionModelCodingAgent.value')
-    expect(source).toContain('name="session-model-kind"')
-    expect(source).toContain("{{ t('chat.modelType') }}")
-    expect(source).toContain('<NRadioButton value="model">{{ t(\'chat.standardModels\') }}</NRadioButton>')
-    expect(source).toContain('<NRadioButton value="moa">{{ t(\'chat.moaPresets\') }}</NRadioButton>')
+    expect(source).toContain('group.provider === "moa"\n          ? isSessionModelHermes.value')
+    expect(source).toContain("selection.provider === 'moa'")
     expect(source).toContain('await applySessionModelSwitch(preset, "moa")')
   })
 })
