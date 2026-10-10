@@ -143,3 +143,87 @@ describe('new chat Agent card dragging', () => {
     expect(selectAgent).toHaveBeenCalledWith('hermes')
   })
 })
+
+describe('new chat Agent card wheel scrolling', () => {
+  let wrapper: VueWrapper
+  let viewport: HTMLElement
+  let selectAgent: ReturnType<typeof vi.fn>
+
+  function wheel(init: WheelEventInit) {
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init })
+    viewport.dispatchEvent(event)
+    return event
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    selectAgent = vi.fn()
+    wrapper = mount(NewChatAgentCards, {
+      props: { value: 'ekko-agent', options: AGENT_OPTIONS.slice(0, 4), 'onUpdate:value': selectAgent },
+      attachTo: document.body,
+    })
+    viewport = wrapper.get('.agent-card-viewport').element as HTMLElement
+    Object.defineProperties(viewport, {
+      clientWidth: { value: 300 }, clientHeight: { value: 250 }, scrollWidth: { value: 642 },
+    })
+    wrapper.findAll('.agent-card-slot').forEach((slot, index) => Object.defineProperties(slot.element, {
+      offsetLeft: { value: 100 + index * 114 }, offsetWidth: { value: 100 },
+    }))
+    viewport.scrollTo = vi.fn((options: ScrollToOptions) => { viewport.scrollLeft = options.left! }) as typeof viewport.scrollTo
+    await nextTick()
+    vi.advanceTimersByTime(51)
+    viewport.scrollLeft = 114
+  })
+
+  afterEach(() => {
+    wrapper.unmount()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
+  it.each([
+    { deltaY: 80, expected: 194 },
+    { deltaY: -80, expected: 34 },
+    { deltaX: 60, deltaY: 5, expected: 174 },
+    { deltaX: 5, deltaY: 60, expected: 174 },
+    { deltaY: 2, deltaMode: WheelEvent.DOM_DELTA_LINE, expected: 146 },
+    { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_PAGE, expected: 342 },
+  ])('scrolls horizontally with $deltaMode wheel units and deltas ($deltaX, $deltaY)', ({ expected, ...init }) => {
+    expect(wheel(init).defaultPrevented).toBe(true)
+    expect(viewport.scrollLeft).toBe(expected)
+  })
+
+  it('selects the nearest Agent after interrupting a card centering animation', async () => {
+    await wrapper.findAll('.agent-card')[2].trigger('click')
+    wheel({ deltaY: -114 })
+    await wrapper.get('.agent-card-viewport').trigger('scroll')
+    expect(wrapper.findAll('.agent-card')[1].classes()).toContain('active')
+    expect(selectAgent).toHaveBeenLastCalledWith('hermes')
+  })
+
+  it('preserves zoom gestures and lets page scrolling continue at either edge', () => {
+    expect(wheel({ deltaY: 60, ctrlKey: true }).defaultPrevented).toBe(false)
+    expect(viewport.scrollLeft).toBe(114)
+    viewport.scrollLeft = 0
+    expect(wheel({ deltaY: -60 }).defaultPrevented).toBe(false)
+    expect(viewport.scrollLeft).toBe(0)
+    viewport.scrollLeft = 342
+    expect(wheel({ deltaY: 60 }).defaultPrevented).toBe(false)
+    expect(viewport.scrollLeft).toBe(342)
+  })
+
+  it('leaves empty wheel events, disabled cards and single-option rows alone', async () => {
+    expect(wheel({}).defaultPrevented).toBe(false)
+    await wrapper.setProps({ disabled: true })
+    expect(wheel({ deltaY: 60 }).defaultPrevented).toBe(false)
+    expect(viewport.scrollLeft).toBe(114)
+    await wrapper.setProps({ disabled: false, options: AGENT_OPTIONS.slice(0, 1) })
+    const left = viewport.scrollLeft
+    expect(wheel({ deltaY: 60 }).defaultPrevented).toBe(false)
+    expect(viewport.scrollLeft).toBe(left)
+  })
+})

@@ -290,9 +290,20 @@ function finishScroll() {
   onScroll()
 }
 
-function onWheel() {
+function onWheel(event: WheelEvent) {
+  const el = viewport.value
+  // Ctrl+wheel belongs to browser zoom, including trackpad pinch gestures.
+  if (!el || props.disabled || props.options.length < 2 || event.ctrlKey) return
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? el.clientWidth : 1
+  const left = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, el.scrollLeft + delta * unit))
+  // Let the page scroll when a finite row has reached its edge.
+  if (left === el.scrollLeft) return
+  event.preventDefault()
   clearTimeout(selectionTimer)
   movingTo = null
+  el.scrollTo({ left, behavior: 'instant' })
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -347,7 +358,7 @@ onUnmounted(() => {
 
 <template>
   <div class="agent-cards" :aria-label="t('chat.agent')" :aria-busy="loading">
-    <div ref="viewport" class="agent-card-viewport" @scroll.passive="onScroll" @scrollend="finishScroll" @wheel.passive="onWheel" @keydown="onKeydown"
+    <div ref="viewport" class="agent-card-viewport" @scroll.passive="onScroll" @scrollend="finishScroll" @wheel="onWheel" @keydown="onKeydown"
       @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp" @lostpointercapture="onPointerUp">
       <div class="agent-card-track">
         <div v-for="(option, position) in cards" :key="`${option.value}-${position}`" class="agent-card-slot">
@@ -379,19 +390,21 @@ onUnmounted(() => {
     <span ref="effects" class="agent-card-effects" aria-hidden="true">
       <i v-for="ember in emberSlots" :key="`${ember.edge}-${ember.slot}`" class="agent-card-ember" :data-edge="ember.edge"></i>
     </span>
-    <span class="agent-card-side-fade" aria-hidden="true"></span><span class="agent-card-side-fade right" aria-hidden="true"></span>
   </div>
 </template>
 
 <style scoped lang="scss">
 .agent-cards {
   --card-width: clamp(64px, calc((100cqh - 84px) / 1.4), 176px); --card-gap: 14px;
+  --edge-fade-width: 70px;
   --logo-size: calc(var(--card-width) * .47); --logo-gap: clamp(6px, calc(var(--card-width) * .1), 18px);
   position: relative; container-type: size; min-width: 0; width: 100%;
 }
 .agent-card-viewport {
   position: relative; height: 100%; display: flex; align-items: center;
   overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain;
+  // Fade the cards themselves so every theme background remains visible.
+  mask-image: linear-gradient(90deg, transparent, #000 var(--edge-fade-width), #000 calc(100% - var(--edge-fade-width)), transparent);
   &::-webkit-scrollbar { display: none; }
 }
 .agent-card-viewport--rebasing .agent-card,
@@ -509,15 +522,10 @@ onUnmounted(() => {
   background: radial-gradient(ellipse at var(--mx) var(--my), #ffffff75, transparent 60%);
   opacity: var(--sheen); mix-blend-mode: screen; transition: opacity .2s;
 }
-.agent-card-side-fade {
-  position: absolute; inset: 0 auto 0 0; width: 70px; z-index: 10; pointer-events: none;
-  background: linear-gradient(90deg, var(--bg-main-surface), transparent);
-  &.right { left: auto; right: 0; transform: rotate(180deg); }
-}
 .dark .agent-card { opacity: 1; }
 .dark .agent-card.active { box-shadow: 0 22px 33px -17px #0009, 0 0 0 1px #fff0b27a, 0 0 14px 2px #efbd4f60, 0 0 32px 5px #efc96538; }
 @media (max-width: 768px) {
-  .agent-cards { container-type: inline-size; --card-width: clamp(82px, calc((100cqw - 24px) / 4), 134px); --card-gap: 6px; --logo-size: calc(var(--card-width) * .62); --logo-gap: clamp(6px, 2vw, 12px); }
+  .agent-cards { container-type: inline-size; --card-width: clamp(82px, calc((100cqw - 24px) / 4), 134px); --card-gap: 6px; --logo-size: calc(var(--card-width) * .62); --logo-gap: clamp(6px, 2vw, 12px); --edge-fade-width: 6px; }
   .agent-card-viewport { height: auto; }
   .agent-card-track { padding-top: 50px; padding-bottom: 26px; }
   .agent-card { border-radius: 9px; padding: 1.5px; opacity: .78; }
@@ -529,10 +537,9 @@ onUnmounted(() => {
   .agent-card-halo.second { inset: -3px; border-radius: 12px; filter: blur(8px); }
   .agent-card-stone { border-radius: 26%; box-shadow: 3px 6px 10px #9b895522, inset 0 1px 2px #fff; img { width: calc(var(--card-width) * .4); height: calc(var(--card-width) * .4); } }
   .agent-card-name, .agent-card-name.long { font-size: clamp(9px, 2.55vw, 12px); letter-spacing: -.15px; line-height: 1.3; }
-  .agent-card-side-fade { width: 6px; }
 }
 @media (max-width: 480px) {
-  .agent-cards { --card-width: clamp(144px, 44cqw, 190px); --card-gap: 12px; --logo-gap: 14px; }
+  .agent-cards { --card-width: clamp(144px, 44cqw, 190px); --card-gap: 12px; --logo-gap: 14px; --edge-fade-width: 16px; }
   .agent-card { border-radius: 14px; padding: 2px; }
   .agent-card-surface { border-radius: 12px; padding: 12px 8px; &::after { inset: 5px; border-radius: 9px; } }
   .agent-card-rim { padding: 2px; }
@@ -542,7 +549,6 @@ onUnmounted(() => {
     font-size: 16px; line-height: 1.25; white-space: normal; text-overflow: clip; overflow-wrap: anywhere;
     &.long { font-size: 13px; }
   }
-  .agent-card-side-fade { width: 16px; }
 }
 @media (max-width: 480px) and (max-height: 640px) {
   .agent-cards { --card-width: clamp(112px, min(44cqw, calc((100svh - 370px) / 1.4)), 190px); --logo-gap: 10px; }
