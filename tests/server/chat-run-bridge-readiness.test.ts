@@ -1084,17 +1084,24 @@ describe('ChatRunSocket MCP task plan lifecycle', () => {
     getSessionMock.mockImplementation((id?: string) => id ? {
       id, profile: 'default', source, agent: 'ekko-agent', provider: 'openai', model: 'gpt-test',
     } : undefined)
-    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
-    const { io, socket, handlers } = makeServerHarness()
-    const server = new ChatRunSocket(io as any)
-    ;(server as any).onConnection(socket)
-    handleEkkoAgentRunMock.mockClear()
-    await handlers.get('run')?.({
-      session_id: 'session-1', source: 'coding_agent', coding_agent_id: 'ekko-agent', input: '/context',
-    })
-    expect(handleEkkoAgentRunMock).toHaveBeenCalledTimes(1)
-    expect((handleEkkoAgentRunMock.mock.calls as any)[0][2]).toMatchObject({ input: '/context', source, coding_agent_id: 'ekko-agent' })
-    expect(socket.emit.mock.calls.some(([event]: any[]) => event === 'session.command')).toBe(false)
+    const { isSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
+    // Hermes recognizes /context too; Ekko tasks must not hit its early return.
+    vi.mocked(isSessionCommand).mockReturnValue(true)
+    try {
+      const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+      const { io, socket, handlers } = makeServerHarness()
+      const server = new ChatRunSocket(io as any)
+      ;(server as any).onConnection(socket)
+      handleEkkoAgentRunMock.mockClear()
+      await handlers.get('run')?.({
+        session_id: 'session-1', source: 'coding_agent', coding_agent_id: 'ekko-agent', input: '/context',
+      })
+      expect(handleEkkoAgentRunMock).toHaveBeenCalledTimes(1)
+      expect((handleEkkoAgentRunMock.mock.calls as any)[0][2]).toMatchObject({ input: '/context', source, coding_agent_id: 'ekko-agent' })
+      expect(socket.emit.mock.calls.some(([event]: any[]) => event === 'session.command')).toBe(false)
+    } finally {
+      vi.mocked(isSessionCommand).mockReturnValue(false)
+    }
   })
 
   it.each(['coding_agent', 'workflow', 'group_chat'])('does not inject shared planning into Ekko on %s', async source => {
@@ -1274,7 +1281,7 @@ describe('session upload provenance at the socket boundary', () => {
     const input = [{ type, path: '/uploads/attachment.txt', name: 'attachment.txt', text: 'hello' }]
     await handlers.get('run')!({ session_id: 'new-local-session', profile: 'default', input })
     expect(socket.emit).not.toHaveBeenCalledWith('run.failed', expect.anything())
-    expect(run).toHaveBeenCalledWith(socket, expect.objectContaining({ session_id: 'new-local-session', input }), 'default', false, undefined, undefined)
+    expect(run).toHaveBeenCalledWith(socket, expect.objectContaining({ session_id: 'new-local-session', input }), 'default', false, undefined, undefined, expect.any(String))
     expect(recordSessionUploadAttachmentsMock).toHaveBeenCalledWith('new-local-session', 'default', input, { allowPendingSession: true })
   })
 
