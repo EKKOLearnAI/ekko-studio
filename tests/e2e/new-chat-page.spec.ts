@@ -3,6 +3,37 @@ import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY, TEST_MODE
 import catalog from '../../config/agents.json'
 import { expectNewChatEffectsMoving, selectNewChatAgent } from './new-chat-helpers'
 
+for (const reducedMotion of ['no-preference', 'reduce'] as const) test(`Agent card interiors keep moving with ${reducedMotion} system motion preference`, async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion })
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await mockChatSocket(page)
+  await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+    revision: 1, updatedAt: new Date().toISOString(), agents: catalog.agents.map(agent => ({ id: agent.id, installed: true, source: 'user-cli' })),
+  } }))
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  const active = page.locator('.agent-card.active')
+  await expect(active).toHaveAttribute('data-agent', 'ekko-agent')
+  await expect(page.locator('.page-loading-overlay:visible')).toHaveCount(0)
+
+  const layers = active.locator('.agent-card-foil, .agent-card-foil-beam, .agent-card-sweep')
+  const expectInteriorMoving = async () => {
+    await expect(layers).toHaveCount(4)
+    await expect.poll(() => layers.first().evaluate(el => el.style.transform)).not.toBe('')
+    const before = await layers.evaluateAll(elements => elements.map(el => getComputedStyle(el).transform))
+    await expect.poll(() => layers.evaluateAll((elements, before) => elements.every((el, index) =>
+      getComputedStyle(el).transform !== before[index]), before)).toBe(true)
+  }
+  await expectInteriorMoving()
+  await selectNewChatAgent(page, 'Codex')
+  await expectInteriorMoving()
+  // Windows can update this media query while Studio is already running.
+  await page.emulateMedia({ reducedMotion: reducedMotion === 'reduce' ? 'no-preference' : 'reduce' })
+  await expectInteriorMoving()
+})
+
 for (const mobile of [false, true]) test(`Agent loop preserves card scale when clicking Ekko and Zcode (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
   await page.setViewportSize(mobile ? {width:390,height:844} : {width:1440,height:1000})
   await authenticate(page, TEST_ACCESS_KEY, 'research')

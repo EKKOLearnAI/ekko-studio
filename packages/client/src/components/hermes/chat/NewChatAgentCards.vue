@@ -50,7 +50,8 @@ let sweep: HTMLElement | null = null
 let emberElements: HTMLElement[] = []
 
 function paintCardInterior(now: number) {
-  const seconds = motionQuery?.matches ? 0 : now / 1000
+  // Keep ambient foil moving gently, like the halo and embers, when motion is reduced.
+  const seconds = now / 1000 * (motionQuery?.matches ? .35 : 1)
   const phase = seconds / 8 * Math.PI * 2
   const x = Math.sin(phase), y = Math.cos(phase)
   if (foil) foil.style.transform = `translate(${7 * x}%, ${5 * y}%) rotate(${24 * x}deg) scale(1.08)`
