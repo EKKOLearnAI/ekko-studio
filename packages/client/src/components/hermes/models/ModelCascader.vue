@@ -224,7 +224,6 @@ async function openWithKeyboard(event: KeyboardEvent) {
 .model-cascader-remove { border: 0; border-radius: $radius-sm; background: transparent; color: $text-muted; cursor: pointer; padding: 4px; &:hover { color: $error; } }
 .model-cascader-empty { display: flex; flex-direction: column; align-items: center; padding: 24px 8px; font-size: 12px; color: $text-muted; text-align: center; }
 @media (max-width: 600px) {
-  .model-cascader-provider > span:first-child { white-space: normal; overflow-wrap: anywhere; }
   .model-cascader-provider small { display: none; }
 }
 @media (max-width: 480px) {
