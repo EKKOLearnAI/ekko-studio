@@ -2309,7 +2309,6 @@ async function selectSessionModel(model: string, provider: string) {
     sessionModelApiMode.value = sessionModelSession.value?.provider === provider && sessionModelSession.value.apiMode
       ? normalizeCodingAgentApiMode(sessionModelSession.value.apiMode, defaultSessionModelApiMode(provider))
       : defaultSessionModelApiMode(provider);
-    showSessionModelPicker.value = false;
     showSessionModelModeModal.value = true;
     return;
   }
@@ -2331,7 +2330,6 @@ function cancelSessionModelMode() {
   if (sessionModelSwitching.value) return;
   pendingSessionModelSwitch.value = null;
   showSessionModelModeModal.value = false;
-  showSessionModelPicker.value = true;
 }
 
 function handleSessionModelSelect(selection: { model: string; provider: string }) {
