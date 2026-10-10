@@ -34,6 +34,9 @@ const priorityLabel = computed(() => {
 const priorityText = computed(() => {
   return t(`kanban.card.priority.${priorityLabel.value}`)
 })
+
+const hasRiskFlag = computed(() => props.task.priority >= 3
+  || /\b(risk|blocker|breaking|security|data loss|payment|credential)\b/i.test(`${props.task.title} ${props.task.body || ''}`))
 </script>
 
 <template>
@@ -51,6 +54,7 @@ const priorityText = computed(() => {
         <span class="priority-dot" aria-hidden="true" />
         {{ priorityText }}
       </span>
+      <span v-if="hasRiskFlag" class="risk-flag">{{ t('kanban.approval.risk') }}</span>
     </div>
     <div class="card-title" dir="auto">{{ task.title }}</div>
     <div class="card-footer">
@@ -69,6 +73,8 @@ const priorityText = computed(() => {
         </template>
         {{ t('kanban.card.assigneeTooltip') }}
       </NTooltip>
+      <span v-if="task.current_run_id" class="card-run">run #{{ task.current_run_id }}</span>
+      <span v-if="task.latest_event_id" class="card-event">event #{{ task.latest_event_id }}</span>
       <span class="card-time">{{ timeAgo }}</span>
     </div>
   </button>
@@ -185,6 +191,21 @@ const priorityText = computed(() => {
   height: 5px;
   border-radius: 999px;
   background: $text-muted;
+}
+
+.risk-flag {
+  color: $error;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.card-run,
+.card-event {
+  flex: 0 0 auto;
+  color: $text-muted;
+  font-family: $font-code;
+  font-size: 10px;
 }
 
 .card-footer {

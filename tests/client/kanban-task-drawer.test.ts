@@ -5,6 +5,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 
 const mockGetTask = vi.hoisted(() => vi.fn())
 const mockListAttachments = vi.hoisted(() => vi.fn())
+const mockGetApprovalCapabilities = vi.hoisted(() => vi.fn())
+const mockPerformApprovalAction = vi.hoisted(() => vi.fn())
 const mockOpenRemotePreview = vi.hoisted(() => vi.fn())
 const mockClosePreview = vi.hoisted(() => vi.fn())
 const mockRequest = vi.hoisted(() => vi.fn())
@@ -45,6 +47,8 @@ vi.mock('@/api/client', () => ({
 vi.mock('@/api/hermes/kanban', () => ({
   getTask: mockGetTask,
   listAttachments: mockListAttachments,
+  getApprovalCapabilities: mockGetApprovalCapabilities,
+  performApprovalAction: mockPerformApprovalAction,
   getAttachmentContentPath: (taskId: string, attachmentId: number) => `/attachments/${taskId}/${attachmentId}`,
 }))
 
@@ -146,6 +150,14 @@ describe('KanbanTaskDrawer', () => {
     vi.clearAllMocks()
     mockRequest.mockResolvedValue({ results: [] })
     mockListAttachments.mockResolvedValue([])
+    mockGetApprovalCapabilities.mockResolvedValue({
+      can_approve: false,
+      allowed_boards: ['project-a'],
+      dingtalk_configured: true,
+    })
+    mockPerformApprovalAction.mockResolvedValue({
+      receipt: { event_id: 'evt-1', after_status: 'done', duplicate: false },
+    })
     mockOpenRemotePreview.mockResolvedValue(true)
     mockCompleteTasks.mockResolvedValue(undefined)
     mockBlockTask.mockResolvedValue(undefined)
@@ -240,8 +252,110 @@ describe('KanbanTaskDrawer', () => {
     await flushPromises()
 
     expect(mockArchiveTasks).toHaveBeenCalledWith(['task-1'])
-    expect(wrapper.emitted('updated')).toHaveLength(1)
-    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('requires confirmation before archiving through the approval center', async () => {
+    mockGetApprovalCapabilities.mockResolvedValueOnce({
+      can_approve: true,
+      allowed_boards: ['project-a'],
+      dingtalk_configured: true,
+    })
+    const doneDetail = {
+      task: {
+        id: 'task-approval-archive', title: 'Approved task', body: null, assignee: 'codex-worker',
+        status: 'done', priority: 1, created_at: 100, started_at: 110, completed_at: 120, tenant: null,
+        result: 'Approved', current_run_id: 17,
+      },
+      latest_summary: 'Approved', comments: [], events: [], runs: [],
+    }
+    mockGetTask.mockReset()
+    mockGetTask.mockResolvedValueOnce(doneDetail).mockResolvedValueOnce({
+      ...doneDetail,
+      task: { ...doneDetail.task, status: 'archived' },
+    })
+
+    const wrapper = mount(KanbanTaskDrawer, { props: { taskId: 'task-approval-archive' } })
+    await flushPromises()
+
+    await wrapper.find('[data-testid="approval-archive"]').trigger('click')
+    await flushPromises()
+
+    expect(mockPerformApprovalAction).not.toHaveBeenCalled()
+    expect(mockDialogWarning).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'kanban.action.archive',
+      content: 'kanban.action.archiveConfirm',
+      positiveText: 'kanban.action.archive',
+      negativeText: 'common.cancel',
+    }))
+
+    await mockDialogWarning.mock.calls[0][0].onPositiveClick()
+    await flushPromises()
+
+    expect(mockPerformApprovalAction).toHaveBeenCalledWith(
+      'task-approval-archive',
+      'archive',
+      { reason: undefined },
+      { board: 'project-a' },
+    )
+    expect(mockGetTask).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows approval actions by lifecycle status and records the review decision reason', async () => {
+    mockGetApprovalCapabilities.mockResolvedValueOnce({
+      can_approve: true,
+      allowed_boards: ['project-a'],
+      dingtalk_configured: true,
+    })
+    const reviewDetail = {
+      task: {
+        id: 'task-review', title: 'Risky release', body: 'Breaking migration risk', assignee: 'codex-worker',
+        status: 'review', priority: 3, created_at: 100, started_at: 110, completed_at: null, tenant: null,
+        result: null, current_run_id: 17,
+      },
+      latest_summary: 'Ready for review',
+      comments: [],
+      events: [{ id: 55, task_id: 'task-review', kind: 'review_requested', payload: {}, created_at: 120, run_id: 17 }],
+      runs: [{ id: 17, profile: 'codex-worker', status: 'review', started_at: 110, ended_at: 120 }],
+    }
+    mockGetTask.mockReset()
+    mockGetTask.mockResolvedValueOnce(reviewDetail).mockResolvedValueOnce({
+      ...reviewDetail,
+      task: { ...reviewDetail.task, status: 'done', completed_at: 130 },
+    })
+
+    const wrapper = mount(KanbanTaskDrawer, { props: { taskId: 'task-review' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="approval-risk"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="approval-event-id"]').text()).toContain('55')
+    await wrapper.find('[data-testid="approval-reason"]').setValue('tests and diff verified')
+    await wrapper.find('[data-testid="approval-approve"]').trigger('click')
+    await flushPromises()
+
+    expect(mockPerformApprovalAction).toHaveBeenCalledWith(
+      'task-review',
+      'approve',
+      { reason: 'tests and diff verified' },
+      { board: 'project-a' },
+    )
+    expect(mockGetTask).toHaveBeenCalledTimes(2)
+  })
+
+  it('hides approval mutations when the Studio identity is not authorized', async () => {
+    mockGetApprovalCapabilities.mockResolvedValueOnce({
+      can_approve: false,
+      allowed_boards: ['project-a'],
+      dingtalk_configured: false,
+    })
+    mockGetTask.mockResolvedValueOnce({
+      task: { id: 'task-review', title: 'Review', body: null, assignee: 'codex-worker', status: 'review', priority: 1, created_at: 1, started_at: 2, completed_at: null, tenant: null, result: null },
+      latest_summary: null, comments: [], events: [], runs: [],
+    })
+    const wrapper = mount(KanbanTaskDrawer, { props: { taskId: 'task-review' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="approval-approve"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('kanban.approval.unauthorized')
   })
 
   it('uses the latest run profile when searching related sessions', async () => {

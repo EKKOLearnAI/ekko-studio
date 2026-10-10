@@ -25,6 +25,8 @@ const mockDispatch = vi.hoisted(() => vi.fn())
 const mockGetStats = vi.hoisted(() => vi.fn())
 const mockGetAssignees = vi.hoisted(() => vi.fn())
 const mockListAttachments = vi.hoisted(() => vi.fn())
+const mockPerformApprovalAction = vi.hoisted(() => vi.fn())
+const mockReconcileDingTalkApprovalEvent = vi.hoisted(() => vi.fn())
 const mockSearchSessions = vi.hoisted(() => vi.fn())
 const mockGetSessionDetail = vi.hoisted(() => vi.fn())
 const mockGetExactSessionDetail = vi.hoisted(() => vi.fn())
@@ -75,6 +77,17 @@ vi.mock('../../packages/server/src/modules/hermes/services/kanban/kanban-service
   getStats: mockGetStats,
   getAssignees: mockGetAssignees,
   listAttachments: mockListAttachments,
+  performApprovalAction: mockPerformApprovalAction,
+}))
+
+vi.mock('../../packages/server/src/modules/hermes/services/kanban/dingtalk-approval-outbox', () => ({
+  reconcileDingTalkApprovalEvent: mockReconcileDingTalkApprovalEvent,
+  notificationResultFromOutboxRecord: (record: any) => ({
+    configured: record.configured,
+    api_accepted: record.api_accepted,
+    attempts: record.attempts,
+    recipient_confirmed: false,
+  }),
 }))
 
 vi.mock('../../packages/server/src/modules/hermes/services/history/sessions-db', () => ({
@@ -104,6 +117,9 @@ function ctx(overrides: Record<string, any> = {}) {
 describe('kanban controller', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    delete process.env.HERMES_STUDIO_KANBAN_APPROVERS
+    delete process.env.HERMES_STUDIO_KANBAN_APPROVAL_BOARDS
+    delete process.env.DINGTALK_APPROVAL_WEBHOOK_URL
     mockListUserProfiles.mockReturnValue([{ profile_name: 'research' }])
     mockGetTask.mockImplementation(async (id: string) => ({
       task: { id, assignee: null, status: 'ready' },
@@ -111,6 +127,95 @@ describe('kanban controller', () => {
       events: [],
       runs: [],
     }))
+  })
+
+  it('gates approval-center actions to explicit Studio identities and board allowlists', async () => {
+    process.env.HERMES_STUDIO_KANBAN_APPROVERS = 'james'
+    process.env.HERMES_STUDIO_KANBAN_APPROVAL_BOARDS = 'codex-tech'
+    mockPerformApprovalAction.mockResolvedValue({
+      ok: true,
+      action: 'approve',
+      event_id: 'evt-1',
+      after_status: 'done',
+      task: { id: 'task-1', status: 'done' },
+    })
+
+    const deniedIdentity = ctx({
+      state: { user: { id: 2, username: 'alice', role: 'super_admin' } },
+      query: { board: 'codex-tech' },
+      params: { id: 'task-1' },
+      request: { body: { reason: 'approved' } },
+    })
+    await ctrl.approveTask(deniedIdentity)
+    expect(deniedIdentity.status).toBe(403)
+
+    const deniedBoard = ctx({
+      state: { user: { id: 1, username: 'james', role: 'super_admin' } },
+      query: { board: 'default' },
+      params: { id: 'task-1' },
+      request: { body: { reason: 'approved' } },
+    })
+    await ctrl.approveTask(deniedBoard)
+    expect(deniedBoard.status).toBe(403)
+
+    const allowed = ctx({
+      state: { user: { id: 1, username: 'james', role: 'super_admin' } },
+      query: { board: 'codex-tech' },
+      params: { id: 'task-1' },
+      request: { body: { reason: 'approved', event_id: 'evt-1' } },
+    })
+    await ctrl.approveTask(allowed)
+    expect(mockPerformApprovalAction).toHaveBeenCalledWith('task-1', 'approve', {
+      actor: 'james',
+      board: 'codex-tech',
+      channel: 'studio',
+      eventId: 'evt-1',
+      reason: 'approved',
+      reviewer: undefined,
+    })
+    expect(allowed.body).toMatchObject({ receipt: { event_id: 'evt-1', after_status: 'done' } })
+  })
+
+  it('returns approval capabilities without treating super-admin as an allow-all approver', async () => {
+    process.env.HERMES_STUDIO_KANBAN_APPROVERS = 'james'
+    const allowed = ctx({ state: { user: { id: 1, username: 'james', role: 'super_admin' } } })
+    await ctrl.approvalCapabilities(allowed)
+    expect(allowed.body).toEqual({ approval: { can_approve: true, allowed_boards: ['codex-tech'], dingtalk_configured: false } })
+
+    const denied = ctx({ state: { user: { id: 2, username: 'admin', role: 'super_admin' } } })
+    await ctrl.approvalCapabilities(denied)
+    expect(denied.body).toEqual({ approval: { can_approve: false, allowed_boards: ['codex-tech'], dingtalk_configured: false } })
+  })
+
+  it('requests review, performs readback, and reports DingTalk API acceptance separately from receipt', async () => {
+    process.env.HERMES_STUDIO_KANBAN_APPROVERS = 'james'
+    process.env.DINGTALK_APPROVAL_WEBHOOK_URL = 'https://example.com/hook'
+    mockPerformApprovalAction.mockResolvedValue({
+      ok: true,
+      action: 'request_review',
+      event_id: 'evt-review',
+      canonical_event_id: 42,
+      after_status: 'review',
+      task: { id: 'task-1', title: 'Review me', priority: 3, status: 'review' },
+    })
+    mockReconcileDingTalkApprovalEvent.mockResolvedValue({
+      task_id: 'task-1', configured: true, api_accepted: true, attempts: 1, recipient_confirmed: false,
+    })
+    const c = ctx({
+      state: { user: { id: 1, username: 'james', role: 'super_admin' } },
+      query: { board: 'codex-tech' },
+      params: { id: 'task-1' },
+      request: { body: { reason: 'tests pass', event_id: 'evt-review' } },
+      origin: 'http://127.0.0.1:8748',
+    })
+
+    await ctrl.requestTaskReview(c)
+
+    expect(c.body).toMatchObject({
+      receipt: { after_status: 'review' },
+      notification: { api_accepted: true, recipient_confirmed: false },
+    })
+    expect(mockReconcileDingTalkApprovalEvent).toHaveBeenCalledWith('codex-tech', 'task-1', '42')
   })
 
   it('lists boards and tasks with explicit/default board context', async () => {
