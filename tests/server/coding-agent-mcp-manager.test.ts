@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -517,4 +519,52 @@ describe('coding Agent MCP manager', () => {
 
     expect(processTree.kill).toHaveBeenCalledWith(4321, expect.any(Function))
   })
+})
+
+
+it('uses the current profile token in new managed MCP processes despite stale parent tokens', async () => {
+  const home = makeHome()
+  mkdirSync(join(home, 'profiles', 'default'), { recursive: true })
+  const tokenFile = join(home, 'profiles', 'default', '.model-run-token')
+  const seen: string[] = []
+  const server = createServer((req, res) => {
+    seen.push(req.headers.authorization || '')
+    res.writeHead(req.headers.authorization === `Bearer ${readFileSync(tokenFile, 'utf8')}` ? 200 : 401)
+    res.end(JSON.stringify({ ok: true }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const listed = await listCodingAgentMcpServers('claude-code')
+    const config = listed.servers.find(server => server.name === 'ekko-studio-api')!.raw_config
+    for (const token of ['fixture-first', 'fixture-rotated']) {
+      writeFileSync(tokenFile, token)
+      const child = spawn(process.execPath, ['bin/ekko-studio-mcp.mjs', 'plan'], { env: {
+        PATH: process.env.PATH, HOME: home,
+        AUTH_TOKEN: 'fixture-stale', HERMES_WEB_UI_TOKEN: 'fixture-stale',
+        ...config.env, HERMES_WEB_UI_PROFILE: 'default',
+        HERMES_WEB_UI_URL: `http://127.0.0.1:${(server.address() as any).port}`,
+      } })
+      try {
+        const response = new Promise<any>((resolve, reject) => {
+          let buffer = ''
+          const timer = setTimeout(() => reject(new Error('MCP response timed out')), 4000)
+          child.stdout.on('data', chunk => {
+            buffer += chunk
+            const line = buffer.split('\n')[0]
+            if (!line) return
+            try { const value = JSON.parse(line); clearTimeout(timer); resolve(value) } catch {}
+          })
+        })
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+          name: 'ekko_studio_update_plan', arguments: { profile: 'default', context_id: 'fixture-context',
+            plan: [{ id: 'work', step: 'Test', status: 'in_progress' }] },
+        } })}\n`)
+        expect((await response).result.isError).not.toBe(true)
+      } finally { child.kill() }
+    }
+    expect(seen).toEqual(['Bearer fixture-first', 'Bearer fixture-rotated'])
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
 })
