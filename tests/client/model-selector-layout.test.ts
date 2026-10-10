@@ -14,19 +14,19 @@ function findClosingDiv(source: string, start: number): number {
   return -1
 }
 
-describe('ModelSelector layout', () => {
-  it('keeps the custom provider controls below the scrollable model list', () => {
-    const source = readFileSync('packages/client/src/components/layout/ModelSelector.vue', 'utf8')
-    const modalStart = source.indexOf('<NModal')
-    const modalEnd = source.indexOf('</NModal>', modalStart)
+describe('ModelCascader layout', () => {
+  it('keeps the custom model controls below the scrollable model list', () => {
+    const source = readFileSync('packages/client/src/components/hermes/models/ModelCascader.vue', 'utf8')
+    const modalStart = source.indexOf('<NPopover')
+    const modalEnd = source.indexOf('</NPopover>', modalStart)
     const modal = source.slice(modalStart, modalEnd)
-    const modelListStart = modal.indexOf('<div class="model-list">')
+    const modelListStart = modal.indexOf('<div class="model-cascader-columns"')
     const modelListEnd = findClosingDiv(modal, modelListStart)
-    const customFooter = modal.indexOf('<div class="model-custom">')
+    const customFooter = modal.indexOf('class="model-cascader-custom"')
 
     expect(modelListStart).toBeGreaterThanOrEqual(0)
     expect(modelListEnd).toBeGreaterThan(modelListStart)
     expect(customFooter).toBeGreaterThan(modelListEnd)
-    expect(modal.slice(modelListStart, modelListEnd)).not.toContain('class="model-custom"')
+    expect(modal.slice(modelListStart, modelListEnd)).not.toContain('class="model-cascader-custom"')
   })
 })

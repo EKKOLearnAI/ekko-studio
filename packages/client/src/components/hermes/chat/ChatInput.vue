@@ -37,6 +37,7 @@ const { toolTraceVisible, toggleToolTraceVisible } = useToolTraceVisibility()
 const props = withDefaults(defineProps<{
   modelLabel?: string
   modelDisabled?: boolean
+  modelExpanded?: boolean
   initialText?: string
   persistDraft?: boolean
   draft?: boolean
@@ -47,6 +48,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   modelLabel: '',
   modelDisabled: false,
+  modelExpanded: false,
   initialText: '',
   persistDraft: true,
   draft: false,
@@ -58,7 +60,7 @@ const composerSession = computed(() => props.draft ? null : chatStore.activeSess
 const submitting = ref(false)
 
 const emit = defineEmits<{
-  modelClick: []
+  modelClick: [event: MouseEvent]
   voiceClick: []
   'update:reasoningEffort': [value: string]
 }>()
@@ -132,9 +134,9 @@ function onReasoningEffortSliderChange(value: number | [number, number]) {
   if (option) onReasoningEffortChange(option.value)
 }
 
-function handleModelButtonClick() {
+function handleModelButtonClick(event: MouseEvent) {
   if (props.modelDisabled) return
-  emit('modelClick')
+  emit('modelClick', event)
 }
 
 const compactModelLabel = computed(() => {
@@ -1323,6 +1325,8 @@ function openAttachmentPreview(attachment: Attachment) {
                 :disabled="props.modelDisabled"
                 :title="isMobileViewport ? undefined : props.modelLabel || t('models.selectModel')"
                 :aria-label="props.modelLabel || t('models.selectModel')"
+                aria-haspopup="menu"
+                :aria-expanded="props.modelExpanded"
                 @click="handleModelButtonClick"
               >
                 <template #icon>

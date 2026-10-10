@@ -1958,6 +1958,7 @@ export default {
 
 
   models: {
+    providerColumn: 'Провайдер',
     title: 'Модели',
     searchPlaceholder: 'Поиск моделей...',
     noResults: 'Нет результатов',

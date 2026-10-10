@@ -2141,6 +2141,7 @@ export default {
 
   // Models
   models: {
+    providerColumn: 'المزوّد',
     title: 'النماذج',
     searchPlaceholder: 'البحث في النماذج...',
     noResults: 'لا توجد نتائج',

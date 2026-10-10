@@ -1693,6 +1693,7 @@ jobTriggered: 'Job acionado',
 
   // Models
   models: {
+    providerColumn: 'Provedor',
     title: 'Modelos',
     addProvider: 'Adicionar provedor',
     noProviderPromptTitle: 'Nenhum provedor de modelos configurado',

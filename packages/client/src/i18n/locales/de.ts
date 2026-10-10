@@ -1693,6 +1693,7 @@ jobTriggered: 'Job ausgelost',
 
   // Models
   models: {
+    providerColumn: 'Anbieter',
     title: 'Modelle',
     addProvider: 'Anbieter hinzufugen',
     noProviderPromptTitle: 'Kein Modellanbieter konfiguriert',

@@ -1693,6 +1693,7 @@ export default {
 
   // モデル
   models: {
+    providerColumn: 'プロバイダー',
     title: 'モデル',
     addProvider: 'プロバイダーを追加',
     noProviderPromptTitle: 'モデルプロバイダーが設定されていません',

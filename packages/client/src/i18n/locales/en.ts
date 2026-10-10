@@ -2102,6 +2102,7 @@ export default {
 
   // Models
   models: {
+    providerColumn: 'Provider',
     title: 'Models',
     searchPlaceholder: 'Search models...',
     noResults: 'No results',

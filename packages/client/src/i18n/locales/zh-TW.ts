@@ -2136,6 +2136,7 @@ export default {
 
   // 模型
   models: {
+    providerColumn: '供應商',
     title: '模型',
     searchPlaceholder: '搜尋模型...',
     noResults: '無結果',

@@ -2148,6 +2148,7 @@ export default {
 
   // 模型
   models: {
+    providerColumn: '服务商',
     title: '模型',
     searchPlaceholder: '搜索模型...',
     noResults: '无结果',

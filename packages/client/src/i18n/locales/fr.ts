@@ -1693,6 +1693,7 @@ jobTriggered: 'Job declenche',
 
   // Models
   models: {
+    providerColumn: 'Fournisseur',
     title: 'Modeles',
     addProvider: 'Ajouter un fournisseur',
     noProviderPromptTitle: 'Aucun fournisseur de modeles configure',

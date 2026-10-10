@@ -1693,6 +1693,7 @@ jobTriggered: 'Job ejecutado',
 
   // Models
   models: {
+    providerColumn: 'Proveedor',
     title: 'Modelos',
     addProvider: 'Anadir proveedor',
     noProviderPromptTitle: 'No hay proveedor de modelos configurado',
