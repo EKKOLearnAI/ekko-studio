@@ -1025,7 +1025,8 @@ function normalizeNodeModel(data: WorkflowAgentNodeData): Pick<WorkflowAgentNode
         group.provider,
       ))
   const currentGroup = availableGroups.find(group => group.provider === data.provider)
-  if (currentGroup?.models.includes(data.model)) {
+  // A workflow can retain a manually entered model under a supported provider.
+  if (currentGroup && data.model) {
     return { provider: data.provider, model: data.model, apiMode: data.apiMode || defaultApiMode(data.provider) }
   }
   const fallbackGroup = availableGroups.find(group => group.models.length > 0)

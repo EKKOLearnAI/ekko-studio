@@ -124,7 +124,7 @@ describe('ChatPanel session clicks', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
 
     expect(source).toContain('if (group.provider === "moa") return newChatAgent.value === "hermes"')
-    expect(source).toContain('group.provider === "moa"\n          ? !isSessionModelCodingAgent.value')
+    expect(source).toContain('group.provider === "moa"\n          ? isSessionModelHermes.value')
     expect(source).toContain("selection.provider === 'moa'")
     expect(source).toContain('await applySessionModelSwitch(preset, "moa")')
   })

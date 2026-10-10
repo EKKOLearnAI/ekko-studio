@@ -14,6 +14,34 @@ const modelGroups = [TEST_MODEL_GROUP, {
 }))]
 const modelAliases = { 'other-provider': { 'other-model': 'Fast model' } }
 
+for (const [label, identity, expectedMoa] of [
+  ['legacy Hermes', { source: 'cli' }, true],
+  ['built-in Ekko without agent metadata', { source: 'builtin_agent' }, false],
+  ['Codex', { source: 'coding_agent', agent: 'codex', agent_mode: 'scoped' }, false],
+] as const) test(`existing ${label} session ${expectedMoa ? 'offers' : 'hides'} MoA models`, async ({ page }) => {
+  const session = {
+    id: 'model-agent-policy', title: label, profile: 'research', provider: 'test-provider', model: 'test-model',
+    started_at: 100, last_active: 101, message_count: 0, ...identity,
+  }
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript(id => {
+    (window as any).__PW_CHAT_SOCKET_RESUMES__ = { [id]: { session_id: id, messages: [], isWorking: false, messageLoadedCount: 0, messageTotal: 0 } }
+  }, session.id)
+  const api = await mockHermesApi(page, { sessions: [session], modelGroups })
+  await mockChatSocket(page)
+  await page.goto(`/#/hermes/session/${session.id}`)
+  await page.locator('.input-model-button').click()
+  const menu = page.locator('.model-cascader:visible')
+  await expect(menu).toBeVisible()
+  const moa = menu.locator('.model-cascader-provider').filter({ hasText: 'MoA' })
+  await expect(moa).toHaveCount(expectedMoa ? 1 : 0)
+  if (expectedMoa) {
+    await moa.click()
+    await expect(menu.getByRole('menuitemradio').filter({ hasText: 'review-combination' })).toBeVisible()
+  }
+  expect(api.unexpectedRequests).toEqual([])
+})
+
 for (const mobile of [false, true]) test(`chooses provider then model in a fixed-height dialog (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
   await page.setViewportSize(mobile ? { width: 320, height: 568 } : { width: 1280, height: 900 })
   await authenticate(page, TEST_ACCESS_KEY, 'research')

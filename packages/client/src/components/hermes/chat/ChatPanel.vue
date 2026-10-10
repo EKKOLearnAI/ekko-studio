@@ -59,6 +59,7 @@ import OutlinePanel from "./OutlinePanel.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import SubagentStreamPanel from "./SubagentStreamPanel.vue";
 import { chatSessionAgentAvatar } from "@/utils/chat-agent-avatar";
+import { isHermesSession } from "@/utils/hermes/session-agent";
 import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./session-category-groups";
 import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } from "./session-category-menu";
 import { buildActiveSessionMenuOptions, buildSessionContextMenuOptions } from "./session-menu-options";
@@ -2141,6 +2142,7 @@ const sessionModelSession = computed<Pick<Session, 'profile' | 'provider' | 'mod
     profile: newChatProfile.value,
     provider: newChatProvider.value,
     model: newChatModel.value,
+    agent: newChatAgent.value === 'claude-code' ? 'claude' : newChatAgent.value,
     source: isNewChatCodingAgent.value ? 'coding_agent' : 'cli',
     codingAgentId: isNewChatCodingAgent.value ? newChatAgent.value as ChatCodingAgentId : undefined,
     codingAgentMode: effectiveNewChatAgentMode.value,
@@ -2173,15 +2175,15 @@ const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>
         ? "ekko-agent"
         : undefined),
 );
-const isSessionModelCodingAgent = computed(() =>
-  sessionModelSession.value?.source === "coding_agent" || Boolean(sessionModelSession.value?.codingAgentId),
+const isSessionModelHermes = computed(() =>
+  isHermesSession(sessionModelSession.value),
 );
 
 const sessionModelAllGroups = computed(() =>
   sessionModelProfile.value
     ? getModelGroupsForProfile(sessionModelProfile.value).filter((group) => (
         group.provider === "moa"
-          ? !isSessionModelCodingAgent.value
+          ? isSessionModelHermes.value
           : (!isSessionModelScopedCodingAgent.value ||
             !sessionModelCodingAgentId.value ||
             canScopedCodingAgentUseProvider(sessionModelCodingAgentId.value, group.provider))
@@ -2198,7 +2200,7 @@ const sessionMoaGroup = computed(() =>
 );
 
 const sessionCanUseMoa = computed(() =>
-  !isSessionModelCodingAgent.value && Boolean(sessionMoaGroup.value?.models.length),
+  isSessionModelHermes.value && Boolean(sessionMoaGroup.value?.models.length),
 );
 
 async function openSessionModelPicker(sessionId: string | null, event?: MouseEvent) {

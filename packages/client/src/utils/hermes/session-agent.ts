@@ -3,6 +3,12 @@ import type { Session } from '@/stores/hermes/chat'
 
 type SessionAgentIdentity = { source?: string; agent?: string; codingAgentId?: string }
 
+export function isHermesSession(session?: SessionAgentIdentity | null): boolean {
+  if (!session || isBuiltinEkkoSession(session) || isExternalCodingAgentSession(session)) return false
+  // Older Hermes histories omit the agent field.
+  return !session.agent || session.agent.trim().toLowerCase() === 'hermes'
+}
+
 export function isBuiltinEkkoSession(session?: SessionAgentIdentity | null): boolean {
   return session?.source === 'builtin_agent' || ['ekko', 'ekko-agent', 'ekko_agent'].includes((session?.codingAgentId || session?.agent || '').trim().toLowerCase())
 }

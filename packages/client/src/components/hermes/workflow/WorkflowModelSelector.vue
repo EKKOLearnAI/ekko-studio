@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/hermes/app'
 import type { AvailableModelGroup } from '@/api/hermes/system'
 import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
-import ModelPickerModal from '@/components/hermes/models/ModelPickerModal.vue'
+import ModelCascader from '@/components/hermes/models/ModelCascader.vue'
 
 const props = defineProps<{
   provider: string
@@ -19,15 +19,15 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const showModal = ref(false)
 
 const groupsWithCustom = computed(() =>
   props.groups.map(group => ({
     ...group,
-    models: [
+    models: [...new Set([
       ...group.models,
-      ...(appStore.customModels[group.provider] || []).filter(model => !group.models.includes(model)),
-    ],
+      ...(appStore.customModels[group.provider] || []),
+      ...(group.provider === props.provider && props.model ? [props.model] : []),
+    ])],
   })),
 )
 
@@ -42,15 +42,6 @@ const selectedDisplayName = computed(() => {
     : props.model
 })
 
-const selectedModels = computed(() => props.provider && props.model
-  ? [{ provider: props.provider, model: props.model }]
-  : [])
-
-function openModal() {
-  if (props.disabled) return
-  showModal.value = true
-}
-
 function handleSelect(selection: { provider: string; model: string; apiMode?: ProviderApiMode }) {
   emit('select', selection)
 }
@@ -58,19 +49,22 @@ function handleSelect(selection: { provider: string; model: string; apiMode?: Pr
 
 <template>
   <div class="workflow-model-selector">
-    <button class="model-trigger" type="button" :disabled="props.disabled" @click="openModal">
-      <span class="model-name" :title="props.model">{{ selectedDisplayName || t('models.selectModel') }}</span>
-      <svg class="model-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="6 9 12 15 18 9" />
-      </svg>
-    </button>
-
-    <ModelPickerModal
-      v-model:show="showModal"
-      :groups="props.groups"
-      :selected="selectedModels"
+    <ModelCascader
+      :groups="groupsWithCustom"
+      :provider="props.provider"
+      :model="props.model"
+      :disabled="props.disabled"
       @select="handleSelect"
-    />
+    >
+      <template #trigger="{ show, open, openWithKeyboard }">
+        <button class="model-trigger" type="button" :disabled="props.disabled" aria-haspopup="dialog" :aria-expanded="show" @click="open" @keydown.down="openWithKeyboard">
+          <span class="model-name" :title="props.model">{{ selectedDisplayName || t('models.selectModel') }}</span>
+          <svg class="model-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      </template>
+    </ModelCascader>
   </div>
 </template>
 
@@ -97,6 +91,11 @@ function handleSelect(selection: { provider: string; model: string; apiMode?: Pr
 
   &:hover {
     border-color: $accent-muted;
+  }
+
+  &:focus-visible {
+    outline: 2px solid $accent-primary;
+    outline-offset: 2px;
   }
 
   &:disabled {
