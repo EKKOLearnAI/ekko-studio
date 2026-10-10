@@ -56,8 +56,7 @@ watch(shown, async show => {
 watch(panel, element => { if (element) focusPanel() }, { flush: 'post' })
 function focusPanel() {
   if (!shown.value) return
-  if (window.matchMedia('(max-width: 600px)').matches) panel.value?.focus()
-  else panel.value?.querySelector<HTMLInputElement>('.model-cascader-search input')?.focus()
+  panel.value?.focus()
   panel.value?.querySelector('.model-cascader-item.active')?.scrollIntoView({ block: 'nearest' })
 }
 function restoreFocus() {
@@ -124,15 +123,20 @@ async function openWithKeyboard(event: KeyboardEvent) {
 <template>
   <slot name="trigger" :show="shown" :open="open" :open-with-keyboard="openWithKeyboard" />
   <NModal
-    :show="shown" preset="card" class="model-cascader-modal" :title="title || t('models.title')"
+    :show="shown" preset="card" class="model-cascader-modal" :aria-label="title || t('models.title')"
     :style="{ width: 'min(640px, calc(100vw - 24px))', height: 'min(560px, calc(100dvh - 24px))' }"
     :content-style="{ padding: '0', minHeight: '0', display: 'flex', overflow: 'hidden' }"
-    :mask-closable="!loading" :close-on-esc="!loading" :closable="!loading" :auto-focus="false"
+    :mask-closable="!loading" :close-on-esc="!loading" :closable="false" :auto-focus="false"
     @update:show="setShow" @after-leave="restoreFocus"
   >
     <div ref="panel" class="model-cascader" role="group" :aria-label="title || t('models.title')" tabindex="-1" @keydown.esc="dismiss">
       <div class="model-cascader-search">
         <NInput v-model:value="search" :placeholder="t('models.searchPlaceholder')" :disabled="loading" clearable size="small" @keydown.down.prevent="focusColumn('providers')" />
+        <NButton class="model-cascader-close" size="small" quaternary circle :disabled="loading" :aria-label="t('common.close')" :title="t('common.close')" @click="setShow(false)">
+          <template #icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </template>
+        </NButton>
       </div>
       <NSpin class="model-cascader-lists" content-class="model-cascader-list-content" :show="loading" :description="t('chat.modelSwitching')">
         <div class="model-cascader-columns" :aria-busy="loading">
@@ -187,7 +191,9 @@ async function openWithKeyboard(event: KeyboardEvent) {
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 .model-cascader { display: flex; flex-direction: column; width: 100%; min-height: 0; color: $text-primary; outline: none; }
-.model-cascader-search { padding: 10px; flex-shrink: 0; }
+.model-cascader-search { display: flex; align-items: center; gap: 8px; padding: 10px; flex-shrink: 0; }
+.model-cascader-search :deep(.n-input) { flex: 1; min-width: 0; }
+.model-cascader-close { flex-shrink: 0; }
 .model-cascader-lists { flex: 1; min-height: 0; overflow: hidden; }
 .model-cascader-lists :deep(.model-cascader-list-content) { height: 100%; }
 .model-cascader-columns { display: grid; grid-template-columns: minmax(0, 38%) minmax(0, 1fr); height: 100%; min-height: 0; border-top: 1px solid $border-color; }
