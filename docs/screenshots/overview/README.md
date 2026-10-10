@@ -1,19 +1,36 @@
 # Product screenshots
 
-Captured on 2026-09-10 from Ekko Studio v0.7.18, using the client at commit
-`ae4af8df` (the preceding branding change only changes documentation and metadata).
+Captured on 2026-10-10 from the Ekko Studio **v0.7.33** client at commit
+`05b4e1bd84d7430ec3fa85247282cf68235e76c8`.
 
-- `workspace.png`: current chat components rendered with a fictional product-demo conversation through the existing Playwright API/socket fixtures.
-- `workflow.png`: current workflow editor with a demonstration research → coding → review definition. The workflow is idle and has not been executed.
-- `agent-manager.png`: the local installation’s actual agent status, with the conversation sidebar collapsed.
-- `skills.png`: the actual Ekko Agent Skills page displaying the GitHub skill.
+| Image | What it shows | Pixel dimensions |
+| --- | --- | --- |
+| [new-chat.png](./new-chat.png) | Responsive Agent cards with Ekko selected and the shared chat composer. | 2880 × 1920 |
+| [workspace.png](./workspace.png) | A fictional release-planning conversation, completed task card, and example per-turn usage. | 2880 × 1920 |
+| [workflow.png](./workflow.png) | An idle Ekko → Codex → Claude demonstration workflow with an approval gate on the review node. | 2880 × 1920 |
+| [agent-manager.png](./agent-manager.png) | All 16 Agent cards, local CLI versions, and automatic-update controls. | 2880 × 2436 |
+| [skills.png](./skills.png) | Ekko Skills with a demonstration GitHub skill and category/source controls. | 2880 × 1920 |
 
-All four are direct Chromium screenshots at a 1440 × 960 CSS viewport and 2×
-device scale (2880 × 1920 pixels). No UI elements were painted into the images.
-The demo data stayed in the capture browser; no demo conversations or workflows
-were saved to the user’s Studio database. Authentication state and private
-conversation screenshots are not included in this directory.
+These are direct Playwright screenshots from the system Chrome channel, at a
+1440-pixel CSS viewport width and 2× device scale. Agent Manager uses a 1218-pixel
+viewport height to include the entire catalog; the others use 960 pixels.
+The workflow list and run-history panels were collapsed through their UI controls,
+then the canvas was fitted to the three nodes. No UI elements were painted into
+the images.
 
-The main README uses repository-relative image links. Inspect every replacement
-at full size before publishing, including sidebar content, clipping, and loaded
-fonts. Keep the English and Chinese README galleries synchronized.
+Capture used an isolated Vite client on port 18473, a separate dependency cache,
+and the repository's Playwright API, Socket.IO, and native WebSocket fixtures.
+Conversations, the `studio-demo` model, usage figures, workflows, skills, and
+update-policy values are demonstration data, not live execution results.
+Agent installation/version fields came from a read-only local status snapshot;
+the Ekko badge reflects the captured client version. Local executable paths were
+replaced with demonstration paths before supplying the fixture.
+
+Demo conversations and workflows stayed in the capture browser. Authentication
+state, credentials, private conversations, and local executable paths are not
+included in this directory.
+
+All five images were inspected after capture. The capture check reported no
+browser page errors or broken images; it also verified the restored task card,
+usage summary, review approval switch, and visibility of the final Agent card.
+The English and Chinese README galleries use the same repository-relative images.
