@@ -2804,7 +2804,8 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                 :closable="!isSavingAgent"
             >
                     <div v-if="isLoadingAgentForm" class="agent-form-loading" role="status">
-                        <NSpin size="small" :description="t('common.loading')" />
+                        <NSpin size="small" />
+                        <span>{{ t('common.loading') }}</span>
                     </div>
                     <div v-if="!editingAgent" class="agent-preset-entry">
                         <NButton secondary block @click="openAgentPresetSelection">
@@ -4761,7 +4762,19 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 }
 
-.agent-form-loading,
+.agent-form-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px;
+    margin-bottom: 18px;
+    border-radius: $radius-md;
+    background: rgba(var(--text-primary-rgb), 0.03);
+    color: $text-secondary;
+    font-size: 13px;
+}
+
 .agent-preset-entry {
     margin-bottom: 18px;
 }

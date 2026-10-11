@@ -733,10 +733,10 @@ for (const endpoint of ['/api/hermes/profiles', '/api/hermes/available-models', 
       await expect(addDrawer).toBeVisible({ timeout: 1000 })
       await expect(addDrawer.locator('.agent-form-loading')).toBeVisible()
       await expect(addDrawer.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
-      await addDrawer.getByPlaceholder('Custom name (leave empty to use profile name)').fill('Draft while loading')
       if (endpoint === '/api/hermes/profiles') {
-        await page.screenshot({ path: test.info().outputPath('agent-drawer-loading.png'), animations: 'disabled' })
+        await addDrawer.screenshot({ path: test.info().outputPath('agent-drawer-loading.png'), animations: 'disabled' })
       }
+      await addDrawer.getByPlaceholder('Custom name (leave empty to use profile name)').fill('Draft while loading')
       await addDrawer.getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(addDrawer).toBeHidden()
 
