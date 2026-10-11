@@ -166,6 +166,11 @@ function authContainsProvider(auth: JsonRecord, provider: AuthorizedProvider): b
   })
 }
 
+function isPermissionError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === 'EACCES' || code === 'EPERM'
+}
+
 async function readJsonFile(path: string): Promise<JsonRecord> {
   try {
     const parsed = JSON.parse(await readFile(path, 'utf-8'))
@@ -349,14 +354,30 @@ async function locateAuthSnapshot(
 ): Promise<CredentialSnapshot | null> {
   const profileDir = dependencies.profileDir || getProfileDir
   const requestedPath = join(profileDir(profile), 'auth.json')
-  const requestedAuth = await readJsonFile(requestedPath)
+  let requestedAuth: JsonRecord
+  try {
+    requestedAuth = await readJsonFile(requestedPath)
+  } catch (error) {
+    if (isPermissionError(error)) {
+      throw missingCredentials(provider, `Cannot read Hermes auth file ${requestedPath}: permission denied`)
+    }
+    throw error
+  }
   if (authContainsProvider(requestedAuth, provider)) {
     return snapshotFromAuth(requestedPath, requestedAuth, provider, dependencies.env || process.env)
   }
 
   const defaultPath = join(profileDir('default'), 'auth.json')
   if (resolve(defaultPath) === resolve(requestedPath)) return null
-  const defaultAuth = await readJsonFile(defaultPath)
+  let defaultAuth: JsonRecord
+  try {
+    defaultAuth = await readJsonFile(defaultPath)
+  } catch (error) {
+    if (isPermissionError(error)) {
+      throw missingCredentials(provider, `Cannot read Hermes auth file ${defaultPath}: permission denied`)
+    }
+    throw error
+  }
   if (!authContainsProvider(defaultAuth, provider)) return null
   return snapshotFromAuth(defaultPath, defaultAuth, provider, dependencies.env || process.env)
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -74,6 +74,49 @@ describe('Studio authorized provider runtime credentials', () => {
       lastRefresh: new Date(NOW).toISOString(),
     })
     expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('treats an unreadable auth.json as an unauthenticated provider', async () => {
+    writeAuth({ providers: { 'xai-oauth': { access_token: 'hidden-token' } } })
+    chmodSync(hermesHome, 0o000)
+
+    try {
+      await expect(resolveAuthorizedProviderRuntimeCredentials({
+        profile: 'default',
+        provider: 'xai-oauth',
+      }, { profileDir })).rejects.toMatchObject({
+        code: 'AUTHORIZED_PROVIDER_AUTH_MISSING',
+        provider: 'xai-oauth',
+        reloginRequired: true,
+        message: expect.stringContaining('permission denied'),
+      })
+    } finally {
+      chmodSync(hermesHome, 0o700)
+    }
+  })
+
+  it('does not fall back to default credentials when a profile auth file is unreadable', async () => {
+    writeAuth({ providers: { 'xai-oauth': { access_token: 'default-token' } } })
+    const researchDir = join(hermesHome, 'profiles', 'research')
+    mkdirSync(researchDir, { recursive: true })
+    writeFileSync(join(researchDir, 'auth.json'), JSON.stringify({
+      providers: { 'xai-oauth': { access_token: 'research-token' } },
+    }))
+    chmodSync(researchDir, 0o000)
+
+    try {
+      await expect(resolveAuthorizedProviderRuntimeCredentials({
+        profile: 'research',
+        provider: 'xai-oauth',
+      }, { profileDir })).rejects.toMatchObject({
+        code: 'AUTHORIZED_PROVIDER_AUTH_MISSING',
+        provider: 'xai-oauth',
+        reloginRequired: true,
+        message: expect.stringContaining('permission denied'),
+      })
+    } finally {
+      chmodSync(researchDir, 0o700)
+    }
   })
 
   it('refreshes an expired xAI token in Studio and atomically updates provider and pool state', async () => {
