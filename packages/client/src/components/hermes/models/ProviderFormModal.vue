@@ -38,13 +38,14 @@ const copilotChecking = ref(false)
 
 const providerType = ref<'preset' | 'custom'>('preset')
 const selectedPreset = ref<string | null>(null)
+type ProviderApiModeSelection = ProviderApiMode | ''
 const formData = ref({
   name: '',
   base_url: '',
   api_key: '',
   model: '',
   context_length: null as number | null,
-  api_mode: 'chat_completions' as ProviderApiMode,
+  api_mode: '' as ProviderApiModeSelection,
 })
 
 const providerNameInputProps = {
@@ -76,7 +77,8 @@ const providerModelInputProps = {
 }
 
 const modelOptions = ref<Array<{ label: string; value: string }>>([])
-const apiModeOptions: Array<{ label: string; value: ProviderApiMode }> = [
+const apiModeOptions: Array<{ label: string; value: ProviderApiModeSelection }> = [
+  { label: 'Auto-detect (recommended)', value: '' },
   { label: 'chat_completions (/chat/completions)', value: 'chat_completions' },
   { label: 'codex_responses (/responses)', value: 'codex_responses' },
   { label: 'anthropic_messages (/messages)', value: 'anthropic_messages' },
@@ -218,7 +220,7 @@ watch(() => formData.value.model, (model) => {
 
 watch(providerType, () => {
   modelOptions.value = []
-  formData.value = { name: '', base_url: '', api_key: '', model: '', context_length: null, api_mode: 'chat_completions' }
+  formData.value = { name: '', base_url: '', api_key: '', model: '', context_length: null, api_mode: '' }
   selectedPreset.value = null
 })
 
@@ -339,7 +341,7 @@ async function handleSave() {
       api_key: formData.value.api_key.trim(),
       model: formData.value.model,
       context_length: contextLength,
-      api_mode: formData.value.api_mode,
+      api_mode: formData.value.api_mode || undefined,
       providerKey,
     })
     message.success(t('models.providerAdded'))
