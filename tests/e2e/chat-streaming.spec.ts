@@ -1713,3 +1713,38 @@ test('shows completed run usage above diff with matching colors and no disclosur
   await expect(card.last()).toContainText('Est. speed')
   await expect(card.last()).toContainText('≈ 2.4 tok/s')
 })
+
+test('keeps stored unclosed leading thinking text out of the reply after reload', async ({ page }) => {
+  const sessionId = 'unclosed-thinking-history'
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript((sid) => {
+    ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = {
+      [sid]: { session_id: sid, isWorking: false, events: [], messages: [{
+        id: 0, session_id: sid, role: 'user', content: 'Stored reasoning regression',
+        timestamp: 0, tool_call_id: null, tool_calls: null, tool_name: null,
+        token_count: null, finish_reason: null, reasoning: null,
+      }, {
+        id: 1, session_id: sid, role: 'assistant', content: '\n <thinking>synthetic reasoning only',
+        timestamp: 1, tool_call_id: null, tool_calls: null, tool_name: null,
+        token_count: null, finish_reason: 'stop', reasoning: null,
+      }] },
+    }
+  }, sessionId)
+  const api = await mockHermesApi(page, { sessions: [{
+    id: sessionId, source: 'api_server', model: 'test-model', title: 'Thinking history', preview: '',
+    started_at: 1, ended_at: 1, last_active: 1, message_count: 2, tool_call_count: 0,
+    input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
+    reasoning_tokens: 0, billing_provider: 'test-provider', estimated_cost_usd: 0,
+    actual_cost_usd: null, cost_status: 'none', workspace: null,
+  }] })
+  await mockChatSocket(page)
+  await page.goto('/#/hermes/chat')
+  for (const reload of [false, true]) {
+    if (reload) await page.reload()
+    await expect(page.locator('p').filter({ hasText: /^Stored reasoning regression$/ })).toBeVisible()
+    await expect(page.getByText('synthetic reasoning only', { exact: true })).toHaveCount(0)
+    await expect(page.locator('.message.assistant')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0)
+  }
+  expect(api.unexpectedRequests).toEqual([])
+})
