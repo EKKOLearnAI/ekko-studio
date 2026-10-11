@@ -100,7 +100,7 @@ export class NativeAcpTurn {
     else pending.resolve(message.result)
   }
 
-  async prompt(input: { cwd: string; text: string; images?: CodingAgentImageInput[]; nativeSessionId?: string; mcpServers: object[] }): Promise<string> {
+  async prompt(input: { cwd: string; text: string; images?: CodingAgentImageInput[]; nativeSessionId?: string; mcpServers: object[]; model?: string; reasoningEffort?: string }): Promise<string> {
     const initialized = await this.request('initialize', {
       protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'ekko-studio', version: '1.0.0' },
     })
@@ -124,6 +124,21 @@ export class NativeAcpTurn {
     this.sessionId = session?.sessionId || input.nativeSessionId
     if (!this.sessionId || typeof this.sessionId !== 'string') throw new Error('ACP returned no session ID')
     this.callbacks.session(this.sessionId)
+    let options = Array.isArray(session.configOptions) ? session.configOptions : []
+    if (input.model) {
+      const selector = options.find((option: any) => option.category === 'model' || option.id === 'model')
+      if (selector) {
+        const configured = await this.request('session/set_config_option', { sessionId: this.sessionId, configId: selector.id, value: input.model })
+        options = configured.configOptions || options
+      } else {
+        await this.request('session/set_model', { sessionId: this.sessionId, modelId: input.model })
+      }
+    }
+    if (input.reasoningEffort) {
+      const selector = options.find((option: any) => option.category === 'thought_level' || option.id === 'reasoning_effort')
+      if (!selector) throw new Error('This CLI does not expose a reasoning effort selector')
+      await this.request('session/set_config_option', { sessionId: this.sessionId, configId: selector.id, value: input.reasoningEffort })
+    }
     const prompt: any[] = input.text ? [{ type: 'text', text: input.text }] : []
     for (const image of input.images || []) prompt.push({
       type: 'image', mimeType: image.mediaType === 'image/jpg' ? 'image/jpeg' : image.mediaType || 'image/png',

@@ -11,6 +11,12 @@ const form: NewChatFormPreferences = {
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); vi.restoreAllMocks() })
 
 describe('new-chat form preferences', () => {
+  it('remembers native model and effort choices separately for each agent and scoped provider', () => {
+    const nativeModels = { codex: { model: 'native-codex', reasoningEffort: 'high' }, pi: { model: 'provider/native-pi', reasoningEffort: 'low' },
+      dsh: { model: '["native","model"]', reasoningEffort: 'off' } }
+    saveNewChatFormPreferences(106, { ...form, nativeModels })
+    expect(loadNewChatFormPreferences(106)).toEqual({ ...form, nativeModels })
+  })
   it('retains all form choices per account and keeps manually entered credentials out of persistent storage', () => {
     saveNewChatFormPreferences(101, form)
     expect(loadNewChatFormPreferences(101)).toEqual(form)

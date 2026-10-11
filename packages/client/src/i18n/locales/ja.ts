@@ -1161,6 +1161,8 @@ export default {
       options: {
         default: '既定 (config.yaml)',
         none: 'なし',
+        disabled: "オフ",
+        enabled: "オン",
         minimal: '最小',
         low: '低',
         medium: '中',
@@ -2746,6 +2748,9 @@ export default {
     providerPlaceholder: "例: custom:glm",
     modelScope: "モデル",
     modelPlaceholder: "モデルを選択",
+    nativeModelDefault: "エージェントの既定モデル",
+    nativeModelsFailed: "モデルを読み込めませんでした。既定モデルを使用するか更新してください。",
+    nativeModelsRefreshFailed: "更新に失敗しました。キャッシュ済みモデルを表示しています。",
     launchModeScope: "起動モード",
     launchModeGlobal: "グローバル設定",
     launchModeGlobalShort: "グローバル",

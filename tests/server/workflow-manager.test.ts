@@ -207,6 +207,12 @@ describe('workflow manager', () => {
     expect(normalizeWorkflowNode({ id: 'codex', type: 'agent', data: { agent: 'codex' } })?.data.agent).toBe('codex')
     expect(normalizeWorkflowNode({ id: 'cursor', type: 'agent', data: { agent: 'cursor' } })?.data.agent).toBe('cursor')
     expect(normalizeWorkflowNode({ id: 'cursor-global', type: 'agent', data: { agent: 'cursor', agentMode: 'scoped' } })?.data.agentMode).toBe('global')
+    expect(normalizeWorkflowNode({ id: 'legacy-cursor', type: 'agent', data: {
+      agent: 'cursor', agentMode: 'scoped', provider: 'openai', model: 'studio-model', reasoningEffort: 'high',
+    } })?.data).toMatchObject({ agentMode: 'global', model: '', reasoningEffort: 'default', provider: '', apiMode: '' })
+    expect(normalizeWorkflowNode({ id: 'native-cursor', type: 'agent', data: {
+      agent: 'cursor', agentMode: 'global', model: 'native-high', reasoningEffort: 'high',
+    } })?.data).toMatchObject({ agentMode: 'global', model: 'native-high', reasoningEffort: 'high', provider: '', apiMode: '' })
     expect(normalizeWorkflowNode({ id: 'legacy-mode', type: 'agent', data: { agent: 'codex' } })?.data.agentMode).toBe('scoped')
     expect(normalizeWorkflowNode({ id: 'global-mode', type: 'agent', data: { agent: 'codex', agentMode: 'global' } })?.data.agentMode).toBe('global')
     expect(() => normalizeWorkflowNode({ id: 'bad-global', type: 'agent', data: { agent: 'ekko-agent', agentMode: 'global' } }))
@@ -417,7 +423,46 @@ describe('workflow manager', () => {
     } finally { await manager.delete(workflow.id) }
   })
 
-  it('runs global Codex workflow nodes without injecting scoped model configuration', async () => {
+  it.each([false, true])('ignores legacy Global Model-mode fields when running a stored workflow (recursive=%s)', async recursive => {
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { createWorkflow } = await import('../../packages/server/src/modules/studio/repositories/workflow-store')
+    const { WorkflowManager, normalizeWorkflowNode } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    initAllStores()
+    chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
+    const manager = new WorkflowManager()
+    // Persist the old shape directly, as an upgrade or a scheduled run would find it.
+    const workflow = createWorkflow({ name: `Legacy Global ${Date.now()}`, profile: 'default',
+      nodes: [{ id: 'agent', type: 'agent', data: {
+        agent: 'claude-code', agentMode: 'global', provider: 'custom:openai',
+        model: 'gpt-5', apiMode: 'codex_responses', reasoningEffort: 'xhigh', input: 'work',
+      } }],
+      edges: recursive ? [{ id: 'retry', source: 'agent', target: 'agent', data: {
+        orchestration: { route: 'success', feedback: { maxIterations: 2 } },
+      } }] : [],
+    })
+    try {
+      const migrated = normalizeWorkflowNode(workflow.nodes[0])!
+      expect(migrated.data).toMatchObject({ agentMode: 'global', provider: '', model: '', apiMode: '', reasoningEffort: 'default' })
+      expect(normalizeWorkflowNode(migrated)).toEqual(migrated)
+      const result = await manager.runNow(workflow.id)
+      expect(result.run.status).toBe('completed')
+      expect(chatRunMock.runAndWait).toHaveBeenCalledTimes(recursive ? 2 : 1)
+      for (const [input] of chatRunMock.runAndWait.mock.calls) {
+        expect(input).toMatchObject({ coding_agent_id: 'claude-code', mode: 'global' })
+        expect(input.model).toBeUndefined()
+        expect(input.reasoning_effort).toBeUndefined()
+        expect(input).not.toHaveProperty('provider')
+        expect(input).not.toHaveProperty('apiMode')
+      }
+      for (const session of result.nodeSessions) {
+        expect(getDb()!.prepare('SELECT model, reasoning_effort FROM sessions WHERE id = ?').get(session.session_id))
+          .toEqual({ model: '', reasoning_effort: '' })
+      }
+    } finally { await manager.delete(workflow.id) }
+  })
+
+  it('persists and runs a global Codex workflow with its native model and effort', async () => {
     const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
     const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
@@ -429,7 +474,7 @@ describe('workflow manager', () => {
       profile: 'default',
       nodes: [{ id: 'agent', type: 'agent', data: {
         title: 'Global Codex', agent: 'codex', agentMode: 'global',
-        provider: 'must-not-leak', model: 'must-not-leak', apiMode: 'chat_completions',
+        provider: '', model: 'native-selected-model', apiMode: 'chat_completions',
         reasoningEffort: 'high', input: 'work',
       } }],
       edges: [],
@@ -445,22 +490,23 @@ describe('workflow manager', () => {
         one_shot_model: true,
       })
       expect(runInput).not.toHaveProperty('provider')
-      expect(runInput).not.toHaveProperty('model')
+      expect(runInput.model).toBe('native-selected-model')
       expect(runInput).not.toHaveProperty('apiMode')
-      expect(runInput).not.toHaveProperty('reasoning_effort')
+      expect(runInput.reasoning_effort).toBe('high')
       expect(result.nodeSessions[0]).toMatchObject({
         agent: 'codex',
         agent_mode: 'global',
         status: 'completed',
       })
-      expect(getDb()!.prepare(`SELECT source, agent, agent_mode, provider, model, api_mode FROM sessions WHERE id = ?`)
+      expect(getDb()!.prepare(`SELECT source, agent, agent_mode, provider, model, api_mode, reasoning_effort FROM sessions WHERE id = ?`)
         .get(result.nodeSessions[0]!.session_id)).toEqual({
           source: 'workflow',
           agent: 'codex',
           agent_mode: 'global',
           provider: 'global',
-          model: '',
+          model: 'native-selected-model',
           api_mode: '',
+          reasoning_effort: 'high',
         })
     } finally { await manager.delete(workflow.id) }
   })
@@ -477,7 +523,7 @@ describe('workflow manager', () => {
       profile: 'default',
       nodes: [{ id: 'agent', type: 'agent', data: {
         title: 'DSH preset', agent: 'dsh', agentMode: 'global',
-        provider: 'must-not-leak', model: 'must-not-leak', apiMode: 'chat_completions',
+        provider: '', model: 'native-selected-model', apiMode: 'chat_completions',
         reasoningEffort: 'high', agentPreset: 'minimal', input: 'work',
       } }],
       edges: [],
@@ -494,23 +540,53 @@ describe('workflow manager', () => {
         one_shot_model: true,
       })
       expect(runInput).not.toHaveProperty('provider')
-      expect(runInput).not.toHaveProperty('model')
+      expect(runInput.model).toBe('native-selected-model')
       expect(runInput).not.toHaveProperty('apiMode')
-      expect(runInput).not.toHaveProperty('reasoning_effort')
+      expect(runInput.reasoning_effort).toBe('high')
       expect(result.nodeSessions[0]).toMatchObject({
         agent: 'dsh',
         agent_mode: 'global',
         status: 'completed',
       })
-      expect(getDb()!.prepare(`SELECT source, agent, agent_mode, provider, model, api_mode FROM sessions WHERE id = ?`)
+      expect(getDb()!.prepare(`SELECT source, agent, agent_mode, provider, model, api_mode, reasoning_effort FROM sessions WHERE id = ?`)
         .get(result.nodeSessions[0]!.session_id)).toEqual({
           source: 'workflow',
           agent: 'dsh',
           agent_mode: 'global',
           provider: 'global',
-          model: '',
+          model: 'native-selected-model',
           api_mode: '',
+          reasoning_effort: 'high',
         })
+    } finally { await manager.delete(workflow.id) }
+  })
+
+  it.each([
+    { agent: 'zcode', model: 'glm-5-turbo', effort: 'enabled' },
+    { agent: 'kimi', model: 'kimi-for-coding', effort: 'off' },
+    { agent: 'kimi', model: 'kimi-for-coding', effort: 'on' },
+    { agent: 'kimi', model: '', effort: 'on' },
+  ])('retains native $agent model "$model" and effort $effort in every recursive iteration', async ({ agent, model, effort }) => {
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    initAllStores()
+    chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
+    const manager = new WorkflowManager()
+    const workflow = manager.create({ name: `Native loop ${Date.now()}`, profile: 'default',
+      nodes: [{ id: 'agent', type: 'agent', data: { agent, agentMode: 'global',
+        model, reasoningEffort: effort, input: 'work' } }],
+      edges: [{ id: 'retry', source: 'agent', target: 'agent', data: { orchestration: { route: 'success', feedback: { maxIterations: 2 } } } }],
+    })
+    try {
+      const result = await manager.runNow(workflow.id)
+      expect(result.run.status).toBe('completed')
+      expect(chatRunMock.runAndWait).toHaveBeenCalledTimes(2)
+      for (const [input] of chatRunMock.runAndWait.mock.calls) {
+        expect(input).toMatchObject({ coding_agent_id: agent, mode: 'global', reasoning_effort: effort })
+        expect(input.model).toBe(model || undefined)
+        expect(input).not.toHaveProperty('provider')
+        expect(input).not.toHaveProperty('apiMode')
+      }
     } finally { await manager.delete(workflow.id) }
   })
 

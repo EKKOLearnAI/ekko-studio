@@ -1508,8 +1508,8 @@ export const useChatStore = defineStore('chat', () => {
   const olderMessageLoads = new WeakMap<Session, object>()
   let activeSelectionSequence = 0
   const reasoningEffortWriteChains = new Map<string, Promise<boolean>>()
-  const reasoningEffortWriteTargets = new Map<string, string | undefined>()
-  const reasoningEffortConfirmedValues = new Map<string, string | undefined>()
+  const reasoningEffortWriteTargets = new Map<string, { effort: string | undefined; model?: string }>()
+  const reasoningEffortConfirmedValues = new Map<string, { effort: string | undefined; model?: string }>()
   const pushEnabledWriteChains = new Map<string, Promise<boolean>>()
   const pushEnabledWriteTargets = new Map<string, boolean>()
   const pushEnabledConfirmedValues = new Map<string, boolean>()
@@ -2334,7 +2334,7 @@ export const useChatStore = defineStore('chat', () => {
     const isGlobalCodingAgent = Boolean(codingAgentId) && codingAgentId !== 'ekko-agent' && options.codingAgentMode === 'global'
     const session = createSession({
       profile: options.profile,
-      model: isGlobalCodingAgent ? undefined : options.model || appStore.selectedModel || undefined,
+      model: isGlobalCodingAgent ? options.model || undefined : options.model || appStore.selectedModel || undefined,
       provider: isGlobalCodingAgent ? '' : options.provider || appStore.selectedProvider || '',
       source: storageSource,
       agent: options.agent,
@@ -2346,7 +2346,7 @@ export const useChatStore = defineStore('chat', () => {
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
       apiMode: options.apiMode,
-      reasoningEffort: isGlobalCodingAgent || options.provider === 'moa' ? undefined : options.reasoningEffort,
+      reasoningEffort: !isGlobalCodingAgent && options.provider === 'moa' ? undefined : options.reasoningEffort,
     })
     void switchSession(session.id)
     return session
@@ -3541,12 +3541,14 @@ export const useChatStore = defineStore('chat', () => {
     const targets = [sessions.value.find(s => s.id === sid), activeSession.value?.id === sid ? activeSession.value : null]
       .filter((session): session is Session => Boolean(session))
     for (const target of new Set(targets)) {
-      if (typeof evt.model === 'string') target.model = evt.model
+      const pendingReasoning = reasoningEffortWriteTargets.get(sid)
+      const matchesReasoningWrite = !pendingReasoning || pendingReasoning.effort === (evt.reasoning_effort || undefined)
+      if (typeof evt.model === 'string' && (!pendingReasoning?.model || matchesReasoningWrite)) target.model = evt.model
       if (typeof evt.provider === 'string') target.provider = evt.provider
       if (typeof evt.api_mode === 'string') target.apiMode = evt.api_mode as ProviderApiMode || undefined
       if (typeof evt.reasoning_effort === 'string') {
         const incomingEffort = evt.reasoning_effort || undefined
-        const pendingEffort = reasoningEffortWriteTargets.get(sid)
+        const pendingEffort = reasoningEffortWriteTargets.get(sid)?.effort
         if (!reasoningEffortWriteTargets.has(sid) || pendingEffort === incomingEffort) {
           target.reasoningEffort = incomingEffort
         }
@@ -3808,7 +3810,7 @@ export const useChatStore = defineStore('chat', () => {
         session_id: sid,
         profile: sessionProfile,
         model: isCodingAgentExecution
-          ? (codingAgentMode === 'global' ? undefined : sessionModel || undefined)
+          ? (codingAgentMode === 'global' ? activeSession.value?.model || undefined : sessionModel || undefined)
           : shouldSendInitialSessionConfig ? sessionModel || undefined : undefined,
         provider: isCodingAgentExecution
           ? (codingAgentMode === 'global' ? undefined : sessionProvider || undefined)
@@ -3833,13 +3835,8 @@ export const useChatStore = defineStore('chat', () => {
               apiMode: codingAgentApiMode,
             }
           : {}),
-        // Per-session reasoning effort override. Hermes bridge and scoped coding
-        // agents both consume this when the selected provider/API supports it.
-        // Global coding-agent mode uses the user's native CLI config, so avoid
-        // injecting a per-session override there.
-        reasoning_effort: isCodingAgentExecution && codingAgentMode === 'global'
-          ? undefined
-          : activeSession.value?.reasoningEffort || undefined,
+        // An absent override preserves the agent's native reasoning setting.
+        reasoning_effort: activeSession.value?.reasoningEffort || undefined,
         push_enabled: activeSession.value?.pushEnabled !== false,
       }
       if (shouldSendInitialSessionConfig && activeSession.value) {
@@ -5500,32 +5497,41 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function setSessionReasoningEffort(sessionId: string, effort: string): Promise<boolean> {
+  async function setSessionReasoningEffort(sessionId: string, effort: string, nativeModel?: string): Promise<boolean> {
     const target = sessions.value.find(s => s.id === sessionId)
     const activeTarget = activeSession.value?.id === sessionId ? activeSession.value : null
     const session = target || activeTarget
     if (!session) return false
 
     const nextEffort = effort || undefined
-    const previousEffort = session.reasoningEffort
+    const previous = { effort: session.reasoningEffort, model: session.model }
+    const next = { effort: nextEffort, model: nativeModel ?? session.model }
+    const writeTarget = { effort: nextEffort, model: nativeModel }
     if (target) target.reasoningEffort = nextEffort
     if (activeTarget) activeTarget.reasoningEffort = nextEffort
+    if (nativeModel !== undefined) {
+      if (target) target.model = nativeModel
+      if (activeTarget) activeTarget.model = nativeModel
+    }
     if (session.isLocalOnly) return true
 
     if (!reasoningEffortWriteChains.has(sessionId)) {
-      reasoningEffortConfirmedValues.set(sessionId, previousEffort)
+      reasoningEffortConfirmedValues.set(sessionId, previous)
     }
-    reasoningEffortWriteTargets.set(sessionId, nextEffort)
+    reasoningEffortWriteTargets.set(sessionId, writeTarget)
     const previousWrite = reasoningEffortWriteChains.get(sessionId) || Promise.resolve(true)
     const write: Promise<boolean> = previousWrite
       .catch(() => false)
-      .then(() => persistSessionReasoningEffort(sessionId, effort))
+      .then(() => nativeModel === undefined ? persistSessionReasoningEffort(sessionId, effort) : persistSessionReasoningEffort(sessionId, effort, nativeModel))
       .then((ok) => {
-        if (ok) reasoningEffortConfirmedValues.set(sessionId, nextEffort)
-        if (!ok && reasoningEffortWriteTargets.get(sessionId) === nextEffort) {
-          const confirmedEffort = reasoningEffortConfirmedValues.get(sessionId)
-          if (target) target.reasoningEffort = confirmedEffort
-          if (activeTarget) activeTarget.reasoningEffort = confirmedEffort
+        if (ok) reasoningEffortConfirmedValues.set(sessionId, next)
+        if (!ok && reasoningEffortWriteTargets.get(sessionId) === writeTarget) {
+          const confirmed = reasoningEffortConfirmedValues.get(sessionId) || previous
+          for (const session of new Set([target, activeTarget])) {
+            if (!session) continue
+            session.reasoningEffort = confirmed.effort
+            if (nativeModel !== undefined) session.model = confirmed.model
+          }
         }
         return ok
       })

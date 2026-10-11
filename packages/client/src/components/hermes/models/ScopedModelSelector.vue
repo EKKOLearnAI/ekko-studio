@@ -10,6 +10,7 @@ const props = defineProps<{
   provider: string
   model: string
   groups: AvailableModelGroup[]
+  allowMoa?: boolean
   disabled?: boolean
 }>()
 
@@ -48,9 +49,10 @@ function handleSelect(selection: { provider: string; model: string; apiMode?: Pr
 </script>
 
 <template>
-  <div class="workflow-model-selector">
+  <div class="scoped-model-selector">
     <ModelCascader
       :groups="groupsWithCustom"
+      :allow-moa="props.allowMoa"
       :provider="props.provider"
       :model="props.model"
       :disabled="props.disabled"
@@ -71,7 +73,7 @@ function handleSelect(selection: { provider: string; model: string; apiMode?: Pr
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
-.workflow-model-selector {
+.scoped-model-selector {
   min-width: 0;
 }
 

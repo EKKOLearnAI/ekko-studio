@@ -94,6 +94,45 @@ describe('chat store per-session reasoning effort', () => {
     expect(sessionsApi.setSessionReasoningEffort).toHaveBeenCalledWith('s1', 'low')
   })
 
+  it('persists and sends a paired global model variant when changing effort', async () => {
+    const store = useChatStore()
+    const session = store.newChat({ codingAgentId: 'cursor', codingAgentMode: 'global', model: 'native-high', reasoningEffort: 'high' })
+    session.isLocalOnly = false
+    await store.setSessionReasoningEffort(session.id, 'low', 'native-low')
+    expect(sessionsApi.setSessionReasoningEffort).toHaveBeenCalledWith(session.id, 'low', 'native-low')
+    await store.sendMessage('Continue with low effort')
+    expect(chatApi.startRunViaSocket.mock.calls.at(-1)?.[0]).toMatchObject({ model: 'native-low', reasoning_effort: 'low' })
+  })
+
+  it('restores both model and effort after a failed paired settings write', async () => {
+    const store = useChatStore()
+    const session = makeSession('cursor')
+    session.model = 'native-high'
+    session.reasoningEffort = 'high'
+    store.sessions = [session]
+    sessionsApi.setSessionReasoningEffort.mockResolvedValueOnce(false)
+    await expect(store.setSessionReasoningEffort(session.id, 'low', 'native-low')).resolves.toBe(false)
+    expect(session).toMatchObject({ model: 'native-high', reasoningEffort: 'high' })
+  })
+
+  it('keeps the latest native variant when an earlier effort broadcast arrives', async () => {
+    let finishWrite: ((value: boolean) => void) | undefined
+    sessionsApi.setSessionReasoningEffort.mockImplementationOnce(() => new Promise<boolean>(resolve => { finishWrite = resolve }))
+    const store = useChatStore()
+    const session = store.newChat({ codingAgentId: 'cursor', codingAgentMode: 'global', model: 'native-high', reasoningEffort: 'high' })
+    session.isLocalOnly = false
+    await store.sendMessage('Start')
+    const onEvent = chatApi.startRunViaSocket.mock.calls.at(-1)?.[1]
+    const first = store.setSessionReasoningEffort(session.id, 'low', 'native-low')
+    const second = store.setSessionReasoningEffort(session.id, 'max', 'native-max')
+    await vi.waitFor(() => expect(finishWrite).toBeTypeOf('function'))
+    onEvent?.({ event: 'session.settings.updated', session_id: session.id, model: 'native-low', reasoning_effort: 'low' })
+    expect(session).toMatchObject({ model: 'native-max', reasoningEffort: 'max' })
+    finishWrite?.(true)
+    await Promise.all([first, second])
+    expect(session).toMatchObject({ model: 'native-max', reasoningEffort: 'max' })
+  })
+
   it('carries a draft effort into the new session first run without a settings write', async () => {
     const store = useChatStore()
     const session = store.newChat({ model: 'draft-model', provider: 'draft-provider', reasoningEffort: 'max' })
@@ -104,12 +143,33 @@ describe('chat store per-session reasoning effort', () => {
     expect(sessionsApi.setSessionReasoningEffort).not.toHaveBeenCalled()
   })
 
-  it.each([
-    { provider: 'moa', model: 'ensemble' },
-    { codingAgentId: 'codex' as const, codingAgentMode: 'global' as const },
-  ])('does not carry a draft effort into MoA or global CLI configuration: %j', options => {
-    const session = useChatStore().newChat({ ...options, reasoningEffort: 'max' })
+  it('does not carry a draft effort into MoA', () => {
+    const session = useChatStore().newChat({ provider: 'moa', model: 'ensemble', reasoningEffort: 'max' })
     expect(session.reasoningEffort).toBeUndefined()
+  })
+
+  it('sends native model and effort overrides in global mode without Studio provider credentials', async () => {
+    const store = useChatStore()
+    const session = store.newChat({ codingAgentId: 'codex', codingAgentMode: 'global', model: 'native-model', reasoningEffort: 'high' })
+    await store.sendMessage('Use native settings')
+    expect(chatApi.startRunViaSocket.mock.calls.at(-1)?.[0]).toMatchObject({
+      model: 'native-model', reasoning_effort: 'high', mode: 'global', coding_agent_id: 'codex',
+    })
+    const payload = chatApi.startRunViaSocket.mock.calls.at(-1)?.[0]
+    expect(payload.provider).toBeUndefined()
+    expect(payload.baseUrl).toBeUndefined()
+    expect(payload.apiKey).toBeUndefined()
+    expect(payload.apiMode).toBeUndefined()
+    expect(session.reasoningEffort).toBe('high')
+  })
+
+  it('keeps native defaults when no global override was chosen', async () => {
+    const store = useChatStore()
+    store.newChat({ codingAgentId: 'codex', codingAgentMode: 'global' })
+    await store.sendMessage('Use agent defaults')
+    const payload = chatApi.startRunViaSocket.mock.calls.at(-1)?.[0]
+    expect(payload.model).toBeUndefined()
+    expect(payload.reasoning_effort).toBeUndefined()
   })
 
   it('persists the default value as an empty server setting', async () => {

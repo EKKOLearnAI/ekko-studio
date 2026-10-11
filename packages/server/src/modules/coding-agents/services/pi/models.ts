@@ -1,15 +1,17 @@
-import { lines, modelId, requireModelOutput, tokenCount } from '../models/text'
+import { cliReasoningEfforts, lines, modelId, requireModelOutput, tokenCount } from '../models/text'
 import type { ModelDiscoveryAdapter } from '../models/types'
 
 export const piModels: ModelDiscoveryAdapter = {
   source: 'cli', scope: 'available',
   async discover(context) {
     const { stdout } = await context.run(['--list-models'])
+    const reasoningEfforts = await cliReasoningEfforts(context, '--thinking')
     const models = lines(stdout).flatMap(line => {
-      const [provider, model, window, output, , images] = line.split(/\s+/)
+      const [provider, model, window, output, thinking, images] = line.split(/\s+/)
       if (!modelId(provider) || !modelId(model || '') || !tokenCount(window || '') || !tokenCount(output || '')) return []
       return [{ id: `${provider}/${model}`, name: model, provider, contextWindow: tokenCount(window), maxOutputTokens: tokenCount(output),
         inputModalities: images === 'yes' ? ['text', 'image'] : ['text'],
+        ...(thinking === 'yes' && reasoningEfforts.length ? { reasoningEfforts } : {}),
       }]
     })
     requireModelOutput(models, stdout)

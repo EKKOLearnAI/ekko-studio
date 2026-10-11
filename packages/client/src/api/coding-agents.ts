@@ -77,6 +77,9 @@ export interface CodingAgentModel {
   contextWindow?: number
   maxOutputTokens?: number
   reasoningEfforts?: string[]
+  modelFamily?: string
+  modelFamilyName?: string
+  reasoningEffort?: string
   inputModalities?: string[]
 }
 

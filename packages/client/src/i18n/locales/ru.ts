@@ -632,6 +632,9 @@ export default {
   },
 
   codingAgents: {
+    nativeModelDefault: 'Модель агента по умолчанию',
+    nativeModelsFailed: 'Не удалось загрузить модели. Используйте модель по умолчанию или обновите список.',
+    nativeModelsRefreshFailed: "Не удалось обновить. Показаны модели из кеша.",
     launchModeGlobalShort: "Общая",
     nativeUsage: "Использование: вход {inputTokens}, выход {outputTokens}, чтение кэша {cacheReadTokens}, запись кэша {cacheWriteTokens}, всего {totalTokens} токенов.",
     nativeUsageUnknown: "Использование неизвестно. Для этой сессии ещё не получены данные о токенах от CLI.",
@@ -1077,6 +1080,8 @@ export default {
       options: {
         default: 'По умолчанию (config.yaml)',
         none: 'Нет',
+        disabled: "Выключено",
+        enabled: "Включено",
         minimal: 'Минимум',
         low: 'Низкая',
         medium: 'Средняя',

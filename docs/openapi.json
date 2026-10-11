@@ -20462,10 +20462,13 @@
             "description": "Success"
           },
           "400": {
-            "$ref": "#/components/responses/BadRequest"
+            "description": "Invalid effort, mode or native variant/family"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "description": "Native catalog unavailable for validating the paired model change"
           }
         },
         "parameters": [
@@ -20484,8 +20487,28 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {},
-                "additionalProperties": true
+                "required": [
+                  "reasoningEffort"
+                ],
+                "properties": {
+                  "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                      "",
+                      "none",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "Optional literal effort-variant ID for global Cursor/Antigravity sessions. Validated against the native catalog and current family; persisted atomically with effort."
+                  }
+                }
               }
             }
           }
@@ -25712,6 +25735,17 @@
                                   "items": {
                                     "type": "string"
                                   }
+                                },
+                                "modelFamily": {
+                                  "type": "string",
+                                  "description": "Grouping key for native effort variants; never send it as a model ID."
+                                },
+                                "modelFamilyName": {
+                                  "type": "string"
+                                },
+                                "reasoningEffort": {
+                                  "type": "string",
+                                  "description": "Fixed effort encoded by this literal native model ID."
                                 },
                                 "inputModalities": {
                                   "type": "array",

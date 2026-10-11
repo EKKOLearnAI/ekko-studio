@@ -14,6 +14,10 @@ export interface CodingAgentModel {
   contextWindow?: number
   maxOutputTokens?: number
   reasoningEfforts?: string[]
+  /** Family metadata never replaces the literal native id. */
+  modelFamily?: string
+  modelFamilyName?: string
+  reasoningEffort?: string
   inputModalities?: string[]
 }
 

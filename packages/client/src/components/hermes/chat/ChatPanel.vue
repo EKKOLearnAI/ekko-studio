@@ -3,6 +3,7 @@ import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-cata
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { useCodingAgentModels } from '@/composables/useCodingAgentModels'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
 import { AGENT_OPTIONS } from "@/utils/agent-options"
@@ -22,6 +23,7 @@ import {
 } from "@/api/studio/sessions";
 import type { AvailableModelGroup } from "@/api/hermes/system";
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
+import { nativeCatalogModel, nativeModelFamilies, nativeModelPickerId, nativeModelEffortChoices, selectNativeModelEffort } from "@/utils/native-model-families";
 import { agentInstallationState, fetchAgentAvailabilitySnapshot, type AgentAvailabilitySnapshot } from "@/api/agent-status";
 import { useChatStore, type Session, type Attachment } from "@/stores/hermes/chat";
 import { useAppStore } from "@/stores/hermes/app";
@@ -808,7 +810,10 @@ const activeSessionUsesGlobalCodingAgentConfig = computed(() => {
 
 const activeSessionModelLabel = computed(() => {
   const session = chatStore.activeSession;
-  if (activeSessionUsesGlobalCodingAgentConfig.value) return t("codingAgents.launchModeGlobal");
+  if (activeSessionUsesGlobalCodingAgentConfig.value) {
+    const model = nativeCatalogModel(activeSessionNativeCatalog.value?.models, session?.model || "");
+    return session?.model ? model?.modelFamilyName || session.model : t("codingAgents.nativeModelDefault");
+  }
   if (!session?.model) return t("models.selectModel");
   if (session.provider === "moa") return `MoA · ${session.model}`;
   return appStore.displayModelName(session.model, session.provider);
@@ -826,7 +831,7 @@ const showNewChatPresetMode = ref(false);
 const newChatComposerRevision = ref(0);
 const newChatPreviousToolPanel = ref(false);
 const newChatModelLabel = computed(() => isNewChatGlobalCodingAgent.value
-  ? t("codingAgents.launchModeGlobal")
+  ? nativeModelDisplayName(newChatNativeSelection.value.model)
   : newChatModel.value ? appStore.displayModelName(newChatModel.value, newChatProvider.value)
     : newChatHasNoModels.value ? t("models.noModels") : t("models.selectModel"));
 
@@ -878,6 +883,7 @@ const newChatProvider = ref<string>("");
 const newChatModel = ref<string>("");
 const newChatCustomModel = ref(false);
 const newChatReasoningEffort = ref("");
+const newChatNativeSelections = ref<Record<string, { model: string; reasoningEffort: string }>>({});
 const newChatBaseUrl = ref<string>("");
 const newChatApiKey = ref<string>("");
 const newChatApiMode = ref<CodingAgentApiMode>("codex_responses");
@@ -906,12 +912,14 @@ function persistNewChatForm() {
     apiMode: newChatApiMode.value, reasoningEffort: newChatReasoningEffort.value,
     workspace: newChatWorkspace.value, categoryId: newChatCategoryId.value,
     agentPreset: newChatAgentPreset.value, baseUrl: newChatBaseUrl.value, apiKey: newChatApiKey.value,
+    nativeModels: newChatNativeSelections.value,
   });
 }
 
 watch([newChatAgent, newChatAgentMode, newChatProfile, newChatProvider, newChatModel, newChatCustomModel,
   newChatApiMode, newChatReasoningEffort, newChatWorkspace, newChatCategoryId, newChatAgentPreset, newChatBaseUrl, newChatApiKey],
   () => { if (showNewChatPage.value) persistNewChatForm(); }, { flush: "post" });
+watch(newChatNativeSelections, () => { if (showNewChatPage.value) persistNewChatForm(); }, { deep: true });
 
 const newChatCategoryOptions = computed(() => [
   { label: t("chat.uncategorized"), value: 0 },
@@ -1108,10 +1116,53 @@ const effectiveNewChatAgentMode = computed(() =>
 const isNewChatGlobalCodingAgent = computed(() =>
   isNewChatCodingAgent.value && effectiveNewChatAgentMode.value === "global",
 );
+const { catalog: newChatNativeCatalog, loading: newChatNativeModelsLoading, refreshFailed: newChatNativeModelsRefreshFailed, reload: reloadNewChatNativeModels } = useCodingAgentModels(
+  () => newChatAgent.value as CodingAgentId,
+  () => showNewChatPage.value && isNewChatGlobalCodingAgent.value,
+);
+const newChatNativeSelection = computed(() => newChatNativeSelections.value[newChatAgent.value] || { model: "", reasoningEffort: "" });
+const selectedNewChatNativeModel = computed(() => nativeCatalogModel(newChatNativeCatalog.value?.models, newChatNativeSelection.value.model));
+const newChatNativeReasoningEfforts = computed(() => selectedNewChatNativeModel.value?.reasoningEfforts || []);
+const newChatNativeEffortChoices = computed(() => nativeModelEffortChoices(newChatNativeCatalog.value?.models, newChatNativeSelection.value.model));
+const { catalog: activeSessionNativeCatalog } = useCodingAgentModels(
+  () => (chatStore.activeSession?.codingAgentId || chatStore.activeSession?.agent || "codex") as CodingAgentId,
+  () => !showNewChatPage.value && activeSessionUsesGlobalCodingAgentConfig.value,
+);
+const activeSessionNativeReasoningEfforts = computed(() => {
+  return nativeCatalogModel(activeSessionNativeCatalog.value?.models, chatStore.activeSession?.model || "")?.reasoningEfforts;
+});
+const activeSessionNativeEffortChoices = computed(() => nativeModelEffortChoices(activeSessionNativeCatalog.value?.models, chatStore.activeSession?.model || ""));
+const newChatComposerReasoningEffort = computed({
+  get: () => isNewChatGlobalCodingAgent.value ? newChatNativeSelection.value.reasoningEffort || selectedNewChatNativeModel.value?.reasoningEffort || "" : newChatReasoningEffort.value,
+  set: (value: string) => {
+    if (isNewChatGlobalCodingAgent.value) newChatNativeSelections.value[newChatAgent.value] = selectNativeModelEffort(newChatNativeCatalog.value?.models, newChatNativeSelection.value.model, value);
+    else newChatReasoningEffort.value = value;
+  },
+});
+function nativeModelDisplayName(model: string) {
+  const entry = nativeCatalogModel(newChatNativeCatalog.value?.models, model);
+  return model ? entry?.modelFamilyName || entry?.name || model : t("codingAgents.nativeModelDefault");
+}
+const newChatNativeModelGroups = computed<AvailableModelGroup[]>(() => [{
+  provider: `native:${newChatAgent.value}`, label: newChatNativeCatalog.value?.name || newChatAgent.value,
+  base_url: "", api_key: "", models: ["", ...new Set(nativeModelFamilies(newChatNativeCatalog.value?.models).map(model => model.id))],
+}]);
+watch(newChatNativeCatalog, catalog => {
+  if (!catalog || !["ready", "empty"].includes(catalog.status)) return;
+  const selection = newChatNativeSelection.value;
+  if (selection.model && !catalog.models.some(model => model.id === selection.model && !model.hidden)) {
+    newChatNativeSelections.value[newChatAgent.value] = { model: "", reasoningEffort: "" };
+  } else if (selection.reasoningEffort && selectedNewChatNativeModel.value?.reasoningEfforts
+    && !newChatNativeReasoningEfforts.value.includes(selection.reasoningEffort)) {
+    newChatNativeSelections.value[newChatAgent.value] = { ...selection, reasoningEffort: "" };
+  } else if (selection.model && selectedNewChatNativeModel.value?.modelFamily) {
+    newChatNativeSelections.value[newChatAgent.value] = selectNativeModelEffort(catalog.models, selection.model, selection.reasoningEffort || selectedNewChatNativeModel.value.reasoningEffort || "");
+  }
+});
 const newChatDraftConfig = computed(() => ({
   profile: newChatProfile.value,
-  provider: newChatProvider.value,
-  model: newChatModel.value,
+  provider: isNewChatGlobalCodingAgent.value ? "" : newChatProvider.value,
+  model: isNewChatGlobalCodingAgent.value ? newChatNativeSelection.value.model : newChatModel.value,
   codingAgentMode: isNewChatCodingAgent.value ? effectiveNewChatAgentMode.value : undefined,
 }));
 const newChatModelCatalogKnown = computed(() => appStore.profileModelGroups.some(entry => entry.profile === newChatProfile.value));
@@ -1279,6 +1330,7 @@ async function openNewChatPage() {
   newChatAgentMode.value = saved?.mode || "scoped";
   newChatAgentPreset.value = saved?.agentPreset;
   newChatReasoningEffort.value = saved?.reasoningEffort || "";
+  newChatNativeSelections.value = saved?.nativeModels || {};
   newChatPresetReady.value = false;
   newChatCategoryId.value = saved?.categoryId ?? null;
   newChatProfile.value = saved?.profile || profilesStore.activeProfileName
@@ -1378,7 +1430,7 @@ async function submitNewChat(text: string, attachments?: Attachment[]): Promise<
     const session = chatStore.newChat({
       profile: newChatProfile.value,
       provider: isGlobalCodingAgent ? undefined : newChatProvider.value,
-      model: isGlobalCodingAgent ? undefined : newChatModel.value,
+      model: isGlobalCodingAgent ? newChatNativeSelection.value.model || undefined : newChatModel.value,
       source,
       agent,
       codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value,
@@ -1389,7 +1441,8 @@ async function submitNewChat(text: string, attachments?: Attachment[]): Promise<
       baseUrl: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
       apiKey: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
       apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined,
-      reasoningEffort: !isGlobalCodingAgent && newChatProvider.value !== "moa" ? newChatReasoningEffort.value : undefined,
+      reasoningEffort: isGlobalCodingAgent ? newChatComposerReasoningEffort.value || undefined
+        : newChatProvider.value !== "moa" ? newChatReasoningEffort.value : undefined,
     });
     // Send the first message before changing the route so it belongs to this session.
     void chatStore.sendMessage(text, attachments);
@@ -2207,7 +2260,15 @@ async function openSessionModelPicker(sessionId: string | null, event?: MouseEve
   sessionModelTrigger.value = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   const isDraft = sessionId === null;
   const draftSequence = newChatOptionsLoadSequence;
-  if (isDraft && (!showNewChatPage.value || isNewChatGlobalCodingAgent.value || newChatLoading.value)) return;
+  if (isDraft && (!showNewChatPage.value || newChatLoading.value)) return;
+  if (isDraft && isNewChatGlobalCodingAgent.value) {
+    sessionModelSessionId.value = null;
+    sessionModelIsDraft.value = true;
+    sessionModelValue.value = nativeModelPickerId(newChatNativeCatalog.value?.models, newChatNativeSelection.value.model);
+    sessionModelProvider.value = `native:${newChatAgent.value}`;
+    showSessionModelPicker.value = true;
+    return;
+  }
   const requestedSession =
     chatStore.sessions.find((s) => s.id === sessionId) ||
     (chatStore.activeSession?.id === sessionId ? chatStore.activeSession : undefined);
@@ -2269,6 +2330,15 @@ async function applySessionModelSwitch(model: string, provider: string, apiMode?
   if (sessionModelSwitching.value) return;
   if (sessionModelIsDraft.value) {
     if (!showNewChatPage.value || newChatLoading.value) return;
+    if (isNewChatGlobalCodingAgent.value) {
+      if (model && !newChatNativeCatalog.value?.models.some(entry => entry.id === model && !entry.hidden)) return;
+      const sameFamily = model === nativeModelPickerId(newChatNativeCatalog.value?.models, newChatNativeSelection.value.model);
+      newChatNativeSelections.value[newChatAgent.value] = model && sameFamily
+        ? selectNativeModelEffort(newChatNativeCatalog.value?.models, model, newChatComposerReasoningEffort.value)
+        : { model, reasoningEffort: model ? nativeCatalogModel(newChatNativeCatalog.value?.models, model)?.reasoningEffort || "" : "" };
+      showSessionModelPicker.value = false;
+      return;
+    }
     if (newChatProvider.value !== provider) {
       newChatBaseUrl.value = "";
       newChatApiKey.value = "";
@@ -2840,7 +2910,9 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
 
     <ModelCascader
       v-model:show="showSessionModelPicker"
-      :groups="sessionModelAllGroups"
+      :groups="sessionModelIsDraft && isNewChatGlobalCodingAgent ? newChatNativeModelGroups : sessionModelAllGroups"
+      :custom-models="sessionModelIsDraft && isNewChatGlobalCodingAgent ? {} : undefined"
+      :display-name="sessionModelIsDraft && isNewChatGlobalCodingAgent ? nativeModelDisplayName : undefined"
       :allow-moa="isSessionModelHermes"
       :provider="sessionModelProvider"
       :model="sessionModelValue"
@@ -2852,6 +2924,15 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
     >
       <template #empty>
         <NButton v-if="sessionModelIsDraft" size="small" quaternary @click="openNewChatModelSettings">{{ t('models.noProviderPromptAction') }}</NButton>
+      </template>
+      <template v-if="sessionModelIsDraft && isNewChatGlobalCodingAgent" #footer>
+        <div class="native-model-catalog-status" :aria-busy="newChatNativeModelsLoading">
+          <span v-if="newChatNativeModelsLoading && !newChatNativeCatalog">{{ t('common.loading') }}</span>
+          <span v-else-if="newChatNativeModelsRefreshFailed && newChatNativeCatalog && ['ready', 'empty'].includes(newChatNativeCatalog.status)">{{ t('codingAgents.nativeModelsRefreshFailed') }}</span>
+          <span v-else-if="!newChatNativeModelsLoading && (!newChatNativeCatalog || !['ready', 'empty'].includes(newChatNativeCatalog.status))">{{ t('codingAgents.nativeModelsFailed') }}</span>
+          <span v-else-if="newChatNativeCatalog?.status === 'empty'">{{ t('models.noModels') }}</span>
+          <NButton size="small" quaternary :aria-label="t('codingAgents.refresh')" :loading="newChatNativeModelsLoading" :disabled="newChatNativeModelsLoading" @click="reloadNewChatNativeModels(true)">{{ t('codingAgents.refresh') }}</NButton>
+        </div>
       </template>
     </ModelCascader>
 
@@ -3051,8 +3132,10 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
                   </div>
                 </div>
                 <ChatInput :key="newChatComposerRevision" ref="chatInputRef" draft :send-disabled="!canConfirmNewChat"
-                  :draft-config="newChatDraftConfig" v-model:reasoning-effort="newChatReasoningEffort"
-                  :submit="submitNewChat" :model-label="newChatModelLabel" :model-disabled="isNewChatGlobalCodingAgent || newChatLoading || newChatModelsLoading"
+                  :draft-config="newChatDraftConfig" v-model:reasoning-effort="newChatComposerReasoningEffort"
+                  :native-reasoning-efforts="isNewChatGlobalCodingAgent ? newChatNativeReasoningEfforts : undefined"
+                  :native-effort-choices="isNewChatGlobalCodingAgent ? newChatNativeEffortChoices : undefined"
+                  :submit="submitNewChat" :model-label="newChatModelLabel" :model-disabled="newChatLoading || (!isNewChatGlobalCodingAgent && newChatModelsLoading)"
                   :model-expanded="showSessionModelPicker && sessionModelIsDraft"
                   :persist-draft="false" :initial-text="initialComposerText" @model-click="openSessionModelPicker(null, $event)" />
                 <button v-if="newChatHasNoModels" type="button" class="new-chat-config-hint" @click="openNewChatModelSettings">
@@ -3073,6 +3156,8 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
               ref="chatInputRef"
               :model-label="activeSessionModelLabel"
               :model-disabled="activeSessionUsesGlobalCodingAgentConfig"
+              :native-reasoning-efforts="activeSessionUsesGlobalCodingAgentConfig ? activeSessionNativeReasoningEfforts : undefined"
+              :native-effort-choices="activeSessionUsesGlobalCodingAgentConfig ? activeSessionNativeEffortChoices : undefined"
               :model-expanded="showSessionModelPicker && !sessionModelIsDraft && sessionModelSessionId === chatStore.activeSessionId"
               :initial-text="initialComposerText"
               :persist-draft="composerPersistDraft"
@@ -3215,6 +3300,17 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
+
+.native-model-catalog-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 14px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  > span { flex: 1; }
+}
 
 .chat-panel {
   display: flex;

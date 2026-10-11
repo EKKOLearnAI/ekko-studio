@@ -1161,6 +1161,8 @@ export default {
       options: {
         default: '기본값 (config.yaml)',
         none: '없음',
+        disabled: "꺼짐",
+        enabled: "켜짐",
         minimal: '최소',
         low: '낮음',
         medium: '중간',
@@ -2746,6 +2748,9 @@ export default {
     providerPlaceholder: "예: custom:glm",
     modelScope: "모델",
     modelPlaceholder: "모델 선택",
+    nativeModelDefault: "에이전트 기본 모델",
+    nativeModelsFailed: "모델을 불러오지 못했습니다. 기본 모델을 사용하거나 새로고침하세요.",
+    nativeModelsRefreshFailed: "새로고침에 실패했습니다. 캐시된 모델을 표시합니다.",
     launchModeScope: "시작 모드",
     launchModeGlobal: "전역 설정",
     launchModeGlobalShort: "전역",

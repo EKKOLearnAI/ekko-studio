@@ -13,6 +13,7 @@ import { grokModels } from '../../packages/server/src/modules/coding-agents/serv
 import { openCodeModels } from '../../packages/server/src/modules/coding-agents/services/opencode/models'
 import { cursorModels } from '../../packages/server/src/modules/coding-agents/services/cursor/models'
 import { antigravityModels } from '../../packages/server/src/modules/coding-agents/services/antigravity/models'
+import { nativeModelVariant, validateNativeModelEffort } from '../../packages/server/src/modules/coding-agents/services/models/variants'
 import { qoderModels } from '../../packages/server/src/modules/coding-agents/services/qoder/models'
 import { copilotModels } from '../../packages/server/src/modules/coding-agents/services/copilot/models'
 import { zcodeModels } from '../../packages/server/src/modules/coding-agents/services/zcode/models'
@@ -28,10 +29,93 @@ async function home() {
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(homes.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 
 function context(stdout = ''): ModelDiscoveryContext {
-  return { home: tmpdir(), cwd: tmpdir(), env: {}, run: vi.fn(async () => ({ stdout, stderr: '' })), rpc: vi.fn() }
+  return { home: tmpdir(), cwd: tmpdir(), env: {}, run: vi.fn(async () => ({ stdout, stderr: '' })),
+    rpc: vi.fn().mockRejectedValue(new ModelDiscoveryError('unsupported')) }
 }
 
 describe('native model directory adapters', () => {
+  it('groups Antigravity effort variants without advertising CLI-wide choices', async () => {
+    const ctx = context('gemini-3.1-pro-high  Gemini 3.1 Pro (High)\ngemini-3.1-pro-low  Gemini 3.1 Pro (Low)\ngpt-oss-120b-medium  GPT-OSS 120B (Medium)\nclaude-opus-4-6-thinking  Claude Opus 4.6 (Thinking)\n')
+    const models = normalizeModels((await antigravityModels.discover(ctx)).models)
+    expect(models[0]).toMatchObject({ id: 'gemini-3.1-pro-high', modelFamily: 'gemini-3.1-pro', modelFamilyName: 'Gemini 3.1 Pro', reasoningEffort: 'high', reasoningEfforts: ['low', 'high'] })
+    expect(models[1]).toMatchObject({ reasoningEffort: 'low', reasoningEfforts: ['low', 'high'] })
+    expect(models[2]).toMatchObject({ modelFamilyName: 'GPT-OSS 120B', reasoningEfforts: ['medium'] })
+    expect(models[3].reasoningEfforts).toBeUndefined()
+    expect(ctx.run).toHaveBeenCalledTimes(1)
+    expect(ctx.run).toHaveBeenCalledWith(['models'])
+    expect(() => validateNativeModelEffort(models, models[0].id, models[1].id, 'low')).not.toThrow()
+    expect(() => validateNativeModelEffort(models, models[0].id, 'gemini-3.1-pro-medium', 'medium')).toThrow('Invalid native')
+  })
+
+  it('keeps Cursor aliases, Fast and Thinking distinct while grouping effort tokens', async () => {
+    const models = normalizeModels((await cursorModels.discover(context([
+      'auto - Auto (current, default)',
+      'gpt-5.3-codex-low - Codex 5.3 Low', 'gpt-5.3-codex - Codex 5.3',
+      'gpt-5.3-codex-xhigh - Codex 5.3 Extra High',
+      'gpt-5.3-codex-low-fast - Codex 5.3 Low Fast', 'gpt-5.3-codex-fast - Codex 5.3 Fast',
+      'claude-4.6-opus-high-thinking - Claude Opus 4.6 1M Thinking',
+      'claude-4.6-opus-max-thinking - Claude Opus 4.6 1M Max Thinking',
+      'claude-4.6-opus-high - Claude Opus 4.6 1M',
+      'gpt-5.5-extra-high-fast - GPT-5.5 Extra High Fast',
+      'claude-haiku-5-5-thinking-low - Claude Haiku 5.5 Low',
+      'gemini-3.1-pro - Gemini 3.1 Pro',
+    ].join('\n')))).models)
+    expect(models[1]).toMatchObject({ modelFamily: 'gpt-5.3-codex', modelFamilyName: 'Codex 5.3', reasoningEfforts: ['low', 'xhigh'] })
+    expect(models[2]).toMatchObject({ modelFamily: 'gpt-5.3-codex' })
+    expect(models[2].reasoningEffort).toBeUndefined()
+    expect(models[4]).toMatchObject({ modelFamily: 'gpt-5.3-codex-fast', modelFamilyName: 'Codex 5.3 Fast', reasoningEfforts: ['low'] })
+    expect(models[6]).toMatchObject({ modelFamily: 'claude-4.6-opus-thinking', reasoningEfforts: ['high', 'max'] })
+    expect(models[8]).toMatchObject({ modelFamily: 'claude-4.6-opus', reasoningEfforts: ['high'] })
+    expect(models[9]).toMatchObject({ id: 'gpt-5.5-extra-high-fast', modelFamily: 'gpt-5.5-fast', reasoningEffort: 'xhigh' })
+    expect(models[10]).toMatchObject({ modelFamilyName: 'Claude Haiku 5.5 (Thinking)' })
+    expect(models[11].modelFamily).toBeUndefined()
+    expect(nativeModelVariant('gemini-3.1-pro')).toBeUndefined()
+    expect(() => validateNativeModelEffort(models, models[1].id, models[4].id, 'low')).toThrow('Invalid native')
+    expect(() => validateNativeModelEffort(models, models[6].id, models[7].id, 'high')).toThrow('Invalid native')
+  })
+  it.each([true, false])('reads Grok model-specific effort metadata (legacy initialize catalog: %s)', async legacy => {
+    const state = { currentModelId: 'grok-4.7', availableModels: [
+      { modelId: 'grok-4.7', name: 'Grok 4.7', _meta: { supportsReasoningEffort: true,
+        reasoningEfforts: [{ id: 'deep', value: 'xhigh' }, { value: 'high' }, { value: 'low' }] }, apiKey: 'secret' },
+      { modelId: 'grok-4.5', name: 'Grok 4.5', _meta: { supportsReasoningEffort: true,
+        reasoningEfforts: [{ value: 'high' }, { value: 'medium' }, { value: 'low' }] } },
+      { modelId: 'plain', _meta: { supportsReasoningEffort: false, reasoningEfforts: [{ value: 'high' }] } },
+      { modelId: 'unknown' },
+    ] }
+    const ctx = context()
+    const request = vi.fn(async (method: string) => {
+      if (method === 'initialize') return { protocolVersion: 1, _meta: legacy ? { modelState: state } : {} }
+      if (method === 'x.ai/models/list') {
+        if (legacy) throw new Error('Method not found')
+        return { result: state }
+      }
+      throw new Error('Discovery must not create sessions or send prompts')
+    })
+    ctx.rpc = async (args, call) => {
+      expect(args).toEqual(['agent', '--no-leader', 'stdio'])
+      return call({ request, notify: vi.fn(), controlInitialize: vi.fn() })
+    }
+    const result = await grokModels.discover(ctx)
+    expect(result.models).toEqual([
+      { id: 'grok-4.7', name: 'Grok 4.7', isDefault: true, reasoningEfforts: ['low', 'high', 'xhigh'] },
+      { id: 'grok-4.5', name: 'Grok 4.5', isDefault: false, reasoningEfforts: ['low', 'medium', 'high'] },
+      { id: 'plain', name: 'plain', isDefault: false, reasoningEfforts: [] },
+      { id: 'unknown', name: 'unknown', isDefault: false },
+    ])
+    expect(JSON.stringify(result)).not.toContain('secret')
+    expect(request.mock.calls.map(([method]) => method)).toEqual(['initialize', 'x.ai/models/list'])
+    expect(ctx.run).not.toHaveBeenCalled()
+  })
+
+  it('uses the native Grok compatibility menu only for models explicitly supporting effort', async () => {
+    const ctx = context()
+    ctx.rpc = async (_args, call) => call({ request: vi.fn().mockResolvedValue({ protocolVersion: 1, _meta: {
+      modelState: { availableModels: [{ modelId: 'legacy-reasoning', _meta: { supportsReasoningEffort: true } }, { modelId: 'unknown' }] },
+    } }), notify: vi.fn(), controlInitialize: vi.fn() })
+    const result = await grokModels.discover(ctx)
+    expect(result.models[0].reasoningEfforts).toEqual(['low', 'medium', 'high', 'xhigh'])
+    expect(result.models[1].reasoningEfforts).toBeUndefined()
+  })
   it.each([
     [piModels, 'provider  model  context  max-out  thinking  images\nglm  glm-5-turbo  128K  16.4K  yes  no\n', { id: 'glm/glm-5-turbo', provider: 'glm', contextWindow: 128000, maxOutputTokens: 16400 }],
     [grokModels, 'You are not authenticated.\nAvailable models:\n * grok-example (default)\n - grok-other\n', { id: 'grok-example', isDefault: true }],
@@ -54,6 +138,23 @@ describe('native model directory adapters', () => {
     const result = await piModels.discover(context('provider model context max-out thinking images\np test 1M 32K yes yes'))
     expect(result.models[0].reasoningEfforts).toBeUndefined()
     expect(result.models[0].inputModalities).toEqual(['text', 'image'])
+  })
+
+  it('reads advertised Pi effort levels only for models supporting thinking', async () => {
+    const ctx = context()
+    ctx.run = vi.fn(async args => ({ stdout: args.includes('--help')
+      ? '  --thinking <level> Thinking level: off, minimal, low, medium, high, xhigh, max\n  --other unrelated'
+      : 'provider model context max-out thinking images\np thinking 128K 32K yes no\np simple 128K 32K no no', stderr: '' }))
+    const result = await piModels.discover(ctx)
+    expect(result.models[0].reasoningEfforts).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+    expect(result.models[1].reasoningEfforts).toBeUndefined()
+  })
+
+  it('keeps Claude model discovery usable if optional CLI help is unavailable', async () => {
+    const ctx = context()
+    ctx.run = vi.fn().mockRejectedValue(new Error('No help'))
+    ctx.rpc = async (_args, call) => call({ request: vi.fn(), notify: vi.fn(), controlInitialize: vi.fn(async () => ({ models: [{ value: 'default' }] })) })
+    expect((await claudeCodeModels.discover(ctx)).models).toEqual([{ id: 'default', name: 'default', isDefault: true }])
   })
 
   it('paginates Codex and keeps native hidden models without exposing account objects', async () => {
@@ -85,6 +186,31 @@ describe('native model directory adapters', () => {
     expect(await claudeCodeModels.discover(ctx)).toEqual({ models: [{ id: 'opus', name: 'Custom upstream', isDefault: false }] })
   })
 
+  it('shows Claude resolved models while preserving aliases and native context selectors', async () => {
+    const ctx = context()
+    ctx.rpc = async (_args, call) => call({ request: vi.fn(), notify: vi.fn(), controlInitialize: vi.fn(async () => ({
+      account: { token: 'private' },
+      models: [
+        { value: 'default', displayName: 'Default (recommended)', resolvedModel: 'claude-opus-5-5' },
+        { value: 'opus', displayName: 'Opus', resolvedModel: 'claude-opus-5-5' },
+        { value: 'sonnet', displayName: 'Sonnet', resolvedModel: 'configured-sonnet-model' },
+        { value: 'claude-fable-5-1[1m]', displayName: 'Fable', resolvedModel: 'claude-fable-5-1' },
+        { value: 'custom', displayName: 'custom-model-id', resolvedModel: 'custom-model-id' },
+        { value: 'haiku', displayName: 'Haiku', resolvedModel: { token: 'private' } },
+      ],
+    })) })
+    const models = normalizeModels((await claudeCodeModels.discover(ctx)).models)
+    expect(models).toEqual([
+      { id: 'default', name: 'Default (recommended) (claude-opus-5-5)', isDefault: true },
+      { id: 'opus', name: 'Opus (claude-opus-5-5)', isDefault: false },
+      { id: 'sonnet', name: 'Sonnet (configured-sonnet-model)', isDefault: false },
+      { id: 'claude-fable-5-1[1m]', name: 'Fable (claude-fable-5-1)', isDefault: false },
+      { id: 'custom', name: 'custom-model-id', isDefault: false },
+      { id: 'haiku', name: 'Haiku', isDefault: false },
+    ])
+    expect(JSON.stringify(models)).not.toContain('private')
+  })
+
   it('uses the SDK transport for Copilot rather than its ACP selectors', async () => {
     const ctx = context()
     ctx.rpc = async (args, call, framing) => {
@@ -107,6 +233,16 @@ describe('native model directory adapters', () => {
     expect(modelsFromAcpSession({ models: { currentModelId: 'a', availableModels: [{ modelId: 'a', name: 'A', token: 'private' }] } }).models).toEqual([{ id: 'a', name: 'A', isDefault: true }])
   })
 
+  it('attaches ACP thought-level metadata only to its current native model', () => {
+    expect(modelsFromAcpSession({ configOptions: [
+      { id: 'native-model', category: 'model', currentValue: 'a', options: [{ value: 'a', name: 'A' }, { value: 'b', name: 'B' }] },
+      { id: 'native-thought', category: 'thought_level', options: [{ value: 'low' }, { value: 'high' }] },
+    ] }).models).toEqual([
+      { id: 'a', name: 'A', isDefault: true, reasoningEfforts: ['low', 'high'] },
+      { id: 'b', name: 'B', isDefault: false },
+    ])
+  })
+
   it.each([true, false])('closes ACP discovery sessions even when model selectors are unavailable (%s)', async selectors => {
     const ctx = context()
     const request = vi.fn(async (method: string) => {
@@ -121,7 +257,7 @@ describe('native model directory adapters', () => {
     expect(request.mock.calls.map(([method]) => method)).toEqual(['initialize', 'session/new', 'session/close'])
   })
 
-  it('reads exact ZCode builtin declarations rather than interpreting regex rules or credentials', async () => {
+  it('reads exact ZCode builtin model ids without exposing unrelated rules or credentials', async () => {
     const file = join(await home(), 'builtin.json')
     await writeFile(file, JSON.stringify({ config: { modelConfigRules: {
       modelRules: [{ modelMatch: '.*', config: { apiKey: 'secret' } }],
@@ -130,6 +266,33 @@ describe('native model directory adapters', () => {
     const ctx = context(); ctx.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = file
     expect(await zcodeModels.discover(ctx)).toEqual({ models: [{ id: 'glm-example', name: 'glm-example', provider: 'builtin', hidden: false }] })
     await expect(zcodeModels.discover(context())).rejects.toMatchObject({ status: 'unsupported' })
+  })
+
+  it('resolves ZCode native effort rules per model and native provider without exposing personal credentials', async () => {
+    const root = await home(), builtin = join(root, 'builtin.json'), personal = join(root, 'personal.json')
+    await writeFile(builtin, JSON.stringify({ config: { modelConfigRules: {
+      modelRules: [
+        { modelMatch: '.*', config: { optionSpecs: { reasoningLevel: { values: ['disabled', 'enabled'] } } } },
+        { modelMatch: 'glm-5\\.3', config: { optionSpecs: { reasoningLevel: { values: ['low', 'high', 'max'] } } } },
+        { modelMatch: '[invalid', config: { optionSpecs: { reasoningLevel: { values: ['invalid'] } } } },
+      ], builtinProviderModelRules: [
+        { providerId: 'native', modelId: 'GLM-5.3' }, { providerId: 'other', modelId: 'GLM-5.3' },
+        { providerId: 'native', modelId: 'GLM-5-Turbo' },
+      ],
+    } } }))
+    await writeFile(personal, JSON.stringify({ config: {
+      defaultModelSelection: { providerId: 'native', modelId: 'GLM-5.3' },
+      providerConfigRules: { providerRules: [{ providerId: 'native', config: { access: { apiKey: 'secret' } } }] },
+      modelConfigRules: { providerModelRules: [{ providerId: 'other', modelId: 'GLM-5.3',
+        config: { optionSpecs: { reasoningLevel: { values: ['low', 'high'] } } } }] },
+    } }))
+    const ctx = context(); ctx.env = { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: builtin, ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: personal }
+    const result = await zcodeModels.discover(ctx)
+    expect(result.models[0]).toMatchObject({ id: 'GLM-5.3', isDefault: true, reasoningEfforts: ['low', 'high', 'max'] })
+    expect(result.models[1]).toMatchObject({ id: 'GLM-5.3', provider: 'other', reasoningEfforts: ['low', 'high'] })
+    expect(result.models[1].isDefault).toBeUndefined()
+    expect(result.models[2].reasoningEfforts).toEqual(['disabled', 'enabled'])
+    expect(JSON.stringify(result)).not.toContain('secret')
   })
 
   it('deduplicates by provider and model and allowlists public metadata', () => {

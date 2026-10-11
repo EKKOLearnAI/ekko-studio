@@ -72,6 +72,9 @@ export function normalizeModels(models: CodingAgentModel[]): CodingAgentModel[] 
       ...(positiveNumber(raw.contextWindow) ? { contextWindow: raw.contextWindow } : {}),
       ...(positiveNumber(raw.maxOutputTokens) ? { maxOutputTokens: raw.maxOutputTokens } : {}),
       ...(Array.isArray(raw.reasoningEfforts) ? { reasoningEfforts: [...new Set(raw.reasoningEfforts.slice(0, 32).map(text).filter((item): item is string => Boolean(item)))] } : {}),
+      ...(text(raw.modelFamily) ? { modelFamily: text(raw.modelFamily) } : {}),
+      ...(text(raw.modelFamilyName) ? { modelFamilyName: text(raw.modelFamilyName) } : {}),
+      ...(text(raw.reasoningEffort) ? { reasoningEffort: text(raw.reasoningEffort) } : {}),
       ...(Array.isArray(raw.inputModalities) ? { inputModalities: [...new Set(raw.inputModalities.slice(0, 16).map(text).filter((item): item is string => Boolean(item)))] } : {}),
     }]
   })

@@ -2,6 +2,7 @@ import type { CodingAgentDefinition, CodingAgentConfigFileDefinition } from '../
 import { TOOL_DEFINITIONS, CONFIG_FILE_DEFINITIONS } from './registry/definitions'
 import { createOpenCodeConfig, mergeOpenCodeSettingsConfig, openCodeSettingsConfig, opencodeMcpServerConfig, openCodeRuntimeEnv, OPENCODE_CONFIG_FILE, OPENCODE_DATABASE_FILE, OPENCODE_API_KEY_ENV, OPENCODE_PROVIDER_ID } from './opencode/config'
 import { prepareOpenCodeBaseConfig } from './opencode/runtime-config'
+import { prepareZcodeGlobalModel } from './zcode/runtime-config'
 import { NATIVE_CODING_AGENTS, prepareNativeScopedRuntime, nativeScopedUsesChatCompletions, checkNativeCodingAgentEnvironment, checkNativeCodingAgentPlatform } from './registry/native-agents'
 import { resolveZcodeCommand } from './zcode/installation'
 import { isNativeCodingAgent, nativeCodingAgentSupportsScoped, isGlobalOnlyCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
@@ -35,7 +36,7 @@ import { codingAgentRunManager } from './runtime/run-manager'
 import { mergePiSettings, userSettingsProvidesPiMcpAdapter } from './pi/settings'
 import { ANTIGRAVITY_DEFAULT_SETTINGS, ANTIGRAVITY_INSTALL_URL, prepareAntigravityRuntime, validateAntigravitySettings } from './antigravity/config'
 import { CURSOR_DEFAULT_SETTINGS, cursorSettingsPath, validateCursorSettings } from './cursor/settings'
-import { PI_EXTENDED_THINKING_LEVEL_MAP, piModelSupportsThinking } from './pi/thinking'
+import { normalizePiThinkingLevel, PI_EXTENDED_THINKING_LEVEL_MAP, piModelSupportsThinking } from './pi/thinking'
 import { GROK_API_KEY_ENV, GROK_PROVIDER_ID } from './grok/definition'
 import { getDisabledManagedMcpServers, getManagedMcpServerOverride } from './mcp-overrides'
 import {
@@ -59,6 +60,7 @@ import { isolateUnhealthyRuntimeMcpServers } from './mcp-runtime-isolation'
 import { getCodingAgentGlobalHome } from '../../studio/public/coding-agent-global-home'
 import { codingAgentContextPolicy, compactionPercent, claudeCompactionPercent, piCompactionSettings, type CodingAgentContextPolicy } from './context-policy'
 import { createCodingAgentModelDiscovery } from './models'
+import { nativeModelVariant } from './models/variants'
 
 const execFileAsync = promisify(execFile)
 const LAUNCH_API_MODES = new Set<ApiMode>(['chat_completions', 'codex_responses', 'anthropic_messages'])
@@ -2967,6 +2969,12 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const mcpCapabilities = studioMcpCapabilities(getCodingAgentManagedMcpServerConfigs(tool.id, input.profile || 'default'))
   const mode = resolvedCodingAgentLaunchMode(tool.id, input.mode)
   if (mode === 'global') {
+    const model = String(input.model || '').trim()
+    const reasoningEffort = String(input.reasoningEffort || '').trim()
+    const variant = ['cursor', 'antigravity'].includes(tool.id) ? nativeModelVariant(model) : undefined
+    if (variant && reasoningEffort && variant.effort !== reasoningEffort) {
+      throw Object.assign(new Error('Native model ID and reasoning effort must select the same variant'), { status: 400 })
+    }
     const scope = normalizeConfigScope({ profile: input.profile, provider: 'global' })
     const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
     await mkdir(workspaceDir, { recursive: true })
@@ -2990,6 +2998,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       }
       const args = [
         '--mode', 'rpc',
+        ...(model ? ['--model', model] : []),
         ...(input.agentNativeSessionId ? ['--session-id', input.agentNativeSessionId] : []),
         '--extension', studioExtensionPath,
         ...mcp.args,
@@ -3012,7 +3021,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         mode,
         profile: scope.profile,
         provider: scope.provider,
-        model: '',
+        model,
         rootDir,
         workspaceDir,
         command: tool.command,
@@ -3020,7 +3029,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         env,
         shellCommand: buildLauncherShellCommand(workspaceDir, launcherPath),
         files,
-        reasoningEffort: String(input.reasoningEffort || '').trim(),
+        reasoningEffort,
       }
     }
     const rootDir = getScopedRuntimeConfigRoot(tool.id, scope, input)
@@ -3037,8 +3046,14 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         ? await resolveZcodeCommand([], await commandEnv(), findCommandPaths, { preferDesktop: process.platform === 'win32' })
         : { command: tool.command, args: [], env: {} }
       execution.env = { ...nativeEnvironment, ...execution.env }
-      return { agentId: tool.id, mode, profile: scope.profile, provider: 'global', model: '', rootDir, workspaceDir,
-        command: execution.command, args: execution.args, env: execution.env, files: [], nativeSystemPrompt: systemPrompt, nativeMcpServers,
+      const nativeFiles = []
+      if (tool.id === 'zcode' && (model || reasoningEffort)) {
+        const selection = await prepareZcodeGlobalModel(rootDir, model, { ...await commandEnv(), ...execution.env }, reasoningEffort)
+        execution.env = { ...execution.env, ...selection.env }
+        nativeFiles.push(selection.file)
+      }
+      return { agentId: tool.id, mode, profile: scope.profile, provider: 'global', model, reasoningEffort, rootDir, workspaceDir,
+        command: execution.command, args: execution.args, env: execution.env, files: nativeFiles, nativeSystemPrompt: systemPrompt, nativeMcpServers,
         shellCommand: buildLaunchShellCommand({ workspaceDir, ...execution }) }
     }
 
@@ -3060,6 +3075,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       ]
       env = { IS_SANDBOX: '1' }
       args = ['--append-system-prompt-file', promptFile, '--mcp-config', mcpPath, ...CLAUDE_CODE_SKIP_PERMISSIONS_ARGS]
+      if (reasoningEffort) args.push('--effort', reasoningEffort)
     } else if (tool.id === 'codex') {
       promptFile = await prepareGlobalCodexShadowHome(rootDir, systemPrompt, scope.profile, input.studioMcpTokenFile)
       files = [
@@ -3067,6 +3083,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         { key: 'config', path: 'config.toml', absolutePath: join(rootDir, 'config.toml') },
       ]
       env = { CODEX_HOME: rootDir }
+      if (reasoningEffort) args.push('-c', `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`)
     } else if (tool.id === 'grok') {
       const prepared = await prepareGlobalGrokRuntime({
         sourceHome: process.env.GROK_HOME?.trim() || join(getGlobalConfigHome(), '.grok'),
@@ -3078,6 +3095,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       files = prepared.files
       env = { GROK_HOME: rootDir }
       args = ['--always-approve', '--no-auto-update']
+      if (reasoningEffort) args.push('--reasoning-effort', reasoningEffort)
     } else if (tool.id === 'dsh') {
       const prepared = await prepareDshRuntime({
         ...await dshHost.runtimeInput(),
@@ -3094,8 +3112,9 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       promptFile = prepared.promptFile
       env = prepared.env
       const effort = String(input.reasoningEffort || '').trim()
-      if (effort && !['low', 'medium', 'high', 'max'].includes(effort)) throw Object.assign(new Error('Antigravity effort must be low, medium, high or max'), { status: 400 })
-      args = ['--dangerously-skip-permissions', ...(effort ? ['--effort', effort] : [])]
+      if (!variant && effort && !['low', 'medium', 'high', 'max'].includes(effort)) throw Object.assign(new Error('Antigravity effort must be low, medium, high or max'), { status: 400 })
+      // A literal effort variant already fixes the strength; do not override it twice.
+      args = ['--dangerously-skip-permissions', ...(!variant && effort ? ['--effort', effort] : [])]
     } else if (tool.id === 'cursor') {
       const prepared = await prepareCursorMcp(rootDir, scope.profile, input.studioMcpTokenFile)
       files = prepared.files
@@ -3143,6 +3162,8 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       }
     }
     const chatSessionId = String(input.sessionId || '').trim()
+    if (model && tool.id !== 'dsh') args.push('--model', model)
+    if (tool.id === 'pi' && normalizePiThinkingLevel(reasoningEffort)) args.push('--thinking', normalizePiThinkingLevel(reasoningEffort)!)
     if (chatSessionId) env[HERMES_STUDIO_SESSION_ENV_KEY] = chatSessionId
     const shellCommand = buildLaunchShellCommand({
       workspaceDir,
@@ -3155,7 +3176,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       mode,
       profile: scope.profile,
       provider: scope.provider,
-      model: '',
+      model,
       rootDir,
       workspaceDir,
       command: tool.command,
@@ -3164,7 +3185,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       shellCommand,
       files,
       promptFile,
-      ...(tool.id === 'antigravity' ? { reasoningEffort: String(input.reasoningEffort || '').trim() } : {}),
+      reasoningEffort,
     }
   }
 

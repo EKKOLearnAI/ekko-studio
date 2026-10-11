@@ -1,4 +1,5 @@
 import { lines, modelId, requireModelOutput } from '../models/text'
+import { withNativeModelFamilies } from '../models/variants'
 import type { ModelDiscoveryAdapter } from '../models/types'
 
 export const antigravityModels: ModelDiscoveryAdapter = {
@@ -10,6 +11,6 @@ export const antigravityModels: ModelDiscoveryAdapter = {
       return id && id !== 'Model' && id !== 'ID' ? [{ id, name: match![2] }] : []
     })
     requireModelOutput(models, stdout)
-    return { models }
+    return { models: withNativeModelFamilies(models) }
   },
 }

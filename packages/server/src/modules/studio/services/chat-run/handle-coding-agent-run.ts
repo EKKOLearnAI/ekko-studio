@@ -98,9 +98,9 @@ export async function handleCodingAgentRun(
     updateSession(sessionId, { user_id: String(socketUser.id) })
   }
   const launchProvider = data.provider || (mode === 'scoped' ? storedSession?.provider || undefined : undefined)
-  const launchModel = data.model || (mode === 'scoped' ? storedSession?.model || undefined : undefined)
+  const launchModel = data.model ?? (storedSession?.model || undefined)
   const launchApiMode = data.apiMode || data.api_mode || (mode === 'scoped' ? storedSession?.api_mode || undefined : undefined)
-  const launchReasoningEffort = data.reasoning_effort ?? (mode === 'scoped' ? storedSession?.reasoning_effort || undefined : undefined)
+  const launchReasoningEffort = data.reasoning_effort ?? (storedSession?.reasoning_effort || undefined)
   const groupSystemPrompt = String(data.group_system_prompt || '').trim()
   const groupRoomId = String(data.group_room_id || '').trim()
   const groupAgentId = String(data.group_agent_id || '').trim()

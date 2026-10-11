@@ -19,6 +19,8 @@ const props = withDefaults(defineProps<{
   removableCustom?: boolean
   closeOnSelect?: boolean
   title?: string
+  customModels?: Record<string, string[]>
+  displayName?: (model: string, provider: string) => string
 }>(), { provider: '', model: '', show: undefined, triggerElement: null, allowMoa: false, closeOnSelect: true, title: '' })
 const emit = defineEmits<{
   'update:show': [show: boolean]
@@ -44,9 +46,9 @@ const panel = ref<HTMLElement | null>(null)
 let returnFocus: HTMLElement | null = null
 const groups = computed(() => modelCascaderGroups(
   props.groups.filter(group => group.provider !== 'moa' || props.allowMoa),
-  appStore.customModels,
+  props.customModels ?? appStore.customModels,
   search.value,
-  appStore.displayModelName,
+  props.displayName ?? appStore.displayModelName,
 ))
 const activeGroup = computed(() => groups.value.find(group => group.provider === activeProvider.value) || groups.value[0])
 
@@ -88,7 +90,7 @@ function selectModel(model: string) {
   if (props.closeOnSelect) setShow(false)
 }
 function isCustom(model: string) {
-  return (appStore.customModels[activeGroup.value?.provider || ''] || []).includes(model)
+  return ((props.customModels ?? appStore.customModels)[activeGroup.value?.provider || ''] || []).includes(model)
 }
 function open(event: MouseEvent) {
   returnFocus = event.currentTarget as HTMLElement
@@ -171,8 +173,8 @@ async function openWithKeyboard(event: KeyboardEvent) {
                   :disabled="loading || !!activeGroup?.model_meta?.[model]?.disabled"
                   :title="activeGroup?.model_meta?.[model]?.disabled ? t('models.disabledTooltip') : model" @click="selectModel(model)">
                   <span class="model-cascader-item-label">
-                    <span>{{ appStore.displayModelName(model, activeGroup!.provider) }}</span>
-                    <small v-if="appStore.getModelAlias(model, activeGroup!.provider)">{{ t('models.aliasCanonical', { model }) }}</small>
+                    <span>{{ (displayName || appStore.displayModelName)(model, activeGroup!.provider) }}</span>
+                    <small v-if="!displayName && appStore.getModelAlias(model, activeGroup!.provider)">{{ t('models.aliasCanonical', { model }) }}</small>
                     <span class="model-cascader-badges">
                       <small v-if="activeGroup?.model_meta?.[model]?.preview">{{ t('models.previewBadge') }}</small>
                       <small v-if="activeGroup?.model_meta?.[model]?.disabled">{{ t('models.disabledBadge') }}</small>
@@ -189,6 +191,7 @@ async function openWithKeyboard(event: KeyboardEvent) {
           </div>
         </div>
       </NSpin>
+      <slot name="footer" />
     </div>
   </NModal>
 </template>

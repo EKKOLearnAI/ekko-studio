@@ -1444,6 +1444,38 @@ describe('coding agent launch preparation', () => {
     expect(readFileSync(join(globalCodexHome, 'AGENTS.md'), 'utf8')).toBe('User global Codex instructions.\n')
   })
 
+  it.each(['codex', 'claude-code', 'grok', 'pi', 'cursor', 'opencode', 'antigravity'])('passes a global %s native model override without Studio provider configuration', async id => {
+    const home = makeHome()
+    if (id === 'pi') {
+      const adapter = join(home, 'coding-agent', 'pi-mcp-adapter', 'node_modules', 'pi-mcp-adapter', 'index.ts')
+      mkdirSync(dirname(adapter), { recursive: true })
+      writeFileSync(adapter, 'export default function () {}')
+    }
+    const result = await prepareCodingAgentLaunch(id, { mode: 'global', model: 'native-selected',
+      ...(['codex', 'claude-code', 'grok', 'pi', 'antigravity'].includes(id) ? { reasoningEffort: 'high' } : {}),
+      ...(id === 'pi' ? { piOutputMode: 'rpc' as const } : {}),
+    })
+    expect(result.model).toBe('native-selected')
+    expect(result.provider).toBe('global')
+    expect(result.args).toEqual(expect.arrayContaining(['--model', 'native-selected']))
+    if (id === 'codex') expect(result.args).toContain('model_reasoning_effort="high"')
+    if (id === 'claude-code' || id === 'antigravity') expect(result.args).toEqual(expect.arrayContaining(['--effort', 'high']))
+    if (id === 'grok') expect(result.args).toEqual(expect.arrayContaining(['--reasoning-effort', 'high']))
+    if (['codex', 'claude-code', 'grok', 'pi', 'antigravity'].includes(id)) expect(result.reasoningEffort).toBe('high')
+  })
+
+  it.each([
+    ['cursor', 'gpt-5.3-codex-xhigh-fast', 'xhigh'],
+    ['antigravity', 'gemini-3.1-pro-low', 'low'],
+  ])('launches %s with the exact selected effort-variant ID', async (id, model, reasoningEffort) => {
+    makeHome()
+    const result = await prepareCodingAgentLaunch(id, { mode: 'global', model, reasoningEffort })
+    expect(result).toMatchObject({ model, reasoningEffort, provider: 'global' })
+    expect(result.args).toEqual(expect.arrayContaining(['--model', model]))
+    expect(result.args).not.toContain('--effort')
+    await expect(prepareCodingAgentLaunch(id, { mode: 'global', model, reasoningEffort: 'high' })).rejects.toThrow('same variant')
+  })
+
   it('launches Grok from an isolated shadow home without changing the user config', async () => {
     const home = makeHome()
     const globalGrokHome = join(home, 'global-home', '.grok')
@@ -3954,7 +3986,7 @@ it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('prepares %s
   const launch = await prepareCodingAgentLaunch(id, {
     mode: 'global', profile: 'research', workspace: join(home, 'workspace'),
     studioMcpTokenFile: tokenFile, groupSystemPrompt: 'Review the repository',
-    provider: 'custom:test', model: 'must-not-override-native-model', apiKey: 'must-not-write-upstream-key',
+    provider: 'custom:test', apiKey: 'must-not-write-upstream-key',
   })
   expect(launch).toMatchObject({ agentId: id, mode: 'global', provider: 'global', model: '', args: [], env: {} })
   expect(launch.nativeSystemPrompt).toContain('Review the repository')
@@ -3980,6 +4012,30 @@ it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot'])('loads %s supplementa
   expect(launch.nativeMcpServers!['ekko-studio-interaction']).toBeDefined()
 })
 
+
+it.each(['glm-5.3', ''])('applies global ZCode effort to the native selection overlay for model %s', async model => {
+  const home = makeHome()
+  const builtinPath = join(home, 'builtin.json'), personalPath = join(home, 'personal.json')
+  writeFileSync(builtinPath, JSON.stringify({ config: { modelConfigRules: { builtinProviderModelRules: [
+    { providerId: 'native', modelId: 'glm-5.3', config: { optionSpecs: { reasoningLevel: { values: ['low', 'high', 'max'] } } } },
+  ] } } }))
+  const personal = JSON.stringify({ config: { defaultModelSelection: {
+    providerId: 'native', modelId: 'glm-5.3', options: { reasoningLevel: 'low' },
+  }, providerConfigRules: { providerRules: [{ providerId: 'native', config: { apiKey: 'native-secret' } }] } } })
+  writeFileSync(personalPath, personal)
+  vi.mocked(resolveZcodeCommand).mockResolvedValueOnce({ command: 'zcode', args: [], path: 'zcode', env: {
+    ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: builtinPath, ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: personalPath,
+  } })
+  const launch = await prepareCodingAgentLaunch('zcode', {
+    mode: 'global', workspace: join(home, 'workspace'), model, reasoningEffort: 'max',
+  })
+  expect(launch).toMatchObject({ mode: 'global', provider: 'global', model, reasoningEffort: 'max' })
+  expect(launch.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE).not.toBe(personalPath)
+  expect(JSON.parse(readFileSync(launch.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE!, 'utf8')).config.defaultModelSelection)
+    .toEqual({ providerId: 'native', modelId: 'glm-5.3', options: { reasoningLevel: 'max' } })
+  expect(readFileSync(personalPath, 'utf8')).toBe(personal)
+  expect(launch.args).not.toContain('--effort')
+})
 
 it('uses desktop provider paths globally while retaining scoped ZCode configuration in chat and terminal launchers', async () => {
   const home = makeHome()

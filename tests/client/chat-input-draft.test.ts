@@ -184,7 +184,7 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('0')
     await wrapper.setProps({ draftConfig: { provider: 'moa', model: 'ensemble', profile: 'research' } })
     expect(wrapper.find('.reasoning-effort-button').exists()).toBe(false)
-    await wrapper.setProps({ draftConfig: { provider: 'draft-provider', model: 'draft-model', codingAgentMode: 'global' } })
+    await wrapper.setProps({ draftConfig: { provider: 'draft-provider', model: 'draft-model', codingAgentMode: 'global' }, reasoningEffort: '' })
     expect(wrapper.find('.reasoning-effort-button').exists()).toBe(false)
   })
 
@@ -195,6 +195,22 @@ describe('ChatInput draft persistence', () => {
     await wrapper.get('textarea').trigger('keydown', { key: 'Enter' })
     expect(submit).not.toHaveBeenCalled()
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('First message')
+  })
+
+  it('uses the global draft native effort choices without changing the active conversation', async () => {
+    const onEffortChange = vi.fn()
+    const wrapper = mountForSession('existing', { reasoningEffort: 'low' }, {}, {
+      draft: true, draftConfig: { codingAgentMode: 'global', model: 'native-model' },
+      nativeReasoningEfforts: ['low', 'high'], reasoningEffort: 'high',
+      'onUpdate:reasoningEffort': onEffortChange,
+    })
+    await nextTick()
+    expect(wrapper.find('.reasoning-effort-button').exists()).toBe(true)
+    expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('2')
+    await wrapper.get('.n-slider-stub').setValue('1')
+    expect(onEffortChange).toHaveBeenCalledWith('low')
+    expect(useChatStore().activeSession?.reasoningEffort).toBe('low')
+    expect(useChatStore().setSessionReasoningEffort).not.toHaveBeenCalled()
   })
 
   it('adds a pasted non-image file to the attachment list', async () => {
@@ -445,7 +461,7 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.get('.context-info').text()).toBe('chat.sessionUsage 1857.2M')
   })
 
-  it('shows reasoning effort selector for coding-agent sessions', async () => {
+  it('allows reasoning effort changes in scoped coding-agent sessions', async () => {
     const wrapper = mountForSession('session-codex', {
       source: 'coding_agent',
       agent: 'codex',
@@ -458,6 +474,27 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.find('.n-slider-stub').exists()).toBe(true)
     expect(wrapper.get('.n-slider-stub').attributes('min')).toBe('0')
     expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('7')
+    expect(wrapper.get('.reasoning-effort-button').attributes('disabled')).toBeUndefined()
+    await wrapper.get('.n-slider-stub').setValue('5')
+    expect(useChatStore().setSessionReasoningEffort).toHaveBeenCalledWith('session-codex', 'high')
+    expect(useChatStore().activeSession?.reasoningEffort).toBe('high')
+  })
+
+  it.each([
+    ['', 'chat.reasoningEffort.defaultLabel'],
+    ['high', 'chat.reasoningEffort.options.high'],
+    ['unlisted-effort', 'unlisted-effort'],
+  ])('keeps Ekko run-detail effort %s read-only without rewriting the saved value', async (effort, label) => {
+    const wrapper = mountForSession('ekko-run-detail', {
+      source: 'workflow', codingAgentId: 'ekko-agent', codingAgentMode: 'scoped',
+      provider: 'test-provider', model: 'historical-model', reasoningEffort: effort,
+    }, {}, { reasoningEffortDisabled: true })
+    await nextTick()
+    expect(wrapper.get('.reasoning-effort-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.reasoning-effort-button').text()).toContain(label)
+    await wrapper.get('.n-slider-stub').setValue('1')
+    expect(useChatStore().setSessionReasoningEffort).not.toHaveBeenCalled()
+    expect(useChatStore().activeSession?.reasoningEffort).toBe(effort)
   })
 
   it('hides the reasoning effort selector for global coding-agent sessions', async () => {
@@ -471,6 +508,87 @@ describe('ChatInput draft persistence', () => {
 
     expect(wrapper.find('.reasoning-effort-button').exists()).toBe(false)
     expect(wrapper.find('.n-slider-stub').exists()).toBe(false)
+  })
+
+  it('displays and preserves the saved global effort while native capabilities are unavailable', async () => {
+    const wrapper = mountForSession('session-global-saved', {
+      source: 'coding_agent', codingAgentId: 'codex', codingAgentMode: 'global', reasoningEffort: 'high',
+    })
+    await nextTick()
+    expect(wrapper.get('.reasoning-effort-button').text()).toContain('chat.reasoningEffort.options.high')
+    expect(wrapper.get('.reasoning-effort-button').attributes('disabled')).toBeDefined()
+    await wrapper.setProps({ nativeReasoningEfforts: [] })
+    expect(useChatStore().activeSession?.reasoningEffort).toBe('high')
+    await wrapper.setProps({ nativeReasoningEfforts: ['low', 'high'] })
+    expect(wrapper.get('.reasoning-effort-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('2')
+    await wrapper.get('.n-slider-stub').setValue('1')
+    expect(useChatStore().activeSession?.reasoningEffort).toBe('high')
+    expect(useChatStore().setSessionReasoningEffort).not.toHaveBeenCalled()
+    await wrapper.setProps({ nativeReasoningEfforts: undefined })
+    expect(wrapper.get('.reasoning-effort-button').text()).toContain('chat.reasoningEffort.options.high')
+    expect(useChatStore().activeSession?.reasoningEffort).toBe('high')
+  })
+
+  it('shows a fixed native effort as read-only when its family has only one variant', async () => {
+    const wrapper = mountForSession('fixed-native-effort', { codingAgentMode: 'global', model: 'gpt-oss-medium' }, {}, {
+      nativeReasoningEfforts: ['medium'], nativeEffortChoices: [{ model: 'gpt-oss-medium', effort: 'medium' }],
+    })
+    await nextTick()
+    expect(wrapper.get('.reasoning-effort-button').text()).toContain('chat.reasoningEffort.options.medium')
+    expect(wrapper.get('.reasoning-effort-button').attributes('disabled')).toBeDefined()
+    expect(useChatStore().setSessionReasoningEffort).not.toHaveBeenCalled()
+  })
+
+  it('keeps native ID and effort fixed in an existing coding-agent conversation', async () => {
+    const wrapper = mountForSession('native-effort-variant', { codingAgentId: 'antigravity', codingAgentMode: 'global', model: 'gemini-high' }, {}, {
+      nativeReasoningEfforts: ['low', 'high'], nativeEffortChoices: [{ model: 'gemini-low', effort: 'low' }, { model: 'gemini-high', effort: 'high' }],
+    })
+    await nextTick()
+    expect(wrapper.get('.reasoning-effort-button').text()).toContain('chat.reasoningEffort.options.high')
+    expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('1')
+    await wrapper.get('.n-slider-stub').setValue('0')
+    expect(wrapper.get('.reasoning-effort-button').attributes('disabled')).toBeDefined()
+    expect(useChatStore().setSessionReasoningEffort).not.toHaveBeenCalled()
+    expect(useChatStore().activeSession?.model).toBe('gemini-high')
+  })
+
+  it.each(['codex', 'grok', 'zcode', 'cursor'])('allows a scoped %s session to switch among supported model efforts', async agent => {
+    const wrapper = mountForSession('editable-scoped', { source: 'coding_agent', agent, codingAgentId: agent as any, codingAgentMode: 'scoped', model: 'reasoning-model', provider: 'test', reasoningEffort: 'high' })
+    useAppStore().modelGroups = [{ provider: 'test', label: 'Test', models: ['reasoning-model'], model_meta: { 'reasoning-model': { reasoning: true, reasoning_efforts: ['low', 'high', 'max'] } } }]
+    await nextTick()
+    expect(wrapper.get('.reasoning-effort-button').text()).toContain('chat.reasoningEffort.options.high')
+    expect(wrapper.get('.reasoning-effort-button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('3')
+    await wrapper.get('.n-slider-stub').setValue('1')
+    expect(useChatStore().setSessionReasoningEffort).toHaveBeenCalledWith('editable-scoped', 'low')
+    expect(useChatStore().activeSession?.reasoningEffort).toBe('low')
+    expect(useChatStore().activeSession?.model).toBe('reasoning-model')
+  })
+
+  it('allows a new native draft to select effort while the existing coding-agent session is read-only', async () => {
+    const change = vi.fn()
+    const wrapper = mountForSession('existing-agent', { codingAgentId: 'cursor', codingAgentMode: 'global', reasoningEffort: 'high' }, {}, {
+      draft: true, draftConfig: { codingAgentMode: 'global', model: 'gemini-high' }, reasoningEffort: 'high',
+      nativeReasoningEfforts: ['low', 'high'], nativeEffortChoices: [{ model: 'gemini-low', effort: 'low' }, { model: 'gemini-high', effort: 'high' }],
+      'onUpdate:reasoningEffort': change,
+    })
+    await nextTick()
+    expect(wrapper.get('.reasoning-effort-button').attributes('disabled')).toBeUndefined()
+    await wrapper.get('.n-slider-stub').setValue('0')
+    expect(change).toHaveBeenCalledWith('low')
+    expect(useChatStore().activeSession?.reasoningEffort).toBe('high')
+    expect(useChatStore().setSessionReasoningEffort).not.toHaveBeenCalled()
+  })
+
+  it('keeps a saved native effort that is absent from a refreshed catalog', async () => {
+    const wrapper = mountForSession('session-global-native-level', {
+      source: 'coding_agent', codingAgentId: 'codex', codingAgentMode: 'global', reasoningEffort: 'high',
+    }, {}, { nativeReasoningEfforts: ['low'] })
+    await nextTick()
+    expect(wrapper.get('.reasoning-effort-button').text()).toContain('chat.reasoningEffort.options.high')
+    expect(wrapper.get('.reasoning-effort-button').attributes('disabled')).toBeDefined()
+    expect(useChatStore().activeSession?.reasoningEffort).toBe('high')
   })
 
   it('hides the reasoning effort selector for MoA sessions', async () => {
