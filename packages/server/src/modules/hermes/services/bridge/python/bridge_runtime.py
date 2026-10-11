@@ -825,6 +825,31 @@ def _resolve_runtime(model: str, provider: str | None = None) -> dict[str, Any]:
     return resolve_runtime_provider(requested=requested, target_model=model or None)
 
 
+def _load_disabled_toolsets() -> list[str] | None:
+    """``agent.disabled_toolsets`` from config.yaml, or ``None``.
+
+    Mirrors Hermes' own ``tui_gateway.server._load_disabled_toolsets`` /
+    ``hermes_cli.cli_init_mixin`` loader. AIAgent only strips these toolsets when the
+    caller forwards the list (``agent/agent_init.py::_load_tools``): the CLI passes it,
+    so ``disabled_toolsets: [web, browser]`` worked there, but this bridge historically
+    passed ``enabled_toolsets`` alone — so the block silently never reached Studio /
+    desktop / TUI sessions and ``web_search`` / ``web_extract`` / every ``browser_*``
+    tool stayed callable even though ``hermes-cli`` resolves them and
+    ``_get_platform_tools`` cannot strip them from a composite default toolset.
+    """
+    _ensure_agent_imports()
+    try:
+        from agent.skill_utils import parse_config_string_list
+
+        from hermes_cli.config import load_config
+
+        agent_cfg = load_config().get("agent") or {}
+        disabled = parse_config_string_list(agent_cfg.get("disabled_toolsets"))
+        return [str(ts) for ts in disabled] or None
+    except Exception:
+        return None
+
+
 def _load_enabled_toolsets() -> list[str] | None:
     _ensure_agent_imports()
     raw = os.environ.get("HERMES_BRIDGE_TOOLSETS", "").strip()
@@ -882,6 +907,7 @@ def _log_worker_startup_context(profile: str | None) -> None:
     try:
         cfg = _load_cfg()
         enabled_toolsets = _load_enabled_toolsets()
+        disabled_toolsets = _load_disabled_toolsets()
         discovered_mcp_tools = _discover_bridge_mcp_tools()
         tool_names: list[str] = []
         tool_error: str | None = None
@@ -890,7 +916,7 @@ def _log_worker_startup_context(profile: str | None) -> None:
 
             tool_names = _tool_names_from_definitions(
                 get_tool_definitions(
-                    enabled_toolsets=enabled_toolsets,
+                    enabled_toolsets=enabled_toolsets, disabled_toolsets=disabled_toolsets,
                     quiet_mode=True,
                 )
             )
@@ -914,6 +940,7 @@ def _log_worker_startup_context(profile: str | None) -> None:
             "config_path": str(_hermes_home() / "config.yaml"),
             "model": _resolve_model(cfg),
             "enabled_toolsets": enabled_toolsets,
+            "disabled_toolsets": disabled_toolsets,
             "tool_count": len(tool_names),
             "tool_names": tool_names,
             "tool_error": tool_error,

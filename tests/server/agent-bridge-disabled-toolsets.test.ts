@@ -11,16 +11,23 @@ function runPython(script: string): Record<string, unknown> {
   } catch (error) {
     const err = error as { stdout?: string; stderr?: string; message?: string }
     throw new Error([
-      err.message || 'Python agent bridge fallback test failed',
+      err.message || 'Python agent bridge disabled-toolsets test failed',
       err.stdout ? `stdout:\n${err.stdout}` : '',
       err.stderr ? `stderr:\n${err.stderr}` : '',
     ].filter(Boolean).join('\n\n'))
   }
 }
 
-describe('Agent Bridge fallback providers', () => {
-  it('passes the configured fallback chain to each newly created agent', () => {
-    const result = runPython(String.raw`
+/**
+ * ``agent.disabled_toolsets`` must reach ``AIAgent`` or the block silently has no effect:
+ * ``AIAgent`` only strips a toolset when the caller forwards the list
+ * (``agent/agent_init.py::_load_tools``). The bridge used to pass ``enabled_toolsets`` alone,
+ * so ``disabled_toolsets: [web, browser]`` worked in the CLI but not in Studio sessions.
+ *
+ * ``disabledExpr`` is a Python expression so each case can drive the loader's return value.
+ */
+function disabledToolsetsHarness(disabledExpr: string): string {
+  return String.raw`
 import contextlib
 import importlib.util
 import json
@@ -41,10 +48,10 @@ bridge_runtime._ensure_agent_imports = lambda: None
 bridge_runtime._hermes_home = lambda *_args, **_kwargs: Path(tempfile.gettempdir())
 bridge_runtime._install_execute_code_approval_memory_patch = lambda *_args, **_kwargs: None
 bridge_runtime._jsonable = lambda value: value
-bridge_runtime._load_cfg = lambda *_args, **_kwargs: {"fallback_providers": [{"provider": "backup", "model": "backup-model"}]}
-bridge_runtime._load_disabled_toolsets = lambda *_args, **_kwargs: None
+bridge_runtime._load_cfg = lambda *_args, **_kwargs: {}
+bridge_runtime._load_disabled_toolsets = lambda *_args, **_kwargs: ${disabledExpr}
 bridge_runtime._load_enabled_toolsets = lambda *_args, **_kwargs: []
-bridge_runtime._load_fallback_model = lambda cfg: cfg["fallback_providers"]
+bridge_runtime._load_fallback_model = lambda *_args, **_kwargs: None
 bridge_runtime._load_reasoning_config = lambda *_args, **_kwargs: {}
 bridge_runtime._load_service_tier = lambda *_args, **_kwargs: None
 bridge_runtime._mcp_tool_names_from_names = lambda *_args, **_kwargs: []
@@ -83,11 +90,29 @@ run_agent.AIAgent = AIAgent
 sys.modules["run_agent"] = run_agent
 
 session = bridge_pool.AgentPool().get_or_create("session-1")
-print(json.dumps({"fallback_model": session.agent.kwargs.get("fallback_model")}))
-`)
+print(json.dumps({
+    "disabled_toolsets": session.agent.kwargs.get("disabled_toolsets"),
+    "enabled_toolsets": session.agent.kwargs.get("enabled_toolsets"),
+}))
+`
+}
+
+describe('Agent Bridge disabled toolsets', () => {
+  it('forwards agent.disabled_toolsets to each newly created agent', () => {
+    const result = runPython(disabledToolsetsHarness('["web", "browser"]'))
 
     expect(result).toEqual({
-      fallback_model: [{ provider: 'backup', model: 'backup-model' }],
+      disabled_toolsets: ['web', 'browser'],
+      enabled_toolsets: [],
+    })
+  })
+
+  it('passes None when agent.disabled_toolsets is unset', () => {
+    const result = runPython(disabledToolsetsHarness('None'))
+
+    expect(result).toEqual({
+      disabled_toolsets: null,
+      enabled_toolsets: [],
     })
   })
 })
