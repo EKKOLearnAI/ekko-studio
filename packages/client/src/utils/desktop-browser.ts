@@ -43,7 +43,18 @@ export async function openUrlInDesktopBrowser(url: string): Promise<boolean> {
   if (!browser) return false
   const tabCreation = browser.createTab(url, true)
   revealDesktopBrowserPanel()
-  await tabCreation
+  try {
+    await tabCreation
+  } catch (error) {
+    if (typeof bridge.openExternalUrl === 'function') {
+      try {
+        if (await bridge.openExternalUrl(url)) return true
+      } catch {
+        // Preserve the embedded-browser error when the fallback also fails.
+      }
+    }
+    throw error
+  }
   return true
 }
 

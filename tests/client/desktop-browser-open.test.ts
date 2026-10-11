@@ -72,6 +72,39 @@ describe('desktop browser open helpers', () => {
     window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, listener)
   })
 
+  it('opens a link externally when the embedded browser cannot create a tab', async () => {
+    const browser = browserBridge()
+    browser.createTab.mockRejectedValue(new Error('Browser supports at most 8 tabs per profile'))
+    const openExternalUrl = vi.fn().mockResolvedValue(true)
+    ;(window as typeof window & { hermesDesktop?: unknown }).hermesDesktop = {
+      isDesktop: true,
+      browser,
+      openExternalUrl,
+    }
+    const { openUrlInDesktopBrowser } = await import('../../packages/client/src/utils/desktop-browser')
+
+    await expect(openUrlInDesktopBrowser('https://example.com/full')).resolves.toBe(true)
+
+    expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/full')
+  })
+
+  it('keeps the embedded-browser error when external fallback fails', async () => {
+    const browser = browserBridge()
+    const embeddedError = new Error('Browser supports at most 8 tabs per profile')
+    browser.createTab.mockRejectedValue(embeddedError)
+    const openExternalUrl = vi.fn().mockResolvedValue(false)
+    ;(window as typeof window & { hermesDesktop?: unknown }).hermesDesktop = {
+      isDesktop: true,
+      browser,
+      openExternalUrl,
+    }
+    const { openUrlInDesktopBrowser } = await import('../../packages/client/src/utils/desktop-browser')
+
+    await expect(openUrlInDesktopBrowser('https://example.com/full')).rejects.toBe(embeddedError)
+
+    expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/full')
+  })
+
   it('leaves a message URL for the system browser when that target is stored', async () => {
     const browser = browserBridge()
     ;(window as typeof window & { hermesDesktop?: unknown }).hermesDesktop = {
