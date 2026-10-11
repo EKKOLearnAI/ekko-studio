@@ -138,6 +138,15 @@ describe('RuntimeRestartPrompt', () => {
     wrapper.unmount()
   })
 
+  it('never queries jobs when no user role is stored', async () => {
+    auth.isStoredSuperAdmin.mockReturnValue(false)
+    const wrapper = mount(RuntimeRestartPrompt)
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(api.fetchVersionDownloadJobs).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('checks once on mount and stays idle when no Runtime download is active', async () => {
     api.fetchVersionDownloadJobs.mockResolvedValue({ jobs: [] })
     const wrapper = mount(RuntimeRestartPrompt)
