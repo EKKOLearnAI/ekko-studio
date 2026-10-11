@@ -20,7 +20,9 @@ const { mockReadFile, mockReadConfigYaml, mockReadConfigYamlForProfile, mockFetc
 }))
 
 vi.mock('fs/promises', () => ({
-  readFile: mockReadFile,
+  readFile: (...args: any[]) => String(args[0]).endsWith('/auth.json')
+    ? Promise.resolve(mockExistsSync(args[0]) ? mockReadFileSync(args[0], 'utf-8') : '{}')
+    : mockReadFile(...args),
 }))
 
 vi.mock('fs', () => ({
