@@ -1296,7 +1296,7 @@ describe('group chat REST route baseline', () => {
     })
   })
 
-  it.each(['codex', 'dsh'] as const)('uses global CLI configuration for %s without persisting scoped overrides', async agent => {
+  it.each(['codex', 'dsh'] as const)('uses global CLI configuration for %s with its native model and effort', async agent => {
     storage.rooms.set('room-global', { id: 'room-global', name: 'Global Room', inviteCode: 'GLOBAL1' })
 
     const res = await fetch(`${baseUrl}/api/studio/group-chat/rooms/room-global/agents`, {
@@ -1307,7 +1307,7 @@ describe('group chat REST route baseline', () => {
         agentMode: 'global',
         profile: 'research',
         provider: 'must-not-persist',
-        model: 'must-not-persist',
+        model: 'native-selected-model',
         apiMode: 'chat_completions',
         reasoningEffort: 'high',
         name: 'Global Codex',
@@ -1315,31 +1315,47 @@ describe('group chat REST route baseline', () => {
     })
 
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toMatchObject({
+    const created: any = await res.json()
+    expect(created).toMatchObject({
       agent: expect.objectContaining({
         agent,
         agentMode: 'global',
         provider: '',
-        model: '',
+        model: 'native-selected-model',
         apiMode: '',
-        reasoningEffort: '',
+        reasoningEffort: 'high',
       }),
     })
     expect(agentClients.createAgent).toHaveBeenCalledWith(expect.objectContaining({
       agent,
       agentMode: 'global',
       provider: '',
-      model: '',
+      model: 'native-selected-model',
       apiMode: '',
-      reasoningEffort: '',
+      reasoningEffort: 'high',
     }))
     expect(storage.addRoomAgent.mock.calls.at(-1)?.[6]).toMatchObject({
       agent,
       agentMode: 'global',
       provider: '',
-      model: '',
+      model: 'native-selected-model',
       apiMode: '',
-      reasoningEffort: '',
+      reasoningEffort: 'high',
+    })
+
+    const updated = await fetch(`${baseUrl}/api/studio/group-chat/rooms/room-global/agents/${created.agent.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent, agentMode: 'global', profile: 'research', provider: 'must-not-persist',
+        model: 'another-native-model', apiMode: 'codex_responses', reasoningEffort: 'low', name: 'Global Reviewer' }),
+    })
+    expect(updated.status).toBe(200)
+    expect(await updated.json()).toMatchObject({ agent: { id: created.agent.id,
+      agentMode: 'global', provider: '', model: 'another-native-model', apiMode: '', reasoningEffort: 'low' } })
+    expect(agentClients.createAgent).toHaveBeenLastCalledWith(expect.objectContaining({
+      agentMode: 'global', provider: '', model: 'another-native-model', apiMode: '', reasoningEffort: 'low',
+    }))
+    expect(storage.getRoomAgent('room-global', created.agent.id)).toMatchObject({
+      model: 'another-native-model', reasoningEffort: 'low', provider: '', apiMode: '',
     })
 
     const unsupported = await fetch(`${baseUrl}/api/studio/group-chat/rooms/room-global/agents`, {

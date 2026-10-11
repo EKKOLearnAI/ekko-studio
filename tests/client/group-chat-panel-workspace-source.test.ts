@@ -537,13 +537,13 @@ describe('GroupChatPanel workspace save handling', () => {
     const selection = readFileSync('packages/client/src/utils/coding-agent-mode.ts', 'utf8')
     expect(selection).toContain("agentMode: input.usesGlobal ? 'global' : 'scoped'")
     expect(selection).toContain("provider: input.usesGlobal ? '' : input.provider")
-    expect(selection).toContain("model: input.usesGlobal ? '' : input.model")
+    expect(selection).toContain("model: input.usesGlobal ? input.nativeModel || '' : input.model")
     expect(source).toContain("apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value")
-    expect(source).toContain("reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value")
+    expect(source).toContain("reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value")
     for (const modelSource of [source, linkView]) {
-      expect(modelSource).toContain('function handleAgentModelChange(model: string)')
+      expect(modelSource).toContain(modelSource === source ? 'function handleAgentModelSelect(' : 'function handleAgentModelChange(model: string)')
       expect(modelSource).toContain("selectedAgentReasoningEffort.value = ''")
-      expect(modelSource).toContain('@update:value="handleAgentModelChange"')
+      expect(modelSource).toContain(modelSource === source ? '@select="handleAgentModelSelect"' : '@update:value="handleAgentModelChange"')
     }
     expect(source).toContain('inferCodingAgentApiMode(')
     expect(source).toContain('normalizeCodingAgentApiMode(')

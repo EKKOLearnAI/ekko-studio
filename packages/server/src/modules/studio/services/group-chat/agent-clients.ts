@@ -1226,10 +1226,8 @@ export class AgentClient implements GroupAgentExecutor {
             const result = await this.chatRunService.runAndWait({
                 input: this.groupRuntimeInput(msg, runtimeContext),
                 session_id: sessionId,
-                ...(usesGlobalCodingAgent ? {} : {
-                    model: this.model || undefined,
-                    provider: this.provider || undefined,
-                }),
+                ...(this.model ? { model: this.model } : {}),
+                ...(usesGlobalCodingAgent ? {} : { provider: this.provider || undefined }),
                 ...(!usesGlobalCodingAgent && this.apiMode ? { apiMode: this.apiMode } : {}),
                 instructions: groupSystemPrompt,
                 group_system_prompt: groupSystemPrompt,
@@ -1242,7 +1240,7 @@ export class AgentClient implements GroupAgentExecutor {
                 mode: usesGlobalCodingAgent ? 'global' : 'scoped',
                 profile: this.profile,
                 ...(this.agentPreset ? { agent_preset: this.agentPreset } : {}),
-                ...(!usesGlobalCodingAgent && this.reasoningEffort
+                ...(this.reasoningEffort
                     ? { reasoning_effort: this.reasoningEffort }
                     : {}),
                 background_delegation_enabled: false,

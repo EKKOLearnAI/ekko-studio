@@ -843,20 +843,20 @@ describe('group chat agent workspace bridge runs', () => {
     }))
   })
 
-  it('runs a global Codex group Agent without scoped provider, model, protocol, or reasoning overrides', async () => {
+  it.each([['codex', 'native-model', 'high'], ['cursor', 'model-high', 'high'], ['zcode', 'glm-5-turbo', 'enabled'], ['codex', '', '']])('runs a global %s group Agent with its native model %s and effort %s', async (agent, model, effort) => {
     const { AgentClients } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-clients')
     const runAndWait = vi.fn(async () => ({ ok: true, output: 'done' }))
     const clients = new AgentClients()
     clients.setChatRunService({ runAndWait, abortSession: vi.fn(async () => {}) })
     const client = await clients.createAgent({
       agentId: 'agent-global-codex',
-      agent: 'codex',
+      agent,
       agentMode: 'global',
       profile: 'default',
       provider: 'must-not-leak',
-      model: 'must-not-leak',
+      model,
       apiMode: 'chat_completions',
-      reasoningEffort: 'high',
+      reasoningEffort: effort,
       name: 'Global Codex',
       description: 'Uses the user CLI configuration',
       invited: 0,
@@ -878,7 +878,7 @@ describe('group chat agent workspace bridge runs', () => {
 
     const runInput = runAndWait.mock.calls[0][0]
     expect(runInput).toMatchObject({
-      coding_agent_id: 'codex',
+      coding_agent_id: agent,
       mode: 'global',
       profile: 'default',
       group_room_id: 'room-global',
@@ -887,9 +887,11 @@ describe('group chat agent workspace bridge runs', () => {
     expect(runInput.instructions).toContain('You are "Global Codex", an AI assistant in the group chat room "Global Room"')
     expect(runInput.group_system_prompt).toBe(runInput.instructions)
     expect(runInput).not.toHaveProperty('provider')
-    expect(runInput).not.toHaveProperty('model')
+    if (model) expect(runInput.model).toBe(model)
+    else expect(runInput).not.toHaveProperty('model')
     expect(runInput).not.toHaveProperty('apiMode')
-    expect(runInput).not.toHaveProperty('reasoning_effort')
+    if (effort) expect(runInput.reasoning_effort).toBe(effort)
+    else expect(runInput).not.toHaveProperty('reasoning_effort')
   })
 
   it('keeps Pi group turns temporary while reinjecting the room history', async () => {

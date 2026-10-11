@@ -14,7 +14,7 @@ describe('workflow reasoning effort authoring contract', () => {
     expect(types).toMatch(/WorkflowAgentNodeEditableData[^\n]+reasoningEffort/)
     expect(node).toContain(':value="data.reasoningEffort"')
     expect(node).toContain("updateField('reasoningEffort'")
-    expect(view).toContain("reasoningEffort: data.reasoningEffort || 'default'")
+    expect(view).toContain("reasoningEffort: isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global' ? 'default' : data.reasoningEffort || 'default'")
     expect(view).toContain('reasoningEffort: node.data.reasoningEffort')
     expect(view).toContain("reasoningEffort: typeof data.reasoningEffort === 'string'")
   })

@@ -135,7 +135,7 @@ type RoomSummaryInput = {
     everyTurns?: number
 }
 
-const GROUP_AGENT_REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+const GROUP_AGENT_REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'disabled', 'enabled'])
 const GROUP_AGENT_TYPES = new Set(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])
 const GROUP_AGENT_API_MODES = new Set(['chat_completions', 'codex_responses', 'anthropic_messages'])
 const GLOBAL_MODE_GROUP_AGENTS = new Set(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])
@@ -318,9 +318,9 @@ async function connectAndPersistRoomAgent(server: GroupChatServer, roomId: strin
         throw new Error('Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor')
     }
     const provider = agentMode === 'global' ? '' : String(input.provider || '').trim()
-    const model = agentMode === 'global' ? '' : String(input.model || '').trim()
+    const model = isGlobalOnlyCodingAgent(agent) && input.agentMode !== 'global' ? '' : String(input.model || '').trim()
     const apiMode = agent === 'hermes' || agentMode === 'global' ? '' : String(input.apiMode || '').trim()
-    const reasoningEffort = agentMode === 'global' ? '' : String(input.reasoningEffort || '').trim()
+    const reasoningEffort = isGlobalOnlyCodingAgent(agent) && input.agentMode !== 'global' ? '' : String(input.reasoningEffort || '').trim()
     const name = input.name || profile
     const description = input.description || ''
     const avatar = normalizeRoomAgentAvatar(input.avatar)
@@ -764,13 +764,11 @@ export async function addRoomAgent(ctx: any) {
     const normalizedAgent = typeof agent === 'string' ? agent.trim() : 'hermes'
     const normalizedAgentMode = isGlobalOnlyCodingAgent(normalizedAgent) || agentMode === 'global' ? 'global' : 'scoped'
     const normalizedProvider = normalizedAgentMode === 'global' ? '' : typeof provider === 'string' ? provider.trim() : ''
-    const normalizedModel = normalizedAgentMode === 'global' ? '' : typeof model === 'string' ? model.trim() : ''
+    const normalizedModel = isGlobalOnlyCodingAgent(normalizedAgent) && agentMode !== 'global' ? '' : typeof model === 'string' ? model.trim() : ''
     const normalizedApiMode = normalizedAgent === 'hermes' || normalizedAgentMode === 'global'
         ? ''
         : typeof apiMode === 'string' ? apiMode.trim() : ''
-    const normalizedReasoningEffort = normalizedAgentMode === 'global'
-        ? ''
-        : typeof reasoningEffort === 'string' ? reasoningEffort.trim() : ''
+    const normalizedReasoningEffort = isGlobalOnlyCodingAgent(normalizedAgent) && agentMode !== 'global' ? '' : typeof reasoningEffort === 'string' ? reasoningEffort.trim() : ''
     let normalizedAvatar = ''
     try {
         normalizedAvatar = normalizeRoomAgentAvatar(avatar)
@@ -799,7 +797,7 @@ export async function addRoomAgent(ctx: any) {
         ctx.body = { error: 'Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor' }
         return
     }
-    if (Boolean(normalizedProvider) !== Boolean(normalizedModel)) {
+    if (normalizedAgentMode !== 'global' && Boolean(normalizedProvider) !== Boolean(normalizedModel)) {
         ctx.status = 400
         ctx.body = { error: 'provider and model must be provided together' }
         return
@@ -885,13 +883,11 @@ export async function updateRoomAgent(ctx: any) {
     const normalizedAgent = typeof agent === 'string' ? agent.trim() : 'hermes'
     const normalizedAgentMode = isGlobalOnlyCodingAgent(normalizedAgent) || agentMode === 'global' ? 'global' : 'scoped'
     const normalizedProvider = normalizedAgentMode === 'global' ? '' : typeof provider === 'string' ? provider.trim() : ''
-    const normalizedModel = normalizedAgentMode === 'global' ? '' : typeof model === 'string' ? model.trim() : ''
+    const normalizedModel = isGlobalOnlyCodingAgent(normalizedAgent) && agentMode !== 'global' ? '' : typeof model === 'string' ? model.trim() : ''
     const normalizedApiMode = normalizedAgent === 'hermes' || normalizedAgentMode === 'global'
         ? ''
         : typeof apiMode === 'string' ? apiMode.trim() : ''
-    const normalizedReasoningEffort = normalizedAgentMode === 'global'
-        ? ''
-        : typeof reasoningEffort === 'string' ? reasoningEffort.trim() : ''
+    const normalizedReasoningEffort = isGlobalOnlyCodingAgent(normalizedAgent) && agentMode !== 'global' ? '' : typeof reasoningEffort === 'string' ? reasoningEffort.trim() : ''
     const normalizedName = typeof name === 'string' ? name.trim() : ''
     const normalizedDescription = typeof description === 'string' ? description.trim() : ''
     let normalizedAvatar = ''
@@ -922,7 +918,7 @@ export async function updateRoomAgent(ctx: any) {
         ctx.body = { error: 'Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor' }
         return
     }
-    if (Boolean(normalizedProvider) !== Boolean(normalizedModel)) {
+    if (normalizedAgentMode !== 'global' && Boolean(normalizedProvider) !== Boolean(normalizedModel)) {
         ctx.status = 400
         ctx.body = { error: 'provider and model must be provided together' }
         return

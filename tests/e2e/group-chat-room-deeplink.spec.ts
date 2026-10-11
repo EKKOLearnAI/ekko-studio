@@ -2054,3 +2054,81 @@ test('group-chat Agent picker only lists installed Agents in catalog order', asy
   await expect.poll(async () => (await page.locator('.n-base-select-option__content:visible').allTextContents())
     .map(label => label.split(' · ')[0])).toEqual(['Ekko', 'Codex', 'Qwen Code'])
 })
+
+for (const mobile of [false, true]) test(`group-chat ${mobile ? 'mobile' : 'desktop'} uses the shared dialog for scoped and global native model and effort`, async ({ page }) => {
+  if (mobile) await page.setViewportSize({ width: 390, height: 844 })
+  const api = await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  let discoveries = 0
+  let finishRefresh: (() => void) | undefined
+  await page.route('**/api/coding-agents/models?*', async route => {
+    discoveries++
+    if (discoveries > 1) await new Promise<void>(resolve => { finishRefresh = resolve })
+    await route.fulfill({ json: { agents: [{ agentId: 'codex', name: 'Codex', status: 'ready', source: 'cli',
+      models: [{ id: 'native-review', name: 'Native Review', reasoningEfforts: ['low', 'high'] }] }] } })
+  })
+  await page.locator('.agent-avatar-rail-add').click()
+  const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+  await drawer.locator('.n-select').first().click()
+  await page.getByText('Codex', { exact: true }).last().click()
+  await drawer.locator('.model-trigger').click()
+  const menu = page.locator('.model-cascader:visible')
+  await expect(menu).toBeVisible()
+  await menu.getByRole('menuitemradio', { name: 'test-model', exact: true }).click()
+  const mode = drawer.locator('.form-group').filter({ has: page.locator('.form-label', { hasText: 'Launch mode' }) }).locator('.n-select')
+  await expect(mode).toContainText('Model')
+  await mode.click()
+  await page.getByText('Global', { exact: true }).last().click()
+  await drawer.locator('.native-model-trigger').click()
+  await menu.getByRole('menuitemradio', { name: 'Native Review', exact: true }).click()
+  await drawer.locator('.native-reasoning-effort').click()
+  await page.getByText('High', { exact: true }).last().click()
+  await mode.click()
+  await page.getByText('Model', { exact: true }).last().click()
+  await expect(drawer.locator('.model-trigger')).toContainText('test-model')
+  await mode.click()
+  await page.getByText('Global', { exact: true }).last().click()
+  await expect(drawer.locator('.native-model-trigger')).toHaveText('Native Review')
+  await expect(drawer.locator('.native-reasoning-effort')).toContainText('High')
+  await drawer.getByPlaceholder('Custom name (leave empty to use profile name)').fill('Native Reviewer')
+  await drawer.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect.poll(() => api.addedAgents.length).toBe(1)
+  expect(api.addedAgents[0].body).toMatchObject({ agent: 'codex', agentMode: 'global', provider: '', model: 'native-review', reasoningEffort: 'high' })
+  expect(api.addedAgents[0].body.apiMode).toBeUndefined()
+  await page.getByRole('button', { name: 'Native Reviewer', exact: true }).click()
+  const edit = page.locator('.n-drawer').filter({ hasText: 'Edit Native Reviewer' })
+  await expect(edit.locator('.native-model-trigger')).toHaveText('Native Review')
+  await expect(edit.locator('.native-reasoning-effort')).toContainText('High')
+  await edit.locator('.native-model-trigger').click()
+  await expect(menu.getByRole('menuitemradio', { name: 'Native Review', exact: true })).toBeVisible()
+  await expect.poll(() => Boolean(finishRefresh)).toBe(true)
+  finishRefresh!()
+  await menu.getByRole('button', { name: 'Close', exact: true }).click()
+})
+
+test('group-chat applies a global native preset and uses edited effort instead of the preset snapshot', async ({ page }) => {
+  const api = await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  await page.route('**/api/studio/group-chat/agent-presets', route => route.fulfill({ json: { presets: [{
+    id: 'native-preset', agent: 'codex', agentMode: 'global', profile: 'default', provider: '', model: 'native-review',
+    apiMode: '', reasoningEffort: 'high', name: 'Native preset', description: '', avatar: '', available: true,
+  }] } }))
+  await page.route('**/api/coding-agents/models?*', route => route.fulfill({ json: { agents: [{
+    agentId: 'codex', name: 'Codex', status: 'ready', source: 'cli',
+    models: [{ id: 'native-review', name: 'Native Review', reasoningEfforts: ['low', 'high'] }],
+  }] } }))
+  await page.locator('.agent-avatar-rail-add').click()
+  const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+  await drawer.getByRole('button', { name: 'Choose preset', exact: true }).click()
+  const presets = page.locator('.agent-preset-dialog').filter({ hasText: 'Choose preset' })
+  await presets.getByRole('button', { name: /Native preset/ }).click()
+  await presets.getByRole('button', { name: 'Apply', exact: true }).click()
+  await expect(drawer.locator('.native-model-trigger')).toHaveText('Native Review')
+  await expect(drawer.locator('.native-reasoning-effort')).toContainText('High')
+  await drawer.locator('.native-reasoning-effort').click()
+  await page.getByText('Low', { exact: true }).last().click()
+  await drawer.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect.poll(() => api.addedAgents.length).toBe(1)
+  expect(api.addedAgents[0].body).toMatchObject({ agentMode: 'global', model: 'native-review', reasoningEffort: 'low' })
+  expect(api.addedAgents[0].body.presetId).toBeUndefined()
+})

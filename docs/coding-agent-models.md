@@ -140,6 +140,22 @@ effort. Subsequent global messages retain the selected effort and native model I
 Scoped Coding Agent single chats allow effort changes using the selected model's
 supported levels, and subsequent messages use the updated effort.
 
+## Group chat and workflows
+
+Group-chat members and workflow nodes use the same Model / Global launch modes
+and shared model dialog. Model mode selects a Studio Profile provider and model;
+Global mode selects a native CLI model while retaining its native provider and
+credentials. Global model and effort choices use the same cached discovery as
+single-chat drafts, including effort-to-model-ID mapping for Cursor and
+Antigravity. Switching modes in an editor retains each mode's selection.
+
+Global group members, Agent presets and workflow nodes persist their native
+model and advertised reasoning effort. Their editors allow changes before the
+next run; workflow run snapshots remain read-only. Both normal and recursive
+workflow execution forward these selections, and workflow sessions display the
+saved effort. Empty selections use native defaults. Legacy scoped settings for
+global-only agents are cleared rather than passed to a native CLI.
+
 Global runs carry the chosen model and reasoning effort through session storage
 and resumed runs while retaining native authentication and provider settings.
 CLI agents receive native flags, and ACP agents receive native session model and

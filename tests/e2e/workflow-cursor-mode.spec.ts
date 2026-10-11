@@ -57,7 +57,7 @@ for (const target of [
     await expect.poll(() => saves().length).toBe(1)
     const data = JSON.parse(saves()[0].postData || '{}').nodes[0].data
     expect(data).toMatchObject({
-      agent: target.agent, agentMode: target.mode, provider: 'test-provider', model: 'test-model',
+      agent: target.agent, agentMode: target.mode, provider: target.mode === 'global' ? '' : 'test-provider', model: 'test-model',
     })
     expect(data.priorAgentMode).toBeUndefined()
     expect(api.unexpectedRequests).toEqual([])

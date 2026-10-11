@@ -640,6 +640,7 @@ function makeNode(
   data: Partial<WorkflowAgentNodeEditableData> & { status?: WorkflowNodeStatus } = {},
 ): WorkflowNode {
   const agent = data.agent || firstAvailableWorkflowAgent.value || 'hermes'
+  const usesGlobal = isGlobalOnlyCodingAgent(agent) || (agent !== 'hermes' && agent !== 'ekko-agent' && data.agentMode === 'global')
   return {
     id,
     type: 'agent',
@@ -651,11 +652,11 @@ function makeNode(
       agent,
       agentMode: isGlobalOnlyCodingAgent(agent) || (data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(agent)) ? 'global' : 'scoped',
       priorAgentMode: data.priorAgentMode === 'global' || data.priorAgentMode === 'scoped' ? data.priorAgentMode : undefined,
-      provider: data.provider || defaultModelSelection.value.provider,
-      model: data.model || defaultModelSelection.value.model,
+      provider: usesGlobal ? '' : data.provider || defaultModelSelection.value.provider,
+      model: usesGlobal ? (isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global' ? '' : data.model || '') : data.model || defaultModelSelection.value.model,
       apiMode: data.apiMode || defaultApiMode(data.provider || defaultModelSelection.value.provider),
       agentPreset: data.agentPreset,
-      reasoningEffort: data.reasoningEffort || 'default',
+      reasoningEffort: isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global' ? 'default' : data.reasoningEffort || 'default',
       input: data.input || '',
       skills: data.skills || [],
       images: data.images || [],
@@ -1018,6 +1019,9 @@ function defaultApiMode(provider: string) {
 }
 
 function normalizeNodeModel(data: WorkflowAgentNodeData): Pick<WorkflowAgentNodeData, 'provider' | 'model' | 'apiMode'> {
+  if (data.agentMode === 'global' || isGlobalOnlyCodingAgent(data.agent)) {
+    return { provider: '', model: data.model, apiMode: data.apiMode }
+  }
   const availableGroups = data.agent === 'hermes'
     ? modelGroups.value
     : modelGroups.value.filter(group => canScopedCodingAgentUseProvider(
@@ -2808,6 +2812,10 @@ function initialRunNodeStatuses(sourceNodes: WorkflowNode[], sourceEdges: Workfl
   ]))
 }
 
+const workflowModelSelections = new Map<string, Pick<WorkflowAgentNodeEditableData, 'provider' | 'model' | 'apiMode' | 'reasoningEffort'>>()
+function workflowModelSelectionKey(id: string, agent: string, mode: string) {
+  return JSON.stringify([activeWorkflowId.value, id, agent, mode])
+}
 function updateNodeData(id: string, patch: Partial<WorkflowAgentNodeEditableData>) {
   if (selectedWorkflowRunId.value) return
   nodes.value = nodes.value.map<WorkflowNode>((node) => {
@@ -2829,12 +2837,21 @@ function updateNodeData(id: string, patch: Partial<WorkflowAgentNodeEditableData
       ...(switched ? { agentMode: switched.agentMode, priorAgentMode: switched.priorAgentMode } : {}),
       skills: agentChanged ? [] : patch.skills ?? node.data.skills,
     }
+    const modeChanged = data.agentMode !== node.data.agentMode
+    if (agentChanged || modeChanged) {
+      workflowModelSelections.set(workflowModelSelectionKey(id, node.data.agent, node.data.agentMode), {
+        provider: node.data.provider, model: node.data.model, apiMode: node.data.apiMode, reasoningEffort: node.data.reasoningEffort,
+      })
+      const saved = workflowModelSelections.get(workflowModelSelectionKey(id, data.agent, data.agentMode))
+      Object.assign(data, saved || (data.agentMode === 'global'
+        ? { provider: '', model: '', reasoningEffort: 'default' }
+        : { ...normalizeNodeModel({ ...data, provider: '', model: '' }), reasoningEffort: 'default' }))
+    }
     return {
       ...node,
       style: patch.images ? expandNodeHeightForImages(node.style, patch.images.length) : node.style,
       data: withRuntimeNodeData({
         ...data,
-        ...(agentChanged ? normalizeNodeModel(data) : {}),
       }),
     }
   })

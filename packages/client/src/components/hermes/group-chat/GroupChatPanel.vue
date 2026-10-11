@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
+import ScopedModelSelector from '@/components/hermes/models/ScopedModelSelector.vue'
+import type { CodingAgentId } from '@/api/coding-agents'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
@@ -261,9 +264,19 @@ const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
 )
 const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
+const nativeAgentSelections = ref<Record<string, { model: string; reasoningEffort: string }>>({})
+const nativeAgentId = computed(() => (selectedAgentType.value === 'claude' ? 'claude-code' : selectedAgentType.value) as CodingAgentId)
+const nativeAgentSelection = computed(() => nativeAgentSelections.value[selectedAgentType.value] || { model: '', reasoningEffort: '' })
+function updateNativeAgentSelection(selection: { model: string; reasoningEffort: string }) {
+    nativeAgentSelections.value[selectedAgentType.value] = selection
+}
+function handleNativeAgentSelection(selection: { model: string; reasoningEffort: string }) {
+    selectedAgentPresetId.value = null
+    updateNativeAgentSelection(selection)
+}
 const agentModeOptions = computed(() => [
-    { label: t('codingAgents.launchModeGlobal'), value: 'global' },
-    { label: t('codingAgents.launchModeScoped'), value: 'scoped' },
+    { label: t('codingAgents.modelScope'), value: 'scoped' },
+    { label: t('codingAgents.launchModeGlobalShort'), value: 'global' },
 ])
 
 function groupAgentDisplayName(agent: GroupAgentType): string {
@@ -332,21 +345,7 @@ function getDefaultAgentModel(profile: string) {
     }
 }
 
-const agentProviderOptions = computed(() =>
-    getAgentModelGroups(selectedProfile.value || '').map(group => ({
-        label: group.label || group.provider,
-        value: group.provider,
-    }))
-)
-
-const agentModelOptions = computed(() => {
-    const group = getAgentModelGroups(selectedProfile.value || '')
-        .find(item => item.provider === selectedAgentProvider.value)
-    return (group?.models || []).map(modelId => ({
-        label: appStore.displayModelName(modelId, group?.provider),
-        value: modelId,
-    }))
-})
+const agentModelGroups = computed(() => getAgentModelGroups(selectedProfile.value || ''))
 
 const selectedAgentProviderGroup = computed(() =>
     getAgentModelGroups(selectedProfile.value || '')
@@ -557,18 +556,15 @@ function handleAgentTypeChange(agent: GroupAgentType) {
 function handleAgentModeChange(mode: 'scoped' | 'global') {
     selectedAgentMode.value = mode
     selectedAgentPresetId.value = null
+    if (mode === 'scoped' && !selectedAgentProvider.value && selectedProfile.value) syncAgentModelSelection(selectedProfile.value)
 }
 
-function handleAgentProviderChange(provider: string) {
-    selectedAgentProvider.value = provider
-    selectedAgentModel.value = agentModelOptions.value[0]?.value || ''
+function handleAgentModelSelect(selection: { provider: string; model: string }) {
+    selectedAgentProvider.value = selection.provider
+    selectedAgentModel.value = selection.model
     selectedAgentReasoningEffort.value = ''
+    selectedAgentPresetId.value = null
     syncAgentApiMode()
-}
-
-function handleAgentModelChange(model: string) {
-    selectedAgentModel.value = model
-    selectedAgentReasoningEffort.value = ''
 }
 
 function agentAvatarName(agent: RoomAgent): string {
@@ -1317,6 +1313,7 @@ async function handleSummaryConfigurationRequired() {
 }
 
 function resetAgentForm() {
+    nativeAgentSelections.value = {}
     selectedAgentPresetId.value = null
     selectedProfile.value = null
     selectedRuntimePreset.value = undefined
@@ -1343,10 +1340,11 @@ function currentAgentPresetInput(): GroupAgentPresetInput | null {
             provider: selectedAgentProvider.value,
             model: selectedAgentModel.value,
             usesGlobal: usesGlobalAgentMode.value,
+            nativeModel: nativeAgentSelection.value.model,
         }),
         profile: selectedProfile.value,
         apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
-        reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
+        reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
         agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
         name: agentName.value.trim() || selectedProfile.value,
         description: agentDescription.value.trim(),
@@ -1422,7 +1420,8 @@ function applyAgentPreset(presetId: string | null) {
         input.apiMode,
         inferCodingAgentApiMode(input.provider),
     )
-    selectedAgentReasoningEffort.value = input.reasoningEffort || ''
+    selectedAgentReasoningEffort.value = usesGlobalAgentMode.value ? '' : input.reasoningEffort || ''
+    if (usesGlobalAgentMode.value) updateNativeAgentSelection({ model: input.model || '', reasoningEffort: input.reasoningEffort || '' })
     selectedRuntimePreset.value = input.agentPreset
     agentName.value = input.name || ''
     agentDescription.value = input.description || ''
@@ -1581,7 +1580,8 @@ function handleEditAgent(agent: RoomAgent) {
         agent.apiMode,
         inferCodingAgentApiMode(agent.provider),
     )
-    selectedAgentReasoningEffort.value = agent.reasoningEffort || ''
+    selectedAgentReasoningEffort.value = usesGlobalAgentMode.value ? '' : agent.reasoningEffort || ''
+    if (usesGlobalAgentMode.value) updateNativeAgentSelection({ model: agent.model || '', reasoningEffort: agent.reasoningEffort || '' })
     selectedRuntimePreset.value = agent.agentPreset
     agentName.value = agent.name || ''
     agentDescription.value = agent.description || ''
@@ -1724,10 +1724,11 @@ async function confirmAddAgent() {
                 provider: selectedAgentProvider.value,
                 model: selectedAgentModel.value,
                 usesGlobal: usesGlobalAgentMode.value,
+                nativeModel: nativeAgentSelection.value.model,
             }),
             profile: selectedProfile.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
@@ -1763,10 +1764,11 @@ async function confirmUpdateAgent() {
                 provider: selectedAgentProvider.value,
                 model: selectedAgentModel.value,
                 usesGlobal: usesGlobalAgentMode.value,
+                nativeModel: nativeAgentSelection.value.model,
             }),
             profile: selectedProfile.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
@@ -2870,7 +2872,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     <DshSessionPresetSelect v-if="selectedAgentType === 'dsh'" class="form-group"
                         v-model="selectedRuntimePreset" :disabled="isSavingAgent || isLoadingAgentForm"
                         @valid="selectedRuntimePresetReady = $event" />
-                    <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="form-group">
+                    <div v-if="supportsGlobalAgentMode && !isGlobalOnlyCodingAgent(selectedAgentType)" class="form-group">
                         <label class="form-label">{{ t('codingAgents.launchModeScope') }}</label>
                         <NSelect
                             :value="selectedAgentMode"
@@ -2879,29 +2881,18 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             @update:value="handleAgentModeChange"
                         />
                     </div>
-                    <div v-if="!usesGlobalAgentMode" class="form-group">
-                        <label class="form-label">{{ t('models.provider') }}</label>
-                        <NSelect
-                            :value="selectedAgentProvider"
-                            :options="agentProviderOptions"
-                            :placeholder="t('models.selectProvider')"
-                            :loading="isLoadingAgentForm"
-                            :disabled="isLoadingAgentForm"
-                            filterable
-                            @update:value="handleAgentProviderChange"
-                        />
+                    <div v-if="usesGlobalAgentMode" class="form-group">
+                        <label class="form-label">{{ t('models.models') }}</label>
+                        <NativeCodingAgentModelFields :key="nativeAgentId" :agent="nativeAgentId"
+                            :model="nativeAgentSelection.model" :reasoning-effort="nativeAgentSelection.reasoningEffort"
+                            :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                     </div>
                     <div v-if="!usesGlobalAgentMode" class="form-group">
                         <label class="form-label">{{ t('models.models') }}</label>
-                        <NSelect
-                            :value="selectedAgentModel"
-                            :options="agentModelOptions"
-                            :placeholder="t('models.selectModel')"
-                            :loading="isLoadingAgentForm"
-                            :disabled="isLoadingAgentForm || !selectedAgentProvider"
-                            filterable
-                            @update:value="handleAgentModelChange"
-                        />
+                        <ScopedModelSelector :provider="selectedAgentProvider" :model="selectedAgentModel"
+                            :groups="agentModelGroups" :allow-moa="selectedAgentType === 'hermes'"
+                            :disabled="isLoadingAgentForm || isSavingAgent"
+                            @select="handleAgentModelSelect" />
                     </div>
                     <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode" class="form-group">
                         <label class="form-label">{{ t('codingAgents.protocolScope') }}</label>
