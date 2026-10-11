@@ -25,6 +25,48 @@ async function selectNativeModel(page: Page, label: string) {
   await expect(models).toBeHidden()
 }
 
+for (const mobile of [false, true]) test(`Claude shows and searches resolved models while sending the native alias (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
+  await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 })
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  const api = await mockHermesApi(page)
+  await mockChatSocket(page)
+  await page.route('**/api/agents/availability', route => route.fulfill({ json: { revision: 1, agents: [
+    { id: 'hermes', installed: true, source: 'user-cli' },
+    { id: 'ekko-agent', installed: true, source: 'built-in' },
+    { id: 'claude-code', installed: true, source: 'user-cli' },
+  ] } }))
+  await page.route('**/api/coding-agents', route => route.fulfill({ json: { tools: [{ id: 'claude-code', installed: true }] } }))
+  await page.route('**/api/coding-agents/models?*', route => route.fulfill({ json: { agents: [{
+    ...catalog, agentId: 'claude-code', name: 'Claude Code', source: 'control-protocol',
+    models: [
+      { id: 'opus', name: 'Opus (claude-opus-5-5)' },
+      { id: 'sonnet', name: 'Sonnet (configured-sonnet-model)' },
+      { id: 'claude-fable-5-1[1m]', name: 'Fable (claude-fable-5-1)' },
+    ],
+  }] } }))
+  await page.goto('/#/hermes/chat')
+  if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  await selectNewChatAgent(page, 'Claude')
+  await selectNewChatLaunchMode(page, 'global')
+  const draft = page.locator('.new-chat-page')
+  await draft.locator('.input-model-button').click()
+  const picker = page.locator('.model-cascader:visible')
+  await expect(picker.getByRole('menuitemradio', { name: 'Fable (claude-fable-5-1)', exact: true })).toBeVisible()
+  await picker.getByPlaceholder('Search models...').fill('claude-opus-5-5')
+  await expect(picker.getByRole('menuitemradio', { name: 'Sonnet (configured-sonnet-model)', exact: true })).toHaveCount(0)
+  await picker.getByRole('menuitemradio', { name: 'Opus (claude-opus-5-5)', exact: true }).click()
+  await expect(draft.locator('.input-model-button')).toContainText('claude-opus-5-5')
+  await draft.locator('.input-model-button').click()
+  await expect(picker.getByRole('menuitemradio', { name: 'Opus (claude-opus-5-5)', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await page.screenshot({ path: `/tmp/claude-resolved-model-${mobile ? 'mobile' : 'desktop'}.png`, animations: 'disabled' })
+  await page.keyboard.press('Escape')
+  await sendNewChatMessage(page, 'Use the native Claude alias')
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload))
+    .toMatchObject({ coding_agent_id: 'claude-code', mode: 'global', model: 'opus' })
+  expect(api.unexpectedRequests).toEqual([])
+})
+
 for (const mobile of [false, true]) for (const native of [
   { agent: 'antigravity', name: 'Antigravity', family: 'Gemini 3.1 Pro', base: 'gemini-3.1-pro', levels: ['low', 'high'], alias: false },
   { agent: 'cursor', name: 'Cursor', family: 'Codex 5.3 Fast', base: 'gpt-5.3-codex-fast', levels: ['low', 'high', 'xhigh'], alias: true },

@@ -40,7 +40,12 @@ An older CLI that does not expose the required protocol returns `unsupported`.
 `configured` directory, and a shipped `builtin` directory. Neither a configured
 nor a builtin directory proves that every entry can be used by the account.
 Native model IDs, aliases and provider prefixes are preserved. In particular,
-Claude Code aliases can refer to models selected in native settings. Optional
+Claude Code aliases can refer to models selected in native settings.
+Claude Code labels include the concrete `resolvedModel` returned by native
+initialization, when available (for example, `Opus (claude-opus-5-5)`).
+The selection still submits the original native value, such as `opus` or a
+context-window suffix, so display metadata does not change CLI execution.
+Older CLI responses without `resolvedModel` keep their original labels. Optional
 context limits, input modalities and reasoning efforts are returned only when
 the native discovery response provides them. Codex includes hidden entries.
 

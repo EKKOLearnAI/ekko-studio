@@ -186,6 +186,31 @@ describe('native model directory adapters', () => {
     expect(await claudeCodeModels.discover(ctx)).toEqual({ models: [{ id: 'opus', name: 'Custom upstream', isDefault: false }] })
   })
 
+  it('shows Claude resolved models while preserving aliases and native context selectors', async () => {
+    const ctx = context()
+    ctx.rpc = async (_args, call) => call({ request: vi.fn(), notify: vi.fn(), controlInitialize: vi.fn(async () => ({
+      account: { token: 'private' },
+      models: [
+        { value: 'default', displayName: 'Default (recommended)', resolvedModel: 'claude-opus-5-5' },
+        { value: 'opus', displayName: 'Opus', resolvedModel: 'claude-opus-5-5' },
+        { value: 'sonnet', displayName: 'Sonnet', resolvedModel: 'configured-sonnet-model' },
+        { value: 'claude-fable-5-1[1m]', displayName: 'Fable', resolvedModel: 'claude-fable-5-1' },
+        { value: 'custom', displayName: 'custom-model-id', resolvedModel: 'custom-model-id' },
+        { value: 'haiku', displayName: 'Haiku', resolvedModel: { token: 'private' } },
+      ],
+    })) })
+    const models = normalizeModels((await claudeCodeModels.discover(ctx)).models)
+    expect(models).toEqual([
+      { id: 'default', name: 'Default (recommended) (claude-opus-5-5)', isDefault: true },
+      { id: 'opus', name: 'Opus (claude-opus-5-5)', isDefault: false },
+      { id: 'sonnet', name: 'Sonnet (configured-sonnet-model)', isDefault: false },
+      { id: 'claude-fable-5-1[1m]', name: 'Fable (claude-fable-5-1)', isDefault: false },
+      { id: 'custom', name: 'custom-model-id', isDefault: false },
+      { id: 'haiku', name: 'Haiku', isDefault: false },
+    ])
+    expect(JSON.stringify(models)).not.toContain('private')
+  })
+
   it('uses the SDK transport for Copilot rather than its ACP selectors', async () => {
     const ctx = context()
     ctx.rpc = async (args, call, framing) => {
