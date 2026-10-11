@@ -29,7 +29,6 @@ import {
   normalizeWorkflowRunEdge,
   normalizeWorkflowRunNodeTargets,
   workflowRunEdgeCanvasLabel,
-  workflowRunNodeModelDetails,
 } from '@/utils/workflow-run-snapshot'
 import {
   inferWorkflowConditionValueType,
@@ -141,7 +140,7 @@ import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
 
-const { t, te, locale } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const appStore = useAppStore()
 const chatStore = useChatStore()
@@ -749,12 +748,6 @@ const selectedWorkflowRunBudgetSessions = computed(() => {
     && (run.started_at == null || session.started_at == null || session.started_at >= run.started_at)
   ))
 })
-const selectedWorkflowRunModels = computed(() => workflowRunNodeModelDetails(selectedWorkflowRun.value?.snapshot_nodes || []))
-function workflowRunReasoningEffortLabel(effort: string | null): string {
-  if (effort === null) return t('workflow.evidence.notRecorded')
-  if (!effort || effort === 'default') return t('chat.reasoningEffort.defaultLabel')
-  return te(`chat.reasoningEffort.options.${effort}`) ? t(`chat.reasoningEffort.options.${effort}`) : effort
-}
 const selectedWorkflowEvidenceRows = computed(() => selectedWorkflowRun.value ? buildWorkflowEvidenceRows(selectedWorkflowRun.value) : [])
 const selectedWorkflowEvidenceSummary = computed(() => summarizeWorkflowEvidenceRows(selectedWorkflowEvidenceRows.value))
 const selectedWorkflowOtherJudgmentRows = computed(() => [
@@ -887,6 +880,15 @@ const workflowChatPanelPendingApproval = computed(() => {
   const nodeId = workflowChatPanelNodeId.value
   if (!run || !nodeId) return false
   return workflowNodeStatusFromRun(run, nodeId) === 'pending_approval'
+})
+
+const workflowChatPanelModelLabel = computed(() => {
+  const session = chatStore.activeSession
+  if (!session || session.id !== workflowChatPanelSessionId.value) return t('models.selectModel')
+  if (session.codingAgentMode === 'global') return session.model || t('codingAgents.nativeModelDefault')
+  if (!session.model) return t('models.selectModel')
+  if (session.provider === 'moa') return `MoA · ${session.model}`
+  return appStore.displayModelName(session.model, session.provider)
 })
 
 const visibleWorkflowApprovalKey = computed(() => {
@@ -3759,7 +3761,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
                 </div>
               </div>
               <MessageList scroll-scope="workflow" />
-              <ChatInput />
+              <ChatInput :model-label="workflowChatPanelModelLabel" :model-disabled="true" reasoning-effort-disabled />
             </template>
             <div v-else class="workflow-chat-loading">
               {{ t('chat.noVisibleMessages') }}
@@ -4009,27 +4011,6 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
       data-testid="workflow-run-evidence-details-modal"
     >
       <div v-if="selectedWorkflowRun" class="workflow-run-evidence-details-list">
-        <section v-if="selectedWorkflowRunModels.length" data-testid="workflow-run-model-details">
-          <h3>{{ t('workflow.evidence.nodeModelDetails') }}</h3>
-          <article v-for="node in selectedWorkflowRunModels" :key="node.id" class="workflow-run-model-detail" :data-node-id="node.id">
-            <strong>{{ node.title }}</strong>
-            <dl>
-              <dt>{{ t('workflow.node.agent') }}</dt>
-              <dd>{{ AGENT_OPTIONS.find(option => option.value === node.agent)?.label || node.agent }}</dd>
-              <template v-if="node.agent !== 'hermes' && node.agent !== 'ekko-agent'">
-                <dt>{{ t('codingAgents.launchModeScope') }}</dt>
-                <dd>{{ t(node.agentMode === 'global' ? 'codingAgents.launchModeGlobalShort' : 'codingAgents.modelScope') }}</dd>
-              </template>
-              <template v-if="node.agentMode !== 'global' && node.provider">
-                <dt>{{ t('models.provider') }}</dt><dd>{{ node.provider }}</dd>
-              </template>
-              <dt>{{ t('workflow.node.model') }}</dt>
-              <dd data-testid="workflow-run-node-model">{{ node.model || (node.model === '' && node.agentMode === 'global' ? t('codingAgents.nativeModelDefault') : t('workflow.evidence.notRecorded')) }}</dd>
-              <dt>{{ t('chat.reasoningEffort.tooltip') }}</dt>
-              <dd data-testid="workflow-run-node-effort">{{ workflowRunReasoningEffortLabel(node.reasoningEffort) }}</dd>
-            </dl>
-          </article>
-        </section>
         <section>
           <h3>{{ t('workflow.evidence.actualPathSteps') }}</h3>
           <ol v-if="selectedWorkflowEvidenceSummary.actualPathEdges.length > 0">
@@ -4573,11 +4554,6 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 .workflow-run-evidence-details-list li { margin: 5px 0; }
 .workflow-run-evidence-details-list li span { display: block; color: var(--text-muted); font-size: 11px; }
 .workflow-run-evidence-details-list p { margin: 0; color: var(--text-muted); }
-.workflow-run-model-detail { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-light); border-radius: 8px; font-size: 12px; }
-.workflow-run-model-detail strong { color: var(--text-primary); overflow-wrap: anywhere; }
-.workflow-run-model-detail dl { margin: 8px 0 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 6px 12px; }
-.workflow-run-model-detail dt { color: var(--text-muted); overflow-wrap: anywhere; }
-.workflow-run-model-detail dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 
 .workflow-run-budget-form {
   display: flex;
@@ -4947,6 +4923,10 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+
+  :deep(.input-top-bar) { flex-wrap: wrap; }
+  :deep(.input-model-button) { min-width: 0; max-width: 190px; }
+  :deep(.input-model-label) { display: inline-block; }
 }
 
 .workflow-chat-header {

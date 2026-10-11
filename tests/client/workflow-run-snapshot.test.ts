@@ -3,38 +3,9 @@ import {
   normalizeWorkflowRunEdge,
   normalizeWorkflowRunNodeTargets,
   workflowRunEdgeCanvasLabel,
-  workflowRunNodeModelDetails,
 } from '../../packages/client/src/utils/workflow-run-snapshot'
 
 describe('Workflow run snapshot playback', () => {
-  it('reads historical model configurations without replacing native or removed model IDs', () => {
-    const nodes = [
-      { id: 'hermes', data: { title: 'Historical Hermes', agent: 'hermes', provider: 'removed-provider', model: 'removed-model', reasoningEffort: 'high' } },
-      { id: 'scoped', data: { agent: 'codex', agentMode: 'scoped', provider: 'custom:old', model: 'old-codex', reasoningEffort: 'xhigh' } },
-      { id: 'global', data: { agent: 'codex', agentMode: 'global', model: 'native-old', reasoningEffort: 'ultra' } },
-      { id: 'cursor', data: { agent: 'cursor', model: 'native-old-high', reasoningEffort: 'high' } },
-    ]
-    const original = structuredClone(nodes)
-    expect(workflowRunNodeModelDetails(nodes)).toEqual([
-      { id: 'hermes', title: 'Historical Hermes', agent: 'hermes', agentMode: 'scoped', provider: 'removed-provider', model: 'removed-model', reasoningEffort: 'high' },
-      { id: 'scoped', title: 'scoped', agent: 'codex', agentMode: 'scoped', provider: 'custom:old', model: 'old-codex', reasoningEffort: 'xhigh' },
-      { id: 'global', title: 'global', agent: 'codex', agentMode: 'global', provider: '', model: 'native-old', reasoningEffort: 'ultra' },
-      { id: 'cursor', title: 'cursor', agent: 'cursor', agentMode: 'global', provider: '', model: 'native-old-high', reasoningEffort: 'high' },
-    ])
-    expect(nodes).toEqual(original)
-  })
-
-  it('distinguishes an explicit Agent default from unrecorded legacy model settings', () => {
-    expect(workflowRunNodeModelDetails([
-      null, [], {}, { id: 'other', type: 'note' },
-      { id: 'default', type: 'agent', data: { agent: 'codex', agentMode: 'global', model: '', reasoningEffort: 'default' } },
-      { id: 'legacy', data: { title: '  ', agent: 'codex', agentMode: 'global' } },
-    ])).toEqual([
-      { id: 'default', title: 'default', agent: 'codex', agentMode: 'global', provider: '', model: '', reasoningEffort: 'default' },
-      { id: 'legacy', title: 'legacy', agent: 'codex', agentMode: 'global', provider: '', model: null, reasoningEffort: null },
-    ])
-  })
-
   it('preserves authored handles, labels, animation, and orchestration data', () => {
     expect(normalizeWorkflowRunEdge({
       id: 'review-retry',

@@ -480,6 +480,23 @@ describe('ChatInput draft persistence', () => {
     expect(useChatStore().activeSession?.reasoningEffort).toBe('high')
   })
 
+  it.each([
+    ['', 'chat.reasoningEffort.defaultLabel'],
+    ['high', 'chat.reasoningEffort.options.high'],
+    ['unlisted-effort', 'unlisted-effort'],
+  ])('keeps Ekko run-detail effort %s read-only without rewriting the saved value', async (effort, label) => {
+    const wrapper = mountForSession('ekko-run-detail', {
+      source: 'workflow', codingAgentId: 'ekko-agent', codingAgentMode: 'scoped',
+      provider: 'test-provider', model: 'historical-model', reasoningEffort: effort,
+    }, {}, { reasoningEffortDisabled: true })
+    await nextTick()
+    expect(wrapper.get('.reasoning-effort-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.reasoning-effort-button').text()).toContain(label)
+    await wrapper.get('.n-slider-stub').setValue('1')
+    expect(useChatStore().setSessionReasoningEffort).not.toHaveBeenCalled()
+    expect(useChatStore().activeSession?.reasoningEffort).toBe(effort)
+  })
+
   it('hides the reasoning effort selector for global coding-agent sessions', async () => {
     const wrapper = mountForSession('session-global-codex', {
       source: 'coding_agent',

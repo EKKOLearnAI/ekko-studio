@@ -44,6 +44,7 @@ const props = withDefaults(defineProps<{
   draft?: boolean
   draftConfig?: Pick<Session, 'profile' | 'provider' | 'model' | 'codingAgentMode'>
   reasoningEffort?: string
+  reasoningEffortDisabled?: boolean
   nativeReasoningEfforts?: string[]
   nativeEffortChoices?: NativeEffortChoice[]
   sendDisabled?: boolean
@@ -56,6 +57,7 @@ const props = withDefaults(defineProps<{
   persistDraft: true,
   draft: false,
   reasoningEffort: '',
+  reasoningEffortDisabled: false,
   sendDisabled: false,
 })
 
@@ -112,7 +114,7 @@ const reasoningEffortAccentStyle = computed(() => ({
     || reasoningEffortAccentColors[''],
 }))
 const supportsNativeReasoning = computed(() => (props.nativeReasoningEfforts?.length || 0) > 0)
-const canEditReasoningEffort = computed(() => !isReadOnlyCodingAgentEffort.value && (!isGlobalCodingAgentSession.value || (supportsNativeReasoning.value && reasoningEffortOptions.value.length > 1
+const canEditReasoningEffort = computed(() => !props.reasoningEffortDisabled && !isReadOnlyCodingAgentEffort.value && (!isGlobalCodingAgentSession.value || (supportsNativeReasoning.value && reasoningEffortOptions.value.length > 1
   && (!currentReasoningEffort.value || reasoningEffortOptions.value.some(option => option.value === currentReasoningEffort.value)))))
 const reasoningEffortLabel = computed<string>(() => {
   const v = currentReasoningEffort.value

@@ -1502,7 +1502,6 @@ export default {
       ariaLabel: 'Workflow 執行詳情', title: '執行詳情', count: '{count} 條',
       intro: '顯示本次執行的路徑選擇、循環輪次和異常節點。', empty: '暫無執行詳情', loadFailed: '讀取持久化執行詳情失敗',
       summaryTitle: '執行結論', blockedAt: '卡在 {gate}', actualPath: '實際執行路徑', noActualPath: '本次未採用任何路徑', pathChecks: '路徑判斷', selectedPaths: '已採用路徑', otherPaths: '其他判斷與事件', selectedCount: '已採用 {count} 條', otherCount: '未採用 {count} 條', eventCount: '事件 {count} 條', showOtherPaths: '查看其他詳情（{count}）', hideOtherPaths: '收合其他詳情', runDetails: '執行詳情', actualPathSteps: '實際路徑步驟', nodeBudgetDetails: '時間預算詳情',
-      nodeModelDetails: '節點模型設定', notRecorded: '未記錄',
       condition: '條件', conditionMatched: '已符合', conditionNotMatched: '未符合', sourceOutcome: '節點結果', sourceReturned: '正常回傳', sourceFailed: '執行失敗', sourceSkippedStatus: '未執行',
       checkedData: '檢查的資料', entireReplyText: '完整回覆文字', errorText: '錯誤文字', jsonFieldValue: '單一 JSON 欄位值', advancedPathValue: '進階路徑的值', comparison: '比較方式', textToFind: '要尋找的文字', expectedFieldValue: '預期欄位值', parsedBusinessDecision: '解析出的業務結論', failedGateLabel: '失敗環節（failed_gate 欄位的值）', failedGateValue: '失敗環節（failed_gate 欄位的值）：{gate}', decisions: { blocked: '已阻塞', released: '已發佈', verified: '已驗證', skipped: '無需處理' },
       node: '異常節點', edge: '執行路徑', loop: '循環', unknownNode: '未知節點', pathTitle: '{source} → {target}', loopPass: '循環第 {count} 輪', exceptionalNode: '此節點未正常完成。',

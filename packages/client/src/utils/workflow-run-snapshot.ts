@@ -1,38 +1,5 @@
 import { MarkerType, type EdgeMarkerType } from '@vue-flow/core'
 import { normalizeWorkflowHandleId, workflowEdgeVisualType } from './workflow-edge-authoring'
-import { isGlobalOnlyCodingAgent } from './agent-catalog'
-
-export interface WorkflowRunNodeModelDetails {
-  id: string
-  title: string
-  agent: string
-  agentMode: 'scoped' | 'global'
-  provider: string
-  model: string | null
-  reasoningEffort: string | null
-}
-
-// Read the run's configuration directly; authoring defaults and today's model
-// catalog must not fill in fields that an older run did not record.
-export function workflowRunNodeModelDetails(nodes: unknown[]): WorkflowRunNodeModelDetails[] {
-  return nodes.flatMap(raw => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
-    const record = raw as Record<string, unknown>
-    if (typeof record.id !== 'string' || !record.id || (record.type && record.type !== 'agent')) return []
-    const data = record.data && typeof record.data === 'object' && !Array.isArray(record.data)
-      ? record.data as Record<string, unknown> : {}
-    const agent = typeof data.agent === 'string' && data.agent ? data.agent : 'hermes'
-    return [{
-      id: record.id,
-      title: typeof data.title === 'string' && data.title.trim() ? data.title.trim() : record.id,
-      agent,
-      agentMode: data.agentMode === 'global' || isGlobalOnlyCodingAgent(agent) ? 'global' : 'scoped',
-      provider: typeof data.provider === 'string' ? data.provider : '',
-      model: typeof data.model === 'string' ? data.model : null,
-      reasoningEffort: typeof data.reasoningEffort === 'string' ? data.reasoningEffort : null,
-    }]
-  })
-}
 
 export interface WorkflowRunEdgeOrchestration {
   route: 'success' | 'failure' | 'always'
