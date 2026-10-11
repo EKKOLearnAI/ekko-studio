@@ -34,12 +34,12 @@ function connection(options: { image?: boolean; load?: boolean; resume?: boolean
 }
 
 describe('native ACP session transport', () => {
-  it('applies native model and thought selectors before sending the prompt', async () => {
+  it.each(['high', 'off', 'on'])('applies native model and thought selector %s before sending the prompt', async reasoningEffort => {
     const { turn, sent } = connection({ configOptions: [{ id: 'native-model', category: 'model' }, { id: 'effort', category: 'thought_level' }] })
-    await turn.prompt({ cwd: '/workspace', text: 'go', mcpServers: [], model: 'exact/native-model', reasoningEffort: 'high' })
+    await turn.prompt({ cwd: '/workspace', text: 'go', mcpServers: [], model: 'exact/native-model', reasoningEffort })
     expect(sent.map(message => message.method)).toEqual(['initialize', 'session/new', 'session/set_config_option', 'session/set_config_option', 'session/prompt'])
     expect(sent[2].params).toEqual({ sessionId: 'native', configId: 'native-model', value: 'exact/native-model' })
-    expect(sent[3].params).toEqual({ sessionId: 'native', configId: 'effort', value: 'high' })
+    expect(sent[3].params).toEqual({ sessionId: 'native', configId: 'effort', value: reasoningEffort })
   })
 
   it('uses the legacy ACP model method when the CLI has no config selector', async () => {

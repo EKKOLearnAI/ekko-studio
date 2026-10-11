@@ -225,21 +225,27 @@ describe('group Agent presets', () => {
     })).toThrow(/global mode is only available/i)
   })
 
-  it('round-trips global native choices and accepts native defaults without Studio model bindings', async () => {
+  it.each([
+    { agent: 'codex', effort: 'ultra' },
+    { agent: 'kimi', effort: 'off' },
+    { agent: 'kimi', effort: 'on' },
+  ])('round-trips global $agent effort $effort and native defaults without Studio bindings', async ({ agent, effort }) => {
     const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const controller = await import('../../packages/server/src/modules/studio/controllers/group-agent-presets')
+    const { updateAgentStatus } = await import('../../packages/server/src/modules/studio/public/agent-status-registry')
+    updateAgentStatus(agent as 'codex' | 'kimi', { installed: true, source: 'user-cli', path: `/test/${agent}` })
     initAllStores()
     modelGroups.value = []
     const user = { id: 910, role: 'admin', profiles: ['research'] }
-    const input = { agent: 'codex', agentMode: 'global', profile: 'research', name: 'Global native preset',
-      model: 'native-review', reasoningEffort: 'ultra', provider: 'discard', apiMode: 'codex_responses' }
+    const input = { agent, agentMode: 'global', profile: 'research', name: `Global native ${agent} ${effort}`,
+      model: 'native-review', reasoningEffort: effort, provider: 'discard', apiMode: 'codex_responses' }
     const created: any = { state: { user }, request: { body: input } }
     await controller.create(created)
     expect(created.status).toBe(201)
-    expect(created.body.preset).toMatchObject({ model: 'native-review', reasoningEffort: 'ultra', provider: '', apiMode: '' })
+    expect(created.body.preset).toMatchObject({ model: 'native-review', reasoningEffort: effort, provider: '', apiMode: '' })
     const listed: any = { state: { user } }
     await controller.list(listed)
-    expect(listed.body.presets).toContainEqual(expect.objectContaining({ model: 'native-review', reasoningEffort: 'ultra', available: true }))
+    expect(listed.body.presets).toContainEqual(expect.objectContaining({ model: 'native-review', reasoningEffort: effort, available: true }))
     const updated: any = { state: { user }, params: { presetId: created.body.preset.id },
       request: { body: { ...input, model: '', reasoningEffort: '' } } }
     await controller.update(updated)

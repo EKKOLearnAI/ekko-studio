@@ -309,7 +309,7 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter(item => typeof item === 'string' && item.trim()).map(item => item.trim()) : []
 }
 
-const WORKFLOW_REASONING_EFFORTS = new Set(['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'disabled', 'enabled'])
+const WORKFLOW_REASONING_EFFORTS = new Set(['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'disabled', 'enabled', 'off', 'on'])
 const WORKFLOW_API_MODES = new Set(['chat_completions', 'codex_responses', 'anthropic_messages'])
 export function normalizeWorkflowNode(raw: unknown): WorkflowNodeSnapshot | null {
   const record = raw && typeof raw === 'object' ? raw as Record<string, any> : {}
@@ -335,8 +335,14 @@ export function normalizeWorkflowNode(raw: unknown): WorkflowNodeSnapshot | null
   if (agentMode === 'global' && !isNativeCodingAgent(agent) && agent !== 'claude-code' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && agent !== 'cursor' && agent !== 'antigravity' && (agent !== 'opencode' && agent !== 'dsh')) {
     throw new Error(`workflow node ${id} cannot use global mode with this agent runtime`)
   }
+  // Old Global nodes retained their ignored Model-mode fields. Native overrides
+  // have no Studio provider; migrate before discarding that legacy marker.
+  const hasLegacyGlobalSelection = agentMode === 'global' && (
+    (typeof data.provider === 'string' && Boolean(data.provider.trim()))
+    || (isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global')
+  )
   const provider = agentMode !== 'global' && typeof data.provider === 'string' ? data.provider.trim() : ''
-  const model = isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global' ? '' : typeof data.model === 'string' ? data.model.trim() : ''
+  const model = hasLegacyGlobalSelection ? '' : typeof data.model === 'string' ? data.model.trim() : ''
   const apiMode = agentMode !== 'global' && typeof data.apiMode === 'string' ? data.apiMode.trim() : ''
   const targetFieldCount = [provider, model, apiMode].filter(Boolean).length
   if (agentMode !== 'global' && targetFieldCount !== 0 && targetFieldCount !== 3) {
@@ -345,7 +351,7 @@ export function normalizeWorkflowNode(raw: unknown): WorkflowNodeSnapshot | null
   if (apiMode && !WORKFLOW_API_MODES.has(apiMode)) {
     throw new Error(`workflow node ${id} has invalid apiMode`)
   }
-  const reasoningEffort = isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global' ? 'default' : typeof data.reasoningEffort === 'string' && data.reasoningEffort.trim()
+  const reasoningEffort = hasLegacyGlobalSelection ? 'default' : typeof data.reasoningEffort === 'string' && data.reasoningEffort.trim()
     ? data.reasoningEffort.trim()
     : 'default'
   if (!WORKFLOW_REASONING_EFFORTS.has(reasoningEffort)) {

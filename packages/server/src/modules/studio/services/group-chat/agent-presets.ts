@@ -25,7 +25,7 @@ const ALLOWED_FIELDS = new Set([
 ])
 const AGENTS = new Set<GroupAgentPresetAgent>(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])
 const API_MODES = new Set(['chat_completions', 'codex_responses', 'anthropic_messages'])
-const REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'disabled', 'enabled'])
+const REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'disabled', 'enabled', 'off', 'on'])
 const AVATAR_MAX_LENGTH = 1_500_000
 const GLOBAL_MODE_AGENTS = new Set<GroupAgentPresetAgent>(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])
 

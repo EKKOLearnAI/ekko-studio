@@ -641,6 +641,11 @@ function makeNode(
 ): WorkflowNode {
   const agent = data.agent || firstAvailableWorkflowAgent.value || 'hermes'
   const usesGlobal = isGlobalOnlyCodingAgent(agent) || (agent !== 'hermes' && agent !== 'ekko-agent' && data.agentMode === 'global')
+  // Match server migration before clearing the provider: old Global nodes kept
+  // ignored Model-mode values, while native selections have no Studio provider.
+  const hasLegacyGlobalSelection = usesGlobal && (
+    Boolean(data.provider?.trim()) || (isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global')
+  )
   return {
     id,
     type: 'agent',
@@ -653,10 +658,10 @@ function makeNode(
       agentMode: isGlobalOnlyCodingAgent(agent) || (data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(agent)) ? 'global' : 'scoped',
       priorAgentMode: data.priorAgentMode === 'global' || data.priorAgentMode === 'scoped' ? data.priorAgentMode : undefined,
       provider: usesGlobal ? '' : data.provider || defaultModelSelection.value.provider,
-      model: usesGlobal ? (isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global' ? '' : data.model || '') : data.model || defaultModelSelection.value.model,
+      model: usesGlobal ? (hasLegacyGlobalSelection ? '' : data.model || '') : data.model || defaultModelSelection.value.model,
       apiMode: data.apiMode || defaultApiMode(data.provider || defaultModelSelection.value.provider),
       agentPreset: data.agentPreset,
-      reasoningEffort: isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global' ? 'default' : data.reasoningEffort || 'default',
+      reasoningEffort: hasLegacyGlobalSelection ? 'default' : data.reasoningEffort || 'default',
       input: data.input || '',
       skills: data.skills || [],
       images: data.images || [],

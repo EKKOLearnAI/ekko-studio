@@ -6,6 +6,8 @@ for (const target of [
   { agent: 'cursor', label: 'Cursor', model: 'native-review-high', family: 'Native Review', effort: 'high', effortLabel: 'High', choices: ['low', 'high'], variants: true },
   { agent: 'antigravity', label: 'Antigravity', model: 'native-review-high', family: 'Native Review', effort: 'high', effortLabel: 'High', choices: ['low', 'high'], variants: true },
   { agent: 'zcode', label: 'ZCode', model: 'glm-5-turbo', family: 'GLM-5-Turbo', effort: 'enabled', effortLabel: 'On', choices: ['disabled', 'enabled'] },
+  { agent: 'kimi', label: 'Kimi (off)', model: 'kimi-for-coding', family: 'Kimi for Coding', effort: 'off', effortLabel: 'off', choices: ['off', 'on'] },
+  { agent: 'kimi', label: 'Kimi (on)', model: 'kimi-for-coding', family: 'Kimi for Coding', effort: 'on', effortLabel: 'on', choices: ['off', 'on'] },
 ]) {
   test(`workflow saves and restores ${target.label} global native model and effort`, async ({ page }) => {
     await authenticate(page, TEST_ACCESS_KEY, 'research')
@@ -74,3 +76,43 @@ for (const target of [
     expect(api.unexpectedRequests).toEqual([])
   })
 }
+
+test('loading an old Global workflow discards ignored Model settings before saving and running', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  const workflow = {
+    id: 'wf-legacy-global', name: 'Legacy Global', profile: 'research', workspace: null,
+    nodes: [{ id: 'agent', type: 'agent', position: { x: 80, y: 80 }, data: {
+      title: 'Agent', agent: 'claude-code', agentMode: 'global', provider: 'custom:openai',
+      model: 'gpt-5', apiMode: 'codex_responses', reasoningEffort: 'xhigh', input: 'Review',
+      skills: [], images: [], approvalRequired: false,
+    } }], edges: [], viewport: { x: 80, y: 80, zoom: .75 }, created_at: 1, updated_at: 1,
+  }
+  const api = await mockHermesApi(page, { workflows: [workflow], workflowRuns: [] })
+  await page.route('**/api/agents/status', route => route.fulfill({ json: {
+    revision: 1, updatedAt: new Date().toISOString(), agents: [{ id: 'claude-code', installed: true,
+      source: 'user-cli', path: '/test/claude', version: '1.0.0' }],
+  } }))
+  await page.route('**/api/coding-agents/models?*', route => route.fulfill({ json: { agents: [{
+    agentId: 'claude-code', name: 'Claude', status: 'ready', source: 'cli', scope: 'available',
+    models: [{ id: 'sonnet', name: 'Sonnet', reasoningEfforts: ['low', 'high'] }],
+  }] } }))
+  await page.goto('/#/hermes/workflow')
+  const node = page.locator('.vue-flow__node[data-id="agent"]')
+  await expect(node.locator('.native-model-trigger')).toHaveText('Agent default model')
+  await expect(node.locator('.native-reasoning-effort')).toContainText('Default')
+  await page.locator('.header-actions').getByRole('button', { name: 'Save', exact: true }).click()
+  const saves = () => api.requests.filter(request => request.method === 'PATCH' && request.pathname === '/api/studio/workflows/wf-legacy-global')
+  await expect.poll(() => saves().length).toBe(1)
+  const migrated = JSON.parse(saves()[0].postData || '{}')
+  expect(migrated.nodes[0].data).toMatchObject({ agentMode: 'global', provider: '', model: '', reasoningEffort: 'default' })
+  Object.assign(workflow, migrated)
+  await page.reload()
+  await expect(node.locator('.native-model-trigger')).toHaveText('Agent default model')
+  await page.getByRole('button', { name: 'Start Execution', exact: true }).click()
+  await page.getByTestId('workflow-run-budget-modal').getByRole('button', { name: 'Confirm', exact: true }).click()
+  await expect.poll(() => api.requests.some(request => request.method === 'POST' && request.pathname === '/api/studio/workflows/wf-legacy-global/run')).toBe(true)
+  expect(JSON.parse(saves().at(-1)?.postData || '{}').nodes[0].data).toMatchObject({
+    agentMode: 'global', provider: '', model: '', reasoningEffort: 'default',
+  })
+  expect(api.unexpectedRequests).toEqual([])
+})

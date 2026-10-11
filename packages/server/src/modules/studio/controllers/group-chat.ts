@@ -135,7 +135,7 @@ type RoomSummaryInput = {
     everyTurns?: number
 }
 
-const GROUP_AGENT_REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'disabled', 'enabled'])
+const GROUP_AGENT_REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'disabled', 'enabled', 'off', 'on'])
 const GROUP_AGENT_TYPES = new Set(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])
 const GROUP_AGENT_API_MODES = new Set(['chat_completions', 'codex_responses', 'anthropic_messages'])
 const GLOBAL_MODE_GROUP_AGENTS = new Set(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])

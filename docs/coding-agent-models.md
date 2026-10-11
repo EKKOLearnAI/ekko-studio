@@ -156,6 +156,14 @@ workflow execution forward these selections, and workflow sessions display the
 saved effort. Empty selections use native defaults. Legacy scoped settings for
 global-only agents are cleared rather than passed to a native CLI.
 
+Older Global workflow nodes retained a Studio `provider` alongside ignored
+Model-mode values. Loading or executing these nodes clears their model and effort
+before enabling native overrides, preserving their original native defaults.
+Saving persists the migrated values. New Global workflow selections must omit
+`provider` or set it to an empty string; their native model and effort are kept.
+Kimi's advertised `off` / `on` thought levels are stored and forwarded unchanged
+by workflow nodes, group members and Agent presets.
+
 Global runs carry the chosen model and reasoning effort through session storage
 and resumed runs while retaining native authentication and provider settings.
 CLI agents receive native flags, and ACP agents receive native session model and
