@@ -18,8 +18,8 @@ vi.mock('@/components/hermes/models/ModelCascader.vue', () => ({ default: {
   name: 'ModelCascader', props: ['model', 'groups', 'displayName'], emits: ['select'],
   template: '<div><slot name="trigger" :show="false" :open="() => {}" :openWithKeyboard="() => {}" /><slot name="footer" /></div>',
 } }))
-function setup(disabled = false) {
-  return mount(NativeCodingAgentModelFields, { props: { agent: 'cursor', model: 'gemini-high', reasoningEffort: 'high', disabled, onChange } })
+function setup(disabled = false, field: 'model' | 'reasoning-effort' = 'reasoning-effort') {
+  return mount(NativeCodingAgentModelFields, { props: { agent: 'cursor', model: 'gemini-high', reasoningEffort: 'high', disabled, field, onChange } })
 }
 beforeEach(() => {
   onChange.mockClear()
@@ -29,14 +29,17 @@ beforeEach(() => {
 })
 describe('native model fields shared by group chat and workflow', () => {
   it('shows one family and changes strength together with the real native model ID', () => {
-    const wrapper = setup()
-    expect(wrapper.get('.native-model-trigger').text()).toBe('Gemini')
-    expect(wrapper.findComponent({ name: 'ModelCascader' }).props('groups')[0].models).toEqual(['', 'gemini-low'])
-    wrapper.findComponent({ name: 'NSelect' }).vm.$emit('update:value', 'low')
+    const model = setup(false, 'model')
+    const effort = setup()
+    expect(model.get('.native-model-trigger').text()).toBe('Gemini')
+    expect(model.findComponent({ name: 'ModelCascader' }).props('groups')[0].models).toEqual(['', 'gemini-low'])
+    expect(model.findComponent({ name: 'NSelect' }).exists()).toBe(false)
+    expect(effort.findComponent({ name: 'ModelCascader' }).exists()).toBe(false)
+    effort.findComponent({ name: 'NSelect' }).vm.$emit('update:value', 'low')
     expect(onChange.mock.calls).toEqual([[{ model: 'gemini-low', reasoningEffort: 'low' }]])
   })
   it('retains strength when selecting the same family and clears it for agent defaults', () => {
-    const wrapper = setup()
+    const wrapper = setup(false, 'model')
     wrapper.findComponent({ name: 'ModelCascader' }).vm.$emit('select', { model: 'gemini-low' })
     wrapper.findComponent({ name: 'ModelCascader' }).vm.$emit('select', { model: '' })
     expect(onChange.mock.calls).toEqual([[{ model: 'gemini-high', reasoningEffort: 'high' }], [{ model: '', reasoningEffort: '' }]])
@@ -57,9 +60,10 @@ describe('native model fields shared by group chat and workflow', () => {
     expect(wrapper.get('.effort').attributes('disabled')).toBeDefined()
   })
   it('blocks edits in a workflow run snapshot', () => {
-    const wrapper = setup(true)
-    wrapper.findComponent({ name: 'ModelCascader' }).vm.$emit('select', { model: 'gemini-low' })
-    wrapper.findComponent({ name: 'NSelect' }).vm.$emit('update:value', 'low')
+    const model = setup(true, 'model')
+    const effort = setup(true)
+    model.findComponent({ name: 'ModelCascader' }).vm.$emit('select', { model: 'gemini-low' })
+    effort.findComponent({ name: 'NSelect' }).vm.$emit('update:value', 'low')
     expect(onChange.mock.calls).toEqual([])
   })
 })

@@ -7,7 +7,7 @@ import { useCodingAgentModels } from '@/composables/useCodingAgentModels'
 import { nativeCatalogModel, nativeModelEffortChoices, nativeModelFamilies, nativeModelPickerId, selectNativeModelEffort } from '@/utils/native-model-families'
 import ModelCascader from './ModelCascader.vue'
 
-const props = defineProps<{ agent: CodingAgentId; model: string; reasoningEffort: string; disabled?: boolean }>()
+const props = defineProps<{ agent: CodingAgentId; model: string; reasoningEffort: string; disabled?: boolean; field?: 'model' | 'reasoning-effort' }>()
 const emit = defineEmits<{ change: [selection: { model: string; reasoningEffort: string }] }>()
 const { t, te } = useI18n()
 const { catalog, loading, refreshFailed, reload } = useCodingAgentModels(() => props.agent, () => true)
@@ -46,7 +46,7 @@ function selectEffort(value: string) {
 
 <template>
   <div class="native-coding-agent-model-fields">
-    <ModelCascader :groups="groups" :provider="`native:${agent}`" :model="nativeModelPickerId(models, model)"
+    <ModelCascader v-if="field !== 'reasoning-effort'" :groups="groups" :provider="`native:${agent}`" :model="nativeModelPickerId(models, model)"
       :custom-models="{}" :display-name="displayName" :disabled="disabled" @select="selectModel">
       <template #trigger="{ show, open, openWithKeyboard }">
         <button type="button" class="native-model-trigger" :disabled="disabled" aria-haspopup="dialog"
@@ -64,15 +64,16 @@ function selectEffort(value: string) {
         </div>
       </template>
     </ModelCascader>
-    <NSelect v-if="selected?.reasoningEfforts?.length || effort" class="native-reasoning-effort" :value="effort"
+    <NSelect v-else class="native-reasoning-effort" :value="effort"
       :options="effortOptions" size="small" :disabled="disabled || !canSelectEffort"
+      :aria-label="t('chat.reasoningEffort.tooltip')"
       :placeholder="t('chat.reasoningEffort.tooltip')" @update:value="selectEffort" />
   </div>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-.native-coding-agent-model-fields { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.native-coding-agent-model-fields { min-width: 0; }
 .native-model-trigger {
   width: 100%; padding: 6px 8px; border: 1px solid $border-color; border-radius: $radius-sm;
   background: $bg-input; color: $text-primary; font-size: 13px; text-align: start; cursor: pointer;

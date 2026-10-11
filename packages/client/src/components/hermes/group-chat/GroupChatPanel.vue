@@ -2902,11 +2902,16 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             :disabled="isLoadingAgentForm"
                         />
                     </div>
-                    <div v-if="!usesGlobalAgentMode" class="form-group">
+                    <div class="form-group">
                         <label class="form-label">{{ t('chat.reasoningEffort.tooltip') }}</label>
+                        <NativeCodingAgentModelFields v-if="usesGlobalAgentMode" :key="nativeAgentId" :agent="nativeAgentId"
+                            field="reasoning-effort" :model="nativeAgentSelection.model" :reasoning-effort="nativeAgentSelection.reasoningEffort"
+                            :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                         <NSelect
+                            v-else
                             v-model:value="selectedAgentReasoningEffort"
                             :options="agentReasoningEffortOptions"
+                            :aria-label="t('chat.reasoningEffort.tooltip')"
                             :placeholder="t('chat.reasoningEffort.tooltip')"
                             :disabled="isLoadingAgentForm"
                         />

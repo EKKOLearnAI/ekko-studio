@@ -225,15 +225,22 @@ async function uploadImages(files: File[]) {
         :placeholder="t('workflow.node.apiMode')"
         @update:value="value => updateField('apiMode', value as CodingAgentApiMode)"
       />
-      <NSelect
-        v-if="usesScopedModel"
-        :value="data.reasoningEffort"
-        :options="reasoningEffortOptions"
-        size="small"
-        :disabled="data.readonly"
-        :placeholder="t('chat.reasoningEffort.tooltip')"
-        @update:value="value => updateField('reasoningEffort', value as string)"
-      />
+      <div class="node-field-row">
+        <span class="node-field-label-row">{{ t('chat.reasoningEffort.tooltip') }}</span>
+        <NSelect
+          v-if="usesScopedModel"
+          :value="data.reasoningEffort"
+          :options="reasoningEffortOptions"
+          size="small"
+          :disabled="data.readonly"
+          :aria-label="t('chat.reasoningEffort.tooltip')"
+          :placeholder="t('chat.reasoningEffort.tooltip')"
+          @update:value="value => updateField('reasoningEffort', value as string)"
+        />
+        <NativeCodingAgentModelFields v-else :key="data.agent" :agent="data.agent as CodingAgentId"
+          field="reasoning-effort" :model="data.model" :reasoning-effort="data.reasoningEffort === 'default' ? '' : data.reasoningEffort"
+          :disabled="data.readonly" @change="selection => data.onUpdate(id, { ...selection, reasoningEffort: selection.reasoningEffort || 'default' })" />
+      </div>
       <div class="node-field-row">
         <span class="node-field-label-row">
           <span>{{ t('workflow.node.join') }}</span>

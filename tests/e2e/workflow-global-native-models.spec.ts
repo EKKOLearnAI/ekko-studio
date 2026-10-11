@@ -40,7 +40,10 @@ for (const target of [
     const menu = page.locator('.model-cascader:visible')
     await expect(menu.getByRole('menuitemradio', { name: target.family, exact: true })).toHaveCount(1)
     await menu.getByRole('menuitemradio', { name: target.family, exact: true }).click()
-    await node.locator('.native-reasoning-effort').click()
+    const effortField = node.locator('.node-field-row').filter({ has: page.locator('.native-reasoning-effort') })
+    await expect(effortField.locator('.node-field-label-row')).toHaveText('Reasoning effort')
+    await expect(effortField.locator('.native-model-trigger')).toHaveCount(0)
+    await effortField.locator('.native-reasoning-effort').click()
     await page.getByText(target.effortLabel, { exact: true }).last().click()
     if (target.agent !== 'cursor') {
       await mode.click()
