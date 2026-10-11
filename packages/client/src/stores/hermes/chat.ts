@@ -3107,6 +3107,35 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
+  /**
+   * What a plain message does when it is typed while the agent is working.
+   * Hermes calls this `display.busy_input_mode`, and Studio has carried the
+   * key in its DisplayConfig without honouring it; these are its values.
+   *
+   * Studio has always queued, so an unset or unrecognised value keeps queueing
+   * rather than adopting Hermes' own `interrupt` default and changing what
+   * every existing install does on upgrade.
+   */
+  type BusyInputMode = 'queue' | 'steer' | 'interrupt'
+
+  function resolveBusyInputMode(): BusyInputMode {
+    const raw = String(useSettingsStore().display.busy_input_mode || '').trim().toLowerCase()
+    return raw === 'steer' || raw === 'interrupt' ? raw : 'queue'
+  }
+
+  /** Queue ids waiting for the server to acknowledge them, with what to do then. */
+  const pendingBusyActions = new Map<string, 'steer' | 'interrupt'>()
+
+  function applyPendingBusyAction(sessionId: string, queueId: string) {
+    const action = pendingBusyActions.get(queueId)
+    if (!action) return
+    pendingBusyActions.delete(queueId)
+    // The message is in the queue and visible either way; if the action fails
+    // the server says so and the message simply stays queued.
+    if (action === 'steer') steerQueuedMessage(sessionId, queueId)
+    else insertQueuedMessage(sessionId, queueId)
+  }
+
   function enqueueUserMessage(sessionId: string, message: Message) {
     const queue = queuedUserMessages.value.get(sessionId) || []
     if (queue.some(item => item.id === message.id)) return
@@ -3146,6 +3175,19 @@ export const useChatStore = defineStore('chat', () => {
   function removeQueuedMessage(sessionId: string, messageId: string) {
     if (!dropQueuedUserMessage(sessionId, messageId)) return
     getChatRunSocket(runtimeTransport())?.emit('cancel_queued_run', {
+      session_id: sessionId,
+      queue_id: messageId,
+    })
+  }
+
+  /**
+   * Hand a queued message to the run that is already going. Unlike inserting,
+   * which stops the current turn first, this reaches the agent mid-turn — so
+   * the server drops it from the queue only once the bridge accepts it.
+   */
+  function steerQueuedMessage(sessionId: string, messageId: string) {
+    if (!(queuedUserMessages.value.get(sessionId) || []).some(message => message.id === messageId)) return
+    getChatRunSocket(runtimeTransport())?.emit('steer_queued_run', {
       session_id: sessionId,
       queue_id: messageId,
     })
@@ -3257,6 +3299,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function handleRunQueuedEvent(sessionId: string, evt: RunEvent) {
+    const queuedIds = Array.isArray((evt as any).queued_messages)
+      ? (evt as any).queued_messages.map((message: any) => String(message?.id || '')).filter(Boolean)
+      : []
+    for (const queueId of queuedIds) applyPendingBusyAction(sessionId, queueId)
     const queueLength = Number((evt as any).queue_length || 0)
     if (queueLength > 0) {
       queueLengths.value.set(sessionId, queueLength)
@@ -3707,6 +3753,13 @@ export const useChatStore = defineStore('chat', () => {
 
     if (shouldQueue) {
       enqueueUserMessage(sid, userMsg)
+      const busyMode = resolveBusyInputMode()
+      // Steering carries text only, so anything with attachments stays queued —
+      // the same fallback Hermes applies for images.
+      const canSteer = busyMode === 'steer' && !(attachments && attachments.length > 0)
+      if (busyMode === 'interrupt' || canSteer) {
+        pendingBusyActions.set(userMsg.id, busyMode === 'interrupt' ? 'interrupt' : 'steer')
+      }
     } else {
       addMessage(sid, userMsg)
       updateSessionTitle(sid)
@@ -5625,6 +5678,7 @@ export const useChatStore = defineStore('chat', () => {
     getSubagentStream,
     removeQueuedMessage,
     insertQueuedMessage,
+    steerQueuedMessage,
     setMessageReference,
     clearMessageReference,
     isLoadingSessions,
