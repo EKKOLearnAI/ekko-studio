@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
-test('language menu stays usable after switching to an RTL locale', async ({ page }) => {
+test('language menu stays usable after switching locales', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await mockHermesApi(page)
 
@@ -13,6 +13,12 @@ test('language menu stays usable after switching to an RTL locale', async ({ pag
   const languageMenu = page.locator('.n-base-select-menu')
   const option = (label: string) =>
     page.locator('.n-base-select-option').filter({ hasText: new RegExp(`^${label}$`) })
+
+  await languageSwitch.click()
+  await option('Türkçe').click()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'tr')
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr')
+  await expect(languageSwitch).toContainText('Türkçe')
 
   await languageSwitch.click()
   await option('العربية').click()

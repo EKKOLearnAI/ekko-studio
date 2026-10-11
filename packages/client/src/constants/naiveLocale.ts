@@ -9,6 +9,7 @@ import {
   dateKoKR,
   datePtBR,
   dateRuRU,
+  dateTrTR,
   dateZhCN,
   dateZhTW,
   deDE,
@@ -19,6 +20,7 @@ import {
   koKR,
   ptBR,
   ruRU,
+  trTR,
   zhCN,
   zhTW,
   type NDateLocale,
@@ -41,6 +43,7 @@ const LOCALE_CONFIGS: Record<string, NaiveLocaleConfig> = {
   es: { locale: esAR, dateLocale: dateEsAR },
   pt: { locale: ptBR, dateLocale: datePtBR },
   ru: { locale: ruRU, dateLocale: dateRuRU },
+  tr: { locale: trTR, dateLocale: dateTrTR },
   ar: { locale: arDZ, dateLocale: dateArDZ },
 }
 
