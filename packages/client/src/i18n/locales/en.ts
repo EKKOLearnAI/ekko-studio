@@ -1187,6 +1187,8 @@ export default {
       options: {
         default: 'Default (config.yaml)',
         none: 'None',
+        disabled: "Off",
+        enabled: "On",
         minimal: 'Minimal',
         low: 'Low',
         medium: 'Medium',
@@ -3259,6 +3261,9 @@ export default {
     providerPlaceholder: "e.g. custom:glm",
     modelScope: "Model",
     modelPlaceholder: "Select model",
+    nativeModelDefault: "Agent default model",
+    nativeModelsFailed: "Models could not be loaded. Use the agent default or refresh.",
+    nativeModelsRefreshFailed: "Refresh failed. Showing cached models.",
     launchModeScope: "Launch mode",
     launchModeGlobal: "Global config",
     launchModeGlobalShort: "Global",

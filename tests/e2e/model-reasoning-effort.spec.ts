@@ -68,6 +68,12 @@ for (const agent of ['Ekko', 'Hermes', 'Codex']) test(`${agent} new-chat forward
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const api = await mockHermesApi(page, { modelGroups: draftGroups })
   await mockChatSocket(page)
+  const effortWrites: any[] = []
+  await page.route('**/api/studio/sessions/*/reasoning-effort', async route => {
+    const body = route.request().postDataJSON()
+    effortWrites.push(body)
+    await route.fulfill({ json: { ok: true, reasoning_effort: body.reasoningEffort } })
+  })
   await page.goto('/#/hermes/chat')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await selectNewChatAgent(page, agent)
@@ -80,7 +86,31 @@ for (const agent of ['Ekko', 'Hermes', 'Codex']) test(`${agent} new-chat forward
     model: 'reasoning-model', reasoning_effort: 'max', input: 'Use my draft reasoning effort',
   })
   await expect(page.locator('.reasoning-effort-button')).toHaveAttribute('aria-label', /max/i)
+  await expect(page.locator('.reasoning-effort-button')).toBeEnabled()
   expect(api.requests.filter(request => request.pathname.endsWith('/reasoning-effort') && request.method !== 'GET')).toEqual([])
+  expect(effortWrites).toEqual([])
+  if (agent === 'Codex') {
+    const sid = await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.find((item: any) => item.event === 'run').payload.session_id)
+    await page.evaluate(sid => {
+      const socket = (window as any).__PW_CHAT_SOCKET__.latest
+      socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'scoped-run' })
+      socket.__trigger('session.workspace.updated', { event: 'session.workspace.updated', session_id: sid, workspace: '/tmp/scoped-workspace' })
+      socket.__trigger('message.delta', { event: 'message.delta', session_id: sid, delta: 'Ready to continue.' })
+      socket.__trigger('run.completed', { event: 'run.completed', session_id: sid, run_id: 'scoped-run' })
+    }, sid)
+    await page.locator('.reasoning-effort-button').click()
+    await page.getByRole('slider').focus()
+    for (let step = 0; step < 3; step++) await page.keyboard.press('ArrowLeft')
+    await page.keyboard.press('ArrowRight')
+    await expect(page.locator('.reasoning-effort-button')).toHaveAttribute('aria-label', /low/i)
+    await page.keyboard.press('Escape')
+    await expect.poll(() => effortWrites.at(-1)).toEqual({ reasoningEffort: 'low' })
+    const input = page.locator('.chat-input-area textarea')
+    await input.fill('Continue with the new scoped effort')
+    await input.press('Enter')
+    await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.filter((item: any) => item.event === 'run').at(-1)?.payload))
+      .toMatchObject({ mode: 'scoped', model: 'reasoning-model', reasoning_effort: 'low', input: 'Continue with the new scoped effort' })
+  }
   expect(api.unexpectedRequests).toEqual([])
 })
 

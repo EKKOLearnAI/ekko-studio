@@ -75,6 +75,20 @@ describe('handleCodingAgentRun', () => {
     })
   })
 
+  it('restores native model and effort overrides when a global chat resumes', async () => {
+    getSessionMock.mockReturnValue({ model: 'native-model', reasoning_effort: 'high', provider: 'global' })
+    managerMock.runIdForSession.mockReturnValue(undefined)
+    startCodingAgentRunMock.mockResolvedValue({ agentSessionId: 'native-runtime' })
+    sendCodingAgentRunInputMock.mockResolvedValue({ runId: 'native-runtime' })
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    await handleCodingAgentRun({} as any, { join: vi.fn(), emit: vi.fn() } as any, {
+      session_id: 'native-session', input: 'continue', coding_agent_id: 'codex', mode: 'global',
+    }, 'default', new Map())
+    expect(startCodingAgentRunMock).toHaveBeenCalledWith('codex', expect.objectContaining({
+      mode: 'global', model: 'native-model', reasoningEffort: 'high', provider: undefined, apiMode: undefined,
+    }), expect.anything())
+  })
+
   it('passes the group credential into native launch without overwriting a shared profile token', async () => {
     managerMock.runIdForSession.mockReturnValue(undefined)
     startCodingAgentRunMock.mockResolvedValue({ agentSessionId: 'group-runtime' })

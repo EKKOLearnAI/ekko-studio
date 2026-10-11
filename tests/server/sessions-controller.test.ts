@@ -14,6 +14,7 @@ const getSessionDetailFromDbWithProfileMock = vi.fn()
 const getExactSessionDetailFromDbWithProfileMock = vi.fn()
 const getUsageStatsFromDbMock = vi.fn()
 const getSessionMock = vi.fn()
+const validateCodingAgentModelEffortMock = vi.fn()
 const deleteHermesSessionForProfileMock = vi.fn()
 const localListSessionsMock = vi.fn()
 const localCountSessionsMock = vi.fn()
@@ -245,6 +246,7 @@ vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime',
   },
   stopCodingAgentSessionRun: codingAgentRunManagerMock.stop,
   invalidateCodingAgentSessionRuntime: invalidateCodingAgentSessionRuntimeMock,
+  validateCodingAgentModelEffort: validateCodingAgentModelEffortMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/task-plans', () => ({
@@ -2260,6 +2262,35 @@ describe('session conversations controller', () => {
     } as any)
 
     expect(invalidateCodingAgentSessionRuntimeMock).toHaveBeenCalledWith('grok-session')
+  })
+
+  it('saves and broadcasts a global native effort and model together', async () => {
+    getSessionMock.mockReturnValue({ id: 'cursor-session', profile: 'default', agent: 'cursor', agent_mode: 'global', model: 'native-high' })
+    validateCodingAgentModelEffortMock.mockResolvedValue(undefined)
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'cursor-session' }, request: { body: { reasoningEffort: 'low', model: 'native-low' } } }
+    await mod.setReasoningEffort(ctx)
+    expect(validateCodingAgentModelEffortMock).toHaveBeenCalledWith('cursor', 'native-high', 'native-low', 'low')
+    expect(localUpdateSessionMock).toHaveBeenCalledWith('cursor-session', { model: 'native-low', reasoning_effort: 'low' })
+    expect(emitSessionSettingsUpdatedMock).toHaveBeenCalledWith('cursor-session', { model: 'native-low', reasoning_effort: 'low' })
+    expect(ctx.body).toEqual({ ok: true, model: 'native-low', reasoning_effort: 'low' })
+  })
+
+  it('does not persist either field when native variant validation fails', async () => {
+    getSessionMock.mockReturnValue({ id: 'agy-session', agent: 'antigravity', agent_mode: 'global', model: 'gemini-pro-high' })
+    validateCodingAgentModelEffortMock.mockRejectedValueOnce(Object.assign(new Error('Invalid native variant'), { status: 400 }))
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    await expect(mod.setReasoningEffort({ params: { id: 'agy-session' }, request: { body: { reasoningEffort: 'medium', model: 'gemini-pro-medium' } } })).rejects.toThrow('Invalid native variant')
+    expect(localUpdateSessionMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a coupled native model change in scoped mode', async () => {
+    getSessionMock.mockReturnValue({ id: 'cursor-scoped', agent: 'cursor', agent_mode: 'scoped', model: 'native-high' })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'cursor-scoped' }, request: { body: { reasoningEffort: 'low', model: 'native-low' } } }
+    await mod.setReasoningEffort(ctx)
+    expect(ctx.status).toBe(400)
+    expect(localUpdateSessionMock).not.toHaveBeenCalled()
   })
 
   it('deletes a current-profile Hermes history session even when no local Web UI session exists', async () => {

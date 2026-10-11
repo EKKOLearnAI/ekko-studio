@@ -59,7 +59,7 @@ describe('ChatPanel session clicks', () => {
 
   it('uses the shared model dialog while preserving the session Profile and composer focus', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
-    expect(source).toContain(':groups="sessionModelAllGroups"')
+    expect(source).toContain('newChatNativeModelGroups : sessionModelAllGroups')
     expect(source).toContain(':trigger-element="sessionModelTrigger"')
     expect(source).toContain('session?.profile || null')
     expect(source).toContain('@model-click="openSessionModelPicker(null, $event)"')

@@ -1178,6 +1178,8 @@ export default {
       options: {
         default: '預設 (config.yaml)',
         none: '無',
+        disabled: "關閉",
+        enabled: "開啟",
         minimal: '極低',
         low: '低',
         medium: '中',
@@ -3190,6 +3192,9 @@ export default {
     providerPlaceholder: "例如 custom:glm",
     modelScope: "模型",
     modelPlaceholder: "選擇模型",
+    nativeModelDefault: "Agent 預設模型",
+    nativeModelsFailed: "模型載入失敗，可使用 Agent 預設模型或重新整理重試。",
+    nativeModelsRefreshFailed: "重新整理失敗，繼續顯示已快取的模型。",
     launchModeScope: "啟動方式",
     launchModeGlobal: "全域預設設定",
     launchModeGlobalShort: "全域",

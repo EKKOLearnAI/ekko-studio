@@ -658,6 +658,24 @@ describe('coding agent terminal output sanitizer', () => {
 })
 
 describe('coding agent run state', () => {
+  it('restarts a global native runner when its selected model or effort changes', () => {
+    const manager = new CodingAgentRunManager()
+    ;(manager as any).ensureDbSession = () => {}
+    ;(manager as any).emitToChat = () => {}
+    manager.start({
+      agentSessionId: 'native-compat', agentId: 'qwen', mode: 'global', profile: 'default',
+      provider: 'global', model: 'native-model', reasoningEffort: 'high', sessionId: 'native-chat-compat',
+      command: 'qwen', args: [], shellCommand: 'qwen', workspaceDir: process.cwd(),
+      state: { messages: [], isWorking: false, events: [], queue: [] },
+    })
+    const input = { agentId: 'qwen', mode: 'global' as const, provider: 'global', model: 'native-model', reasoningEffort: 'high' }
+    try {
+      expect(manager.isSessionLaunchCompatible('native-chat-compat', input)).toBe(true)
+      expect(manager.isSessionLaunchCompatible('native-chat-compat', { ...input, model: 'other-model' })).toBe(false)
+      expect(manager.isSessionLaunchCompatible('native-chat-compat', { ...input, reasoningEffort: 'low' })).toBe(false)
+    } finally { manager.shutdown() }
+  })
+
   it('stores structured display input separately from the CLI prompt', () => {
     const manager = new CodingAgentRunManager()
     const addUserMessage = vi.fn()

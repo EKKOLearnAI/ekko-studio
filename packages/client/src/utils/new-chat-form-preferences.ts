@@ -16,6 +16,7 @@ export interface NewChatFormPreferences {
   agentPreset?: string
   baseUrl: string
   apiKey: string
+  nativeModels?: Record<string, { model: string; reasoningEffort: string }>
 }
 
 const memory = new Map<string, NewChatFormPreferences>()
@@ -30,6 +31,14 @@ export function loadNewChatFormPreferences(account: number | null): NewChatFormP
     const saved = JSON.parse(raw)
     if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return null
     const agent = AGENT_OPTIONS.find(option => option.value === saved.agent)?.value || AGENT_OPTIONS[0].value
+    const nativeModels = Object.fromEntries(AGENT_OPTIONS.filter(option => option.value !== 'hermes' && option.value !== 'ekko-agent')
+      .flatMap(option => {
+        const selection = saved.nativeModels?.[option.value]
+        return selection && typeof selection === 'object' ? [[option.value, {
+          model: stringValue(selection.model),
+          reasoningEffort: stringValue(selection.reasoningEffort),
+        }]] : []
+      }))
     const form: NewChatFormPreferences = {
       agent, mode: saved.mode === 'global' ? 'global' : 'scoped',
       profile: stringValue(saved.profile) || 'default',
@@ -41,6 +50,7 @@ export function loadNewChatFormPreferences(account: number | null): NewChatFormP
       categoryId: Number.isSafeInteger(saved.categoryId) && saved.categoryId > 0 ? saved.categoryId : null,
       agentPreset: stringValue(saved.agentPreset) || undefined,
       baseUrl: stringValue(saved.baseUrl), apiKey: '',
+      ...(saved.nativeModels ? { nativeModels } : {}),
     }
     try {
       const credential = JSON.parse(sessionStorage.getItem(`${key}:credential`) || 'null')

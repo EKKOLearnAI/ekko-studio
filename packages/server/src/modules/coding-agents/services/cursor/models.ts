@@ -1,4 +1,5 @@
 import { lines, modelId, requireModelOutput } from '../models/text'
+import { withNativeModelFamilies } from '../models/variants'
 import type { ModelDiscoveryAdapter } from '../models/types'
 
 export const cursorModels: ModelDiscoveryAdapter = {
@@ -10,6 +11,6 @@ export const cursorModels: ModelDiscoveryAdapter = {
       return id ? [{ id, name: match![2].replace(/\s*\((?:current|default|current, default)\)$/, ''), isDefault: /\bdefault\)/i.test(match![2]) }] : []
     })
     requireModelOutput(models, stdout)
-    return { models }
+    return { models: withNativeModelFamilies(models) }
   },
 }

@@ -23,6 +23,10 @@ export function modelsFromAcpSession(value: unknown): DiscoveredModels {
   const session = record(value)
   const options = Array.isArray(session.configOptions) ? session.configOptions : []
   const selector = options.find(option => option?.category === 'model' || option?.id === 'model')
+  const effortSelector = options.find(option => option?.category === 'thought_level' || option?.id === 'reasoning_effort')
+  const reasoningEfforts = Array.isArray(effortSelector?.options) ? effortSelector.options
+    .map((option: any) => text(option.value)).filter((value: unknown): value is string => typeof value === 'string') : []
+  const effortMetadata = (isDefault: boolean) => isDefault && reasoningEfforts.length ? { reasoningEfforts } : {}
   const models: CodingAgentModel[] = []
   function addOptions(entries: unknown) {
     if (!Array.isArray(entries)) return
@@ -32,7 +36,8 @@ export function modelsFromAcpSession(value: unknown): DiscoveredModels {
       if (Array.isArray(option.options)) addOptions(option.options)
       else {
         const id = text(option.value)
-        if (id) models.push({ id, name: text(option.name) || id, isDefault: option.value === selector.currentValue })
+        if (id) models.push({ id, name: text(option.name) || id, isDefault: option.value === selector.currentValue,
+          ...effortMetadata(option.value === selector.currentValue) })
       }
     }
   }
@@ -44,6 +49,7 @@ export function modelsFromAcpSession(value: unknown): DiscoveredModels {
   if (!Array.isArray(native.availableModels)) throw new ModelDiscoveryError('unsupported')
   return { models: native.availableModels.flatMap((value: unknown) => {
     const item = record(value), id = text(item.modelId)
-    return id ? [{ id, name: text(item.name) || id, isDefault: item.modelId === native.currentModelId }] : []
+    return id ? [{ id, name: text(item.name) || id, isDefault: item.modelId === native.currentModelId,
+      ...effortMetadata(item.modelId === native.currentModelId) }] : []
   }) }
 }

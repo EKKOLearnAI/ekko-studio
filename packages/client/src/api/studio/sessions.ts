@@ -592,11 +592,11 @@ export async function setSessionModel(id: string, model: string, provider: strin
   }
 }
 
-export async function setSessionReasoningEffort(id: string, reasoningEffort: string): Promise<boolean> {
+export async function setSessionReasoningEffort(id: string, reasoningEffort: string, model?: string): Promise<boolean> {
   try {
     await request(`/api/studio/sessions/${encodeURIComponent(id)}/reasoning-effort`, {
       method: 'POST',
-      body: JSON.stringify({ reasoningEffort }),
+      body: JSON.stringify({ reasoningEffort, ...(model !== undefined ? { model } : {}) }),
     })
     return true
   } catch {

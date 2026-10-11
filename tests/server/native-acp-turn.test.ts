@@ -12,7 +12,7 @@ import { applyZcodeEvent } from '../../packages/server/src/modules/coding-agents
 const turns: NativeAcpTurn[] = []
 afterEach(() => { for (const turn of turns.splice(0)) turn.dispose() })
 
-function connection(options: { image?: boolean; load?: boolean; resume?: boolean; error?: boolean; hold?: boolean; permissionRequired?: boolean } = {}) {
+function connection(options: { image?: boolean; load?: boolean; resume?: boolean; error?: boolean; hold?: boolean; permissionRequired?: boolean; configOptions?: any[] } = {}) {
   const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough() })
   const sent: any[] = [], update = vi.fn(), session = vi.fn()
   const receive = (message: object) => child.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
@@ -23,7 +23,7 @@ function connection(options: { image?: boolean; load?: boolean; resume?: boolean
     if (message.method === 'session/load') receive({ method: 'session/update', params: { sessionId: 'native', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'old history' } } } })
     const result = message.method === 'initialize'
       ? { protocolVersion: 1, agentCapabilities: { promptCapabilities: { image: options.image }, loadSession: options.load, sessionCapabilities: options.resume ? { resume: {} } : {} } }
-      : message.method === 'session/new' ? { sessionId: 'native' }
+      : message.method === 'session/new' ? { sessionId: 'native', configOptions: options.configOptions }
       : message.method === 'session/prompt' ? { stopReason: 'end_turn' } : {}
     queueMicrotask(() => receive({ id: message.id, ...(options.error && message.method === 'session/load'
       ? { error: { code: -32000, message: 'Session missing' } } : { result }) }))
@@ -34,6 +34,19 @@ function connection(options: { image?: boolean; load?: boolean; resume?: boolean
 }
 
 describe('native ACP session transport', () => {
+  it('applies native model and thought selectors before sending the prompt', async () => {
+    const { turn, sent } = connection({ configOptions: [{ id: 'native-model', category: 'model' }, { id: 'effort', category: 'thought_level' }] })
+    await turn.prompt({ cwd: '/workspace', text: 'go', mcpServers: [], model: 'exact/native-model', reasoningEffort: 'high' })
+    expect(sent.map(message => message.method)).toEqual(['initialize', 'session/new', 'session/set_config_option', 'session/set_config_option', 'session/prompt'])
+    expect(sent[2].params).toEqual({ sessionId: 'native', configId: 'native-model', value: 'exact/native-model' })
+    expect(sent[3].params).toEqual({ sessionId: 'native', configId: 'effort', value: 'high' })
+  })
+
+  it('uses the legacy ACP model method when the CLI has no config selector', async () => {
+    const { turn, sent } = connection()
+    await turn.prompt({ cwd: '/workspace', text: 'go', mcpServers: [], model: 'legacy-model' })
+    expect(sent[2]).toMatchObject({ method: 'session/set_model', params: { sessionId: 'native', modelId: 'legacy-model' } })
+  })
   it('sends exact image bytes and long Unicode text over stdin after capability negotiation', async () => {
     const root = mkdtempSync(join(tmpdir(), 'native-acp-image-'))
     try {

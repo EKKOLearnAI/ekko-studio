@@ -41,7 +41,8 @@ test('Antigravity picker offers scoped provider selection and global config', as
   await expect(draft.locator('.agent-card.active')).toContainText('Antigravity')
   await expect(draft.getByRole('radiogroup', { name: 'Launch mode', exact: true }).getByRole('radio', { name: 'Model', exact: true })).toHaveAttribute('aria-checked', 'true')
   await selectNewChatLaunchMode(page, 'global')
-  await expect(draft.locator('.input-model-button')).toBeDisabled()
+  await expect(draft.locator('.input-model-button')).toBeEnabled()
+  await expect(draft.locator('.input-model-button')).toHaveText('Agent default model')
 })
 
 for (const mode of ['global', 'scoped']) {

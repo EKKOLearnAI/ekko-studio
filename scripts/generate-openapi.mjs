@@ -1523,8 +1523,22 @@ const nativeModelSchema = {
     isDefault: { type: 'boolean' }, hidden: { type: 'boolean' },
     contextWindow: { type: 'number' }, maxOutputTokens: { type: 'number' },
     reasoningEfforts: { type: 'array', items: { type: 'string' } },
+    modelFamily: { type: 'string', description: 'Grouping key for native effort variants; never send it as a model ID.' },
+    modelFamilyName: { type: 'string' },
+    reasoningEffort: { type: 'string', description: 'Fixed effort encoded by this literal native model ID.' },
     inputModalities: { type: 'array', items: { type: 'string' } },
   },
+}
+const reasoningOperation = openapi.paths['/api/studio/sessions/{id}/reasoning-effort']?.post
+if (reasoningOperation) {
+  reasoningOperation.requestBody = { required: true, content: { 'application/json': { schema: {
+    type: 'object', required: ['reasoningEffort'], properties: {
+      reasoningEffort: { type: 'string', enum: ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
+      model: { type: 'string', description: 'Optional literal effort-variant ID for global Cursor/Antigravity sessions. Validated against the native catalog and current family; persisted atomically with effort.' },
+    },
+  } } } }
+  reasoningOperation.responses['400'] = { description: 'Invalid effort, mode or native variant/family' }
+  reasoningOperation.responses['503'] = { description: 'Native catalog unavailable for validating the paired model change' }
 }
 openapi.paths['/api/coding-agents/models'] = { get: {
   tags: ['Coding Agents'], operationId: 'getCodingAgentModels', summary: 'Discover native models for one or all Coding Agents',

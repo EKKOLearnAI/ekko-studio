@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { DEFAULT_REASONING_EFFORTS, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import type { NativeEffortChoice } from '@/utils/native-model-families'
 import { isBuiltinEkkoSession, isExternalCodingAgentSession } from '@/utils/hermes/session-agent'
 import { EKKO_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
 import type { Attachment, Session } from '@/stores/hermes/chat'
@@ -43,6 +44,8 @@ const props = withDefaults(defineProps<{
   draft?: boolean
   draftConfig?: Pick<Session, 'profile' | 'provider' | 'model' | 'codingAgentMode'>
   reasoningEffort?: string
+  nativeReasoningEfforts?: string[]
+  nativeEffortChoices?: NativeEffortChoice[]
   sendDisabled?: boolean
   submit?: (text: string, attachments?: Attachment[]) => Promise<boolean>
 }>(), {
@@ -66,17 +69,26 @@ const emit = defineEmits<{
 }>()
 
 const reasoningSession = computed(() => props.draft ? props.draftConfig : composerSession.value)
+const isMoaSession = computed(() => reasoningSession.value?.provider === 'moa')
+const isGlobalCodingAgentSession = computed(() => reasoningSession.value?.codingAgentMode === 'global')
+const isReadOnlyCodingAgentEffort = computed(() => !props.draft && isGlobalCodingAgentSession.value && isExternalCodingAgentSession(composerSession.value))
+function effortLabel(value: string) {
+  return DEFAULT_REASONING_EFFORTS.includes(value) || ['ultra', 'disabled', 'enabled'].includes(value) ? t(`chat.reasoningEffort.options.${value}`) : value
+}
 const showReasoningEffort = ref(false)
-const reasoningEffortOptions = computed(() => [
-  { label: t('chat.reasoningEffort.options.default'), value: '' },
-  ...modelReasoningEfforts(
+const reasoningEffortOptions = computed(() => isGlobalCodingAgentSession.value && props.nativeEffortChoices
+  ? props.nativeEffortChoices.map(choice => ({ value: choice.effort,
+    label: choice.effort ? effortLabel(choice.effort) : t('chat.reasoningEffort.defaultLabel') })) : [
+  { label: t(isGlobalCodingAgentSession.value ? 'chat.reasoningEffort.defaultLabel' : 'chat.reasoningEffort.options.default'), value: '' },
+  ...(isGlobalCodingAgentSession.value ? props.nativeReasoningEfforts || [] : modelReasoningEfforts(
     appStore.profileModelGroups?.find(entry => entry.profile === (reasoningSession.value?.profile || profilesStore.activeProfileName))?.groups || appStore.modelGroups || [],
     reasoningSession.value?.provider || appStore.selectedProvider || '',
     reasoningSession.value?.model || appStore.selectedModel || '',
-  ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
+  )).map(value => ({ label: effortLabel(value), value })),
 ])
 const currentReasoningEffort = computed<string>(() =>
-  (props.draft ? props.reasoningEffort : composerSession.value?.reasoningEffort) || ''
+  (props.draft ? props.reasoningEffort : composerSession.value?.reasoningEffort
+    || props.nativeEffortChoices?.find(choice => choice.model === composerSession.value?.model)?.effort) || ''
 )
 const reasoningEffortSliderValue = computed(() => {
   const index = reasoningEffortOptions.value.findIndex(option => option.value === currentReasoningEffort.value)
@@ -85,6 +97,8 @@ const reasoningEffortSliderValue = computed(() => {
 const reasoningEffortAccentColors: Record<string, string> = {
   '': '#94a3b8',
   none: '#2ac8e9',
+  disabled: '#2ac8e9',
+  enabled: '#b9d93a',
   minimal: '#2bd9b4',
   low: '#4ed786',
   medium: '#b9d93a',
@@ -97,31 +111,33 @@ const reasoningEffortAccentStyle = computed(() => ({
   '--reasoning-effort-accent-color': reasoningEffortAccentColors[currentReasoningEffort.value]
     || reasoningEffortAccentColors[''],
 }))
-const isMoaSession = computed(() => reasoningSession.value?.provider === 'moa')
-const isGlobalCodingAgentSession = computed(() =>
-  reasoningSession.value?.codingAgentMode === 'global'
-)
+const supportsNativeReasoning = computed(() => (props.nativeReasoningEfforts?.length || 0) > 0)
+const canEditReasoningEffort = computed(() => !isReadOnlyCodingAgentEffort.value && (!isGlobalCodingAgentSession.value || (supportsNativeReasoning.value && reasoningEffortOptions.value.length > 1
+  && (!currentReasoningEffort.value || reasoningEffortOptions.value.some(option => option.value === currentReasoningEffort.value)))))
 const reasoningEffortLabel = computed<string>(() => {
   const v = currentReasoningEffort.value
   if (!v) return t('chat.reasoningEffort.defaultLabel')
   const opt = reasoningEffortOptions.value.find(o => o.value === v)
-  return opt?.label || v
+  return opt?.label || effortLabel(v)
 })
 function onReasoningEffortChange(value: string | null | undefined) {
+  if (!canEditReasoningEffort.value) return
   if (props.draft) {
     emit('update:reasoningEffort', value || '')
     return
   }
   const sid = chatStore.activeSessionId
   if (!sid) return
-  chatStore.setSessionReasoningEffort(sid, value || '')
+  const variant = props.nativeEffortChoices?.find(choice => choice.effort === (value || ''))
+  if (variant) void chatStore.setSessionReasoningEffort(sid, variant.effort, variant.model)
+  else void chatStore.setSessionReasoningEffort(sid, value || '')
 }
-watch([reasoningEffortOptions, currentReasoningEffort], ([options]) => {
-  if (isMoaSession.value || isGlobalCodingAgentSession.value) {
+watch([reasoningEffortOptions, currentReasoningEffort, canEditReasoningEffort], ([options]) => {
+  if (isMoaSession.value || !canEditReasoningEffort.value) {
     showReasoningEffort.value = false
     return
   }
-  if (currentReasoningEffort.value && !options.some(option => option.value === currentReasoningEffort.value)) {
+  if (!isGlobalCodingAgentSession.value && currentReasoningEffort.value && !options.some(option => option.value === currentReasoningEffort.value)) {
     onReasoningEffortChange('')
   }
 }, { immediate: true })
@@ -1359,10 +1375,11 @@ function openAttachmentPreview(attachment: Attachment) {
           </NTooltip>
 
           <NPopover
-            v-if="(!draft || draftConfig) && !isMoaSession && !isGlobalCodingAgentSession"
+            v-if="(!draft || draftConfig) && !isMoaSession && (!isGlobalCodingAgentSession || supportsNativeReasoning || currentReasoningEffort)"
             v-model:show="showReasoningEffort"
             trigger="click"
             placement="top-start"
+            :disabled="!canEditReasoningEffort"
           >
             <template #trigger>
               <NTooltip trigger="hover" :disabled="isMobileViewport">
@@ -1371,7 +1388,7 @@ function openAttachmentPreview(attachment: Attachment) {
                     quaternary
                     size="tiny"
                     class="reasoning-effort-button"
-                    :disabled="submitting || (draft && modelDisabled)"
+                    :disabled="submitting || (draft && modelDisabled) || !canEditReasoningEffort"
                     :class="{ active: !!currentReasoningEffort }"
                     :aria-label="`${t('chat.reasoningEffort.tooltip')}: ${reasoningEffortLabel}`"
                     @keydown.esc.stop="showReasoningEffort = false"
@@ -1383,7 +1400,7 @@ function openAttachmentPreview(attachment: Attachment) {
                       </svg>
                     </template>
                     <span class="reasoning-effort-label">{{ reasoningEffortLabel }}</span>
-                    <svg class="toolbar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                    <svg v-if="canEditReasoningEffort" class="toolbar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
                   </NButton>
                 </template>
                 {{ t('chat.reasoningEffort.tooltip') }}: {{ reasoningEffortLabel }}
@@ -1401,7 +1418,7 @@ function openAttachmentPreview(attachment: Attachment) {
                 :value="reasoningEffortSliderValue"
                 :min="0"
                 :max="reasoningEffortOptions.length - 1"
-                :disabled="reasoningEffortOptions.length <= 1"
+                :disabled="!canEditReasoningEffort || reasoningEffortOptions.length <= 1"
                 :step="1"
                 :format-tooltip="reasoningEffortSliderLabel"
                 @update:value="onReasoningEffortSliderChange"
@@ -2052,9 +2069,12 @@ function openAttachmentPreview(attachment: Attachment) {
     gap: 5px;
   }
 
-  .reasoning-effort-label,
   .auto-play-speech-switch {
     display: none;
+  }
+
+  .reasoning-effort-label {
+    max-width: 64px;
   }
 
   .reasoning-effort-slider-popover {

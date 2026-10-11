@@ -1180,6 +1180,8 @@ export default {
       options: {
         default: 'افتراضي (config.yaml)',
         none: 'بدون',
+        disabled: "إيقاف",
+        enabled: "تشغيل",
         minimal: 'الحد الأدنى',
         low: 'منخفض',
         medium: 'متوسط',
@@ -3241,6 +3243,9 @@ export default {
     modelScope: "النموذج",
     modelPlaceholder: "اختر نموذجًا",
     launchModeScope: "وضع التشغيل",
+    nativeModelDefault: "نموذج الوكيل الافتراضي",
+    nativeModelsFailed: "تعذر تحميل النماذج. استخدم النموذج الافتراضي أو حدّث القائمة.",
+    nativeModelsRefreshFailed: "فشل التحديث. يتم عرض النماذج المخزنة مؤقتًا.",
     launchModeGlobal: "الإعداد العام",
     launchModeGlobalShort: "عام",
     launchModeScoped: "المزوّد والنموذج",

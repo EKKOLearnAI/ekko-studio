@@ -950,6 +950,12 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       await route.fulfill(jsonResponse({ tools: [] }))
       return
     }
+    if (pathname === '/api/coding-agents/models' && request.method() === 'GET') {
+      const agentId = new URL(request.url()).searchParams.get('agent') || 'codex'
+      await route.fulfill(jsonResponse({ agents: [{ agentId, name: agentId, status: 'empty', source: 'cli', scope: 'available',
+        models: [], checkedAt: new Date().toISOString(), cached: false }] }))
+      return
+    }
 
     if (
       request.method() === 'GET' &&

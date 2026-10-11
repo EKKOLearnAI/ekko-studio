@@ -1187,6 +1187,8 @@ export default {
       options: {
         default: '默认 (config.yaml)',
         none: '无',
+        disabled: "关闭",
+        enabled: "开启",
         minimal: '极低',
         low: '低',
         medium: '中',
@@ -3297,6 +3299,9 @@ export default {
     providerPlaceholder: "例如 custom:glm",
     modelScope: "模型",
     modelPlaceholder: "选择模型",
+    nativeModelDefault: "Agent 默认模型",
+    nativeModelsFailed: "模型加载失败，可使用 Agent 默认模型或刷新重试。",
+    nativeModelsRefreshFailed: "刷新失败，继续显示已缓存的模型。",
     launchModeScope: "启动方式",
     launchModeGlobal: "全局默认配置",
     launchModeGlobalShort: "全局",

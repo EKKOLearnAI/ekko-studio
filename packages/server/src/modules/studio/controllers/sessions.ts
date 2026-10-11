@@ -23,6 +23,7 @@ import {
   notifyHermesSessionModelChanged,
   stopCodingAgentSessionRun,
   invalidateCodingAgentSessionRuntime,
+  validateCodingAgentModelEffort,
 } from '../public/session-agent-runtime'
 import {
   listSessions as localListSessions,
@@ -1695,7 +1696,7 @@ export async function setReasoningEffort(ctx: any) {
   }
   if (denySessionAccess(ctx, existing)) return
 
-  const body = (ctx.request.body || {}) as { reasoningEffort?: unknown; reasoning_effort?: unknown }
+  const body = (ctx.request.body || {}) as { reasoningEffort?: unknown; reasoning_effort?: unknown; model?: unknown }
   const rawEffort = body.reasoningEffort ?? body.reasoning_effort
   if (typeof rawEffort !== 'string') {
     ctx.status = 400
@@ -1709,12 +1710,21 @@ export async function setReasoningEffort(ctx: any) {
     return
   }
 
-  localUpdateSession(id, { reasoning_effort: reasoningEffort })
+  if (body.model !== undefined) {
+    if (typeof body.model !== 'string' || !body.model.trim() || existing.agent_mode !== 'global'
+      || !['cursor', 'antigravity'].includes(existing.agent)) {
+      ctx.status = 400
+      ctx.body = { error: 'Native reasoning variants require a global Cursor or Antigravity session' }
+      return
+    }
+    await validateCodingAgentModelEffort(existing.agent, existing.model, body.model.trim(), reasoningEffort)
+  }
+  const updates = { reasoning_effort: reasoningEffort,
+    ...(typeof body.model === 'string' ? { model: body.model.trim() } : {}) }
+  localUpdateSession(id, updates)
   if (existing.agent === 'grok') invalidateCodingAgentSessionRuntime(id)
-  getChatRunServer()?.emitSessionSettingsUpdated(id, {
-    reasoning_effort: reasoningEffort,
-  })
-  ctx.body = { ok: true, reasoning_effort: reasoningEffort }
+  getChatRunServer()?.emitSessionSettingsUpdated(id, updates)
+  ctx.body = { ok: true, ...updates }
 }
 
 export async function contextLength(ctx: any) {
