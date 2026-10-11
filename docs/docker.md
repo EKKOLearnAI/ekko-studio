@@ -13,6 +13,9 @@ docker compose logs -f hermes-webui
 
 Open: `http://localhost:6060`
 
+To connect the Ekko Studio desktop app to this deployment instead of a
+browser, see [Remote server mode](../packages/desktop/README.md#remote-server-mode).
+
 ### Build from source
 
 ```bash

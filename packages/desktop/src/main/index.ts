@@ -40,6 +40,7 @@ import { ScreenshotShortcutManager, ScreenshotShortcutTargets } from './screensh
 import { screenshotEnvironment } from './screenshot-platform'
 import { groupChatAgentLinkPopupResponse } from './group-chat-agent-popup'
 import { isTrustedDesktopAppUrl, normalizeExternalHttpUrl } from './window-open-policy'
+import { remoteReadyTimeoutMs, resolveRemoteServerUrl, waitForRemoteServerReady } from './remote-server'
 import {
   ensureDesktopRuntime,
   isDesktopRuntimeReady,
@@ -82,6 +83,9 @@ let petWindow: BrowserWindow | null = null
 let petWindowLoadPromise: Promise<void> | null = null
 const chatWindows = new Map<string, BrowserWindow>()
 let serverUrl: string | null = null
+// Resolved once at startup so createWindow can flag remote mode into the main
+// window's preload; bootstrap() re-resolves it on every (re)start attempt.
+let activeRemoteServerUrl: string | null = resolveRemoteServerUrl()
 let tray: Tray | null = null
 let appShutdownPromise: Promise<void> | null = null
 let isBootstrapping = false
@@ -384,7 +388,7 @@ function showDesktopMessageBox(options: MessageBoxOptions) {
 }
 
 async function handleResetDefaultLogin() {
-  if (isResettingLogin || (isBootstrapping && !serverUrl)) return
+  if (isResettingLogin || activeRemoteServerUrl || (isBootstrapping && !serverUrl)) return
 
   const choice = await showDesktopMessageBox({
     type: 'warning',
@@ -462,7 +466,7 @@ function updateTrayMenu() {
     },
     {
       label: isResettingLogin ? t('loginReset.resetting') : t('tray.resetLogin'),
-      enabled: !isResettingLogin && (!isBootstrapping || !!serverUrl),
+      enabled: !isResettingLogin && !activeRemoteServerUrl && (!isBootstrapping || !!serverUrl),
       click: () => {
         handleResetDefaultLogin().catch(err => {
           console.error('[tray] reset login failed:', err)
@@ -551,6 +555,7 @@ async function createWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      ...(activeRemoteServerUrl ? { additionalArguments: ['--hermes-remote-mode'] } : {}),
     },
   })
 
@@ -981,6 +986,30 @@ async function bootstrap(source?: RuntimeDownloadSource) {
   if (isBootstrapping) return
   isBootstrapping = true
 
+  const remoteUrl = resolveRemoteServerUrl()
+  activeRemoteServerUrl = remoteUrl
+  if (remoteUrl) {
+    // Remote mode: the Web UI is served by an external deployment (for
+    // example a Docker container). Skip all local runtime and server
+    // bootstrap work and point the windows straight at it.
+    console.log(`[desktop] remote Web UI mode: ${remoteUrl}`)
+    try {
+      updateSplash({ stage: 'resolve', message: t('desktop.connectingRemoteServices') })
+      await waitForRemoteServerReady(remoteUrl, remoteReadyTimeoutMs())
+      serverUrl = remoteUrl
+      updateTrayMenu()
+      if (mainWindow) await mainWindow.loadURL(mainRouteUrl() || remoteUrl)
+      await loadPetWindowRoute()
+    } catch (err) {
+      console.error(`[desktop] failed to connect to the remote Web UI at ${remoteUrl}:`, err)
+      serverUrl = null
+      await loadServiceFailurePage(err, t('desktop.failedConnectRemote'))
+    } finally {
+      isBootstrapping = false
+    }
+    return
+  }
+
   try {
     const legacyMigration = await migratePendingLegacyWindowsData()
     if (legacyMigration.completed) {
@@ -1030,13 +1059,13 @@ async function bootstrap(source?: RuntimeDownloadSource) {
   }
 }
 
-async function loadServiceFailurePage(error: unknown): Promise<void> {
+async function loadServiceFailurePage(error: unknown, title = t('desktop.failedStartServices')): Promise<void> {
   if (!mainWindow || mainWindow.isDestroyed()) return
   const msg = escapeHtml(String(error instanceof Error ? error.message : error))
   const pageBackground = process.platform === 'win32' ? 'transparent' : '#1a1a1a'
   const html = `<html><body style="margin:0;font-family:system-ui;background:${pageBackground};color:#eee">
     <main style="min-height:100vh;padding:32px;background:#1a1a1a;box-sizing:border-box">
-      <h2>${escapeHtml(t('desktop.failedStartServices'))}</h2>
+      <h2>${escapeHtml(title)}</h2>
       <pre style="white-space:pre-wrap;color:#f88">${msg}</pre>
       <button id="retry" style="padding:8px 14px;cursor:pointer">Retry</button>
       <script>
@@ -1075,7 +1104,11 @@ async function recoverUnexpectedWebUiExit(details: { code: number | null; signal
   if (!serverUrl) await loadServiceFailurePage(error)
 }
 
-ipcMain.handle('hermes-desktop:get-token', () => getToken())
+ipcMain.handle('hermes-desktop:get-token', () => {
+  // The shared token authorizes the locally spawned server only. Never hand
+  // it to a remote page: it is useless there and would leak desktop state.
+  return activeRemoteServerUrl ? '' : getToken()
+})
 ipcMain.handle('hermes-desktop:restart-app', event => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
     throw new Error('Desktop restart can only be requested from the main window')

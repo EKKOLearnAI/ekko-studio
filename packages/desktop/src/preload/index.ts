@@ -11,6 +11,10 @@ function desktopWindowKind(): DesktopWindowKind {
   return kind === 'pet' || kind === 'chat' ? kind : 'main'
 }
 
+// Set by the main process when the desktop points at a remote Web UI
+// deployment instead of the bundled local server.
+const REMOTE_SERVER_MODE = process.argv.includes('--hermes-remote-mode')
+
 contextBridge.exposeInMainWorld('hermesDesktop', {
   screenshot: {
     shortcut: {
@@ -52,9 +56,11 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   openExternalUrl: (url: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:open-external-url', url),
   openChatWindow: (sessionId: string, profile?: string): Promise<void> => ipcRenderer.invoke('hermes-desktop:open-chat-window', sessionId, profile),
   ensureAuth: async (): Promise<boolean> => {
-    const token = await ipcRenderer.invoke('hermes-desktop:get-token')
-    if (token) {
-      try { localStorage.setItem('AUTH_TOKEN', token) } catch { /* */ }
+    if (!REMOTE_SERVER_MODE) {
+      const token = await ipcRenderer.invoke('hermes-desktop:get-token')
+      if (token) {
+        try { localStorage.setItem('AUTH_TOKEN', token) } catch { /* */ }
+      }
     }
     return !!localStorage.getItem(API_KEY_LS)
   },
@@ -119,7 +125,8 @@ const API_KEY_LS = 'hermes_api_key'
 // Silently strip the "你必须修改默认密码" flag from /api/auth/me responses on
 // desktop. Users on a single-machine install don't benefit from a managed
 // password. The Web UI client uses BOTH fetch and axios (which goes through
-// XMLHttpRequest), so we patch both code paths.
+// XMLHttpRequest), so we patch both code paths. Remote-server deployments
+// keep the server-side password policy, so the patch is local-mode only.
 function isAuthMeUrl(url: string): boolean {
   return /\/api\/auth\/me(?:\?|$)/.test(url)
 }
@@ -199,9 +206,10 @@ function installFetchPatch(): void {
   }
 }
 
-installFetchPatch()
+if (!REMOTE_SERVER_MODE) installFetchPatch()
 
 window.addEventListener('DOMContentLoaded', async () => {
+  if (REMOTE_SERVER_MODE) return
   try {
     const token = await ipcRenderer.invoke('hermes-desktop:get-token')
     if (token) {
