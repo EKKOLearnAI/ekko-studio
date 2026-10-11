@@ -72,6 +72,7 @@ export class StudioHealthService {
     const primaryAgentVersion = rawVersion.split('\n')[0].replace('Hermes Agent ', '') || ''
     const agentBridge = await this.dependencies.getPrimaryAgentBridgeHealth()
     const updateCheckDisabled = isUpdateCheckDisabled()
+    const isGitClone = this.dependencies.isGitCloneDeployment()
 
     return {
       status: 'ok',
@@ -79,8 +80,12 @@ export class StudioHealthService {
       version: primaryAgentVersion,
       gateway: 'running',
       webui_version: this.localVersion,
-      webui_latest: updateCheckDisabled ? '' : this.cachedLatestVersion,
-      webui_update_available: updateCheckDisabled
+      // An npm-global deployment upgrades through the registry, so the registry is
+      // also the source of truth for "is there a newer version". A git checkout
+      // upgrades from the repository instead, so a newer registry release says
+      // nothing about whether this install has an update to pull.
+      webui_latest: updateCheckDisabled || isGitClone ? '' : this.cachedLatestVersion,
+      webui_update_available: updateCheckDisabled || isGitClone
         ? false
         : Boolean(
             this.localVersion
@@ -90,6 +95,7 @@ export class StudioHealthService {
       node_version: process.versions.node,
       agent_bridge: agentBridge,
       is_docker: this.dependencies.isDockerContainer(),
+      is_git_clone: isGitClone,
     }
   }
 }

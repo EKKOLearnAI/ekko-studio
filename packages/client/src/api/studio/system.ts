@@ -10,6 +10,7 @@ export interface HealthResponse {
   webui_update_available?: boolean
   node_version?: string
   is_docker?: boolean
+  is_git_clone?: boolean
   agent_bridge?: {
     status: string
     reachable: boolean
