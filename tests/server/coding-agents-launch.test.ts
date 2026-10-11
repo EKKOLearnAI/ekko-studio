@@ -3121,7 +3121,7 @@ describe('coding agent launch preparation', () => {
     expect(sse).toContain('"text":"pong"')
     expect(sse).toContain('event: response.output_item.done')
     expect(sse).toContain('"output":[{"type":"message"')
-    expect(sse).not.toContain('"usage"')
+    expect(sse).toContain('"usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":15}')
   })
 
   it('keeps OpenCode response.completed valid when Chat Completions omits usage', async () => {
@@ -3229,6 +3229,9 @@ describe('coding agent launch preparation', () => {
 
   it('streams Anthropic thinking and text as Pi-compatible Responses events', async () => {
     makeHome()
+    vi.spyOn(providerRuntime, 'getModelRuntimeCapabilities').mockReturnValue({
+      contextWindow: 200_000, outputLimit: 64_000, outputLimitKnown: true, reasoning: true, input: ['text'],
+    })
     const launch = await prepareCodingAgentLaunch('codex', {
       profile: 'default',
       provider: 'anthropic-compatible',
@@ -3243,7 +3246,7 @@ describe('coding agent launch preparation', () => {
     const encoder = new TextEncoder()
     const fetchMock = vi.fn(async () => new Response(new ReadableStream({
       start(controller) {
-        controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_test","usage":{"input_tokens":3,"output_tokens":0}}}\n\n'))
+        controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_test","usage":{"input_tokens":3,"cache_read_input_tokens":90000,"cache_creation_input_tokens":500,"output_tokens":0}}}\n\n'))
         controller.enqueue(encoder.encode('event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n'))
         controller.enqueue(encoder.encode('event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"inspect"}}\n\n'))
         controller.enqueue(encoder.encode('event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}\n\n'))
@@ -3279,7 +3282,112 @@ describe('coding agent launch preparation', () => {
     expect(sse).toContain('event: response.output_text.done')
     expect(sse).toContain('"text":"hello"')
     expect(sse).toContain('event: response.completed')
-    expect(sse).not.toContain('"usage"')
+    // Codex drives auto-compaction from this usage; Anthropic excludes cached
+    // prompt tokens from input_tokens, so they must be added back.
+    expect(sse).toContain('"usage":{"input_tokens":90503,"input_tokens_details":{"cached_tokens":90000},"output_tokens":2,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":90505}')
+    expect(sse).not.toContain('cache_read_input_tokens')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_tokens).toBe(64_000)
+  })
+
+  it('falls back to max_tokens 4096 when an Anthropic model has no output metadata', async () => {
+    vi.spyOn(providerRuntime, 'getModelRuntimeCapabilities').mockReturnValue({
+      contextWindow: 200_000, outputLimit: 32_000, outputLimitKnown: false, reasoning: true, input: ['text'],
+    })
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: 'custom-anthropic',
+      model: 'custom-claude',
+      baseUrl: 'https://api.example.com',
+      apiKey: 'sk-upstream',
+      apiMode: 'anthropic_messages',
+    })
+    const encoder = new TextEncoder()
+    const fetchMock = vi.fn(async (_url: string, init: any) => JSON.parse(init.body).stream
+      ? new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_s","usage":{"input_tokens":1,"output_tokens":0}}}\n\n'))
+          controller.enqueue(encoder.encode('event: message_stop\ndata: {"type":"message_stop"}\n\n'))
+          controller.close()
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      : new Response(JSON.stringify({
+        id: 'msg_j', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const input = [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }]
+
+    await codexProxyResponses(makeProxyContext(target.routeKey, target.token, { input }))
+    const streamCtx = makeProxyContext(target.routeKey, target.token, { stream: true, input })
+    await codexProxyResponses(streamCtx)
+    for await (const _chunk of streamCtx.body) { /* drain */ }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    for (const call of fetchMock.mock.calls) expect(JSON.parse(call[1].body).max_tokens).toBe(4096)
+  })
+
+  it('returns canonical cached usage for non-streaming Anthropic Codex responses', async () => {
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: 'anthropic-compatible',
+      model: 'claude-sonnet-4-6',
+      baseUrl: 'https://api.example.com',
+      apiKey: 'sk-upstream',
+      apiMode: 'anthropic_messages',
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      id: 'msg_cached',
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 7, cache_read_input_tokens: 1200, cache_creation_input_tokens: 30, output_tokens: 5 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const ctx = makeProxyContext(target.routeKey, target.token, {
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+    })
+    await codexProxyResponses(ctx)
+
+    expect(ctx.body.usage).toEqual({
+      input_tokens: 1237,
+      input_tokens_details: { cached_tokens: 1200 },
+      output_tokens: 5,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 1242,
+    })
+  })
+
+  it('keeps cached prompt tokens inside input_tokens for Chat Completions providers', async () => {
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-upstream',
+      apiMode: 'chat_completions',
+    })
+    const encoder = new TextEncoder()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'))
+        controller.enqueue(encoder.encode('data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":20,"total_tokens":1020,"prompt_cache_hit_tokens":800,"prompt_cache_miss_tokens":200,"completion_tokens_details":{"reasoning_tokens":12}}}\n\n'))
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
+
+    const ctx = makeProxyContext(target.routeKey, target.token, {
+      stream: true,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+    })
+    await codexProxyResponses(ctx)
+
+    const chunks: string[] = []
+    for await (const chunk of ctx.body) chunks.push(String(chunk))
+    const sse = chunks.join('')
+    expect(sse).toContain('"usage":{"input_tokens":1000,"input_tokens_details":{"cached_tokens":800},"output_tokens":20,"output_tokens_details":{"reasoning_tokens":12},"total_tokens":1020}')
+    expect(sse).not.toContain('prompt_cache_hit_tokens')
   })
 
   it('preserves native Responses usage for Codex Responses providers', async () => {

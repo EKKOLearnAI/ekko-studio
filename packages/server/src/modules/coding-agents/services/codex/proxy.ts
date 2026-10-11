@@ -29,6 +29,8 @@ import {
 } from '../../protocol/adapters/responses-stream'
 import { agentRunGateway } from '../../protocol/gateway'
 import { codingAgentRunManager } from '../runtime/run-manager'
+import { codingAgentOutputLimit } from '../context-policy'
+import { normalizeTokenUsage } from '../../../studio/public/usage'
 
 export interface CodexProxyTargetInput extends AgentTargetInput {
   profile: string
@@ -168,7 +170,7 @@ async function callAnthropicMessages(target: CodexProxyTarget, body: any, signal
     ;(err as any).status = 501
     throw err
   }
-  const anthropicBody = responsesToAnthropicMessages(body, target)
+  const anthropicBody = responsesToAnthropicMessages(body, anthropicAdapterTarget(target))
   const response = await agentRunGateway.completeJson({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
@@ -214,38 +216,57 @@ function responsesEventStream(events: AsyncIterable<CanonicalResponsesEvent>): R
   return Readable.from(generate())
 }
 
+/** Anthropic Messages requires max_tokens; use the model output budget rather
+ * than a fixed small cap when the Responses client did not send one. */
+function anthropicAdapterTarget(target: CodexProxyTarget): CodexProxyTarget & { outputLimit?: number } {
+  try {
+    return { ...target, outputLimit: codingAgentOutputLimit(target) }
+  } catch {
+    return target
+  }
+}
+
+/** Responses clients (Codex auto-compaction, OpenCode, chat/Gemini bridges)
+ * read canonical usage, where input_tokens includes cached prompt tokens.
+ * Emit only the standard fields so vendor extras cannot break strict parsers. */
+function responsesClientUsage(target: CodexProxyTarget, usage: unknown): Record<string, unknown> | undefined {
+  if (!usage || typeof usage !== 'object') return undefined
+  const normalized = normalizeTokenUsage(usage, {}, { inputIncludesCache: target.apiMode !== 'anthropic_messages' })
+  if (normalized.isEstimated) return undefined
+  const inputTokens = normalized.inputTokens + normalized.cacheReadTokens + normalized.cacheWriteTokens
+  return {
+    input_tokens: inputTokens,
+    input_tokens_details: { cached_tokens: normalized.cacheReadTokens },
+    output_tokens: normalized.outputTokens,
+    output_tokens_details: { reasoning_tokens: normalized.reasoningTokens },
+    total_tokens: inputTokens + normalized.outputTokens,
+  }
+}
+
+function responseForCodexClient(target: CodexProxyTarget, response: any): any {
+  if (!response || typeof response !== 'object') return response
+  if (target.apiMode === 'codex_responses' && target.agentId !== 'opencode') return response
+  const { usage: rawUsage, ...responseWithoutUsage } = response
+  const usage = target.apiMode === 'codex_responses' ? rawUsage : responsesClientUsage(target, rawUsage)
+  if (usage) return { ...responseWithoutUsage, usage }
+  // OpenCode's OpenAI Responses provider validates `response.completed`
+  // usage before it accepts the terminal event. Chat-compatible upstreams
+  // are allowed to omit usage, so emit the minimum valid shape. Without this
+  // terminal frame OpenCode reports an `unknown` finish reason and starts
+  // another agent step forever.
+  if (target.agentId === 'opencode') {
+    return { ...responseWithoutUsage, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } }
+  }
+  return responseWithoutUsage
+}
+
 function responseEventForCodexClient(target: CodexProxyTarget, event: CanonicalResponsesEvent): CanonicalResponsesEvent {
   if (event.type !== 'response.completed') return event
-  const response = (event.data as any).response
-  if (target.agentId === 'opencode') {
-    // OpenCode's OpenAI Responses provider validates `response.completed`
-    // usage before it accepts the terminal event. Chat-compatible upstreams
-    // are allowed to omit usage, so keep real usage when available and emit
-    // the minimum valid shape otherwise. Without this terminal frame OpenCode
-    // reports an `unknown` finish reason and starts another agent step forever.
-    return {
-      ...event,
-      data: {
-        ...event.data,
-        response: {
-          ...response,
-          usage: response?.usage || {
-            input_tokens: 0,
-            output_tokens: 0,
-            total_tokens: 0,
-          },
-        },
-      },
-    }
-  }
-  if (target.apiMode === 'codex_responses') return event
-  if (!response?.usage) return event
-  const { usage: _usage, ...responseWithoutUsage } = response
   return {
     ...event,
     data: {
       ...event.data,
-      response: responseWithoutUsage,
+      response: responseForCodexClient(target, (event.data as any).response),
     },
   }
 }
@@ -295,7 +316,7 @@ async function anthropicMessagesToResponsesSseStream(target: CodexProxyTarget, b
     throw err
   }
 
-  const anthropicBody = responsesToAnthropicMessages(body, target, true)
+  const anthropicBody = responsesToAnthropicMessages(body, anthropicAdapterTarget(target), true)
   const stream = await agentRunGateway.streamBytes({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
@@ -351,11 +372,11 @@ export async function codexProxyResponses(ctx: Context) {
       ctx.set('Cache-Control', 'no-cache')
       ctx.body = stream
     } else {
-      ctx.body = target.apiMode === 'anthropic_messages'
+      ctx.body = responseForCodexClient(target, target.apiMode === 'anthropic_messages'
         ? anthropicMessageToResponses(await callAnthropicMessages(target, requestBody), target)
         : target.apiMode === 'codex_responses'
           ? await callOpenAiResponses(target, requestBody)
-          : openAiChatToResponses(await callOpenAiChat(target, requestBody), target)
+          : openAiChatToResponses(await callOpenAiChat(target, requestBody), target))
     }
   } catch (err: any) {
     ctx.status = err.status || 502
@@ -420,11 +441,11 @@ export async function antigravityProxyGenerate(ctx: Context) {
   timeout.unref?.()
   try {
     const body = geminiToResponses(ctx.request.body || {})
-    const response = target.apiMode === 'anthropic_messages'
+    const response = responseForCodexClient(target, target.apiMode === 'anthropic_messages'
       ? anthropicMessageToResponses(await callAnthropicMessages(target, body, abort.signal), target)
       : target.apiMode === 'codex_responses'
         ? await callOpenAiResponses(target, body, abort.signal)
-        : openAiChatToResponses(await callOpenAiChat(target, body, abort.signal), target)
+        : openAiChatToResponses(await callOpenAiChat(target, body, abort.signal), target))
     const payload = responsesToGemini(response)
     ctx.set('Cache-Control', 'no-cache')
     if (String(ctx.params.operation).includes('streamGenerateContent')) {
