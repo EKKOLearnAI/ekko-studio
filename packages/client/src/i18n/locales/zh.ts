@@ -1518,6 +1518,7 @@ export default {
       ariaLabel: 'Workflow 执行详情', title: '执行详情', count: '{count} 条',
       intro: '展示本次执行的路径选择、循环轮次和异常节点。', empty: '暂无执行详情', loadFailed: '读取持久化执行详情失败',
       summaryTitle: '运行结论', blockedAt: '卡在 {gate}', actualPath: '实际执行路径', noActualPath: '本次未采用任何路径', pathChecks: '路径判断', selectedPaths: '已采用路径', otherPaths: '其他判断与事件', selectedCount: '已采用 {count} 条', otherCount: '未采用 {count} 条', eventCount: '事件 {count} 条', showOtherPaths: '查看其他详情（{count}）', hideOtherPaths: '收起其他详情', runDetails: '运行详情', actualPathSteps: '实际路径步骤', nodeBudgetDetails: '时间预算详情',
+      nodeModelDetails: '节点模型配置', notRecorded: '未记录',
       condition: '条件', conditionMatched: '已匹配', conditionNotMatched: '未匹配', sourceOutcome: '节点结果', sourceReturned: '正常返回', sourceFailed: '执行失败', sourceSkippedStatus: '未执行',
       checkedData: '检查的数据', entireReplyText: '完整回复文本', errorText: '错误文本', jsonFieldValue: '单个 JSON 字段值', advancedPathValue: '高级路径的值', comparison: '比较方式', textToFind: '要查找的文字', expectedFieldValue: '期望的字段值', parsedBusinessDecision: '解析出的业务结论', failedGateLabel: '失败环节（failed_gate 字段的值）', failedGateValue: '失败环节（failed_gate 字段的值）：{gate}', decisions: { blocked: '已阻塞', released: '已发布', verified: '已验证', skipped: '无需处理' },
       node: '异常节点', edge: '执行路径', loop: '循环', unknownNode: '未知节点', pathTitle: '{source} → {target}', loopPass: '循环第 {count} 轮', exceptionalNode: '该节点未正常完成。',
