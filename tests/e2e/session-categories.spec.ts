@@ -683,3 +683,47 @@ test('shows category load failure and retries instead of presenting an empty men
   await page.locator('.n-dropdown-option').filter({ hasText: 'Move to category' }).hover()
   await expect(page.locator('.n-dropdown-option:visible').filter({ hasText: /^Work$/ })).toBeVisible()
 })
+
+for (const scenario of [
+  { name: 'long category list', count: 40, height: 720 },
+  { name: 'long category list in a short viewport', count: 40, height: 480 },
+  { name: 'short category list', count: 2, height: 720 },
+]) {
+  test(`keeps ${scenario.name} reachable in the session context menu`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: scenario.height })
+    await authenticate(page, TEST_ACCESS_KEY, 'research')
+    const categories = Array.from({ length: scenario.count }, (_, index) => ({
+      id: index + 1,
+      name: `Destination ${String(index + 1).padStart(2, '0')}`,
+    }))
+    const api = await mockHermesApi(page, {
+      sessionCategories: categories,
+      sessions: [sessionSummary('general-session', 'General Notes', null, 100)],
+    })
+    await mockChatSocket(page)
+    await page.goto('/#/hermes/chat')
+    await page.getByRole('link', { name: /General Notes/ }).first().click({ button: 'right' })
+    await page.locator('.n-dropdown-option').filter({ hasText: 'Move to category' }).hover()
+
+    const menu = page.locator('.n-dropdown-menu:visible').filter({ hasText: 'Destination 01' }).last()
+    await expect(menu).toBeVisible()
+    const bounds = await menu.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.y).toBeGreaterThanOrEqual(0)
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(scenario.height)
+    const lastOption = menu.locator('.n-dropdown-option').filter({ hasText: categories.at(-1)!.name })
+    if (scenario.count > 2) {
+      const scroll = menu.locator('.n-scrollbar-container')
+      await menu.hover()
+      await page.mouse.wheel(0, 3000)
+      await expect.poll(() => scroll.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+      await expect(lastOption).toBeInViewport()
+    }
+    await lastOption.click()
+    await expect(page.getByText('Category updated')).toBeVisible()
+    const moveRequest = api.requests.find(request =>
+      request.method === 'POST' && request.pathname === '/api/studio/sessions/general-session/category',
+    )
+    expect(JSON.parse(moveRequest?.postData || '{}')).toEqual({ categoryId: scenario.count })
+  })
+}

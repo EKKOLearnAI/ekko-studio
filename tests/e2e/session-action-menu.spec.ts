@@ -284,4 +284,9 @@ test('shows a matching icon for every sidebar session action and keeps submenu a
   await expect(visibleOption(page, 'Export').locator('.n-dropdown-option-body__suffix')).toBeVisible()
   await visibleOption(page, 'Move to category').hover()
   await expect(visibleOption(page, 'Create new category')).toBeVisible()
+
+  await visibleOption(page, 'Export').hover()
+  await visibleOption(page, 'Full Export (JSON)').hover()
+  await expect(visibleOption(page, 'JSON')).toBeVisible()
+  await expect(visibleOption(page, 'TXT')).toBeVisible()
 })

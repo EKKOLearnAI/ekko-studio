@@ -1903,6 +1903,10 @@ const contextMenuOptions = computed(() => buildSessionContextMenuOptions({
 }).map(option => option.key === "pin"
   ? { ...option, disabled: Boolean(contextSession.value?.isLocalOnly) }
   : option));
+function contextMenuProps(option: DropdownOption | undefined) {
+  return option?.key === "category" ? { style: "max-height: 60vh" } : {};
+}
+
 const contextMenuCategoriesKey = computed(() => [
   sessionCategoriesLoadFailed.value ? "failed" : "ready",
   sessionCategoriesLoading.value ? "loading" : "idle",
@@ -2710,6 +2714,8 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
       :x="contextMenuX"
       :y="contextMenuY"
       :options="contextMenuOptions"
+      scrollable
+      :menu-props="contextMenuProps"
       :show="showContextMenu"
       @select="handleContextMenuSelect"
       @clickoutside="handleClickOutside"
