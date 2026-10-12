@@ -2,12 +2,19 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { webUiHome } from './paths'
 
-export const REMOTE_SERVER_URL_ENV = 'HERMES_DESKTOP_SERVER_URL'
+export const REMOTE_SERVER_URL_ENV = 'EKKO_STUDIO_DESKTOP_SERVER_URL'
 export const REMOTE_SERVER_SETTINGS_NAME = 'desktop-remote-server.json'
 
 const DEFAULT_REMOTE_READY_TIMEOUT_MS = 30_000
 const REMOTE_READY_POLL_INTERVAL_MS = 500
 const REMOTE_READY_REQUEST_TIMEOUT_MS = 2_000
+
+export function desktopPreloadArguments(kind: 'main' | 'pet' | 'chat', remoteMode: boolean): string[] {
+  return [
+    ...(kind === 'main' ? [] : [`--hermes-window-kind=${kind}`]),
+    ...(remoteMode ? ['--hermes-remote-mode'] : []),
+  ]
+}
 
 // Remote mode points every desktop window at an already-running Web UI
 // deployment (for example a Docker container) instead of spawning the bundled
@@ -59,7 +66,7 @@ export function resolveRemoteServerUrl(
 }
 
 export function remoteReadyTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = Number(env.HERMES_DESKTOP_REMOTE_READY_TIMEOUT_MS)
+  const raw = Number(env.EKKO_STUDIO_DESKTOP_REMOTE_READY_TIMEOUT_MS)
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_REMOTE_READY_TIMEOUT_MS
 }
 

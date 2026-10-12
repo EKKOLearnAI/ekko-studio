@@ -117,6 +117,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   } } : {}),
   platform: process.platform,
   isDesktop: true,
+  remoteMode: REMOTE_SERVER_MODE,
   windowKind: desktopWindowKind(),
 })
 

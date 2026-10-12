@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  desktopPreloadArguments,
   normalizeRemoteServerUrl,
   remoteReadyTimeoutMs,
   remoteServerUrlFromEnv,
@@ -62,9 +63,9 @@ describe('remote server URL normalization', () => {
 
 describe('remote server URL sources', () => {
   it('reads the URL from the environment variable', () => {
-    expect(remoteServerUrlFromEnv({ HERMES_DESKTOP_SERVER_URL: 'http://10.0.0.5:6060' })).toBe('http://10.0.0.5:6060')
+    expect(remoteServerUrlFromEnv({ EKKO_STUDIO_DESKTOP_SERVER_URL: 'http://10.0.0.5:6060' })).toBe('http://10.0.0.5:6060')
     expect(remoteServerUrlFromEnv({})).toBeNull()
-    expect(remoteServerUrlFromEnv({ HERMES_DESKTOP_SERVER_URL: '' })).toBeNull()
+    expect(remoteServerUrlFromEnv({ EKKO_STUDIO_DESKTOP_SERVER_URL: '' })).toBeNull()
   })
 
   it('reads the URL from the settings file in the Web UI home', () => {
@@ -95,7 +96,7 @@ describe('remote server URL sources', () => {
     const home = tempDirectory()
     writeFileSync(join(home, 'desktop-remote-server.json'), JSON.stringify({ serverUrl: 'http://from-file:6060' }))
 
-    expect(resolveRemoteServerUrl({ HERMES_DESKTOP_SERVER_URL: 'http://from-env:6060' }, home)).toBe('http://from-env:6060')
+    expect(resolveRemoteServerUrl({ EKKO_STUDIO_DESKTOP_SERVER_URL: 'http://from-env:6060' }, home)).toBe('http://from-env:6060')
     expect(resolveRemoteServerUrl({}, home)).toBe('http://from-file:6060')
     expect(resolveRemoteServerUrl({}, join(home, 'missing'))).toBeNull()
   })
@@ -104,9 +105,9 @@ describe('remote server URL sources', () => {
 describe('remote readiness timeout', () => {
   it('defaults to 30 seconds and accepts positive overrides', () => {
     expect(remoteReadyTimeoutMs({})).toBe(30_000)
-    expect(remoteReadyTimeoutMs({ HERMES_DESKTOP_REMOTE_READY_TIMEOUT_MS: '5000' })).toBe(5000)
-    expect(remoteReadyTimeoutMs({ HERMES_DESKTOP_REMOTE_READY_TIMEOUT_MS: '-1' })).toBe(30_000)
-    expect(remoteReadyTimeoutMs({ HERMES_DESKTOP_REMOTE_READY_TIMEOUT_MS: 'abc' })).toBe(30_000)
+    expect(remoteReadyTimeoutMs({ EKKO_STUDIO_DESKTOP_REMOTE_READY_TIMEOUT_MS: '5000' })).toBe(5000)
+    expect(remoteReadyTimeoutMs({ EKKO_STUDIO_DESKTOP_REMOTE_READY_TIMEOUT_MS: '-1' })).toBe(30_000)
+    expect(remoteReadyTimeoutMs({ EKKO_STUDIO_DESKTOP_REMOTE_READY_TIMEOUT_MS: 'abc' })).toBe(30_000)
   })
 })
 
@@ -153,7 +154,7 @@ describe('desktop remote mode wiring', () => {
   const preloadSource = readFileSync(resolve('packages/desktop/src/preload/index.ts'), 'utf-8')
 
   it('bootstraps against the remote URL instead of the local server', () => {
-    expect(desktopSource).toContain("import { remoteReadyTimeoutMs, resolveRemoteServerUrl, waitForRemoteServerReady } from './remote-server'")
+    expect(desktopSource).toContain("import { desktopPreloadArguments, remoteReadyTimeoutMs, resolveRemoteServerUrl, waitForRemoteServerReady } from './remote-server'")
     expect(desktopSource).toContain('let activeRemoteServerUrl: string | null = resolveRemoteServerUrl()')
     expect(desktopSource).toContain('const remoteUrl = resolveRemoteServerUrl()')
     expect(desktopSource).toContain('await waitForRemoteServerReady(remoteUrl, remoteReadyTimeoutMs())')
@@ -169,8 +170,13 @@ describe('desktop remote mode wiring', () => {
     expect(desktopSource).toContain('!isResettingLogin && !activeRemoteServerUrl && (!isBootstrapping || !!serverUrl)')
   })
 
-  it('flags the main window so the preload can detect remote mode', () => {
-    expect(desktopSource).toContain("additionalArguments: ['--hermes-remote-mode']")
+  it.each(['main', 'pet', 'chat'] as const)('passes remote mode to the %s window preload', kind => {
+    expect(desktopSource).toContain(`additionalArguments: desktopPreloadArguments('${kind}', !!activeRemoteServerUrl)`)
+    expect(desktopPreloadArguments(kind, true)).toEqual([
+      ...(kind === 'main' ? [] : [`--hermes-window-kind=${kind}`]),
+      '--hermes-remote-mode',
+    ])
+    expect(desktopPreloadArguments(kind, false)).toEqual(kind === 'main' ? [] : [`--hermes-window-kind=${kind}`])
     expect(preloadSource).toContain("const REMOTE_SERVER_MODE = process.argv.includes('--hermes-remote-mode')")
   })
 

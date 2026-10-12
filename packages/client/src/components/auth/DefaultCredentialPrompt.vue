@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import { NButton, NModal } from "naive-ui";
 import { fetchCurrentUser } from "@/api/studio/auth";
 import { getApiKey } from "@/api/client";
+import { desktopBridge } from "@/utils/desktop-bridge";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -19,12 +20,9 @@ function dismissalKey(userId: number): string {
   return `hermes_default_credentials_prompt_dismissed_${userId}`;
 }
 
-function isDesktopShell(): boolean {
-  return (window as typeof window & { hermesDesktop?: { isDesktop?: boolean } }).hermesDesktop?.isDesktop === true;
-}
-
 async function checkDefaultCredentials() {
-  if (isDesktopShell()) {
+  const desktop = desktopBridge();
+  if (desktop?.isDesktop === true && desktop.remoteMode !== true) {
     show.value = false;
     return;
   }

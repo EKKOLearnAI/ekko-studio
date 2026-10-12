@@ -20,10 +20,10 @@ server and runtime bootstrap work.
 
 Enable it through either source (the environment variable wins):
 
-1. `HERMES_DESKTOP_SERVER_URL` — one-off or automated launches:
+1. `EKKO_STUDIO_DESKTOP_SERVER_URL` — one-off or automated launches:
 
    ```sh
-   HERMES_DESKTOP_SERVER_URL=http://192.168.1.20:6060 npm run dev
+   EKKO_STUDIO_DESKTOP_SERVER_URL=http://192.168.1.20:6060 npm run dev
    ```
 
 2. A persisted settings file at `$HERMES_WEB_UI_HOME/desktop-remote-server.json`
@@ -35,7 +35,7 @@ Enable it through either source (the environment variable wins):
 
 The URL must use `http://` or `https://`; query strings and hashes are
 dropped. On startup the app polls `<serverUrl>/health/ready` for up to 30
-seconds (override with `HERMES_DESKTOP_REMOTE_READY_TIMEOUT_MS`) before
+seconds (override with `EKKO_STUDIO_DESKTOP_REMOTE_READY_TIMEOUT_MS`) before
 loading the remote Web UI. Delete the settings file or clear `serverUrl` and
 relaunch to return to local mode; mode changes require an app restart.
 

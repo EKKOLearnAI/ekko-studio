@@ -40,7 +40,7 @@ import { ScreenshotShortcutManager, ScreenshotShortcutTargets } from './screensh
 import { screenshotEnvironment } from './screenshot-platform'
 import { groupChatAgentLinkPopupResponse } from './group-chat-agent-popup'
 import { isTrustedDesktopAppUrl, normalizeExternalHttpUrl } from './window-open-policy'
-import { remoteReadyTimeoutMs, resolveRemoteServerUrl, waitForRemoteServerReady } from './remote-server'
+import { desktopPreloadArguments, remoteReadyTimeoutMs, resolveRemoteServerUrl, waitForRemoteServerReady } from './remote-server'
 import {
   ensureDesktopRuntime,
   isDesktopRuntimeReady,
@@ -286,7 +286,7 @@ function ensurePetWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      additionalArguments: ['--hermes-window-kind=pet'],
+      additionalArguments: desktopPreloadArguments('pet', !!activeRemoteServerUrl),
     },
   })
   petWindow.setBackgroundColor('#00000000')
@@ -555,7 +555,7 @@ async function createWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      ...(activeRemoteServerUrl ? { additionalArguments: ['--hermes-remote-mode'] } : {}),
+      additionalArguments: desktopPreloadArguments('main', !!activeRemoteServerUrl),
     },
   })
 
@@ -670,7 +670,7 @@ async function openChatWindow(sessionIdInput: unknown, profileInput?: unknown): 
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      additionalArguments: ['--hermes-window-kind=chat'],
+      additionalArguments: desktopPreloadArguments('chat', !!activeRemoteServerUrl),
     },
   })
   chatWindows.set(windowKey, chatWindow)

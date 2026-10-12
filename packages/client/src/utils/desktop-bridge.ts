@@ -185,6 +185,7 @@ export interface HermesDesktopBridge {
   browser?: DesktopBrowserBridge
   platform: string
   isDesktop: boolean
+  remoteMode?: boolean
   windowKind?: 'main' | 'pet' | 'chat'
 }
 
