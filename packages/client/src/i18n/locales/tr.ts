@@ -1,16 +1,4 @@
 export default {
-  taskPlan: {
-    title: 'Görev planı',
-    progress: '{completed}/{total} tamamlandı',
-    pending: 'Tamamlanmadı',
-    in_progress: 'Devam ediyor',
-    completed: 'Tamamlandı',
-    running: 'Çalışıyor',
-    ended: 'Çalışma sona erdi; tamamlanmamış adımlar var',
-    interrupted: 'Kesildi; tamamlanmamış adımlar var',
-    failed: 'Çalışma başarısız oldu; tamamlanmamış adımlar var',
-  },
-
   profiles: {
     model: 'Model',
   },
