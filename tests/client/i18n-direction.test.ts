@@ -15,7 +15,7 @@ describe('isRtlLocale', () => {
   })
 
   it('treats left-to-right locales as ltr', () => {
-    for (const locale of ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'es', 'de', 'pt', 'ru']) {
+    for (const locale of ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'es', 'de', 'pt', 'ru', 'tr', 'tr-TR']) {
       expect(isRtlLocale(locale), locale).toBe(false)
     }
   })

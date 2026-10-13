@@ -19,6 +19,15 @@ test('language menu stays usable after switching locales', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('lang', 'tr')
   await expect(page.locator('html')).toHaveAttribute('dir', 'ltr')
   await expect(languageSwitch).toContainText('Türkçe')
+  await expect(page.getByRole('heading', { name: 'Tema', exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('hermes_locale'))).toBe('tr')
+
+  await page.reload()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'tr')
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr')
+  await expect(page.getByRole('heading', { name: 'Tema', exact: true })).toBeVisible()
+  await page.locator('.page-sidebar-account-btn').click()
+  await expect(languageSwitch).toContainText('Türkçe')
 
   await languageSwitch.click()
   await option('العربية').click()
@@ -27,6 +36,12 @@ test('language menu stays usable after switching locales', async ({ page }) => {
   await languageSwitch.click()
   await expect(languageMenu).toBeVisible()
   await expect(languageMenu).toBeInViewport()
+  await option('Türkçe').click()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'tr')
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr')
+  await expect(page.getByRole('heading', { name: 'Tema', exact: true })).toBeVisible()
+
+  await languageSwitch.click()
   await option('English').click()
 
   await expect(page.locator('html')).toHaveAttribute('dir', 'ltr')
