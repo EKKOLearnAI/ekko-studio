@@ -606,17 +606,44 @@ async function runLimited<T>(items: T[], limit: number, worker: (item: T) => Pro
   await Promise.all(workers)
 }
 
-export async function refreshConfiguredProviderModelCatalogs(options: { force?: boolean } = {}): Promise<void> {
-  const cache = await readProviderModelCatalogCache()
-  if (!options.force && Object.keys(cache.providers).length > 0) {
-    logger.info('[model-catalog-cache] provider model catalog cache exists; skipping startup refresh')
-    return
-  }
+function hasCachedCatalogForCandidate(cache: ProviderModelCatalogCache, candidate: RefreshCandidate): boolean {
+  const freeOnly = candidate.free_only === true
+  // A fallback entry left by a failed live probe does not count, so the next
+  // startup retries it. Providers without a live catalog only ever get fallback.
+  const hasModels = (entry?: ProviderModelCatalogEntry) => !!entry && entry.models.length > 0 &&
+    (entry.source === 'live' || candidate.skip_live_fetch === true)
+  if (hasModels(cache.providers[providerModelCatalogKey(candidate.provider, candidate.base_url, freeOnly)])) return true
+  // A profile-scoped authoritative list (from a manual "Refresh models") also
+  // counts as cached; the startup pass must not clobber it.
+  return candidate.profile.split(',').filter(Boolean).some(profile =>
+    hasModels(cache.providers[providerModelCatalogKey(candidate.provider, candidate.base_url, freeOnly, profile)]),
+  )
+}
 
+export async function refreshConfiguredProviderModelCatalogs(options: { force?: boolean } = {}): Promise<void> {
   const candidates = await collectRefreshCandidates()
   if (candidates.length === 0) return
-  logger.info('[model-catalog-cache] refreshing %d configured provider catalogs', candidates.length)
-  await runLimited(candidates, 4, async (candidate) => {
+
+  let targets = candidates
+  if (!options.force) {
+    // Startup only fills providers that have no catalog entry yet (e.g. an
+    // OAuth provider added after the cache was first written). Existing
+    // entries are left alone so every boot does not re-fetch every provider.
+    const cache = await readProviderModelCatalogCache()
+    targets = candidates.filter(candidate => !hasCachedCatalogForCandidate(cache, candidate))
+    if (targets.length === 0) {
+      logger.info('[model-catalog-cache] provider model catalog cache covers all configured providers; skipping startup refresh')
+      return
+    }
+    logger.info(
+      '[model-catalog-cache] refreshing %d provider catalogs missing from cache: %s',
+      targets.length,
+      targets.map(candidate => candidate.provider).join(', '),
+    )
+  } else {
+    logger.info('[model-catalog-cache] refreshing %d configured provider catalogs', targets.length)
+  }
+  await runLimited(targets, 4, async (candidate) => {
     try {
       const profiles = candidate.profile.split(',').filter(Boolean)
       if (candidate.skip_live_fetch) {
@@ -648,6 +675,38 @@ export async function refreshConfiguredProviderModelCatalogs(options: { force?: 
       logger.warn(err, '[model-catalog-cache] failed to refresh provider=%s base_url=%s', candidate.provider, candidate.base_url)
     }
   })
+}
+
+/**
+ * Refresh one provider's catalog for a profile, e.g. right after an OAuth
+ * login stored new credentials. Uses the same live/fallback semantics as the
+ * startup refresh.
+ */
+export async function refreshProviderModelCatalogForProfile(
+  profile: string,
+  provider: string,
+): Promise<ProviderModelCatalogEntry | null> {
+  const target = await resolveProviderCatalogRefreshTarget(profile, provider)
+  if (!target || target.skip_live_fetch) return null
+  return refreshProviderModelCatalog({
+    provider: target.provider,
+    label: target.label,
+    base_url: target.base_url,
+    api_key: target.api_key,
+    fallback_models: target.fallback_models,
+    free_only: target.free_only,
+    profiles: [profile],
+    profile,
+    api_mode: target.api_mode,
+    credential_kind: target.credential_kind,
+  })
+}
+
+/** Best-effort, non-blocking variant for auth success paths; never throws. */
+export function refreshProviderModelCatalogForProfileInBackground(profile: string, provider: string, reason = 'login'): void {
+  void refreshProviderModelCatalogForProfile(profile, provider).catch(err =>
+    logger.warn(err, '[model-catalog-cache] provider catalog refresh failed provider=%s profile=%s reason=%s', provider, profile, reason),
+  )
 }
 
 export function refreshConfiguredProviderModelCatalogsInBackground(reason = 'startup'): void {

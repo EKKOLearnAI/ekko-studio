@@ -7,14 +7,21 @@ import '../../packages/server/src/bootstrap/agent-profile-adapter'
 import {
   applyAnthropicOAuthDefaultModel,
   saveAnthropicOAuthTokensForProfile,
+  start as anthropicStart,
   status as anthropicStatus,
+  submit as anthropicSubmit,
 } from '../../packages/server/src/modules/hermes/controllers/anthropic-auth'
 
 let hermesHome = ''
 const mockResolveAuthorizedCredentials = vi.hoisted(() => vi.fn())
+const mockRefreshCatalogInBackground = vi.hoisted(() => vi.fn())
 
 vi.mock('../../packages/server/src/modules/hermes/services/providers/authorized-provider-credentials', () => ({
   resolveAuthorizedProviderRuntimeCredentials: mockResolveAuthorizedCredentials,
+}))
+
+vi.mock('../../packages/server/src/modules/hermes/services/providers/model-catalog-cache', () => ({
+  refreshProviderModelCatalogForProfileInBackground: mockRefreshCatalogInBackground,
 }))
 
 function writeFile(relativePath: string, content: string) {
@@ -59,9 +66,11 @@ describe('Anthropic OAuth controller', () => {
     hermesHome = mkdtempSync(join(tmpdir(), 'hwui-oauth-provider-'))
     process.env.HERMES_HOME = hermesHome
     mockResolveAuthorizedCredentials.mockReset()
+    mockRefreshCatalogInBackground.mockReset()
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     delete process.env.HERMES_HOME
     if (hermesHome) rmSync(hermesHome, { recursive: true, force: true })
     hermesHome = ''
@@ -108,5 +117,45 @@ describe('Anthropic OAuth controller', () => {
       profile: 'research',
       provider: 'claude-oauth',
     })
+  })
+
+  async function startSession(profile: string): Promise<{ sessionId: string; state: string }> {
+    const ctx = makeCtx(profile)
+    await anthropicStart(ctx)
+    const state = new URL(ctx.body.authorization_url).searchParams.get('state') || ''
+    return { sessionId: ctx.body.session_id, state }
+  }
+
+  function submitCtx(profile: string, sessionId: string, code: string): any {
+    return { ...makeCtx(profile), params: { sessionId }, request: { body: { code } } }
+  }
+
+  it('refreshes the Claude OAuth model catalog in the background after a successful login', async () => {
+    mkdirSync(join(hermesHome, 'profiles', 'research'), { recursive: true })
+    writeFile('profiles/research/config.yaml', 'model:\n  provider: openrouter\n  default: openrouter-model\n')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: 'fresh-access', refresh_token: 'fresh-refresh', expires_in: 3600 }),
+    }))
+    const { sessionId, state } = await startSession('research')
+
+    const ctx = submitCtx('research', sessionId, `auth-code#${state}`)
+    await anthropicSubmit(ctx)
+
+    expect(ctx.body).toEqual({ status: 'approved', error: null })
+    expect(mockRefreshCatalogInBackground).toHaveBeenCalledTimes(1)
+    expect(mockRefreshCatalogInBackground).toHaveBeenCalledWith('research', 'claude-oauth', 'oauth-login')
+    expect(readJson('profiles/research/auth.json').providers['claude-oauth'].tokens.access_token).toBe('fresh-access')
+  })
+
+  it('does not refresh the catalog when the token exchange fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 400, text: async () => 'bad code' }))
+    const { sessionId, state } = await startSession('default')
+
+    const ctx = submitCtx('default', sessionId, `auth-code#${state}`)
+    await anthropicSubmit(ctx)
+
+    expect(ctx.status).toBe(502)
+    expect(mockRefreshCatalogInBackground).not.toHaveBeenCalled()
   })
 })

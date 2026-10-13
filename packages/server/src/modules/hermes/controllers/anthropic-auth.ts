@@ -6,6 +6,7 @@ import { saveEnvValueForProfile } from '../services/profiles/config'
 import { logger } from '../../studio/public/logging'
 import { updateConfigYamlForProfile } from '../../studio/public/profile-config'
 import { resolveAuthorizedProviderRuntimeCredentials } from '../services/providers/authorized-provider-credentials'
+import { refreshProviderModelCatalogForProfileInBackground } from '../services/providers/model-catalog-cache'
 
 const ANTHROPIC_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 const ANTHROPIC_AUTHORIZE_URL = 'https://claude.ai/oauth/authorize'
@@ -259,6 +260,7 @@ export async function submit(ctx: any) {
     const tokenData = await res.json() as { access_token: string; refresh_token?: string; expires_in?: number; token_type?: string }
     await saveAnthropicOAuthTokensForProfile(session.profile, tokenData)
     session.status = 'approved'
+    refreshProviderModelCatalogForProfileInBackground(session.profile, CLAUDE_OAUTH_PROVIDER, 'oauth-login')
     ctx.body = { status: 'approved', error: null }
   } catch (err: any) {
     logger.error(err, 'Anthropic OAuth submit failed')
