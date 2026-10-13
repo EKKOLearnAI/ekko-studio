@@ -67,6 +67,7 @@ import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
 import { ensureHermesRunWorkspace } from '../services/chat-run/workspace'
+import { normalizeDirectoryTarget } from '../services/workspace/directory'
 import {
   isAbsoluteWorkspacePath,
   resolveWorkspacePath,
@@ -1586,7 +1587,7 @@ export async function setWorkspace(ctx: any) {
   if (!existing) {
     createSession({ id, profile: requestedProfile(ctx) || 'default', title: '' })
   }
-  updateSession(id, { workspace: workspace || null } as any)
+  updateSession(id, { workspace: normalizeDirectoryTarget(workspace || '') || null } as any)
   ctx.body = { ok: true }
 }
 
