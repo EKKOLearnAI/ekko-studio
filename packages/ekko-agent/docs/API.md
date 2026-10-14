@@ -3303,6 +3303,15 @@ export class DelegateTaskTool implements AgentTool<DelegateTaskInput> {
 
 export function createDelegationTools(): AgentTool[]
 ```
+### `src/tools/directory.ts`
+
+```ts
+export function isWindowsDriveRoot(target: string): boolean
+
+export function normalizeDirectoryTarget(target: string): string
+
+export async function ensureDirectory(target: string): Promise<string>
+```
 ### `src/tools/files.ts`
 
 ```ts
