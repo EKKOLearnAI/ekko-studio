@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { modelReasoningEfforts, hasModelReasoningMetadata } from '@/utils/model-reasoning-effort'
+import { useSelectedModelMetadata } from '@/composables/useSelectedModelMetadata'
 import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
 import ScopedModelSelector from '@/components/hermes/models/ScopedModelSelector.vue'
 import type { CodingAgentId } from '@/api/coding-agents'
@@ -376,17 +377,22 @@ const pendingAgentPreset = computed(() =>
     agentPresets.value.find(preset => preset.id === pendingAgentPresetId.value) || null
 )
 
+const reasoningModelGroups = useSelectedModelMetadata(
+  () => getAgentModelGroups(selectedProfile.value || ''),
+  () => [{ profile: selectedProfile.value, provider: selectedAgentProvider.value, model: selectedAgentModel.value }],
+  () => showAddAgentDrawer.value && !usesGlobalAgentMode.value,
+)
 const agentReasoningEffortOptions = computed(() => [
     { label: t('chat.reasoningEffort.options.default'), value: '' },
     ...modelReasoningEfforts(
-      getAgentModelGroups(selectedProfile.value || ''),
+      reasoningModelGroups.value,
       selectedAgentProvider.value,
       selectedAgentModel.value,
     ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
 ])
 
 watch([agentReasoningEffortOptions, selectedAgentReasoningEffort], ([options, effort]) => {
-  if (!usesGlobalAgentMode.value && effort && !options.some(option => option.value === effort)) {
+  if (!usesGlobalAgentMode.value && hasModelReasoningMetadata(reasoningModelGroups.value, selectedAgentProvider.value, selectedAgentModel.value) && effort && !options.some(option => option.value === effort)) {
     selectedAgentReasoningEffort.value = ''
   }
 })

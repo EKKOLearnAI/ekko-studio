@@ -4,6 +4,7 @@ import * as ctrl from '../controllers/models'
 export const modelRoutes = new Router()
 
 modelRoutes.get('/api/hermes/available-models', ctrl.getAvailable)
+modelRoutes.get('/api/hermes/model-metadata', ctrl.getModelMetadata)
 modelRoutes.post('/api/hermes/provider-models', ctrl.fetchProviderModelList)
 modelRoutes.post('/api/hermes/provider-models/cache/refresh', ctrl.refreshProviderModelCatalogCache)
 modelRoutes.get('/api/hermes/config/models', ctrl.getConfigModels)

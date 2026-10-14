@@ -17,6 +17,7 @@ export function sessionShareHttpOperation(method: string, path: string, query: R
     if (method === 'GET' && ['', 'context', 'usage'].includes(suffix)) return { action: 'read', sessionId }
     if (method === 'POST' && ['share-voice/transcribe', 'share-voice/synthesize'].includes(suffix)) return { action: 'voice', sessionId }
     if (method === 'GET' && suffix === 'share-models') return { action: 'switchModel', sessionId }
+    if (method === 'GET' && suffix === 'share-model-metadata') return { action: 'read', sessionId }
     if (method === 'GET' && suffix === 'share-context-length') return { action: 'read', sessionId }
     if (method === 'PUT' && suffix === 'share-context-length') return { action: 'switchModel', sessionId }
     if (method === 'GET' && suffix === 'share-workspaces') return { action: 'switchWorkspace', sessionId }

@@ -1,27 +1,23 @@
 import { getModelCatalog, resolveCatalogModel, catalogReasoningEfforts } from '../../../studio/public/model-catalog'
+import { resolveModelBaseUrlForProfile } from './endpoint'
 
-interface CatalogModelGroup {
+export interface ModelMetadataQuery {
+  profile?: string
   provider: string
-  base_url: string
-  models: string[]
-  model_meta?: Record<string, { reasoning?: boolean; reasoning_efforts?: string[] }>
+  model: string
+  baseUrl?: string
 }
 
-export function applyCatalogModelMetadata<T extends CatalogModelGroup>(groups: T[]): T[] {
+/** Resolve only the model a consumer is using; listing providers never calls this. */
+export function getModelMetadata(query: ModelMetadataQuery): { reasoning?: boolean; reasoning_efforts?: string[] } {
   const catalog = getModelCatalog()
-  if (!catalog) return groups
-  return groups.map(group => {
-    const meta = { ...group.model_meta }
-    for (const id of group.models) {
-      const model = resolveCatalogModel(catalog, { provider: group.provider, baseUrl: group.base_url, model: id })?.model
-      if (!model) continue
-      const efforts = catalogReasoningEfforts(model)
-      meta[id] = {
-        ...meta[id],
-        ...(typeof model.reasoning === 'boolean' ? { reasoning: model.reasoning } : {}),
-        ...(efforts !== undefined ? { reasoning_efforts: efforts } : {}),
-      }
-    }
-    return Object.keys(meta).length ? { ...group, model_meta: meta } : group
-  })
+  if (!catalog) return {}
+  const baseUrl = query.baseUrl || resolveModelBaseUrlForProfile(query.profile || 'default', query.provider, query.model)
+  const model = resolveCatalogModel(catalog, { ...query, baseUrl })?.model
+  if (!model) return {}
+  const efforts = catalogReasoningEfforts(model)
+  return {
+    ...(typeof model.reasoning === 'boolean' ? { reasoning: model.reasoning } : {}),
+    ...(efforts !== undefined ? { reasoning_efforts: efforts } : {}),
+  }
 }

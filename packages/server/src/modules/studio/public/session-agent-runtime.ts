@@ -1,5 +1,6 @@
 export interface SessionAgentRuntimeDependencies {
   getAvailableModelGroups?: (profile: string) => Promise<any[]>
+  getModelMetadata?: (query: { profile: string; provider: string; model: string; baseUrl?: string }) => { reasoning?: boolean; reasoning_efforts?: string[] }
   deleteHermesSessionForProfile: (...args: any[]) => Promise<boolean>
   getHermesCliSession: (...args: any[]) => Promise<any>
   getHermesModelContextLength: (...args: any[]) => number
@@ -47,3 +48,4 @@ export const validateCodingAgentModelEffort = (agent: string, currentModel: stri
 }
 
 export const getSessionAvailableModelGroups = (profile: string): Promise<any[]> => configured().getAvailableModelGroups?.(profile) ?? Promise.resolve([])
+export const getSessionModelMetadata = (query: { profile: string; provider: string; model: string; baseUrl?: string }) => configured().getModelMetadata?.(query) ?? {}

@@ -1577,6 +1577,31 @@ if (usageStatsOperation) {
   usageStatsOperation.responses['403'] = { description: 'Selected Profile is not accessible to this user' }
 }
 
+const modelMetadataSchema = { type: 'object', properties: {
+  reasoning: { type: 'boolean' }, reasoning_efforts: { type: 'array', items: { type: 'string' } },
+} }
+for (const path of ['/api/hermes/model-metadata', '/api/studio/sessions/{id}/share-model-metadata']) {
+  const operation = openapi.paths[path].get
+  const shared = path.includes('/sessions/')
+  operation.description = shared
+    ? 'Resolve reasoning metadata for one model in the share-bound Profile. Reading the current model requires read access; other models require switchModel and must be selectable. Provider endpoints and credentials remain private.'
+    : 'Resolve reasoning metadata only for the requested model. Provider/endpoint/model priority and unknown capability fallback are shared with runtime context and pricing. Model lists retain aliases, disabled and preview flags without resolving unused models.'
+  operation.parameters = [
+    ...(shared ? [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }] : [{ in: 'query', name: 'profile', schema: { type: 'string' } }, { in: 'query', name: 'base_url', schema: { type: 'string', maxLength: 4096 } }]),
+    ...['provider', 'model'].map(name => ({ in: 'query', name, required: true, schema: { type: 'string', minLength: 1, maxLength: 512 } })),
+  ]
+  operation.responses['200'] = { description: 'Selected model metadata; an empty object means unknown capabilities', content: { 'application/json': { schema: { type: 'object', required: ['metadata'], properties: { metadata: modelMetadataSchema } } } } }
+  operation.responses['400'] = { description: 'Invalid provider or model' }
+  operation.responses['403'] = { description: 'Profile, session or model access denied' }
+  if (shared) {
+    operation.operationId = 'getSessionShareModelMetadata'
+    operation.security = [{ AppAccessToken: [], SessionShareToken: [] }]
+    operation['x-session-share-permission'] = 'read'
+    operation.responses['410'] = { description: 'Share expired or revoked' }
+  }
+}
+openapi.paths['/api/hermes/available-models'].get.description = 'List configured models, selectable provider catalogs and display metadata. Reasoning capabilities are resolved on demand through model-metadata for selected models.'
+
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')
 writeFileSync(outputPath, JSON.stringify(openapi, null, 2))

@@ -65,6 +65,7 @@ beforeEach(async () => {
         'model-a': { alias: 'Model A', reasoning: true, reasoning_efforts: ['low', 'high'], api_key: 'private-provider-key' },
         disabled: { disabled: true, reasoning_efforts: ['ultra'] },
       } }],
+    getSessionModelMetadata: ({ provider, model }: any) => ({ reasoning: true, reasoning_efforts: ['low', 'high'] }),
     notifyHermesSessionModelChanged: vi.fn(),
     getHermesModelContextLength: ({ profile, provider, model }: any) => {
       const row = db.prepare('SELECT context_limit FROM model_context WHERE profile = ? AND provider = ? AND model = ?')
@@ -267,6 +268,21 @@ describe('existing APIs with session share credentials', () => {
     expect((await request(token, '/api/studio/sessions/s1', 'GET', undefined, { 'X-App-Access-Token': 'wrong' })).status).toBe(401)
     expect((await request(token, '/api/studio/chat-run/runs', 'POST', { input: 'hello' })).status).toBe(400)
     expect((await request(token, '/api/studio/sessions/s1', 'DELETE')).status).toBe(403)
+  })
+
+  it('resolves shared model capabilities only for the current or a permitted selectable model', async () => {
+    const { updateSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    updateSession('s1', { model: 'current', provider: 'custom:test' })
+    const readonly = await issue()
+    const path = '/api/studio/sessions/s1/share-model-metadata'
+    const current = await request(readonly.token, path + '?provider=custom:test&model=current')
+    expect(current).toMatchObject({ status: 200, body: { metadata: { reasoning: true, reasoning_efforts: ['low', 'high'] } } })
+    expect(JSON.stringify(current.body)).not.toMatch(/private-provider|api_key|base_url/)
+    expect((await request(readonly.token, path + '?provider=custom:test&model=model-a')).status).toBe(403)
+    expect((await request(readonly.token, '/api/studio/sessions/s2/share-model-metadata?provider=custom:test&model=current')).status).toBe(403)
+    const editor = await issue({ switchModel: true })
+    expect((await request(editor.token, path + '?provider=custom:test&model=model-a')).status).toBe(200)
+    for (const model of ['disabled', 'not-listed']) expect((await request(editor.token, path + '?provider=custom:test&model=' + model)).status).toBe(400)
   })
 
   it('gates settings independently, validates the catalog and preserves reasoning when changing models', async () => {

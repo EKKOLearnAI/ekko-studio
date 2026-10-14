@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { modelReasoningEfforts, hasModelReasoningMetadata } from '@/utils/model-reasoning-effort'
+import { useSelectedModelMetadata } from '@/composables/useSelectedModelMetadata'
 import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
 import { isGlobalOnlyCodingAgent } from "@/utils/agent-catalog"
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
@@ -53,16 +54,21 @@ const apiModeOptions = computed(() => [
   { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
   { label: t('codingAgents.protocolAnthropicMessages'), value: 'anthropic_messages' },
 ])
+const reasoningModelGroups = useSelectedModelMetadata(
+  () => props.data.modelGroups,
+  () => [{ profile: props.data.profile, provider: props.data.provider, model: props.data.model, baseUrl: '' }],
+  () => usesScopedModel.value,
+)
 const reasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.default'), value: 'default' },
   ...modelReasoningEfforts(
-    props.data.modelGroups,
+    reasoningModelGroups.value,
     props.data.provider,
     props.data.model,
   ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
 ])
 watch([reasoningEffortOptions, () => props.data.reasoningEffort], ([options, effort]) => {
-  if (!props.data.readonly && usesScopedModel.value && effort && !options.some(option => option.value === effort)) {
+  if (!props.data.readonly && usesScopedModel.value && hasModelReasoningMetadata(reasoningModelGroups.value, props.data.provider, props.data.model) && effort && !options.some(option => option.value === effort)) {
     updateField('reasoningEffort', 'default')
   }
 }, { immediate: true })

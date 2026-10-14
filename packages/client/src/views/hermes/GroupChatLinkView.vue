@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { modelReasoningEfforts, hasModelReasoningMetadata } from '@/utils/model-reasoning-effort'
+import { useSelectedModelMetadata } from '@/composables/useSelectedModelMetadata'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
@@ -174,23 +175,28 @@ const agentApiModeOptions = computed(() => [
   { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
   { label: t('codingAgents.protocolAnthropicMessages'), value: 'anthropic_messages' },
 ])
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
+const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
+const reasoningModelGroups = useSelectedModelMetadata(
+  () => getAgentModelGroups(selectedProfile.value),
+  () => [{ profile: selectedProfile.value, provider: selectedAgentProvider.value, model: selectedAgentModel.value }],
+  () => !usesGlobalAgentMode.value,
+)
 const agentReasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.default'), value: '' },
   ...modelReasoningEfforts(
-    getAgentModelGroups(selectedProfile.value),
+    reasoningModelGroups.value,
     selectedAgentProvider.value,
     selectedAgentModel.value,
   ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
 ])
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
-const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
   { label: t('codingAgents.launchModeScoped'), value: 'scoped' },
 ])
 
 watch([agentReasoningEffortOptions, selectedAgentReasoningEffort], ([options, effort]) => {
-  if (!usesGlobalAgentMode.value && effort && !options.some(option => option.value === effort)) {
+  if (!usesGlobalAgentMode.value && hasModelReasoningMetadata(reasoningModelGroups.value, selectedAgentProvider.value, selectedAgentModel.value) && effort && !options.some(option => option.value === effort)) {
     selectedAgentReasoningEffort.value = ''
   }
 })

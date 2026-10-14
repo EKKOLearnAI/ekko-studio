@@ -588,6 +588,7 @@ function withRuntimeNodeData(data: WorkflowAgentNodeData): WorkflowAgentNodeData
     skillOptions: skillOptionsForAgent(data.agent),
     skillsLoading: skillsLoadingForAgent(data.agent),
     modelGroups: modelGroups.value,
+    profile: activeWorkflowProfile.value,
     onUpdate: updateNodeData,
     onUploadImages: uploadNodeImages,
   }
@@ -674,6 +675,7 @@ function makeNode(
       skillOptions: skillOptionsForAgent(agent),
       skillsLoading: skillsLoadingForAgent(agent),
       modelGroups: modelGroups.value,
+      profile: activeWorkflowProfile.value,
       onUpdate: updateNodeData,
       onUploadImages: uploadNodeImages,
     },

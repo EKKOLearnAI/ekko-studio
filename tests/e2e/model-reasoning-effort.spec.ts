@@ -2,6 +2,33 @@ import { expect, test } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY, TEST_MODEL_GROUP } from './fixtures'
 import { selectNewChatAgent, selectNewChatLaunchMode, sendNewChatMessage } from './new-chat-helpers'
 
+test('large catalogs resolve only the selected model and keep its effort controls working', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY)
+  const models = Array.from({ length: 3000 }, (_, i) => `gateway-model-${i}`)
+  await mockHermesApi(page, { modelGroups: [{ ...TEST_MODEL_GROUP, provider: 'custom:gateway', models }] })
+  await mockChatSocket(page)
+  const selections: string[] = []
+  await page.route('**/api/hermes/model-metadata?*', async route => {
+    const query = new URL(route.request().url()).searchParams
+    selections.push(query.get('model') || '')
+    await route.fulfill({ json: { metadata: { reasoning: true, reasoning_efforts: ['low', 'high', 'max'] } } })
+  })
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  await selectNewChatAgent(page, 'Hermes')
+  const draft = page.locator('.new-chat-page')
+  await draft.locator('.reasoning-effort-button').click()
+  await expect(page.getByRole('slider')).toHaveAttribute('aria-valuemax', '3')
+  expect(selections.length).toBeGreaterThan(0)
+  expect([...new Set(selections)]).toEqual([models[0]])
+  await page.getByRole('slider').focus()
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('Escape')
+  await sendNewChatMessage(page, 'Use the selected gateway model')
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload))
+    .toMatchObject({ model: models[0], reasoning_effort: 'max' })
+})
+
 for (const [name, provider, model, metadata, max] of [
   ['GLM 5.3 advertised effort levels', 'glm', 'glm-5.3', { reasoning: true, reasoning_efforts: ['low', 'high', 'max'] }, 3],
   ['custom DeepSeek Flash advertised effort levels', 'custom:api.apikey.fun', 'deepseek-flash', { reasoning: true, reasoning_efforts: ['none', 'low', 'high', 'max'] }, 4],

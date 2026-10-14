@@ -147,6 +147,14 @@ export async function workspaces(ctx: Context): Promise<void> {
   })
 }
 
+export async function modelMetadata(ctx: Context): Promise<void> {
+  await respond(ctx, async () => {
+    if (!ctx.state.sessionShare) throw new SessionShareError('share_recipient_required')
+    const { sessionShareModelMetadata } = await import('../services/session-shares/settings')
+    ctx.body = await sessionShareModelMetadata(ctx.state.sessionShare, ctx.query.provider, ctx.query.model)
+  })
+}
+
 export async function contextLength(ctx: Context): Promise<void> {
   await respond(ctx, async () => {
     if (!ctx.state.sessionShare) throw new SessionShareError('share_recipient_required')

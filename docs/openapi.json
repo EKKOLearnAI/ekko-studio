@@ -6521,7 +6521,7 @@
           "Models"
         ],
         "summary": "Get available-models",
-        "description": "GET /api/hermes/available-models",
+        "description": "List configured models, selectable provider catalogs and display metadata. Reasoning capabilities are resolved on demand through model-metadata for selected models.",
         "operationId": "getAvailable",
         "security": [
           {
@@ -10161,6 +10161,101 @@
             }
           }
         }
+      }
+    },
+    "/api/hermes/model-metadata": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Get model-metadata",
+        "description": "Resolve reasoning metadata only for the requested model. Provider/endpoint/model priority and unknown capability fallback are shared with runtime context and pricing. Model lists retain aliases, disabled and preview flags without resolving unused models.",
+        "operationId": "getModelMetadata",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Selected model metadata; an empty object means unknown capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "metadata"
+                  ],
+                  "properties": {
+                    "metadata": {
+                      "type": "object",
+                      "properties": {
+                        "reasoning": {
+                          "type": "boolean"
+                        },
+                        "reasoning_efforts": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid provider or model"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Profile, session or model access denied"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "profile",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "base_url",
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        ]
       }
     },
     "/api/hermes/model-visibility": {
@@ -20717,6 +20812,99 @@
           }
         },
         "x-session-share-permission": "switchModel"
+      }
+    },
+    "/api/studio/sessions/{id}/share-model-metadata": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Get share-model-metadata",
+        "description": "Resolve reasoning metadata for one model in the share-bound Profile. Reading the current model requires read access; other models require switchModel and must be selectable. Provider endpoints and credentials remain private.",
+        "operationId": "getSessionShareModelMetadata",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Selected model metadata; an empty object means unknown capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "metadata"
+                  ],
+                  "properties": {
+                    "metadata": {
+                      "type": "object",
+                      "properties": {
+                        "reasoning": {
+                          "type": "boolean"
+                        },
+                        "reasoning_efforts": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid provider or model"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Profile, session or model access denied"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        ],
+        "x-session-share-permission": "read"
       }
     },
     "/api/studio/sessions/{id}/share-models": {

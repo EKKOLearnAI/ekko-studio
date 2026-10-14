@@ -706,6 +706,14 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       return
     }
 
+    if (pathname === '/api/hermes/model-metadata') {
+      const provider = url.searchParams.get('provider')
+      const model = url.searchParams.get('model') || ''
+      const metadata = (options.modelGroups ?? [TEST_MODEL_GROUP]).find(group => group.provider === provider)?.model_meta?.[model] || {}
+      await route.fulfill(jsonResponse({ metadata }))
+      return
+    }
+
     if (pathname === '/api/hermes/available-models') {
       const groups = options.modelGroups ?? [TEST_MODEL_GROUP]
       const defaultGroup = groups.find(group => Array.isArray(group.models) && group.models.length > 0)

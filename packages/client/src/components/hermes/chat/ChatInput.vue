@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { DEFAULT_REASONING_EFFORTS, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { DEFAULT_REASONING_EFFORTS, modelReasoningEfforts, hasModelReasoningMetadata } from '@/utils/model-reasoning-effort'
+import { useSelectedModelMetadata } from '@/composables/useSelectedModelMetadata'
 import type { NativeEffortChoice } from '@/utils/native-model-families'
 import { isBuiltinEkkoSession, isExternalCodingAgentSession } from '@/utils/hermes/session-agent'
 import { EKKO_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
@@ -78,12 +79,17 @@ function effortLabel(value: string) {
   return DEFAULT_REASONING_EFFORTS.includes(value) || ['ultra', 'disabled', 'enabled'].includes(value) ? t(`chat.reasoningEffort.options.${value}`) : value
 }
 const showReasoningEffort = ref(false)
+const reasoningModelGroups = useSelectedModelMetadata(
+  () => appStore.profileModelGroups?.find(entry => entry.profile === (reasoningSession.value?.profile || profilesStore.activeProfileName))?.groups || appStore.modelGroups || [],
+  () => [{ profile: reasoningSession.value?.profile || profilesStore.activeProfileName, provider: reasoningSession.value?.provider || appStore.selectedProvider || '', model: reasoningSession.value?.model || appStore.selectedModel || '' }],
+  () => !isGlobalCodingAgentSession.value && !isMoaSession.value,
+)
 const reasoningEffortOptions = computed(() => isGlobalCodingAgentSession.value && props.nativeEffortChoices
   ? props.nativeEffortChoices.map(choice => ({ value: choice.effort,
     label: choice.effort ? effortLabel(choice.effort) : t('chat.reasoningEffort.defaultLabel') })) : [
   { label: t(isGlobalCodingAgentSession.value ? 'chat.reasoningEffort.defaultLabel' : 'chat.reasoningEffort.options.default'), value: '' },
   ...(isGlobalCodingAgentSession.value ? props.nativeReasoningEfforts || [] : modelReasoningEfforts(
-    appStore.profileModelGroups?.find(entry => entry.profile === (reasoningSession.value?.profile || profilesStore.activeProfileName))?.groups || appStore.modelGroups || [],
+    reasoningModelGroups.value,
     reasoningSession.value?.provider || appStore.selectedProvider || '',
     reasoningSession.value?.model || appStore.selectedModel || '',
   )).map(value => ({ label: effortLabel(value), value })),
@@ -139,7 +145,7 @@ watch([reasoningEffortOptions, currentReasoningEffort, canEditReasoningEffort], 
     showReasoningEffort.value = false
     return
   }
-  if (!isGlobalCodingAgentSession.value && currentReasoningEffort.value && !options.some(option => option.value === currentReasoningEffort.value)) {
+  if (!isGlobalCodingAgentSession.value && hasModelReasoningMetadata(reasoningModelGroups.value, reasoningSession.value?.provider || appStore.selectedProvider || '', reasoningSession.value?.model || appStore.selectedModel || '') && currentReasoningEffort.value && !options.some(option => option.value === currentReasoningEffort.value)) {
     onReasoningEffortChange('')
   }
 }, { immediate: true })

@@ -2,6 +2,11 @@ import type { AvailableModelGroup } from '@/api/hermes/system'
 
 export const DEFAULT_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
+export function hasModelReasoningMetadata(groups: Pick<AvailableModelGroup, 'provider' | 'model_meta'>[], provider: string, model: string): boolean {
+  const meta = groups.find(group => group.provider === provider)?.model_meta?.[model]
+  return meta?.reasoning === false || Array.isArray(meta?.reasoning_efforts)
+}
+
 export function modelReasoningEfforts(
   groups: Pick<AvailableModelGroup, 'provider' | 'model_meta'>[],
   provider: string,

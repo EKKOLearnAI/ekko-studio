@@ -148,6 +148,16 @@ export async function fetchAvailableModelsForProfile(profile: string): Promise<A
   return request<AvailableModelsResponse>(`/api/hermes/available-models?${params.toString()}`)
 }
 
+export type ModelReasoningMetadata = { reasoning?: boolean; reasoning_efforts?: string[] }
+export interface ModelMetadataSelection { profile?: string | null; provider: string; model: string; baseUrl?: string }
+
+export async function fetchModelMetadata(selection: ModelMetadataSelection): Promise<ModelReasoningMetadata> {
+  const params = new URLSearchParams({ profile: selection.profile || 'default', provider: selection.provider, model: selection.model })
+  if (selection.baseUrl) params.set('base_url', selection.baseUrl)
+  const result = await request<{ metadata: ModelReasoningMetadata }>(`/api/hermes/model-metadata?${params}`)
+  return result.metadata
+}
+
 export async function fetchProviderModels(data: {
   base_url: string
   api_key?: string

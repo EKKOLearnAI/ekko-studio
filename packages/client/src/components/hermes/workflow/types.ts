@@ -10,6 +10,7 @@ export interface WorkflowSelectOption extends SelectOption {
 export type WorkflowNodeStatus = 'idle' | 'queued' | 'running' | 'pending_approval' | 'completed' | 'skipped' | 'failed' | 'approval_rejected' | 'canceled'
 
 export interface WorkflowAgentNodeData {
+  profile?: string
   title: string
   agent: string
   agentMode: 'scoped' | 'global'

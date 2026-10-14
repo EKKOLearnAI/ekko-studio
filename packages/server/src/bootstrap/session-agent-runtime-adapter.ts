@@ -13,6 +13,7 @@ import {
 } from '../modules/hermes/services/history/sessions-db'
 import { deleteSessionForProfile, getSession } from '../modules/hermes/services/runtime/cli'
 import { getModelContextLength } from '../modules/hermes/services/models/context'
+import { getModelMetadata } from '../modules/hermes/services/models/metadata'
 import { configureSessionAgentRuntime } from '../modules/studio/public/session-agent-runtime'
 import { getCodingAgentModels } from '../modules/coding-agents/services'
 import { validateNativeModelEffort } from '../modules/coding-agents/services/models/variants'
@@ -25,6 +26,7 @@ configureSessionAgentRuntime({
     validateNativeModelEffort(catalog.models, currentModel, nextModel, effort)
   },
   getAvailableModelGroups: getAvailableModelGroupsForProfile,
+  getModelMetadata,
   deleteHermesSessionForProfile: deleteSessionForProfile,
   getHermesCliSession: getSession,
   getHermesModelContextLength: getModelContextLength,

@@ -14,7 +14,7 @@ import { readAppConfig, writeAppConfig, providerDisplayLabel, type ModelVisibili
 import { listUserProfiles } from '../../studio/public/users'
 import { readModelContextRecord, upsertModelContextRecord } from '../../studio/public/provider-context'
 import { getModelContextLength } from '../services/models/context'
-import { applyCatalogModelMetadata } from '../services/models/metadata'
+import { getModelMetadata as resolveModelMetadata } from '../services/models/metadata'
 import { readProviderModelCatalogCache,
   refreshConfiguredProviderModelCatalogs,
   resolveProviderCatalogModels,
@@ -562,7 +562,7 @@ async function buildAvailableForProfile(
   }
   const groupsWithCustomModels = applyCustomModels(groups, normalizeCustomModels(appConfig.customModels))
 
-  return { profile, default: currentDefault, default_provider: currentDefaultProvider, groups: applyCatalogModelMetadata(groupsWithCustomModels) }
+  return { profile, default: currentDefault, default_provider: currentDefaultProvider, groups: groupsWithCustomModels }
 }
 
 export async function getAvailableModelGroupsForProfile(profile: string): Promise<AvailableGroup[]> {
@@ -571,6 +571,18 @@ export async function getAvailableModelGroupsForProfile(profile: string): Promis
   const modelCatalogCache = await readProviderModelCatalogCache()
   const result = await buildAvailableForProfile(profile || 'default', modelCatalogCache, appConfig)
   return applyModelVisibility(result.groups, modelVisibility)
+}
+
+export async function getModelMetadata(ctx: any) {
+  const provider = typeof ctx.query?.provider === 'string' ? ctx.query.provider.trim() : ''
+  const model = typeof ctx.query?.model === 'string' ? ctx.query.model.trim() : ''
+  const baseUrl = typeof ctx.query?.base_url === 'string' ? ctx.query.base_url.trim() : undefined
+  if (!provider || !model || provider.length > 512 || model.length > 512 || (baseUrl?.length || 0) > 4096) {
+    ctx.status = 400
+    ctx.body = { error: 'Provider and model are required' }
+    return
+  }
+  ctx.body = { metadata: resolveModelMetadata({ profile: requestScopedProfileName(ctx), provider, model, baseUrl }) }
 }
 
 export async function getAvailable(ctx: any) {
@@ -609,7 +621,7 @@ export async function getAvailable(ctx: any) {
         default: visibleDefault.defaultModel,
         default_provider: visibleDefault.defaultProvider,
         groups: visibleGroups,
-        allProviders: applyCatalogModelMetadata(applyModelAliases(allProvidersBase, modelAliases)),
+        allProviders: applyModelAliases(allProvidersBase, modelAliases),
         model_aliases: modelAliases,
         model_visibility: modelVisibility,
         custom_models: customModels,
@@ -636,13 +648,13 @@ export async function getAvailable(ctx: any) {
       default: visibleProfileDefault.defaultModel,
       default_provider: visibleProfileDefault.defaultProvider,
       groups: visibleProfileGroups,
-      allProviders: applyCatalogModelMetadata(applyModelAliases(PROVIDER_PRESETS.map((p: any) => providerPresetToGroup(
+      allProviders: applyModelAliases(PROVIDER_PRESETS.map((p: any) => providerPresetToGroup(
         p,
         resolveProviderCatalogModels(modelCatalogCacheForProfile, p.value, p.base_url, p.models, {
           freeOnly: p.value === 'openrouter',
           hasStaticManifest: p.builtin === true,
         }),
-      )), modelAliasesForProfile)),
+      )), modelAliasesForProfile),
       model_aliases: modelAliasesForProfile,
       model_visibility: modelVisibilityForProfile,
       custom_models: customModelsForProfile,

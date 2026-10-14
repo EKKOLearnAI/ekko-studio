@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { SessionShareError, type SessionShareAction } from '../../contracts/session-shares'
-import { getHermesModelContextLength, getSessionAvailableModelGroups } from '../../public/session-agent-runtime'
+import { getHermesModelContextLength, getSessionAvailableModelGroups, getSessionModelMetadata } from '../../public/session-agent-runtime'
 import { upsertModelContextRecord } from '../../public/provider-context'
 import { getSession } from '../../repositories/session-store'
 import { authorizeSessionShare, type SessionShareAccess } from './access'
@@ -61,6 +61,27 @@ export async function sessionShareModels(access: SessionShareAccess) {
       }]]
     })),
   })).filter(group => group.models.length)
+}
+
+export async function sessionShareModelMetadata(access: SessionShareAccess, provider: unknown, model: unknown) {
+  authorizeSessionShare(access, 'read')
+  if (typeof provider !== 'string' || typeof model !== 'string' || !provider || !model || provider.length > 512 || model.length > 512) {
+    throw new SessionShareError('share_invalid_request', 400)
+  }
+  const session = getSession(access.share.session_id)
+  if (!session) throw new SessionShareError('share_session_unavailable', 404)
+  let baseUrl: string | undefined
+  if (session.provider !== provider || session.model !== model) {
+    authorizeSessionShare(access, 'switchModel')
+    const groups = await getSessionAvailableModelGroups(access.share.profile)
+    const group = groups.find(group => group.provider === provider && group.models.includes(model) && !group.model_meta?.[model]?.disabled)
+    if (!group) throw new SessionShareError('share_model_unavailable', 400)
+    baseUrl = group.base_url
+    authorizeSessionShare(access, 'switchModel')
+  }
+  const metadata = getSessionModelMetadata({ profile: access.share.profile, provider, model, baseUrl })
+  authorizeSessionShare(access, 'read')
+  return { metadata }
 }
 
 export async function prepareSessionShareSetting(access: SessionShareAccess, action: SessionShareAction, body: any) {

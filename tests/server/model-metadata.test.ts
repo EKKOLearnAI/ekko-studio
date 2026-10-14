@@ -11,7 +11,7 @@ vi.mock('../../packages/server/src/modules/studio/public/model-catalog', async i
   ...await importOriginal<typeof import('../../packages/server/src/modules/studio/public/model-catalog')>(),
   getModelCatalog: () => catalog,
 }))
-import { applyCatalogModelMetadata } from '../../packages/server/src/modules/hermes/services/models/metadata'
+import { getModelMetadata } from '../../packages/server/src/modules/hermes/services/models/metadata'
 
 describe('catalog provider mapping', () => {
   it.each([
@@ -65,22 +65,16 @@ describe('catalog reasoning effort metadata', () => {
   })
 })
 
-describe('available model reasoning metadata', () => {
-  it('keeps existing aliases and preview flags while attaching mapped model capabilities', () => {
-    const group = { provider: 'glm', base_url: 'https://proxy.test/v1', models: ['glm', 'private'], model_meta: { glm: { alias: 'Work', preview: true } } }
-    const [result] = applyCatalogModelMetadata([group])
-    expect(result.model_meta).toEqual({ glm: { alias: 'Work', preview: true, reasoning: true, reasoning_efforts: ['low', 'high', 'max'] } })
-    expect(group.model_meta.glm).toEqual({ alias: 'Work', preview: true })
+describe('selected model reasoning metadata', () => {
+  it('resolves only the requested model and keeps private metadata unknown', () => {
+    expect(getModelMetadata({ provider: 'glm', model: 'glm', baseUrl: 'https://proxy.test/v1' }))
+      .toEqual({ reasoning: true, reasoning_efforts: ['low', 'high', 'max'] })
+    expect(getModelMetadata({ provider: 'glm', model: 'private', baseUrl: 'https://proxy.test/v1' })).toEqual({})
   })
-
   it('uses endpoint hostname metadata for custom providers', () => {
-    const groups = [
-      { provider: 'custom:official', base_url: 'https://open.bigmodel.cn/api/coding/paas/v4/', models: ['glm'] },
-      { provider: 'custom:gateway', base_url: 'https://open.bigmodel.cn/other', models: ['glm'] },
-    ]
-    const results = applyCatalogModelMetadata(groups)
-    expect(results[0].model_meta?.glm.reasoning_efforts).toEqual(['low', 'high', 'max'])
-    expect(results[1].model_meta?.glm.reasoning_efforts).toEqual(['low', 'high', 'max'])
+    for (const baseUrl of ['https://open.bigmodel.cn/api/coding/paas/v4/', 'https://open.bigmodel.cn/other']) {
+      expect(getModelMetadata({ provider: 'custom:gateway', model: 'glm', baseUrl }).reasoning_efforts).toEqual(['low', 'high', 'max'])
+    }
   })
 })
 
@@ -181,5 +175,24 @@ describe('ordered catalog resolution', () => {
     expect(resolveCatalogModel(catalogs, { baseUrl: 'https://api.openai.com/v1', model: 'only' }))
       .toMatchObject({ provider: 'openai', matchedBy: 'url' })
     expect(resolveCatalogModel({ openai: { models: { only: relay } } }, { baseUrl: 'https://api.openai.com/v1', model: 'only' })?.model).toBe(relay)
+  })
+})
+
+
+describe('on-demand catalog resolution cache', () => {
+  it('reuses hits and misses and discards them when the catalog snapshot changes', () => {
+    const models = { known: { reasoning: true } }
+    let reads = 0
+    const snapshot = { maker: { get models() { reads++; return models } } }
+    const known = { provider: 'custom:gateway', model: 'known' }
+    expect(resolveCatalogModel(snapshot, known)?.model).toBe(models.known)
+    const firstReads = reads
+    resolveCatalogModel(snapshot, known)
+    expect(reads).toBe(firstReads)
+    expect(resolveCatalogModel(snapshot, { model: 'private' })).toBeUndefined()
+    const missReads = reads
+    resolveCatalogModel(snapshot, { model: 'private' })
+    expect(reads).toBe(missReads)
+    expect(resolveCatalogModel({ maker: { models: { known: { reasoning: false } } } }, known)?.model.reasoning).toBe(false)
   })
 })

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { modelReasoningEfforts, DEFAULT_REASONING_EFFORTS } from '@/utils/model-reasoning-effort'
+import { modelReasoningEfforts, DEFAULT_REASONING_EFFORTS, hasModelReasoningMetadata } from '@/utils/model-reasoning-effort'
+import { useSelectedModelMetadata } from '@/composables/useSelectedModelMetadata'
+import { getModelsPageProfile } from '@/api/client'
 import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { NSpin, NButton, NInput, NInputNumber, NModal, NSelect, useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -76,10 +78,15 @@ const delegationModelOptions = computed(() => {
   return options
 })
 
-const reasoningEffortOptions = computed(() => modelReasoningEfforts(modelsStore.providers, delegationForm.value.provider, delegationForm.value.model, [...DEFAULT_REASONING_EFFORTS, 'ultra'])
+const reasoningModelGroups = useSelectedModelMetadata(
+  () => modelsStore.providers,
+  () => [{ profile: getModelsPageProfile() || profilesStore.activeProfileName, provider: delegationForm.value.provider, model: delegationForm.value.model }],
+  () => showDelegationEditor.value,
+)
+const reasoningEffortOptions = computed(() => modelReasoningEfforts(reasoningModelGroups.value, delegationForm.value.provider, delegationForm.value.model, [...DEFAULT_REASONING_EFFORTS, 'ultra'])
   .map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })))
 watch([reasoningEffortOptions, () => delegationForm.value.reasoning_effort], ([options, effort]) => {
-  if (effort && !options.some(option => option.value === effort)) delegationForm.value.reasoning_effort = null
+  if (hasModelReasoningMetadata(reasoningModelGroups.value, delegationForm.value.provider, delegationForm.value.model) && effort && !options.some(option => option.value === effort)) delegationForm.value.reasoning_effort = null
 })
 const delegationModelLabel = computed(() => {
   if (!delegation.value.model) return t('models.delegationInheritMain')

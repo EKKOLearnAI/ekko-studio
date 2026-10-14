@@ -118,7 +118,25 @@ function chooseMatch(matches: CatalogModelMatch[]): CatalogModelMatch | undefine
   return matches.every(match => modelSignature(match.model) === modelSignature(matches[0].model)) ? matches[0] : undefined
 }
 
+const resolutionCaches = new WeakMap<ModelCatalog, Map<string, CatalogModelMatch | undefined>>()
+const MAX_RESOLUTIONS = 2048
+
 export function resolveCatalogModel(catalog: ModelCatalog, query: CatalogModelQuery): CatalogModelMatch | undefined {
+  let cache = resolutionCaches.get(catalog)
+  if (!cache) {
+    cache = new Map()
+    resolutionCaches.set(catalog, cache)
+  }
+  // Preserve exact model IDs and endpoint paths: both affect match priority.
+  const key = JSON.stringify([query.provider?.trim().toLowerCase() || '', query.baseUrl?.trim() || '', query.model.trim()])
+  if (cache.has(key)) return cache.get(key)
+  const match = resolveUncachedCatalogModel(catalog, query)
+  if (cache.size >= MAX_RESOLUTIONS) cache.delete(cache.keys().next().value!)
+  cache.set(key, match)
+  return match
+}
+
+function resolveUncachedCatalogModel(catalog: ModelCatalog, query: CatalogModelQuery): CatalogModelMatch | undefined {
   const id = query.model.trim()
   if (!id) return undefined
   if (query.provider) {

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { modelReasoningEfforts, DEFAULT_REASONING_EFFORTS } from '@/utils/model-reasoning-effort'
+import { modelReasoningEfforts, DEFAULT_REASONING_EFFORTS, hasModelReasoningMetadata } from '@/utils/model-reasoning-effort'
+import { useSelectedModelMetadata } from '@/composables/useSelectedModelMetadata'
+import { getModelsPageProfile } from '@/api/client'
 import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { NSpin, NButton, NInput, NInputNumber, NModal, NSelect, NSwitch, useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -83,13 +85,18 @@ function clonePreset(preset: MoaPreset): MoaPreset {
   return JSON.parse(JSON.stringify(preset))
 }
 
+const reasoningModelGroups = useSelectedModelMetadata(
+  () => modelsStore.providers,
+  () => [...formPreset.value.reference_models, formPreset.value.aggregator].map(slot => ({ ...slot, profile: getModelsPageProfile() || profilesStore.activeProfileName })),
+  () => showEditor.value,
+)
 function reasoningEffortOptions(slot: MoaModelSlot) {
-  return modelReasoningEfforts(modelsStore.providers, slot.provider, slot.model, [...DEFAULT_REASONING_EFFORTS, 'ultra'])
+  return modelReasoningEfforts(reasoningModelGroups.value, slot.provider, slot.model, [...DEFAULT_REASONING_EFFORTS, 'ultra'])
     .map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value }))
 }
-watch(() => [formPreset.value, modelsStore.providers], () => {
+watch(() => [formPreset.value, reasoningModelGroups.value], () => {
   for (const slot of [...formPreset.value.reference_models, formPreset.value.aggregator]) {
-    if (slot.reasoning_effort && !reasoningEffortOptions(slot).some(option => option.value === slot.reasoning_effort)) {
+    if (hasModelReasoningMetadata(reasoningModelGroups.value, slot.provider, slot.model) && slot.reasoning_effort && !reasoningEffortOptions(slot).some(option => option.value === slot.reasoning_effort)) {
       slot.reasoning_effort = undefined
     }
   }
