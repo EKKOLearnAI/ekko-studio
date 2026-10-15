@@ -16,44 +16,48 @@ function desktopWindowKind(): DesktopWindowKind {
 const REMOTE_SERVER_MODE = process.argv.includes('--hermes-remote-mode')
 
 contextBridge.exposeInMainWorld('hermesDesktop', {
-  screenshot: {
-    shortcut: {
-      getState: (): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-get'),
-      save: (config: ScreenshotShortcutConfig): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-save', config),
-      setTarget: (targetId: string, active: boolean | null): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-target', targetId, active),
-      setEditing: (targetId: string, editing: boolean): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-editing', targetId, editing),
-      onTrigger: (callback: (request: { targetId: string; hideWindows: boolean }) => void): (() => void) => {
-        const listener = (_event: Electron.IpcRendererEvent, request: { targetId: string; hideWindows: boolean }) => callback(request)
-        ipcRenderer.on('hermes-desktop:screenshot-shortcut-trigger', listener)
-        return () => ipcRenderer.removeListener('hermes-desktop:screenshot-shortcut-trigger', listener)
+  // Remote server mode: the main process refuses these APIs (they act on this
+  // computer), so they are left out and the client falls back.
+  ...(REMOTE_SERVER_MODE ? {} : {
+    screenshot: {
+      shortcut: {
+        getState: (): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-get'),
+        save: (config: ScreenshotShortcutConfig): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-save', config),
+        setTarget: (targetId: string, active: boolean | null): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-target', targetId, active),
+        setEditing: (targetId: string, editing: boolean): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-editing', targetId, editing),
+        onTrigger: (callback: (request: { targetId: string; hideWindows: boolean }) => void): (() => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, request: { targetId: string; hideWindows: boolean }) => callback(request)
+          ipcRenderer.on('hermes-desktop:screenshot-shortcut-trigger', listener)
+          return () => ipcRenderer.removeListener('hermes-desktop:screenshot-shortcut-trigger', listener)
+        },
+        onStateChange: (callback: (state: ScreenshotShortcutState) => void): (() => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, state: ScreenshotShortcutState) => callback(state)
+          ipcRenderer.on('hermes-desktop:screenshot-shortcut-state', listener)
+          return () => ipcRenderer.removeListener('hermes-desktop:screenshot-shortcut-state', listener)
+        },
       },
-      onStateChange: (callback: (state: ScreenshotShortcutState) => void): (() => void) => {
-        const listener = (_event: Electron.IpcRendererEvent, state: ScreenshotShortcutState) => callback(state)
-        ipcRenderer.on('hermes-desktop:screenshot-shortcut-state', listener)
-        return () => ipcRenderer.removeListener('hermes-desktop:screenshot-shortcut-state', listener)
+      getCapabilities: () => ipcRenderer.invoke('hermes-desktop:screenshot-capabilities'),
+      captureRegion: (request: { requestId: string; hideWindows?: boolean; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }) => ipcRenderer.invoke('hermes-desktop:screenshot-capture-region', request),
+      cancel: (requestId: string) => ipcRenderer.invoke('hermes-desktop:screenshot-cancel', requestId),
+    },
+    updater: {
+      getState: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-get-state'),
+      cancel: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-cancel'),
+      download: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-download'),
+      install: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-install'),
+      onStateChange: (callback: (state: DesktopUpdateState) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: DesktopUpdateState) => callback(state)
+        ipcRenderer.on('hermes-desktop:update-state-change', listener)
+        return () => ipcRenderer.removeListener('hermes-desktop:update-state-change', listener)
       },
     },
-    getCapabilities: () => ipcRenderer.invoke('hermes-desktop:screenshot-capabilities'),
-    captureRegion: (request: { requestId: string; hideWindows?: boolean; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }) => ipcRenderer.invoke('hermes-desktop:screenshot-capture-region', request),
-    cancel: (requestId: string) => ipcRenderer.invoke('hermes-desktop:screenshot-cancel', requestId),
-  },
-  updater: {
-    getState: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-get-state'),
-    cancel: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-cancel'),
-    download: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-download'),
-    install: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-install'),
-    onStateChange: (callback: (state: DesktopUpdateState) => void): (() => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, state: DesktopUpdateState) => callback(state)
-      ipcRenderer.on('hermes-desktop:update-state-change', listener)
-      return () => ipcRenderer.removeListener('hermes-desktop:update-state-change', listener)
-    },
-  },
+    restartApp: (): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:restart-app'),
+    selectRuntimeDirectory: (defaultPath?: string): Promise<string | null> => ipcRenderer.invoke('hermes-desktop:select-runtime-directory', defaultPath),
+    openExternalUrl: (url: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:open-external-url', url),
+  }),
   getToken: (): Promise<string> => ipcRenderer.invoke('hermes-desktop:get-token'),
   retryBootstrap: (source?: 'cf' | 'github'): Promise<void> => ipcRenderer.invoke('hermes-desktop:retry-bootstrap', source),
-  restartApp: (): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:restart-app'),
-  selectRuntimeDirectory: (defaultPath?: string): Promise<string | null> => ipcRenderer.invoke('hermes-desktop:select-runtime-directory', defaultPath),
   notifyCompletion: (payload: { title: string; body?: string; icon?: string; tag?: string; clickUrl?: string }): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:notify-completion', payload),
-  openExternalUrl: (url: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:open-external-url', url),
   openChatWindow: (sessionId: string, profile?: string): Promise<void> => ipcRenderer.invoke('hermes-desktop:open-chat-window', sessionId, profile),
   ensureAuth: async (): Promise<boolean> => {
     if (!REMOTE_SERVER_MODE) {
@@ -79,7 +83,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     ipcRenderer.on('hermes-desktop:pet-window-refresh', listener)
     return () => ipcRenderer.removeListener('hermes-desktop:pet-window-refresh', listener)
   },
-  ...(desktopWindowKind() === 'main' ? { browser: {
+  ...(desktopWindowKind() === 'main' && !REMOTE_SERVER_MODE ? { browser: {
     getState: (): Promise<DesktopBrowserState> => ipcRenderer.invoke('hermes-desktop:browser-get-state'),
     setViewport: (bounds: BrowserBounds, visible: boolean): Promise<DesktopBrowserState> => ipcRenderer.invoke('hermes-desktop:browser-set-viewport', bounds, visible),
     createTab: (url?: string, activate?: boolean): Promise<DesktopBrowserTab> => ipcRenderer.invoke('hermes-desktop:browser-create-tab', url, activate),
