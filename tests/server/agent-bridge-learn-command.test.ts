@@ -41,6 +41,7 @@ bridge_runtime._hermes_home = lambda *_args, **_kwargs: Path(tempfile.gettempdir
 bridge_runtime._install_execute_code_approval_memory_patch = lambda *_args, **_kwargs: None
 bridge_runtime._jsonable = lambda value: value
 bridge_runtime._load_cfg = lambda *_args, **_kwargs: {}
+bridge_runtime._load_disabled_toolsets = lambda *_args, **_kwargs: None
 bridge_runtime._load_enabled_toolsets = lambda *_args, **_kwargs: []
 bridge_runtime._load_fallback_model = lambda *_args, **_kwargs: None
 bridge_runtime._load_reasoning_config = lambda *_args, **_kwargs: {}
