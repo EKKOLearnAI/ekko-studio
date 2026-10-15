@@ -2439,6 +2439,11 @@ export default {
     hasEnv: '有 .env',
     hasSoulMd: '有 soul.md',
     noProfiles: '目前無設定檔，建立一個開始吧。',
+    scope: {
+      label: 'Profile',
+      hint: '選擇本頁面管理哪個 Profile 的 MCP 與 Skills 設定，不會切換目前作用中的 Profile。',
+      differsHint: '正在管理 {name}，與目前作用中 Profile（{active}）不同。',
+    },
     avatar: {
       title: '自訂頭像',
       customize: '頭像',

@@ -19,6 +19,8 @@ const props = defineProps<{
   viewCount?: number
   pinned?: boolean
   target?: SkillTarget
+  /** Hermes skills 是按 profile 隔离的；管理页切换管理目标时传入。 */
+  profile?: string
   readonly?: boolean
   canPin?: boolean
   loadContent?: (category: string, skill: string, filePath?: string) => Promise<string>
@@ -54,10 +56,10 @@ async function loadSkill() {
     const [skillContent, skillFiles] = await Promise.all([
       props.loadContent
         ? props.loadContent(props.category, props.skill)
-        : fetchSkillContent(`${props.category}/${props.skill}/SKILL.md`, props.target || 'hermes'),
+        : fetchSkillContent(`${props.category}/${props.skill}/SKILL.md`, props.target || 'hermes', props.profile),
       props.loadFiles
         ? props.loadFiles(props.category, props.skill)
-        : fetchSkillFiles(props.category, props.skill, props.target || 'hermes'),
+        : fetchSkillFiles(props.category, props.skill, props.target || 'hermes', props.profile),
     ])
     content.value = skillContent
     draftContent.value = skillContent
@@ -88,7 +90,7 @@ async function viewFile(filePath: string) {
     }
     fileContent.value = props.loadContent
       ? await props.loadContent(props.category, props.skill, relPath)
-      : await fetchSkillContent(`${base}${relPath}`, props.target || 'hermes')
+      : await fetchSkillContent(`${base}${relPath}`, props.target || 'hermes', props.profile)
   } catch (err: any) {
     fileContent.value = t('skills.fileLoadFailed') + `: ${err.message}`
   } finally {
@@ -116,7 +118,7 @@ async function saveSkill() {
   saving.value = true
   try {
     if (props.saveContent) await props.saveContent(props.category, props.skill, draftContent.value)
-    else await saveSkillContent(props.category, props.skill, draftContent.value, props.target || 'hermes')
+    else await saveSkillContent(props.category, props.skill, draftContent.value, props.target || 'hermes', props.profile)
     content.value = draftContent.value
     editing.value = false
     message.success(t('skills.saveSuccess'))
@@ -136,7 +138,7 @@ async function handlePinToggle() {
   pinLoading.value = true
   try {
     const newPinned = !props.pinned
-    await pinSkillApi(props.skillName, newPinned)
+    await pinSkillApi(props.skillName, newPinned, props.profile)
     emit('pinToggled', props.skillName, newPinned)
   } catch (err: any) {
     message.error(t('skills.pinFailed') + `: ${err.message}`)
@@ -145,7 +147,7 @@ async function handlePinToggle() {
   }
 }
 
-watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, loadSkill, { immediate: true })
+watch(() => `${props.target || 'hermes'}/${props.profile || ''}/${props.category}/${props.skill}`, loadSkill, { immediate: true })
 </script>
 
 <template>

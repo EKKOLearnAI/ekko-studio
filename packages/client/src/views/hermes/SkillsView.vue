@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
+import ProfileScopeSelect from '@/components/common/ProfileScopeSelect.vue'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NBadge, NButton, NDrawer, NDrawerContent, NInput } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -10,8 +11,21 @@ import SkillImportModal from '@/components/hermes/skills/SkillImportModal.vue'
 import SkillExternalDirsModal from '@/components/hermes/skills/SkillExternalDirsModal.vue'
 import SkillSourceLegend from '@/components/hermes/skills/SkillSourceLegend.vue'
 import PendingWriteApprovals from '@/components/hermes/skills/PendingWriteApprovals.vue'
-import { deleteSkillApi, importSkill, fetchSkills, type SkillCategory, type SkillSource, type SkillInfo, type SkillTarget } from '@/api/hermes/skills'
+import {
+  deleteSkillApi,
+  fetchExternalDirs,
+  fetchSkills,
+  importSkill,
+  saveExternalDirs,
+  toggleSkill,
+  type ExternalDirEntry,
+  type SkillCategory,
+  type SkillSource,
+  type SkillInfo,
+  type SkillTarget,
+} from '@/api/hermes/skills'
 import { fetchPendingWrites } from '@/api/hermes/write-gate'
+import { useManagedProfileScope } from '@/composables/useManagedProfileScope'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 
 type SourceFilter = SkillSource | 'modified'
@@ -52,6 +66,10 @@ const selectedSkillData = computed(() => {
 })
 
 const isHermesTarget = computed(() => skillTarget.value === 'hermes')
+const { managedProfile } = useManagedProfileScope()
+// 只有 hermes 目标的 skills 是按 profile 隔离的；coding agent 目标不参与
+const profileParam = computed(() => (isHermesTarget.value ? managedProfile.value ?? undefined : undefined))
+
 const canManageTarget = computed(() => isHermesTarget.value || skillTarget.value === 'dsh' || (skillTarget.value === 'cursor' || skillTarget.value === 'antigravity'))
 const selectedSkillReadonly = computed(() => {
   if (!selectedSkillData.value) return true
@@ -82,13 +100,21 @@ watch(() => props.target, () => {
   loadSkills()
 })
 
+// 切换管理目标后清空选中并加载新 profile 的技能列表
+watch(managedProfile, () => {
+  if (!isHermesTarget.value) return
+  selectedCategory.value = ''
+  selectedSkill.value = ''
+  loadSkills()
+})
+
 async function loadSkills() {
   loading.value = true
   try {
     if (!profilesStore.activeProfileName || profilesStore.profiles.length === 0) {
       await profilesStore.fetchProfiles()
     }
-    const data = await fetchSkills(undefined, skillTarget.value)
+    const data = await fetchSkills(profileParam.value, skillTarget.value)
     categories.value = data.categories
     archived.value = data.archived
     ensureSelectedSkill()
@@ -97,6 +123,26 @@ async function loadSkills() {
   } finally {
     loading.value = false
   }
+}
+
+function handleToggleSkill(_category: string, name: string, enabled: boolean): Promise<void> {
+  return toggleSkill(name, enabled, profileParam.value)
+}
+
+function handleDeleteSkill(category: string, name: string): Promise<void> {
+  return deleteSkillApi(category, name, skillTarget.value, profileParam.value)
+}
+
+function handleImportSkill(files: File[], category?: string): Promise<{ name: string }> {
+  return importSkill(files, category, skillTarget.value, profileParam.value)
+}
+
+function handleFetchExternalDirs(): Promise<ExternalDirEntry[]> {
+  return fetchExternalDirs(profileParam.value)
+}
+
+function handleSaveExternalDirs(dirs: string[]): Promise<void> {
+  return saveExternalDirs(dirs, profileParam.value)
 }
 
 async function loadPendingWriteCount() {
@@ -178,6 +224,7 @@ function handleSkillSaved() {
         <SkillSourceLegend v-model="sourceFilter" :show-hub="isHermesTarget" />
       </div>
       <div class="header-actions">
+        <ProfileScopeSelect v-if="isHermesTarget" v-model="managedProfile" />
         <NButton
           v-if="isHermesTarget && writeApprovalSupported"
           class="header-action-btn"
@@ -235,7 +282,7 @@ function handleSkillSaved() {
           :placeholder="t('skills.searchPlaceholder')"
           size="small"
           clearable
-          style="width: 130px"
+          class="search-input"
         />
       </div>
     </header>
@@ -244,11 +291,13 @@ function handleSkillSaved() {
     <SkillImportModal
       v-if="showImportModal"
       :allow-category="skillTarget !== 'dsh'"
-      :import-handler="!isHermesTarget ? (files, category) => importSkill(files, category, skillTarget) : undefined"
+      :import-handler="handleImportSkill"
       @close="showImportModal = false"
       @saved="handleImported"
     />
     <SkillExternalDirsModal v-if="showExternalDirsModal"
+      :fetch-handler="handleFetchExternalDirs"
+      :save-handler="handleSaveExternalDirs"
       @close="showExternalDirsModal = false" @saved="handleExternalDirsSaved" />
     <NDrawer
       v-model:show="showWriteApprovalDrawer"
@@ -277,7 +326,8 @@ function handleSkillSaved() {
               :source-filter="sourceFilter"
               :readonly="!canManageTarget"
               :toggleable="isHermesTarget"
-              :delete-handler="!isHermesTarget ? (category, name) => deleteSkillApi(category, name, skillTarget) : undefined"
+              :toggle-handler="handleToggleSkill"
+              :delete-handler="handleDeleteSkill"
               @select="handleSelect"
               @deleted="handleSkillDeleted"
             />
@@ -293,6 +343,7 @@ function handleSkillSaved() {
               :view-count="selectedSkillData?.viewCount"
               :pinned="selectedSkillData?.pinned"
               :target="skillTarget"
+              :profile="profileParam"
               :readonly="selectedSkillReadonly"
               :can-pin="isHermesTarget"
               @pin-toggled="handlePinToggled"
@@ -351,10 +402,13 @@ function handleSkillSaved() {
 }
 
 .search-input {
-  width: 100px;
+  width: 130px;
+  min-width: 88px;
+  flex: 0 1 130px;
 
   @media (max-width: $breakpoint-mobile) {
-    width: 100%;
+    flex-basis: 100%;
+    min-width: 0;
   }
 }
 

@@ -1996,6 +1996,11 @@ jobTriggered: 'Job acionado',
     hasEnv: 'Tem .env',
     hasSoulMd: 'Tem soul.md',
     noProfiles: 'Nenhum perfil encontrado. Crie um para comecar.',
+    scope: {
+      label: 'Perfil',
+      hint: 'Escolhe de qual perfil esta pagina gerencia os servidores MCP e as skills. Nao alterna seu perfil ativo.',
+      differsHint: 'Voce esta gerenciando {name}, e nao seu perfil ativo ({active}).',
+    },
     avatar: {
       title: 'Avatar personalizado',
       customize: 'Personalizar avatar',

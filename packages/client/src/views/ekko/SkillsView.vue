@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import ProfileScopeSelect from '@/components/common/ProfileScopeSelect.vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NInput, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import SkillDetail from '@/components/hermes/skills/SkillDetail.vue'
@@ -9,7 +10,8 @@ import SkillExternalDirsModal from '@/components/hermes/skills/SkillExternalDirs
 import SkillImportModal from '@/components/hermes/skills/SkillImportModal.vue'
 import SkillList from '@/components/hermes/skills/SkillList.vue'
 import SkillSourceLegend from '@/components/hermes/skills/SkillSourceLegend.vue'
-import type { SkillCategory, SkillFileEntry, SkillSource } from '@/api/hermes/skills'
+import { useManagedProfileScope } from '@/composables/useManagedProfileScope'
+import type { SkillCategory, SkillFileEntry, SkillSource, ExternalDirEntry } from '@/api/hermes/skills'
 import {
   deleteEkkoSkill,
   fetchEkkoExternalDirectories,
@@ -28,6 +30,8 @@ type SourceFilter = SkillSource | 'modified'
 
 const { t } = useI18n()
 const message = useMessage()
+const { managedProfile } = useManagedProfileScope()
+const profileParam = computed(() => managedProfile.value ?? undefined)
 const skills = ref<EkkoSkillSummary[]>([])
 const loading = ref(true)
 const selectedCategory = ref('')
@@ -86,7 +90,7 @@ function ensureSelectedSkill() {
 async function loadSkills() {
   loading.value = true
   try {
-    skills.value = await fetchEkkoSkills()
+    skills.value = await fetchEkkoSkills('', profileParam.value)
     ensureSelectedSkill()
   } catch (error) {
     message.error(`${t('ekkoConfig.loadFailed')}: ${errorMessage(error)}`)
@@ -102,19 +106,21 @@ function handleSelect(category: string, skill: string) {
 }
 
 async function loadContent(_category: string, skill: string, filePath?: string): Promise<string> {
-  return filePath ? fetchEkkoSkillFile(skill, filePath) : (await fetchEkkoSkill(skill)).content
+  return filePath
+    ? fetchEkkoSkillFile(skill, filePath, profileParam.value)
+    : (await fetchEkkoSkill(skill, profileParam.value)).content
 }
 
 async function loadFiles(_category: string, skill: string): Promise<SkillFileEntry[]> {
-  return fetchEkkoSkillFiles(skill)
+  return fetchEkkoSkillFiles(skill, profileParam.value)
 }
 
 async function saveContent(_category: string, skill: string, content: string): Promise<void> {
-  await updateEkkoSkill(skill, content)
+  await updateEkkoSkill(skill, content, profileParam.value)
 }
 
 async function removeSkill(_category: string, skill: string): Promise<void> {
-  await deleteEkkoSkill(skill)
+  await deleteEkkoSkill(skill, profileParam.value)
 }
 
 async function handleDeleted(category: string, skill: string) {
@@ -126,7 +132,7 @@ async function handleDeleted(category: string, skill: string) {
 }
 
 async function handleToggle(_category: string, name: string, enabled: boolean): Promise<void> {
-  await toggleEkkoSkill(name, enabled)
+  await toggleEkkoSkill(name, enabled, profileParam.value)
   const skill = skills.value.find(candidate => candidate.name === name)
   if (skill) skill.enabled = enabled
 }
@@ -140,6 +146,25 @@ async function handleExternalDirsSaved() {
   showExternalDirsModal.value = false
   await loadSkills()
 }
+
+function handleImportSkill(files: File[], category?: string): Promise<{ name: string }> {
+  return importEkkoSkill(files, category, profileParam.value)
+}
+
+function handleFetchExternalDirs(): Promise<ExternalDirEntry[]> {
+  return fetchEkkoExternalDirectories(profileParam.value)
+}
+
+function handleSaveExternalDirs(directories: string[]): Promise<void> {
+  return saveEkkoExternalDirectories(directories, profileParam.value)
+}
+
+// 切换管理目标后清空选中并加载新 profile 的技能列表
+watch(managedProfile, () => {
+  selectedCategory.value = ''
+  selectedSkill.value = ''
+  void loadSkills()
+})
 
 onMounted(() => {
   mobileQuery = window.matchMedia('(max-width: 768px)')
@@ -168,6 +193,7 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
       </div>
 
       <div class="header-actions">
+        <ProfileScopeSelect v-model="managedProfile" />
         <NButton class="header-action-btn" size="small" :title="t('skills.import')" @click="showImportModal = true">
           <template #icon>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -186,21 +212,21 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
           </template>
           <span class="header-action-label">{{ t('skills.externalDirs.manage') }}</span>
         </NButton>
-        <NInput v-model:value="searchQuery" :placeholder="t('skills.searchPlaceholder')" size="small" clearable style="width: 130px" />
+        <NInput v-model:value="searchQuery" :placeholder="t('skills.searchPlaceholder')" size="small" clearable class="search-input" />
       </div>
     </header>
     </PageHeader>
 
     <SkillImportModal
       v-if="showImportModal"
-      :import-handler="importEkkoSkill"
+      :import-handler="handleImportSkill"
       @close="showImportModal = false"
       @saved="handleImported"
     />
     <SkillExternalDirsModal
       v-if="showExternalDirsModal"
-      :fetch-handler="fetchEkkoExternalDirectories"
-      :save-handler="saveEkkoExternalDirectories"
+      :fetch-handler="handleFetchExternalDirs"
+      :save-handler="handleSaveExternalDirs"
       @close="showExternalDirsModal = false"
       @saved="handleExternalDirsSaved"
     />
@@ -255,6 +281,17 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
 @include skills-manager.layout;
 
 .header-actions { display: flex; align-items: center; gap: calc(8px * var(--spacing-scale, 1)); }
+
+.search-input {
+  width: 130px;
+  min-width: 88px;
+  flex: 0 1 130px;
+
+  @media (max-width: $breakpoint-mobile) {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+}
 
 @media (max-width: $breakpoint-mobile) {
   .header-action-label { display: none; }
