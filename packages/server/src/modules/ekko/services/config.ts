@@ -51,6 +51,7 @@ const RUNTIME_KEYS = [
   'maxModelRetries',
   'toolFailureRecoveryThreshold',
   'maxConsecutiveToolFailures',
+  'maxIdenticalToolFailures',
 ] as const
 const MODEL_KEYS = [
   'defaultProvider',

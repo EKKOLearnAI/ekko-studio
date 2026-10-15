@@ -713,7 +713,7 @@ describe('MemoryService', () => {
       create,
       stream: vi.fn(),
     }
-    const runtime = new AgentRuntime({ modelClient: client, memory: service })
+    const runtime = new AgentRuntime({ modelClient: client, memory: service, maxIdenticalToolFailures: 999 })
 
     const result = await runtime.run({
       messages: ['你好'],

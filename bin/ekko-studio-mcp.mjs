@@ -72,6 +72,7 @@ const requestedToolset = String(positionalArgs[0] || process.env.HERMES_MCP_TOOL
 const ACTIVE_TOOLSET = TOOLSETS.has(requestedToolset) ? requestedToolset : 'api'
 const SHARED_TASK_PLAN_ENABLED = process.env.HERMES_MCP_NATIVE_TASK_PLAN !== '1'
 const USER_CLARIFICATION_ENABLED = SHARED_TASK_PLAN_ENABLED && process.env.HERMES_MCP_USER_CLARIFICATION === '1'
+const IDENTICAL_FAILURE_LIMIT = Number(process.env.HERMES_MCP_IDENTICAL_FAILURE_LIMIT || 3)
 
 if (process.argv.includes('-h') || process.argv.includes('--help')) {
   printHelp()
@@ -163,6 +164,10 @@ function errorText(message) {
     isError: true,
     content: [{ type: 'text', text: message }],
   }
+}
+
+function isErrorResponse(value) {
+  return value && value.isError === true
 }
 
 async function request(path, options = {}) {
@@ -1909,11 +1914,62 @@ function isToolCallable(name) {
   return activeToolsetTools().some(tool => tool.name === resolved)
 }
 
+function exampleOperationName() {
+  const catalog = categoryToolCatalog()
+  return catalog[0]?.name ?? '<operation>'
+}
+
+function selfReferenceMessage(toolName, category) {
+  return errorText(
+    `Error: 'tool' must be an inner operation name returned by action=list (e.g. '${exampleOperationName()}'), `
+    + `not this toolset's own MCP name '${toolName}'. `
+    + `Expected call: { "action": "list" | "describe" | "call", "tool": "<inner operation name>", "arguments": {...} }.`,
+  )
+}
+
+function identicalFailureMessage(category) {
+  return errorText(
+    `Error: this exact request has failed ${IDENTICAL_FAILURE_LIMIT} consecutive times with the same arguments. `
+    + `STOP calling this toolset with unchanged parameters. `
+    + `Re-read the operation list with action=list, correct the arguments, and only call again when the request is different.`,
+  )
+}
+
+let identicalFailureStreak = 0
+let identicalFailureSignature = ''
+
+function identicalFailureSignatureFor(args) {
+  return JSON.stringify({ action: args.action ?? null, tool: args.tool ?? null, arguments: args.arguments ?? null, query: args.query ?? null })
+}
+
+function noteIdenticalFailure(args, isFailure) {
+  const signature = identicalFailureSignatureFor(args)
+  if (isFailure && signature === identicalFailureSignature) {
+    identicalFailureStreak += 1
+  } else {
+    identicalFailureSignature = signature
+    identicalFailureStreak = isFailure ? 1 : 0
+  }
+  return signature
+}
+
+function isSelfReference(toolName) {
+  if (!toolName) return false
+  const normalized = String(toolName)
+  const selfName = `ekko_studio_${ACTIVE_TOOLSET}_toolset`
+  const mcpSelf = `mcp__ekko-studio-${ACTIVE_TOOLSET}__${selfName}`
+  const hermesSelf = `mcp__hermes-studio-${ACTIVE_TOOLSET}__${selfName.replace('ekko_', 'hermes_')}`
+  return normalized === selfName || normalized === mcpSelf || normalized === hermesSelf
+    || normalized.includes(`ekko-studio-${ACTIVE_TOOLSET}`)
+}
+
 async function callCategoryToolset(args = {}, signal) {
   const category = CATEGORY_TOOLSETS[ACTIVE_TOOLSET]
   if (!category) return errorText(`No compact category toolset is available for '${ACTIVE_TOOLSET}'.`)
   if (args.action === 'list') {
     const catalog = categoryToolCatalog(args.query)
+    identicalFailureStreak = 0
+    identicalFailureSignature = ''
     return jsonText({
       toolset: ACTIVE_TOOLSET,
       coverage: category.coverage,
@@ -1922,8 +1978,29 @@ async function callCategoryToolset(args = {}, signal) {
       next: `Call ${category.name} with action=describe and an exact tool name before action=call when its parameters are not already known.`,
     })
   }
+  if (args.action !== 'describe' && args.action !== 'call') {
+    return errorText(`Invalid action '${String(args.action || '')}'. Allowed: list, describe, call. 'action' is required — it selects the operation on this toolset; 'tool' is the inner operation name returned by list.`)
+  }
+  if (isSelfReference(args.tool)) {
+    const response = selfReferenceMessage(String(args.tool), category)
+    noteIdenticalFailure(args, true)
+    return response
+  }
+  if (args.action !== 'list' && identicalFailureStreak >= IDENTICAL_FAILURE_LIMIT) {
+    const response = identicalFailureMessage(category)
+    noteIdenticalFailure(args, true)
+    return response
+  }
   const target = categoryToolByName(args.tool)
-  if (!target) return errorText(`Unknown '${ACTIVE_TOOLSET}' tool: ${String(args.tool || '')}. Call ${category.name} with action=list first.`)
+  if (!target) {
+    const response = errorText(
+      `Unknown '${ACTIVE_TOOLSET}' tool: ${String(args.tool || '')}. `
+      + `Expected a full inner operation name like '${exampleOperationName()}' (see action=list output). `
+      + `The 'tool' field must not be empty and must not be this toolset's own MCP name.`,
+    )
+    noteIdenticalFailure(args, true)
+    return response
+  }
   if (args.action === 'describe') {
     return jsonText({
       toolset: ACTIVE_TOOLSET,
@@ -1933,13 +2010,24 @@ async function callCategoryToolset(args = {}, signal) {
     })
   }
   if (args.action === 'call') {
-    if (!isRecord(args.arguments)) return errorText('arguments must be an object when action=call.')
+    if (!isRecord(args.arguments)) {
+      const response = errorText('arguments must be an object when action=call.')
+      noteIdenticalFailure(args, true)
+      return response
+    }
     return await callTool(target.name, args.arguments, signal)
   }
   return errorText('Invalid category toolset action. Allowed: list, describe, call.')
 }
 
 async function callTool(name, args = {}, signal) {
+  const callArgs = { action: 'call', tool: name, arguments: args }
+  const result = await callToolInner(name, args, signal)
+  noteIdenticalFailure(callArgs, isErrorResponse(result))
+  return result
+}
+
+async function callToolInner(name, args = {}, signal) {
   if (!isToolCallable(name)) {
     return errorText(`Tool is not available in the active '${ACTIVE_TOOLSET}' MCP toolset: ${name}`)
   }
