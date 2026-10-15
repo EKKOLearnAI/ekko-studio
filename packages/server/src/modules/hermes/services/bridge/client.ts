@@ -241,11 +241,21 @@ export interface AgentBridgeBackgroundNotification {
   event: Record<string, unknown>
 }
 
+/** A Hermes plugin `ctx.inject_message` notice accepted by the worker; content is the verbatim turn input. */
+export interface AgentBridgePluginNotice {
+  session_id: string
+  profile: string
+  content: string
+  plugin_id: string
+  received_at: number
+}
+
 export interface AgentBridgeBackgroundPoll extends AgentBridgeResponse {
   broker_id?: string
   pending_count?: number
   sessions: AgentBridgeBackgroundSession[]
   notifications: AgentBridgeBackgroundNotification[]
+  plugin_notices?: AgentBridgePluginNotice[]
 }
 
 export interface AgentBridgeBackgroundRoute {
