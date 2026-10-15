@@ -9,7 +9,7 @@ import { withTaskPlanTurnContext } from '../task-plan-runs'
 
 import type { Server, Socket } from 'socket.io'
 import { getSystemPrompt } from '../../public/runs/prompt'
-import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
+import { HIDDEN_DISPLAY_ROLE, getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
 import { logger, bridgeLogger } from '../../public/logging'
 import { recordBridgeModelUsage } from '../usage/bridge-model-usage'
 import type {
@@ -604,6 +604,12 @@ export async function handleBridgeRun(
   const storageRole = shouldStoreInputInsteadOfDisplay ? 'user' : displayRole
   const displayRoleForStorage = shouldStoreInputInsteadOfDisplay ? displayRole : null
   const displayContentForStorage = shouldStoreInputInsteadOfDisplay ? inputStr : null
+  // Automatic turns (plugin notices, background callbacks, goal continuations) show nothing in the chat,
+  // but their verbatim input is stored as a hidden user row so the stored history keeps alternating.
+  const hiddenInput = displayInput === null && data.storage_message?.trim() ? data.storage_message : undefined
+  // Only a turn that stored its input as a user row may cut the latest user row from history;
+  // otherwise that row is the previous human turn (plain commands stored with role 'command').
+  const currentInputStoredAsUser = (shouldPersistUserMessage && storageRole === 'user') || hiddenInput !== undefined
   let messageId: number | string | undefined
 
   if (shouldPersistUserMessage) {
@@ -720,6 +726,14 @@ export async function handleBridgeRun(
     return
   }
 
+  // Stored only once the turn really runs: a callback that cannot run leaves no input behind.
+  if (hiddenInput !== undefined) {
+    // No message.created or peer echo: the user is not notified about an automatic input.
+    const hiddenRow = { session_id, role: 'user', content: hiddenInput, display_role: HIDDEN_DISPLAY_ROLE, display_content: null, timestamp: now }
+    state.messages.push({ ...hiddenRow, id: state.messages.length + 1, runMarker, run_marker: runMarker })
+    addMessage(hiddenRow)
+  }
+
   let backgroundNotificationAccepted = false
 
   state.bridgeRunPollMarker = runMarker
@@ -762,6 +776,7 @@ export async function handleBridgeRun(
           return contextTokens
         },
         currentInputTokens,
+        currentInputStoredAsUser,
       )
     const bridgeHistory = history
     const originalBridgeInput = isContentBlockArray(input)
@@ -892,9 +907,10 @@ export async function handleBridgeRun(
         runSource,
         workspace,
         currentInputTokens,
-        shouldPersistUserMessage && displayRole === 'user',
+        (shouldPersistUserMessage && displayRole === 'user') || hiddenInput !== undefined,
         data.model_groups,
         runMetadata,
+        currentInputStoredAsUser,
       )
       if (chunk.done) {
         sawTerminalChunk = true
@@ -941,6 +957,7 @@ export async function handleBridgeRun(
         shouldPersistUserMessage && displayRole === 'user',
         data.model_groups,
         runMetadata,
+        currentInputStoredAsUser,
       )
     }
   } catch (err: any) {
@@ -1302,6 +1319,7 @@ async function applyBridgeChunkAsync(
   currentInputIncludedInDb = true,
   modelGroups?: RunModelGroup[],
   runMetadata?: BridgeRunMetadata,
+  currentInputStoredAsUser = true,
 ): Promise<void> {
   if (sessionMap.get(sessionId) !== state || state.activeRunMarker !== runMarker) {
     bridgeLogger.info({
@@ -1578,7 +1596,7 @@ async function applyBridgeChunkAsync(
       const bridgeHistory = await buildDbSnapshotAwareHistory(
         sessionId,
         profile,
-        { excludeLastUser: true },
+        { excludeLastUser: currentInputStoredAsUser },
         { model: modelContext.model, provider: modelContext.provider },
       )
       const bridgeUsage = estimateUsageTokensFromMessages(bridgeHistory)
@@ -1619,7 +1637,7 @@ async function applyBridgeChunkAsync(
             tokenCount,
             // Hermes requests compression when it measured the context over budget; the debug
             // force-compress path reuses the event below threshold and keeps its old behaviour.
-            { overBudget: ev.focus_topic !== 'debug_force_compress' },
+            { excludeLastUser: currentInputStoredAsUser, overBudget: ev.focus_topic !== 'debug_force_compress' },
           )
           state.bridgeCompressionResults = state.bridgeCompressionResults || {}
           state.bridgeCompressionResults[String(ev.request_id)] = compressed

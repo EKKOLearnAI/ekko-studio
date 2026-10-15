@@ -12,6 +12,12 @@ import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runti
 import { BUILTIN_EKKO_AGENT_IDS, BUILTIN_HISTORY_SOURCES, isBuiltinEkkoAgent, normalizeSessionIdentity } from '../contracts/history-source'
 import { studioSessionAccount } from '../contracts/runs/usage'
 
+/** display_role of a stored user row that the model reads but the chat does not show (automatic turn input). */
+export const HIDDEN_DISPLAY_ROLE = 'hidden'
+const VISIBLE_ROW = `COALESCE(display_role, '') <> '${HIDDEN_DISPLAY_ROLE}'`
+const VISIBLE_M_ROW = `COALESCE(m.display_role, '') <> '${HIDDEN_DISPLAY_ROLE}'`
+const VISIBLE_SEARCH_ROW = `COALESCE(search_message.display_role, '') <> '${HIDDEN_DISPLAY_ROLE}'`
+
 // Re-export types for compatibility with sessions-db.ts consumers
 export interface HermesSessionRow {
   id: string
@@ -426,7 +432,7 @@ export function getSessionNotificationPreview(id: string): { title: string; prev
   const row = getDb()!.prepare(`
     SELECT SUBSTR(COALESCE(NULLIF(s.title, ''), NULLIF(s.preview, ''),
       (SELECT SUBSTR(m.content, 1, 63) FROM ${MESSAGES_TABLE} m
-       WHERE m.session_id = s.id AND m.role = 'user' AND m.content != ''
+       WHERE m.session_id = s.id AND m.role = 'user' AND ${VISIBLE_M_ROW} AND m.content != ''
        ORDER BY m.timestamp, m.id LIMIT 1), ''), 1, 120) AS title,
       COALESCE((SELECT SUBSTR(COALESCE(NULLIF(m.display_content, ''), m.content), 1, 240)
        FROM ${MESSAGES_TABLE} m WHERE m.session_id = s.id AND m.role = 'assistant' AND m.content != ''
@@ -445,7 +451,7 @@ export function getSessionMetadata(id: string): HermesSessionRow | null {
         SELECT REPLACE(REPLACE(m.content, CHAR(10), ' '), CHAR(13), ' ')
         FROM ${MESSAGES_TABLE} m
         WHERE m.session_id = s.parent_session_id
-          AND m.role IN ('user', 'assistant')
+          AND m.role IN ('user', 'assistant') AND ${VISIBLE_M_ROW}
           AND m.content IS NOT NULL
           AND TRIM(m.content) <> ''
         ORDER BY m.timestamp DESC, m.id DESC
@@ -455,7 +461,7 @@ export function getSessionMetadata(id: string): HermesSessionRow | null {
         SELECT m.role
         FROM ${MESSAGES_TABLE} m
         WHERE m.session_id = s.parent_session_id
-          AND m.role IN ('user', 'assistant')
+          AND m.role IN ('user', 'assistant') AND ${VISIBLE_M_ROW}
           AND m.content IS NOT NULL
           AND TRIM(m.content) <> ''
         ORDER BY m.timestamp DESC, m.id DESC
@@ -593,7 +599,7 @@ export function listSessions(
         (
           SELECT SUBSTR(REPLACE(REPLACE(m.content, CHAR(10), ' '), CHAR(13), ' '), 1, 63)
           FROM ${MESSAGES_TABLE} m
-          WHERE m.session_id = s.id AND m.role = 'user' AND m.content IS NOT NULL
+          WHERE m.session_id = s.id AND m.role = 'user' AND ${VISIBLE_M_ROW} AND m.content IS NOT NULL
           ORDER BY m.timestamp, m.id
           LIMIT 1
         ),
@@ -604,7 +610,7 @@ export function listSessions(
         SELECT REPLACE(REPLACE(m.content, CHAR(10), ' '), CHAR(13), ' ')
         FROM ${MESSAGES_TABLE} m
         WHERE m.session_id = s.parent_session_id
-          AND m.role IN ('user', 'assistant')
+          AND m.role IN ('user', 'assistant') AND ${VISIBLE_M_ROW}
           AND m.content IS NOT NULL
           AND TRIM(m.content) <> ''
         ORDER BY m.timestamp DESC, m.id DESC
@@ -614,7 +620,7 @@ export function listSessions(
         SELECT m.role
         FROM ${MESSAGES_TABLE} m
         WHERE m.session_id = s.parent_session_id
-          AND m.role IN ('user', 'assistant')
+          AND m.role IN ('user', 'assistant') AND ${VISIBLE_M_ROW}
           AND m.content IS NOT NULL
           AND TRIM(m.content) <> ''
         ORDER BY m.timestamp DESC, m.id DESC
@@ -799,7 +805,7 @@ export function searchSessions(
            WHEN ${previewMatchSql} THEN 2
            WHEN EXISTS (
              SELECT 1 FROM ${MESSAGES_TABLE} search_message
-             WHERE search_message.session_id = s.id AND ${messageContentMatchSql}
+             WHERE search_message.session_id = s.id AND ${VISIBLE_SEARCH_ROW} AND ${messageContentMatchSql}
            ) THEN 3
            WHEN EXISTS (
              SELECT 1 FROM ${MESSAGES_TABLE} search_message
@@ -826,7 +832,7 @@ export function searchSessions(
   const msgQuery = db.prepare(
     `SELECT search_message.id, search_message.content, search_message.tool_name
      FROM ${MESSAGES_TABLE} search_message
-     WHERE search_message.session_id = ? AND ${messageMatchSql}
+     WHERE search_message.session_id = ? AND ${VISIBLE_SEARCH_ROW} AND ${messageMatchSql}
      ORDER BY search_message.timestamp, search_message.id
      LIMIT 1`,
   )
@@ -880,7 +886,7 @@ export function getSessionDetail(id: string): HermesSessionDetailRow | null {
         SELECT REPLACE(REPLACE(m.content, CHAR(10), ' '), CHAR(13), ' ')
         FROM ${MESSAGES_TABLE} m
         WHERE m.session_id = s.parent_session_id
-          AND m.role IN ('user', 'assistant')
+          AND m.role IN ('user', 'assistant') AND ${VISIBLE_M_ROW}
           AND m.content IS NOT NULL
           AND TRIM(m.content) <> ''
         ORDER BY m.timestamp DESC, m.id DESC
@@ -890,7 +896,7 @@ export function getSessionDetail(id: string): HermesSessionDetailRow | null {
         SELECT m.role
         FROM ${MESSAGES_TABLE} m
         WHERE m.session_id = s.parent_session_id
-          AND m.role IN ('user', 'assistant')
+          AND m.role IN ('user', 'assistant') AND ${VISIBLE_M_ROW}
           AND m.content IS NOT NULL
           AND TRIM(m.content) <> ''
         ORDER BY m.timestamp DESC, m.id DESC
@@ -1080,7 +1086,7 @@ export function getFirstSessionMessageByRole(sessionId: string, role: string): H
   if (!isSqliteAvailable()) return null
   const row = getDb()!.prepare(
     `SELECT * FROM ${MESSAGES_TABLE}
-     WHERE session_id = ? AND role = ?
+     WHERE session_id = ? AND role = ? AND ${VISIBLE_ROW}
        AND content IS NOT NULL AND TRIM(content) <> ''
      ORDER BY id
      LIMIT 1`,
@@ -1091,7 +1097,7 @@ export function getFirstSessionMessageByRole(sessionId: string, role: string): H
 export function getSessionMessageCountByRole(sessionId: string, role: string): number {
   if (!isSqliteAvailable()) return 0
   const row = getDb()!.prepare(
-    `SELECT COUNT(*) AS count FROM ${MESSAGES_TABLE} WHERE session_id = ? AND role = ?`,
+    `SELECT COUNT(*) AS count FROM ${MESSAGES_TABLE} WHERE session_id = ? AND role = ? AND ${VISIBLE_ROW}`,
   ).get(sessionId, role) as { count: number } | undefined
   return Number(row?.count || 0)
 }
@@ -1126,7 +1132,7 @@ export function getSessionDetailPaginated(
         SELECT REPLACE(REPLACE(m.content, CHAR(10), ' '), CHAR(13), ' ')
         FROM ${MESSAGES_TABLE} m
         WHERE m.session_id = s.parent_session_id
-          AND m.role IN ('user', 'assistant')
+          AND m.role IN ('user', 'assistant') AND ${VISIBLE_M_ROW}
           AND m.content IS NOT NULL
           AND TRIM(m.content) <> ''
         ORDER BY m.timestamp DESC, m.id DESC
@@ -1136,7 +1142,7 @@ export function getSessionDetailPaginated(
         SELECT m.role
         FROM ${MESSAGES_TABLE} m
         WHERE m.session_id = s.parent_session_id
-          AND m.role IN ('user', 'assistant')
+          AND m.role IN ('user', 'assistant') AND ${VISIBLE_M_ROW}
           AND m.content IS NOT NULL
           AND TRIM(m.content) <> ''
         ORDER BY m.timestamp DESC, m.id DESC
