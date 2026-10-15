@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderActionOverflow from '@/components/layout/HeaderActionOverflow.vue'
 import ProfileScopeSelect from '@/components/common/ProfileScopeSelect.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NInput, useMessage } from 'naive-ui'
@@ -194,24 +195,26 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
 
       <div class="header-actions">
         <ProfileScopeSelect v-model="managedProfile" />
-        <NButton class="header-action-btn" size="small" :title="t('skills.import')" @click="showImportModal = true">
-          <template #icon>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-          </template>
-          <span class="header-action-label">{{ t('skills.import') }}</span>
-        </NButton>
-        <NButton class="header-action-btn" size="small" :title="t('skills.externalDirs.manage')" @click="showExternalDirsModal = true">
-          <template #icon>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
-          </template>
-          <span class="header-action-label">{{ t('skills.externalDirs.manage') }}</span>
-        </NButton>
+        <HeaderActionOverflow :label="t('chat.more')" :breakpoint="1100">
+          <NButton class="header-action-btn" size="small" :title="t('skills.import')" @click="showImportModal = true">
+            <template #icon>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </template>
+            <span class="header-action-label">{{ t('skills.import') }}</span>
+          </NButton>
+          <NButton class="header-action-btn" size="small" :title="t('skills.externalDirs.manage')" @click="showExternalDirsModal = true">
+            <template #icon>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+            </template>
+            <span class="header-action-label">{{ t('skills.externalDirs.manage') }}</span>
+          </NButton>
+        </HeaderActionOverflow>
         <NInput v-model:value="searchQuery" :placeholder="t('skills.searchPlaceholder')" size="small" clearable class="search-input" />
       </div>
     </header>
@@ -294,8 +297,9 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
 }
 
 @media (max-width: $breakpoint-mobile) {
-  .header-action-label { display: none; }
-  .header-action-btn {
+  // 只压缩 header 里直接展示的按钮；溢出菜单（teleport 到 body）中的按钮保留文字
+  .header-actions > .header-action-btn .header-action-label { display: none; }
+  .header-actions > .header-action-btn {
     width: 30px;
     padding: 0;
 
