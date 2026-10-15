@@ -564,32 +564,22 @@ export interface HermesProfileDetail {
 
 /**
  * List all profiles
+ *
+ * Reads names/models straight from disk instead of spawning `hermes profile list`
+ * (~4-9s per call: git version probes + full plugin discovery inside the CLI).
+ * Gateway status is served by the separate cached /runtime-statuses endpoint,
+ * and alias is cosmetic, so neither justifies the subprocess here.
  */
 export async function listProfiles(): Promise<HermesProfile[]> {
   const profileNames = listProfileNamesFromDisk()
   const activeProfileName = getActiveProfileName()
-  let runtimeInfo = new Map<string, ProfileListRuntimeInfo>()
-  try {
-    const { stdout } = await execHermesWithBin(resolveHermesBin(), ['profile', 'list'], {
-      timeout: 10000,
-      ...execOpts,
-    })
-    runtimeInfo = parseProfileListRuntimeInfo(stdout, profileNames)
-  } catch (err: any) {
-    logger.warn(err, 'Hermes CLI: profile list failed; falling back to disk profile list')
-  }
 
-  return profileNames.map(name => {
-    const runtime = runtimeInfo.get(name)
-    const gatewayStatus = runtime?.gatewayStatus
-    return {
-      name,
-      active: runtime?.active ?? name === activeProfileName,
-      model: readProfileDefaultModel(name),
-      gatewayStatus: gatewayStatus && gatewayStatus !== '—' && gatewayStatus !== '-' ? gatewayStatus : undefined,
-      alias: runtime?.alias || '',
-    }
-  })
+  return profileNames.map(name => ({
+    name,
+    active: name === activeProfileName,
+    model: readProfileDefaultModel(name),
+    alias: '',
+  }))
 }
 
 /**
