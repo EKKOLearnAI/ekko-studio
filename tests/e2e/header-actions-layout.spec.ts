@@ -50,13 +50,17 @@ async function clippedControls(header: Locator) {
   })
 }
 
+const nativeSmokeRoutes = new Set(['/hermes/chat', '/hermes/workflow', '/studio/agents'])
+
 for (const { widths, platform } of [
   { widths: [390, 769, 900, 1440] },
   { widths: [769], platform: 'win32' }, { widths: [769], platform: 'linux' },
   { widths: [900], platform: 'darwin' },
 ]) {
   for (const route of routes) {
-    test(`keeps header actions visible on ${route} (${platform || 'browser'})`, async ({ page }) => {
+    test(`keeps header actions visible on ${route} (${platform || 'browser'})`, {
+      tag: platform && !nativeSmokeRoutes.has(route) ? '@extended' : [],
+    }, async ({ page }) => {
       await page.setViewportSize({ width: widths[0], height: 900 })
       await page.clock.install()
       await setup(page, platform)

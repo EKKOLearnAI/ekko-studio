@@ -7,6 +7,15 @@ on:
   pull_request:
     branches:
       - main
+  schedule:
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Browser regression scope
+        type: choice
+        options: [full, core]
+        default: full
 
 permissions:
   contents: read
@@ -16,7 +25,23 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  test-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      suite: ${{ steps.scope.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Select regression scope
+        id: scope
+        run: node scripts/ci-test-scope.mjs
+
   e2e-shard:
+    needs: test-scope
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -44,7 +69,9 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run Playwright tests
-        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
+        env:
+          E2E_SUITE: ${{ needs.test-scope.outputs.suite }}
+        run: npm run "test:e2e:$E2E_SUITE" -- --shard=${{ matrix.shard }}/4
 
       - name: Upload shard report
         if: ${{ !cancelled() }}

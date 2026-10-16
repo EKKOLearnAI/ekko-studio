@@ -8,6 +8,15 @@ on:
     branches:
       - main
       - base
+  schedule:
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Include all packaging integration tests
+        type: choice
+        options: [full, core]
+        default: full
 
 permissions:
   contents: read
@@ -23,6 +32,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -30,6 +41,10 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
+
+      - name: Select regression scope
+        id: scope
+        run: node scripts/ci-test-scope.mjs
 
       - name: Install dependencies
         run: |
@@ -40,7 +55,14 @@ jobs:
         run: npm run harness:check
 
       - name: Test with coverage
-        run: npm run test:coverage
+        env:
+          INCLUDE_PACKAGING: ${{ steps.scope.outputs.packaging }}
+        run: |
+          if [ "$INCLUDE_PACKAGING" = true ]; then
+            npm run test:coverage
+          else
+            npm run test:coverage:core
+          fi
 
       - name: Build
         run: npm run build

@@ -80,13 +80,37 @@ state and does not require a running Gateway.
 
 ## CI Mapping
 
+Routine PRs and pushes run core browser regression coverage and coverage tests
+without `tos-packaging.test.ts`. Core browser coverage retains all functional
+flows, every page's responsive header sweep, representative Windows/Linux/macOS
+headers, theme editing, theme ZIP round trips, animated wallpaper uploads and
+group-message surfaces. The remaining platform sweeps and repeated theme surface
+combinations are retained in the full suite.
+
+`scripts/ci-test-scope.mjs` expands browser coverage for shared theme/layout code,
+browser fixtures and theme tests; it includes real TOS packaging tests for TOS,
+packaging/release workflows, CLI entries, managed MCP launch configuration or
+shared dependency changes. Missing diff history defaults to full validation.
+Both workflows run full suites daily at 19:00 UTC
+(03:00 Asia/Shanghai), and support manual `core`/`full` runs, defaulting to full.
+New browser files remain in core unless explicitly listed as extended.
+
+```bash
+npm run test:e2e:core   # Routine browser regression coverage
+npm run test:e2e:full   # Complete theme/platform matrix
+npm run test:coverage:core # Coverage without TOS packaging integration tests
+npm run test:coverage      # Complete coverage, including packaging integration
+```
+
 - Build workflow: installs dependencies, runs coverage, and builds production
-  assets on pushes and pull requests.
+  assets on pushes and pull requests. TOS packaging integrations follow the scope
+  rules above; unit logic, auth and persistence tests remain in every run.
 - Coding agent platforms workflow: runs environment/discovery checks and real
   CLI protocol fixtures on Windows, Linux and macOS, including long stdin prompts,
   non-ASCII installation paths and process cancellation. Vendor authentication
   and paid API calls are not required.
-- Playwright workflow: runs all browser tests across four independent shards,
+- Playwright workflow: selects core/full coverage, runs four independent shards
+  with two browser workers per shard,
   then merges their blob reports into the `playwright-report` HTML artifact.
   The final `e2e` check requires every shard to pass. Keep route/viewport sweeps
   as independent route tests so they can be distributed across runners.

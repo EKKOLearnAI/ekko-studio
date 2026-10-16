@@ -41,6 +41,11 @@ for (const [path, endpoint] of pages) {
     await authenticate(page)
     await mockHermesApi(page)
     await mockChatSocket(page)
+    if (path === '/hermes/version-preview') {
+      // Only the controlled status request should end initial loading. A mock
+      // 404 from its concurrent tags request would reject Promise.all early.
+      await page.route('**/api/studio/update/preview/tags', route => route.fulfill({ json: { tags: [] } }))
+    }
     let release!: () => void
     const pending = new Promise<void>(resolve => { release = resolve })
     await page.route(url => url.pathname === endpoint, async route => {
