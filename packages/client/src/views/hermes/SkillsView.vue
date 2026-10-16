@@ -226,7 +226,8 @@ function handleSkillSaved() {
       </div>
       <div class="header-actions">
         <ProfileScopeSelect v-if="isHermesTarget" v-model="managedProfile" />
-        <HeaderActionOverflow :label="t('chat.more')" :breakpoint="1100">
+        <!-- embedded 视图（coding agent 配置页）保持操作常驻：breakpoint 0 永不收纳 -->
+        <HeaderActionOverflow :label="t('chat.more')" :breakpoint="embedded ? 0 : 1100">
           <NButton
             v-if="isHermesTarget && writeApprovalSupported"
             class="header-action-btn"
