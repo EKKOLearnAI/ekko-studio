@@ -977,8 +977,11 @@ describe('ChatRunSocket queued bridge runs', () => {
     deleteMessageGroupsMock.mockReturnValueOnce({ deleted: 1, deletedGroups: 1, messageIds: [12], historyRevision: 1 })
     await server.deleteSessionMessages('session-1', [12], 0)
     expect(server.sessionMap.has('session-1')).toBe(false)
-    readSessionStateFromDbMock.mockReturnValueOnce({ messages: [...retained], isWorking: false, events: [], queue: [],
-      messageTotal: 2, messageLoadedCount: 2, messageStateBaselineCount: 2, messagePageLimit: 150 })
+    const persisted = { messages: [...retained], isWorking: false, events: [], queue: [],
+      messageTotal: 2, messageLoadedCount: 2, messageStateBaselineCount: 2, messagePageLimit: 150 }
+    readSessionStateFromDbMock.mockReturnValueOnce(persisted)
+    // Native reconciliation also hydrates the persisted page before dispatch.
+    loadSessionStateFromDbMock.mockResolvedValueOnce(persisted)
     handleBridgeRunMock.mockImplementationOnce(async (...args: any[]) => {
       const state = args[4].get('session-1')
       expect(state.messages).toEqual(retained)
@@ -988,6 +991,8 @@ describe('ChatRunSocket queued bridge runs', () => {
     await server.handleRun(socket, { session_id: 'session-1', input: 'follow up', source: 'cli' }, 'default')
     expect(handleBridgeRunMock).toHaveBeenCalled()
     expect(readSessionStateFromDbMock).toHaveBeenCalledOnce()
+    loadSessionStateFromDbMock.mockResolvedValueOnce({ ...persisted,
+      messageTotal: 4, messageLoadedCount: 4, messageStateBaselineCount: 4 })
     socket.emit.mockClear()
     await handlers.get('resume')?.({ session_id: 'session-1' })
     expect(socket.emit).toHaveBeenCalledWith('resumed', expect.objectContaining({

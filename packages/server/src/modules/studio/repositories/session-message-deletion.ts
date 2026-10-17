@@ -16,8 +16,8 @@ export interface MessageSelectionGroup {
 /** Read only identities, including rows outside the current display page. */
 export function getMessageSelectionGroups(sessionId: string): MessageSelectionGroup[] {
   if (!isSqliteAvailable()) throw new Error('Message storage is unavailable')
-  const rows = getDb()!.prepare(`SELECT id, role, run_marker FROM ${MESSAGES_TABLE}
-    WHERE session_id = ? ORDER BY id`).all(sessionId) as Array<{ id: number; role: string; run_marker: string | null }>
+  const rows = getDb()!.prepare(`SELECT id, role, run_marker, selection_run_marker FROM ${MESSAGES_TABLE}
+    WHERE session_id = ? ORDER BY id`).all(sessionId) as Array<{ id: number; role: string; run_marker: string | null; selection_run_marker: string | null }>
   const groups: MessageSelectionGroup[] = []
   const runs = new Map<string, MessageSelectionGroup>()
   let current: MessageSelectionGroup | undefined
@@ -27,11 +27,16 @@ export function getMessageSelectionGroups(sessionId: string): MessageSelectionGr
       current = undefined
       continue
     }
-    const marker = row.run_marker?.trim()
+    // Imported lineage markers identify individual native messages for deduplication,
+    // not agent runs. Infer those runs from input boundaries without rewriting provenance.
+    const selectionMarker = row.selection_run_marker?.trim()
+    const sourceMarker = row.run_marker?.trim()
+    const marker = selectionMarker || (sourceMarker?.startsWith('hermes_lineage:') ? undefined : sourceMarker)
     if (marker && current?.runMarker !== marker) {
       const known = runs.get(marker)
       if (known) current = known
-      else if (current && !current.runMarker) {
+      // A persisted boundary cannot absorb an unmarked protected run before it.
+      else if (current && !current.runMarker && !selectionMarker) {
         current.runMarker = marker
         runs.set(marker, current)
       } else current = undefined
@@ -85,13 +90,16 @@ export function deleteSessionMessageGroups(sessionId: string, messageIds: number
     if (selected.some(group => group.deleteBlockedReason)) {
       throw Object.assign(new Error('Compressed messages cannot be deleted. Reload the selection.'), { status: 409 })
     }
-    // Preserve inferred legacy run boundaries before a user message is removed.
-    // Otherwise adjacent old runs without markers would merge on the next read.
-    const mark = db.prepare(`UPDATE ${MESSAGES_TABLE} SET run_marker = ? WHERE session_id = ?
-      AND id IN (SELECT value FROM json_each(?)) AND (run_marker IS NULL OR TRIM(run_marker) = '')`)
+    // Persist inferred boundaries separately: removing an input must not merge runs,
+    // and native per-message provenance must remain available for deduplication.
+    const mark = db.prepare(`UPDATE ${MESSAGES_TABLE} SET selection_run_marker = ?,
+      run_marker = CASE WHEN run_marker IS NULL OR TRIM(run_marker) = '' THEN ? ELSE run_marker END
+      WHERE session_id = ?
+      AND id IN (SELECT value FROM json_each(?)) AND (selection_run_marker IS NULL OR TRIM(selection_run_marker) = '')`)
     for (const group of groups) {
       if (group.kind !== 'run' || group.deleteBlockedReason || deletedIdSet.has(group.id)) continue
-      mark.run(group.runMarker || `legacy_run_${group.id}`, sessionId, JSON.stringify(group.messageIds))
+      const marker = group.runMarker || `legacy_run_${group.id}`
+      mark.run(marker, marker, sessionId, JSON.stringify(group.messageIds))
     }
     const remove = db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ? AND id = ?`)
     const removeChanges = db.prepare(`DELETE FROM ${WORKSPACE_RUN_CHANGES_TABLE} WHERE session_id = ? AND assistant_message_id = ?`)

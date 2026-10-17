@@ -27,6 +27,126 @@ describe('message deletion and compression history', () => {
     return { ...store, ...deletion, ...compression, add }
   }
 
+  function withoutSelectionMarkers(messages: any[]) {
+    return messages.map(({ selection_run_marker, ...message }) => message)
+  }
+
+  async function importedFixture() {
+    const f = await fixture()
+    const { configureSessionAgentRuntime } = await import('../../packages/server/src/modules/studio/public/session-agent-runtime')
+    const nativeMessages = [
+      { role: 'user', content: 'first question' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'first-call', type: 'function', function: { name: 'lookup', arguments: '{}' } }] },
+      { role: 'tool', content: 'first result', tool_call_id: 'first-call', tool_name: 'lookup' },
+      { role: 'assistant', content: 'first answer' },
+      { role: 'user', content: 'second question' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'second-call', type: 'function', function: { name: 'lookup', arguments: '{}' } }] },
+      { role: 'tool', content: 'second result', tool_call_id: 'second-call', tool_name: 'lookup' },
+      { role: 'assistant', content: 'second answer' },
+    ].map((message, index) => ({ ...message, id: index + 1, session_id: 'native-tip', timestamp: index + 1 }))
+    configureSessionAgentRuntime({
+      getHermesSessionDetailForProfile: async () => ({ id: 's', thread_session_count: 2, messages: nativeMessages }),
+    } as any)
+    const { reconcileHermesSessionHistory } = await import('../../packages/server/src/modules/studio/services/history/reconcile-hermes-history')
+    expect(await reconcileHermesSessionHistory('s')).toEqual({ changed: true, added: 8 })
+    const messages = f.getSessionDetail('s')!.messages
+    return { ...f, messages, reconcile: () => reconcileHermesSessionHistory('s') }
+  }
+
+  it.each([1, 2, 3])('deletes an imported native tool run as a whole when selecting row %i and preserves provenance', async selectedIndex => {
+    const f = await importedFixture()
+    const ids = f.messages.map(message => message.id)
+    expect(f.getMessageSelectionGroups('s').map(group => group.messageIds)).toEqual([
+      [ids[0]], ids.slice(1, 4), [ids[4]], ids.slice(5),
+    ])
+    expect(await f.reconcile()).toEqual({ changed: false, added: 0 })
+    expect(withoutSelectionMarkers(f.getSessionDetail('s')!.messages)).toEqual(withoutSelectionMarkers(f.messages))
+    expect(f.deleteSessionMessageGroups('s', [ids[selectedIndex]], 0)).toMatchObject({
+      deleted: 3, deletedGroups: 1, messageIds: ids.slice(1, 4), historyRevision: 1,
+    })
+    expect(withoutSelectionMarkers(f.getSessionDetail('s')!.messages)).toEqual(withoutSelectionMarkers([f.messages[0], ...f.messages.slice(4)]))
+    expect(await f.reconcile()).toEqual({ changed: false, added: 0 })
+    expect(f.getSessionContextMessages('s').map(message => message.id)).toEqual([ids[0], ...ids.slice(4)])
+  })
+
+  it('preserves imported native run boundaries and provenance after deleting the separating input and reloading', async () => {
+    const f = await importedFixture()
+    const ids = f.messages.map(message => message.id)
+    f.deleteSessionMessageGroups('s', [ids[4]], 0)
+    vi.resetModules()
+    const reloaded = await import('../../packages/server/src/modules/studio/repositories/session-message-deletion')
+    expect(reloaded.getMessageSelectionGroups('s').map(group => group.messageIds)).toEqual([
+      [ids[0]], ids.slice(1, 4), ids.slice(5),
+    ])
+    expect(withoutSelectionMarkers(f.getSessionDetail('s')!.messages)).toEqual(withoutSelectionMarkers(f.messages.filter(message => message.id !== ids[4])))
+    expect(reloaded.deleteSessionMessageGroups('s', [ids[7]], 1).messageIds).toEqual(ids.slice(5))
+    expect(f.getSessionContextMessages('s').map(message => message.id)).toEqual(ids.slice(0, 4))
+  })
+
+  it('preserves imported run boundaries and provenance when branching edited history', async () => {
+    const f = await importedFixture()
+    f.deleteSessionMessageGroups('s', [Number(f.messages[4].id)], 0)
+    f.createBranchedSession({
+      parent_session_id: 's', id: 'branch', source: 'cli', ended_at: 10, last_active: 10,
+      messages: f.getSessionDetail('s')!.messages,
+    })
+    const branchMessages = f.getSessionContextMessages('branch')
+    const ids = branchMessages.map(message => message.id)
+    expect(f.getMessageSelectionGroups('branch').map(group => group.messageIds)).toEqual([
+      [ids[0]], ids.slice(1, 4), ids.slice(4),
+    ])
+    expect(branchMessages.map(message => message.run_marker))
+      .toEqual(f.messages.filter((_message, index) => index !== 4).map(message => message.run_marker))
+    expect(f.deleteSessionMessageGroups('branch', [Number(ids[6])], 0).messageIds).toEqual(ids.slice(4))
+    expect(f.getSessionContextMessages('s')).toHaveLength(7)
+  })
+
+  it('protects an entire imported native tool run crossing the compression cursor', async () => {
+    const f = await importedFixture()
+    const ids = f.messages.map(message => message.id)
+    f.saveCompressionSnapshot('s', 'keep imported summary', 0, 0, {
+      compressedThroughMessageId: ids[2], protectedHeadThroughMessageId: ids[0], expectedHistoryRevision: 0,
+    })
+    const before = f.getCompressionSnapshot('s')
+    expect(f.getMessageSelectionGroups('s').find(group => group.messageIds.includes(ids[3])))
+      .toMatchObject({ messageIds: ids.slice(1, 4), deleteBlockedReason: 'compressed' })
+    expect(() => f.deleteSessionMessageGroups('s', [ids[3]], 0)).toThrow('Compressed messages cannot be deleted')
+    expect(withoutSelectionMarkers(f.getSessionDetail('s')!.messages)).toEqual(withoutSelectionMarkers(f.messages))
+    expect(f.getCompressionSnapshot('s')).toEqual(before)
+  })
+
+  it('keeps an imported uncompressed run separate from a protected run after deleting its input', async () => {
+    const f = await importedFixture()
+    const ids = f.messages.map(message => message.id)
+    f.saveCompressionSnapshot('s', 'keep imported summary', 0, 0, {
+      compressedThroughMessageId: ids[2], protectedHeadThroughMessageId: ids[0], expectedHistoryRevision: 0,
+    })
+    const before = f.getCompressionSnapshot('s')!
+    f.deleteSessionMessageGroups('s', [ids[4]], 0)
+    const groups = f.getMessageSelectionGroups('s')
+    expect(groups.map(group => group.messageIds)).toEqual([[ids[0]], ids.slice(1, 4), ids.slice(5)])
+    expect(groups[1].deleteBlockedReason).toBe('compressed')
+    expect(groups[2].deleteBlockedReason).toBeUndefined()
+    expect(f.deleteSessionMessageGroups('s', [ids[7]], 1).messageIds).toEqual(ids.slice(5))
+    expect(withoutSelectionMarkers(f.getSessionDetail('s')!.messages)).toEqual(withoutSelectionMarkers(f.messages.slice(0, 4)))
+    expect(f.getCompressionSnapshot('s')).toEqual({ ...before, historyRevision: 2 })
+  })
+
+  it('adds selection run markers to an existing messages table idempotently without changing provenance', async () => {
+    db.exec(`DROP TABLE messages;
+      CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+        role TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', run_marker TEXT, timestamp INTEGER NOT NULL);
+      INSERT INTO messages (session_id, role, content, run_marker, timestamp)
+        VALUES ('s', 'assistant', 'imported answer', 'hermes_lineage:native-tip:4', 4)`)
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    initAllHermesTables()
+    initAllHermesTables()
+    expect(db.prepare('PRAGMA table_info(messages)').all().filter((column: any) => column.name === 'selection_run_marker')).toHaveLength(1)
+    expect(db.prepare('SELECT content, run_marker, selection_run_marker FROM messages').get()).toEqual({
+      content: 'imported answer', run_marker: 'hermes_lineage:native-tip:4', selection_run_marker: null,
+    })
+  })
+
   it.each([
     ['cli', 'hermes'], ['builtin_agent', 'ekko-agent'], ['coding_agent', 'codex'], ['coding_agent', 'cursor'],
     ['group_chat', 'hermes'], ['group_chat', 'ekko-agent'], ['group_chat', 'codex'],
@@ -350,6 +470,23 @@ describe('message deletion and compression history', () => {
     expect(f.getSessionContextMessages('s').map(m => m.id)).toEqual([first])
   })
 
+  it('preserves legacy run boundaries when branching history after deleting an input', async () => {
+    const f = await fixture()
+    f.add('assistant', 'first')
+    const separator = f.add('user', 'separator')
+    f.add('assistant', 'second')
+    f.add('tool', 'second tool')
+    f.deleteSessionMessageGroups('s', [separator], 0)
+    f.createBranchedSession({
+      parent_session_id: 's', id: 'branch', source: 'cli', ended_at: 10, last_active: 10,
+      messages: f.getSessionDetail('s')!.messages,
+    })
+    const branchIds = f.getSessionContextMessages('branch').map(message => message.id)
+    expect(f.getMessageSelectionGroups('branch').map(group => group.messageIds)).toEqual([
+      [branchIds[0]], branchIds.slice(1),
+    ])
+  })
+
   it('rejects cross-session IDs and outdated selections atomically', async () => {
     const f = await fixture()
     const id = f.add('user', 'keep')
@@ -384,6 +521,7 @@ describe('message deletion and compression history', () => {
     expect(() => f.deleteSessionMessageGroups('s', [id], 0)).toThrow()
     expect(f.getSessionContextMessages('s')).toHaveLength(2)
     expect(f.getSessionContextMessages('s')[1].run_marker).toBeNull()
+    expect(db.prepare('SELECT selection_run_marker FROM messages WHERE session_id = ? AND role = ?').get('s', 'assistant').selection_run_marker).toBeNull()
     expect(f.getSession('s')?.history_revision).toBe(0)
   })
 

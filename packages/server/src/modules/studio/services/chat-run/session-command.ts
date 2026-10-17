@@ -1238,6 +1238,8 @@ function createBranchSession(parentSessionId: string, requestedTitle: string, ct
       tool_call_id: message.tool_call_id,
       tool_calls: message.tool_calls,
       tool_name: message.tool_name,
+      run_marker: message.run_marker,
+      selection_run_marker: message.selection_run_marker,
       timestamp: message.timestamp,
       token_count: message.token_count,
       finish_reason: message.finish_reason,

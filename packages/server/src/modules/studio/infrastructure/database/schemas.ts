@@ -221,6 +221,8 @@ export const MESSAGES_SCHEMA: Record<string, string> = {
   tool_calls: 'TEXT',
   tool_name: 'TEXT',
   run_marker: 'TEXT',
+  /** Stable deletion grouping, separate from per-message native lineage provenance. */
+  selection_run_marker: 'TEXT',
   timestamp: 'INTEGER NOT NULL',
   token_count: 'INTEGER',
   finish_reason: 'TEXT',
