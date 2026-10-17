@@ -145,7 +145,15 @@ elements, event handlers, URL schemes and XML directives before uploading.
 The App Center creates the non-root user/group `ekko-studio-tos`, as declared
 by `config.ini`; installation scripts do not create system users. The unit
 is registered with systemd from the application directory. The Web UI listens
-on `0.0.0.0:8648` and opens in a new browser tab at `http://${ip}:8648`.
+on `0.0.0.0:8648`. `config.ini` declares the portal route
+`/com.hermeswebui.studio/` and the separate numeric `port: 8648`.
+The packaged nginx entry redirects that route (with or without its trailing
+slash) to `http://<NAS-host>:8648/` in the new browser tab. Studio's assets,
+API and Socket.IO use root-relative URLs and must remain on that dedicated
+origin rather than the shared TOS origin. Access to port 8648 is still required;
+this entry does not provide HTTPS or remote access through the TOS proxy alone.
+The service unit does not configure automatic restart; App Center controls
+start, stop and restart.
 It uses Studio's own login; configure your login and model provider before use.
 Port 8648 must be free. It is separate from TOS's system ports.
 
@@ -195,6 +203,20 @@ After uninstall, an administrator may explicitly delete the documented data
 directories if no longer needed. Do not remove an installation volume wholesale.
 
 ## Required TNAS acceptance
+
+### Resubmission after the 2026-10-15 review
+
+The C21/S05 review requires a portal route in `config.ini.path`, a separate
+port field, and no systemd `Restart` directive. These review findings take
+precedence over the external-open URL example in the development guide.
+The package verifier rejects regressions of both findings.
+
+Withdraw the held `0.7.35` submission in the developer console to free the
+submission slot. Build a new version using these corrected packaging tools,
+upload its matching TOS Deb, and add `Rectified per review comments` to the
+submission remarks. Existing Release assets are immutable to the upload
+workflow; do not retry with different bytes under the old asset name.
+Package verification and platform parsing do not replace installation tests.
 
 Static/package checks and an Ubuntu startup smoke test do not establish TOS
 compatibility. On an authorized TOS 7 x86_64 device:

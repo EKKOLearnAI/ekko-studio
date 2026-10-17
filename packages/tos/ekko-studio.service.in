@@ -1,8 +1,6 @@
 [Unit]
 Description=Ekko Studio for TOS
 After=network.target
-StartLimitBurst=5
-StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -33,8 +31,6 @@ ProtectHome=true
 ReadWritePaths=/usr/local/@APP_ID@/data /usr/local/@APP_ID@/logs
 UMask=0077
 LimitNOFILE=65536
-Restart=on-failure
-RestartSec=10
 
 [Install]
 WantedBy=multi-user.target

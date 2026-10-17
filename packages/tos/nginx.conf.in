@@ -1,3 +1,12 @@
+# Studio uses root-relative assets, API and Socket.IO URLs. Open its dedicated
+# origin from the TOS portal instead of serving the SPA below a shared prefix.
+location = /@APP_ID@ {
+    return 302 http://$host:@PORT@/;
+}
+location = /@APP_ID@/ {
+    return 302 http://$host:@PORT@/;
+}
+
 location /@APP_ID@/ {
     proxy_pass http://127.0.0.1:@PORT@/;
     proxy_http_version 1.1;

@@ -152,6 +152,9 @@ export function verifyTosDeb(deb) {
       || config.open_path !== true || 'type' in config || config.user === 'root' || !config.beta) {
       throw new Error('Invalid TOS application identity or external-open configuration')
     }
+    if (config.path !== `/${config.id}/` || config.port !== defaults.port) {
+      throw new Error('C21: TOS path must be the application portal route with a separate service port')
+    }
     if (run('dpkg-deb', ['--field', deb, 'Package']).trim() !== config.package
       || run('dpkg-deb', ['--field', deb, 'Version']).trim() !== config.version
       || run('dpkg-deb', ['--field', deb, 'Architecture']).trim() !== 'amd64') {
@@ -173,6 +176,9 @@ export function verifyTosDeb(deb) {
       }
     }
     const service = readFileSync(join(app, `init.d/${config.system_id}.service`), 'utf8')
+    if (/^\s*Restart(?:Sec)?\s*=/m.test(service)) {
+      throw new Error('S05: TOS service restart must be controlled by App Center')
+    }
     if (!service.includes(`User=${config.user}\n`) || !service.includes('NoNewPrivileges=true\n')
       || !service.includes('ProtectSystem=strict\n') || !service.includes('BIND_HOST=0.0.0.0\n')) {
       throw new Error('Invalid TOS service configuration')
@@ -243,13 +249,12 @@ export function packTosDeb({ webuiDir, nodeRoot = dirname(dirname(process.execPa
     const values = { APP_ID: settings.id, USER: settings.user, SERVICE: settings.system_id, PORT: settings.port }
     const config = {
       ...settings, version: pkg.version, icon: `/images/icons/${settings.id}.svg`,
-      exec: true, open_path: true, path: `http://\${ip}:${settings.port}`,
+      exec: true, open_path: true, path: `/${settings.id}/`,
       recommend: false, beta: true, category: ['Utilities'], platform: 'x86_64',
       application_type: 'deb', official: 'https://ekkostudio.xyz',
       help: 'https://github.com/EKKOLearnAI/ekko-studio', depend: [], relation: [],
       all_user_display: false, allow_open_in_mobile: true,
     }
-    delete config.port
     put('config.ini', JSON.stringify(config, null, 2) + '\n')
     put(`${settings.id}.lang`, languageFile(settings.publisher))
     put(`images/icons/${settings.id}.svg`, readFileSync(join(templates, 'icon.svg')))
