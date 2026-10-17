@@ -21,40 +21,44 @@ export interface EkkoMcpToolInfo {
   description: string
 }
 
-export async function fetchEkkoMcpServers(): Promise<EkkoMcpServerInfo[]> {
-  const response = await request<{ ok: boolean; servers: EkkoMcpServerInfo[] }>('/api/ekko/mcp/servers')
+function profileQuery(profile?: string): string {
+  return profile ? `?profile=${encodeURIComponent(profile)}` : ''
+}
+
+export async function fetchEkkoMcpServers(profile?: string): Promise<EkkoMcpServerInfo[]> {
+  const response = await request<{ ok: boolean; servers: EkkoMcpServerInfo[] }>(`/api/ekko/mcp/servers${profileQuery(profile)}`)
   return response.servers
 }
 
-export async function createEkkoMcpServer(name: string, config: EkkoMcpServerConfig): Promise<EkkoMcpServerInfo> {
-  const response = await request<{ ok: boolean; server: EkkoMcpServerInfo }>('/api/ekko/mcp/servers', {
+export async function createEkkoMcpServer(name: string, config: EkkoMcpServerConfig, profile?: string): Promise<EkkoMcpServerInfo> {
+  const response = await request<{ ok: boolean; server: EkkoMcpServerInfo }>(`/api/ekko/mcp/servers${profileQuery(profile)}`, {
     method: 'POST',
     body: JSON.stringify({ name, config }),
   })
   return response.server
 }
 
-export async function updateEkkoMcpServer(name: string, config: EkkoMcpServerConfig): Promise<EkkoMcpServerInfo> {
-  const response = await request<{ ok: boolean; server: EkkoMcpServerInfo }>(`/api/ekko/mcp/servers/${encodeURIComponent(name)}`, {
+export async function updateEkkoMcpServer(name: string, config: EkkoMcpServerConfig, profile?: string): Promise<EkkoMcpServerInfo> {
+  const response = await request<{ ok: boolean; server: EkkoMcpServerInfo }>(`/api/ekko/mcp/servers/${encodeURIComponent(name)}${profileQuery(profile)}`, {
     method: 'PATCH',
     body: JSON.stringify({ config }),
   })
   return response.server
 }
 
-export async function setEkkoMcpServerEnabled(name: string, enabled: boolean): Promise<EkkoMcpServerInfo> {
-  const response = await request<{ ok: boolean; server: EkkoMcpServerInfo }>(`/api/ekko/mcp/servers/${encodeURIComponent(name)}`, {
+export async function setEkkoMcpServerEnabled(name: string, enabled: boolean, profile?: string): Promise<EkkoMcpServerInfo> {
+  const response = await request<{ ok: boolean; server: EkkoMcpServerInfo }>(`/api/ekko/mcp/servers/${encodeURIComponent(name)}${profileQuery(profile)}`, {
     method: 'PATCH',
     body: JSON.stringify({ enabled }),
   })
   return response.server
 }
 
-export async function deleteEkkoMcpServer(name: string): Promise<void> {
-  await request(`/api/ekko/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' })
+export async function deleteEkkoMcpServer(name: string, profile?: string): Promise<void> {
+  await request(`/api/ekko/mcp/servers/${encodeURIComponent(name)}${profileQuery(profile)}`, { method: 'DELETE' })
 }
 
-export async function testEkkoMcpServer(name: string): Promise<EkkoMcpToolInfo[]> {
-  const response = await request<{ ok: boolean; tools: EkkoMcpToolInfo[] }>(`/api/ekko/mcp/servers/${encodeURIComponent(name)}/test`, { method: 'POST' })
+export async function testEkkoMcpServer(name: string, profile?: string): Promise<EkkoMcpToolInfo[]> {
+  const response = await request<{ ok: boolean; tools: EkkoMcpToolInfo[] }>(`/api/ekko/mcp/servers/${encodeURIComponent(name)}/test${profileQuery(profile)}`, { method: 'POST' })
   return response.tools
 }

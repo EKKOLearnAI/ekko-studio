@@ -70,6 +70,7 @@ describe('SkillDetail editing', () => {
       'demo-skill',
       '# Demo Skill\nupdated\n',
       'codex',
+      undefined,
     )
     expect(wrapper.find('.markdown-renderer-stub').text()).toContain('updated')
   })

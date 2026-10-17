@@ -2012,6 +2012,11 @@ export default {
     hasEnv: '.env 있음',
     hasSoulMd: 'soul.md 있음',
     noProfiles: '프로필이 없습니다. 새로 만들어 시작하세요.',
+    scope: {
+      label: '프로필',
+      hint: '이 페이지에서 관리할 프로필의 MCP 서버와 Skills를 선택합니다. 활성 프로필은 전환되지 않습니다.',
+      differsHint: '현재 {name}을(를) 관리 중입니다. 활성 프로필({active})과 다릅니다.',
+    },
     avatar: {
       title: '사용자 지정 아바타',
       customize: '아바타',

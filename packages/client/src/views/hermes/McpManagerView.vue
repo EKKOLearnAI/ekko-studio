@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
-import { computed, onUnmounted, ref } from 'vue'
+import ProfileScopeSelect from '@/components/common/ProfileScopeSelect.vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import {
   NAlert, NButton, NEmpty, NInput, NModal,
   NRadioGroup, NRadioButton, useMessage,
@@ -10,6 +11,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import McpServerCard from '@/components/hermes/mcp/McpServerCard.vue'
 import { useMcpConfigInput } from '@/composables/useMcpConfigInput'
+import { useManagedProfileScope } from '@/composables/useManagedProfileScope'
 import {
   fetchMcpServers, fetchMcpTools, mcpServerAdd, mcpServerRemove,
   mcpServerUpdate, mcpServerTest, mcpReload,
@@ -18,6 +20,9 @@ import {
 
 const { t } = useI18n()
 const message = useMessage()
+
+const { managedProfile } = useManagedProfileScope()
+const profileParam = computed(() => managedProfile.value ?? undefined)
 
 const servers = ref<McpServerInfo[]>([])
 const loading = ref(true)
@@ -108,7 +113,7 @@ async function loadServers() {
   loading.value = true
   error.value = ''
   try {
-    const data = await fetchMcpServers()
+    const data = await fetchMcpServers(profileParam.value)
     servers.value = data.servers ?? []
     // Populate toolsByServer from embedded tool_details, including empty filtered results.
     const nextToolsByServer: Record<string, {name: string, description: string}[]> = {}
@@ -137,7 +142,7 @@ async function loadServers() {
 
 async function handleReload(server?: string) {
   try {
-    const res = await mcpReload(server)
+    const res = await mcpReload(server, profileParam.value)
     if (res.ok) {
       if (server) {
         const { [server]: _, ...rest } = toolsByServer.value
@@ -193,7 +198,7 @@ async function saveServer() {
       let added = 0
       for (const [name, config] of entries) {
         if (typeof config !== 'object' || config === null) continue
-        const res = await mcpServerAdd(name, config as McpServerConfig)
+        const res = await mcpServerAdd(name, config as McpServerConfig, profileParam.value)
         if (res.ok) added++
         else message.error(`${name}: ${res.error || t('mcp.addFailed')}`)
       }
@@ -211,7 +216,7 @@ async function saveServer() {
       const config = (parsed[name] && typeof parsed[name] === 'object')
         ? parsed[name] as Record<string, unknown>
         : parsed
-      const res = await mcpServerUpdate(name, config)
+      const res = await mcpServerUpdate(name, config, profileParam.value)
       if (res.ok) {
         showModal.value = false
         message.success(t('mcp.serverUpdated', { name: editingName.value }))
@@ -232,7 +237,7 @@ async function saveServer() {
 
 async function handleRemove(server: McpServerInfo) {
   try {
-    const res = await mcpServerRemove(server.name)
+    const res = await mcpServerRemove(server.name, profileParam.value)
     if (res.ok) {
       message.success(t('mcp.serverRemoved', { name: server.name }))
       const { [server.name]: _, ...rest } = toolsByServer.value
@@ -250,7 +255,7 @@ async function handleToggleEnabled(server: McpServerInfo) {
   const newValue = !server.raw_config.enabled
   try {
     const config = { ...server.raw_config, enabled: newValue }
-    const res = await mcpServerUpdate(server.name, config)
+    const res = await mcpServerUpdate(server.name, config, profileParam.value)
     if (res.ok) {
       message.success(t(newValue ? 'mcp.enabled' : 'mcp.disabled', { name: server.name }))
       const { [server.name]: _, ...rest } = toolsByServer.value
@@ -267,7 +272,7 @@ async function handleToggleEnabled(server: McpServerInfo) {
 
 async function handleTest(server: McpServerInfo) {
   try {
-    const res = await mcpServerTest(server.name)
+    const res = await mcpServerTest(server.name, profileParam.value)
     if (res.ok && res.tools) {
       message.success(t('mcp.testOk', { count: res.tools.length }), { duration: 3000 })
     } else {
@@ -278,6 +283,14 @@ async function handleTest(server: McpServerInfo) {
   }
 }
 
+
+// 切换管理目标后丢弃旧 profile 的数据再重新加载
+watch(managedProfile, () => {
+  _autoRetryCount = 0
+  servers.value = []
+  toolsByServer.value = {}
+  void loadServers()
+})
 
 void loadServers()
 
@@ -303,7 +316,7 @@ async function fetchToolsList() {
   if (!toolsModalServer.value) return
   fetchingTools.value = true
   try {
-    const res = await fetchMcpTools(toolsModalServer.value.name, true)
+    const res = await fetchMcpTools(toolsModalServer.value.name, true, profileParam.value)
     if (res.ok && res.results?.length) {
       const serverResult = res.results.find((r: { server: string }) => r.server === toolsModalServer.value!.name)
       if (serverResult?.tools) {
@@ -374,7 +387,7 @@ async function saveToolsVisibility() {
   }
 
   try {
-    const res = await mcpServerUpdate(server.name, config)
+    const res = await mcpServerUpdate(server.name, config, profileParam.value)
     if (res.ok) {
       message.success(t('mcp.toolsVisibilitySaved'))
       showToolsModal.value = false
@@ -395,6 +408,7 @@ async function saveToolsVisibility() {
     <header class="page-header">
       <h2 class="header-title">{{ t('mcp.title') }}</h2>
       <div class="header-actions">
+        <ProfileScopeSelect v-model="managedProfile" />
         <NButton size="small" quaternary :loading="loading" @click="_autoRetryCount = 0; loadServers()">
           {{ t('mcp.refresh') }}
         </NButton>

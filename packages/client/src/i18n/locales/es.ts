@@ -2012,6 +2012,11 @@ jobTriggered: 'Job ejecutado',
     hasEnv: 'Tiene .env',
     hasSoulMd: 'Tiene soul.md',
     noProfiles: 'No se encontraron perfiles. Crea uno para comenzar.',
+    scope: {
+      label: 'Perfil',
+      hint: 'Elige de qué perfil gestiona esta página los servidores MCP y las skills. No cambia tu perfil activo.',
+      differsHint: 'Estás gestionando {name}, no tu perfil activo ({active}).',
+    },
     avatar: {
       title: 'Avatar personalizado',
       customize: 'Personalizar avatar',

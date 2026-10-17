@@ -118,17 +118,20 @@ export async function fetchSkillUsageStats(days = 7): Promise<SkillUsageStats> {
   return request<SkillUsageStats>(`/api/hermes/skills/usage/stats?${params}`)
 }
 
-function targetQuery(target: SkillTarget = 'hermes'): string {
-  if (target === 'hermes') return ''
-  return `?target=${encodeURIComponent(target)}`
+function targetQuery(target: SkillTarget = 'hermes', profile?: string): string {
+  const params = new URLSearchParams()
+  if (target !== 'hermes') params.set('target', target)
+  if (profile) params.set('profile', profile)
+  const query = params.toString()
+  return query ? `?${query}` : ''
 }
 
 function encodeSkillPath(path: string): string {
   return path.split('/').map(segment => encodeURIComponent(segment)).join('/')
 }
 
-export async function fetchSkillContent(skillPath: string, target: SkillTarget = 'hermes'): Promise<string> {
-  const res = await request<{ content: string }>(`/api/hermes/skills/${encodeSkillPath(skillPath)}${targetQuery(target)}`)
+export async function fetchSkillContent(skillPath: string, target: SkillTarget = 'hermes', profile?: string): Promise<string> {
+  const res = await request<{ content: string }>(`/api/hermes/skills/${encodeSkillPath(skillPath)}${targetQuery(target, profile)}`)
   return res.content
 }
 
@@ -137,18 +140,19 @@ export async function saveSkillContent(
   skill: string,
   content: string,
   target: SkillTarget = 'hermes',
+  profile?: string,
 ): Promise<void> {
   const c = encodeURIComponent(category)
   const s = encodeURIComponent(skill)
-  await request(`/api/hermes/skills/${c}/${s}${targetQuery(target)}`, {
+  await request(`/api/hermes/skills/${c}/${s}${targetQuery(target, profile)}`, {
     method: 'PUT',
     body: JSON.stringify({ content }),
   })
 }
 
-export async function fetchSkillFiles(category: string, skill: string, target: SkillTarget = 'hermes'): Promise<SkillFileEntry[]> {
+export async function fetchSkillFiles(category: string, skill: string, target: SkillTarget = 'hermes', profile?: string): Promise<SkillFileEntry[]> {
   const path = encodeSkillPath(`${category}/${skill}`)
-  const res = await request<{ files: SkillFileEntry[] }>(`/api/hermes/skills/${path}/files${targetQuery(target)}`)
+  const res = await request<{ files: SkillFileEntry[] }>(`/api/hermes/skills/${path}/files${targetQuery(target, profile)}`)
   return res.files
 }
 
@@ -163,36 +167,40 @@ export async function saveMemory(section: 'memory' | 'user' | 'soul', content: s
   })
 }
 
-export async function toggleSkill(name: string, enabled: boolean): Promise<void> {
-  await request('/api/hermes/skills/toggle', {
+export async function toggleSkill(name: string, enabled: boolean, profile?: string): Promise<void> {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  await request(`/api/hermes/skills/toggle${query}`, {
     method: 'PUT',
     body: JSON.stringify({ name, enabled }),
   })
 }
 
-export async function pinSkillApi(name: string, pinned: boolean): Promise<void> {
-  await request('/api/hermes/skills/pin', {
+export async function pinSkillApi(name: string, pinned: boolean, profile?: string): Promise<void> {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  await request(`/api/hermes/skills/pin${query}`, {
     method: 'PUT',
     body: JSON.stringify({ name, pinned }),
   })
 }
 
-export async function fetchExternalDirs(): Promise<ExternalDirEntry[]> {
-  const res = await request<{ dirs: ExternalDirEntry[] }>('/api/hermes/skills/external-dirs')
+export async function fetchExternalDirs(profile?: string): Promise<ExternalDirEntry[]> {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  const res = await request<{ dirs: ExternalDirEntry[] }>(`/api/hermes/skills/external-dirs${query}`)
   return res.dirs ?? []
 }
 
-export async function saveExternalDirs(dirs: string[]): Promise<void> {
-  await request('/api/hermes/skills/external-dirs', {
+export async function saveExternalDirs(dirs: string[], profile?: string): Promise<void> {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  await request(`/api/hermes/skills/external-dirs${query}`, {
     method: 'PUT',
     body: JSON.stringify({ dirs }),
   })
 }
 
-export async function deleteSkillApi(category: string, name: string, target: SkillTarget = 'hermes'): Promise<void> {
+export async function deleteSkillApi(category: string, name: string, target: SkillTarget = 'hermes', profile?: string): Promise<void> {
   const c = encodeURIComponent(category)
   const n = encodeURIComponent(name)
-  await request(`/api/hermes/skills/${c}/${n}${targetQuery(target)}`, { method: 'DELETE' })
+  await request(`/api/hermes/skills/${c}/${n}${targetQuery(target, profile)}`, { method: 'DELETE' })
 }
 
 /**
@@ -201,13 +209,13 @@ export async function deleteSkillApi(category: string, name: string, target: Ski
  * starts with the skill folder name; we forward those paths verbatim as the
  * `filename` parameter so the server can reconstruct the directory tree.
  */
-export async function importSkill(files: File[], category?: string, target: SkillTarget = 'hermes'): Promise<{ name: string }> {
+export async function importSkill(files: File[], category?: string, target: SkillTarget = 'hermes', profile?: string): Promise<{ name: string }> {
   const baseUrl = getBaseUrlValue()
   const token = getApiKey()
   const headers: Record<string, string> = {}
   if (token) headers['Authorization'] = `Bearer ${token}`
-  const profile = getActiveProfileName()
-  if (profile) headers['X-Hermes-Profile'] = profile
+  const activeProfile = profile || getActiveProfileName()
+  if (activeProfile) headers['X-Hermes-Profile'] = activeProfile
 
   const formData = new FormData()
   for (const f of files) {

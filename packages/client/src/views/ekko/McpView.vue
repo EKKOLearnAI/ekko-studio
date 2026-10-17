@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import ProfileScopeSelect from '@/components/common/ProfileScopeSelect.vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NAlert,
   NButton,
@@ -15,6 +16,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import McpServerCard from '@/components/hermes/mcp/McpServerCard.vue'
 import { useMcpConfigInput } from '@/composables/useMcpConfigInput'
+import { useManagedProfileScope } from '@/composables/useManagedProfileScope'
 import type { McpServerInfo } from '@/api/hermes/mcp'
 import {
   createEkkoMcpServer,
@@ -30,6 +32,8 @@ import {
 
 const { t } = useI18n()
 const message = useMessage()
+const { managedProfile } = useManagedProfileScope()
+const profileParam = computed(() => managedProfile.value ?? undefined)
 const loading = ref(true)
 const saving = ref(false)
 const probingServers = ref<Set<string>>(new Set())
@@ -142,7 +146,7 @@ async function probeServer(server: EkkoMcpServerInfo, notify: boolean) {
   delete nextErrors[server.name]
   testErrors.value = nextErrors
   try {
-    const tools = await testEkkoMcpServer(server.name)
+    const tools = await testEkkoMcpServer(server.name, profileParam.value)
     if (probeVersions.get(server.name) !== version) return
     toolsByServer.value = { ...toolsByServer.value, [server.name]: tools }
     if (notify) message.success(t('ekkoConfig.testSuccess', { count: tools.length }))
@@ -167,7 +171,7 @@ async function loadServers() {
   loading.value = true
   error.value = ''
   try {
-    const loadedServers = await fetchEkkoMcpServers()
+    const loadedServers = await fetchEkkoMcpServers(profileParam.value)
     servers.value = loadedServers
     const enabledNames = new Set(
       loadedServers
@@ -224,9 +228,9 @@ async function saveServer() {
       const wrapped = entries.find(([name]) => name === editingName.value)
       const config = wrapped?.[1] ?? entries[0]?.[1]
       if (!config) throw new Error(t('mcp.invalidConfig'))
-      await updateEkkoMcpServer(editingName.value, config)
+      await updateEkkoMcpServer(editingName.value, config, profileParam.value)
     } else {
-      for (const [name, config] of entries) await createEkkoMcpServer(name.trim(), config)
+      for (const [name, config] of entries) await createEkkoMcpServer(name.trim(), config, profileParam.value)
     }
     showModal.value = false
     await loadServers()
@@ -240,7 +244,7 @@ async function saveServer() {
 
 async function toggleServer(server: EkkoMcpServerInfo, enabled: boolean) {
   try {
-    await setEkkoMcpServerEnabled(server.name, enabled)
+    await setEkkoMcpServerEnabled(server.name, enabled, profileParam.value)
     server.config.enabled = enabled
     delete toolsByServer.value[server.name]
     delete testErrors.value[server.name]
@@ -257,7 +261,7 @@ async function toggleFromCard(server: EkkoMcpServerInfo) {
 
 async function removeServer(server: EkkoMcpServerInfo) {
   try {
-    await deleteEkkoMcpServer(server.name)
+    await deleteEkkoMcpServer(server.name, profileParam.value)
     invalidateServerProbe(server.name)
     delete toolsByServer.value[server.name]
     await loadServers()
@@ -271,6 +275,14 @@ async function testServer(server: EkkoMcpServerInfo) {
   await probeServer(server, true)
 }
 
+// 切换管理目标后作废旧 profile 的探测结果再重新加载
+watch(managedProfile, () => {
+  for (const server of servers.value) invalidateServerProbe(server.name)
+  toolsByServer.value = {}
+  testErrors.value = {}
+  void loadServers()
+})
+
 onMounted(() => void loadServers())
 onBeforeUnmount(() => {
   for (const server of servers.value) invalidateServerProbe(server.name)
@@ -283,6 +295,7 @@ onBeforeUnmount(() => {
     <header class="page-header">
       <h2 class="header-title">{{ t('ekkoConfig.mcpTitle') }}</h2>
       <div class="header-actions">
+        <ProfileScopeSelect v-model="managedProfile" />
         <NButton size="small" quaternary :loading="loading" @click="loadServers">
           {{ t('ekkoConfig.refresh') }}
         </NButton>

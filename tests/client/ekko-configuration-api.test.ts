@@ -106,6 +106,28 @@ describe('Ekko configuration API', () => {
     ])
   })
 
+  it('appends the managed-profile query without changing default URLs', async () => {
+    const config = { command: 'node', args: ['server.mjs'], enabled: true }
+    await fetchEkkoSkills('release notes', 'work')
+    await fetchEkkoSkillFile('release-notes', 'references/checklist.md', 'work')
+    await toggleEkkoSkill('release-notes', false, 'work')
+    await fetchEkkoMcpServers('work')
+    await setEkkoMcpServerEnabled('ekko-studio-api', false, 'work')
+    await deleteEkkoMcpServer('local-tools', 'work')
+
+    expect(request.mock.calls.map(call => call[0])).toEqual([
+      '/api/ekko/skills?query=release%20notes&profile=work',
+      '/api/ekko/skills/release-notes/file?path=references%2Fchecklist.md&profile=work',
+      '/api/ekko/skills/release-notes/toggle?profile=work',
+      '/api/ekko/mcp/servers?profile=work',
+      '/api/ekko/mcp/servers/ekko-studio-api?profile=work',
+      '/api/ekko/mcp/servers/local-tools?profile=work',
+    ])
+    expect(request).toHaveBeenLastCalledWith('/api/ekko/mcp/servers/local-tools?profile=work', {
+      method: 'DELETE',
+    })
+  })
+
   it('loads and replaces the editable Ekko settings through one endpoint', async () => {
     const config = { runtime: { maxSteps: 90 } } as EkkoSettingsConfig
     await fetchEkkoSettings()

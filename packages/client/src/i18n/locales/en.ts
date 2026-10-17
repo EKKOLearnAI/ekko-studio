@@ -2468,6 +2468,11 @@ export default {
     hasEnv: 'Has .env',
     hasSoulMd: 'Has soul.md',
     noProfiles: 'No profiles found. Create one to get started.',
+    scope: {
+      label: 'Profile',
+      hint: 'Choose which profile\u2019s MCP servers and skills this page manages. This does not switch your active profile.',
+      differsHint: 'You are managing {name}, not your active profile ({active}).',
+    },
     avatar: {
       title: 'Custom Avatar',
       customize: 'Avatar',
