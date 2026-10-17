@@ -573,13 +573,13 @@ watch(
 .weixin-qr-loading {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .weixin-qr-hint {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-secondary;
 }
 
@@ -588,7 +588,7 @@ watch(
   align-items: center;
   justify-content: space-between;
   margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid $border-light;
+  padding-top: calc(12px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
 }
 </style>

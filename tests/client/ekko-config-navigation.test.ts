@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readPresetStyleSource as readFileSync } from './preset-style-source'
 import { describe, expect, it } from 'vitest'
 
 const readClientFile = (path: string) => readFileSync(`packages/client/src/${path}`, 'utf8')
@@ -62,7 +62,7 @@ describe('Ekko configuration navigation', () => {
     expect(settings).toContain('@update:value="saveImmediateChange"')
     expect(settings).toContain('saveDebouncedChange')
     expect(settings).not.toContain('watch(form')
-    expect(settings.match(/:hint="t\('ekkoConfig\.[A-Za-z]+Hint'\)"/g)).toHaveLength(34)
+    expect(settings.match(/:hint="t\('ekkoConfig\.[A-Za-z]+Hint'\)"/g)).toHaveLength(36)
     expect(settings).toContain('.input-sm { width: 120px; }')
     expect(settings).toContain('.input-md { width: 240px; }')
     expect(settings).toContain('.input-lg { width: 360px; }')

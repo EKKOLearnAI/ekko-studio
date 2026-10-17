@@ -132,8 +132,8 @@ export async function reconcileHermesSessionHistory(
   options: HermesHistoryReconciliationOptions = {},
 ): Promise<HermesHistoryReconciliationResult> {
   const local = getSessionDetail(sessionId)
-  // A local clear is authoritative: native history still contains deleted turns.
-  // Without a native reset boundary, importing it again would undo that clear.
+  // A local history edit is authoritative: native history still contains deleted turns.
+  // Without a native reset boundary, importing it again would undo that edit.
   if (!local || !HERMES_LOCAL_SOURCES.has(local.source) || Number(local.history_revision || 0) > 0) {
     return { changed: false, added: 0 }
   }

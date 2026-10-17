@@ -13,6 +13,10 @@ npm run test:e2e
 npm run build
 ```
 
+- `npm run pack:tos -- --webui-dir /absolute/staged/webui` adds the optional
+  TOS 7 x86_64 headless Deb target. See `packages/tos/README.md` for production
+  dependency staging, runtime requirements and device acceptance.
+
 - `npm run dev` starts the Vite client and Koa server together.
 - `npm run test` runs Vitest unit tests.
 - `npm run test:coverage` is what the Build workflow runs before `npm run build`.
@@ -46,6 +50,9 @@ npm run build
 - Add user-facing strings to all locale files.
 - Keep component styles scoped with SCSS unless the style is intentionally global.
 - Match existing Naive UI patterns and avoid adding a new UI library.
+- Follow `docs/harness/frontend-ui.md` for theme ownership, wallpaper transparency,
+  scoped exceptions and browser verification. `npm run harness:check` rejects new
+  unowned backgrounds, literal colors and local Naive UI fill overrides.
 
 ## Server Rules
 

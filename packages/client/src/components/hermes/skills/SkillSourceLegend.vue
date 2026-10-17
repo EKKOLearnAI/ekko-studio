@@ -49,20 +49,20 @@ function toggle(filter: SkillSourceFilter) {
 .source-legend {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
 .legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: calc(4px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
   white-space: nowrap;
-  padding: 2px 6px;
-  border: 1px solid transparent;
-  border-radius: 10px;
+  padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid transparent;
+  border-radius: var(--radius-component, 10px);
   background: none;
   cursor: pointer;
   transition: all $transition-fast;
@@ -93,7 +93,7 @@ function toggle(filter: SkillSourceFilter) {
 .dot-external { background: #f59e0b; }
 
 .modified-icon {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $warning;
   opacity: 0.7;
 }

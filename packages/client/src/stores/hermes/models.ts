@@ -67,6 +67,11 @@ export const useModelsStore = defineStore('models', () => {
     }
   }
 
+  async function fetchProviderCatalog(provider: string) {
+    const profile = getModelsPageProfile() || useProfilesStore().activeProfileName || 'default'
+    return systemApi.fetchProviderModelCatalog(provider, profile)
+  }
+
   async function setDefaultModel(modelId: string, provider: string) {
     await systemApi.updateDefaultModel({ default: modelId, provider })
     defaultModel.value = modelId
@@ -150,6 +155,7 @@ export const useModelsStore = defineStore('models', () => {
     builtinProviders,
     allModels,
     fetchProviders,
+    fetchProviderCatalog,
     refreshModelCache,
     setDefaultModel,
     setDefaultProvider,

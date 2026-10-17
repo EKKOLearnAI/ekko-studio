@@ -221,7 +221,7 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
-  background: $bg-main-surface;
+  background: var(--theme-content-bg, $bg-main-surface);
 }
 
 .coding-agent-skills-content,
@@ -234,7 +234,7 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
 .coding-agent-settings-content {
   flex: 1;
   min-height: 0;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
   overflow: hidden;
 }
 
@@ -247,7 +247,7 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
 .settings-editors {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   height: 100%;
   min-height: 0;
 }
@@ -258,17 +258,17 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  padding: 16px;
-  border: 1px solid $border-color;
-  border-radius: 10px;
-  background: $bg-card;
+  padding: calc(16px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 10px);
+  background: var(--theme-card-bg, $bg-card);
 }
 
 .editor-toolbar,
 .editor-heading {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .editor-toolbar {
@@ -284,7 +284,7 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
 .editor-heading h3 {
   margin: 0;
   color: $text-primary;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
 }
 
@@ -317,7 +317,7 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
 
 @media (max-width: $breakpoint-mobile) {
   .coding-agent-settings-content {
-    padding: 12px;
+    padding: calc(12px * var(--spacing-scale, 1));
     overflow-y: auto;
   }
 

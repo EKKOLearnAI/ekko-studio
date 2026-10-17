@@ -60,7 +60,7 @@ test('keeps global navigation and account controls available when the conversati
   await expect(page.locator('.session-search-modal')).toBeVisible()
   await page.keyboard.press('Escape')
   await sidebar.getByRole('button', { name: 'New Chat', exact: true }).click()
-  await expect(page.locator('.new-chat-drawer')).toBeVisible()
+  await expect(page.locator('.new-chat-page')).toBeVisible()
 })
 
 test('opens the two-column mobile drawer and restores the desktop rail after resizing', async ({ page }) => {
@@ -79,7 +79,7 @@ test('opens the two-column mobile drawer and restores the desktop rail after res
   const sidebar = drawer.locator('.session-list')
   await expect(rail.getByRole('link', { name: 'Group Chat', exact: true })).toBeVisible()
   await expect(sidebar.locator('.session-items')).toBeVisible()
-  await expect(drawer).toHaveCSS('width', '390px')
+  await expect(drawer).toHaveCSS('width', '351px')
   await expect(drawer).toHaveCSS('border-top-right-radius', '5px')
   await expect.poll(async () => (await rail.boundingBox())?.x).toBe(0)
   expect(await rail.boundingBox()).toMatchObject({ width: 64, height: 800 })
@@ -124,6 +124,7 @@ test('navigates through the shared mobile rail and closes it on leaf pages', asy
     ['Device connections', '.connections-panel'],
     ['Agent Manager', '.agent-manager-panel'],
     ['Models', '.models-view'],
+    ['Usage', '.usage-view'],
   ]) {
     await page.getByRole('button', { name: 'Menu', exact: true }).click()
     await expect(drawer).toBeVisible()
@@ -137,6 +138,33 @@ test('navigates through the shared mobile rail and closes it on leaf pages', asy
   await drawer.getByRole('link', { name: 'Chat', exact: true }).click()
   await expect(page).toHaveURL(/#\/hermes\/chat$/)
   await expect(drawer.locator('.session-list .session-items')).toBeVisible()
+})
+
+test('places Usage below Models as a standalone page with its own active navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto('/#/hermes/settings')
+  const rail = page.locator('.studio-navigation-rail')
+  const usage = rail.getByRole('link', { name: 'Usage', exact: true })
+  await expect(usage).toHaveAttribute('href', '#/hermes/usage')
+  expect(await usage.evaluate(element => element.previousElementSibling?.getAttribute('href'))).toBe('#/hermes/models')
+  await expect(page.locator('aside.sidebar').getByRole('link', { name: 'Usage', exact: true })).toHaveCount(0)
+  await usage.click()
+  await expect(page.locator('.usage-view')).toBeVisible()
+  await expect(page.locator('.usage-content')).toHaveAttribute('aria-busy', 'false')
+  await expect(page.locator('.usage-content [role="alert"]')).toHaveCount(0)
+  await expect(usage).toHaveAttribute('aria-current', 'page')
+  await expect(rail.getByRole('link', { name: 'Settings', exact: true })).not.toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('aside.sidebar')).toHaveCount(0)
+  await page.reload()
+  await expect(usage).toHaveAttribute('aria-current', 'page')
+  await page.setViewportSize({ width: 390, height: 800 })
+  await page.getByRole('button', { name: 'Menu', exact: true }).click()
+  const drawer = page.locator('.studio-mobile-drawer')
+  await expect(drawer).toHaveCSS('width', '64px')
+  await expect(drawer.getByRole('link', { name: 'Usage', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(drawer.locator('aside.sidebar')).toHaveCount(0)
+  await drawer.getByRole('link', { name: 'Usage', exact: true }).click()
+  await expect(drawer).not.toBeVisible()
 })
 
 test('keeps both navigation levels while switching lists and settings on mobile', async ({ page }) => {
@@ -316,7 +344,7 @@ test('scrolls a populated list within a small phone drawer and closes after sele
   await expect(list.getByRole('link', { name: /Mobile conversation 23/ }).last()).toBeAttached()
   await list.getByRole('link', { name: /Mobile conversation 23/ }).last().scrollIntoViewIfNeeded()
   await expect(drawer.getByRole('link', { name: 'Settings', exact: true })).toBeInViewport()
-  expect(await drawer.boundingBox()).toMatchObject({ x: 0, y: 0, width: 320, height: 568 })
+  expect(await drawer.boundingBox()).toMatchObject({ x: 0, y: 0, width: 288, height: 568 })
   expect(await list.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
   await page.screenshot({ path: '/tmp/studio-mobile-two-level-small.png', animations: 'disabled' })
   await list.getByRole('link', { name: /Mobile conversation 23/ }).last().click()

@@ -9,6 +9,7 @@ import '../../packages/server/src/bootstrap/coding-agent-adapters'
 import { CodingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
 import { getRecordedUsageTotals } from '../../packages/server/src/modules/studio/repositories/usage-store'
+import { getSessionDetail } from '../../packages/server/src/modules/studio/public/sessions'
 
 vi.mock('child_process', async importOriginal => ({
   ...await importOriginal<typeof import('child_process')>(),
@@ -63,6 +64,41 @@ describe('OpenCode turns', () => {
     child.exitCode = code
     child.emit('close', code)
   }
+
+  it.each(['global', 'scoped'] as const)('shows and persists native nested API errors in %s mode', async mode => {
+    start(mode)
+    manager.send(sessionId, 'work')
+    const message = 'Upstream request failed: Model is unavailable.'
+    child.stdout.write(`${JSON.stringify({ type: 'error', sessionID: 'ses_native', error: {
+      name: 'APIError', data: { message, statusCode: 400, isRetryable: false,
+        responseHeaders: { authorization: 'private-native-secret' }, responseBody: 'private-upstream-body' },
+    } })}\n`)
+    close(1)
+    await vi.waitFor(() => expect(emitted).toHaveBeenCalledWith(sessionId, 'run.failed', expect.objectContaining({ error: message })))
+    const failures = emitted.mock.calls.filter(([, event]) => event === 'run.failed')
+    expect(failures).toHaveLength(1)
+    expect(JSON.stringify(failures)).not.toContain('[object Object]')
+    expect(JSON.stringify(failures)).not.toContain('private-native-secret')
+    expect(JSON.stringify(failures)).not.toContain('private-upstream-body')
+    const stored = getSessionDetail(sessionId)?.messages.filter(row => row.role === 'assistant')
+    expect(stored).toEqual([expect.objectContaining({ content: message, finish_reason: 'error' })])
+  })
+
+  it.each([
+    ['native string', 'Native request failed', 'Native request failed'],
+    ['flat message', { message: 'Request failed' }, 'Request failed'],
+    ['nested error', { error: { data: { message: 'Provider failed' } } }, 'Provider failed'],
+    ['named error without text', { name: 'ProviderModelNotFoundError', data: { modelID: 'missing' } }, 'ProviderModelNotFoundError'],
+    ['unknown object', { responseHeaders: { authorization: 'private-secret' } }, 'OpenCode run failed'],
+  ])('renders %s without object coercion', async (_label, error, message) => {
+    start()
+    manager.send(sessionId, 'work')
+    child.stdout.write(`${JSON.stringify({ type: 'error', error })}\n`)
+    close(1)
+    await vi.waitFor(() => expect(emitted).toHaveBeenCalledWith(sessionId, 'run.failed', expect.objectContaining({ error: message })))
+    expect(JSON.stringify(emitted.mock.calls)).not.toContain('[object Object]')
+    expect(JSON.stringify(emitted.mock.calls)).not.toContain('private-secret')
+  })
 
   it('sends option-like text through stdin while retaining image file args', () => {
     start()

@@ -913,7 +913,7 @@ onBeforeUnmount(() => {
 
 .group-message {
     display: flex;
-    padding: 2px 0;
+    padding: calc(2px * var(--spacing-scale, 1)) 0;
     min-width: 0;
     max-width: 100%;
     box-sizing: border-box;
@@ -937,7 +937,7 @@ onBeforeUnmount(() => {
     &.agent .msg-content.agent-error {
         color: $error;
         background-color: rgba(var(--error-rgb), 0.06);
-        border: 1px solid rgba(var(--error-rgb), 0.2);
+        border: var(--border-width, 1px) solid rgba(var(--error-rgb), 0.2);
 
         :deep(.markdown-body),
         :deep(.markdown-body p),
@@ -968,11 +968,11 @@ onBeforeUnmount(() => {
             background: transparent;
             border: 0;
             border-radius: 0;
-            padding: 8px 10px;
+            padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
         }
 
         .message-meta {
-            padding-inline: 10px;
+            padding-inline: calc(10px * var(--spacing-scale, 1));
         }
     }
 }
@@ -981,18 +981,18 @@ onBeforeUnmount(() => {
     align-items: flex-start;
 
     &.embedded {
-        padding: 4px 8px;
+        padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     }
 }
 
 .tool-line {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 4px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding: calc(2px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     min-width: 0;
     max-width: 100%;
     box-sizing: border-box;
@@ -1009,7 +1009,7 @@ onBeforeUnmount(() => {
 .tool-interrupted-badge {
     flex: 0 0 auto;
     color: $text-muted;
-    font-size: 10px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
 }
 
 .tool-chevron {
@@ -1030,7 +1030,7 @@ onBeforeUnmount(() => {
 .tool-name {
     flex: 0 1 auto;
     min-width: 0;
-    font-family: $font-code;
+    font-family: var(--font-code, $font-code);
     color: $text-muted;
     font-weight: 400;
     overflow: hidden;
@@ -1059,12 +1059,12 @@ onBeforeUnmount(() => {
 }
 
 .tool-error-badge {
-    font-size: 9px;
+    font-size: calc(var(--font-size-base, 14px) * 9 / 14);
     color: $error;
     background: rgba(var(--error-rgb), 0.08);
-    padding: 0 4px;
-    border-radius: 3px;
-    line-height: 14px;
+    padding: 0 calc(4px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 3px);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 14 / 14));
     margin-inline-start: 4px;
 }
 
@@ -1072,7 +1072,7 @@ onBeforeUnmount(() => {
     margin-inline-start: 16px;
     margin-top: 2px;
     border-inline-start: 2px solid $border-light;
-    padding-inline-start: 10px;
+    padding-inline-start: calc(10px * var(--spacing-scale, 1));
 }
 
 .assistant-workspace-change {
@@ -1086,7 +1086,7 @@ onBeforeUnmount(() => {
 .tool-detail-label {
     margin-bottom: 2px;
     color: $text-muted;
-    font-size: 10px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
     font-weight: 600;
     letter-spacing: 0.3px;
     text-transform: uppercase;
@@ -1102,7 +1102,7 @@ onBeforeUnmount(() => {
     }
 
     :deep(code.hljs) {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         max-height: 300px;
         overflow-y: auto;
         white-space: pre-wrap;
@@ -1113,12 +1113,12 @@ onBeforeUnmount(() => {
 .tool-detail-reasoning {
     max-height: 300px;
     overflow-y: auto;
-    padding: 8px 10px;
-    border: 1px solid $border-light;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-light;
     border-radius: $radius-sm;
     background: rgba(var(--text-primary-rgb), 0.035);
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
     :deep(.markdown-body > :first-child) {
         margin-top: 0;
@@ -1146,11 +1146,11 @@ onBeforeUnmount(() => {
 .msg-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding-bottom: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding-bottom: calc(6px * var(--spacing-scale, 1));
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 22px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 22 / 14));
 
     .sender-name {
         min-width: 0;
@@ -1170,7 +1170,7 @@ onBeforeUnmount(() => {
     }
 
     .agent-desc {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         color: $text-muted;
         font-style: italic;
     }
@@ -1178,7 +1178,7 @@ onBeforeUnmount(() => {
 
 .msg-time,
 .message-time {
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     color: var(--text-muted);
     opacity: 0.6;
     user-select: none;
@@ -1187,10 +1187,10 @@ onBeforeUnmount(() => {
 .message-meta {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     margin-top: 4px;
-    padding: 0 4px;
-    padding-bottom: 4px;
+    padding: 0 calc(4px * var(--spacing-scale, 1));
+    padding-bottom: calc(4px * var(--spacing-scale, 1));
     color: $text-muted;
     opacity: 1;
 }
@@ -1292,12 +1292,12 @@ onBeforeUnmount(() => {
 }
 
 .msg-content {
-    padding: 10px 14px;
+    padding: calc(10px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
     font-size: var(--font-size-base);
-    line-height: 1.65;
+    line-height: var(--line-height, 1.65);
     color: $text-primary;
-    border-radius: 10px;
-    background-color: $msg-user-bg;
+    border-radius: var(--radius-component, 10px);
+    background-color: var(--theme-userMessage-bg, $msg-user-bg);
     min-width: 0;
     max-width: 100%;
     box-sizing: border-box;
@@ -1315,7 +1315,7 @@ onBeforeUnmount(() => {
     &.agent-error {
         color: $error;
         background-color: rgba(var(--error-rgb), 0.06);
-        border: 1px solid rgba(var(--error-rgb), 0.2);
+        border: var(--border-width, 1px) solid rgba(var(--error-rgb), 0.2);
 
         :deep(.markdown-body),
         :deep(.markdown-body p),
@@ -1336,16 +1336,16 @@ onBeforeUnmount(() => {
 :global(html.theme-has-custom-background .group-message:not(.embedded) .msg-content:not(.agent-error)),
 :global(html.theme-has-custom-background .group-message.agent:not(.embedded) .msg-content.agent-content:not(.agent-error)),
 :global(html.theme-has-custom-background .group-message.self:not(.embedded) .msg-content:not(.agent-error)) {
-    background-color: rgba(var(--bg-main-surface-rgb), 0.78);
-    border: 1px solid rgba(var(--text-primary-rgb), 0.18);
-    -webkit-backdrop-filter: blur(8px) saturate(110%);
-    backdrop-filter: blur(8px) saturate(110%);
+    background-color: var(--message-theme-bg, rgba(var(--bg-main-surface-rgb), 0.78));
+    border: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.18);
+    -webkit-backdrop-filter: var(--message-theme-filter, blur(8px) saturate(110%));
+    backdrop-filter: var(--message-theme-filter, blur(8px) saturate(110%));
 }
 
 .msg-attachments {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     margin-bottom: 8px;
 }
 
@@ -1353,7 +1353,7 @@ onBeforeUnmount(() => {
     border-radius: $radius-sm;
     overflow: hidden;
     background-color: $bg-secondary;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
 
     &.image {
         width: 96px;
@@ -1386,11 +1386,11 @@ onBeforeUnmount(() => {
 .msg-attachment-video-footer {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
+    gap: calc(8px * var(--spacing-scale, 1));
+    padding: calc(7px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     color: $text-secondary;
     background: $bg-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
     .att-name {
         min-width: 0;
@@ -1403,17 +1403,17 @@ onBeforeUnmount(() => {
     .att-size {
         flex-shrink: 0;
         color: $text-muted;
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     }
 }
 
 .msg-attachment-file {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     min-width: 140px;
     max-width: 220px;
-    padding: 8px 10px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     color: $text-secondary;
     text-decoration: none;
 
@@ -1423,28 +1423,28 @@ onBeforeUnmount(() => {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 12px;
+        font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     }
 
     .att-size {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         color: $text-muted;
     }
 }
 
 .thinking-block {
     margin-bottom: 8px;
-    padding: 4px 0;
-    border-bottom: 1px dashed $border-light;
+    padding: calc(4px * var(--spacing-scale, 1)) 0;
+    border-bottom: var(--border-width, 1px) dashed $border-light;
 
     .thinking-header {
         display: flex;
         align-items: center;
-        gap: 6px;
-        font-size: 11px;
+        gap: calc(6px * var(--spacing-scale, 1));
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         color: $text-muted;
         cursor: pointer;
-        padding: 2px 4px;
+        padding: calc(2px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1));
         border-radius: $radius-sm;
         user-select: none;
 
@@ -1463,7 +1463,7 @@ onBeforeUnmount(() => {
     }
 
     .thinking-icon {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         flex-shrink: 0;
     }
 
@@ -1479,9 +1479,9 @@ onBeforeUnmount(() => {
 
     .thinking-body {
         margin-top: 6px;
-        padding: 6px 10px;
+        padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
         border-inline-start: 2px solid $border-light;
-        font-size: 13px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
         opacity: 0.85;
         font-style: italic;
 
@@ -1493,8 +1493,8 @@ onBeforeUnmount(() => {
 
 .streaming-dots {
     display: flex;
-    gap: 4px;
-    padding: 4px 0;
+    gap: calc(4px * var(--spacing-scale, 1));
+    padding: calc(4px * var(--spacing-scale, 1)) 0;
 
     span {
         width: 6px;
@@ -1536,7 +1536,7 @@ onBeforeUnmount(() => {
         .msg-content,
         &.agent .msg-content.agent-content,
         &.self .msg-content {
-            padding: 10px 14px;
+            padding: calc(10px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
         }
     }
 }

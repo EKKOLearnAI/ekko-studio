@@ -1,6 +1,7 @@
 import { requireAdmin, requireSuperAdmin } from '../../studio/public/auth'
 import Router from '@koa/router'
 import * as ctrl from '../controllers/agents'
+import { models } from '../controllers/models'
 import * as presets from '../controllers/dsh-agent-presets'
 import * as plugins from '../controllers/dsh-plugins'
 
@@ -24,6 +25,7 @@ codingAgentRoutes.delete('/api/coding-agents/dsh/ui-session/:id', requireSuperAd
 codingAgentRoutes.get('/api/coding-agents/update-policies', requireAdmin, ctrl.updatePolicies)
 codingAgentRoutes.put('/api/coding-agents/:id/update-policy', requireAdmin, ctrl.setUpdatePolicy)
 codingAgentRoutes.get('/api/coding-agents', ctrl.status)
+codingAgentRoutes.get('/api/coding-agents/models', models)
 codingAgentRoutes.post('/api/coding-agents/:id/install', ctrl.install)
 codingAgentRoutes.post('/api/coding-agents/:id/check-update', ctrl.checkUpdate)
 codingAgentRoutes.post('/api/coding-agents/:id/launch/prepare', ctrl.prepareLaunch)

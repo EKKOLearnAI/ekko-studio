@@ -34,5 +34,5 @@ async function change(body: { action: 'install'; packageSpec: string } | { actio
 <style scoped lang="scss">
 @use '@/styles/plugins-page' as plugins-page;
 @include plugins-page.layout;
-h3 { display: flex; gap: 10px; align-items: center; margin: 0 0 14px; }.install-row { display: flex; gap: 10px; }.hint { padding-block: 8px; font-size: 12px; opacity: .7; }.web-packages { margin-bottom: 24px; }
+h3 { display: flex; gap: calc(10px * var(--spacing-scale, 1)); align-items: center; margin: 0 0 14px; }.install-row { display: flex; gap: calc(10px * var(--spacing-scale, 1)); }.hint { padding-block: calc(8px * var(--spacing-scale, 1)); font-size: calc(var(--font-size-base, 14px) * 12 / 14); opacity: .7; }.web-packages { margin-bottom: 24px; }
 </style>

@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs'
+import { readPresetStyleSource as readFileSync } from './preset-style-source'
 import { describe, expect, it } from 'vitest'
 
 const readClientFile = (path: string) => readFileSync(`packages/client/src/${path}`, 'utf8')
@@ -177,9 +177,9 @@ describe('client style system', () => {
     expect(useTheme).toContain(
       "document.documentElement.classList.toggle('theme-has-custom-background', active)",
     )
-    expect(globalStyles).toMatch(
-      /html\.theme-has-custom-background\s*\{[\s\S]*\.n-base-select-menu,[\s\S]*\.n-dropdown-menu,[\s\S]*\.n-cascader-menu,[\s\S]*background-color: rgba\(var\(--bg-main-surface-rgb\), 0\.72\) !important;[\s\S]*backdrop-filter: blur\(8px\) saturate\(110%\);/,
-    )
+    // Popup behavior is covered by theme-overlays.spec.ts; global styles must
+    // load the shared regional mapping for teleported surfaces.
+    expect(globalStyles).toContain("@use 'theme-surfaces'")
   })
 
 })

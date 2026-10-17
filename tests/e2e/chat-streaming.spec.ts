@@ -93,6 +93,75 @@ test('sends a chat run and renders streamed Socket.IO response events', async ({
   expect(api.unexpectedRequests).toEqual([])
 })
 
+for (const width of [1280, 390]) {
+  test(`card customization preserves tool message alignment at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await authenticate(page)
+    const api = await mockHermesApi(page)
+    await mockChatSocket(page)
+    await page.goto('/#/hermes/chat')
+    await sendChatMessage(page, 'Check the tool layout')
+    const { run } = await waitForRun(page)
+    await page.evaluate((sid) => {
+      const socket = (window as any).__PW_CHAT_SOCKET__.latest
+      const context = { session_id: sid, run_id: 'theme-layout' }
+      socket.__trigger('run.started', { ...context, event: 'run.started' })
+      socket.__trigger('tool.started', { ...context, event: 'tool.started', tool_call_id: 'layout-tool', tool: 'read_file', arguments: { path: 'layout.txt' } })
+      socket.__trigger('tool.completed', { ...context, event: 'tool.completed', tool_call_id: 'layout-tool', tool: 'read_file', output: 'Ready' })
+      socket.__trigger('run.completed', { ...context, event: 'run.completed', output: 'Layout checked.' })
+      ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = { [sid]: { session_id: sid, isWorking: false, events: [] } }
+    }, run.session_id)
+    const runCard = page.locator('.tool-run-card[data-run-id="theme-layout"]')
+    const tool = runCard.locator('.message.tool')
+    const toolInset = () => tool.evaluate(element => element.getBoundingClientRect().left - element.parentElement!.getBoundingClientRect().left)
+    const openTools = async () => {
+      await expect(page.locator('.chat-view')).toHaveAttribute('aria-busy', 'false')
+      const header = runCard.locator('.tool-run-header')
+      if (await header.getAttribute('aria-expanded') !== 'true') await header.click()
+      await expect(header).toHaveAttribute('aria-expanded', 'true')
+      await expect(tool).toBeVisible()
+    }
+    await openTools()
+    const initialInset = await toolInset()
+
+    await page.goto('/#/hermes/theme')
+    await page.getByTestId('theme-scope').selectOption('card')
+    await page.getByTestId('theme-card-opacity').fill('0.4')
+    await page.getByTestId('theme-card-opacity').dispatchEvent('change')
+    await expect(page.locator('html')).toHaveClass(/theme-card-bg/)
+    await page.goto('/#/hermes/chat')
+    await openTools()
+    expect(await toolInset()).toBeCloseTo(initialInset, 1)
+    await tool.locator('.tool-line').click()
+    await expect(tool.locator('.tool-details')).toContainText('Ready')
+    expect(await toolInset()).toBeCloseTo(initialInset, 1)
+
+    await page.goto('/#/hermes/theme')
+    await page.getByTestId('theme-global-chatWidth').fill('600')
+    await page.getByTestId('theme-global-chatWidth').dispatchEvent('change')
+    await page.goto('/#/hermes/chat')
+    await openTools()
+    expect(await toolInset()).toBeCloseTo(initialInset, 1)
+    const rows = page.locator('.message-list-shell .virtual-row')
+    const rowWidths = await rows.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().width))
+    expect(rowWidths.length).toBeGreaterThanOrEqual(3)
+    for (const rowWidth of rowWidths) {
+      expect(rowWidth).toBeLessThanOrEqual(600)
+      expect(rowWidth).toBeCloseTo(rowWidths[0], 1)
+    }
+    if (width === 1280) expect(rowWidths[0]).toBe(600)
+    await page.screenshot({ path: `/tmp/studio-themed-tool-alignment-${width}.png` })
+
+    await page.goto('/#/hermes/theme')
+    await page.getByRole('button', { name: 'Reset Chat width', exact: true }).click()
+    await page.goto('/#/hermes/chat')
+    await openTools()
+    expect(await toolInset()).toBeCloseTo(initialInset, 1)
+    if (width === 1280) expect((await rows.first().boundingBox())!.width).toBeGreaterThan(600)
+    expect(api.unexpectedRequests).toEqual([])
+  })
+}
+
 test('freezes the current reasoning between the thinking animation and its tool call', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const api = await mockHermesApi(page)
@@ -1604,7 +1673,7 @@ test('restores named resumed tool traces from assistant tool calls after session
   expect(api.unexpectedRequests).toEqual([])
 })
 
-test('restores per-turn usage cards on resume and reload, including a summary-only reply', async ({ page }) => {
+for (const showCost of [true, false]) test(`restores usage history with Show Cost ${showCost ? 'enabled' : 'disabled'}`, async ({ page }) => {
   const sessionId = 'session-history-run-usage'
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await page.addInitScript((sid) => {
@@ -1627,7 +1696,7 @@ test('restores per-turn usage cards on resume and reload, including a summary-on
       ] },
     }
   }, sessionId)
-  const api = await mockHermesApi(page, { sessions: [{
+  const api = await mockHermesApi(page, { channelConfig: { display: { show_cost: showCost } }, sessions: [{
     id: sessionId, source: 'api_server', model: 'test-model', title: 'Run usage history', preview: 'First answer.',
     started_at: 1, ended_at: 4, last_active: 4, message_count: 4, tool_call_count: 0,
     input_tokens: 33475, output_tokens: 386, cache_read_tokens: 32640, cache_write_tokens: 0,
@@ -1639,6 +1708,11 @@ test('restores per-turn usage cards on resume and reload, including a summary-on
   const cards = page.locator('.run-usage-card')
   for (const reload of [false, true]) {
     if (reload) await page.reload()
+    if (!showCost) {
+      await expect(page.getByText('First answer.', { exact: true })).toBeVisible()
+      await expect(cards).toHaveCount(0)
+      continue
+    }
     await expect(cards).toHaveCount(2)
     await expect(cards.first().locator('.run-usage-value').first()).toHaveText('32')
     await expect(cards.last().locator('.run-usage-value').first()).toHaveText('354')
@@ -1712,4 +1786,39 @@ test('shows completed run usage above diff with matching colors and no disclosur
   await expect(card.last().locator('.run-usage-value').first()).toHaveText('12')
   await expect(card.last()).toContainText('Est. speed')
   await expect(card.last()).toContainText('≈ 2.4 tok/s')
+})
+
+test('keeps stored unclosed leading thinking text out of the reply after reload', async ({ page }) => {
+  const sessionId = 'unclosed-thinking-history'
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript((sid) => {
+    ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = {
+      [sid]: { session_id: sid, isWorking: false, events: [], messages: [{
+        id: 0, session_id: sid, role: 'user', content: 'Stored reasoning regression',
+        timestamp: 0, tool_call_id: null, tool_calls: null, tool_name: null,
+        token_count: null, finish_reason: null, reasoning: null,
+      }, {
+        id: 1, session_id: sid, role: 'assistant', content: '\n <thinking>synthetic reasoning only',
+        timestamp: 1, tool_call_id: null, tool_calls: null, tool_name: null,
+        token_count: null, finish_reason: 'stop', reasoning: null,
+      }] },
+    }
+  }, sessionId)
+  const api = await mockHermesApi(page, { sessions: [{
+    id: sessionId, source: 'api_server', model: 'test-model', title: 'Thinking history', preview: '',
+    started_at: 1, ended_at: 1, last_active: 1, message_count: 2, tool_call_count: 0,
+    input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
+    reasoning_tokens: 0, billing_provider: 'test-provider', estimated_cost_usd: 0,
+    actual_cost_usd: null, cost_status: 'none', workspace: null,
+  }] })
+  await mockChatSocket(page)
+  await page.goto('/#/hermes/chat')
+  for (const reload of [false, true]) {
+    if (reload) await page.reload()
+    await expect(page.locator('p').filter({ hasText: /^Stored reasoning regression$/ })).toBeVisible()
+    await expect(page.getByText('synthetic reasoning only', { exact: true })).toHaveCount(0)
+    await expect(page.locator('.message.assistant')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0)
+  }
+  expect(api.unexpectedRequests).toEqual([])
 })

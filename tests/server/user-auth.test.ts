@@ -490,6 +490,7 @@ describe('user auth tables and middleware', () => {
     expect(ctx.body.theme).toEqual({
       fontSize: 14,
       textColor: null,
+      appearance: { global: {}, regions: {} },
       accentColor: null,
       background: null,
       updatedAt: 0,

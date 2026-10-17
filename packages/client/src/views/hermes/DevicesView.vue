@@ -488,7 +488,7 @@ onMounted(() => {
 .devices-view--embedded {
   .page-header {
     min-height: 68px;
-    padding: 12px 20px;
+    padding: calc(12px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
   }
 }
 
@@ -498,15 +498,15 @@ onMounted(() => {
   p {
     margin: 2px 0 0;
     color: $text-muted;
-    font-size: 12px;
-    line-height: 18px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
   }
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -519,11 +519,11 @@ onMounted(() => {
 .header-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   align-items: center;
   color: $text-muted;
-  font-size: 12px;
-  line-height: 1.2;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.2);
 }
 
 .devices-spin {
@@ -534,7 +534,7 @@ onMounted(() => {
 .devices-content {
   height: 100%;
   overflow: auto;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
 }
 
 .empty-state {
@@ -544,29 +544,29 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   color: $text-muted;
 }
 
 .empty-title {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
 }
 
 .device-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .device-card {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   min-height: 220px;
-  padding: 14px;
-  border: 1px solid $border-color;
+  padding: calc(14px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
 }
 
 .device-card-header,
@@ -574,7 +574,7 @@ onMounted(() => {
 .device-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .device-card-header {
@@ -587,7 +587,7 @@ onMounted(() => {
 
 .device-name {
   color: $text-primary;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -596,7 +596,7 @@ onMounted(() => {
 
 .device-link {
   color: $accent-primary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   text-decoration: none;
 
   &:hover {
@@ -606,24 +606,24 @@ onMounted(() => {
 
 .device-meta-list {
   display: grid;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   margin: 0;
 
   div {
     display: grid;
     grid-template-columns: 92px minmax(0, 1fr);
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
   }
 
   dt {
     color: $text-muted;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 
   dd {
     margin: 0;
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -636,21 +636,21 @@ onMounted(() => {
 }
 
 .request-empty {
-  padding: 40px 0;
+  padding: calc(40px * var(--spacing-scale, 1)) 0;
   color: $text-muted;
   text-align: center;
 }
 
 .request-list {
   display: grid;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .request-item {
   display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid $border-color;
+  gap: calc(10px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
 }
 
@@ -661,42 +661,42 @@ onMounted(() => {
 
 .request-meta {
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .request-status-row {
   display: flex;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   flex-wrap: wrap;
   margin-top: 8px;
 }
 
 .request-actions {
   display: flex;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
 .pairing-code-dialog {
   width: min(420px, calc(100vw - 32px));
   display: grid;
-  gap: 14px;
-  padding: 20px;
+  gap: calc(14px * var(--spacing-scale, 1));
+  padding: calc(20px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
 }
 
 .pairing-code-title {
   color: $text-primary;
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
   font-weight: 600;
 }
 
 .pairing-code-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 @media (max-width: $breakpoint-mobile) {
@@ -706,11 +706,11 @@ onMounted(() => {
   }
 
   .devices-content {
-    padding: 12px;
+    padding: calc(12px * var(--spacing-scale, 1));
   }
 
   .devices-view--embedded .page-header {
-    padding: 12px;
+    padding: calc(12px * var(--spacing-scale, 1));
   }
 
   .header-actions {

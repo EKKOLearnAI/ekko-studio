@@ -10,12 +10,15 @@ import CombinationModelsPanel from '@/components/hermes/models/CombinationModels
 import JevSettingsPanel from '@/components/hermes/models/JevSettingsPanel.vue'
 import ProvidersPanel from '@/components/hermes/models/ProvidersPanel.vue'
 import ProviderFormModal from '@/components/hermes/models/ProviderFormModal.vue'
+import ProviderVisibilityModal from '@/components/hermes/models/ProviderVisibilityModal.vue'
+import ModelCatalogNotice from '@/components/hermes/models/ModelCatalogNotice.vue'
 import VoiceSettings from '@/components/hermes/settings/VoiceSettings.vue'
 import { useModelsStore } from '@/stores/hermes/models'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { fetchProfiles, type HermesProfile } from '@/api/hermes/profiles'
 import { checkCopilotToken } from '@/api/hermes/copilot-auth'
+import { provideModelCatalogNotice } from '@/composables/useModelCatalogNotice'
 
 const { t } = useI18n()
 const modelsStore = useModelsStore()
@@ -25,12 +28,33 @@ const message = useMessage()
 const route = useRoute()
 const router = useRouter()
 const showModal = ref(false)
+const showLargeCatalogNotice = ref(false)
+const visibilityProviderId = ref('')
+const largeCatalogProviders = computed(() => modelsStore.providers.filter(provider => provider.models.length > 100))
+const visibilityProvider = computed(() => {
+  const providerId = visibilityProviderId.value
+  return modelsStore.providers.find(provider => provider.provider === providerId)
+})
 const profiles = ref<HermesProfile[]>([])
 const selectedProfile = ref(typeof route.query.modelProfile === 'string' ? route.query.modelProfile : profilesStore.activeProfileName || 'default')
 const profileOptions = computed(() => profiles.value.map(profile => ({ label: profile.name, value: profile.name })))
 const profileLoading = ref(true)
 let profilesReady = false
 let loadId = 0
+let catalogLoaded = false
+const catalogBusy = provideModelCatalogNotice(checkLargeCatalog)
+
+function checkLargeCatalog() {
+  if (catalogLoaded) showLargeCatalogNotice.value = largeCatalogProviders.value.length > 0
+}
+
+watch(() => modelsStore.providers, () => {
+  if (!profileLoading.value) {
+    catalogLoaded = true
+    checkLargeCatalog()
+  }
+})
+watch(() => [modelsStore.defaultModel, modelsStore.defaultProvider], checkLargeCatalog)
 
 function handleProfileUpdate(profile: string) {
   if (profileLoading.value || !profiles.value.some(item => item.name === profile)) return
@@ -68,13 +92,27 @@ function handleTabUpdate(tab: ModelsTab) {
 async function loadProvidersForProfile() {
   const currentLoad = ++loadId
   profileLoading.value = true
+  catalogLoaded = false
+  showLargeCatalogNotice.value = false
+  visibilityProviderId.value = ''
   try {
     try { await checkCopilotToken() } catch { /* ignore */ }
     if (currentLoad !== loadId) return
+    const previousProviders = modelsStore.providers
     await modelsStore.fetchProviders()
+    // Do not warn using another Profile's stale catalog after a failed load.
+    if (currentLoad === loadId && modelsStore.providers !== previousProviders) {
+      catalogLoaded = true
+      checkLargeCatalog()
+    }
   } finally {
     if (currentLoad === loadId) profileLoading.value = false
   }
+}
+
+function manageLargeCatalog(provider: string) {
+  showLargeCatalogNotice.value = false
+  visibilityProviderId.value = provider
 }
 
 onMounted(async () => {
@@ -227,6 +265,18 @@ async function handleRefreshModelCache() {
       @close="handleModalClose"
       @saved="handleSaved"
     />
+    <ModelCatalogNotice
+      v-if="largeCatalogProviders.length > 0 && !profileLoading && !modelsStore.loading && !modelsStore.refreshingModelCache && !showModal && !visibilityProvider && !catalogBusy"
+      v-model:show="showLargeCatalogNotice"
+      :providers="largeCatalogProviders"
+      @manage="manageLargeCatalog"
+    />
+    <ProviderVisibilityModal
+      v-if="visibilityProvider && !profileLoading"
+      :key="`${selectedProfile}:${visibilityProvider.provider}`"
+      :provider="visibilityProvider"
+      @close="visibilityProviderId = ''"
+    />
   </PageLoading>
 </template>
 
@@ -244,7 +294,7 @@ async function handleRefreshModelCache() {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .models-content {
@@ -253,7 +303,7 @@ async function handleRefreshModelCache() {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
 }
 
 .models-profile-loading {
@@ -271,7 +321,7 @@ async function handleRefreshModelCache() {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   flex-wrap: wrap;
   justify-content: flex-end;
 }

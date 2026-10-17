@@ -1,0 +1,9 @@
+{
+  "id": "com.hermeswebui.studio",
+  "package": "ekko-studio-tos",
+  "system_id": "ekko-studio-tos",
+  "user": "ekko-studio-tos",
+  "publisher": "EKKOLearnAI",
+  "port": 8648,
+  "low_version": "7.0"
+}

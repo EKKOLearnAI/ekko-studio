@@ -931,7 +931,7 @@ watch(nodes, () => {
 .journey-view__content {
   flex: 1;
   min-height: 0;
-  padding: 16px 20px 20px;
+  padding: calc(16px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
 }
 
 .journey-panel {
@@ -945,30 +945,30 @@ watch(nodes, () => {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 8px;
-  padding-bottom: 10px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding-bottom: calc(10px * var(--spacing-scale, 1));
 }
 
 .node-kind-legend {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: calc(9px * var(--spacing-scale, 1));
   min-width: 0;
   margin-inline-end: auto;
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .node-kind-legend__item {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   white-space: nowrap;
 }
 
 .node-kind-legend__arrow {
   color: $text-muted;
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
 }
 
 :global([dir='rtl']) .node-kind-legend__arrow {
@@ -986,7 +986,7 @@ watch(nodes, () => {
 }
 
 .node-kind-marker--memory {
-  border-radius: 2px;
+  border-radius: var(--radius-component, 2px);
   color: #6ba3d6;
   transform: rotate(45deg);
 }
@@ -1015,10 +1015,10 @@ watch(nodes, () => {
 
 .category-meter {
   display: grid;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   margin-bottom: 10px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, $border-color 70%, transparent);
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid color-mix(in srgb, $border-color 70%, transparent);
   border-radius: $radius-sm;
   background: color-mix(in srgb, $bg-secondary 72%, transparent);
 }
@@ -1062,10 +1062,10 @@ watch(nodes, () => {
 
 .category-legend {
   display: flex;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   overflow-x: auto;
   color: $text-secondary;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   scrollbar-width: none;
 
   &::-webkit-scrollbar {
@@ -1075,10 +1075,10 @@ watch(nodes, () => {
   button {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: calc(5px * var(--spacing-scale, 1));
     flex: 0 0 auto;
-    padding: 4px 8px;
-    border: 1px solid transparent;
+    padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid transparent;
     border-radius: 999px;
     background: transparent;
     color: inherit;
@@ -1128,7 +1128,7 @@ watch(nodes, () => {
 .journey-graph-wrap {
   position: relative;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, $border-color 72%, transparent);
+  border: var(--border-width, 1px) solid color-mix(in srgb, $border-color 72%, transparent);
   border-radius: $radius-md;
   background:
     radial-gradient(circle at 50% 45%, rgba(var(--accent-info-rgb), 0.07), transparent 48%),
@@ -1160,7 +1160,7 @@ watch(nodes, () => {
 
   :deep(.vue-flow__controls) {
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, $border-color 78%, transparent);
+    border: var(--border-width, 1px) solid color-mix(in srgb, $border-color 78%, transparent);
     border-radius: $radius-sm;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   }
@@ -1175,7 +1175,7 @@ watch(nodes, () => {
     width: 138px;
     height: 92px;
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, $border-color 72%, transparent);
+    border: var(--border-width, 1px) solid color-mix(in srgb, $border-color 72%, transparent);
     border-radius: $radius-sm;
     background: color-mix(in srgb, $bg-primary 90%, transparent);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
@@ -1187,10 +1187,10 @@ watch(nodes, () => {
   width: 240px;
   min-height: 82px;
   display: grid;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: calc(6px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--node-color) 35%, $border-color);
+  border: var(--border-width, 1px) solid color-mix(in srgb, var(--node-color) 35%, $border-color);
   border-radius: $radius-sm;
   background: color-mix(in srgb, $bg-primary 96%, var(--node-color) 4%);
   box-shadow: 0 7px 20px rgba(0, 0, 0, 0.08);
@@ -1247,9 +1247,9 @@ watch(nodes, () => {
 
 .journey-node__topline {
   justify-content: space-between;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   color: $text-muted;
-  font-size: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1258,7 +1258,7 @@ watch(nodes, () => {
 .journey-node__kind {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 
   i {
     width: 7px;
@@ -1270,7 +1270,7 @@ watch(nodes, () => {
 }
 
 .journey-node--memory .journey-node__kind i {
-  border-radius: 1px;
+  border-radius: var(--radius-component, 1px);
   transform: rotate(45deg);
 }
 
@@ -1284,18 +1284,18 @@ watch(nodes, () => {
 .journey-node__title {
   display: -webkit-box;
   overflow: hidden;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 650;
-  line-height: 1.38;
+  line-height: var(--line-height, 1.38);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
 .journey-node__meta {
-  gap: 5px 10px;
+  gap: calc(5px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   flex-wrap: wrap;
   color: $text-secondary;
-  font-size: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
 }
 
 .journey-node-tooltip {
@@ -1303,8 +1303,8 @@ watch(nodes, () => {
   z-index: 10;
   width: max-content;
   max-width: min(320px, calc(100% - 16px));
-  padding: 9px 11px;
-  border: 1px solid color-mix(in srgb, $border-color 82%, transparent);
+  padding: calc(9px * var(--spacing-scale, 1)) calc(11px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid color-mix(in srgb, $border-color 82%, transparent);
   border-radius: $radius-sm;
   background: color-mix(in srgb, $bg-primary 96%, transparent);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
@@ -1316,7 +1316,7 @@ watch(nodes, () => {
 .journey-node-tooltip__name {
   max-width: 100%;
   overflow: hidden;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1327,8 +1327,8 @@ watch(nodes, () => {
   margin-top: 4px;
   overflow: hidden;
   color: $text-secondary;
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.4);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
@@ -1349,15 +1349,15 @@ watch(nodes, () => {
   left: 50%;
   bottom: 14px;
   display: flex;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   pointer-events: none;
   transform: translateX(-50%);
 
   span {
-    padding: 4px 8px;
-    border: 1px solid color-mix(in srgb, $border-color 70%, transparent);
+    padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid color-mix(in srgb, $border-color 70%, transparent);
     border-radius: 999px;
     background: color-mix(in srgb, $bg-primary 88%, transparent);
     backdrop-filter: blur(10px);
@@ -1376,7 +1376,7 @@ watch(nodes, () => {
 .drawer-title-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 
   span:first-child {
@@ -1390,22 +1390,22 @@ watch(nodes, () => {
   :deep(.n-drawer-body-content-wrapper) {
     display: grid;
     align-content: start;
-    gap: 14px;
+    gap: calc(14px * var(--spacing-scale, 1));
   }
 }
 
 .detail-card {
   display: grid;
-  gap: 6px;
-  padding: 12px;
-  border: 1px solid $border-light;
+  gap: calc(6px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-light;
   border-radius: $radius-sm;
   background: rgba(var(--accent-primary-rgb), 0.04);
 
   code {
     color: $text-primary;
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1.5);
     white-space: normal;
     overflow-wrap: anywhere;
   }
@@ -1413,9 +1413,9 @@ watch(nodes, () => {
 
 .memory-card {
   display: grid;
-  gap: 8px;
-  padding: 14px;
-  border: 1px solid color-mix(in srgb, $border-color 82%, transparent);
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(14px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid color-mix(in srgb, $border-color 82%, transparent);
   border-radius: $radius-sm;
   background:
     linear-gradient(180deg, rgba(var(--accent-info-rgb), 0.08), transparent),
@@ -1424,8 +1424,8 @@ watch(nodes, () => {
   p {
     margin: 0;
     color: $text-primary;
-    font-size: 13px;
-    line-height: 1.65;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+    line-height: var(--line-height, 1.65);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
@@ -1434,35 +1434,35 @@ watch(nodes, () => {
 .detail-card-label,
 .detail-item span {
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .detail-item {
   min-width: 0;
   display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid $border-light;
+  gap: calc(4px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-light;
   border-radius: $radius-sm;
   background: $bg-secondary;
 
   strong {
     min-width: 0;
     color: $text-primary;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     overflow-wrap: anywhere;
   }
 }
 
 @media (max-width: $breakpoint-mobile) {
   .journey-view__content {
-    padding: 10px;
+    padding: calc(10px * var(--spacing-scale, 1));
   }
 
   .journey-toolbar {
@@ -1474,7 +1474,7 @@ watch(nodes, () => {
   }
 
   .category-meter {
-    padding: 8px 10px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   }
 
   .journey-flow {

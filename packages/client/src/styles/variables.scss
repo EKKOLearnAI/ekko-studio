@@ -222,15 +222,15 @@ $font-code: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 
 // Layout
 $navigation-rail-width: 64px;
-$sidebar-width: 240px;
+$sidebar-width: var(--studio-sidebar-width, 240px);
 $sidebar-collapsed-width: 64px;
 $header-height: 60px;
 $breakpoint-mobile: 768px;
 
 // Radius
-$radius-sm: 6px;
-$radius-md: 8px;
-$radius-lg: 8px;
+$radius-sm: var(--radius-sm, 6px);
+$radius-md: var(--radius-md, 8px);
+$radius-lg: var(--radius-lg, 8px);
 
 // Transition
 $transition-fast: 0.15s ease;

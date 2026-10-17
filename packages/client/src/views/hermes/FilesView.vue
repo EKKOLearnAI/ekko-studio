@@ -213,26 +213,26 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 16px;
-  border-bottom: 1px solid $border-color;
-  background-color: $bg-card;
+  gap: calc(16px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
 }
 
 .profile-config-title {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 }
 
 .profile-config-eyebrow {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
 }
 
 .profile-config-file {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   color: $text-primary;
   overflow: hidden;
@@ -250,7 +250,7 @@ watch(
   width: 240px;
   min-width: 180px;
   max-width: 400px;
-  border-inline-end: 1px solid $border-color;
+  border-inline-end: var(--border-width, 1px) solid $border-color;
   overflow-y: auto;
   flex-shrink: 0;
 }
@@ -279,7 +279,7 @@ watch(
     max-width: none;
     height: 200px;
     border-inline-end: none;
-    border-bottom: 1px solid $border-color;
+    border-bottom: var(--border-width, 1px) solid $border-color;
   }
 }
 </style>

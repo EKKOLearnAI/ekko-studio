@@ -10,6 +10,11 @@ creates one `EkkoProfileAgent` per configured Profile, so modules are used as
 `ekko.agent.get('work').tool`. See the complete field, method, parameter, and
 configuration reference in [docs/API.md](docs/API.md).
 
+Native desktop control is available through the built-in `computer_use` tool.
+Its Cua native SDK installs with the agent; a separate driver app is not required.
+See [Computer Use](docs/computer-use.md) for Studio settings, native dependencies,
+operation discovery, screenshots, approvals and host permissions.
+
 Ekko includes its own optional JEV evaluator through `ekko.jev` and `runtime.jev`.
 Persist defaults in `config.jev`, or pass a `jev` object to the constructor/runtime
 to override fields in memory without rewriting the local configuration. The host

@@ -13,10 +13,19 @@ window.__ModuleLoader__.load({id:'studio-dsh-ui',factory(require){
       const disposeThemes=['light','dark'].map(scheme=>ctx.theme.register({...ctx.theme.getTheme().themes.find(theme=>theme.id===scheme),id:'studio-'+scheme}));
       let selected=new URL(location.href).searchParams.get('studioTheme');
       let disposed=false;
+      let properties=[];
       const sync=()=>{if(!disposed&&(selected==='light'||selected==='dark'))ctx.theme.setTheme('studio-'+selected)};
       const receive=event=>{
         if(event.source!==parent||event.origin!==location.origin||event.data?.type!=='studio-dsh-theme'||!['light','dark'].includes(event.data.theme))return;
         selected=event.data.theme;sync();
+        // Only Studio's named tokens cross the frame boundary; resets remove old overrides.
+        const root=document.documentElement;
+        properties.forEach(name=>root.style.removeProperty(name));properties=[];
+        for(const [name,value] of Object.entries(event.data.variables||{})){
+          if(!/^--(?:bg-[a-z-]+|text-[a-z-]+|accent-[a-z-]+|border-[a-z-]+|font-[a-z-]+|radius-[a-z-]+|line-height|letter-spacing|spacing-scale|control-height|theme-[a-zA-Z-]+)$/.test(name)||typeof value!=='string'||value.length>200||/[{};]|url\s*\(/i.test(value))continue;
+          root.style.setProperty(name,value);properties.push(name);
+        }
+        root.classList.toggle('studio-theme-customized',properties.length>0);
       };
       // Native settings refreshes may adopt their own preference; the embedded view follows Studio.
       const stop=ctx.on('theme/change',()=>{if(ctx.theme.getTheme().preference!=='studio-'+selected)queueMicrotask(sync)});
@@ -62,6 +71,9 @@ html,body,#root{height:100%!important;min-height:0;margin:0;background:transpare
 .studio-dsh-slot{box-sizing:border-box;height:100%;overflow:auto;padding:0 0 16px;color:var(--dsw-alias-label-primary)}
 .studio-dsh-slot button[aria-expanded]:not([aria-haspopup])::after{content:var(--studio-dsh-expand);font-size:12px;white-space:nowrap;margin-inline-start:8px}
 .studio-dsh-slot button[aria-expanded=true]:not([aria-haspopup])::after{content:var(--studio-dsh-collapse)}
+.studio-theme-customized{--dsw-alias-label-primary:var(--text-primary);font-size:var(--font-size-base);color:var(--text-primary)}
+.studio-theme-customized .studio-dsh-slot{font-family:var(--font-ui,inherit);line-height:var(--line-height,1.6);letter-spacing:var(--letter-spacing,normal);background:var(--theme-content-bg,transparent)}
+.studio-theme-customized .studio-dsh-slot :is(input,textarea,select){color:var(--text-primary);background:var(--theme-input-bg);border-color:var(--border-color);border-radius:var(--theme-input-radius)}
 </style></head>`)
 }
 

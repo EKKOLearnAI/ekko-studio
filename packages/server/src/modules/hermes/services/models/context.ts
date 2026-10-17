@@ -312,6 +312,8 @@ export function getModelContextLength(input?: string | ModelContextLengthOptions
 export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
   contextWindow: number
   outputLimit: number
+  /** False when outputLimit is the generic fallback, not model metadata. */
+  outputLimitKnown: boolean
   reasoning: boolean
   reasoningEfforts?: string[]
   input: Array<'text' | 'image'>
@@ -327,7 +329,8 @@ export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
   }
   const entry = model ? lookupModelFromCache(config, model, provider, input) : undefined
   const reasoningEfforts = catalogReasoningEfforts(entry)
-  const outputLimit = getPositiveNumber(entry?.limit?.output) || Math.min(32_000, contextWindow)
+  const knownOutputLimit = getPositiveNumber(entry?.limit?.output)
+  const outputLimit = knownOutputLimit || Math.min(32_000, contextWindow)
   // Unknown custom models must remain usable. A missing models.dev entry is
   // absence of metadata, not evidence that reasoning or image input is
   // unsupported. Keep the runtime permissive and let the upstream provider
@@ -336,6 +339,7 @@ export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
   return {
     contextWindow,
     outputLimit: Math.min(outputLimit, contextWindow),
+    outputLimitKnown: Boolean(knownOutputLimit),
     reasoning: entry ? entry.reasoning === true : true,
     ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
     input: imageInput ? ['text', 'image'] : ['text'],

@@ -9,6 +9,7 @@ import { groupRunUsageMessage } from './run-usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { recordBridgeModelUsage } from '../usage/bridge-model-usage'
 import { groupRunUser } from './run-user'
+import { runMcpCredentials } from '../auth/run-mcp-credentials'
 import type { AuthenticatedUser } from '../../public/auth'
 import { io, Socket } from 'socket.io-client'
 import { createHash, randomBytes, randomUUID } from 'crypto'
@@ -1226,10 +1227,8 @@ export class AgentClient implements GroupAgentExecutor {
             const result = await this.chatRunService.runAndWait({
                 input: this.groupRuntimeInput(msg, runtimeContext),
                 session_id: sessionId,
-                ...(usesGlobalCodingAgent ? {} : {
-                    model: this.model || undefined,
-                    provider: this.provider || undefined,
-                }),
+                ...(this.model ? { model: this.model } : {}),
+                ...(usesGlobalCodingAgent ? {} : { provider: this.provider || undefined }),
                 ...(!usesGlobalCodingAgent && this.apiMode ? { apiMode: this.apiMode } : {}),
                 instructions: groupSystemPrompt,
                 group_system_prompt: groupSystemPrompt,
@@ -1242,7 +1241,7 @@ export class AgentClient implements GroupAgentExecutor {
                 mode: usesGlobalCodingAgent ? 'global' : 'scoped',
                 profile: this.profile,
                 ...(this.agentPreset ? { agent_preset: this.agentPreset } : {}),
-                ...(!usesGlobalCodingAgent && this.reasoningEffort
+                ...(this.reasoningEffort
                     ? { reasoning_effort: this.reasoningEffort }
                     : {}),
                 background_delegation_enabled: false,
@@ -1429,6 +1428,7 @@ export class AgentClient implements GroupAgentExecutor {
         let activeSessionId = ''
         let activeReplyInterruptVersion = 0
         let groupPlan: ReturnType<NonNullable<GroupChatRunService['beginGroupTaskPlanRun']>> | undefined
+        let mcpContextId: string | undefined
         let planWrites = Promise.resolve()
         let planFailed = false
         let staleStartedRunStopped = false
@@ -1510,6 +1510,13 @@ export class AgentClient implements GroupAgentExecutor {
             groupPlan = mcpCapabilities.interaction ? this.chatRunService?.beginGroupTaskPlanRun?.(sessionId, this.profile, runMessageId,
                 () => this.replySessionIsCurrent(roomId, sessionId, replyInterruptVersion),
                 snapshot => { planWrites = planWrites.then(() => this.recordTaskPlan(roomId, sessionId, runMessageId, snapshot)).catch(error => { logger.warn(error, '[GroupChat] task plan delivery failed') }) }) : undefined
+            if (groupPlan) {
+                mcpContextId = groupPlan.contextId
+                await runMcpCredentials.issue({
+                    sessionId, contextId: mcpContextId, profile: this.profile, roomId, agentId: this.agentId,
+                    isActive: () => this.replySessionIsCurrent(roomId, sessionId, replyInterruptVersion),
+                }, { contextLookup: true })
+            }
             const planInput = withTaskPlanTurnContext(input, groupPlan?.contextId)
             const bridgeInput: GroupPrimaryAgentBridgeMessage = isContentBlockArray(planInput)
                 ? await convertContentBlocksForAgent(planInput)
@@ -1693,6 +1700,7 @@ export class AgentClient implements GroupAgentExecutor {
                 onStatus?.('ready', { runId: runMessageId })
             }
         } finally {
+            if (activeSessionId && mcpContextId) runMcpCredentials.revoke(activeSessionId, mcpContextId)
             if (bridgeRunId && activeSessionId && this.roomSessionIsCurrent(roomId, activeSessionId)) {
                 try {
                     const usage = completeRunUsage(activeSessionId, bridgeRunId, streamMessageId, (Date.now() - runStartedAt) / 1000)
@@ -2383,6 +2391,12 @@ export class AgentClients {
      */
     getAgent(roomId: string, agentId: string): GroupAgentExecutor | undefined {
         return this.rooms.get(roomId)?.get(agentId)
+    }
+
+    hasRoomWork(roomId: string): boolean {
+        return this.activeSessionIds(roomId).length > 0
+            || [...this._processingMentionQueues].some(key => this.mentionQueueRoomId(key) === roomId)
+            || [...this._mentionQueues].some(([key, queue]) => this.mentionQueueRoomId(key) === roomId && queue.length > 0)
     }
 
     activeSessionIds(roomId: string): string[] {

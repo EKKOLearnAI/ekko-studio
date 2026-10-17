@@ -8,6 +8,9 @@ Use this checklist before pushing or updating a pull request.
 - The diff is limited to the requested task and required harness updates.
 - Unrelated formatting or refactors are not bundled into the change.
 - User-facing text has locale coverage.
+- New UI surfaces follow `frontend-ui.md`; review any style exception and reject
+  additions to the legacy theme baseline. Verify wallpaper, regional opacity,
+  light/dark, reset and interactive states on the actual affected surface.
 - JEV consumers are registered with independent switches and frontend configuration; configuration-only status must not imply an active evaluation policy.
 
 ## Architecture

@@ -14,6 +14,7 @@ export interface CompressionSnapshot {
   compressedThroughMessageId: number | null
   protectedHeadThroughMessageId: number | null
   historyRevision: number
+  updatedAt: number
 }
 
 export interface CompressionSnapshotCursorWrite {
@@ -31,7 +32,8 @@ export function getCompressionSnapshot(sessionId: string): CompressionSnapshot |
        message_count_at_time AS messageCountAtTime,
        compressed_through_message_id AS compressedThroughMessageId,
        protected_head_through_message_id AS protectedHeadThroughMessageId,
-       history_revision AS historyRevision
+       history_revision AS historyRevision,
+       updated_at AS updatedAt
      FROM ${TABLE}
      WHERE session_id = ?`,
   ).get(sessionId) as CompressionSnapshot | undefined ?? null
@@ -43,6 +45,7 @@ export function saveCompressionSnapshot(
   lastMessageIndex: number,
   messageCountAtTime: number,
   cursor?: CompressionSnapshotCursorWrite,
+  expectedHistoryRevision?: number,
 ): boolean {
   if (!isSqliteAvailable()) return true
   const db = getDb()!
@@ -51,7 +54,8 @@ export function saveCompressionSnapshot(
   ).get(sessionId) as { historyRevision: number } | undefined
   if (!session) return false
   const historyRevision = Number(session.historyRevision || 0)
-  if (cursor && historyRevision !== cursor.expectedHistoryRevision) return false
+  const expectedRevision = cursor?.expectedHistoryRevision ?? expectedHistoryRevision
+  if (expectedRevision != null && historyRevision !== expectedRevision) return false
 
   if (cursor) {
     const compressedBoundary = db.prepare(

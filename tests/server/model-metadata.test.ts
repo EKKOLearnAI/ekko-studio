@@ -11,7 +11,7 @@ vi.mock('../../packages/server/src/modules/studio/public/model-catalog', async i
   ...await importOriginal<typeof import('../../packages/server/src/modules/studio/public/model-catalog')>(),
   getModelCatalog: () => catalog,
 }))
-import { applyCatalogModelMetadata } from '../../packages/server/src/modules/hermes/services/models/metadata'
+import { createCatalogModelMetadataEnricher } from '../../packages/server/src/modules/hermes/services/models/metadata'
 
 describe('catalog provider mapping', () => {
   it.each([
@@ -68,7 +68,7 @@ describe('catalog reasoning effort metadata', () => {
 describe('available model reasoning metadata', () => {
   it('keeps existing aliases and preview flags while attaching mapped model capabilities', () => {
     const group = { provider: 'glm', base_url: 'https://proxy.test/v1', models: ['glm', 'private'], model_meta: { glm: { alias: 'Work', preview: true } } }
-    const [result] = applyCatalogModelMetadata([group])
+    const [result] = createCatalogModelMetadataEnricher()([group])
     expect(result.model_meta).toEqual({ glm: { alias: 'Work', preview: true, reasoning: true, reasoning_efforts: ['low', 'high', 'max'] } })
     expect(group.model_meta.glm).toEqual({ alias: 'Work', preview: true })
   })
@@ -78,7 +78,7 @@ describe('available model reasoning metadata', () => {
       { provider: 'custom:official', base_url: 'https://open.bigmodel.cn/api/coding/paas/v4/', models: ['glm'] },
       { provider: 'custom:gateway', base_url: 'https://open.bigmodel.cn/other', models: ['glm'] },
     ]
-    const results = applyCatalogModelMetadata(groups)
+    const results = createCatalogModelMetadataEnricher()(groups)
     expect(results[0].model_meta?.glm.reasoning_efforts).toEqual(['low', 'high', 'max'])
     expect(results[1].model_meta?.glm.reasoning_efforts).toEqual(['low', 'high', 'max'])
   })

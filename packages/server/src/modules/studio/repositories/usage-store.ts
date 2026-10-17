@@ -2,12 +2,14 @@ import { isSqliteAvailable, getDb, jsonSet, jsonGet, jsonGetAll, jsonDelete } fr
 import { randomUUID } from 'crypto'
 import { USAGE_TABLE as TABLE, RUN_USAGE_TABLE } from '../infrastructure/database/schemas'
 import { refreshCompletedRunUsage } from './run-usage-store'
+import { getSessionUsageAccount, getSessionUsageAccounts, usageAccountExpression } from './usage-accounts'
 import { finiteCost, emptyCostCoverage, type UsageCost, type UsagePriceSnapshot } from '../services/usage/usage-cost'
 import type {
   LocalUsageStats,
   UsageStatsAgentRow,
   UsageStatsDailyRow,
   UsageStatsModelRow,
+  UsageStatsFilters,
 } from '../contracts/runs/usage'
 
 export type {
@@ -75,6 +77,7 @@ export function updateUsage(
   const model = data.model || ''
   const provider = data.provider || ''
   const profile = data.profile || 'default'
+  const account = getSessionUsageAccount(sessionId, profile) ?? null
   const costUsd = finiteCost(data.costUsd) ?? null
   const costSource = costUsd == null ? 'unknown' : data.costSource || 'reported'
   const costPricing = costUsd == null || !data.costPricing ? null : JSON.stringify(data.costPricing)
@@ -82,6 +85,7 @@ export function updateUsage(
     const db = getDb()!
     const columns = [
       'session_id',
+      'account_id',
       'run_id',
       'parent_run_id',
       'api_duration',
@@ -107,6 +111,7 @@ export function updateUsage(
     const values = columns.map(() => '?')
     const params = [
       sessionId,
+      account,
       data.runId || '',
       data.parentRunId || '',
       typeof data.apiDuration === 'number' && Number.isFinite(data.apiDuration) && data.apiDuration > 0 ? data.apiDuration : null,
@@ -143,6 +148,7 @@ export function updateUsage(
     const id = randomUUID()
     jsonSet(TABLE, sessionId, {
       id,
+      account_id: account,
       run_id: data.runId || '',
       parent_run_id: data.parentRunId || '',
       api_duration: data.apiDuration ?? null,
@@ -336,7 +342,7 @@ export function getRecordedUsageSessionIds(profile?: string): string[] {
     .filter(Boolean)
 }
 
-export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats {
+export function getLocalUsageStats(profile?: string, days = 30, selection: UsageStatsFilters = {}): LocalUsageStats {
   const empty: LocalUsageStats = {
     input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
     cache_write_tokens: 0, reasoning_tokens: 0, sessions: 0,
@@ -346,12 +352,34 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
 
   const db = getDb()!
   const safeDays = Math.max(1, Math.floor(Number.isFinite(days) ? days : 30))
-  const cutoffMs = Date.now() - safeDays * 24 * 60 * 60 * 1000
-  const filters: string[] = ['created_at > ?']
+  const cutoffMs = selection.today?.startMs ?? Date.now() - safeDays * 24 * 60 * 60 * 1000
+  const filters: string[] = [selection.today ? 'created_at >= ?' : 'created_at > ?']
   const params: any[] = [cutoffMs]
+  if (selection.today) {
+    filters.push('created_at <= ?')
+    params.push(selection.today.endMs)
+  }
   if (profile) {
     filters.unshift('profile = ?')
     params.unshift(profile)
+  }
+  // Options remain scoped to the period/profile, rather than shrinking with each selection.
+  const baseWhere = `WHERE ${filters.join(' AND ')}`
+  const optionRows = db.prepare(`SELECT DISTINCT
+    COALESCE(NULLIF(TRIM(model), ''), 'unknown') AS model,
+    COALESCE(NULLIF(TRIM(agent), ''), 'unknown') AS agent
+    FROM ${TABLE} ${baseWhere}`).all(...params) as Array<{ model: string; agent: string }>
+  if (selection.model) {
+    filters.push("COALESCE(NULLIF(TRIM(model), ''), 'unknown') = ?")
+    params.push(selection.model)
+  }
+  if (selection.agent) {
+    filters.push("COALESCE(NULLIF(TRIM(agent), ''), 'unknown') = ?")
+    params.push(selection.agent)
+  }
+  if (selection.account) {
+    filters.push(`${usageAccountExpression} = ?`)
+    params.push(JSON.stringify(selection.sessionAccounts ?? getSessionUsageAccounts(profile)), selection.account)
   }
   const whereClause = `WHERE ${filters.join(' AND ')}`
 
@@ -397,7 +425,7 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
   `).all(...params) as unknown as UsageStatsAgentRow[]
 
   const byDay = db.prepare(`
-    SELECT DATE(created_at / 1000, 'unixepoch') as date,
+    SELECT ${selection.today ? '?' : "DATE(created_at / 1000, 'unixepoch')"} as date,
       ${costSelect},
       COALESCE(SUM(input_tokens),0) as input_tokens,
       COALESCE(SUM(output_tokens),0) as output_tokens,
@@ -408,9 +436,13 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
     ${whereClause}
     GROUP BY date
     ORDER BY date
-  `).all(...params) as unknown as Array<UsageStatsDailyRow & CostTotals>
+  `).all(...(selection.today ? [selection.today.date] : []), ...params) as unknown as Array<UsageStatsDailyRow & CostTotals>
 
   return {
+    filter_options: {
+      models: [...new Set(optionRows.map(row => row.model))].sort(),
+      agents: [...new Set(optionRows.map(row => row.agent))].sort(),
+    },
     input_tokens: totals.input_tokens,
     output_tokens: totals.output_tokens,
     cache_read_tokens: totals.cache_read_tokens,
@@ -437,14 +469,20 @@ function coverage(row: CostTotals) {
 }
 
 /** A cumulative Hermes bill can only replace wholly unpriced sessions contained in this period. */
-export function getUnpricedHermesUsageSessions(profile: string, days: number): Array<{ sessionId: string; days: Array<{ date: string; entries: number }> }> {
+export function getUnpricedHermesUsageSessions(profile: string, days: number, selection: UsageStatsFilters = {}): Array<{ sessionId: string; days: Array<{ date: string; entries: number }> }> {
   if (!isSqliteAvailable()) return []
-  const cutoff = Date.now() - days * 86_400_000
-  const rows = getDb()!.prepare(`SELECT session_id, DATE(created_at / 1000, 'unixepoch') AS date, COUNT(*) AS entries
+  const cutoff = selection.today?.startMs ?? Date.now() - days * 86_400_000
+  const accountClause = selection.account ? `AND SUM(CASE WHEN ${usageAccountExpression} <> ? THEN 1 ELSE 0 END) = 0` : ''
+  const accountParams = selection.account
+    ? [JSON.stringify(selection.sessionAccounts ?? getSessionUsageAccounts(profile)), selection.account] : []
+  const rows = getDb()!.prepare(`SELECT session_id, ${selection.today ? '?' : "DATE(created_at / 1000, 'unixepoch')"} AS date, COUNT(*) AS entries
     FROM ${TABLE} WHERE profile = ? AND source = 'hermes' AND session_id IN (
       SELECT session_id FROM ${TABLE} WHERE profile = ? GROUP BY session_id
-      HAVING MIN(created_at) > ? AND COUNT(cost_usd) = 0 AND SUM(CASE WHEN source <> 'hermes' THEN 1 ELSE 0 END) = 0
-    ) GROUP BY session_id, date`).all(profile, profile, cutoff) as Array<{ session_id: string; date: string; entries: number }>
+      HAVING MIN(created_at) ${selection.today ? '>=' : '>'} ? ${selection.today ? 'AND MAX(created_at) <= ?' : ''}
+        AND COUNT(cost_usd) = 0 AND SUM(CASE WHEN source <> 'hermes' THEN 1 ELSE 0 END) = 0
+        ${accountClause}
+    ) GROUP BY session_id, date`).all(...(selection.today ? [selection.today.date] : []), profile, profile, cutoff,
+      ...(selection.today ? [selection.today.endMs] : []), ...accountParams) as Array<{ session_id: string; date: string; entries: number }>
   const sessions = new Map<string, Array<{ date: string; entries: number }>>()
   for (const row of rows) {
     const days = sessions.get(row.session_id) || []

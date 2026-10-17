@@ -1,3 +1,4 @@
+import { studioSessionAccount } from '../../contracts/runs/usage'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
 import { codingAgentId } from './types'
 import { studioMcpCapabilities, type StudioMcpCapabilities } from '../../public/runs/mcp-capabilities'
@@ -97,10 +98,13 @@ export async function handleCodingAgentRun(
   if (storedSession && !storedSession.user_id && socketUser?.id != null) {
     updateSession(sessionId, { user_id: String(socketUser.id) })
   }
+  if (storedSession && !storedSession.studio_user_id && socketUser?.id != null) {
+    updateSession(sessionId, { studio_user_id: studioSessionAccount(storedSession) || String(socketUser.id) })
+  }
   const launchProvider = data.provider || (mode === 'scoped' ? storedSession?.provider || undefined : undefined)
-  const launchModel = data.model || (mode === 'scoped' ? storedSession?.model || undefined : undefined)
+  const launchModel = data.model ?? (storedSession?.model || undefined)
   const launchApiMode = data.apiMode || data.api_mode || (mode === 'scoped' ? storedSession?.api_mode || undefined : undefined)
-  const launchReasoningEffort = data.reasoning_effort ?? (mode === 'scoped' ? storedSession?.reasoning_effort || undefined : undefined)
+  const launchReasoningEffort = data.reasoning_effort ?? (storedSession?.reasoning_effort || undefined)
   const groupSystemPrompt = String(data.group_system_prompt || '').trim()
   const groupRoomId = String(data.group_room_id || '').trim()
   const groupAgentId = String(data.group_agent_id || '').trim()
@@ -144,6 +148,9 @@ export async function handleCodingAgentRun(
   const persistedSession = getSession(sessionId)
   if (persistedSession && !persistedSession.user_id && socketUser?.id != null) {
     updateSession(sessionId, { user_id: String(socketUser.id) })
+  }
+  if (persistedSession && !persistedSession.studio_user_id && socketUser?.id != null) {
+    updateSession(sessionId, { studio_user_id: studioSessionAccount(persistedSession) || String(socketUser.id) })
   }
 
   if (data.category_id !== undefined) {

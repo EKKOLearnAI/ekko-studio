@@ -115,8 +115,8 @@ export function startDshChatTurn(run: ManagedCodingAgentRun, input: string, syst
     cwd: run.launch.workspaceDir, text: input, images,
     agentPreset: run.launch.agentPreset,
     nativeSessionId: run.nativeResumeReady ? run.launch.agentNativeSessionId : undefined,
-    modelValue: run.launch.mode === 'scoped' ? JSON.stringify([DSH_MODEL_PROVIDER, run.launch.model]) : undefined,
-    reasoningEffort: run.launch.mode === 'scoped' ? run.launch.reasoningEffort : undefined,
+    modelValue: run.launch.mode === 'scoped' ? JSON.stringify([DSH_MODEL_PROVIDER, run.launch.model]) : run.launch.model || undefined,
+    reasoningEffort: run.launch.reasoningEffort,
   }).then(reason => {
     if (run.exited || run.stoppedByUser) return
     if (reason === 'end_turn' || reason === 'max_tokens') host.complete()

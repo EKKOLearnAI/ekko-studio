@@ -19,7 +19,9 @@ not change the persisted `coding-agent/native/<id>/` MCP configuration paths.
 Qwen Code, Kimi Code, CodeBuddy, Copilot, and ZCode support **scoped** and
 **global** modes. Scoped uses the selected Studio provider/model, with isolated
 per-session configuration and data under Web UI state. Global retains each
-CLI's existing account and model settings and requires native CLI sign-in.
+CLI's existing account and requires native CLI sign-in. New chats can select a
+native model and its advertised reasoning effort for the conversation; leaving
+these unset retains the CLI's defaults. See [native model discovery](coding-agent-models.md).
 
 | Runtime | Scoped configuration | Client protocol |
 | --- | --- | --- |

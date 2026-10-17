@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { modelReasoningEfforts, DEFAULT_REASONING_EFFORTS } from '@/utils/model-reasoning-effort'
 import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { useModelCatalogNotice } from '@/composables/useModelCatalogNotice'
 import { NSpin, NButton, NInput, NInputNumber, NModal, NSelect, NSwitch, useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 
@@ -25,6 +26,7 @@ const editingName = ref('')
 const formName = ref('')
 const formPreset = ref<MoaPreset>(createEmptyPreset())
 const showModelPicker = ref(false)
+const catalogChanged = useModelCatalogNotice(() => showEditor.value || showModelPicker.value || saving.value)
 const pickerTarget = ref<{ kind: 'reference' | 'aggregator'; index?: number } | null>(null)
 const pickerSearch = ref('')
 const { isGroupCollapsed: isModelPickerGroupCollapsed, toggleGroup: toggleModelPickerGroup } = useCollapsedProviderGroups()
@@ -257,6 +259,7 @@ function handleCustomModelSubmit() {
 
 async function removeCustomModel(model: string, provider: string) {
   await appStore.removeCustomModel(model, provider)
+  catalogChanged()
 }
 
 async function persist(next: MoaConfig) {
@@ -520,8 +523,8 @@ usePageLoadingTask(() => loading.value)
 .combination-models-panel {
   --combination-table-min-width: 860px;
 
-  background-color: $bg-card;
-  border: 1px solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
 }
 
@@ -529,20 +532,20 @@ usePageLoadingTask(() => loading.value)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
-  border-bottom: 1px solid $border-light;
+  gap: calc(16px * var(--spacing-scale, 1));
+  padding: calc(14px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
 
   h3 {
     color: $text-primary;
-    font-size: 15px;
+    font-size: calc(var(--font-size-base, 14px) * 15 / 14);
     font-weight: 600;
     margin: 0 0 4px;
   }
 
   p {
     color: $text-muted;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     margin: 0;
   }
 }
@@ -553,7 +556,7 @@ usePageLoadingTask(() => loading.value)
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .combination-table {
@@ -563,10 +566,10 @@ usePageLoadingTask(() => loading.value)
 .combination-row {
   display: grid;
   grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.7fr) minmax(220px, 1.2fr) minmax(220px, auto);
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   align-items: center;
-  padding: 10px 16px;
-  border-bottom: 1px solid $border-light;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
 
   &:last-child {
     border-bottom: 0;
@@ -575,14 +578,14 @@ usePageLoadingTask(() => loading.value)
 
 .combination-row-head {
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 600;
   text-transform: uppercase;
 }
 
 .preset-name {
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
   min-width: 0;
 }
@@ -591,17 +594,17 @@ usePageLoadingTask(() => loading.value)
   display: inline-flex;
   margin-inline-start: 6px;
   border-radius: 999px;
-  padding: 1px 6px;
+  padding: calc(1px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
   background: rgba(var(--accent-primary-rgb), 0.12);
   color: $accent-primary;
-  font-size: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   font-weight: 600;
 }
 
 .slot-summary {
   color: $text-secondary;
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -611,17 +614,17 @@ usePageLoadingTask(() => loading.value)
 .combination-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 
   label {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     min-width: 0;
 
     > span {
       color: $text-secondary;
-      font-size: 12px;
+      font-size: calc(var(--font-size-base, 14px) * 12 / 14);
       font-weight: 500;
     }
   }
@@ -636,8 +639,8 @@ usePageLoadingTask(() => loading.value)
 
 .slot-section {
   grid-column: 1 / -1;
-  border: 1px solid $border-light;
-  border-radius: 8px;
+  border: var(--border-width, 1px) solid $border-light;
+  border-radius: var(--radius-component, 8px);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -660,14 +663,14 @@ usePageLoadingTask(() => loading.value)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   background: $bg-secondary;
 
   h4 {
     margin: 0;
     color: $text-primary;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     font-weight: 600;
   }
 }
@@ -680,10 +683,10 @@ usePageLoadingTask(() => loading.value)
 .slot-editor-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 130px auto;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   align-items: center;
-  padding: 10px 12px;
-  border-top: 1px solid $border-light;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
 }
 
 .slot-pair {
@@ -692,14 +695,14 @@ usePageLoadingTask(() => loading.value)
   text-overflow: ellipsis;
   white-space: nowrap;
   color: $text-secondary;
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .slot-row-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .model-search {
@@ -719,12 +722,12 @@ usePageLoadingTask(() => loading.value)
 .model-group-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px;
+  gap: calc(6px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
   color: $text-secondary;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
   transition: background-color $transition-fast;
   user-select: none;
@@ -749,23 +752,23 @@ usePageLoadingTask(() => loading.value)
 
 .model-group-count {
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 400;
 }
 
 .model-group-items {
-  padding-inline-start: 8px;
+  padding-inline-start: calc(8px * var(--spacing-scale, 1));
 }
 
 .model-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(7px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
   color: $text-secondary;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   transition: all $transition-fast;
 
   &:hover {
@@ -789,15 +792,15 @@ usePageLoadingTask(() => loading.value)
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 }
 
 .model-item-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .model-item-id {
@@ -805,19 +808,19 @@ usePageLoadingTask(() => loading.value)
   text-overflow: ellipsis;
   white-space: nowrap;
   color: $text-muted;
-  font-family: $font-code;
-  font-size: 10px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   font-weight: 400;
 }
 
 .model-badge-custom {
   flex-shrink: 0;
-  border-radius: 3px;
+  border-radius: var(--radius-component, 3px);
   margin-inline-end: 4px;
-  padding: 1px 5px;
+  padding: calc(1px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
   background: $accent-primary;
   color: #fff;
-  font-size: 9px;
+  font-size: calc(var(--font-size-base, 14px) * 9 / 14);
   font-weight: 600;
   letter-spacing: 0.03em;
 }
@@ -832,7 +835,7 @@ usePageLoadingTask(() => loading.value)
   background: transparent;
   color: $text-muted;
   cursor: pointer;
-  line-height: 18px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
 
   &:hover {
     background: rgba(var(--error-rgb), 0.12);
@@ -842,45 +845,45 @@ usePageLoadingTask(() => loading.value)
 
 .model-badge-preview {
   flex-shrink: 0;
-  border-radius: 3px;
+  border-radius: var(--radius-component, 3px);
   margin-inline-end: 4px;
-  padding: 1px 5px;
+  padding: calc(1px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
   background: #d97706;
   color: #fff;
-  font-size: 9px;
+  font-size: calc(var(--font-size-base, 14px) * 9 / 14);
   font-weight: 600;
   letter-spacing: 0.03em;
 }
 
 .model-badge-disabled {
   flex-shrink: 0;
-  border: 1px solid $border-color;
-  border-radius: 3px;
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 3px);
   margin-inline-end: 4px;
-  padding: 0 5px;
+  padding: 0 calc(5px * var(--spacing-scale, 1));
   background: transparent;
   color: $text-muted;
-  font-size: 9px;
+  font-size: calc(var(--font-size-base, 14px) * 9 / 14);
   font-weight: 600;
   letter-spacing: 0.03em;
 }
 
 .model-empty {
-  padding: 24px 0;
+  padding: calc(24px * var(--spacing-scale, 1)) 0;
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   text-align: center;
 }
 
 .model-custom {
   margin-top: 12px;
-  border-top: 1px solid $border-color;
-  padding-top: 12px;
+  border-top: var(--border-width, 1px) solid $border-color;
+  padding-top: calc(12px * var(--spacing-scale, 1));
 }
 
 .model-custom-row {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .model-custom-provider {
@@ -895,7 +898,7 @@ usePageLoadingTask(() => loading.value)
 .model-custom-hint {
   margin-top: 6px;
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 @media (max-width: 860px) {

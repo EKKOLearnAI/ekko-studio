@@ -1,9 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { historySessionSource, sessionAgentFields, isBuiltinEkkoSession, isExternalCodingAgentSession } from '@/utils/hermes/session-agent'
+import { historySessionSource, sessionAgentFields, isBuiltinEkkoSession, isExternalCodingAgentSession, isHermesSession } from '@/utils/hermes/session-agent'
 import type { SessionSummary } from '@/api/studio/sessions'
 import { EKKO_SESSION_COMMAND_DEFINITIONS, isKnownEkkoSessionCommand, isKnownBridgeSessionCommand } from '@/utils/hermes/bridge-session-commands'
 
 describe('built-in Ekko session classification', () => {
+  it('recognizes Hermes histories while excluding built-in, external and unknown agents', () => {
+    for (const source of ['cli', 'api_server', 'workflow', undefined]) {
+      expect(isHermesSession({ source, agent: 'hermes' })).toBe(true)
+      expect(isHermesSession({ source })).toBe(true)
+    }
+    expect(isHermesSession(undefined)).toBe(false)
+    expect(isHermesSession({ source: 'builtin_agent' })).toBe(false)
+    expect(isHermesSession({ source: 'coding_agent' })).toBe(false)
+    expect(isHermesSession({ source: 'cli', codingAgentId: 'future-cli' })).toBe(false)
+    for (const agent of ['ekko', 'ekko-agent', 'ekko_agent', 'claude', 'codex', 'future-cli']) {
+      expect(isHermesSession({ source: 'cli', agent })).toBe(false)
+    }
+  })
+
   it.each(['ekko', 'ekko_agent', 'ekko-agent'])('recognizes %s before the legacy source flag', agent => {
     expect(isBuiltinEkkoSession({ agent, source: 'coding_agent' })).toBe(true)
     expect(isExternalCodingAgentSession({ agent, source: 'coding_agent' })).toBe(false)

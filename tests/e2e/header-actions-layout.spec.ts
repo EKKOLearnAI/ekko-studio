@@ -154,20 +154,20 @@ test('preserves skill filters and search when moving between compact and wide he
   await expect(menu.getByRole('button', { name: 'Local', exact: true })).toHaveClass(/active/)
 })
 
-test('uses compact usage period controls at the minimum Windows width', async ({ page }) => {
+test('keeps usage filters accessible below the standalone header at the minimum Windows width', async ({ page }) => {
   const api = await setup(page, 'win32')
   await page.setViewportSize({ width: 769, height: 900 })
   await page.goto('/#/hermes/usage')
   const header = page.locator('.studio-page-header > .page-header')
-  await header.getByRole('button', { name: 'More', exact: true }).click()
-  const menu = page.locator('.header-overflow-menu')
-  await expect(menu).toBeVisible()
-  expect(await clippedControls(menu)).toEqual([])
-  await menu.getByRole('button', { name: '90d', exact: true }).click()
+  await expect(header.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible()
+  await expect(header.locator('.period-selector')).toHaveCount(0)
+  await expect(page.locator('aside.sidebar')).toHaveCount(0)
+  const filters = page.locator('.overview-controls')
+  await filters.getByRole('button', { name: '90d', exact: true }).click()
   await expect.poll(() => api.requests.some(request => request.pathname === '/api/studio/usage/stats'
     && new URLSearchParams(request.search).get('days') === '90')).toBe(true)
   await page.setViewportSize({ width: 1440, height: 900 })
-  await expect(header.getByRole('button', { name: '90d', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(filters.getByRole('button', { name: '90d', exact: true })).toHaveAttribute('aria-pressed', 'true')
 })
 
 for (const tab of ['app', 'mcu', 'devices']) {

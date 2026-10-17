@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+case "$1" in
+    remove|deconfigure)
+        systemctl stop "@SERVICE@.service"
+        systemctl disable "@SERVICE@.service"
+        ;;
+    upgrade)
+        systemctl stop "@SERVICE@.service"
+        ;;
+esac
+exit 0

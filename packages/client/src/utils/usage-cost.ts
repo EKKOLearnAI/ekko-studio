@@ -10,8 +10,17 @@ export function usageCostState(amount: number, coverage?: UsageCostCoverage, has
   return coverage.estimated > 0 ? 'mixed' : 'reported'
 }
 
-export function formatUsageCost(amount: number, coverage?: UsageCostCoverage, hasActivity = true): string | null {
+export function formatUsageCurrency(amount: number, locale = 'en'): string {
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 2,
+    }).format(amount)
+  } catch {
+    return `$${amount.toFixed(2)}`
+  }
+}
+
+export function formatUsageCost(amount: number, coverage?: UsageCostCoverage, hasActivity = true, locale = 'en'): string | null {
   if (usageCostState(amount, coverage, hasActivity) === 'unknown') return null
-  if (amount === 0) return '$0.00'
-  return amount < 0.01 ? '<$0.01' : `$${amount.toFixed(2)}`
+  return amount > 0 && amount < 0.01 ? `<${formatUsageCurrency(0.01, locale)}` : formatUsageCurrency(amount, locale)
 }

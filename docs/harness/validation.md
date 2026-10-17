@@ -1,5 +1,12 @@
 # Validation Guide
 
+For TOS packaging changes, run `npx vitest run tests/server/tos-packaging.test.ts`,
+`npm run harness:check`, and build a real package with `npm run pack:tos`.
+The package verifier checks metadata placement, languages, lifecycle syntax,
+identity, symlinks and glibc compatibility. Follow `packages/tos/README.md` for
+non-root startup and TNAS install/start/stop/upgrade/remove acceptance; an
+Ubuntu smoke test is not a substitute for TOS device validation.
+
 Run the smallest relevant checks while iterating. Escalate to the broad checks
 when touching shared behavior, release automation, auth, persistence, or chat.
 
@@ -23,6 +30,8 @@ npm run build
 | --- | --- |
 | Docs only | `npm run harness:check` |
 | Client component/store/API | focused `npm run test -- <pattern>`, then `npm run build` |
+| UI surfaces/theme | `npm run harness:check`, relevant theme browser checks and `npm run build`; follow `frontend-ui.md` |
+| UI theme harness | `npx vitest run tests/client/ui-theme-harness.test.ts`, then `npm run harness:check` |
 | User-visible browser flow | focused Vitest plus `npm run test:e2e` |
 | Server controller/service/db | focused `npm run test -- tests/server/<file>` |
 | Server module move or dependency change | focused server boundary tests, then `npm run harness:check` |

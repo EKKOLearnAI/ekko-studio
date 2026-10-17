@@ -3,9 +3,11 @@ const auth=vi.hoisted(()=>({user:{id:1,role:'user'} as any,profiles:['default']}
 const mutedTokens=vi.hoisted(()=>new Set<string>())
 vi.mock('../../packages/server/src/modules/studio/repositories/app-connections-store',()=>({isAppConnectionPushEnabled:(token:string)=>!mutedTokens.has(token),listAppConnections:()=>[]}))
 const ownership=vi.hoisted(()=>({sessionUser:'1' as string|null,runUser:1 as number|null}))
-vi.mock('../../packages/server/src/modules/studio/public/auth',()=>({authenticateUserToken:async()=>auth.user}))
+const sessionFixtures=vi.hoisted(()=>new Map<string,any>())
+const accountTokens=vi.hoisted(()=>new Map<string,any>())
+vi.mock('../../packages/server/src/modules/studio/public/auth',()=>({authenticateUserToken:async(token:string)=>accountTokens.get(token) || auth.user}))
 vi.mock('../../packages/server/src/modules/studio/repositories/users-store',()=>({listUserProfiles:()=>auth.profiles.map(profile_name=>({profile_name}))}))
-vi.mock('../../packages/server/src/modules/studio/repositories/session-store',()=>({getSession:(id:string)=>id==='missing'?null:({source:'cli',agent:'codex',profile:'default',user_id:ownership.sessionUser}),getSessionNotificationPreview:()=>({title:'Title',preview:'Reply'})}))
+vi.mock('../../packages/server/src/modules/studio/repositories/session-store',()=>({getSession:(id:string)=>sessionFixtures.has(id)?sessionFixtures.get(id):id==='missing'?null:({source:'cli',agent:'codex',profile:'default',user_id:ownership.sessionUser}),getSessionNotificationPreview:()=>({title:'Title',preview:'Reply'})}))
 vi.mock('../../packages/server/src/modules/studio/repositories/workflow-run-store',()=>({
  getWorkflowRun:(id:string)=>id==='missing'?null:({id,workflow_id:'w',profile:'default',user_id:ownership.runUser}),
  getWorkflowRunForSession:(id:string,profile:string)=>id==='node' && profile==='default'?({id:'root',workflow_id:'w',profile:'root-profile',user_id:ownership.runUser}):null,
@@ -14,7 +16,7 @@ import { bindAppEventSubscription, parseAppSubscription, registerGroupEventAcces
 import { publishDomainEvent, publishGroupMessage } from '../../packages/server/src/modules/studio/services/webhooks/domain-events'
 function socket(){const handlers=new Map<string,Function>();return {id:Math.random().toString(),handshake:{auth:{token:'test'}},data:{},emit:vi.fn(),on:(n:string,f:Function)=>{const old=handlers.get(n);handlers.set(n,old?(...args:any[])=>{old(...args);f(...args)}:f)},once:(n:string,f:Function)=>handlers.set(n,f),handlers}}
 const flush=()=>new Promise(r=>setTimeout(r,15))
-beforeEach(()=>{mutedTokens.clear();auth.user={id:1,role:'user'};auth.profiles=['default'];ownership.sessionUser='1';ownership.runUser=1})
+beforeEach(()=>{sessionFixtures.clear();accountTokens.clear();mutedTokens.clear();auth.user={id:1,role:'user'};auth.profiles=['default'];ownership.sessionUser='1';ownership.runUser=1})
 it('normalizes omitted/blank profile before authorization and validates types',async()=>{
  expect(parseAppSubscription({schema_version:1}).profile).toBe('default')
  expect(()=>parseAppSubscription({schema_version:1,types:['unsafe']})).toThrow()
@@ -210,5 +212,87 @@ it('also applies device preferences to legacy notification subscriptions', async
   await flush();expect(s.emit).not.toHaveBeenCalled()
   mutedTokens.delete('test');publishDomainEvent('workflow.run.completed','default',{workflow_id:'w',run_id:'on'},{title:'W'})
   await flush();expect(s.emit).toHaveBeenCalledWith('app.workflow-notification',expect.objectContaining({runId:'on'}))
+ } finally {s.handlers.get('disconnect')!()}
+})
+
+
+it('synchronizes deleted-session cleanup to both live devices without disclosing ownership', async () => {
+ const { createServer } = await import('node:http')
+ const { Server } = await import('socket.io')
+ const { io } = await import('socket.io-client')
+ const { publishSessionRemoval } = await import('../../packages/server/src/modules/studio/services/notifications/session-removal')
+ const http = createServer(), server = new Server(http)
+ server.of('/chat-run').on('connection', bindAppEventSubscription)
+ await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve))
+ const port = (http.address() as any).port
+ accountTokens.set('phone-a', { id: 1, role: 'user' })
+ accountTokens.set('phone-b', { id: 1, role: 'user' })
+ accountTokens.set('other-account', { id: 2, role: 'super_admin' })
+ const clients = ['phone-a', 'phone-b', 'other-account'].map(token => io(`http://127.0.0.1:${port}/chat-run`, {
+  auth: { token, appEventVersion: 1 }, transports: ['websocket'], autoConnect: false,
+ }))
+ const received: any[][] = clients.map(() => [])
+ try {
+  await Promise.all(clients.map(async (client, index) => {
+   client.on('app.event', event => received[index].push(event))
+   const ready = new Promise<void>(resolve => client.once('connect', () => resolve()))
+   client.connect(); await ready
+   await new Promise<void>((resolve, reject) => client.emit('app.events.subscribe', {schema_version: 1, profile: 'default'},
+    (ack: any) => ack.ok ? resolve() : reject(Error('denied'))))
+  }))
+  sessionFixtures.set('deleted-chat', null)
+  mutedTokens.add('phone-b') // Cleanup is synchronization, even when result alerts are muted.
+  publishSessionRemoval({ id: 'deleted-chat', profile: 'default', user_id: '1' }, 'deleted')
+  await vi.waitFor(() => {
+   expect(received[0]).toHaveLength(1)
+   expect(received[1]).toHaveLength(1)
+  })
+  expect(received[0][0]).toMatchObject({ type: 'chat.session.removed', notify: false, subject: {session_id: 'deleted-chat'} })
+  expect(received[1][0]).toEqual(received[0][0])
+  expect(received[2]).toEqual([])
+  expect(JSON.stringify(received)).not.toContain('owner_user_id')
+  auth.profiles = []
+  publishSessionRemoval({ id: 'revoked-chat', user_id: 1 }, 'deleted')
+  await flush()
+  expect(received[0]).toHaveLength(1)
+ } finally {
+  clients.forEach(client => client.disconnect())
+  await new Promise<void>(resolve => server.close(() => resolve()))
+  http.close()
+ }
+})
+
+it('reconciles exact unread IDs after offline deletion without relying on list pagination', async () => {
+ sessionFixtures.set('archived', {profile: 'default', user_id: '1', is_archived: 1})
+ sessionFixtures.set('other-profile', {profile: 'research', user_id: '1'})
+ sessionFixtures.set('other-owner', {profile: 'default', user_id: '2'})
+ const s = socket(); bindAppEventSubscription(s as any)
+ try {
+  const ack = vi.fn()
+  await s.handlers.get('app.events.subscribe')!({schema_version: 1, include_snapshot: true,
+   unread_session_ids: ['missing', 'archived', 'other-profile', 'other-owner', 'old-unpaginated-chat']}, ack)
+  expect(ack.mock.calls[0][0]).toMatchObject({ok: true, unread_sessions: ['old-unpaginated-chat']})
+  expect(() => parseAppSubscription({schema_version: 1, unread_session_ids: Array(1001).fill('s')})).toThrow()
+  expect(() => parseAppSubscription({schema_version: 1, unread_session_ids: [7]})).toThrow()
+ } finally {s.handlers.get('disconnect')!()}
+})
+
+
+it('adds silent removals through an optional capability while preserving legacy type filters', async () => {
+ expect(parseAppSubscription({schema_version: 1, types: ['chat.run.completed'], include_session_removals: true}).types)
+  .toEqual(['chat.run.completed', 'chat.session.removed'])
+ const { publishSessionRemoval } = await import('../../packages/server/src/modules/studio/services/notifications/session-removal')
+ const s = socket(); bindAppEventSubscription(s as any)
+ try {
+  await s.handlers.get('app.events.subscribe')!({schema_version: 1, types: ['chat.run.completed'], include_session_removals: true}, vi.fn())
+  publishSessionRemoval({id: 's', user_id: 1}, 'archived')
+  await flush()
+  expect(s.emit).toHaveBeenCalledWith('app.event', expect.objectContaining({type: 'chat.session.removed', notify: false}))
+  sessionFixtures.set('s', {profile: 'default', user_id: '1', is_archived: 1})
+  const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+  businessEvents.publish({schema_version: 1, id: 'late-completion', type: 'chat.run.completed', occurred_at: new Date().toISOString(),
+   profile: 'default', source: 'chat', subject: {session_id: 's', run_id: 'r'}, payload: {run_id: 'r', output: 'late reply'}})
+  await flush()
+  expect(s.emit).toHaveBeenCalledTimes(1)
  } finally {s.handlers.get('disconnect')!()}
 })

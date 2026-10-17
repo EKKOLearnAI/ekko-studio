@@ -83,7 +83,7 @@ for (const agent of ['Codex', 'DeepSeek Harness']) test(`workflow ${agent} nodes
   })
 
   await page.goto('/#/hermes/workflow')
-  const node = page.locator('.vue-flow__node[data-id="agent"]')
+  const node = page.locator('.vue-flow__node')
   await expect(node.locator('.model-trigger')).toContainText('gpt-5-codex')
 
   await node.locator('.n-select').first().click()
@@ -92,8 +92,8 @@ for (const agent of ['Codex', 'DeepSeek Harness']) test(`workflow ${agent} nodes
 
   await node.locator('.model-trigger').click()
   const modelDialog = page.getByRole('dialog')
-  await expect(modelDialog.getByText('Test Provider', { exact: true })).toBeVisible()
-  await expect(modelDialog.getByText('OpenAI Codex Subscription', { exact: true })).toHaveCount(0)
+  await expect(modelDialog.locator('.model-cascader-provider').filter({ hasText: 'Test Provider' })).toBeVisible()
+  await expect(modelDialog.locator('.model-cascader-provider').filter({ hasText: 'OpenAI Codex Subscription' })).toHaveCount(0)
   if (agent === 'DeepSeek Harness') {
     await page.keyboard.press('Escape')
     const preset = node.getByTestId('dsh-session-preset')

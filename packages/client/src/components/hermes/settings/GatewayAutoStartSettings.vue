@@ -145,8 +145,8 @@ function saveExclude(value: string[]) {
 }
 
 .gateway-auto-start-settings {
-  padding-top: 16px;
-  border-top: 1px solid var(--border-color);
+  padding-top: calc(16px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid var(--border-color);
 
   &.standalone {
     margin-top: 0;
@@ -157,7 +157,7 @@ function saveExclude(value: string[]) {
 
 .section-title {
   margin: 0 0 6px;
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 600;
   color: var(--text-color);
 }
@@ -165,7 +165,7 @@ function saveExclude(value: string[]) {
 .section-hint {
   margin: 0 0 12px;
   color: var(--text-color-secondary);
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .input-md {

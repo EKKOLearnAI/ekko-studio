@@ -1,13 +1,16 @@
 import { expect, test } from '@playwright/test'
-import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
+import { authenticate, mockHermesApi, TEST_ACCESS_KEY, TEST_MODEL_GROUP } from './fixtures'
 
 test.beforeEach(async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
-  await mockHermesApi(page)
+  await mockHermesApi(page, { modelGroups: [TEST_MODEL_GROUP, {
+    ...TEST_MODEL_GROUP, provider: 'other-provider', label: 'Other Provider', models: ['other-model'],
+  }] })
   await page.route('**/api/studio/sessions/hermes/groups**', route => route.fulfill({ json: { groups: [], included: [] } }))
 })
 
 test('opens account controls from chat without navigating and keeps nested dialogs usable', async ({ page }, testInfo) => {
+  await page.route('**/api/hermes/config/model', route => route.fulfill({ json: { success: true } }))
   await page.goto('/#/hermes/chat')
   const account = page.locator('.page-sidebar-account-btn')
   const menu = page.locator('.sidebar-account-menu')
@@ -32,12 +35,22 @@ test('opens account controls from chat without navigating and keeps nested dialo
 
   await account.click()
   await menu.locator('.model-trigger').click()
-  await expect(menu).not.toBeVisible()
-  const models = page.getByRole('dialog')
-  await expect(models.locator('.model-list')).toBeVisible()
-  await models.locator('.n-base-close').click()
-
+  await expect(menu).toBeHidden()
+  const models = page.locator('.model-cascader:visible')
+  await expect(models.locator('.model-cascader-columns')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(models).toBeHidden()
   await account.click()
+  await menu.locator('.model-trigger').click()
+  await models.locator('.model-cascader-provider').filter({ hasText: 'Other Provider' }).click()
+  await expect(menu).toBeHidden()
+  const modelUpdate = page.waitForRequest(request => request.url().endsWith('/api/hermes/config/model') && request.method() === 'PUT')
+  await models.getByRole('menuitemradio').filter({ hasText: 'other-model' }).click()
+  expect((await modelUpdate).postDataJSON()).toMatchObject({ default: 'other-model', provider: 'other-provider' })
+  await expect(models).toBeHidden()
+  await account.click()
+  await expect(menu).toBeVisible()
+  await expect(menu.locator('.model-trigger')).toContainText('other-model')
   await menu.locator('.version-text').click()
   await expect(menu).not.toBeVisible()
   await expect(page.locator('.changelog-list')).toBeVisible()
@@ -84,6 +97,17 @@ test('keeps the menu and language selection within a narrow viewport', async ({ 
   await page.locator('.page-sidebar-account-btn').click()
   const menu = page.locator('.sidebar-account-menu')
   await expect(menu).toBeInViewport()
+  await menu.locator('.model-trigger').click()
+  const models = page.locator('.model-cascader:visible')
+  const bounds = await page.locator('.model-cascader-modal:visible').boundingBox()
+  expect(bounds!.x).toBeGreaterThanOrEqual(0)
+  expect(bounds!.y).toBeGreaterThanOrEqual(0)
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390)
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(680)
+  await page.keyboard.press('Escape')
+  await expect(models).toBeHidden()
+  await page.locator('.page-sidebar-account-btn').click()
+  await expect(menu).toBeVisible()
   await menu.locator('.language-switch').click()
   await page.locator('.n-base-select-option').filter({ hasText: /^简体中文$/ }).click()
   await expect(menu.locator('.language-switch')).toContainText('简体中文')

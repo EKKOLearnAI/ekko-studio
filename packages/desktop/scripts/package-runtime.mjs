@@ -17,6 +17,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { hermesSource } from './runtime-config.mjs'
+import { hermesInstalledVersionScript } from './hermes-version.mjs'
 import {
   bundledBaseHomePath,
   configWithPythonHome,
@@ -74,7 +75,7 @@ for (const dir of [PY_DIR, NODE_DIR]) {
 
 const hermesAgentVersion = output(pyBin, [
   '-c',
-  'import importlib.metadata as m; print(m.version("hermes-agent"))',
+  hermesInstalledVersionScript,
 ])
 if (hermesAgentVersion !== configuredSource.version) {
   console.error(
@@ -141,14 +142,13 @@ try {
   const stagedVersion = output(stagedPython, [
     '-c',
     [
-      'import importlib.metadata as metadata',
       'from pathlib import Path',
       'import hermes_cli',
       `source = Path(${JSON.stringify(stagedSource)}).resolve()`,
       'module = Path(hermes_cli.__file__).resolve()',
       'assert module.is_relative_to(source), (module, source)',
-      'print(metadata.version("hermes-agent"))',
-    ].join('; '),
+      hermesInstalledVersionScript,
+    ].join('\n'),
   ])
   if (stagedVersion !== hermesAgentVersion) {
     console.error(`Relocated Hermes version mismatch: expected ${hermesAgentVersion}, found ${stagedVersion}`)

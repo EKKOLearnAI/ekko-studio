@@ -16,7 +16,7 @@ import { getApiKey, setApiKey, clearApiKey, hasApiKey, getStoredUserRole, isStor
 import { downloadFile, getDownloadUrl } from '../../packages/client/src/api/studio/download'
 import { uploadFiles } from '../../packages/client/src/api/studio/files'
 import { importSkill } from '../../packages/client/src/api/hermes/skills'
-import { archiveSession, batchDeleteSessions, exportSession, fetchHermesSessionGroups, fetchHermesSessionPage, importHermesSession, unarchiveSession } from '../../packages/client/src/api/studio/sessions'
+import { archiveSession, batchDeleteSessions, exportSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchUsageStats, importHermesSession, unarchiveSession } from '../../packages/client/src/api/studio/sessions'
 import router from '@/router'
 
 function fakeJwt(payload: Record<string, unknown>) {
@@ -53,6 +53,24 @@ describe('API Client', () => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
     await request('/api/hermes/config/moa', { headers: { 'X-Hermes-Profile': 'original' } })
     expect(mockFetch.mock.calls.at(-1)?.[1].headers['X-Hermes-Profile']).toBe('original')
+  })
+
+  it('requests all usage Profiles independently of the global active Profile and combines an explicit Profile with account and today', async () => {
+    localStorage.setItem('hermes_active_profile_name', 'default')
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    await fetchUsageStats(30)
+    const [allPath, allOptions] = mockFetch.mock.calls.at(-1)!
+    expect(new URL(allPath, 'http://local').searchParams.get('profile')).toBe('')
+    expect(allOptions.headers['X-Hermes-Profile']).toBeUndefined()
+    await fetchUsageStats(1, { profile: 'research', account: 'unassigned' })
+    const [path, options] = mockFetch.mock.calls.at(-1)!
+    const params = new URL(path, 'http://local').searchParams
+    expect(params.get('profile')).toBe('research')
+    expect(params.get('account')).toBe('unassigned')
+    expect(params.get('period')).toBe('today')
+    expect(params.get('time_zone')).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+    expect(options.headers['X-Hermes-Profile']).toBeUndefined()
+    expect(localStorage.getItem('hermes_active_profile_name')).toBe('default')
   })
 
   describe('token management', () => {

@@ -6,6 +6,8 @@ export interface ResponsesAdapterTarget {
   model: string
   provider?: string
   baseUrl?: string
+  /** Default for providers such as Anthropic Messages that require max_tokens. */
+  outputLimit?: number
 }
 
 const HERMES_STUDIO_NAMESPACE = 'mcp__ekko_studio'
@@ -858,6 +860,11 @@ export function responsesToOpenAiChat(body: any, target: ResponsesAdapterTarget,
     ...(typeof body?.top_p === 'number' ? { top_p: body.top_p } : {}),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     ...(tools?.length ? { tools } : {}),
+    // OpenAI-compatible streaming providers (notably vLLM) omit token usage
+    // from the final SSE chunk unless the client explicitly requests it.
+    // Without this the Responses→Chat Completions conversion never receives a
+    // usage frame, so the turn lands with zero/missing token accounting.
+    ...(stream ? { stream_options: { include_usage: true } } : {}),
     stream,
   }
 }
@@ -955,7 +962,9 @@ export function responsesToAnthropicMessages(body: any, target: ResponsesAdapter
     model: target.model,
     messages: responsesInputToAnthropicMessages(body),
     ...(body?.instructions ? { system: stringifyContent(body.instructions) } : {}),
-    ...(typeof body?.max_output_tokens === 'number' ? { max_tokens: body.max_output_tokens } : { max_tokens: 4096 }),
+    max_tokens: typeof body?.max_output_tokens === 'number'
+      ? body.max_output_tokens
+      : target.outputLimit && target.outputLimit > 0 ? Math.floor(target.outputLimit) : 4096,
     ...(typeof body?.temperature === 'number' ? { temperature: body.temperature } : {}),
     ...(typeof body?.top_p === 'number' ? { top_p: body.top_p } : {}),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),

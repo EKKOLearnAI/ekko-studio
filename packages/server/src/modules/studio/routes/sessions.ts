@@ -1,5 +1,6 @@
 import Router from '@koa/router'
 import * as shares from '../controllers/session-shares'
+import * as directories from '../controllers/workspace-directories'
 import * as ctrl from '../controllers/sessions'
 
 export const sessionRoutes = new Router()
@@ -37,6 +38,8 @@ sessionRoutes.delete('/api/studio/sessions/:id/workspace-file/delete', ctrl.dele
 sessionRoutes.post('/api/studio/sessions/:id/workspace-file/rename', ctrl.renameWorkspaceFile)
 sessionRoutes.post('/api/studio/sessions/:id/workspace-file/copy', ctrl.copyWorkspaceFile)
 sessionRoutes.get('/api/studio/sessions/:id', ctrl.get)
+sessionRoutes.get('/api/studio/sessions/:id/message-selection', ctrl.messageSelection)
+sessionRoutes.post('/api/studio/sessions/:id/messages/batch-delete', ctrl.deleteMessages)
 sessionRoutes.get('/api/studio/sessions/:id/export', ctrl.exportSession)
 sessionRoutes.get('/api/studio/sessions/:id/usage', ctrl.usageSingle)
 sessionRoutes.delete('/api/studio/sessions/:id', ctrl.remove)
@@ -57,6 +60,9 @@ sessionRoutes.get('/api/studio/sessions/:id/share-workspaces', shares.workspaces
 sessionRoutes.post('/api/studio/sessions/:id/model', ctrl.setModel)
 sessionRoutes.post('/api/studio/sessions/:id/reasoning-effort', ctrl.setReasoningEffort)
 sessionRoutes.get('/api/studio/workspace/folders', ctrl.listWorkspaceFolders)
+sessionRoutes.get('/api/studio/workspace/directories', directories.list)
+sessionRoutes.post('/api/studio/workspace/directories', directories.record)
+sessionRoutes.patch('/api/studio/workspace/directories', directories.setFavorite)
 sessionRoutes.post('/api/studio/workspace/folders', ctrl.createWorkspaceFolder)
 sessionRoutes.post('/api/studio/workspace/folders/rename', ctrl.renameWorkspaceFolder)
 sessionRoutes.delete('/api/studio/workspace/folders', ctrl.deleteWorkspaceFolder)

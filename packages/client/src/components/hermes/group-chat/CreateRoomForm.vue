@@ -215,33 +215,33 @@ onMounted(() => {
 
 .form-label {
     display: block;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     font-weight: 500;
     color: $text-secondary;
     margin-bottom: 6px;
 }
 
 .form-hint {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $text-muted;
     margin: 4px 0 0;
 }
 
 .code-row {
     display: flex;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     align-items: center;
 }
 
 .summary-section {
-    padding: 14px;
+    padding: calc(14px * var(--spacing-scale, 1));
     margin-bottom: 16px;
-    border: 1px solid $border-color;
-    border-radius: 10px;
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 10px);
 
     h4 {
         margin: 0;
-        font-size: 14px;
+        font-size: calc(var(--font-size-base, 14px) * 14 / 14);
     }
 }
 

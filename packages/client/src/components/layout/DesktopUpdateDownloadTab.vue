@@ -83,11 +83,11 @@ const speed = computed(() => {
 .desktop-update-tab {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: calc(9px * var(--spacing-scale, 1));
   width: 100%;
-  padding: 11px 10px 10px;
+  padding: calc(11px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   margin-bottom: 2px;
-  border-radius: 7px;
+  border-radius: var(--radius-component, 7px);
   background: rgba(var(--accent-primary-rgb), 0.045);
   color: $text-primary;
   box-sizing: border-box;
@@ -95,9 +95,9 @@ const speed = computed(() => {
   &__heading {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    line-height: 18px;
+    gap: calc(8px * var(--spacing-scale, 1));
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
 
     svg {
       width: 15px;
@@ -131,7 +131,7 @@ const speed = computed(() => {
     margin: -2px -3px;
     padding: 0;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-component, 4px);
     background: transparent;
     color: $text-secondary;
     cursor: pointer;
@@ -144,7 +144,7 @@ const speed = computed(() => {
 
   &__track {
     height: 3px;
-    border-radius: 9px;
+    border-radius: var(--radius-component, 9px);
     background: rgba(var(--accent-primary-rgb), 0.11);
     overflow: hidden;
   }
@@ -162,10 +162,10 @@ const speed = computed(() => {
   &__details {
     display: flex;
     justify-content: space-between;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     color: $text-muted;
-    font-size: 11px;
-    line-height: 15px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 15 / 14));
     font-variant-numeric: tabular-nums;
   }
 
@@ -202,8 +202,8 @@ const speed = computed(() => {
   &__error {
     margin: 0;
     color: $error;
-    font-size: 11px;
-    line-height: 1.5;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+    line-height: var(--line-height, 1.5);
   }
 }
 

@@ -543,6 +543,7 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig {
   const tools = record(source.tools, 'tools', true)
   const approvals = record(tools.approvals, 'tools.approvals', true)
   const codeExec = record(tools.codeExec, 'tools.codeExec', true)
+  const computerUse = record(tools.computerUse, 'tools.computerUse', true)
   const mcp = record(source.mcp, 'mcp', true)
   const delegation = record(source.delegation, 'delegation', true)
   const compression = record(source.compression, 'compression', true)
@@ -630,6 +631,10 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig {
     },
     tools: {
       ...tools,
+      computerUse: {
+        enabled: booleanValue(computerUse.enabled, true, 'tools.computerUse.enabled'),
+        timeoutMs: integer(computerUse.timeoutMs, 30_000, 'tools.computerUse.timeoutMs', 1),
+      },
       enabled: booleanValue(tools.enabled, DEFAULT_EKKO_CONFIG.tools.enabled, 'tools.enabled'),
       executionTimeoutMs: integer(
         tools.executionTimeoutMs,
@@ -795,6 +800,7 @@ function mergeConfigPatch(current: EkkoConfig, patch: EkkoConfigPatch): JsonReco
       ...patch.tools,
       approvals: { ...current.tools.approvals, ...patch.tools?.approvals },
       codeExec: { ...current.tools.codeExec, ...patch.tools?.codeExec },
+      computerUse: { ...current.tools.computerUse, ...patch.tools?.computerUse },
     },
     mcp: {
       ...current.mcp,

@@ -52,16 +52,21 @@ describe('available model reasoning metadata', () => {
     },
   )
 
-  it('includes effort metadata in configured, profile and preset catalogs without changing the configured context', async () => {
+  it('includes effort metadata in visible models while keeping preset descriptors compact and the configured context unchanged', async () => {
     await import('../../packages/server/src/bootstrap/agent-profile-adapter')
     const { getAvailable } = await import('../../packages/server/src/modules/hermes/controllers/models')
     const { getModelContextLength } = await import('../../packages/server/src/modules/hermes/services/models/context')
     const ctx = { query: { profile: 'default' }, body: undefined as any }
     await getAvailable(ctx)
-    for (const groups of [ctx.body.groups, ctx.body.profiles[0].groups, ctx.body.allProviders]) {
+    for (const groups of [ctx.body.groups, ctx.body.profiles[0].groups]) {
       expect(groups.find((group: any) => group.provider === 'deepseek').model_meta['deepseek-chat'])
         .toMatchObject({ reasoning: true, reasoning_efforts: ['low', 'high'] })
     }
+    const preset = ctx.body.allProviders.find((group: any) => group.provider === 'deepseek')
+    expect(preset.models).toEqual([])
+    expect(preset.model_count).toBeGreaterThan(0)
+    expect(preset.model_meta).toBeUndefined()
+    expect(preset.available_models).toBeUndefined()
     expect(getModelContextLength()).toBe(80_000)
     expect(readFileSync(join(home, 'config.yaml'), 'utf8')).toBe(initialConfig)
     expect(fetch).not.toHaveBeenCalled()

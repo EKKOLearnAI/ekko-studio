@@ -48,6 +48,9 @@ for (const target of [
     await expect(node.locator('.n-select').first()).toContainText(target.label)
     if (target.mode === 'scoped') {
       await expect(node.locator('.model-trigger')).toContainText('test-model')
+    } else {
+      // The legacy Global node's Studio provider/model was never a native choice.
+      await expect(node.locator('.native-model-trigger')).toHaveText('Agent default model')
     }
 
     await page.locator('.header-actions').getByRole('button', { name: 'Save', exact: true }).click()
@@ -57,7 +60,9 @@ for (const target of [
     await expect.poll(() => saves().length).toBe(1)
     const data = JSON.parse(saves()[0].postData || '{}').nodes[0].data
     expect(data).toMatchObject({
-      agent: target.agent, agentMode: target.mode, provider: 'test-provider', model: 'test-model',
+      agent: target.agent, agentMode: target.mode,
+      provider: target.mode === 'global' ? '' : 'test-provider',
+      model: target.mode === 'global' ? '' : 'test-model',
     })
     expect(data.priorAgentMode).toBeUndefined()
     expect(api.unexpectedRequests).toEqual([])

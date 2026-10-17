@@ -229,7 +229,9 @@ def start_manual_run(pool, session_id, agent, message=None, workspace=None):
         args=(session, record, message or f"message:{session_id}", None, None, [], "default", False, workspace, "api_server"),
         daemon=True,
     )
-    thread.start()
+    with session.lock:
+        record.worker_thread = thread
+        thread.start()
     return session, record, thread
 
 def wait_for(condition, timeout=20):
@@ -242,6 +244,120 @@ def wait_for(condition, timeout=20):
 `
 
 describe('agent bridge Python session concurrency', () => {
+  it('settles abnormal exits and failures before conversation setup', () => {
+    runPython(String.raw`
+${harness}
+
+class ExitingAgent:
+    def run_conversation(self, message, **kwargs):
+        raise SystemExit("agent exited")
+
+pool, _ = make_pool()
+session, record, thread = start_manual_run(pool, "exiting", ExitingAgent())
+thread.join(timeout=5)
+assert not thread.is_alive()
+assert pool.get_output(record.run_id)["done"] is True
+assert record.status == "error" and "SystemExit" in record.error
+assert pool.status(session.session_id)["running"] is False
+assert session.current_run_id is None
+assert pool._approval_handlers == {} and approval._notify == {}
+assert pool._exec_ask_depth == 0
+
+def fail_setup():
+    raise RuntimeError("approval setup failed")
+
+sys.modules["bridge_pool"]._refresh_approval_allowlist = fail_setup
+session, record, thread = start_manual_run(pool, "setup-failure", ExitingAgent())
+thread.join(timeout=5)
+assert not thread.is_alive()
+assert record.status == "error" and "approval setup failed" in record.error
+assert pool.status(session.session_id)["running"] is False
+`)
+  })
+
+  it.each(['get_output', 'get_result', 'status'])('repairs a dead worker through %s without clearing a newer run', reader => {
+    runPython(String.raw`
+${harness}
+
+pool, _ = make_pool()
+session = bridge.AgentSession(session_id="dead-worker", agent=object(), running=True, current_run_id="old")
+thread = threading.Thread(target=lambda: None)
+thread.start()
+thread.join(timeout=5)
+record = bridge.RunRecord(run_id="old", session_id=session.session_id, worker_thread=thread)
+pool._sessions[session.session_id] = session
+pool._runs[record.run_id] = record
+pool.${reader}(session.session_id if "${reader}" == "status" else record.run_id)
+assert record.status == "error"
+assert pool.get_output(record.run_id)["done"] is True
+assert session.running is False and session.current_run_id is None
+
+record.status = "running"
+session.running = True
+session.current_run_id = "new"
+pool.get_output(record.run_id)
+assert record.status == "error"
+assert session.running is True and session.current_run_id == "new"
+
+record.status = "running"
+pool._sessions.pop(session.session_id)
+assert pool.get_output(record.run_id)["done"] is True
+`)
+  })
+
+  it('releases the session when startup fails before a worker can launch', () => {
+    runPython(String.raw`
+${harness}
+
+pool, _ = make_pool()
+session = bridge.AgentSession(session_id="startup-failure", agent=object())
+pool._sessions[session.session_id] = session
+pool.get_or_create = lambda *_args, **_kwargs: session
+pool._install_usage_hook = lambda: None
+pool._install_boundary_interrupt = lambda _session: None
+def fail_context(*_args):
+    raise RuntimeError("context setup failed")
+pool._bridge_context_ready_event = fail_context
+try:
+    pool.start_chat(session.session_id, "hello")
+    assert False, "startup should fail"
+except RuntimeError as exc:
+    assert "context setup failed" in str(exc)
+assert session.running is False and session.current_run_id is None
+record = next(iter(pool._runs.values()))
+assert record.worker_thread is None
+assert pool.get_output(record.run_id)["done"] is True
+assert record.status == "error"
+`)
+  })
+
+  it('keeps a live waiting conversation running until it returns', () => {
+    runPython(String.raw`
+${harness}
+
+release = threading.Event()
+entered = threading.Event()
+class WaitingAgent:
+    def run_conversation(self, message, **kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+        return {"final_response": "done"}
+
+pool, _ = make_pool()
+session, record, thread = start_manual_run(pool, "waiting", WaitingAgent())
+try:
+    assert entered.wait(timeout=2)
+    assert pool.status(session.session_id)["running"] is True
+    assert pool.get_output(record.run_id)["done"] is False
+finally:
+    release.set()
+    thread.join(timeout=5)
+assert record.status == "complete"
+assert pool.get_output(record.run_id)["done"] is True
+assert pool.status(session.session_id)["running"] is False
+`)
+  })
+
   it('denies only the interrupted session run generation approval queues', () => {
     runPython(String.raw`
 ${harness}

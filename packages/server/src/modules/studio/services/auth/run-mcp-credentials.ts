@@ -20,18 +20,27 @@ export interface RunMcpBinding {
 type Credential = RunMcpBinding & { tokenFile: string; digest: string }
 const digest = (token: string) => createHash('sha256').update(token).digest('hex')
 
+/** Shared Hermes MCP connections select an interaction-only credential per request. */
+export function runMcpContextTokenPath(profile: string, contextId: string): string {
+  return join(getWebUiHome(), 'runtime', 'mcp-credentials', `context-${digest(`${profile}\0${contextId}`)}`, 'auth.json')
+}
+
 /** In-memory capabilities die with the server and with their owning turn. */
 export class RunMcpCredentials {
   private readonly tokens = new Map<string, Credential>()
   private readonly sessions = new Map<string, Map<string, Credential>>()
 
-  async issue(binding: RunMcpBinding, options: { preserveOtherContexts?: boolean } = {}): Promise<string> {
+  async issue(binding: RunMcpBinding, options: { preserveOtherContexts?: boolean; contextLookup?: boolean } = {}): Promise<string> {
     if (![binding.sessionId, binding.contextId, binding.profile, binding.agentId].every(value => value.trim())) {
       throw new Error('Run MCP credentials require a complete execution context')
     }
+    if (options.contextLookup && binding.userId !== undefined) {
+      throw new Error('Context-selected MCP credentials cannot delegate account permissions')
+    }
     this.revoke(binding.sessionId, options.preserveOtherContexts ? binding.contextId : undefined)
     const token = `${TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`
-    const directory = join(getWebUiHome(), 'runtime', 'mcp-credentials', randomUUID())
+    const directory = options.contextLookup ? dirname(runMcpContextTokenPath(binding.profile, binding.contextId))
+      : join(getWebUiHome(), 'runtime', 'mcp-credentials', randomUUID())
     // Reuse the sensitive basename blocked by local, shared and remote file APIs.
     const credential: Credential = { ...binding, tokenFile: join(directory, 'auth.json'), digest: digest(token) }
     // Register before IO so an abort during preparation can revoke this lease.

@@ -49,6 +49,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/handle-bridg
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/load-state', () => ({
   loadSessionStateFromDb: loadSessionStateFromDbMock,
+  readSessionStateFromDb: vi.fn(() => ({ messages: [], isWorking: false, events: [], queue: [] })),
   resolveRunSource: vi.fn((source?: string) => source || 'cli'),
 }))
 
@@ -656,6 +657,53 @@ describe('ChatRunSocket bridge readiness gating', () => {
     })
   })
 
+  it('recovers the terminal result of a cached run that lost its consumer', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).sessionMap.set('session-1', {
+      messages: [], events: [], queue: [], source: 'cli', isWorking: true,
+      runId: 'old-run', activeRunMarker: 'old-marker',
+    })
+    ;(server as any).onConnection(socket)
+    await handlers.get('resume')?.({ session_id: 'session-1' })
+    expect(bridgeMock.statusIfLoaded).toHaveBeenCalledWith('session-1', 'default', { timeoutMs: 1000 })
+    expect(resumeBridgeRunMock).toHaveBeenCalledWith(expect.anything(), socket,
+      expect.objectContaining({ sessionId: 'session-1', runId: 'old-run' }), expect.anything(), bridgeMock, expect.any(Function))
+  })
+
+  it('preserves a live consumer while its terminal accounting is pending', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).sessionMap.set('session-1', {
+      messages: [], events: [], queue: [], source: 'cli', isWorking: true,
+      runId: 'old-run', activeRunMarker: 'old-marker', bridgeRunPollMarker: 'old-marker',
+    })
+    ;(server as any).onConnection(socket)
+    await handlers.get('resume')?.({ session_id: 'session-1' })
+    expect(bridgeMock.statusIfLoaded).toHaveBeenCalled()
+    expect(resumeBridgeRunMock).not.toHaveBeenCalled()
+    expect(socket.emit).toHaveBeenCalledWith('resumed', expect.objectContaining({ isWorking: true }))
+  })
+
+  it('ignores a status reply for a run superseded during reconnect', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const state = { messages: [], events: [], queue: [], source: 'cli', isWorking: true,
+      runId: 'old-run', activeRunMarker: 'old-marker' }
+    ;(server as any).sessionMap.set('session-1', state)
+    bridgeMock.statusIfLoaded.mockImplementationOnce(async () => {
+      Object.assign(state, { runId: 'new-run', activeRunMarker: 'new-marker' })
+      return { running: true, current_run_id: 'old-run' }
+    })
+    ;(server as any).onConnection(socket)
+    await handlers.get('resume')?.({ session_id: 'session-1' })
+    expect(resumeBridgeRunMock).not.toHaveBeenCalled()
+    expect(state).toMatchObject({ runId: 'new-run', activeRunMarker: 'new-marker' })
+  })
+
   it('reattaches a loaded running bridge run without probing manager readiness again', async () => {
     bridgeMock.statusIfLoaded
       .mockResolvedValueOnce({
@@ -1130,7 +1178,7 @@ describe('ChatRunSocket MCP task plan lifecycle', () => {
     expect(() => server.updateTaskPlan(contextId, 'default', input)).toThrow('expired')
   })
 
-  it.each([false, true])('keeps Hermes plans alive until its stream completes (interrupted=%s)', async interrupted => {
+  it.each([false, true])('keeps Hermes plans alive until completion without treating runtime interrupted=%s as Stop', async interrupted => {
     getSessionMock.mockReturnValue({ id: 'session-1', profile: 'default', source: 'cli', agent: 'hermes' })
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const { emitted, io, socket } = makeServerHarness()
@@ -1147,7 +1195,9 @@ describe('ChatRunSocket MCP task plan lifecycle', () => {
       data.onEvent('run.completed', { event: 'run.completed', result: { interrupted } })
     }) as any)
     await (server as any).handleRun(socket, { session_id: 'session-1', source: 'cli', input: 'Implement a feature' }, 'default')
-    expect(emitted.filter(item => item.event === 'plan.updated').map(item => item.payload.execution_state)).toEqual(['running', interrupted ? 'interrupted' : 'ended'])
+    const updates = emitted.filter(item => item.event === 'plan.updated')
+    expect(updates.map(item => item.payload.execution_state)).toEqual(['running', 'ended'])
+    expect(updates[1].payload.plan).toEqual([{ id: 'verify', step: 'Verify the change', status: 'pending' }])
     expect(() => server.updateTaskPlan(contextId, 'default', input)).toThrow('expired')
   })
 })

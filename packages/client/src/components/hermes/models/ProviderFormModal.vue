@@ -173,7 +173,10 @@ function customProviderKey(name: string): string {
   return `custom:${name.trim().toLowerCase().replace(/ /g, '-')}`
 }
 
+let presetCatalogRequest = 0
 watch(selectedPreset, (val) => {
+  const request = ++presetCatalogRequest
+  fetchingModels.value = false
   formData.value.model = ''
   alibabaCodingRegion.value = 'intl'
   if (val) {
@@ -186,6 +189,7 @@ watch(selectedPreset, (val) => {
       if (group.models.length > 0) {
         formData.value.model = group.models[0]
       }
+      void loadPresetCatalog(val, request)
     }
     if (val === COPILOT_KEY) {
       // 判断是否已能解析到 token：有 → 弹简单确认；无 → 走 in-app device flow
@@ -199,6 +203,20 @@ watch(selectedPreset, (val) => {
     }
   }
 })
+
+async function loadPresetCatalog(provider: string, request: number) {
+  fetchingModels.value = true
+  try {
+    const catalog = await modelsStore.fetchProviderCatalog(provider)
+    if (request !== presetCatalogRequest || selectedPreset.value !== provider || providerType.value !== 'preset') return
+    modelOptions.value = catalog.models.map(model => ({ label: model, value: model }))
+    if (!formData.value.model) formData.value.model = catalog.models[0] || ''
+  } catch (error: any) {
+    if (request === presetCatalogRequest) message.error(error?.message || t('models.providerEditorLoadFailed'))
+  } finally {
+    if (request === presetCatalogRequest) fetchingModels.value = false
+  }
+}
 
 watch(alibabaCodingRegion, (region) => {
   if (isAlibabaCoding.value) {
@@ -632,13 +650,13 @@ function handleClose() {
 <style scoped lang="scss">
 .fun-provider-hint {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   a {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     white-space: nowrap;
     color: var(--accent-primary);
     text-decoration: none;
@@ -656,6 +674,6 @@ function handleClose() {
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>

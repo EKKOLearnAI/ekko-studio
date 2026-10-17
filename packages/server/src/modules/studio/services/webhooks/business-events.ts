@@ -1,6 +1,7 @@
 import type { ChatRunWebhookEvent } from './envelope'
 
 export const APP_BUSINESS_TYPES = [
+  'chat.session.removed',
   'chat.run.completed', 'chat.run.failed', 'chat.approval.requested', 'chat.approval.resolved',
   'chat.clarification.requested', 'chat.clarification.resolved', 'group.message.created',
   'workflow.run.completed', 'workflow.run.failed',

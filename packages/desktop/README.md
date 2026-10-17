@@ -11,6 +11,50 @@ architecture from the project
 The desktop app bundles the Web UI runtime and launches it locally from the
 native shell app.
 
+## Remote server mode
+
+By default the desktop app spawns the bundled Web UI server locally. Remote
+mode points every window at an already-running deployment instead — for
+example the [Docker Compose setup](../../docs/docker.md) — and skips all local
+server and runtime bootstrap work.
+
+Enable it through either source (the environment variable wins):
+
+1. `EKKO_STUDIO_DESKTOP_SERVER_URL` — one-off or automated launches:
+
+   ```sh
+   EKKO_STUDIO_DESKTOP_SERVER_URL=http://192.168.1.20:6060 npm run dev
+   ```
+
+2. A persisted settings file at `$HERMES_WEB_UI_HOME/desktop-remote-server.json`
+   (default `~/.hermes-web-ui/desktop-remote-server.json`):
+
+   ```json
+   { "serverUrl": "https://studio.example.com" }
+   ```
+
+The URL must use `http://` or `https://`; query strings and hashes are
+dropped. On startup the app polls `<serverUrl>/health/ready` for up to 30
+seconds (override with `EKKO_STUDIO_DESKTOP_REMOTE_READY_TIMEOUT_MS`) before
+loading the remote Web UI. Delete the settings file or clear `serverUrl` and
+relaunch to return to local mode; mode changes require an app restart.
+
+Log in with the deployment's own accounts. The desktop shared token is never
+injected into a remote page, and the tray's "Reset Login" action is disabled
+because it only manages the local server.
+
+Behavior differences in remote mode:
+
+- Chat, coding agents, files, and workflows execute on the server; local
+  Runtime downloads and managed command shims are skipped.
+- Server-side password policies apply unchanged; the desktop patch that hides
+  the "change the default password" prompt is local-mode only.
+- Desktop integrations (embedded browser, screenshots, update controls) remain
+  available to pages loaded from the remote origin. Only connect to servers
+  you control.
+- The server has no built-in TLS, so put public deployments behind an HTTPS
+  reverse proxy; login tokens are bearer credentials sent on every request.
+
 ### Release asset names
 
 Installers use `Ekko.Studio-${version}-${arch}.${ext}`. Publish the new

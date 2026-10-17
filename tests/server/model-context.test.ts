@@ -76,9 +76,12 @@ describe('getModelContextLength', () => {
       'catalog-model': { limit: { context: 300_000, output: 32_000 }, reasoning: true, modalities: { input: ['text', 'image'] } },
     } } }))))
     await refreshModelCatalog(true)
-    expect(getModelRuntimeCapabilities(input)).toEqual({ contextWindow: 300_000, outputLimit: 32_000, reasoning: true, input: ['text', 'image'] })
+    expect(getModelRuntimeCapabilities(input)).toEqual({ contextWindow: 300_000, outputLimit: 32_000, outputLimitKnown: true, reasoning: true, input: ['text', 'image'] })
     writeConfig('model:\n  context_length: 80000\n')
     expect(getModelRuntimeCapabilities(input).contextWindow).toBe(80_000)
+
+    expect(getModelRuntimeCapabilities({ provider: 'custom:relay', model: 'unlisted-model' }))
+      .toMatchObject({ outputLimit: 32_000, outputLimitKnown: false })
   })
 
   it('resolves reasoning efforts through the same provider mapping and observes refreshed metadata', async () => {
@@ -148,7 +151,7 @@ describe('getModelContextLength', () => {
     const { getModelContextLength, getModelRuntimeCapabilities } = await loadModelContext()
     expect(getModelContextLength()).toBe(131_072)
     expect(getModelRuntimeCapabilities({ provider, model: 'glm-4.5' }))
-      .toEqual({ contextWindow: 131_072, outputLimit: 98_304, reasoning: true, input: ['text'] })
+      .toEqual({ contextWindow: 131_072, outputLimit: 98_304, outputLimitKnown: true, reasoning: true, input: ['text'] })
     expect(getModelContextLength({ provider: 'custom:relay', model: 'glm-4.5' })).toBe(131_072)
     writeConfig(`model:\n  default: glm-4.5\n  provider: ${provider}\n  context_length: 80000\n`)
     expect(getModelContextLength()).toBe(80_000)

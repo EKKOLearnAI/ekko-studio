@@ -11,6 +11,7 @@ const apiMock = vi.hoisted(() => ({
 
 const storeMock = vi.hoisted(() => ({
   fetchProviderEditor: vi.fn(),
+  fetchProviderCatalog: vi.fn(async () => ({ provider: 'custom:example', models: ['model-a', 'model-b'], visible_models: ['model-a', 'model-b'], model_aliases: {} })),
   saveProviderEditor: vi.fn(),
 }))
 

@@ -817,7 +817,7 @@ onUnmounted(() => {
   box-sizing: border-box;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: calc(24px * var(--spacing-scale, 1));
   background: $bg-primary;
 }
 
@@ -830,39 +830,39 @@ onUnmounted(() => {
 .link-card {
   width: min(100%, 480px);
   box-sizing: border-box;
-  padding: 36px;
-  border: 1px solid $border-color;
-  border-radius: 20px;
-  background: $bg-card;
+  padding: calc(36px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 20px);
+  background: var(--theme-card-bg, $bg-card);
   box-shadow: 0 22px 70px rgba(0, 0, 0, 0.16);
 
   h1 {
     margin: 16px 0 8px;
     color: $text-primary;
-    font-size: 25px;
+    font-size: calc(var(--font-size-base, 14px) * 25 / 14);
   }
 
   > p {
     color: $text-secondary;
-    line-height: 1.6;
+    line-height: var(--line-height, 1.6);
   }
 }
 
 .link-logo {
   width: 48px;
   height: 48px;
-  border-radius: 13px;
+  border-radius: var(--radius-component, 13px);
 }
 
 .requesting-origin {
   display: block;
   overflow: hidden;
-  padding: 8px 10px;
-  border: 1px solid $border-color;
-  border-radius: 8px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 8px);
   color: $text-secondary;
   background: $bg-primary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -870,24 +870,24 @@ onUnmounted(() => {
 .link-form,
 .link-success {
   display: grid;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-top: 22px;
 }
 
 .agent-config-form {
-  padding: 14px;
-  border: 1px solid $border-color;
-  border-radius: 12px;
+  padding: calc(14px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 12px);
   background: $bg-primary;
 }
 
 .field {
   display: grid;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 
   > label {
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     font-weight: 600;
   }
 }
@@ -895,13 +895,13 @@ onUnmounted(() => {
 .group-agent-avatar-editor {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .group-agent-avatar-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .group-agent-avatar-file {
@@ -910,28 +910,28 @@ onUnmounted(() => {
 
 .link-form label {
   color: $text-secondary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
 }
 
 .link-status {
-  padding: 30px 0;
+  padding: calc(30px * var(--spacing-scale, 1)) 0;
   color: $text-muted;
   text-align: center;
 }
 
 .link-success strong {
   color: $success;
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
 }
 
 .manual-divider {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-top: 24px;
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   &::before,
   &::after {
@@ -944,21 +944,21 @@ onUnmounted(() => {
 
 .manual-agent-preview {
   display: grid;
-  gap: 2px;
-  padding: 10px;
-  border: 1px solid $border-color;
-  border-radius: 8px;
+  gap: calc(2px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 8px);
   background: $bg-primary;
 
   strong {
     color: $text-primary;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   }
 
   span {
     overflow: hidden;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -966,12 +966,12 @@ onUnmounted(() => {
 
 .link-error {
   color: $error !important;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .link-security {
   margin: 22px 0 0;
   color: $text-muted !important;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 </style>

@@ -516,31 +516,31 @@ async function handleSave() {
 <style scoped>
 .provider-form {
   display: grid;
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
 }
 
 .form-section {
   display: grid;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .form-section + .form-section {
-  padding-top: 12px;
-  border-top: 1px solid var(--n-border-color, rgba(0, 0, 0, 0.08));
+  padding-top: calc(12px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid var(--n-border-color, rgba(0, 0, 0, 0.08));
 }
 
 .section-heading {
   display: grid;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
   font-weight: 600;
 }
 
 .section-heading small,
 .helper-text {
   color: var(--n-text-color-3, #8a8f98);
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 400;
-  line-height: 1.4;
+  line-height: var(--line-height, 1.4);
 }
 
 .connection-actions {
@@ -550,21 +550,21 @@ async function handleSave() {
 
 .inline-error {
   display: grid;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   color: var(--n-error-color, #d03050);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.4);
 }
 
 .inline-error pre {
   max-height: 120px;
   margin: 0;
-  padding: 8px;
+  padding: calc(8px * var(--spacing-scale, 1));
   overflow: auto;
   white-space: pre-wrap;
   color: inherit;
   background: rgba(208, 48, 80, 0.06);
-  border-radius: 6px;
+  border-radius: var(--radius-component, 6px);
 }
 
 .link-button {
@@ -579,6 +579,6 @@ async function handleSave() {
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>

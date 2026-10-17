@@ -46,7 +46,7 @@ onBeforeUnmount(() => { requestController?.abort() })
       </header>
     </PageHeader>
     <div class="api-relay-content">
-      <section class="api-relay-hero" aria-labelledby="api-relay-heading">
+      <section class="api-relay-hero" data-theme-surface="card" aria-labelledby="api-relay-heading">
         <div class="api-relay-intro">
           <div class="api-relay-brand">
             <img
@@ -116,13 +116,13 @@ onBeforeUnmount(() => { requestController?.abort() })
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: $bg-main-surface;
+  background: var(--theme-content-bg, $bg-main-surface);
 }
 
 .api-relay-content {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
   overflow: auto;
   background: linear-gradient(180deg, rgba(var(--accent-primary-rgb), 0.025), transparent 52%);
 }
@@ -143,24 +143,24 @@ onBeforeUnmount(() => { requestController?.abort() })
     max-width: 560px;
     margin: 18px 0 0;
     color: $text-secondary;
-    font-size: 14px;
-    line-height: 22px;
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 22 / 14));
   }
 }
 
 .api-relay-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
 
   span {
     display: block;
     margin-bottom: 2px;
     color: $text-muted;
-    font-size: 10px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
     font-weight: 650;
     letter-spacing: 0.09em;
-    line-height: 16px;
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
   }
 
   h3 {
@@ -169,7 +169,7 @@ onBeforeUnmount(() => { requestController?.abort() })
     font-size: clamp(21px, 2.5vw, 28px);
     font-weight: 650;
     letter-spacing: -0.03em;
-    line-height: 1.2;
+    line-height: var(--line-height, 1.2);
   }
 }
 
@@ -177,7 +177,7 @@ onBeforeUnmount(() => { requestController?.abort() })
   display: block;
   flex: 0 0 auto;
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: var(--radius-component, 6px);
 }
 
 .api-relay-action { margin-top: 14px; }
@@ -187,36 +187,36 @@ onBeforeUnmount(() => { requestController?.abort() })
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   margin-bottom: 16px;
-  h3 { margin: 0; color: $text-primary; font-size: 16px; font-weight: 600; }
-  p { margin: 6px 0 0; color: $text-muted; font-size: 12px; line-height: 1.6; }
+  h3 { margin: 0; color: $text-primary; font-size: calc(var(--font-size-base, 14px) * 16 / 14); font-weight: 600; }
+  p { margin: 6px 0 0; color: $text-muted; font-size: calc(var(--font-size-base, 14px) * 12 / 14); line-height: var(--line-height, 1.6); }
   :deep(.n-button) { flex-shrink: 0; }
 }
-.api-relay-usage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.api-relay-usage-message { padding: 20px; margin: 0; color: $text-secondary; background: $bg-card; border: 1px solid $border-color; border-radius: 12px; font-size: 13px; }
+.api-relay-usage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(16px * var(--spacing-scale, 1)); }
+.api-relay-usage-message { padding: calc(20px * var(--spacing-scale, 1)); margin: 0; color: $text-secondary; background: var(--theme-card-bg, $bg-card); border: var(--border-width, 1px) solid $border-color; border-radius: var(--radius-component, 12px); font-size: calc(var(--font-size-base, 14px) * 13 / 14); }
 
 .api-relay-features {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   margin-top: 18px;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
 
   span {
-    padding: 5px 9px;
+    padding: calc(5px * var(--spacing-scale, 1)) calc(9px * var(--spacing-scale, 1));
     color: $text-secondary;
     background: $bg-secondary;
-    border: 1px solid $border-light;
+    border: var(--border-width, 1px) solid $border-light;
     border-radius: 999px;
-    font-size: 10px;
-    line-height: 14px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 14 / 14));
   }
 }
 
 @media (max-width: $breakpoint-mobile) {
-  .api-relay-content { padding: 12px; }
-  .api-relay-hero { padding: 20px; }
+  .api-relay-content { padding: calc(12px * var(--spacing-scale, 1)); }
+  .api-relay-hero { padding: calc(20px * var(--spacing-scale, 1)); }
   .api-relay-usage-grid { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

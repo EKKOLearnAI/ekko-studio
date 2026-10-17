@@ -147,6 +147,20 @@ jobs:
       - name: Verify desktop updater download lifecycle
         run: npm --prefix packages/desktop run test:updater
 
+      - name: Verify Windows screenshot overlay coverage
+        id: screenshot_geometry
+        if: needs.validate.outputs.target_os == 'win32'
+        run: node packages/desktop/scripts/verify-screenshot-overlay.cjs --output-dir=packages/desktop/screenshot-geometry
+
+      - name: Upload Windows screenshot geometry reports
+        if: always() && needs.validate.outputs.target_os == 'win32' && steps.screenshot_geometry.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-win32-x64-screenshot-geometry
+          path: packages/desktop/screenshot-geometry/*.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Write runtime release metadata
         shell: bash
         env:

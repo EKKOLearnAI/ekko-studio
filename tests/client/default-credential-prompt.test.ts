@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 
@@ -54,6 +54,8 @@ vi.mock('naive-ui', async () => {
 import DefaultCredentialPrompt from '@/components/auth/DefaultCredentialPrompt.vue'
 
 describe('DefaultCredentialPrompt', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
   beforeEach(() => {
     sessionStorage.clear()
     vi.clearAllMocks()
@@ -92,5 +94,40 @@ describe('DefaultCredentialPrompt', () => {
     await Promise.resolve()
 
     expect(mockFetchCurrentUser).not.toHaveBeenCalled()
+  })
+
+  it.each([undefined, false])('suppresses the prompt for local desktop mode %s', async remoteMode => {
+    vi.stubGlobal('hermesDesktop', { isDesktop: true, remoteMode })
+
+    const wrapper = mount(DefaultCredentialPrompt)
+    await flushPromises()
+
+    expect(mockFetchCurrentUser).not.toHaveBeenCalled()
+    expect(wrapper.find('.modal').exists()).toBe(false)
+  })
+
+  it('preserves the remote desktop warning and account-settings action', async () => {
+    vi.stubGlobal('hermesDesktop', { isDesktop: true, remoteMode: true })
+    mockFetchCurrentUser.mockResolvedValue({ id: 1, requiresCredentialChange: true })
+
+    const wrapper = mount(DefaultCredentialPrompt)
+    await flushPromises()
+
+    expect(mockFetchCurrentUser).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('login.defaultCredentialMessage')
+    await wrapper.findAll('button')[1].trigger('click')
+    expect(mockPush).toHaveBeenCalledWith({ name: 'hermes.settings', query: { tab: 'account' } })
+  })
+
+  it('honors a remote desktop dismissal for the current session', async () => {
+    vi.stubGlobal('hermesDesktop', { isDesktop: true, remoteMode: true })
+    mockFetchCurrentUser.mockResolvedValue({ id: 1, requiresCredentialChange: true })
+    sessionStorage.setItem('hermes_default_credentials_prompt_dismissed_1', '1')
+
+    const wrapper = mount(DefaultCredentialPrompt)
+    await flushPromises()
+
+    expect(mockFetchCurrentUser).toHaveBeenCalledOnce()
+    expect(wrapper.find('.modal').exists()).toBe(false)
   })
 })

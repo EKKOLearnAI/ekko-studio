@@ -100,6 +100,7 @@ win:
   artifactName: "Ekko.Studio-${version}-${arch}.${ext}"
 
 linux:
+  syncDesktopName: true
   icon: build/icons
   target:
     - target: AppImage

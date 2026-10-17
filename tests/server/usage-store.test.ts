@@ -187,6 +187,7 @@ describe('Usage Store (SQLite path)', () => {
     updateUsage('s1', { inputTokens: 500, outputTokens: 200 })
     expect(runMock).toHaveBeenCalledWith(
       's1',
+      null, // accountId: no known Studio session owner
       '', // runId
       '', // parentRunId
       null, // apiDuration
@@ -222,6 +223,7 @@ describe('Usage Store (SQLite path)', () => {
     updateUsage('s1', { inputTokens: 500, outputTokens: 200 })
     expect(runMock).toHaveBeenCalledWith(
       's1',
+      null, // accountId
       '', // runId
       '', // parentRunId
       null, // apiDuration
@@ -304,6 +306,7 @@ describe('Usage Store (SQLite path)', () => {
       sessions: 2,
     })
     allMock
+      .mockReturnValueOnce([{ model: 'gpt-test', agent: 'coding_agent' }])
       .mockReturnValueOnce([
         { model: 'gpt-test', input_tokens: 100, output_tokens: 40, cache_read_tokens: 30, cache_write_tokens: 5, reasoning_tokens: 8, sessions: 2 },
       ])
@@ -320,6 +323,7 @@ describe('Usage Store (SQLite path)', () => {
 
     const { getLocalUsageStats, getRecordedUsageSessionIds } = await import('../../packages/server/src/modules/studio/repositories/usage-store')
     expect(getLocalUsageStats('default', 7)).toEqual({
+      filter_options: { models: ['gpt-test'], agents: ['coding_agent'] },
       input_tokens: 100,
       output_tokens: 40,
       cache_read_tokens: 30,

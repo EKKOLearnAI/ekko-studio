@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   CodeExecTool,
   createDefaultToolRegistry,
@@ -10,17 +10,65 @@ import {
 } from '../../packages/ekko-agent/src'
 
 let workspaceRoot = ''
+const originalElectronVersion = Object.getOwnPropertyDescriptor(process.versions, 'electron')
 
 beforeEach(async () => {
   workspaceRoot = await mkdtemp(join(tmpdir(), 'ekko-code-exec-test-'))
 })
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
+  if (originalElectronVersion) {
+    Object.defineProperty(process.versions, 'electron', originalElectronVersion)
+  } else {
+    Reflect.deleteProperty(process.versions, 'electron')
+  }
   await rm(workspaceRoot, { recursive: true, force: true })
   delete process.env.EKKO_CODE_EXEC_TEST_SECRET
 })
 
 describe('code_exec', () => {
+  it.each([true, false])('sets Node mode only for Electron hosts (electron=%s)', async (electron) => {
+    if (electron) {
+      Object.defineProperty(process.versions, 'electron', { value: 'test-electron', configurable: true })
+    } else {
+      Reflect.deleteProperty(process.versions, 'electron')
+    }
+    vi.stubEnv('ELECTRON_RUN_AS_NODE', '0')
+    vi.stubEnv('NODE_OPTIONS', '--invalid-option-must-not-reach-child')
+    vi.stubEnv('EKKO_CODE_EXEC_TEST_SECRET', 'must-not-leak')
+    const tool = new CodeExecTool({ dispatch: async () => ({ ok: true, content: 'unused' }) })
+    const result = await tool.execute({
+      language: 'node',
+      code: 'console.log(JSON.stringify([process.env.ELECTRON_RUN_AS_NODE ?? null, process.env.NODE_OPTIONS ?? null, process.env.EKKO_CODE_EXEC_TEST_SECRET ?? null]))',
+    }, { workspaceRoot })
+
+    expect(result.ok).toBe(true)
+    expect(JSON.parse(result.content)).toMatchObject({
+      output: `${JSON.stringify([electron ? '1' : null, null, null])}\n`,
+      exitCode: 0,
+    })
+  })
+
+  it.runIf(Boolean(findPythonExecutable()))('does not pass Electron Node mode to Python', async () => {
+    Object.defineProperty(process.versions, 'electron', { value: 'test-electron', configurable: true })
+    vi.stubEnv('ELECTRON_RUN_AS_NODE', '1')
+    const tool = new CodeExecTool({
+      pythonExecutable: findPythonExecutable(),
+      dispatch: async () => ({ ok: true, content: 'unused' }),
+    })
+    const result = await tool.execute({
+      language: 'python',
+      code: 'import os\nprint(os.environ.get("ELECTRON_RUN_AS_NODE", "absent"))',
+    }, { workspaceRoot })
+
+    expect(result.ok).toBe(true)
+    expect(JSON.parse(result.content)).toMatchObject({
+      output: `absent${process.platform === 'win32' ? '\r\n' : '\n'}`,
+      exitCode: 0,
+    })
+  })
+
   it('runs Node.js code with programmatic Ekko tool calls', async () => {
     await writeFile(join(workspaceRoot, 'input.txt'), 'hello from node')
     const registry = createDefaultToolRegistry()

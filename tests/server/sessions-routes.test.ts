@@ -48,6 +48,8 @@ const renameWorkspaceFileMock = vi.fn(async (ctx: any) => { ctx.body = { ok: tru
 const copyWorkspaceFileMock = vi.fn(async (ctx: any) => { ctx.body = { ok: true } })
 
 vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => ({
+  messageSelection: vi.fn(async (ctx: any) => { ctx.body = { groups: [], historyRevision: 0 } }),
+  deleteMessages: vi.fn(async (ctx: any) => { ctx.body = { deleted: 1, deletedGroups: 1, messageIds: [1], historyRevision: 1 } }),
   listConversations: listConversationsMock,
   getConversationMessages: getConversationMessagesMock,
   getConversationMessagesPaginated: getConversationMessagesPaginatedMock,

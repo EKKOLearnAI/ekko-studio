@@ -5,7 +5,7 @@ import { browserOutput } from './browser/output.mjs'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { createInterface } from 'node:readline'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -120,16 +120,25 @@ function readToken(tokenOverride, allowTokenFile = true, profile = '') {
   }
 }
 
-function readRunCredential(profile) {
-  const file = process.env.HERMES_WEB_UI_RUN_TOKEN_FILE
+function readRunCredential(profile, contextId) {
+  let file = process.env.HERMES_WEB_UI_RUN_TOKEN_FILE
+  const contextLookup = !file && process.env.HERMES_MCP_CONTEXT_CREDENTIALS === '1' && contextId !== undefined
+  if (contextLookup) {
+    const key = createHash('sha256').update(`${profile}\0${contextId}`).digest('hex')
+    file = join(appHome(), 'runtime', 'mcp-credentials', `context-${key}`, 'auth.json')
+  }
   if (!file) return null
   let credential
-  try { credential = JSON.parse(readFileSync(file, 'utf8')) } catch {
+  try { credential = JSON.parse(readFileSync(file, 'utf8')) } catch (error) {
+    // Ordinary Hermes chats still use their existing profile JWT. Only group
+    // contexts have a lookup file; an explicit per-run file must fail closed.
+    if (contextLookup && error?.code === 'ENOENT') return null
     throw new Error('The current run credential is unavailable. Start a new Studio run.')
   }
   if (!credential || typeof credential.token !== 'string' || !credential.token.startsWith('studio_run_')
     || typeof credential.context_id !== 'string' || !credential.context_id
-    || typeof credential.profile !== 'string' || credential.profile !== profile) {
+    || typeof credential.profile !== 'string' || credential.profile !== profile
+    || (contextLookup && credential.context_id !== contextId)) {
     throw new Error('The MCP request does not match its configured run credential.')
   }
   return credential
@@ -233,9 +242,10 @@ async function requestEnvelope(path, options = {}) {
   const profile = typeof options.profile === 'string' && options.profile.trim()
     ? options.profile.trim()
     : defaultProfile()
-  // A managed group run must never fall back to another run's profile token,
-  // a stale inherited AUTH_TOKEN, or an explicit tool-argument override.
-  const runCredential = readRunCredential(profile)
+  // Explicit run bindings take precedence. Shared Hermes MCP connections can
+  // select a restricted group-plan credential without changing process state.
+  const contextId = path === '/api/studio/task-plans/update' ? String(options.body?.context_id || '') : undefined
+  const runCredential = readRunCredential(profile, contextId)
   const token = runCredential?.token || readToken(options.token, options.allowTokenFile !== false, profile)
   const method = options.method || 'GET'
   const body = method === 'GET' || method === 'HEAD' ? undefined : options.body

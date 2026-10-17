@@ -164,6 +164,30 @@ describe('DSH ACP connection', () => {
     await pending
   })
 
+  it('survives a dependency log line on stdout instead of disposing the turn', async () => {
+    const { turn, sent, receive, child, update } = connection({ holdPrompt: true })
+    const pending = turn.prompt({ cwd: '/workspace', text: 'go', images: [] })
+    await vi.waitFor(() => expect(sent.at(-1).method).toBe('session/prompt'))
+    // The MCP SDK's default logger emits console.debug (== stdout in a stdio
+    // child) when a server lacks the resources capability. That line is not an
+    // ACP frame and must not tear the connection down.
+    child.stdout.write('Client.listResourceTemplates() called but server does not advertise resources capability - returning empty list\n')
+    receive({ method: 'session/update', params: { sessionId: 'native-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'after noise' } } } })
+    receive({ id: sent.find(message => message.method === 'session/prompt').id, result: { stopReason: 'end_turn' } })
+    await expect(pending).resolves.toBe('end_turn')
+    expect(update).toHaveBeenCalledExactlyOnceWith({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'after noise' } })
+  })
+
+  it('still fails the turn when a frame that looks like JSON is corrupt', async () => {
+    const { turn, sent, child } = connection({ holdPrompt: true })
+    const pending = expect(turn.prompt({ cwd: '/workspace', text: 'go', images: [] })).rejects.toThrow()
+    await vi.waitFor(() => expect(sent.at(-1).method).toBe('session/prompt'))
+    // A line beginning with '{' that cannot parse is a real protocol break.
+    child.stdout.write('{"jsonrpc":"2.0",\n')
+    await pending
+    turn.dispose()
+  })
+
   it('bounds a stalled initialize request', async () => {
     vi.useFakeTimers()
     const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough() })

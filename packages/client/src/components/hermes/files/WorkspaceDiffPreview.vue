@@ -148,31 +148,31 @@ async function handleDiffClick(event: MouseEvent): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   flex: 0 0 auto;
-  padding: 8px 16px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 }
 
 .diff-file-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .diff-file-name {
   flex: 0 0 auto;
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .diff-file-path {
   min-width: 0;
   overflow: hidden;
   color: $text-muted;
-  font-family: $font-code;
-  font-size: 11px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -181,7 +181,7 @@ async function handleDiffClick(event: MouseEvent): Promise<void> {
 .diff-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   flex: 0 0 auto;
 }
 
@@ -204,7 +204,7 @@ async function handleDiffClick(event: MouseEvent): Promise<void> {
 .diff-code {
   height: 100%;
   overflow: auto;
-  padding: 12px;
+  padding: calc(12px * var(--spacing-scale, 1));
 
   :deep(.hljs-code-block) {
     min-height: 100%;
@@ -222,17 +222,17 @@ async function handleDiffClick(event: MouseEvent): Promise<void> {
 @media (max-width: $breakpoint-mobile) {
   .diff-preview-header {
     align-items: flex-start;
-    padding: 8px;
+    padding: calc(8px * var(--spacing-scale, 1));
   }
 
   .diff-file-info {
     align-items: flex-start;
     flex-direction: column;
-    gap: 2px;
+    gap: calc(2px * var(--spacing-scale, 1));
   }
 
   .diff-stats {
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
   }
 }
 </style>

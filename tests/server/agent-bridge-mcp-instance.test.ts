@@ -54,6 +54,7 @@ assert stale == original
 for key, value in owner.items():
     assert actual[key] == value, (key, actual)
 assert actual['HERMES_WEB_UI_PROFILE'] == 'research'
+assert actual['HERMES_MCP_CONTEXT_CREDENTIALS'] == '1'
 assert 'HERMES_WEB_UI_TOKEN' not in actual
 assert actual['CUSTOM'] == 'keep' and actual['HERMES_MCP_TOOLSET'] == 'plan'
 assert installed(None) == process_env()

@@ -60,7 +60,7 @@ describe('Ekko JEV configuration', () => {
   it('migrates existing JEV settings without automatically activating memory enhancements', () => {
     const config = normalizeEkkoConfig({ schemaVersion: 10, jev: { enabled: true, memoryEnabled: true, apiKey: 'legacy' } })
     expect(config.jev).toEqual({ ...DEFAULT_EKKO_JEV_CONFIG, enabled: true, memoryEnabled: true, apiKey: 'legacy' })
-    expect(config.schemaVersion).toBe(14)
+    expect(config.schemaVersion).toBe(15)
     expect(resolveEkkoJevConfig(config.jev, { memoryWriteReviewEnabled: true }, { memoryWriteReviewEnabled: false }))
       .toMatchObject({ memoryWriteReviewEnabled: false, apiKey: 'legacy' })
   })
@@ -82,7 +82,7 @@ describe('Ekko JEV configuration', () => {
     const config = normalizeEkkoConfig({ schemaVersion: 9, runtime: { maxSteps: 17 } })
     expect(config.jev).toEqual(DEFAULT_EKKO_JEV_CONFIG)
     expect(config.runtime.maxSteps).toBe(17)
-    expect(config.schemaVersion).toBe(14)
+    expect(config.schemaVersion).toBe(15)
   })
 
   it('uses local settings when no override is supplied, including after restarting', async () => {

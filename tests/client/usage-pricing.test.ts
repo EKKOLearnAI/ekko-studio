@@ -56,8 +56,8 @@ const groups = [
   { provider: 'custom:other', label: 'Other Relay', models: ['other-model'] },
 ]
 
-function mountPricing() {
-  return mount(UsagePricing)
+function mountPricing(profile?: string) {
+  return mount(UsagePricing, { props: { profile } })
 }
 
 type PricingWrapper = ReturnType<typeof mountPricing>
@@ -80,7 +80,7 @@ describe('UsagePricing provider and model selection', () => {
 
   it('loads the active Profile and saves the configured provider and canonical model IDs', async () => {
     const wrapper = mountPricing()
-    await clickButton(wrapper, 'usage.pricing.title')
+    await clickButton(wrapper, 'usage.dashboard.pricingPreset')
     expect(api.fetchAvailableModelsForProfile).toHaveBeenCalledWith('research')
     await clickButton(wrapper, 'common.add')
     const [provider, model] = wrapper.findAllComponents(NSelect)
@@ -100,7 +100,7 @@ describe('UsagePricing provider and model selection', () => {
     input.vm.$emit('update:value', 2)
     output.vm.$emit('update:value', 8)
     await clickButton(wrapper, 'common.save')
-    expect(api.request).toHaveBeenLastCalledWith('/api/studio/usage/pricing', {
+    expect(api.request).toHaveBeenLastCalledWith('/api/studio/usage/pricing?profile=research', {
       method: 'PUT', body: JSON.stringify({ rates: [{ provider: 'custom:relay', model: 'added-model', input: 2, output: 8 }] }),
     })
   })
@@ -108,7 +108,7 @@ describe('UsagePricing provider and model selection', () => {
   it('clears the model when switching providers and offers all configured models for global', async () => {
     api.request.mockResolvedValue({ rates: [{ provider: 'custom:relay', model: 'added-model', input: 2, output: 8 }] })
     const wrapper = mountPricing()
-    await clickButton(wrapper, 'usage.pricing.title')
+    await clickButton(wrapper, 'usage.dashboard.pricingPreset')
     const [provider, model] = wrapper.findAllComponents(NSelect)
     provider.vm.$emit('update:value', 'custom:relay')
     await flushPromises()
@@ -130,12 +130,12 @@ describe('UsagePricing provider and model selection', () => {
     const rates = [{ provider: 'retired-provider', model: 'retired-model', input: 0, output: 8, cacheRead: 0 }]
     api.request.mockResolvedValue({ rates })
     const wrapper = mountPricing()
-    await clickButton(wrapper, 'usage.pricing.title')
+    await clickButton(wrapper, 'usage.dashboard.pricingPreset')
     const [provider, model] = wrapper.findAllComponents(NSelect)
     expect(provider.props('options')).toContainEqual({ label: 'retired-provider', value: 'retired-provider' })
     expect(model.props('options')).toEqual([{ label: 'retired-model', value: 'retired-model' }])
     await clickButton(wrapper, 'common.save')
-    expect(api.request).toHaveBeenLastCalledWith('/api/studio/usage/pricing', {
+    expect(api.request).toHaveBeenLastCalledWith('/api/studio/usage/pricing?profile=research', {
       method: 'PUT', body: JSON.stringify({ rates }),
     })
   })
@@ -143,7 +143,7 @@ describe('UsagePricing provider and model selection', () => {
   it('allows manual IDs when the catalog fails and reloads the catalog on reopening', async () => {
     api.fetchAvailableModelsForProfile.mockRejectedValueOnce(new Error('offline'))
     const wrapper = mountPricing()
-    await clickButton(wrapper, 'usage.pricing.title')
+    await clickButton(wrapper, 'usage.dashboard.pricingPreset')
     expect(wrapper.findComponent(NAlert).text()).toBe('usage.pricing.catalogError')
     await clickButton(wrapper, 'common.add')
     const [provider, model] = wrapper.findAllComponents(NSelect)
@@ -156,12 +156,26 @@ describe('UsagePricing provider and model selection', () => {
     input.vm.$emit('update:value', 0)
     output.vm.$emit('update:value', 0)
     await clickButton(wrapper, 'common.save')
-    expect(api.request).toHaveBeenLastCalledWith('/api/studio/usage/pricing', {
+    expect(api.request).toHaveBeenLastCalledWith('/api/studio/usage/pricing?profile=research', {
       method: 'PUT', body: JSON.stringify({ rates: [{ provider: 'manual-provider', model: 'manual-model', input: 0, output: 0 }] }),
     })
     profile.activeProfileName = 'default'
-    await clickButton(wrapper, 'usage.pricing.title')
+    await clickButton(wrapper, 'usage.dashboard.pricingPreset')
     expect(api.fetchAvailableModelsForProfile).toHaveBeenLastCalledWith('default')
     expect(wrapper.findComponent(NAlert).exists()).toBe(false)
+  })
+
+  it('edits the selected Profile and saves to the Profile captured when the modal opens', async () => {
+    const wrapper = mountPricing('default')
+    await clickButton(wrapper, 'usage.dashboard.pricingPreset')
+    expect(api.request).toHaveBeenCalledWith('/api/studio/usage/pricing?profile=default')
+    expect(api.fetchAvailableModelsForProfile).toHaveBeenCalledWith('default')
+    expect(wrapper.text()).toContain('usage.dashboard.profile: default')
+    profile.activeProfileName = 'other'
+    await wrapper.setProps({ profile: 'research' })
+    await clickButton(wrapper, 'common.save')
+    expect(api.request).toHaveBeenLastCalledWith('/api/studio/usage/pricing?profile=default', {
+      method: 'PUT', body: JSON.stringify({ rates: [] }),
+    })
   })
 })

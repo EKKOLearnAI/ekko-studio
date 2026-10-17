@@ -138,7 +138,7 @@ describe('chat store compression state', () => {
     }))
   })
 
-  it.each(newChatCases)('opens a new $name $mode chat without resuming an unpersisted session', async ({ options, mode }) => {
+  it.each(newChatCases)('opens a new $name $mode chat without resuming an unpersisted session', async ({ options }) => {
     const store = useChatStore()
     const session = store.newChat({ ...options, workspace: '/workspace/draft', model: 'chosen-model', provider: 'chosen-provider' })
 
@@ -147,7 +147,7 @@ describe('chat store compression state', () => {
     expect(chatApi.resumeSession).not.toHaveBeenCalled()
     expect(session.isLocalOnly).toBe(true)
     expect(session.workspace).toBe('/workspace/draft')
-    expect(session.model).toBe(mode === 'global' ? undefined : 'chosen-model')
+    expect(session.model).toBe('chosen-model')
 
     await expect(store.switchSession(session.id)).resolves.toBe(true)
     expect(chatApi.resumeSession).not.toHaveBeenCalled()

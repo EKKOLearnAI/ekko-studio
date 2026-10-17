@@ -44,6 +44,26 @@ describe('agent runner Responses adapters', () => {
     })
   })
 
+  it('requests stream usage from Chat Completions providers only when streaming', () => {
+    // vLLM and other OpenAI-compatible streaming backends omit token usage
+    // from the final SSE chunk unless stream_options.include_usage is set,
+    // which leaves coding-agent turns with zero token accounting.
+    const streaming = responsesToOpenAiChat({ input: [{ role: 'user', content: 'hi' }] }, target, true)
+    expect(streaming).toMatchObject({
+      stream: true,
+      stream_options: { include_usage: true },
+    })
+
+    const nonStreaming = responsesToOpenAiChat({ input: [{ role: 'user', content: 'hi' }] }, target, false)
+    expect(nonStreaming.stream).toBe(false)
+    expect(nonStreaming).not.toHaveProperty('stream_options')
+  })
+
+  it('never adds Chat Completions stream_options to Anthropic payloads', () => {
+    const streaming = responsesToAnthropicMessages({ input: [{ role: 'user', content: 'hi' }] }, target, true)
+    expect(streaming).not.toHaveProperty('stream_options')
+  })
+
   it('truncates oversized Responses function-call outputs before provider forwarding', () => {
     const largeOutput = `${'A'.repeat(32 * 1024 + 1)}TAIL_MARKER`
     const body = {
@@ -466,6 +486,14 @@ describe('agent runner Responses adapters', () => {
       { role: 'user', content: 'hello' },
       { role: 'user', content: 'next turn' },
     ])
+  })
+
+  it('defaults Anthropic max_tokens to the target output limit', () => {
+    const body = { input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }] }
+
+    expect(responsesToAnthropicMessages(body, { ...target, outputLimit: 64_000 }).max_tokens).toBe(64_000)
+    expect(responsesToAnthropicMessages({ ...body, max_output_tokens: 2048 }, { ...target, outputLimit: 64_000 }).max_tokens).toBe(2048)
+    expect(responsesToAnthropicMessages(body, target).max_tokens).toBe(4096)
   })
 
   it('converts Responses input to Anthropic messages', () => {

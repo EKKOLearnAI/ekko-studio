@@ -13,6 +13,12 @@ describe('storedPriorAgentMode', () => {
 })
 
 describe('nextCodingAgentMode', () => {
+  it('submits a selected native model independently of the scoped model', () => {
+    expect(submittedCodingAgentSelection({ agent: 'codex', agentMode: 'global', provider: 'studio', model: 'scoped-model',
+      usesGlobal: true, nativeModel: 'native-model' })).toMatchObject({ agentMode: 'global', provider: '', model: 'native-model' })
+    expect(workflowSavedAgentFields({ agent: 'cursor', agentMode: 'global', provider: 'studio', model: 'model-high' }))
+      .toMatchObject({ agentMode: 'global', provider: '', model: 'model-high' })
+  })
   it.each(['hermes', 'ekko', 'ekko-agent'])('saves scoped mode when leaving Cursor for %s after a global Agent', agent => {
     const entered = nextCodingAgentMode({ previousAgent: 'codex', nextAgent: 'cursor', agentMode: 'global' })
     const left = nextCodingAgentMode({ previousAgent: 'cursor', nextAgent: agent, ...entered })

@@ -1097,6 +1097,20 @@ describe('MarkdownRenderer', () => {
     expect(wrapper.find('.markdown-body').text()).toContain('Done outside.')
   })
 
+  it('re-renders existing diagrams when Studio colors change without replacing the surrounding content', async () => {
+    const wrapper = mount(MarkdownRenderer, { props: { content: 'Before\n\n```mermaid\nflowchart LR\nA --> B\n```\n\nAfter' } })
+    await flushMermaidRender()
+    document.documentElement.style.setProperty('--text-primary', '#123456')
+    document.dispatchEvent(new CustomEvent('studio-theme-change'))
+    await flushMermaidRender()
+    expect(mermaidMock.initialize).toHaveBeenLastCalledWith(expect.objectContaining({ theme: 'base', themeVariables: expect.objectContaining({ primaryTextColor: '#123456' }) }))
+    expect(wrapper.find('[data-testid="mermaid-svg"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Before')
+    expect(wrapper.text()).toContain('After')
+    wrapper.unmount()
+    document.documentElement.style.removeProperty('--text-primary')
+  })
+
   it('falls back to a copyable code block when mermaid rendering fails', async () => {
     mermaidMock.render.mockImplementationOnce((id: string) => {
       const errorContainer = document.createElement('div')

@@ -3,6 +3,7 @@ import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { NSpin, NButton, NDropdown, NInput, NModal, NSpace, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api/client'
+import { recordWorkspaceDirectory } from '@/api/studio/workspace-directories'
 import { copyToClipboard } from '@/utils/clipboard'
 import StarIcon from '@/components/common/StarIcon.vue'
 import FolderIcon from '@/components/common/FolderIcon.vue'
@@ -139,10 +140,19 @@ async function toggleExpand(folder: FolderEntry) {
 
 function selectFolder(folder: FolderEntry) {
   updateSelectedPath(folder.fullPath)
+  void rememberSelection()
 }
 
 function selectBase() {
   updateSelectedPath(basePath.value)
+  void rememberSelection()
+}
+
+async function rememberSelection() {
+  const path = selectedPath.value.trim()
+  if (!path) return
+  try { await recordWorkspaceDirectory(path) }
+  catch { message.error(t('chat.workspaceSetFailed')) }
 }
 
 async function openFolder(folder: FolderEntry | null) {
@@ -320,6 +330,7 @@ const flatNodes = computed<FlatNode[]>(() => {
         clearable
         class="folder-path-input"
         @update:value="updateSelectedPath"
+        @blur="rememberSelection"
       >
         <template #prefix><FolderIcon class="folder-path-icon" /></template>
       </NInput>
@@ -456,23 +467,23 @@ const flatNodes = computed<FlatNode[]>(() => {
 .folder-picker {
   max-height: 360px;
   min-width: 0;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .folder-path-bar {
-  padding: 10px;
-  border-bottom: 1px solid $border-light;
+  padding: calc(10px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
   flex-shrink: 0;
 }
 
 .folder-path-input {
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   :deep(.n-input__prefix) {
     margin-inline-end: 8px;
@@ -486,21 +497,21 @@ const flatNodes = computed<FlatNode[]>(() => {
 .folder-tree {
   max-height: 260px;
   min-height: 0;
-  padding: 6px;
+  padding: calc(6px * var(--spacing-scale, 1));
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .folder-picker-loading {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 32px 16px;
+  gap: calc(10px * var(--spacing-scale, 1));
+  padding: calc(32px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .folder-item {
@@ -513,7 +524,7 @@ const flatNodes = computed<FlatNode[]>(() => {
   transition: background $transition-fast, color $transition-fast;
 
   &:hover {
-    background: $bg-card-hover;
+    background: var(--theme-card-bg, $bg-card-hover);
     color: $text-primary;
   }
 
@@ -525,8 +536,8 @@ const flatNodes = computed<FlatNode[]>(() => {
 
   &.root {
     width: 100%;
-    gap: 10px;
-    padding: 8px 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border: 0;
     background: $bg-secondary;
     font: inherit;
@@ -539,8 +550,8 @@ const flatNodes = computed<FlatNode[]>(() => {
     }
 
     .folder-name {
-      font-family: $font-code;
-      font-size: 12px;
+      font-family: var(--font-code, $font-code);
+      font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     }
   }
 
@@ -572,11 +583,11 @@ const flatNodes = computed<FlatNode[]>(() => {
 .folder-select {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   flex: 1;
   min-width: 0;
   min-height: 36px;
-  padding: 6px 10px 6px 4px;
+  padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1));
   font: inherit;
   text-align: start;
 }
@@ -619,25 +630,25 @@ const flatNodes = computed<FlatNode[]>(() => {
 }
 
 .folder-empty-text {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .folder-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   text-align: center;
-  padding: 24px 16px;
+  padding: calc(24px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   color: $text-muted;
 }
 
 .folder-selected {
-  padding: 8px 12px;
-  border-top: 1px solid $border-light;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
   background: $bg-secondary;
   display: flex;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   align-items: center;
   min-width: 0;
   flex-shrink: 0;
@@ -646,14 +657,14 @@ const flatNodes = computed<FlatNode[]>(() => {
 .folder-selected-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
   flex: 1;
   min-width: 0;
 }
 
 .folder-selected-label {
-  font-size: 11px;
-  line-height: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
   color: $text-muted;
 }
 

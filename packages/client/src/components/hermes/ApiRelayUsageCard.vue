@@ -89,53 +89,53 @@ function spend(period: ApiRelayPeriodUsage | undefined): number | undefined {
 
 .relay-usage-card {
   min-width: 0;
-  padding: 20px;
-  border: 1px solid $border-color;
-  border-radius: 12px;
-  background: $bg-card;
+  padding: calc(20px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 12px);
+  background: var(--theme-card-bg, $bg-card);
 }
 
 .relay-usage-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 
   > div { min-width: 0; }
-  h3 { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+  h3 { margin: 0; font-size: calc(var(--font-size-base, 14px) * 15 / 14); font-weight: 600; overflow-wrap: anywhere; }
 }
 
-.relay-usage-endpoint { margin: 6px 0 0; color: $text-muted; font-size: 11px; overflow-wrap: anywhere; }
-.relay-key-status { flex-shrink: 0; color: $success; font-size: 11px; }
+.relay-usage-endpoint { margin: 6px 0 0; color: $text-muted; font-size: calc(var(--font-size-base, 14px) * 11 / 14); overflow-wrap: anywhere; }
+.relay-key-status { flex-shrink: 0; color: $success; font-size: calc(var(--font-size-base, 14px) * 11 / 14); }
 .relay-key-status.inactive { color: $error; }
 .relay-usage-sources {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   margin: 12px 0 20px;
   padding: 0;
   list-style: none;
-  li { padding: 4px 7px; border-radius: 4px; color: $text-secondary; background: $bg-secondary; font-size: 11px; overflow-wrap: anywhere; }
+  li { padding: calc(4px * var(--spacing-scale, 1)) calc(7px * var(--spacing-scale, 1)); border-radius: var(--radius-component, 4px); color: $text-secondary; background: $bg-secondary; font-size: calc(var(--font-size-base, 14px) * 11 / 14); overflow-wrap: anywhere; }
 }
 .relay-balance {
-  > span { display: block; margin-bottom: 6px; color: $text-muted; font-size: 12px; }
-  strong { font-size: 28px; font-weight: 600; overflow-wrap: anywhere; }
-  small { color: $text-secondary; font-size: 13px; font-weight: 400; }
-  p { margin: 6px 0 0; color: $text-secondary; font-size: 12px; }
+  > span { display: block; margin-bottom: 6px; color: $text-muted; font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
+  strong { font-size: calc(var(--font-size-base, 14px) * 28 / 14); font-weight: 600; overflow-wrap: anywhere; }
+  small { color: $text-secondary; font-size: calc(var(--font-size-base, 14px) * 13 / 14); font-weight: 400; }
+  p { margin: 6px 0 0; color: $text-secondary; font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
 }
 .relay-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
 .relay-usage-table {
   width: 100%;
   margin-top: 16px;
   border-collapse: collapse;
-  font-size: 12px;
-  th, td { padding: 9px 8px; text-align: end; white-space: nowrap; border-bottom: 1px solid $border-light; }
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  th, td { padding: calc(9px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1)); text-align: end; white-space: nowrap; border-bottom: var(--border-width, 1px) solid $border-light; }
   th { color: $text-muted; font-weight: 400; }
   th:first-child { padding-inline-start: 0; text-align: start; }
   td { color: $text-primary; font-variant-numeric: tabular-nums; }
 }
-.relay-usage-rates { margin: 14px 0 0; color: $text-muted; font-size: 11px; span { margin: 0 8px; } }
-.relay-model-details { margin-top: 16px; summary { color: $text-secondary; font-size: 12px; cursor: pointer; } }
-.relay-usage-error { margin: 0; color: $text-secondary; font-size: 13px; line-height: 1.6; }
-@media (max-width: $breakpoint-mobile) { .relay-usage-card { padding: 16px; } }
+.relay-usage-rates { margin: 14px 0 0; color: $text-muted; font-size: calc(var(--font-size-base, 14px) * 11 / 14); span { margin: 0 8px; } }
+.relay-model-details { margin-top: 16px; summary { color: $text-secondary; font-size: calc(var(--font-size-base, 14px) * 12 / 14); cursor: pointer; } }
+.relay-usage-error { margin: 0; color: $text-secondary; font-size: calc(var(--font-size-base, 14px) * 13 / 14); line-height: var(--line-height, 1.6); }
+@media (max-width: $breakpoint-mobile) { .relay-usage-card { padding: calc(16px * var(--spacing-scale, 1)); } }
 </style>

@@ -8,7 +8,7 @@ import { openDshPluginUi, closeDshPluginUi } from '@/api/coding-agents/dsh'
 import { useTheme } from '@/composables/useTheme'
 import { getBaseUrlValue } from '@/api/client'
 const { t } = useI18n()
-const { isDark } = useTheme()
+const { isDark, customization, resolvedAppearance } = useTheme()
 const src = ref('')
 const frame = ref<HTMLIFrameElement>()
 const loading = ref(true)
@@ -33,9 +33,19 @@ async function refresh() {
 }
 function syncTheme() {
   if (!src.value) return
-  frame.value?.contentWindow?.postMessage({ type: 'studio-dsh-theme', theme: isDark.value ? 'dark' : 'light' }, new URL(src.value).origin)
+  const theme = resolvedAppearance.value
+  frame.value?.contentWindow?.postMessage({
+    type: 'studio-dsh-theme', theme: isDark.value ? 'dark' : 'light',
+    variables: {
+      ...theme.variables,
+      '--bg-primary': theme.background, '--text-primary': theme.text,
+      '--text-secondary': theme.secondary, '--text-muted': theme.muted,
+      '--accent-primary': theme.accent, '--border-color': theme.border,
+      '--font-size-base': `${customization.value.fontSize}px`,
+    },
+  }, new URL(src.value).origin)
 }
-watch(isDark, syncTheme)
+watch([isDark, customization], syncTheme)
 function ready(event: MessageEvent) {
   if (!src.value || event.source !== frame.value?.contentWindow || event.origin !== new URL(src.value).origin) return
   if (event.data?.type === 'studio-dsh-ui-ready') { loading.value = false; syncTheme() }

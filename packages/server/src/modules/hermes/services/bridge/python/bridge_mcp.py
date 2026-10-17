@@ -33,6 +33,9 @@ def install_studio_mcp_env() -> None:
             user_env = {**user_env, **owner}
             user_env["HERMES_WEB_UI_PROFILE"] = os.environ.get("HERMES_AGENT_BRIDGE_WORKER_PROFILE") or "default"
             user_env.pop("HERMES_WEB_UI_TOKEN", None)
+            # One shared MCP process can serve concurrent group plan contexts.
+            # Select their restricted credential on each request, never in worker state.
+            user_env["HERMES_MCP_CONTEXT_CREDENTIALS"] = "1"
         return original(user_env)
 
     build_env._studio_bridge_owner = True  # type: ignore[attr-defined]

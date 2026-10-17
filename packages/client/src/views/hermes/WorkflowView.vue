@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import { agentMetadata, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import { useCodingAgentModels } from '@/composables/useCodingAgentModels'
+import { nativeModelLabel } from '@/utils/native-model-families'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
+import SidebarResizeHandle from "@/components/layout/SidebarResizeHandle.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
@@ -120,7 +123,7 @@ import {
 } from '@/api/studio/workflow-socket'
 import { fetchSkills } from '@/api/hermes/skills'
 import { fetchSession } from '@/api/studio/sessions'
-import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId } from '@/api/coding-agents'
+import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentId } from '@/api/coding-agents'
 import { buildWorkflowSkillOptions, workflowAgentToSkillTarget } from '@/utils/hermes/workflow-skills'
 import type {
   WorkflowAgentNodeData,
@@ -469,7 +472,7 @@ const workflowRunBudgetValid = computed(() => isWorkflowRunBudgetValid(
   workflowRunBudgetCustomMinutes.value,
 ))
 
-const modelGroups = computed<AvailableModelGroup[]>(() => appStore.modelGroups)
+const modelGroups = computed<AvailableModelGroup[]>(() => appStore.modelGroups.filter(group => group.provider !== 'moa'))
 
 const defaultWorkflowProfile = computed(() =>
   profilesStore.activeProfileName || profilesStore.profiles[0]?.name || 'default',
@@ -640,6 +643,12 @@ function makeNode(
   data: Partial<WorkflowAgentNodeEditableData> & { status?: WorkflowNodeStatus } = {},
 ): WorkflowNode {
   const agent = data.agent || firstAvailableWorkflowAgent.value || 'hermes'
+  const usesGlobal = isGlobalOnlyCodingAgent(agent) || (agent !== 'hermes' && agent !== 'ekko-agent' && data.agentMode === 'global')
+  // Match server migration before clearing the provider: old Global nodes kept
+  // ignored Model-mode values, while native selections have no Studio provider.
+  const hasLegacyGlobalSelection = usesGlobal && (
+    Boolean(data.provider?.trim()) || (isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global')
+  )
   return {
     id,
     type: 'agent',
@@ -651,11 +660,11 @@ function makeNode(
       agent,
       agentMode: isGlobalOnlyCodingAgent(agent) || (data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(agent)) ? 'global' : 'scoped',
       priorAgentMode: data.priorAgentMode === 'global' || data.priorAgentMode === 'scoped' ? data.priorAgentMode : undefined,
-      provider: data.provider || defaultModelSelection.value.provider,
-      model: data.model || defaultModelSelection.value.model,
+      provider: usesGlobal ? '' : data.provider || defaultModelSelection.value.provider,
+      model: usesGlobal ? (hasLegacyGlobalSelection ? '' : data.model || '') : data.model || defaultModelSelection.value.model,
       apiMode: data.apiMode || defaultApiMode(data.provider || defaultModelSelection.value.provider),
       agentPreset: data.agentPreset,
-      reasoningEffort: data.reasoningEffort || 'default',
+      reasoningEffort: hasLegacyGlobalSelection ? 'default' : data.reasoningEffort || 'default',
       input: data.input || '',
       skills: data.skills || [],
       images: data.images || [],
@@ -881,6 +890,23 @@ const workflowChatPanelPendingApproval = computed(() => {
   return workflowNodeStatusFromRun(run, nodeId) === 'pending_approval'
 })
 
+const { catalog: workflowChatNativeCatalog } = useCodingAgentModels(
+  () => {
+    const id = chatStore.activeSession?.codingAgentId || chatStore.activeSession?.agent || 'codex'
+    return (agentMetadata(id)?.id || id) as CodingAgentId
+  },
+  () => workflowChatPanelVisible.value && chatStore.activeSession?.id === workflowChatPanelSessionId.value
+    && chatStore.activeSession?.codingAgentMode === 'global',
+)
+const workflowChatPanelModelLabel = computed(() => {
+  const session = chatStore.activeSession
+  if (!session || session.id !== workflowChatPanelSessionId.value) return t('models.selectModel')
+  if (session.codingAgentMode === 'global') return nativeModelLabel(workflowChatNativeCatalog.value?.models, session.model || '', t('codingAgents.nativeModelDefault'))
+  if (!session.model) return t('models.selectModel')
+  if (session.provider === 'moa') return `MoA · ${session.model}`
+  return appStore.displayModelName(session.model, session.provider)
+})
+
 const visibleWorkflowApprovalKey = computed(() => {
   const run = selectedWorkflowRun.value
   const nodeId = workflowChatPanelNodeId.value
@@ -1018,6 +1044,9 @@ function defaultApiMode(provider: string) {
 }
 
 function normalizeNodeModel(data: WorkflowAgentNodeData): Pick<WorkflowAgentNodeData, 'provider' | 'model' | 'apiMode'> {
+  if (data.agentMode === 'global' || isGlobalOnlyCodingAgent(data.agent)) {
+    return { provider: '', model: data.model, apiMode: data.apiMode }
+  }
   const availableGroups = data.agent === 'hermes'
     ? modelGroups.value
     : modelGroups.value.filter(group => canScopedCodingAgentUseProvider(
@@ -1025,7 +1054,8 @@ function normalizeNodeModel(data: WorkflowAgentNodeData): Pick<WorkflowAgentNode
         group.provider,
       ))
   const currentGroup = availableGroups.find(group => group.provider === data.provider)
-  if (currentGroup?.models.includes(data.model)) {
+  // A workflow can retain a manually entered model under a supported provider.
+  if (currentGroup && data.model) {
     return { provider: data.provider, model: data.model, apiMode: data.apiMode || defaultApiMode(data.provider) }
   }
   const fallbackGroup = availableGroups.find(group => group.models.length > 0)
@@ -2349,6 +2379,7 @@ async function applyWorkflow(
       ...node,
       data: withRuntimeNodeData({
         ...node.data,
+        ...(node.data.provider === 'moa' ? normalizeNodeModel(node.data) : {}),
         status: options.resetRuntime ? 'idle' : workflowNodeStatusFromRuntime(runtimeStatus, node.id),
         statusError: options.resetRuntime ? null : workflowNodeErrorFromRuntime(runtimeStatus, node.id),
         readonly: false,
@@ -2806,6 +2837,10 @@ function initialRunNodeStatuses(sourceNodes: WorkflowNode[], sourceEdges: Workfl
   ]))
 }
 
+const workflowModelSelections = new Map<string, Pick<WorkflowAgentNodeEditableData, 'provider' | 'model' | 'apiMode' | 'reasoningEffort'>>()
+function workflowModelSelectionKey(id: string, agent: string, mode: string) {
+  return JSON.stringify([activeWorkflowId.value, id, agent, mode])
+}
 function updateNodeData(id: string, patch: Partial<WorkflowAgentNodeEditableData>) {
   if (selectedWorkflowRunId.value) return
   nodes.value = nodes.value.map<WorkflowNode>((node) => {
@@ -2827,12 +2862,21 @@ function updateNodeData(id: string, patch: Partial<WorkflowAgentNodeEditableData
       ...(switched ? { agentMode: switched.agentMode, priorAgentMode: switched.priorAgentMode } : {}),
       skills: agentChanged ? [] : patch.skills ?? node.data.skills,
     }
+    const modeChanged = data.agentMode !== node.data.agentMode
+    if (agentChanged || modeChanged) {
+      workflowModelSelections.set(workflowModelSelectionKey(id, node.data.agent, node.data.agentMode), {
+        provider: node.data.provider, model: node.data.model, apiMode: node.data.apiMode, reasoningEffort: node.data.reasoningEffort,
+      })
+      const saved = workflowModelSelections.get(workflowModelSelectionKey(id, data.agent, data.agentMode))
+      Object.assign(data, saved || (data.agentMode === 'global'
+        ? { provider: '', model: '', reasoningEffort: 'default' }
+        : { ...normalizeNodeModel({ ...data, provider: '', model: '' }), reasoningEffort: 'default' }))
+    }
     return {
       ...node,
       style: patch.images ? expandNodeHeightForImages(node.style, patch.images.length) : node.style,
       data: withRuntimeNodeData({
         ...data,
-        ...(agentChanged ? normalizeNodeModel(data) : {}),
       }),
     }
   })
@@ -3199,6 +3243,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   <PageLoading :show="pageLoading" initial-only class="workflow-view">
     <PageSidebar>
     <aside class="workflow-sidebar" :class="{ collapsed: !showWorkflowSidebar }">
+      <SidebarResizeHandle />
       <div v-if="showWorkflowSidebar" class="page-sidebar-top">
         <PageSidebarNav
           active="workflow"
@@ -3733,7 +3778,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
                 </div>
               </div>
               <MessageList scroll-scope="workflow" />
-              <ChatInput />
+              <ChatInput :model-label="workflowChatPanelModelLabel" :model-disabled="true" reasoning-effort-disabled />
             </template>
             <div v-else class="workflow-chat-loading">
               {{ t('chat.noVisibleMessages') }}
@@ -3806,6 +3851,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
         ref="workflowRunsPanelRef"
         v-if="showWorkflowRunsPanel"
         class="workflow-runs-panel"
+        :class="{ 'workflow-runs-panel--overlay': isMobile }"
         @pointerdown="startWorkflowRunPageSwipe"
         @pointerup="finishWorkflowRunPageSwipe"
         @pointercancel="cancelWorkflowRunPageSwipe"
@@ -4228,7 +4274,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   min-width: 0;
   position: relative;
   overflow: hidden;
-  background-color: $bg-card;
+  background-color: var(--theme-card-bg, $bg-card);
 }
 
 .workflow-main {
@@ -4239,9 +4285,9 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   flex-direction: column;
   margin: 10px 10px 10px 0;
   overflow: hidden;
-  background: $bg-main-surface;
-  border: 1px solid $border-color;
-  border-radius: 14px;
+  background: var(--theme-content-bg, $bg-main-surface);
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 14px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
 
   &--sidebar-collapsed {
@@ -4250,12 +4296,13 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 }
 
 .workflow-sidebar {
+  position: relative;
   width: $sidebar-width;
   min-height: 0;
   align-self: stretch;
   margin: 0;
-  background: $bg-sidebar-surface;
-  border-inline-end: 1px solid $border-color;
+  background: var(--theme-sidebar-bg, $bg-sidebar-surface);
+  border-inline-end: var(--border-width, 1px) solid $border-color;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -4277,20 +4324,20 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 
 .page-sidebar-top {
   flex-shrink: 0;
-  padding: 12px;
+  padding: calc(12px * var(--spacing-scale, 1));
 }
 
 .workflow-list-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   margin-top: 8px;
   justify-content: space-between;
 }
 
 .workflow-selection-count {
   min-width: 0;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
 }
 
@@ -4300,7 +4347,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   justify-content: center;
   width: 22px;
   height: 22px;
-  padding: 4px;
+  padding: calc(4px * var(--spacing-scale, 1));
   border: 0;
   border-radius: $radius-sm;
   background: transparent;
@@ -4313,7 +4360,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   height: 22px;
 
   .n-button {
@@ -4329,12 +4376,12 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 6px 12px;
+  padding: 0 calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
 }
 
 .workflow-list-empty {
-  padding: 16px 10px;
-  font-size: 12px;
+  padding: calc(16px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   text-align: center;
 }
@@ -4343,13 +4390,13 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   width: 100%;
   min-width: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-component, 8px);
   background: transparent;
   color: $text-secondary;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1));
   text-align: start;
   cursor: pointer;
   transition:
@@ -4372,7 +4419,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
     background: rgba(var(--accent-primary-rgb), 0.12);
     color: $text-primary;
     font-weight: 500;
-    border-radius: 6px;
+    border-radius: var(--radius-component, 6px);
   }
 
   &.active .workflow-list-name,
@@ -4436,7 +4483,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 }
 
 .workflow-list-name,
@@ -4448,14 +4495,14 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 }
 
 .workflow-list-name {
-  font-size: 13px;
-  line-height: 18px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
   color: inherit;
 }
 
 .workflow-list-meta {
-  font-size: 11px;
-  line-height: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 15 / 14));
   color: $text-muted;
 }
 
@@ -4463,12 +4510,12 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   flex-shrink: 0;
   opacity: 0;
   pointer-events: none;
-  padding: 2px;
+  padding: calc(2px * var(--spacing-scale, 1));
   border: none;
   background: none;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius-component, 3px);
   transition: all var(--transition-fast);
 
   &:hover {
@@ -4486,112 +4533,112 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 
 .workflow-evidence {
   min-height: 100%;
-  background: $bg-card;
+  background: var(--workflow-run-panel-bg, $bg-card);
 }
-.workflow-evidence-overview { min-width: 0; padding: 14px 12px 12px; border-bottom: 1px solid var(--border-light); display: flex; flex-direction: column; gap: 8px; }
+.workflow-evidence-overview { min-width: 0; padding: calc(14px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)); border-bottom: var(--border-width, 1px) solid var(--border-light); display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); }
 .workflow-evidence-summary-topline,
-.workflow-evidence-result-duration { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-muted); font-size: 11px; }
-.workflow-evidence-summary-topline strong { color: var(--text-primary); font-size: 15px; }
-.workflow-evidence-result-duration strong { color: var(--text-secondary); font-size: 12px; font-weight: 600; }
-.workflow-evidence-actual-path-compact { min-width: 0; display: flex; flex-direction: column; gap: 3px; color: var(--text-primary); font-size: 11px; line-height: 16px; }
+.workflow-evidence-result-duration { display: flex; align-items: center; justify-content: space-between; gap: calc(8px * var(--spacing-scale, 1)); color: var(--text-muted); font-size: calc(var(--font-size-base, 14px) * 11 / 14); }
+.workflow-evidence-summary-topline strong { color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 15 / 14); }
+.workflow-evidence-result-duration strong { color: var(--text-secondary); font-size: calc(var(--font-size-base, 14px) * 12 / 14); font-weight: 600; }
+.workflow-evidence-actual-path-compact { min-width: 0; display: flex; flex-direction: column; gap: calc(3px * var(--spacing-scale, 1)); color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 11 / 14); line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14)); }
 .workflow-evidence-actual-path-compact strong { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 500; }
-.workflow-evidence-section-label { color: var(--text-muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
-.workflow-run-budget-compact { min-width: 0; padding-top: 7px; border-top: 1px solid var(--border-light); display: flex; flex-direction: column; gap: 3px; color: var(--text-muted); font-size: 11px; line-height: 16px; }
+.workflow-evidence-section-label { color: var(--text-muted); font-size: calc(var(--font-size-base, 14px) * 10 / 14); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.workflow-run-budget-compact { min-width: 0; padding-top: calc(7px * var(--spacing-scale, 1)); border-top: var(--border-width, 1px) solid var(--border-light); display: flex; flex-direction: column; gap: calc(3px * var(--spacing-scale, 1)); color: var(--text-muted); font-size: calc(var(--font-size-base, 14px) * 11 / 14); line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14)); }
 .workflow-run-budget-compact strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-weight: 500; }
-.workflow-run-evidence-details-trigger { align-self: flex-end; min-height: 36px; padding: 0 2px; border: 0; background: transparent; color: var(--accent-primary); display: inline-flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; }
+.workflow-run-evidence-details-trigger { align-self: flex-end; min-height: 36px; padding: 0 calc(2px * var(--spacing-scale, 1)); border: 0; background: transparent; color: var(--accent-primary); display: inline-flex; align-items: center; gap: calc(4px * var(--spacing-scale, 1)); font-size: calc(var(--font-size-base, 14px) * 11 / 14); cursor: pointer; }
 .workflow-run-evidence-details-trigger:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
-.workflow-evidence-tabs { position: sticky; top: 0; z-index: 2; padding: 8px; border-bottom: 1px solid var(--border-light); background: $bg-card; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
-.workflow-evidence-tabs button { min-width: 0; min-height: 38px; padding: 5px 3px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: 10px; white-space: nowrap; cursor: pointer; }
+.workflow-evidence-tabs { position: sticky; top: 0; z-index: 2; padding: calc(8px * var(--spacing-scale, 1)); border-bottom: var(--border-width, 1px) solid var(--border-light); background: var(--theme-card-bg, var(--workflow-run-item-bg, $bg-card)); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(4px * var(--spacing-scale, 1)); }
+.workflow-evidence-tabs button { min-width: 0; min-height: 38px; padding: calc(5px * var(--spacing-scale, 1)) calc(3px * var(--spacing-scale, 1)); border: var(--border-width, 1px) solid transparent; border-radius: var(--radius-component, 6px); background: transparent; color: var(--text-muted); font-size: calc(var(--font-size-base, 14px) * 10 / 14); white-space: nowrap; cursor: pointer; }
 .workflow-evidence-tabs button[aria-selected="true"] { border-color: rgba(var(--accent-primary-rgb), 0.24); background: rgba(var(--accent-primary-rgb), 0.1); color: var(--text-primary); }
-.workflow-evidence-tabs button span { display: inline-grid; min-width: 17px; height: 17px; padding: 0 4px; place-items: center; border-radius: 999px; background: rgba(var(--accent-primary-rgb), 0.12); }
-.workflow-evidence-list { min-height: 0; overflow: visible; overscroll-behavior: contain; padding: 10px 12px 16px; display: flex; flex-direction: column; gap: 8px; }
-.workflow-evidence-row { flex: 0 0 auto; display: flex; flex-direction: column; gap: 7px; padding: 10px; border: 1px solid var(--border-light); border-radius: 8px; background: rgba(var(--accent-primary-rgb), 0.04); font-size: 11px; color: var(--text-muted); }
+.workflow-evidence-tabs button span { display: inline-grid; min-width: 17px; height: 17px; padding: 0 calc(4px * var(--spacing-scale, 1)); place-items: center; border-radius: 999px; background: rgba(var(--accent-primary-rgb), 0.12); }
+.workflow-evidence-list { min-height: 0; overflow: visible; overscroll-behavior: contain; padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)); display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); }
+.workflow-evidence-row { flex: 0 0 auto; display: flex; flex-direction: column; gap: calc(7px * var(--spacing-scale, 1)); padding: 10px; border: var(--border-width, 1px) solid var(--border-light); border-radius: var(--radius-component, 8px); background: rgba(var(--accent-primary-rgb), 0.04); font-size: calc(var(--font-size-base, 14px) * 11 / 14); color: var(--text-muted); }
 .workflow-evidence-row.selected { border-color: rgba(var(--accent-primary-rgb), 0.24); background: rgba(var(--accent-primary-rgb), 0.08); }
-.workflow-evidence-topline { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.workflow-evidence-row-title { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--text-primary); font-size: 12px; line-height: 17px; }
-.workflow-evidence-status { flex: 0 0 auto; max-width: 43%; color: var(--text-secondary); font-size: 10px; text-align: end; }
-.workflow-evidence-description { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--text-secondary); line-height: 16px; }
-.workflow-evidence-detail-trigger { align-self: flex-end; min-height: 32px; padding: 0; border: 0; background: transparent; color: var(--accent-primary); font-size: 11px; cursor: pointer; }
+.workflow-evidence-topline { display: flex; align-items: flex-start; justify-content: space-between; gap: calc(8px * var(--spacing-scale, 1)); }
+.workflow-evidence-row-title { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 12 / 14); line-height: var(--line-height, calc(var(--font-size-base, 14px) * 17 / 14)); }
+.workflow-evidence-status { flex: 0 0 auto; max-width: 43%; color: var(--text-secondary); font-size: calc(var(--font-size-base, 14px) * 10 / 14); text-align: end; }
+.workflow-evidence-description { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--text-secondary); line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14)); }
+.workflow-evidence-detail-trigger { align-self: flex-end; min-height: 32px; padding: 0; border: 0; background: transparent; color: var(--accent-primary); font-size: calc(var(--font-size-base, 14px) * 11 / 14); cursor: pointer; }
 .workflow-evidence-detail { max-height: min(70vh, 680px); overflow-y: auto; color: var(--text-secondary); }
-.workflow-evidence-detail-description { margin: 12px 0 18px; color: var(--text-primary); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.workflow-evidence-detail h3 { margin: 0 0 10px; color: var(--text-primary); font-size: 13px; }
-.workflow-evidence-detail dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; }
+.workflow-evidence-detail-description { margin: 12px 0 18px; color: var(--text-primary); line-height: var(--line-height, 1.6); white-space: pre-wrap; overflow-wrap: anywhere; }
+.workflow-evidence-detail h3 { margin: 0 0 10px; color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 13 / 14); }
+.workflow-evidence-detail dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: calc(8px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1)); }
 .workflow-evidence-detail dt { color: var(--text-muted); }
 .workflow-evidence-detail dd { min-width: 0; margin: 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
 .workflow-evidence-detail code { color: var(--accent-primary); white-space: inherit; overflow-wrap: inherit; }
-.workflow-run-evidence-details-list { max-height: min(70vh, 680px); overflow-y: auto; display: flex; flex-direction: column; gap: 18px; color: var(--text-secondary); }
-.workflow-run-evidence-details-list section { display: flex; flex-direction: column; gap: 8px; }
-.workflow-run-evidence-details-list h3 { margin: 0; color: var(--text-primary); font-size: 13px; }
-.workflow-run-evidence-details-list ol, .workflow-run-evidence-details-list ul { margin: 0; padding-inline-start: 20px; }
+.workflow-run-evidence-details-list { max-height: min(70vh, 680px); overflow-y: auto; display: flex; flex-direction: column; gap: calc(18px * var(--spacing-scale, 1)); color: var(--text-secondary); }
+.workflow-run-evidence-details-list section { display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); }
+.workflow-run-evidence-details-list h3 { margin: 0; color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 13 / 14); }
+.workflow-run-evidence-details-list ol, .workflow-run-evidence-details-list ul { margin: 0; padding-inline-start: calc(20px * var(--spacing-scale, 1)); }
 .workflow-run-evidence-details-list li { margin: 5px 0; }
-.workflow-run-evidence-details-list li span { display: block; color: var(--text-muted); font-size: 11px; }
+.workflow-run-evidence-details-list li span { display: block; color: var(--text-muted); font-size: calc(var(--font-size-base, 14px) * 11 / 14); }
 .workflow-run-evidence-details-list p { margin: 0; color: var(--text-muted); }
 
 .workflow-run-budget-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
 }
 
 .workflow-run-budget-help {
   margin: 0;
   color: $text-muted;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
 }
 
 .workflow-create-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 }
 
 .workflow-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .workflow-field-label {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 500;
-  line-height: 16px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
   color: $text-secondary;
 }
 
 .workflow-edge-editor-form {
   max-height: min(720px, calc(100vh - 180px));
   overflow-y: auto;
-  padding-inline-end: 6px;
+  padding-inline-end: calc(6px * var(--spacing-scale, 1));
 }
 
 .workflow-edge-connection-summary {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid rgba(var(--accent-info-rgb), 0.28);
-  border-radius: 8px;
+  gap: calc(4px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-info-rgb), 0.28);
+  border-radius: var(--radius-component, 8px);
   background: rgba(var(--accent-info-rgb), 0.08);
   color: $text-secondary;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.5);
 }
 
 .workflow-edge-connection-summary strong {
   color: $text-primary;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
 }
 
 .workflow-condition-semantics {
-  padding: 10px 12px;
-  border: 1px solid rgba(var(--accent-info-rgb), 0.24);
-  border-radius: 8px;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-info-rgb), 0.24);
+  border-radius: var(--radius-component, 8px);
   background: rgba(var(--accent-info-rgb), 0.06);
   color: $text-secondary;
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.55);
 }
 
 .workflow-condition-semantics strong {
@@ -4605,13 +4652,13 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 .workflow-loop-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid rgba(var(--accent-info-rgb), 0.2);
-  border-radius: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-info-rgb), 0.2);
+  border-radius: var(--radius-component, 8px);
   background: rgba(var(--accent-info-rgb), 0.05);
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .workflow-loop-panel > strong {
@@ -4625,7 +4672,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   background: transparent;
   color: $text-muted;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   cursor: pointer;
 }
 
@@ -4638,25 +4685,25 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   display: inline-flex;
   width: fit-content;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .workflow-field-error {
   color: #dc2626;
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.4);
 }
 
 .workflow-feedback-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
   flex: 1;
 }
@@ -4671,7 +4718,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   overflow: hidden;
 }
 
@@ -4686,16 +4733,16 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
   font-weight: 600;
-  line-height: 22px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 22 / 14));
   color: $text-primary;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .workflow-body {
@@ -4711,7 +4758,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   position: relative;
   min-width: 0;
   min-height: 0;
-  background: $bg-primary;
+  background: var(--theme-content-bg, $bg-primary);
   flex: 1;
 }
 
@@ -4722,16 +4769,22 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   z-index: 8;
   transform: translateX(-50%);
   pointer-events: none;
-  padding: 5px 10px;
-  border: 1px solid rgba(var(--accent-info-rgb), 0.28);
+  padding: calc(5px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-info-rgb), 0.28);
   border-radius: 999px;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   color: $text-secondary;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
   backdrop-filter: blur(8px);
   white-space: nowrap;
+}
+
+// The content surface paints the desktop panel; the mobile drawer owns its overlay.
+html:is(.theme-card-bg, .theme-has-custom-background) .workflow-view {
+  --workflow-run-panel-bg: transparent;
+  --workflow-run-item-bg: rgba(var(--text-primary-rgb), 0.04);
 }
 
 .workflow-runs-panel {
@@ -4739,9 +4792,10 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   width: 280px;
   flex: 0 0 280px;
   min-height: 0;
-  border-inline-start: 1px solid $border-color;
-  background: $bg-card;
-  overflow: hidden;
+  border-inline-start: var(--border-width, 1px) solid $border-color;
+  background: var(--workflow-run-panel-bg, $bg-card);
+  // Keep focus/scrollIntoView from adding scrollLeft to the page track's transform.
+  overflow: clip;
   overscroll-behavior-x: contain;
   touch-action: pan-y;
 }
@@ -4761,6 +4815,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 .workflow-runs-pages {
   width: 200%;
   height: 100%;
+  flex-shrink: 0;
   display: flex;
   transform: translateX(0);
   transition: transform 220ms ease;
@@ -4798,15 +4853,15 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 .workflow-run-back {
   min-height: 36px;
   margin: -6px 0 -6px -6px;
-  padding: 0 6px;
+  padding: 0 calc(6px * var(--spacing-scale, 1));
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-component, 6px);
   background: transparent;
   color: var(--accent-primary);
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 11px;
+  gap: calc(3px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   cursor: pointer;
 }
 
@@ -4822,8 +4877,8 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   min-width: 320px;
   max-width: 100%;
   min-height: 0;
-  border-inline-end: 1px solid $border-color;
-  background: $bg-card;
+  border-inline-end: var(--border-width, 1px) solid $border-color;
+  background: var(--theme-card-bg, $bg-card);
   display: flex;
   overflow: visible;
 }
@@ -4859,13 +4914,13 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
     width: 12px;
     height: 38px;
     transform: translateY(-50%);
-    border-radius: 6px;
+    border-radius: var(--radius-component, 6px);
     background:
       linear-gradient($text-muted, $text-muted) center 12px / 6px 1px no-repeat,
       linear-gradient($text-muted, $text-muted) center 19px / 6px 1px no-repeat,
       linear-gradient($text-muted, $text-muted) center 26px / 6px 1px no-repeat,
       $bg-card;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
     opacity: 0.9;
     transition: all $transition-fast;
     z-index: 2;
@@ -4895,6 +4950,10 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+
+  :deep(.input-top-bar) { flex-wrap: wrap; }
+  :deep(.input-model-button) { min-width: 0; max-width: 190px; }
+  :deep(.input-model-label) { display: inline-block; }
 }
 
 .workflow-chat-header {
@@ -4902,9 +4961,9 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   min-height: 47px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid $border-color;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 }
 
 .workflow-chat-title {
@@ -4914,7 +4973,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
 }
 
@@ -4925,7 +4984,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: $bg-primary;
+  background: var(--theme-content-bg, $bg-primary);
 }
 
 .workflow-chat-loading {
@@ -4934,7 +4993,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   align-items: center;
   justify-content: center;
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .workflow-node-approval-panel {
@@ -4942,25 +5001,25 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid $border-color;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   background: rgba(217, 119, 6, 0.08);
 }
 
 .workflow-node-approval-title {
   min-width: 0;
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
-  line-height: 18px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
 }
 
 .workflow-node-approval-actions {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .workflow-runs-header {
@@ -4968,32 +5027,32 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 12px;
-  border-bottom: 1px solid $border-light;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
 }
 
 .workflow-runs-title {
   min-width: 0;
   flex: 1;
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
-  line-height: 18px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
 }
 
 .workflow-runs-header-actions {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .workflow-runs-refresh {
   width: 26px;
   height: 26px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-component, 6px);
   background: transparent;
   color: $text-muted;
   display: inline-flex;
@@ -5008,40 +5067,47 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 }
 
 .workflow-runs-empty {
-  padding: 18px 12px;
+  padding: calc(18px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   text-align: center;
 }
 
 .workflow-runs-list {
-  padding: 10px;
+  padding: calc(10px * var(--spacing-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .workflow-run-item {
-  border: 1px solid $border-light;
-  border-radius: 8px;
-  background: $bg-secondary;
+  border: var(--border-width, 1px) solid var(--theme-card-border, $border-light);
+  border-radius: var(--theme-card-radius, var(--radius-component, 8px));
+  background: var(--theme-card-bg, var(--workflow-run-item-bg, $bg-secondary));
+  -webkit-backdrop-filter: var(--theme-card-filter, none);
+  backdrop-filter: var(--theme-card-filter, none);
+  box-shadow: var(--theme-card-shadow, none);
   color: inherit;
-  padding: 10px;
+  padding: calc(10px * var(--spacing-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   text-align: start;
   cursor: pointer;
   transition: border-color $transition-fast, background-color $transition-fast;
 
   &:hover {
     border-color: rgba(var(--accent-primary-rgb), 0.45);
-    background: rgba(var(--accent-primary-rgb), 0.06);
+    background:
+      linear-gradient(rgba(var(--accent-primary-rgb), 0.06), rgba(var(--accent-primary-rgb), 0.06)),
+      var(--theme-card-bg, var(--workflow-run-item-bg, transparent));
   }
 
   &.active {
     border-color: var(--accent-primary);
-    background: rgba(var(--accent-primary-rgb), 0.12);
+    background:
+      linear-gradient(rgba(var(--accent-primary-rgb), 0.12), rgba(var(--accent-primary-rgb), 0.12)),
+      var(--theme-card-bg, var(--workflow-run-item-bg, transparent));
   }
 }
 
@@ -5054,16 +5120,16 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 
 .workflow-run-topline {
   justify-content: space-between;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .workflow-run-status {
   min-width: 0;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   color: $text-primary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
-  line-height: 16px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
 }
 
 .workflow-run-status-dot {
@@ -5100,8 +5166,8 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 .workflow-run-meta,
 .workflow-run-budget-summary,
 .workflow-run-error {
-  font-size: 11px;
-  line-height: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 15 / 14));
 }
 
 .workflow-run-duration,
@@ -5118,7 +5184,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 }
 
 .workflow-run-meta {
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .workflow-run-error {
@@ -5128,26 +5194,26 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   white-space: nowrap;
 }
 
-.workflow-schedules-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .9fr); gap: 20px; }
-.workflow-schedules-list { display: flex; min-height: 200px; flex-direction: column; gap: 10px; }
-.workflow-schedules-empty { color: $text-muted; padding: 16px 0; }
-.workflow-schedule-item { border: 1px solid $border-color; border-radius: 8px; padding: 12px; }
-.workflow-schedule-item-header, .workflow-schedule-actions, .workflow-schedule-submit { display: flex; align-items: center; gap: 8px; }
+.workflow-schedules-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .9fr); gap: calc(20px * var(--spacing-scale, 1)); }
+.workflow-schedules-list { display: flex; min-height: 200px; flex-direction: column; gap: calc(10px * var(--spacing-scale, 1)); }
+.workflow-schedules-empty { color: $text-muted; padding: calc(16px * var(--spacing-scale, 1)) 0; }
+.workflow-schedule-item { border: var(--border-width, 1px) solid $border-color; border-radius: var(--radius-component, 8px); padding: calc(12px * var(--spacing-scale, 1)); }
+.workflow-schedule-item-header, .workflow-schedule-actions, .workflow-schedule-submit { display: flex; align-items: center; gap: calc(8px * var(--spacing-scale, 1)); }
 .workflow-schedule-item-header { justify-content: space-between; margin-bottom: 6px; }
-.workflow-schedule-status { color: var(--success); font-size: 12px; }.workflow-schedule-status.disabled { color: $text-muted; }
-.workflow-schedule-meta, .workflow-schedule-policy { color: $text-muted; font-size: 12px; line-height: 18px; }
-.workflow-schedule-error { color: var(--error); font-size: 12px; margin-top: 4px; word-break: break-word; }
+.workflow-schedule-status { color: var(--success); font-size: calc(var(--font-size-base, 14px) * 12 / 14); }.workflow-schedule-status.disabled { color: $text-muted; }
+.workflow-schedule-meta, .workflow-schedule-policy { color: $text-muted; font-size: calc(var(--font-size-base, 14px) * 12 / 14); line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14)); }
+.workflow-schedule-error { color: var(--error); font-size: calc(var(--font-size-base, 14px) * 12 / 14); margin-top: 4px; word-break: break-word; }
 .workflow-schedule-actions { margin-top: 10px; }
-.workflow-schedule-form { display: flex; flex-direction: column; gap: 12px; }.workflow-schedule-form h3 { margin: 0; }
-.workflow-schedule-form label { display: flex; flex-direction: column; gap: 6px; color: $text-secondary; font-size: 13px; }.workflow-schedule-form .workflow-schedule-checkbox { display: block; }
-.workflow-schedule-time-fields { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+.workflow-schedule-form { display: flex; flex-direction: column; gap: calc(12px * var(--spacing-scale, 1)); }.workflow-schedule-form h3 { margin: 0; }
+.workflow-schedule-form label { display: flex; flex-direction: column; gap: calc(6px * var(--spacing-scale, 1)); color: $text-secondary; font-size: calc(var(--font-size-base, 14px) * 13 / 14); }.workflow-schedule-form .workflow-schedule-checkbox { display: block; }
+.workflow-schedule-time-fields { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: calc(8px * var(--spacing-scale, 1)); }
 .workflow-schedule-submit { justify-content: flex-end; }
 @media (max-width: $breakpoint-mobile) { .workflow-schedules-layout { grid-template-columns: 1fr; } }
 
 .workflow-flow {
   width: 100%;
   height: 100%;
-  background: $bg-primary;
+  background: var(--theme-content-bg, $bg-primary);
 
   :deep(.vue-flow__node) {
     cursor: grab;
@@ -5211,20 +5277,20 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   }
 
   :deep(.vue-flow__minimap) {
-    border: 1px solid $border-color;
-    border-radius: 8px;
-    background: $bg-card;
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 8px);
+    background: var(--theme-card-bg, $bg-card);
   }
 
   :deep(.vue-flow__controls) {
-    border: 1px solid $border-color;
-    border-radius: 8px;
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 8px);
     overflow: hidden;
     box-shadow: none;
   }
 
   :deep(.vue-flow__controls-button) {
-    background: $bg-card;
+    background: var(--theme-card-bg, $bg-card);
     border-bottom-color: $border-light;
     color: $text-primary;
   }
@@ -5278,20 +5344,20 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   .page-header {
     flex-wrap: nowrap;
     align-items: center;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     padding: 16px 12px !important;
   }
 
   .header-actions {
     flex: 0 0 auto;
     justify-content: flex-end;
-    gap: 4px;
+    gap: calc(4px * var(--spacing-scale, 1));
   }
 
   .header-left {
     flex: 1 1 auto;
     min-width: 0;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     align-items: center;
     overflow: hidden;
   }
@@ -5300,7 +5366,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
     flex: 1 1 auto;
     min-width: 0;
     align-items: center;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
   }
 
   .header-workflow-title {
@@ -5320,13 +5386,18 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
     width: min(340px, 88vw);
     flex: none;
     min-height: 0;
-    border-inline-start: 1px solid $border-color;
+    border-inline-start: var(--border-width, 1px) solid $border-color;
+    background: var(--theme-overlay-bg, $bg-card);
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.16);
     display: flex;
 
     &:dir(rtl) {
       box-shadow: 8px 0 24px rgba(0, 0, 0, 0.16);
     }
+  }
+
+  .workflow-evidence {
+    background: transparent;
   }
 
   .workflow-chat-panel {

@@ -1,3 +1,4 @@
+import { studioSessionAccount } from '../../contracts/runs/usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
 import { leaseEkkoMcpServers } from './ekko-mcp-lease'
@@ -464,6 +465,9 @@ export async function handleEkkoAgentRun(
 
   if (storedSession && !storedSession.user_id && authenticatedUserId) {
     updateSession(sessionId, { user_id: authenticatedUserId })
+  }
+  if (storedSession && !storedSession.studio_user_id && authenticatedUserId) {
+    updateSession(sessionId, { studio_user_id: studioSessionAccount(storedSession) || authenticatedUserId })
   }
   const modelConfig = await resolveBridgeRunModelConfig({
     profile,

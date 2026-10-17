@@ -342,7 +342,7 @@ onBeforeUnmount(() => {
   width: 260px;
   min-width: 180px;
   max-width: 520px;
-  border-inline-end: 1px solid $border-color;
+  border-inline-end: var(--border-width, 1px) solid $border-color;
   overflow-y: auto;
   flex-shrink: 0;
   display: flex;
@@ -423,8 +423,8 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   flex-shrink: 0;
   min-height: 34px;
-  padding: 0 8px 0 12px;
-  border-bottom: 1px solid $border-color;
+  padding: 0 calc(8px * var(--spacing-scale, 1)) 0 calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 
   :deep(.file-toolbar) {
     padding: 0;
@@ -450,7 +450,7 @@ onBeforeUnmount(() => {
 
 .explorer-title {
   color: $text-secondary;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -468,9 +468,9 @@ onBeforeUnmount(() => {
 .main-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-bottom: 1px solid $border-color;
+  gap: calc(6px * var(--spacing-scale, 1));
+  padding: calc(5px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   flex-shrink: 0;
   background: inherit;
 
@@ -479,8 +479,8 @@ onBeforeUnmount(() => {
   }
 
   @media (max-width: $breakpoint-mobile) {
-    gap: 4px;
-    padding: 4px 8px;
+    gap: calc(4px * var(--spacing-scale, 1));
+    padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     flex-wrap: wrap;
   }
 }
@@ -491,8 +491,8 @@ onBeforeUnmount(() => {
   }
 
   @media (max-width: $breakpoint-mobile) {
-    font-size: 12px;
-    padding: 0 8px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    padding: 0 calc(8px * var(--spacing-scale, 1));
     height: 32px;
   }
 }

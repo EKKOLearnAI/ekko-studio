@@ -1444,6 +1444,38 @@ describe('coding agent launch preparation', () => {
     expect(readFileSync(join(globalCodexHome, 'AGENTS.md'), 'utf8')).toBe('User global Codex instructions.\n')
   })
 
+  it.each(['codex', 'claude-code', 'grok', 'pi', 'cursor', 'opencode', 'antigravity'])('passes a global %s native model override without Studio provider configuration', async id => {
+    const home = makeHome()
+    if (id === 'pi') {
+      const adapter = join(home, 'coding-agent', 'pi-mcp-adapter', 'node_modules', 'pi-mcp-adapter', 'index.ts')
+      mkdirSync(dirname(adapter), { recursive: true })
+      writeFileSync(adapter, 'export default function () {}')
+    }
+    const result = await prepareCodingAgentLaunch(id, { mode: 'global', model: 'native-selected',
+      ...(['codex', 'claude-code', 'grok', 'pi', 'antigravity'].includes(id) ? { reasoningEffort: 'high' } : {}),
+      ...(id === 'pi' ? { piOutputMode: 'rpc' as const } : {}),
+    })
+    expect(result.model).toBe('native-selected')
+    expect(result.provider).toBe('global')
+    expect(result.args).toEqual(expect.arrayContaining(['--model', 'native-selected']))
+    if (id === 'codex') expect(result.args).toContain('model_reasoning_effort="high"')
+    if (id === 'claude-code' || id === 'antigravity') expect(result.args).toEqual(expect.arrayContaining(['--effort', 'high']))
+    if (id === 'grok') expect(result.args).toEqual(expect.arrayContaining(['--reasoning-effort', 'high']))
+    if (['codex', 'claude-code', 'grok', 'pi', 'antigravity'].includes(id)) expect(result.reasoningEffort).toBe('high')
+  })
+
+  it.each([
+    ['cursor', 'gpt-5.3-codex-xhigh-fast', 'xhigh'],
+    ['antigravity', 'gemini-3.1-pro-low', 'low'],
+  ])('launches %s with the exact selected effort-variant ID', async (id, model, reasoningEffort) => {
+    makeHome()
+    const result = await prepareCodingAgentLaunch(id, { mode: 'global', model, reasoningEffort })
+    expect(result).toMatchObject({ model, reasoningEffort, provider: 'global' })
+    expect(result.args).toEqual(expect.arrayContaining(['--model', model]))
+    expect(result.args).not.toContain('--effort')
+    await expect(prepareCodingAgentLaunch(id, { mode: 'global', model, reasoningEffort: 'high' })).rejects.toThrow('same variant')
+  })
+
   it('launches Grok from an isolated shadow home without changing the user config', async () => {
     const home = makeHome()
     const globalGrokHome = join(home, 'global-home', '.grok')
@@ -1620,6 +1652,47 @@ describe('coding agent launch preparation', () => {
     expect(readFileSync(join(baseRoot, 'skills', 'workflow-skill', 'SKILL.md'), 'utf8')).toBe('# Workflow skill\n')
     expect(existsSync(launcherFile(baseRoot))).toBe(true)
     expect(existsSync(join(result.rootDir, 'skills'))).toBe(false)
+  })
+
+  it.each(['codex_responses', 'chat_completions'] as const)('forwards scoped OpenCode effort to the %s upstream', async apiMode => {
+    makeHome()
+    const launch = await prepareCodingAgentLaunch('opencode', {
+      mode: 'scoped', profile: 'default', provider: 'test', model: 'test-model',
+      baseUrl: 'https://api.example.com/v1', apiKey: 'sk-upstream', apiMode,
+      reasoningEffort: 'xhigh', sessionId: 'opencode-effort', agentSessionId: 'opencode-effort-run',
+    })
+    const config = JSON.parse(launch.env.OPENCODE_CONFIG_CONTENT)
+    const routeKey = config.provider['hermes-studio'].options.baseURL.match(/\/api\/codex-proxy\/([^/]+)\/v1/)[1]
+    const response = { id: 'resp_effort', object: 'response', status: 'completed', output: [],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }
+    const chat = { id: 'chat_effort', choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }] }
+
+    for (const stream of [false, true]) {
+      const payload = apiMode === 'codex_responses'
+        ? `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`
+        : 'data: {"id":"chat_effort","choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+      const fetchMock = vi.fn<typeof fetch>(async () => stream
+        ? new Response(payload, { headers: { 'Content-Type': 'text/event-stream' } })
+        : Response.json(apiMode === 'codex_responses' ? response : chat))
+      vi.stubGlobal('fetch', fetchMock)
+      // OpenCode's custom provider can omit reasoning despite Studio's selection.
+      const ctx = makeProxyContext(routeKey, launch.env.HERMES_OPENCODE_API_KEY, { input: 'hello', stream })
+      await codexProxyResponses(ctx)
+      expect(ctx.status).toBeUndefined()
+      if (stream) for await (const _chunk of ctx.body) { /* consume the proxy stream */ }
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const sent = JSON.parse(String(fetchMock.mock.calls[0][1]!.body))
+      expect(sent).toMatchObject({ model: 'test-model', stream })
+      if (apiMode === 'codex_responses') {
+        expect(sent.reasoning).toEqual({ effort: 'xhigh' })
+        expect(sent).not.toHaveProperty('reasoning_effort')
+      } else {
+        expect(sent.reasoning_effort).toBe('xhigh')
+        expect(sent).not.toHaveProperty('reasoning')
+      }
+      expect(ctx.request.body).not.toHaveProperty('reasoning')
+    }
   })
 
   it.each([{ input: ['text'] }, { input: ['text', 'image'] }])('allows OpenCode images regardless of model metadata $input', async ({ input }) => {
@@ -3121,7 +3194,7 @@ describe('coding agent launch preparation', () => {
     expect(sse).toContain('"text":"pong"')
     expect(sse).toContain('event: response.output_item.done')
     expect(sse).toContain('"output":[{"type":"message"')
-    expect(sse).not.toContain('"usage"')
+    expect(sse).toContain('"usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":15}')
   })
 
   it('keeps OpenCode response.completed valid when Chat Completions omits usage', async () => {
@@ -3229,6 +3302,9 @@ describe('coding agent launch preparation', () => {
 
   it('streams Anthropic thinking and text as Pi-compatible Responses events', async () => {
     makeHome()
+    vi.spyOn(providerRuntime, 'getModelRuntimeCapabilities').mockReturnValue({
+      contextWindow: 200_000, outputLimit: 64_000, outputLimitKnown: true, reasoning: true, input: ['text'],
+    })
     const launch = await prepareCodingAgentLaunch('codex', {
       profile: 'default',
       provider: 'anthropic-compatible',
@@ -3243,7 +3319,7 @@ describe('coding agent launch preparation', () => {
     const encoder = new TextEncoder()
     const fetchMock = vi.fn(async () => new Response(new ReadableStream({
       start(controller) {
-        controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_test","usage":{"input_tokens":3,"output_tokens":0}}}\n\n'))
+        controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_test","usage":{"input_tokens":3,"cache_read_input_tokens":90000,"cache_creation_input_tokens":500,"output_tokens":0}}}\n\n'))
         controller.enqueue(encoder.encode('event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n'))
         controller.enqueue(encoder.encode('event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"inspect"}}\n\n'))
         controller.enqueue(encoder.encode('event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}\n\n'))
@@ -3279,7 +3355,112 @@ describe('coding agent launch preparation', () => {
     expect(sse).toContain('event: response.output_text.done')
     expect(sse).toContain('"text":"hello"')
     expect(sse).toContain('event: response.completed')
-    expect(sse).not.toContain('"usage"')
+    // Codex drives auto-compaction from this usage; Anthropic excludes cached
+    // prompt tokens from input_tokens, so they must be added back.
+    expect(sse).toContain('"usage":{"input_tokens":90503,"input_tokens_details":{"cached_tokens":90000},"output_tokens":2,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":90505}')
+    expect(sse).not.toContain('cache_read_input_tokens')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_tokens).toBe(64_000)
+  })
+
+  it('falls back to max_tokens 4096 when an Anthropic model has no output metadata', async () => {
+    vi.spyOn(providerRuntime, 'getModelRuntimeCapabilities').mockReturnValue({
+      contextWindow: 200_000, outputLimit: 32_000, outputLimitKnown: false, reasoning: true, input: ['text'],
+    })
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: 'custom-anthropic',
+      model: 'custom-claude',
+      baseUrl: 'https://api.example.com',
+      apiKey: 'sk-upstream',
+      apiMode: 'anthropic_messages',
+    })
+    const encoder = new TextEncoder()
+    const fetchMock = vi.fn(async (_url: string, init: any) => JSON.parse(init.body).stream
+      ? new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_s","usage":{"input_tokens":1,"output_tokens":0}}}\n\n'))
+          controller.enqueue(encoder.encode('event: message_stop\ndata: {"type":"message_stop"}\n\n'))
+          controller.close()
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      : new Response(JSON.stringify({
+        id: 'msg_j', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const input = [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }]
+
+    await codexProxyResponses(makeProxyContext(target.routeKey, target.token, { input }))
+    const streamCtx = makeProxyContext(target.routeKey, target.token, { stream: true, input })
+    await codexProxyResponses(streamCtx)
+    for await (const _chunk of streamCtx.body) { /* drain */ }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    for (const call of fetchMock.mock.calls) expect(JSON.parse(call[1].body).max_tokens).toBe(4096)
+  })
+
+  it('returns canonical cached usage for non-streaming Anthropic Codex responses', async () => {
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: 'anthropic-compatible',
+      model: 'claude-sonnet-4-6',
+      baseUrl: 'https://api.example.com',
+      apiKey: 'sk-upstream',
+      apiMode: 'anthropic_messages',
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      id: 'msg_cached',
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 7, cache_read_input_tokens: 1200, cache_creation_input_tokens: 30, output_tokens: 5 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const ctx = makeProxyContext(target.routeKey, target.token, {
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+    })
+    await codexProxyResponses(ctx)
+
+    expect(ctx.body.usage).toEqual({
+      input_tokens: 1237,
+      input_tokens_details: { cached_tokens: 1200 },
+      output_tokens: 5,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 1242,
+    })
+  })
+
+  it('keeps cached prompt tokens inside input_tokens for Chat Completions providers', async () => {
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-upstream',
+      apiMode: 'chat_completions',
+    })
+    const encoder = new TextEncoder()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'))
+        controller.enqueue(encoder.encode('data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":20,"total_tokens":1020,"prompt_cache_hit_tokens":800,"prompt_cache_miss_tokens":200,"completion_tokens_details":{"reasoning_tokens":12}}}\n\n'))
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
+
+    const ctx = makeProxyContext(target.routeKey, target.token, {
+      stream: true,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+    })
+    await codexProxyResponses(ctx)
+
+    const chunks: string[] = []
+    for await (const chunk of ctx.body) chunks.push(String(chunk))
+    const sse = chunks.join('')
+    expect(sse).toContain('"usage":{"input_tokens":1000,"input_tokens_details":{"cached_tokens":800},"output_tokens":20,"output_tokens_details":{"reasoning_tokens":12},"total_tokens":1020}')
+    expect(sse).not.toContain('prompt_cache_hit_tokens')
   })
 
   it('preserves native Responses usage for Codex Responses providers', async () => {
@@ -3320,6 +3501,38 @@ describe('coding agent launch preparation', () => {
       reasoning: { effort: 'high', summary: 'auto' },
     })
     expect(sse).toContain('"usage":{"input_tokens":11,"output_tokens":2,"total_tokens":13}')
+  })
+
+  it.each([
+    { selected: 'high', native: { effort: 'low', summary: 'auto' }, expected: { effort: 'high', summary: 'auto' } },
+    { selected: 'none', native: { effort: 'high', summary: 'auto' }, expected: { effort: 'none', summary: 'auto' } },
+    { selected: undefined, native: { effort: 'medium', summary: 'auto' }, expected: { effort: 'medium', summary: 'auto' } },
+    { selected: '', native: undefined, expected: undefined },
+    { selected: 'invalid', native: { summary: 'auto' }, expected: { summary: 'auto' } },
+  ])('merges selected Responses effort $selected without discarding native reasoning options', async ({ selected, native, expected }) => {
+    const target = registerCodexProxyTarget({
+      profile: 'default', provider: 'test', model: 'test-model', baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-upstream', apiMode: 'codex_responses', reasoningEffort: selected, agentId: 'opencode',
+      agentSessionId: 'opencode-effort-options',
+    })
+    const response = { id: 'resp_options', object: 'response', status: 'completed', output: [] }
+    for (const stream of [false, true]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => stream
+        ? new Response(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`, {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+        : Response.json(response))
+      vi.stubGlobal('fetch', fetchMock)
+      const body = { input: 'hello', stream, ...(native ? { reasoning: { ...native } } : {}) }
+      const ctx = makeProxyContext(target.routeKey, target.token, body)
+      await codexProxyResponses(ctx)
+      expect(ctx.status).toBeUndefined()
+      if (stream) for await (const _chunk of ctx.body) { /* consume the proxy stream */ }
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const sent = JSON.parse(String(fetchMock.mock.calls[0][1]!.body))
+      expect(sent.reasoning).toEqual(expected)
+      expect(body.reasoning).toEqual(native)
+    }
   })
 
   it('maps Grok system messages before forwarding native Responses requests', async () => {
@@ -3954,7 +4167,7 @@ it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('prepares %s
   const launch = await prepareCodingAgentLaunch(id, {
     mode: 'global', profile: 'research', workspace: join(home, 'workspace'),
     studioMcpTokenFile: tokenFile, groupSystemPrompt: 'Review the repository',
-    provider: 'custom:test', model: 'must-not-override-native-model', apiKey: 'must-not-write-upstream-key',
+    provider: 'custom:test', apiKey: 'must-not-write-upstream-key',
   })
   expect(launch).toMatchObject({ agentId: id, mode: 'global', provider: 'global', model: '', args: [], env: {} })
   expect(launch.nativeSystemPrompt).toContain('Review the repository')
@@ -3980,6 +4193,30 @@ it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot'])('loads %s supplementa
   expect(launch.nativeMcpServers!['ekko-studio-interaction']).toBeDefined()
 })
 
+
+it.each(['glm-5.3', ''])('applies global ZCode effort to the native selection overlay for model %s', async model => {
+  const home = makeHome()
+  const builtinPath = join(home, 'builtin.json'), personalPath = join(home, 'personal.json')
+  writeFileSync(builtinPath, JSON.stringify({ config: { modelConfigRules: { builtinProviderModelRules: [
+    { providerId: 'native', modelId: 'glm-5.3', config: { optionSpecs: { reasoningLevel: { values: ['low', 'high', 'max'] } } } },
+  ] } } }))
+  const personal = JSON.stringify({ config: { defaultModelSelection: {
+    providerId: 'native', modelId: 'glm-5.3', options: { reasoningLevel: 'low' },
+  }, providerConfigRules: { providerRules: [{ providerId: 'native', config: { apiKey: 'native-secret' } }] } } })
+  writeFileSync(personalPath, personal)
+  vi.mocked(resolveZcodeCommand).mockResolvedValueOnce({ command: 'zcode', args: [], path: 'zcode', env: {
+    ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: builtinPath, ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: personalPath,
+  } })
+  const launch = await prepareCodingAgentLaunch('zcode', {
+    mode: 'global', workspace: join(home, 'workspace'), model, reasoningEffort: 'max',
+  })
+  expect(launch).toMatchObject({ mode: 'global', provider: 'global', model, reasoningEffort: 'max' })
+  expect(launch.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE).not.toBe(personalPath)
+  expect(JSON.parse(readFileSync(launch.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE!, 'utf8')).config.defaultModelSelection)
+    .toEqual({ providerId: 'native', modelId: 'glm-5.3', options: { reasoningLevel: 'max' } })
+  expect(readFileSync(personalPath, 'utf8')).toBe(personal)
+  expect(launch.args).not.toContain('--effort')
+})
 
 it('uses desktop provider paths globally while retaining scoped ZCode configuration in chat and terminal launchers', async () => {
   const home = makeHome()

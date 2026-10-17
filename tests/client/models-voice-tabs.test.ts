@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { reactive } from 'vue'
 
 enableAutoUnmount(afterEach)
 
@@ -8,13 +9,14 @@ const routerReplace = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({
   query: {} as Record<string, string>,
 }))
-const modelsStore = vi.hoisted(() => ({
+const modelsStoreState = vi.hoisted(() => ({
   loading: false,
   refreshingModelCache: false,
   providers: [] as unknown[],
   fetchProviders: vi.fn(async () => {}),
   refreshModelCache: vi.fn(async () => {}),
 }))
+const modelsStore = reactive(modelsStoreState)
 const appStore = vi.hoisted(() => ({
   reloadModels: vi.fn(async () => {}),
 }))
@@ -39,7 +41,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('naive-ui', async () => {
-  const { defineComponent, h } = await import('vue')
+  const { defineComponent, h, ref } = await import('vue')
   return {
     NButton: defineComponent({
       name: 'NButton',
@@ -49,6 +51,10 @@ vi.mock('naive-ui', async () => {
       },
     }),
     NSelect: defineComponent({ name: 'NSelect', props: ['value', 'options'], emits: ['update:value'], setup: () => () => h('select') }),
+    NModal: defineComponent({
+      name: 'NModal', props: ['show', 'title', 'negativeText'], emits: ['update:show', 'negative-click'],
+      setup: (props, { slots, emit }) => () => props.show ? h('div', { role: 'dialog' }, [slots.default?.(), slots.footer?.(), props.negativeText && h('button', { onClick: () => emit('negative-click') }, props.negativeText)]) : null,
+    }),
     NSpin: defineComponent({
       name: 'NSpin',
       setup(_props, { slots }) {
@@ -71,6 +77,7 @@ vi.mock('naive-ui', async () => {
       },
     }),
     useMessage: () => ({ success: vi.fn(), error: vi.fn() }),
+    useDialogReactiveList: () => ref([]),
   }
 })
 
@@ -82,10 +89,15 @@ vi.mock('@/api/hermes/copilot-auth', () => ({ checkCopilotToken: vi.fn(async () 
 vi.mock('@/api/hermes/profiles', () => ({ fetchProfiles: vi.fn(async () => [{ name: 'default' }, { name: 'work' }, { name: 'research' }]) }))
 vi.mock('@/api/client', () => ({ isStoredSuperAdmin: () => false }))
 
+vi.mock('@/components/common/PageLoading.vue', () => ({ default: { template: '<div><slot /></div>' } }))
+
 vi.mock('@/components/hermes/models/AuxiliaryModelsPanel.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/models/CombinationModelsPanel.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/hermes/models/JevSettingsPanel.vue', () => ({ default: { props: ['profile'], template: '<div class="jev-settings-stub" :data-profile="profile" />' } }))
 vi.mock('@/components/hermes/models/ProvidersPanel.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/hermes/models/ProviderVisibilityModal.vue', () => ({
+  default: { name: 'ProviderVisibilityModal', props: ['provider'], emits: ['close'], template: '<div class="visibility-editor-stub" />' },
+}))
 vi.mock('@/components/hermes/models/ProviderFormModal.vue', () => ({
   default: {
     name: 'ProviderFormModal',
@@ -119,6 +131,8 @@ describe('Models voice settings tabs', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     routeState.query = {}
+    modelsStore.providers = []
+    modelsStore.fetchProviders.mockImplementation(async () => {})
   })
 
   it('opens STT/TTS from the route query and keeps tab changes linkable', async () => {
@@ -181,5 +195,64 @@ describe('Models voice settings tabs', () => {
       name: 'hermes.models',
       query: { tab: 'tts', profile: 'work' },
     })
+  })
+
+  it('warns only for more than 100 visible models and opens the selected provider editor', async () => {
+    const group = (provider: string, visible: number, total = visible) => ({
+      provider, label: provider, models: Array.from({ length: visible }, (_, i) => `model-${i}`),
+      available_models: Array.from({ length: total }, (_, i) => `model-${i}`),
+    })
+    modelsStore.fetchProviders.mockImplementation(async () => {
+      modelsStore.providers = [group('large', 101), group('boundary', 100), group('filtered', 2, 3000)]
+    })
+    const wrapper = mount(ModelsView)
+    await flushPromises()
+
+    const notice = wrapper.get('[data-testid="large-model-catalog-notice"]')
+    expect(notice.findAll('li')).toHaveLength(1)
+    await notice.get('button').trigger('click')
+    expect(wrapper.find('[data-testid="large-model-catalog-notice"]').exists()).toBe(false)
+    expect(wrapper.getComponent({ name: 'ProviderVisibilityModal' }).props('provider').provider).toBe('large')
+  })
+
+  it('does not warn from a stale catalog when provider loading fails', async () => {
+    modelsStore.providers = [{ provider: 'stale', models: Array.from({ length: 101 }, (_, i) => `model-${i}`) }]
+    const wrapper = mount(ModelsView)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="large-model-catalog-notice"]').exists()).toBe(false)
+  })
+
+  it('defers the notice until the add-provider form is closed', async () => {
+    routeState.query = { addProvider: '1' }
+    modelsStore.fetchProviders.mockImplementation(async () => {
+      modelsStore.providers = [{ provider: 'large', label: 'large', models: Array.from({ length: 101 }, (_, i) => `model-${i}`) }]
+    })
+    const wrapper = mount(ModelsView)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="large-model-catalog-notice"]').exists()).toBe(false)
+    wrapper.getComponent({ name: 'ProviderFormModal' }).vm.$emit('close')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="large-model-catalog-notice"]').exists()).toBe(true)
+  })
+
+  it('rechecks a changed catalog after an add-provider save without opening over the form', async () => {
+    routeState.query = { addProvider: '1' }
+    modelsStore.fetchProviders.mockImplementation(async () => { modelsStore.providers = [] })
+    const wrapper = mount(ModelsView)
+    await flushPromises()
+    modelsStore.providers = [{ provider: 'added', label: 'Added', models: Array(101).fill('model') }]
+    await flushPromises()
+    expect(wrapper.find('[data-testid="large-model-catalog-notice"]').exists()).toBe(false)
+    wrapper.getComponent({ name: 'ProviderFormModal' }).vm.$emit('saved', true)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="large-model-catalog-notice"]').exists()).toBe(true)
+  })
+
+  it('recovers detection after a failed initial catalog load is refreshed successfully', async () => {
+    const wrapper = mount(ModelsView)
+    await flushPromises()
+    modelsStore.providers = [{ provider: 'recovered', label: 'Recovered', models: Array(101).fill('model') }]
+    await flushPromises()
+    expect(wrapper.find('[data-testid="large-model-catalog-notice"]').exists()).toBe(true)
   })
 })

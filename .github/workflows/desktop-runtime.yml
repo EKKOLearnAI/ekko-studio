@@ -18,6 +18,14 @@ on:
         description: "Pinned full Hermes Agent commit (required with a version override)"
         required: false
         type: string
+      python_version:
+        description: "Bundled Python version override (e.g. 3.14.7 for Hermes 0.22.2)"
+        required: false
+        type: string
+      python_build_tag:
+        description: "python-build-standalone release tag for the Python override (e.g. 20260901)"
+        required: false
+        type: string
       rebuild:
         description: "Rebuild and replace existing runtime assets after validation"
         required: false
@@ -129,6 +137,8 @@ jobs:
           HERMES_SOURCE_REF: ${{ github.event.inputs.hermes_source_ref }}
           HERMES_SOURCE_COMMIT: ${{ github.event.inputs.hermes_source_commit }}
           HERMES_SKIP_BROWSER_RUNTIME: ${{ matrix.skip_browser_runtime || 'false' }}
+          PBS_PY: ${{ github.event.inputs.python_version }}
+          PBS_TAG: ${{ github.event.inputs.python_build_tag }}
         run: npm --prefix packages/desktop run prepare:runtime
 
       - name: Package runtime

@@ -11,11 +11,11 @@
     display: flex;
     flex-direction: column;
     margin: 0;
-    padding: 8px 12px 20px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
     overflow: hidden;
     flex-shrink: 0;
-    border-inline-end: 1px solid $border-color;
-    background-color: $bg-sidebar-surface;
+    border-inline-end: var(--border-width, 1px) solid $border-color;
+    background-color: var(--theme-sidebar-bg, $bg-sidebar-surface);
     transition: width $transition-normal, min-width $transition-normal, padding $transition-normal;
   }
 
@@ -23,27 +23,27 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding-top: 8px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding-top: calc(8px * var(--spacing-scale, 1));
     overflow-y: auto;
     min-height: 0;
     scrollbar-width: none;
   }
 
   .#{$agent}-config-nav::-webkit-scrollbar { display: none; }
-  .#{$agent}-config-nav-item { display: flex; align-items: center; gap: 10px; padding: 12px; border: none; background: none; appearance: none; text-decoration: none; color: $text-secondary; font-size: 14px; border-radius: $radius-sm; cursor: pointer; transition: all $transition-fast; width: 100%; text-align: start; }
+  .#{$agent}-config-nav-item { display: flex; align-items: center; gap: calc(10px * var(--spacing-scale, 1)); padding: 12px; border: none; background: none; appearance: none; text-decoration: none; color: $text-secondary; font-size: calc(var(--font-size-base, 14px) * 14 / 14); border-radius: $radius-sm; cursor: pointer; transition: all $transition-fast; width: 100%; text-align: start; }
   .#{$agent}-config-nav-item:hover { background-color: rgba(var(--accent-primary-rgb), 0.06); color: $text-primary; }
   .#{$agent}-config-nav-item.active { background-color: rgba(var(--accent-primary-rgb), 0.12); color: $accent-primary; }
   .#{$agent}-config-nav-item svg { flex: 0 0 auto; }
-  .#{$agent}-config-footer { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid $border-color; }
-  .#{$agent}-config-return { flex: 1 1 auto; min-width: 0; padding: 8px 10px; color: $text-muted; font-size: 13px; }
+  .#{$agent}-config-footer { flex: 0 0 auto; display: flex; align-items: center; gap: calc(6px * var(--spacing-scale, 1)); margin-top: 8px; padding-top: calc(8px * var(--spacing-scale, 1)); border-top: var(--border-width, 1px) solid $border-color; }
+  .#{$agent}-config-return { flex: 1 1 auto; min-width: 0; padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)); color: $text-muted; font-size: calc(var(--font-size-base, 14px) * 13 / 14); }
   .#{$agent}-config-collapse { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: none; background: none; appearance: none; text-decoration: none; color: $text-muted; border-radius: $radius-sm; cursor: pointer; flex-shrink: 0; margin: 0; transition: all $transition-fast; }
   .#{$agent}-config-collapse:hover { color: $text-primary; background-color: rgba(var(--accent-primary-rgb), 0.08); }
-  .#{$agent}-config-sidebar.collapsed { width: $sidebar-collapsed-width; min-width: $sidebar-collapsed-width; padding: 8px 8px 12px; overflow: hidden; }
+  .#{$agent}-config-sidebar.collapsed { width: $sidebar-collapsed-width; min-width: $sidebar-collapsed-width; padding: calc(8px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)); overflow: hidden; }
   .#{$agent}-config-sidebar.collapsed .#{$agent}-config-nav-item { justify-content: center; gap: 0; padding: 10px 4px; }
   .#{$agent}-config-sidebar.collapsed .#{$agent}-config-nav-item span { display: none; }
   .#{$agent}-config-sidebar.collapsed .#{$agent}-config-nav-item svg { flex-shrink: 0; }
-  .#{$agent}-config-sidebar.collapsed .#{$agent}-config-footer { flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; }
+  .#{$agent}-config-sidebar.collapsed .#{$agent}-config-footer { flex-direction: column; gap: calc(6px * var(--spacing-scale, 1)); margin-top: 8px; padding-top: calc(8px * var(--spacing-scale, 1)); }
   .#{$agent}-config-sidebar.collapsed .#{$agent}-config-return { width: 100%; flex: 0 0 auto; }
   .#{$agent}-config-backdrop { display: none; }
 

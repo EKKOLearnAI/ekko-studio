@@ -20,6 +20,7 @@ vi.mock('../../packages/server/src/modules/studio/infrastructure/database/index'
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({
+  getWebUiHome: () => state.appHome,
   config: {
     appHome: state.appHome,
   },
@@ -67,6 +68,65 @@ describe('workspace diff tracker', () => {
 
     expect(source.match(/execFileSync\('git'/g)).toHaveLength(4)
     expect(source.match(/windowsHide: true/g)).toHaveLength(4)
+  })
+
+  it.each(['writer', 'observer'])('does not attribute ambiguous shared edits when %s finishes first', async first => {
+    const { startWorkspaceRunCheckpoint: start, completeWorkspaceRunCheckpoint: finish } =
+      await import('../../packages/server/src/modules/studio/services/chat-run/workspace-diff-tracker')
+    for (const sessionId of ['writer', 'observer']) start({ sessionId, runId: sessionId, workspace: repo })
+    writeFileSync(join(repo, 'written-by-other.txt'), 'Only the writer touched this\n')
+    const second = first === 'writer' ? 'observer' : 'writer'
+    expect(finish({ sessionId: first, runId: first, workspace: repo })).toBeNull()
+    expect(finish({ sessionId: second, runId: second, workspace: repo })).toBeNull()
+    start({ sessionId: 'later', runId: 'later', workspace: repo })
+    writeFileSync(join(repo, 'later.txt'), 'A nonoverlapping change\n')
+    expect(finish({ sessionId: 'later', runId: 'later', workspace: repo })?.files.map(file => file.path)).toEqual(['later.txt'])
+  })
+
+  it('does not suppress independent workspaces with matching relative filenames', async () => {
+    const other = join(root, 'other')
+    mkdirSync(other)
+    const { startWorkspaceRunCheckpoint: start, completeWorkspaceRunCheckpoint: finish } =
+      await import('../../packages/server/src/modules/studio/services/chat-run/workspace-diff-tracker')
+    start({ sessionId: 'one', runId: 'one', workspace: repo })
+    start({ sessionId: 'two', runId: 'two', workspace: other })
+    for (const dir of [repo, other]) writeFileSync(join(dir, 'new.txt'), 'new\n')
+    expect(finish({ sessionId: 'one', runId: 'one', workspace: repo })?.files.map(file => file.path)).toContain('new.txt')
+    expect(finish({ sessionId: 'two', runId: 'two', workspace: other })?.files.map(file => file.path)).toContain('new.txt')
+  })
+
+  it.each(['parent', 'child'])('suppresses nested filesystem workspaces when %s starts first', async first => {
+    const parent = join(root, 'plain')
+    const child = join(parent, 'project')
+    mkdirSync(child, { recursive: true })
+    writeFileSync(join(child, 'note.txt'), 'before\n')
+    const { startWorkspaceRunCheckpoint: start, completeWorkspaceRunCheckpoint: finish } =
+      await import('../../packages/server/src/modules/studio/services/chat-run/workspace-diff-tracker')
+    const workspaces = { parent, child }
+    const second = first === 'parent' ? 'child' : 'parent'
+    for (const sessionId of [first, second] as Array<keyof typeof workspaces>) {
+      start({ sessionId, runId: sessionId, workspace: workspaces[sessionId] })
+    }
+    writeFileSync(join(child, 'note.txt'), 'child session edit\n')
+    expect(finish({ sessionId: 'parent', runId: 'parent', workspace: parent })).toBeNull()
+    expect(finish({ sessionId: 'child', runId: 'child', workspace: child })).toBeNull()
+    const { listWorkspaceRunChangesForSession } = await import('../../packages/server/src/modules/studio/repositories/workspace-run-changes-store')
+    expect(listWorkspaceRunChangesForSession('parent')).toEqual([])
+    expect(listWorkspaceRunChangesForSession('child')).toEqual([])
+  })
+
+  it('keeps sibling directories with a shared name prefix independent', async () => {
+    const dirs = [join(root, 'project'), join(root, 'project-copy')]
+    const { startWorkspaceRunCheckpoint: start, completeWorkspaceRunCheckpoint: finish } =
+      await import('../../packages/server/src/modules/studio/services/chat-run/workspace-diff-tracker')
+    for (const workspace of dirs) {
+      mkdirSync(workspace)
+      start({ sessionId: workspace, runId: workspace, workspace })
+    }
+    for (const workspace of dirs) {
+      writeFileSync(join(workspace, 'note.txt'), 'new\n')
+      expect(finish({ sessionId: workspace, runId: workspace, workspace })?.files.map(file => file.path)).toEqual(['note.txt'])
+    }
   })
 
   it('records only files changed during the run when the repo was already dirty', async () => {

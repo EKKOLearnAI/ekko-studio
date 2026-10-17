@@ -114,10 +114,10 @@ async function handleRefresh() {
 @use '@/styles/variables' as *;
 
 .file-toolbar {
-  padding: 12px 16px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
 
   @media (max-width: $breakpoint-mobile) {
-    padding: 8px 4px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1));
   }
 }
 

@@ -14,7 +14,7 @@ import {
   type EkkoModelProviderPreset,
 } from './model/provider-presets'
 
-export const EKKO_CONFIG_SCHEMA_VERSION = 14
+export const EKKO_CONFIG_SCHEMA_VERSION = 15
 export const EKKO_CONFIG_DIRECTORY_NAME = 'config'
 export const EKKO_CONFIG_FILE_NAME = 'config.json'
 
@@ -120,11 +120,17 @@ export interface EkkoCodeExecConfig {
   maxSourceBytes: number
 }
 
+export interface EkkoComputerUseConfig {
+  enabled: boolean
+  timeoutMs: number
+}
+
 export interface EkkoToolsConfig {
   enabled: boolean
   executionTimeoutMs: number
   approvals: EkkoToolApprovalConfig
   codeExec: EkkoCodeExecConfig
+  computerUse: EkkoComputerUseConfig
 }
 
 export interface EkkoMcpServerConfig {
@@ -217,9 +223,10 @@ export type EkkoConfigPatch = {
     providers?: Record<string, EkkoModelProviderSettings>
     authorizations?: Record<string, EkkoModelAuthorizationSettings>
   }
-  tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec'>> & {
+  tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec' | 'computerUse'>> & {
     approvals?: Partial<EkkoToolApprovalConfig>
     codeExec?: Partial<EkkoCodeExecConfig>
+    computerUse?: Partial<EkkoComputerUseConfig>
   }
   mcp?: Partial<Omit<EkkoMcpConfig, 'profiles'>> & {
     profiles?: Record<string, EkkoMcpProfileConfig>
@@ -262,6 +269,7 @@ export const DEFAULT_EKKO_CONFIG: EkkoConfig = {
   tools: {
     enabled: true,
     executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS,
+    computerUse: { enabled: true, timeoutMs: 30_000 },
     approvals: {
       enabled: true,
       timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS,

@@ -55,6 +55,7 @@ export function submittedCodingAgentSelection<Agent extends string>(input: {
   provider: string
   model: string
   usesGlobal: boolean
+  nativeModel?: string
 }): {
   agent: Agent
   agentMode: 'scoped' | 'global'
@@ -67,7 +68,7 @@ export function submittedCodingAgentSelection<Agent extends string>(input: {
     agentMode: input.usesGlobal ? 'global' : 'scoped',
     priorAgentMode: input.priorAgentMode || '',
     provider: input.usesGlobal ? '' : input.provider,
-    model: input.usesGlobal ? '' : input.model,
+    model: input.usesGlobal ? input.nativeModel || '' : input.model,
   }
 }
 
@@ -88,7 +89,7 @@ export function workflowSavedAgentFields(data: {
     agent: data.agent,
     agentMode: isGlobalOnlyCodingAgent(data.agent) ? 'global' : data.agentMode,
     priorAgentMode: storedPriorAgentMode(data.priorAgentMode),
-    provider: data.provider,
+    provider: data.agentMode === 'global' || isGlobalOnlyCodingAgent(data.agent) ? '' : data.provider,
     model: data.model,
   }
 }

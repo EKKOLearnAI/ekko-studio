@@ -19,6 +19,8 @@ export function startAcpChatTurn(definition: { name: string; acpArgs: readonly s
   void connection.prompt({ cwd: run.launch.workspaceDir, text, images,
     nativeSessionId: run.nativeResumeReady ? run.launch.agentNativeSessionId : undefined,
     mcpServers: acpMcpServers(run.launch.nativeMcpServers || {}),
+    model: run.launch.mode === 'global' ? run.launch.model : undefined,
+    reasoningEffort: run.launch.mode === 'global' ? run.launch.reasoningEffort : undefined,
   }).then(reason => finish(['end_turn', 'max_tokens'].includes(reason) ? undefined : `${definition.name} stopped: ${reason}`))
     .catch(error => { finish(host.processError(error)); host.terminate(child) })
     .finally(() => {

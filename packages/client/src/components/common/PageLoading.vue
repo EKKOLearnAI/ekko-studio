@@ -118,6 +118,6 @@ onBeforeUnmount(() => {
   z-index: 30;
   display: grid;
   place-items: center;
-  background: $bg-main-surface;
+  background: var(--theme-content-bg, $bg-main-surface);
 }
 </style>

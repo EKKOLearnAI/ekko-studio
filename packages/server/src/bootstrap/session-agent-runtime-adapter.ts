@@ -14,8 +14,16 @@ import {
 import { deleteSessionForProfile, getSession } from '../modules/hermes/services/runtime/cli'
 import { getModelContextLength } from '../modules/hermes/services/models/context'
 import { configureSessionAgentRuntime } from '../modules/studio/public/session-agent-runtime'
+import { getCodingAgentModels } from '../modules/coding-agents/services'
+import { validateNativeModelEffort } from '../modules/coding-agents/services/models/variants'
 
 configureSessionAgentRuntime({
+  validateCodingAgentModelEffort: async (agent, currentModel, nextModel, effort) => {
+    const result = await getCodingAgentModels({ agent })
+    const catalog = result.agents.find(entry => entry.agentId === agent)
+    if (catalog?.status !== 'ready') throw Object.assign(new Error('Native model catalog unavailable'), { status: 503 })
+    validateNativeModelEffort(catalog.models, currentModel, nextModel, effort)
+  },
   getAvailableModelGroups: getAvailableModelGroupsForProfile,
   deleteHermesSessionForProfile: deleteSessionForProfile,
   getHermesCliSession: getSession,

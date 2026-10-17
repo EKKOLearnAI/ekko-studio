@@ -82,14 +82,14 @@ function updateTab(value: string | number) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: $bg-main-surface;
+  background: var(--theme-content-bg, $bg-main-surface);
 }
 
 .connections-header-left {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .connections-tabs {
@@ -98,9 +98,9 @@ function updateTab(value: string | number) {
 
   :deep(.n-tabs-nav) {
     flex: 0 0 auto;
-    padding: 0 20px;
-    border-bottom: 1px solid var(--n-tab-border-color);
-    background: $bg-main-surface;
+    padding: 0 calc(20px * var(--spacing-scale, 1));
+    border-bottom: var(--border-width, 1px) solid var(--n-tab-border-color);
+    background: var(--theme-content-bg, $bg-main-surface);
   }
 
   :deep(.n-tabs-nav-scroll-content) {
@@ -117,7 +117,7 @@ function updateTab(value: string | number) {
 
 @media (max-width: $breakpoint-mobile) {
   .connections-tabs :deep(.n-tabs-nav) {
-    padding: 0 12px;
+    padding: 0 calc(12px * var(--spacing-scale, 1));
   }
 }
 </style>

@@ -1,0 +1,21 @@
+#!/bin/bash
+set -e
+app_root="/usr/local/@APP_ID@"
+
+case "$1" in
+    configure)
+        # TOS creates the dedicated user declared by config.ini.
+        id -u "@USER@" >/dev/null
+        install -d -m 0700 -o "@USER@" -g "@USER@" \
+            "$app_root/data" "$app_root/logs" \
+            "$app_root/data/home" "$app_root/data/studio" \
+            "$app_root/data/tmp" "$app_root/data/cache" \
+            "$app_root/data/workspaces" "$app_root/data/npm"
+        rm -rf "$app_root/webui"
+        tar -xjf "$app_root/webui.bz2" -C "$app_root"
+        systemctl daemon-reload
+        systemctl enable "$app_root/init.d/@SERVICE@.service"
+        systemctl restart "@SERVICE@.service"
+        ;;
+esac
+exit 0

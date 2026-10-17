@@ -175,33 +175,33 @@ startLogin()
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px 0;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
 }
 
 .codex-login__state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   min-height: 120px;
   justify-content: center;
   width: 100%;
 }
 
 .codex-login__hint {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   color: var(--n-text-color, inherit);
   text-align: center;
-  line-height: 1.6;
+  line-height: var(--line-height, 1.6);
 }
 
 .codex-login__code {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 20px;
-  border: 1px solid var(--n-border-color, #e0e0e6);
-  border-radius: 8px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--n-border-color, #e0e0e6);
+  border-radius: var(--radius-component, 8px);
   cursor: pointer;
   transition: border-color 0.2s;
   background: var(--n-color, #fafafa);
@@ -212,7 +212,7 @@ startLogin()
 }
 
 .codex-login__code-text {
-  font-size: 28px;
+  font-size: calc(var(--font-size-base, 14px) * 28 / 14);
   font-weight: 700;
   font-family: monospace;
   letter-spacing: 4px;
@@ -230,12 +230,12 @@ startLogin()
 .codex-login__error {
   color: #d03050;
   text-align: center;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>

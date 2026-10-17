@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync, readFileSync } from 'node:fs'
 
 const order = vi.hoisted(() => [] as string[])
 
@@ -843,20 +844,20 @@ describe('group chat agent workspace bridge runs', () => {
     }))
   })
 
-  it('runs a global Codex group Agent without scoped provider, model, protocol, or reasoning overrides', async () => {
+  it.each([['codex', 'native-model', 'high'], ['cursor', 'model-high', 'high'], ['zcode', 'glm-5-turbo', 'enabled'], ['codex', '', '']])('runs a global %s group Agent with its native model %s and effort %s', async (agent, model, effort) => {
     const { AgentClients } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-clients')
     const runAndWait = vi.fn(async () => ({ ok: true, output: 'done' }))
     const clients = new AgentClients()
     clients.setChatRunService({ runAndWait, abortSession: vi.fn(async () => {}) })
     const client = await clients.createAgent({
       agentId: 'agent-global-codex',
-      agent: 'codex',
+      agent,
       agentMode: 'global',
       profile: 'default',
       provider: 'must-not-leak',
-      model: 'must-not-leak',
+      model,
       apiMode: 'chat_completions',
-      reasoningEffort: 'high',
+      reasoningEffort: effort,
       name: 'Global Codex',
       description: 'Uses the user CLI configuration',
       invited: 0,
@@ -878,7 +879,7 @@ describe('group chat agent workspace bridge runs', () => {
 
     const runInput = runAndWait.mock.calls[0][0]
     expect(runInput).toMatchObject({
-      coding_agent_id: 'codex',
+      coding_agent_id: agent,
       mode: 'global',
       profile: 'default',
       group_room_id: 'room-global',
@@ -887,9 +888,11 @@ describe('group chat agent workspace bridge runs', () => {
     expect(runInput.instructions).toContain('You are "Global Codex", an AI assistant in the group chat room "Global Room"')
     expect(runInput.group_system_prompt).toBe(runInput.instructions)
     expect(runInput).not.toHaveProperty('provider')
-    expect(runInput).not.toHaveProperty('model')
+    if (model) expect(runInput.model).toBe(model)
+    else expect(runInput).not.toHaveProperty('model')
     expect(runInput).not.toHaveProperty('apiMode')
-    expect(runInput).not.toHaveProperty('reasoning_effort')
+    if (effort) expect(runInput.reasoning_effort).toBe(effort)
+    else expect(runInput).not.toHaveProperty('reasoning_effort')
   })
 
   it('keeps Pi group turns temporary while reinjecting the room history', async () => {
@@ -1563,10 +1566,13 @@ describe('group chat agent workspace bridge runs', () => {
 
   it.each(['ended', 'interrupted', 'failed'] as const)('gives Hermes a plan-only context and persists its %s state', async terminal => {
     const { TaskPlanRuns } = await import('../../packages/server/src/modules/studio/services/task-plan-runs')
+    const { runMcpContextTokenPath, runMcpCredentials } = await import('../../packages/server/src/modules/studio/services/auth/run-mcp-credentials')
     const fallbackPublish = vi.fn()
     const plans = new TaskPlanRuns(vi.fn(), fallbackPublish)
     const client = await createClient('')
     let contextId = ''
+    let credentialFile = ''
+    let credentialToken = ''
     client.setChatRunService({
       runAndWait: vi.fn(), abortSession: vi.fn(),
       beginGroupTaskPlanRun(sessionId: string, profile: string, runId: string, isCurrent: () => boolean, publish: any) {
@@ -1574,7 +1580,17 @@ describe('group chat agent workspace bridge runs', () => {
         return { contextId, finish: (state: any) => plans.finish(contextId, state) }
       },
     })
-    bridgeMock.chat.mockImplementation(async (sessionId: string) => {
+    bridgeMock.chat.mockImplementation(async (sessionId: string, ...args: any[]) => {
+      credentialFile = runMcpContextTokenPath('default', contextId)
+      const credential = JSON.parse(readFileSync(credentialFile, 'utf8'))
+      credentialToken = credential.token
+      const binding = runMcpCredentials.authenticate(credentialToken)
+      expect(binding).toMatchObject({ sessionId, contextId, profile: 'default' })
+      expect(binding).not.toHaveProperty('userId')
+      expect(JSON.stringify(args)).not.toContain(credentialFile)
+      expect(JSON.stringify(args)).not.toContain(credentialToken)
+      expect(args[4]).not.toHaveProperty('worker_key')
+      expect(args[4]).not.toHaveProperty('studio_mcp_token_file')
       plans.update(contextId, 'default', { plan: [{ id: 'a', step: 'Inspect', status: 'in_progress' }] })
       if (terminal === 'failed') throw new Error('test bridge failure')
       if (terminal === 'interrupted') await client.interrupt('room-1')
@@ -1591,6 +1607,33 @@ describe('group chat agent workspace bridge runs', () => {
     expect(JSON.parse(cards[1].content)).toMatchObject({ revision: 2, execution_state: terminal, plan: [{ status: 'pending' }] })
     expect(fallbackPublish).not.toHaveBeenCalled()
     expect(() => plans.update(contextId, 'default', { plan: [] })).toThrow('expired')
+    expect(existsSync(credentialFile)).toBe(false)
+    expect(runMcpCredentials.authenticate(credentialToken)).toBeUndefined()
+  })
+
+  it('cleans up the group plan credential if interrupted before bridge launch', async () => {
+    const { TaskPlanRuns } = await import('../../packages/server/src/modules/studio/services/task-plan-runs')
+    const { runMcpCredentials } = await import('../../packages/server/src/modules/studio/services/auth/run-mcp-credentials')
+    const plans = new TaskPlanRuns(vi.fn(), vi.fn())
+    const client = await createClient()
+    client.setChatRunService({ runAndWait: vi.fn(), abortSession: vi.fn(),
+      beginGroupTaskPlanRun(sessionId: string, profile: string, runId: string, isCurrent: () => boolean, publish: any) {
+        const contextId = plans.begin(sessionId, profile, () => ({ isWorking: isCurrent(), activeRunMarker: runId }), publish)
+        return { contextId, finish: (state: any) => plans.finish(contextId, state) }
+      },
+    })
+    let file = ''
+    const issue = runMcpCredentials.issue.bind(runMcpCredentials)
+    const spy = vi.spyOn(runMcpCredentials, 'issue').mockImplementation(async (...args) => {
+      file = await issue(...args)
+      await client.interrupt('room-1')
+      return file
+    })
+    try {
+      await client.replyToMention('room-1', { content: '@Worker inspect', senderName: 'Alice', senderId: 'user-1', timestamp: 1 })
+      expect(bridgeMock.chat).not.toHaveBeenCalled()
+      expect(existsSync(file)).toBe(false)
+    } finally { spy.mockRestore() }
   })
 
   it('does not attach MCP plans or usage guidance to a group bridge run with MCPs disabled', async () => {

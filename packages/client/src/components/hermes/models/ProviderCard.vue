@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { NButton, NCheckbox, NCheckboxGroup, NModal, NInput, NSelect, useMessage, useDialog } from 'naive-ui'
+import { NButton, NModal, NInput, NSelect, useMessage, useDialog } from 'naive-ui'
 import type { AvailableModelGroup } from '@/api/hermes/system'
 import { useModelsStore } from '@/stores/hermes/models'
 import { useAppStore } from '@/stores/hermes/app'
@@ -8,7 +8,9 @@ import { useChatStore } from '@/stores/hermes/chat'
 import { checkCopilotToken, disableCopilot } from '@/api/hermes/copilot-auth'
 import { getStoredUserRole } from '@/api/client'
 import ProviderEditorModal from './ProviderEditorModal.vue'
+import ProviderVisibilityModal from './ProviderVisibilityModal.vue'
 import { useI18n } from 'vue-i18n'
+import { useModelCatalogNotice } from '@/composables/useModelCatalogNotice'
 
 const props = defineProps<{ provider: AvailableModelGroup }>()
 
@@ -62,16 +64,13 @@ const aliasModel = ref('')
 const aliasInput = ref('')
 
 const showVisibilityModal = ref(false)
-const visibilitySaving = ref(false)
-const selectedVisibleModels = ref<string[]>([])
 const defaultingProvider = ref(false)
 const defaultingModel = ref<string | null>(null)
+const catalogChanged = useModelCatalogNotice(() => showEditorModal.value || showAliasListModal.value || showAliasModal.value || showVisibilityModal.value || deleting.value || refreshingModels.value || restoringModels.value || defaultingProvider.value || defaultingModel.value !== null)
 
-const sourceProvider = computed(() => modelsStore.allProviders.find(g => g.provider === props.provider.provider))
-const allModels = computed(() => props.provider.available_models?.length ? props.provider.available_models : (sourceProvider.value?.models?.length ? sourceProvider.value.models : props.provider.models))
 const visibilityRule = computed(() => appStore.getProviderVisibility(props.provider.provider))
 const isFiltered = computed(() => visibilityRule.value.mode === 'include')
-const visibleCountLabel = computed(() => `${props.provider.models.length}/${allModels.value.length}`)
+const visibleCountLabel = computed(() => `${props.provider.models.length}/${props.provider.model_count ?? props.provider.available_models?.length ?? props.provider.models.length}`)
 const isDefaultProvider = computed(() => modelsStore.defaultProvider === props.provider.provider)
 const defaultModelOptions = computed(() => props.provider.models.map(model => ({
   label: modelDisplayName(model),
@@ -140,6 +139,7 @@ async function saveAlias() {
   if (!aliasModel.value || !aliasProvider.value) return
   try {
     await appStore.setModelAlias(aliasModel.value, aliasProvider.value, aliasInput.value)
+    catalogChanged()
     showAliasModal.value = false
   } catch (e: any) {
     message.error(e.message || t('models.aliasSaveFailed'))
@@ -152,37 +152,7 @@ async function clearAlias() {
 }
 
 function openVisibilityModal() {
-  const rule = appStore.getProviderVisibility(props.provider.provider)
-  selectedVisibleModels.value = rule.mode === 'include' ? allModels.value.filter(m => rule.models.includes(m)) : [...allModels.value]
   showVisibilityModal.value = true
-}
-
-async function handleVisibilitySave() {
-  if (selectedVisibleModels.value.length === 0) {
-    message.error(t('models.visibilitySelectOne'))
-    return
-  }
-  visibilitySaving.value = true
-  try {
-    const selected = selectedVisibleModels.value.filter(m => allModels.value.includes(m))
-    const mode = selected.length === allModels.value.length ? 'all' : 'include'
-    await appStore.setModelVisibility(props.provider.provider, { mode, models: selected })
-    await modelsStore.fetchProviders()
-    showVisibilityModal.value = false
-    message.success(t('models.visibilitySaved'))
-  } catch (e: any) {
-    message.error(e.message || t('models.visibilitySaveFailed'))
-  } finally {
-    visibilitySaving.value = false
-  }
-}
-
-function resetVisibility() {
-  selectedVisibleModels.value = [...allModels.value]
-}
-
-function clearVisibility() {
-  selectedVisibleModels.value = []
 }
 
 async function handleDelete() {
@@ -443,46 +413,11 @@ async function handleRestoreModels() {
       </template>
     </NModal>
 
-    <NModal
-      v-model:show="showVisibilityModal"
-      preset="card"
-      :title="t('models.manageVisibleModelsFor', { name: displayName })"
-      :style="{ width: 'min(560px, calc(100vw - 32px))' }"
-      :mask-closable="!visibilitySaving"
-    >
-      <p class="visibility-hint">{{ t('models.visibilityHint') }}</p>
-      <div class="visibility-count">
-        {{ selectedVisibleModels.length }}/{{ allModels.length }} {{ t('models.count') }}
-      </div>
-      <div class="visibility-list">
-        <NCheckboxGroup v-model:value="selectedVisibleModels">
-          <NCheckbox
-            v-for="model in allModels"
-            :key="model"
-            :value="model"
-            class="visibility-model"
-          >
-            <code>{{ modelDisplayName(model) }}</code>
-            <code v-if="modelAlias(model)" class="visibility-model-id">{{ model }}</code>
-          </NCheckbox>
-        </NCheckboxGroup>
-      </div>
-      <div class="visibility-actions">
-        <NButton size="small" quaternary :disabled="visibilitySaving" @click="resetVisibility">
-          {{ t('models.showAllModels') }}
-        </NButton>
-        <NButton size="small" quaternary :disabled="visibilitySaving" @click="clearVisibility">
-          {{ t('models.clearVisibleModels') }}
-        </NButton>
-        <div class="visibility-action-spacer" />
-        <NButton size="small" :disabled="visibilitySaving" @click="showVisibilityModal = false">
-          {{ t('common.cancel') }}
-        </NButton>
-        <NButton size="small" type="primary" :loading="visibilitySaving" @click="handleVisibilitySave">
-          {{ t('common.save') }}
-        </NButton>
-      </div>
-    </NModal>
+    <ProviderVisibilityModal
+      v-if="showVisibilityModal"
+      :provider="provider"
+      @close="showVisibilityModal = false"
+    />
   </div>
 </template>
 
@@ -490,10 +425,10 @@ async function handleRestoreModels() {
 @use '@/styles/variables' as *;
 
 .provider-card {
-  background-color: $bg-card;
-  border: 1px solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   transition: border-color $transition-fast;
 
   &:hover {
@@ -505,12 +440,12 @@ async function handleRestoreModels() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-bottom: 12px;
 }
 
 .provider-name {
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 600;
   color: $text-primary;
   overflow: hidden;
@@ -523,14 +458,14 @@ async function handleRestoreModels() {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .type-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  padding: calc(2px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 10px);
   font-weight: 500;
   white-space: nowrap;
 
@@ -553,7 +488,7 @@ async function handleRestoreModels() {
 .card-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   margin-bottom: 14px;
 }
 
@@ -564,18 +499,18 @@ async function handleRestoreModels() {
 }
 
 .info-label {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .info-value {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
 }
 
 .mono {
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .models-row {
@@ -584,13 +519,13 @@ async function handleRestoreModels() {
 
 .models-count {
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .models-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 6px;
+  gap: calc(4px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
   margin-top: 6px;
   height: 100px;
   overflow-y: auto;
@@ -600,7 +535,7 @@ async function handleRestoreModels() {
 .default-model-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   margin-top: 2px;
   min-width: 0;
 }
@@ -613,12 +548,12 @@ async function handleRestoreModels() {
 .model-tag {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: calc(5px * var(--spacing-scale, 1));
   min-height: 22px;
-  font-size: 10px;
-  font-family: $font-code;
-  padding: 2px 6px;
-  border-radius: 3px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
+  font-family: var(--font-code, $font-code);
+  padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 3px);
   background: rgba(var(--accent-primary-rgb), 0.08);
   color: $text-secondary;
   white-space: nowrap;
@@ -657,29 +592,29 @@ async function handleRestoreModels() {
 
 .model-tag-id {
   color: $text-muted;
-  font-size: 9px;
+  font-size: calc(var(--font-size-base, 14px) * 9 / 14);
 }
 
 .model-tag-default,
 .alias-row-default {
   color: $warning;
   font-family: $font-ui;
-  font-size: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   font-weight: 600;
 }
 
 .card-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  border-top: 1px solid $border-light;
-  padding-top: 10px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
+  padding-top: calc(10px * var(--spacing-scale, 1));
 }
 
 .alias-list-hint,
 .model-alias-hint {
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .alias-list-hint {
@@ -689,7 +624,7 @@ async function handleRestoreModels() {
 .alias-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   max-height: 45vh;
   overflow-y: auto;
 }
@@ -697,9 +632,9 @@ async function handleRestoreModels() {
 .alias-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px;
-  border: 1px solid $border-light;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-light;
   border-radius: $radius-sm;
 }
 
@@ -708,7 +643,7 @@ async function handleRestoreModels() {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 }
 
 .alias-row-name {
@@ -716,8 +651,8 @@ async function handleRestoreModels() {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: $text-primary;
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .alias-row-id,
@@ -726,8 +661,8 @@ async function handleRestoreModels() {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: $text-muted;
-  font-family: $font-code;
-  font-size: 11px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 .model-alias-canonical {
@@ -741,60 +676,11 @@ async function handleRestoreModels() {
 .model-alias-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .model-alias-spacer {
   flex: 1;
 }
 
-.visibility-hint {
-  margin: 0 0 10px;
-  color: $text-secondary;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.visibility-count {
-  color: $text-muted;
-  font-size: 12px;
-  margin-bottom: 10px;
-}
-
-.visibility-list {
-  max-height: 360px;
-  overflow-y: auto;
-  border: 1px solid $border-light;
-  border-radius: $radius-sm;
-  padding: 8px;
-}
-
-.visibility-model {
-  display: flex;
-  width: 100%;
-  padding: 4px 2px;
-
-  code {
-    font-family: $font-code;
-    font-size: 12px;
-    color: $text-secondary;
-  }
-}
-
-.visibility-model-id {
-  margin-inline-start: 6px;
-  color: $text-muted !important;
-  font-size: 11px !important;
-}
-
-.visibility-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.visibility-action-spacer {
-  flex: 1;
-}
 </style>

@@ -296,7 +296,7 @@ watch(
         </NDescriptionsItem>
       </NDescriptions>
 
-      <div class="log-output">
+      <div class="log-output" data-theme-surface="card">
         <div class="log-output-header">{{ t('githubPreview.logOutput') }}</div>
         <div class="log-box">
           <div class="log-title">{{ t('githubPreview.actionLog') }}</div>
@@ -321,20 +321,20 @@ watch(
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 }
 
 .section-description {
   margin: 0;
   color: $text-secondary;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, 1.5);
 }
 
 .control-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
@@ -352,22 +352,22 @@ watch(
 
 .log-output {
   width: 100%;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   overflow: hidden;
 }
 
 .log-output-header {
-  padding: 12px 14px;
-  border-bottom: 1px solid $border-color;
-  font-size: 14px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   color: $text-primary;
 }
 
 .log-box {
-  border-bottom: 1px solid $border-color;
+  border-bottom: var(--border-width, 1px) solid $border-color;
 
   &:last-child {
     border-bottom: none;
@@ -375,26 +375,26 @@ watch(
 }
 
 .log-title {
-  padding: 8px 14px;
-  font-size: 12px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
-  background: $bg-secondary;
+  background: rgba(var(--text-primary-rgb), 0.04);
 }
 
 pre {
   min-height: 180px;
   max-height: 320px;
   margin: 0;
-  padding: 12px 14px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.5);
 }
 
 code {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   word-break: break-all;
 }
 

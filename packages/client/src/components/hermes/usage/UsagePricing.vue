@@ -14,6 +14,7 @@ interface Rate {
   cacheRead?: number | null
   cacheWrite?: number | null
 }
+const props = defineProps<{ profile?: string }>()
 const { t } = useI18n()
 const profilesStore = useProfilesStore()
 const show = ref(false)
@@ -22,6 +23,8 @@ const error = ref(false)
 const catalogError = ref(false)
 const providers = ref<AvailableModelGroup[]>([])
 const rates = ref<Rate[]>([])
+const pricingProfile = ref('')
+const pricingPath = computed(() => `/api/studio/usage/pricing?${new URLSearchParams({ profile: pricingProfile.value })}`)
 const fields = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
 
 const providerOptions = computed(() => {
@@ -55,14 +58,15 @@ function selectProvider(rate: Rate, provider: string) {
 }
 
 async function open() {
+  pricingProfile.value = props.profile || profilesStore.activeProfileName || 'default'
   busy.value = true
   error.value = false
   catalogError.value = false
   providers.value = []
   try {
     const [pricing, catalog] = await Promise.allSettled([
-      request<{ rates: Rate[] }>('/api/studio/usage/pricing'),
-      fetchAvailableModelsForProfile(profilesStore.activeProfileName || 'default'),
+      request<{ rates: Rate[] }>(pricingPath.value),
+      fetchAvailableModelsForProfile(pricingProfile.value),
     ])
     if (pricing.status === 'rejected') throw pricing.reason
     rates.value = pricing.value.rates
@@ -81,7 +85,7 @@ async function save() {
   error.value = false
   busy.value = true
   try {
-    await request('/api/studio/usage/pricing', { method: 'PUT', body: JSON.stringify({ rates: rates.value }) })
+    await request(pricingPath.value, { method: 'PUT', body: JSON.stringify({ rates: rates.value }) })
     show.value = false
   } catch {
     error.value = true
@@ -90,9 +94,10 @@ async function save() {
 </script>
 
 <template>
-  <NButton size="small" quaternary :loading="busy && !show" @click="open">{{ t('usage.pricing.title') }}</NButton>
+  <NButton class="pricing-preset-button" size="small" quaternary :loading="busy && !show" @click="open">{{ t('usage.dashboard.pricingPreset') }}</NButton>
   <span v-if="error && !show" role="alert">{{ t('usage.pricing.error') }}</span>
   <NModal v-model:show="show" preset="card" :title="t('usage.pricing.title')" class="usage-pricing" style="width: min(920px, 94vw)" :mask-closable="!busy" :closable="!busy">
+    <p>{{ t('usage.dashboard.profile') }}: {{ pricingProfile }}</p>
     <p class="pricing-help">{{ t('usage.pricing.selectionHelp') }} {{ t('usage.pricing.help') }}</p>
     <NAlert v-if="catalogError" type="warning" class="pricing-error">{{ t('usage.pricing.catalogError') }}</NAlert>
     <NAlert v-if="error" type="error" class="pricing-error">{{ t('usage.pricing.error') }}</NAlert>
@@ -137,11 +142,11 @@ async function save() {
 </template>
 
 <style scoped lang="scss">
-.pricing-help { margin: 0 0 16px; line-height: 1.6; }
+.pricing-help { margin: 0 0 16px; line-height: var(--line-height, 1.6); }
 .pricing-error { margin-bottom: 12px; }
 .pricing-rows { max-height: 60vh; overflow: auto; }
-.pricing-row { display: grid; grid-template-columns: repeat(2, minmax(110px, 1.5fr)) repeat(4, minmax(85px, 1fr)) auto; align-items: end; gap: 10px; margin-bottom: 14px; }
-.pricing-row label { display: flex; flex-direction: column; min-width: 0; gap: 6px; font-size: 12px; }
+.pricing-row { display: grid; grid-template-columns: repeat(2, minmax(110px, 1.5fr)) repeat(4, minmax(85px, 1fr)) auto; align-items: end; gap: calc(10px * var(--spacing-scale, 1)); margin-bottom: 14px; }
+.pricing-row label { display: flex; flex-direction: column; min-width: 0; gap: calc(6px * var(--spacing-scale, 1)); font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
 .pricing-actions { display: flex; justify-content: space-between; }
 @media (max-width: 800px) { .pricing-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

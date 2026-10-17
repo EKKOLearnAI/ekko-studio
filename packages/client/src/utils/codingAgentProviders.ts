@@ -18,7 +18,8 @@ export function canScopedCodingAgentUseProvider(
   agentId: ChatCodingAgentId,
   provider?: string,
 ): boolean {
-  return agentId === 'ekko-agent' || !isAuthModelProvider(provider)
+  return String(provider || '').trim().toLowerCase() !== 'moa'
+    && (agentId === 'ekko-agent' || !isAuthModelProvider(provider))
 }
 
 export function usesServerManagedProviderAuth(

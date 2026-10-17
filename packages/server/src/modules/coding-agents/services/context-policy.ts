@@ -20,10 +20,27 @@ export async function codingAgentContextPolicy(input: {
   // threshold is shared with ordinary chat, not its compression.enabled switch.
   return {
     contextWindow,
-    outputLimit: Math.max(1, Math.min(Math.floor(capabilities.outputLimit || 8192), contextWindow - 1)),
+    outputLimit: clampOutputLimit(capabilities.outputLimit, contextWindow),
     threshold: compression.threshold,
     triggerTokens: Math.max(1, Math.floor(contextWindow * compression.threshold)),
   }
+}
+
+function clampOutputLimit(outputLimit: number | undefined, contextWindow: number): number {
+  return Math.max(1, Math.min(Math.floor(outputLimit || 8192), contextWindow - 1))
+}
+
+/** Synchronous model output budget for proxies that must fill a required max_tokens.
+ * Undefined without real model metadata: custom endpoints may reject a generic
+ * large default, so callers keep their own conservative fallback. */
+export function codingAgentOutputLimit(input: {
+  profile: string
+  provider: string
+  model: string
+}): number | undefined {
+  const capabilities = getModelRuntimeCapabilities(input)
+  if (!capabilities.outputLimitKnown) return undefined
+  return clampOutputLimit(capabilities.outputLimit, Math.max(1, Math.floor(capabilities.contextWindow)))
 }
 
 export function compactionPercent(threshold: number): number {

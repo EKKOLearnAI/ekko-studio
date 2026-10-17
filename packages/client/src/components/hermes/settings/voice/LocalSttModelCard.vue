@@ -199,9 +199,9 @@ onBeforeUnmount(clearPoll)
 .local-stt-card {
   position: relative;
   overflow: hidden;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
 
   &.active::before {
     content: '';
@@ -216,13 +216,13 @@ onBeforeUnmount(clearPoll)
   display: grid;
   grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) 188px;
   align-items: start;
-  gap: 16px;
-  padding: 14px 16px 14px 18px;
+  gap: calc(16px * var(--spacing-scale, 1));
+  padding: calc(14px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1)) calc(18px * var(--spacing-scale, 1));
 }
 
 .provider-identity {
   display: flex;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
@@ -233,11 +233,11 @@ onBeforeUnmount(clearPoll)
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
-  background: $bg-input;
+  background: var(--theme-input-bg, $bg-input);
   color: $text-secondary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 700;
 }
 
@@ -248,13 +248,13 @@ onBeforeUnmount(clearPoll)
 .provider-title-row {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .provider-title {
   margin: 0;
   color: $text-primary;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
 }
 
@@ -262,32 +262,32 @@ onBeforeUnmount(clearPoll)
 .provider-description,
 .download-progress small {
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 .provider-description {
   margin: 5px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.45);
 }
 
 .provider-meta {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px 16px;
+  gap: calc(7px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   margin: 0;
   min-width: 0;
 
   dt {
     color: $text-muted;
-    font-size: 10px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   }
 
   dd {
     overflow: hidden;
     margin: 2px 0 0;
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -296,7 +296,7 @@ onBeforeUnmount(clearPoll)
 .provider-control {
   display: grid;
   justify-items: end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   width: 188px;
 }
 
@@ -304,31 +304,31 @@ onBeforeUnmount(clearPoll)
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .download-progress,
 .feedback-row {
-  padding: 10px 16px 12px 18px;
-  border-top: 1px solid $border-color;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(18px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-color;
 }
 
 .download-progress {
   display: grid;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
 }
 
 .progress-copy {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .feedback-row {
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .feedback-row.error {

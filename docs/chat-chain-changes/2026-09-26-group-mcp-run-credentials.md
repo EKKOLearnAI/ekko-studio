@@ -1,5 +1,14 @@
 # Group Coding Agent MCP credentials
 
+Hermes group task plans use interaction-only credentials selected by the current
+request's `context_id`. The shared MCP connection reads that context's private
+`auth.json` on each task-plan request; it does not store a current turn token in
+the shared worker environment. These credentials stay valid while their group
+turn is active and are revoked on completion, failure or interruption. They do
+not delegate user account permissions. The existing profile worker and MCP
+connection reuse remains unchanged, and ordinary single-chat requests retain
+their existing profile JWT behavior.
+
 Group Coding Agent runs previously entered ChatRunSocket without a socket user.
 The shared profile JWT writer therefore skipped them, and managed MCP requests
 fell back to a static server token that interaction endpoints reject (#3179).

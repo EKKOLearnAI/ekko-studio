@@ -45,6 +45,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/handle-bridg
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/load-state', () => ({
   loadSessionStateFromDb: loadSessionStateFromDbMock,
+  readSessionStateFromDb: vi.fn(() => ({ messages: [], isWorking: false, events: [], queue: [] })),
   resolveRunSource: vi.fn((source?: string) => source || 'cli'),
 }))
 
@@ -271,6 +272,36 @@ describe('ChatRunSocket reports when the run started', () => {
     const resumed = socket.emit.mock.calls.find((call: any[]) => call[0] === 'resumed')
     expect(resumed![1].messages.map((message: any) => message.content)).toEqual(['stale root', 'native continuation'])
     expect(loadSessionStateFromDbMock).toHaveBeenCalledWith('resume-lineage', expect.any(Map))
+  })
+
+  it.each(['isCompressing', 'isAborting'])('preserves the %s lock during HTTP history refresh', async flag => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const state = { messages: [], events: [], queue: [], isWorking: false, [flag]: true }
+    ;(server as any).sessionMap.set('busy-history', state)
+    expect(server.isSessionRunActive('busy-history')).toBe(true)
+    expect(server.invalidateSessionHistory('busy-history')).toBe(false)
+    expect((server as any).sessionMap.get('busy-history')).toBe(state)
+  })
+
+  it('preserves Stop suppression and queued runtime state during HTTP history refresh', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const { readSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')
+    vi.mocked(readSessionStateFromDb).mockReturnValueOnce({
+      messages: [{ id: 9, role: 'assistant', content: 'native history' }], inputTokens: 100,
+      messageTotal: 151, messageLoadedCount: 150, hasMoreBefore: true,
+    } as any)
+    const state = { messages: [], events: [], queue: [{ input: 'queued' }], isWorking: false, backgroundWakeStopped: true }
+    ;(server as any).sessionMap.set('stopped-history', state)
+    expect(server.invalidateSessionHistory('stopped-history')).toBe(true)
+    expect((server as any).sessionMap.get('stopped-history')).toBe(state)
+    expect(state.messages).toEqual([{ id: 9, role: 'assistant', content: 'native history' }])
+    expect(state).toMatchObject({ inputTokens: 100, messageTotal: 151, messageLoadedCount: 150, hasMoreBefore: true })
+    expect(state.backgroundWakeStopped).toBe(true)
+    expect(state.queue).toEqual([{ input: 'queued' }])
   })
 
   it('reloads history invalidated by a concurrent HTTP reconciliation during resume', async () => {

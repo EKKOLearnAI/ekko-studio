@@ -1,10 +1,12 @@
 import type { Context } from 'koa'
+import { MAX_THEME_ARCHIVE_BYTES, MAX_THEME_BACKGROUND_BYTES } from '../../../../../shared/theme-archive'
+import { importThemeArchive, exportThemeArchive } from '../services/theme/archive'
 import {
+  listThemePresets, createThemePreset, renameThemePreset, activateThemePreset, deleteThemePreset,
   getUserTheme,
   saveUserTheme,
   toUserThemePayload,
   UserThemeValidationError,
-  MAX_THEME_BACKGROUND_BYTES,
   readThemeBackground,
   removeThemeBackground,
   replaceThemeBackground,
@@ -45,7 +47,7 @@ export async function updateTheme(ctx: Context) {
     ctx.body = toUserThemePayload(saveUserTheme(id, body || {}))
   } catch (error) {
     if (error instanceof UserThemeValidationError) {
-      ctx.status = 400
+      ctx.status = error.status
       ctx.body = { error: error.message }
       return
     }
@@ -80,7 +82,7 @@ export async function uploadThemeBackground(ctx: Context) {
     totalSize += chunk.length
     if (totalSize > MAX_MULTIPART_BYTES) {
       ctx.status = 413
-      ctx.body = { error: 'Background image exceeds the 10 MB limit' }
+      ctx.body = { error: 'Background image exceeds the 30 MB limit' }
       return
     }
     chunks.push(chunk)
@@ -105,10 +107,10 @@ export async function uploadThemeBackground(ctx: Context) {
 
     try {
       const data = part.subarray(headerEnd + 4, part.length - 2)
-      ctx.body = toUserThemePayload(await replaceThemeBackground(id, filename, data))
+      ctx.body = toUserThemePayload(await replaceThemeBackground(id, filename, data, ctx.query.presetId))
       return
     } catch (error) {
-      if (error instanceof ThemeBackgroundValidationError) {
+      if (error instanceof ThemeBackgroundValidationError || error instanceof UserThemeValidationError) {
         ctx.status = error.status
         ctx.body = { error: error.message }
         return
@@ -128,7 +130,14 @@ export async function getThemeBackground(ctx: Context) {
     ctx.body = { error: 'Unauthorized' }
     return
   }
-  const background = await readThemeBackground(id)
+  let background
+  try { background = await readThemeBackground(id, ctx.query.presetId) }
+  catch (error) {
+    if (!(error instanceof UserThemeValidationError)) throw error
+    ctx.status = error.status
+    ctx.body = { error: error.message }
+    return
+  }
   if (!background) {
     ctx.status = 404
     ctx.body = { error: 'Background image not found' }
@@ -147,5 +156,67 @@ export async function deleteThemeBackground(ctx: Context) {
     ctx.body = { error: 'Unauthorized' }
     return
   }
-  ctx.body = toUserThemePayload(await removeThemeBackground(id))
+  try { ctx.body = toUserThemePayload(await removeThemeBackground(id, ctx.query.presetId)) }
+  catch (error) {
+    if (!(error instanceof UserThemeValidationError)) throw error
+    ctx.status = error.status
+    ctx.body = { error: error.message }
+  }
+}
+
+async function presetAction(ctx: Context, operation: (id: number) => unknown) {
+  const id = userId(ctx)
+  if (!id) { ctx.status = 401; ctx.body = { error: 'Unauthorized' }; return }
+  try { ctx.body = await operation(id) }
+  catch (error) {
+    if (!(error instanceof UserThemeValidationError || error instanceof ThemeBackgroundValidationError)) throw error
+    ctx.status = error.status
+    ctx.body = { error: error.message }
+  }
+}
+
+export async function listPresets(ctx: Context) {
+  await presetAction(ctx, id => listThemePresets(id))
+}
+
+export async function createPreset(ctx: Context) {
+  const body = ctx.request.body as { name?: unknown; sourceId?: unknown; brightness?: unknown; style?: unknown } | undefined
+  await presetAction(ctx, id => createThemePreset(id, body || {}))
+}
+
+export async function renamePreset(ctx: Context) {
+  const body = ctx.request.body as { name?: unknown } | undefined
+  await presetAction(ctx, id => renameThemePreset(id, ctx.params.id, body?.name))
+}
+
+export async function activatePreset(ctx: Context) {
+  await presetAction(ctx, id => activateThemePreset(id, ctx.params.id))
+}
+
+export async function deletePreset(ctx: Context) {
+  await presetAction(ctx, id => deleteThemePreset(id, ctx.params.id))
+}
+
+export async function importPreset(ctx: Context) {
+  await presetAction(ctx, async id => {
+    if (!ctx.is('application/zip', 'application/octet-stream')) throw new UserThemeValidationError('Expected a ZIP file', 415)
+    const chunks: Buffer[] = []
+    let size = 0
+    for await (const chunk of ctx.req) {
+      size += chunk.length
+      if (size > MAX_THEME_ARCHIVE_BYTES) throw new UserThemeValidationError('Theme ZIP exceeds the 32 MB limit', 413)
+      chunks.push(chunk)
+    }
+    return importThemeArchive(id, Buffer.concat(chunks), ctx.query)
+  })
+}
+
+export async function exportPreset(ctx: Context) {
+  await presetAction(ctx, async id => {
+    const archive = await exportThemeArchive(id, ctx.params.id, ctx.query)
+    ctx.type = 'application/zip'
+    ctx.attachment(`${archive.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')}.zip`)
+    ctx.set('Cache-Control', 'no-store')
+    return archive.data
+  })
 }

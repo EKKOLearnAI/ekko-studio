@@ -481,7 +481,7 @@ async function handleDispatch() {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .board-select {
@@ -495,11 +495,11 @@ async function handleDispatch() {
 
 .stats-bar {
   display: flex;
-  gap: 4px;
-  padding: 8px 20px;
+  gap: calc(4px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
   overflow-x: auto;
   overscroll-behavior-inline: contain;
-  border-bottom: 1px solid $border-light;
+  border-bottom: var(--border-width, 1px) solid $border-light;
   flex-shrink: 0;
   flex-wrap: nowrap;
   scrollbar-width: none;
@@ -539,11 +539,11 @@ async function handleDispatch() {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
-  padding: 5px 8px;
+  gap: calc(5px * var(--spacing-scale, 1));
+  padding: calc(5px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
-  font-size: 12px;
-  border: 1px solid transparent;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  border: var(--border-width, 1px) solid transparent;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -601,10 +601,10 @@ async function handleDispatch() {
 .column-header {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   min-height: 43px;
-  padding: 10px 11px;
-  border-bottom: 1px solid $border-light;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(11px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
   color: $text-primary;
   font-weight: 600;
 }
@@ -620,7 +620,7 @@ async function handleDispatch() {
 .column-title {
   min-width: 0;
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: calc(var(--font-size-base, 14px) * 12.5 / 14);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -628,13 +628,13 @@ async function handleDispatch() {
 .column-count {
   min-width: 22px;
   margin-inline-start: auto;
-  padding: 2px 6px;
-  border: 1px solid $border-light;
+  padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-light;
   border-radius: 999px;
   color: $text-muted;
-  font-size: 10.5px;
+  font-size: calc(var(--font-size-base, 14px) * 10.5 / 14);
   font-weight: 500;
-  line-height: 1.2;
+  line-height: var(--line-height, 1.2);
   text-align: center;
 }
 
@@ -656,21 +656,21 @@ async function handleDispatch() {
   }
 
   :deep(.vue-flow__minimap) {
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: $radius-md;
-    background: $bg-card;
+    background: var(--theme-card-bg, $bg-card);
   }
 
   :deep(.vue-flow__controls) {
     overflow: hidden;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: $radius-md;
     box-shadow: none;
   }
 
   :deep(.vue-flow__controls-button) {
     border-bottom-color: $border-light;
-    background: $bg-card;
+    background: var(--theme-card-bg, $bg-card);
     color: $text-primary;
   }
 }
@@ -683,7 +683,7 @@ async function handleDispatch() {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid $border-light;
+  border: var(--border-width, 1px) solid $border-light;
   border-radius: $radius-md;
   background: color-mix(in srgb, $bg-secondary 66%, $bg-card);
 }
@@ -692,9 +692,9 @@ async function handleDispatch() {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-height: 0;
-  padding: 9px;
+  padding: calc(9px * var(--spacing-scale, 1));
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -707,28 +707,28 @@ async function handleDispatch() {
   justify-content: center;
   flex: 1;
   min-height: 72px;
-  border: 1px dashed $border-light;
+  border: var(--border-width, 1px) dashed $border-light;
   border-radius: $radius-sm;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .board-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 @media (max-width: $breakpoint-mobile) {
   .page-header {
-    padding: 16px 12px 16px 52px;
+    padding: calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) 52px;
     position: sticky;
     top: 0;
     z-index: 20;
     flex-direction: column;
     align-items: flex-start;
     background: $bg-primary;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
   }
 
   .header-actions {
@@ -737,8 +737,8 @@ async function handleDispatch() {
   }
 
   .stats-bar {
-    gap: 6px;
-    padding-inline: 12px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding-inline: calc(12px * var(--spacing-scale, 1));
   }
 
   .kanban-flow {

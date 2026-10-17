@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PageSidebar from "./PageSidebar.vue"
+import SidebarResizeHandle from "./SidebarResizeHandle.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -31,6 +32,7 @@ function handleNavClick(event: MouseEvent) {
 <template>
   <PageSidebar>
   <aside class="ekko-config-sidebar" :class="{ open: expanded, collapsed: !isMobile && appStore.sidebarCollapsed }">
+    <SidebarResizeHandle />
     <nav class="ekko-config-nav" @click="handleNavClick">
       <RouteLinkItem class="ekko-config-nav-item" :to="{ name: 'ekko.memory' }" :active="activeRoute === 'ekko.memory'">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">

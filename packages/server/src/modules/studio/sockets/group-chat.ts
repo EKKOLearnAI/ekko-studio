@@ -1,3 +1,4 @@
+import { getGroupMessageSelection, deleteGroupMessages, groupMessageDeletionError } from '../repositories/group-message-deletion'
 import { registerAppEventState, publishAppState, stateEvent, planStateEvent } from '../services/webhooks/app-event-state'
 import type { BusinessEvent } from '../services/webhooks/business-events'
 import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/notifications/push-registration'
@@ -339,6 +340,7 @@ function normalizeRoomMemberAvatar(value: unknown): string {
 }
 
 export interface RoomInfo {
+    messageDeletionRevision?: number
     id: string
     name: string
     inviteCode: string | null
@@ -368,6 +370,7 @@ export interface RoomInfo {
 }
 
 const ROOM_SELECT_COLUMNS = [
+    'messageDeletionRevision',
     'id',
     'name',
     'inviteCode',
@@ -591,7 +594,8 @@ export const GROUP_CHAT_MESSAGE_WINDOW = 500
 const GROUP_CHAT_CONTEXT_MESSAGE_WINDOW = GROUP_CHAT_MESSAGE_WINDOW
 const GROUP_CHAT_TIMESTAMP_BOUNDARY_OVERFLOW = 100
 const GROUP_CHAT_SUMMARY_SCAN_LIMIT = 10_000
-const GROUP_CHAT_TOKEN_ACCOUNTING_VERSION = 1
+// 2: array tool_calls are counted by their JSON size instead of "[object Object]".
+const GROUP_CHAT_TOKEN_ACCOUNTING_VERSION = 2
 
 function storedGroupAgentRunIdentity(row: any): {
     ownerId: string
@@ -1767,7 +1771,7 @@ class ChatStorage {
         if (role !== 'assistant' && role !== 'tool') return 0
         const reasoning = message.reasoning_content ?? message.reasoning
         return countTokens(this.contentToUsageText(message.content))
-            + countTokens(String(message.tool_calls || ''))
+            + countTokens(typeof message.tool_calls === 'string' ? message.tool_calls : message.tool_calls ? JSON.stringify(message.tool_calls) : '')
             + countTokens(String(reasoning || ''))
     }
 
@@ -2212,6 +2216,13 @@ class ChatStorage {
             GROUP_CHAT_CONTEXT_MESSAGE_WINDOW + GROUP_CHAT_TIMESTAMP_BOUNDARY_OVERFLOW,
         ) as Array<{ id: string }>
         return rows.map(row => String(row.id))
+    }
+
+    refreshRoomTokensAfterDeletion(roomId: string): number {
+        const totalTokens = this.contextWindowMessageIdsForTokenDelta(roomId)
+            .reduce((total, id) => total + this.messageUsageTokens(this.getMessage(id)!), 0)
+        this.updateRoomTotalTokens(roomId, totalTokens)
+        return totalTokens
     }
 
     private ensureCurrentRoomTokenAccounting(roomId: string): void {
@@ -3544,6 +3555,31 @@ export class GroupChatServer {
         return this.io
     }
 
+    private assertMessageDeletionIdle(roomId: string): void {
+        if (this.agentClients.hasRoomWork(roomId) || this.roomAgentActivityState?.get(roomId)?.size
+            || this.contextStatusState.get(roomId)?.size) {
+            throw groupMessageDeletionError('Group chat is busy; wait for pending work to finish')
+        }
+    }
+
+    getMessageSelection(roomId: string) {
+        this.assertMessageDeletionIdle(roomId)
+        return getGroupMessageSelection(roomId)
+    }
+
+    async deleteMessages(roomId: string, messageIds: unknown, historyRevision: unknown) {
+        return this.roomSummaryService.runExclusive(roomId, () => {
+            this.assertMessageDeletionIdle(roomId)
+            const result = deleteGroupMessages(roomId, messageIds, historyRevision,
+                () => this.storage.refreshRoomTokensAfterDeletion(roomId))
+            this.summaryReviewService.cancelRoom(roomId)
+            this.messageRoutingService.cancelRoom(roomId)
+            this.nsp.to(roomId).emit('messages_deleted', result)
+            this.nsp.to(roomId).emit('room_updated', { roomId, totalTokens: result.totalTokens })
+            return result
+        })
+    }
+
     getStorage(): ChatStorage {
         return this.storage
     }
@@ -4635,6 +4671,7 @@ export class GroupChatServer {
             limit: messages.length,
             hasMore: messages.length < total,
             historyTruncated,
+            messageDeletionRevision: storedRoom?.messageDeletionRevision || 0,
             typingUsers: this.getTypingUsers(roomId),
             contextStatuses: this.getContextStatuses(roomId),
             roomSummary: this.roomSummaryService.getState(roomId),

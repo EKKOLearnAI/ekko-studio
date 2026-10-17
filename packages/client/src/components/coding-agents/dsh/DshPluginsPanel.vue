@@ -47,9 +47,9 @@ const settings = ref<InstanceType<typeof DshPluginSettingsPanel>>()
 .plugins-content { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 #dsh-config-panel, #dsh-list-panel { flex: 1; min-height: 0; min-width: 0; }
 #dsh-config-panel { display: flex; overflow: hidden; }
-#dsh-list-panel { padding: 20px; overflow: auto; }
-.plugin-tabs { display: flex; flex-shrink: 0; gap: 24px; padding-inline: 20px; border-bottom: 1px solid $border-color; }
-.plugin-tabs button { padding: 10px 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: $text-secondary; cursor: pointer; font: inherit; }
+#dsh-list-panel { padding: calc(20px * var(--spacing-scale, 1)); overflow: auto; }
+.plugin-tabs { display: flex; flex-shrink: 0; gap: calc(24px * var(--spacing-scale, 1)); padding-inline: 20px; border-bottom: var(--border-width, 1px) solid $border-color; }
+.plugin-tabs button { padding: calc(10px * var(--spacing-scale, 1)) 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: $text-secondary; cursor: pointer; font: inherit; }
 .plugin-tabs button[aria-selected="true"] { color: $accent-primary; border-bottom-color: $accent-primary; }
 .plugin-tabs button:focus-visible { outline: 2px solid $accent-primary; outline-offset: 3px; }
 </style>

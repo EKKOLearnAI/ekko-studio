@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { expectNewChatEffectsMoving } from './new-chat-helpers'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
 type DesktopPlatform = 'darwin' | 'linux' | 'win32'
@@ -172,6 +173,31 @@ async function openDesktopPageSidebar(page: Page, platform: DesktopPlatform, pat
   await page.goto(path)
 }
 
+const softwareTest = test.extend({ launchOptions: { args: ['--disable-gpu'] } })
+
+softwareTest.describe('Windows new-chat effects with software rendering', () => {
+  for (const reducedMotion of ['no-preference', 'reduce'] as const) softwareTest(`Windows new-chat cards keep animating with ${reducedMotion} motion settings`, async ({ page }) => {
+    await installDesktopBridge(page, 'win32')
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await page.emulateMedia({ reducedMotion })
+    await authenticate(page, TEST_ACCESS_KEY, 'research')
+    await mockChatSocket(page)
+    await mockHermesApi(page)
+    await page.goto('/#/hermes/chat')
+    await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+    const draft = page.locator('.new-chat-page')
+    await expect(draft.locator('.agent-cards')).toHaveAttribute('aria-busy', 'false')
+    // Verify visible movement even when the desktop environment disables CSS animations.
+    await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; }' })
+    await expectNewChatEffectsMoving(page)
+    const halo = draft.locator('.agent-card.active .agent-card-halo').first()
+    const initialOpacity = await halo.evaluate(el => Number(getComputedStyle(el).opacity))
+    await expect.poll(() => halo.evaluate(el => Number(getComputedStyle(el).opacity))).not.toBe(initialOpacity)
+    await expect.poll(() => draft.evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
+    if (reducedMotion === 'no-preference') await page.screenshot({ path: '/tmp/studio-windows-stars.png', animations: 'allow' })
+  })
+})
+
 for (const platform of ['win32', 'linux'] as const) {
   test(`keeps browser settings header actions visible at the minimum ${platform} width`, async ({ page }) => {
     await installDesktopBridge(page, platform, true)
@@ -292,12 +318,28 @@ test('matches Windows controls to the header glass over custom backgrounds', asy
   await expect(page.locator('.profile-card.active')).toHaveCSS('border-color', 'rgba(51, 102, 255, 0.55)')
   await expect(page.locator('.profile-card.active .active-badge')).toHaveCSS('color', 'rgb(51, 102, 255)')
   await expect(controls).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-  const railBackground = await page.locator('.studio-navigation-rail').evaluate(el => getComputedStyle(el).backgroundColor)
-  const headerGlass = await page.locator('.app-box').evaluate(el => {
-    const style = getComputedStyle(el, '::before')
+  const frame = page.locator('.studio-frame-surface')
+  const frameGlass = await frame.evaluate(el => {
+    const style = getComputedStyle(el)
     return { background: style.backgroundColor, backdrop: style.backdropFilter }
   })
-  expect(headerGlass).toEqual({ background: railBackground, backdrop: 'blur(16px) saturate(1.1)' })
+  expect(frameGlass).toEqual({ background: 'rgba(26, 26, 26, 0.9)', backdrop: 'blur(16px) saturate(1.1)' })
+
+  await page.goto('/#/hermes/theme')
+  await page.getByTestId('theme-scope').selectOption('chrome')
+  await page.getByTestId('theme-chrome-opacity').fill('0.35')
+  await page.getByTestId('theme-chrome-opacity').dispatchEvent('change')
+  await page.getByTestId('theme-chrome-blur').fill('10')
+  await page.getByTestId('theme-chrome-blur').dispatchEvent('change')
+  await expect(frame).toHaveCSS('background-color', 'rgba(26, 26, 26, 0.35)')
+  await expect(frame).toHaveCSS('backdrop-filter', 'blur(10px) saturate(1.1)')
+  for (const surface of [page.locator('.studio-navigation-rail'), page.locator('.studio-page-header')]) {
+    await expect(surface).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    await expect(surface).toHaveCSS('backdrop-filter', 'none')
+  }
+  await expect(controls).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(controls).toHaveCSS('backdrop-filter', 'none')
+  await expect(controls).toHaveCSS('box-shadow', 'none')
   expect(api.unexpectedRequests).toEqual([])
 })
 
@@ -606,13 +648,13 @@ test('embeds the desktop browser beside workspace and terminal', async ({ page }
   await expect(profileSwitcher).toContainText('Default')
 
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
-  await expect(page.locator('.new-chat-drawer')).toBeVisible()
+  await expect(page.locator('.new-chat-page')).toBeVisible()
   await expect.poll(() => page.evaluate(() => {
     const calls = (window as typeof window & { __PW_DESKTOP_BROWSER__?: { viewportCalls: Array<{ visible: boolean }> } }).__PW_DESKTOP_BROWSER__?.viewportCalls || []
     return calls.at(-1)?.visible
   })).toBe(false)
   await page.keyboard.press('Escape')
-  await expect(page.locator('.new-chat-drawer')).not.toBeVisible()
+  await expect(page.locator('.new-chat-page')).not.toBeVisible()
   await expect.poll(() => page.evaluate(() => {
     const calls = (window as typeof window & { __PW_DESKTOP_BROWSER__?: { viewportCalls: Array<{ visible: boolean }> } }).__PW_DESKTOP_BROWSER__?.viewportCalls || []
     return calls.at(-1)?.visible

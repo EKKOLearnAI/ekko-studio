@@ -10,12 +10,12 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/hermes/write-gate/pending**', route => route.fulfill({ json: { pending: [] } }))
 })
 
-test('opens the partner page below Models and visits the website only from its action', async ({ page, context }) => {
+test('opens the partner page below Usage and visits the website only from its action', async ({ page, context }) => {
   await page.goto('/#/hermes/chat')
   const rail = page.locator('.studio-navigation-rail')
   const relay = rail.getByRole('link', { name: 'API Relay', exact: true })
   await expect(relay).toHaveAttribute('href', '#/hermes/api-relay')
-  expect(await relay.evaluate(el => el.previousElementSibling?.getAttribute('href'))).toBe('#/hermes/models')
+  expect(await relay.evaluate(el => el.previousElementSibling?.getAttribute('href'))).toBe('#/hermes/usage')
   await relay.click()
   await expect(page).toHaveURL(/#\/hermes\/api-relay$/)
   await expect(relay).toHaveAttribute('aria-current', 'page')

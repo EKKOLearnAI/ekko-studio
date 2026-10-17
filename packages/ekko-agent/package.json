@@ -26,7 +26,8 @@
     "dist",
     "skills",
     "README.md",
-    "docs/API.md"
+    "docs/API.md",
+    "docs/computer-use.md"
   ],
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
@@ -40,6 +41,7 @@
     "test:watch": "cd ../.. && vitest tests/ekko-agent"
   },
   "dependencies": {
+    "@trycua/cua-driver": "0.35.4",
     "@typesafe-ai/sdk": "0.6.0",
     "@modelcontextprotocol/client": "^2.0.0",
     "agent-browser": "^0.26.0",

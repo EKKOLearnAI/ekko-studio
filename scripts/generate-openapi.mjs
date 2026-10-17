@@ -937,6 +937,77 @@ openapi.paths['/api/studio/sessions/{id}/pin'].post.requestBody = {
   } } },
 }
 
+// Group chat deletion is manager-only and protects the rolling room summary.
+const groupSelectionPath = '/api/studio/group-chat/rooms/{roomId}/message-selection'
+const groupDeletePath = '/api/studio/group-chat/rooms/{roomId}/messages/delete'
+openapi.paths[groupSelectionPath].get.description = 'List complete persisted message/run groups for a managed group room. Summarized prefixes, runs crossing the summary anchor, and unknown summary boundaries are locked. Requires an idle room. Returns an opaque historyRevision to detect concurrent transcript or summary changes.'
+openapi.paths[groupSelectionPath].get.responses['200'] = {
+  description: 'Selection groups and opaque history revision',
+  content: { 'application/json': { schema: { type: 'object', required: ['groups', 'historyRevision'], properties: {
+    historyRevision: { type: 'string' },
+    groups: { type: 'array', items: { type: 'object', required: ['id', 'kind', 'messageIds'], properties: {
+      id: { type: 'string' }, kind: { type: 'string', enum: ['message', 'run'] },
+      messageIds: { type: 'array', items: { type: 'string' } },
+      deleteBlockedReason: { type: 'string', enum: ['summarized', 'summary_boundary_unknown'] },
+    } } },
+  } } } },
+}
+const groupDeleteOperation = openapi.paths[groupDeletePath].post
+groupDeleteOperation.description = 'Permanently delete selected unsummarized group messages. Requires room management permission and the historyRevision from message-selection. Each selected agent message expands to the entire run across pages. Rechecks summary boundaries, revision, active runs, queues and summary work atomically. Preserves the summary and unselected history, updates context token totals and messageDeletionRevision, and broadcasts messages_deleted to room clients. Returns 409 for stale, protected or busy selections.'
+groupDeleteOperation.requestBody = { required: true, content: { 'application/json': { schema: {
+  type: 'object', required: ['messageIds', 'historyRevision'], properties: {
+    messageIds: { type: 'array', minItems: 1, maxItems: 10000, items: { type: 'string', minLength: 1, maxLength: 500 } },
+    historyRevision: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+  },
+} } } }
+groupDeleteOperation.responses['200'] = { description: 'Deletion result; also emitted as messages_deleted', content: { 'application/json': { schema: {
+  type: 'object', required: ['roomId', 'messageIds', 'deletedGroups', 'messageCount', 'totalTokens', 'messageDeletionRevision'], properties: {
+    roomId: { type: 'string' }, messageIds: { type: 'array', items: { type: 'string' } },
+    deletedGroups: { type: 'integer' }, messageCount: { type: 'integer' }, totalTokens: { type: 'integer' }, messageDeletionRevision: { type: 'integer' },
+  },
+} } } }
+
+// Message selection uses persisted identities and a revision checked on deletion.
+const messageSelectionPath = '/api/studio/sessions/{id}/message-selection'
+openapi.paths[messageSelectionPath].get.description = 'List selection groups and historyRevision for a local Hermes or Ekko chat. User messages are individual items; agent replies, reasoning and tools are grouped by complete run across pages. Groups touching the compressed prefix are locked. Missing or invalid compression cursors lock all groups. Shared sessions are excluded.'
+openapi.paths[messageSelectionPath].get.responses['200'] = {
+  description: 'Message identities for selection (no message bodies)',
+  content: { 'application/json': { schema: {
+    type: 'object', required: ['groups', 'historyRevision'], properties: {
+      historyRevision: { type: 'integer', minimum: 0 },
+      groups: { type: 'array', items: { type: 'object', required: ['id', 'kind', 'messageIds'], properties: {
+        id: { type: 'integer' }, kind: { type: 'string', enum: ['message', 'run'] },
+        messageIds: { type: 'array', items: { type: 'integer' } }, runMarker: { type: 'string' },
+        deleteBlockedReason: { type: 'string', enum: ['compressed', 'compression_boundary_unknown'], description: 'Present when this group cannot be deleted. A run is locked if any of its messages is protected.' },
+      } } },
+    },
+  } } },
+}
+const deleteMessagesOperation = openapi.paths['/api/studio/sessions/{id}/messages/batch-delete'].post
+for (const operation of [openapi.paths[messageSelectionPath].get, deleteMessagesOperation]) {
+  operation.parameters.push({ name: 'profile', in: 'query', required: false, schema: { type: 'string' }, description: 'Profile owning the local session.' })
+}
+deleteMessagesOperation.description = 'Permanently delete selected uncompressed messages. Selecting any agent message removes its entire run. Requires an idle local Hermes/Ekko chat and the historyRevision from message-selection. Rechecks the current compression cursor inside the transaction; groups touching the compressed prefix are rejected. Preserves the summary, cursor and compression timestamp while advancing snapshot validity with the history revision. Cached transcript and context estimates are refreshed; billing usage is retained. Returns 409 for compressed or stale selections, unknown compression boundaries, or pending runs/tasks; shared sessions are forbidden.'
+deleteMessagesOperation.requestBody = {
+  required: true,
+  content: { 'application/json': { schema: {
+    type: 'object', required: ['messageIds', 'historyRevision'], properties: {
+      messageIds: { type: 'array', minItems: 1, maxItems: 10000, items: { type: 'integer', minimum: 1 } },
+      historyRevision: { type: 'integer', minimum: 0 },
+    },
+  } } },
+}
+deleteMessagesOperation.responses['200'] = {
+  description: 'Deleted message identities and new history revision',
+  content: { 'application/json': { schema: {
+    type: 'object', required: ['deleted', 'deletedGroups', 'messageIds', 'historyRevision'], properties: {
+      deleted: { type: 'integer' }, deletedGroups: { type: 'integer' }, historyRevision: { type: 'integer' },
+      contextTokens: { type: 'integer', nullable: true, minimum: 0, description: 'Estimated current context after deletion, including the retained summary; null if unavailable. Independent of billed usage.' },
+      messageIds: { type: 'array', items: { type: 'integer' } },
+    },
+  } } },
+}
+
 // Shared task planning is bound to an authenticated, active turn capability.
 openapi.paths['/api/studio/task-plans/update'] = {
   post: {
@@ -1489,6 +1560,169 @@ for (const operation of [usagePricingPath.get, usagePricingPath.put]) {
   operation.responses['200'] = { description: 'Saved pricing', content: { 'application/json': { schema: usageRatesSchema } } }
 }
 usagePricingPath.put.responses['400'] = { description: 'Invalid or duplicate provider/model pricing' }
+
+// Account-owned workspace shortcuts. No local-storage import or profile dimension.
+const workspaceDirectorySchema = { type: 'object', required: ['path', 'isFavorite', 'lastUsed', 'useCount', 'createdAt', 'updatedAt'], properties: {
+  path: { type: 'string' }, isFavorite: { type: 'boolean' },
+  ...Object.fromEntries(['lastUsed', 'useCount', 'createdAt', 'updatedAt'].map(key => [key, { type: 'integer', minimum: 0 }])),
+} }
+const workspaceDirectoryResponse = { type: 'object', required: ['directories'], properties: {
+  directories: { type: 'array', items: workspaceDirectorySchema },
+} }
+const workspaceDirectoriesPath = openapi.paths['/api/studio/workspace/directories']
+for (const [method, operation] of Object.entries(workspaceDirectoriesPath)) {
+  operation.operationId = { get: 'listWorkspaceDirectories', post: 'recordWorkspaceDirectory', patch: 'setWorkspaceDirectoryFavorite' }[method]
+  operation.description = 'Directory history and favorites for the authenticated Studio account, shared by Studio and App across Profiles. System-generated workspaces are excluded. Timestamps are Unix milliseconds.'
+  operation.responses['200'] = { description: 'Account directory shortcuts', content: { 'application/json': { schema: workspaceDirectoryResponse } } }
+  operation.responses['401'] = { description: 'Authenticated account required' }
+  if (method === 'get') continue
+  operation.requestBody = { required: true, content: { 'application/json': { schema: {
+    type: 'object', required: method === 'patch' ? ['path', 'favorite'] : ['path'], properties: {
+      path: { type: 'string', minLength: 1, maxLength: 4096 },
+      ...(method === 'patch' ? { favorite: { type: 'boolean' } } : {}),
+    },
+  } } } }
+  operation.responses['400'] = { description: 'Invalid directory path or favorite value' }
+}
+
+// One native model discovery endpoint for every Coding Agent.
+const codingAgentIds = ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode']
+const nativeModelSchema = {
+  type: 'object', required: ['id', 'name'], properties: {
+    id: { type: 'string', description: 'Native model ID or alias; preserve provider prefixes.' },
+    name: { type: 'string' }, provider: { type: 'string' },
+    resolvedModel: { type: 'string', description: 'Concrete identity from native discovery; execution preserves id.' },
+    isDefault: { type: 'boolean' }, hidden: { type: 'boolean' },
+    contextWindow: { type: 'number' }, maxOutputTokens: { type: 'number' },
+    reasoningEfforts: { type: 'array', items: { type: 'string' } },
+    modelFamily: { type: 'string', description: 'Grouping key for native effort variants; never send it as a model ID.' },
+    modelFamilyName: { type: 'string' },
+    reasoningEffort: { type: 'string', description: 'Fixed effort encoded by this literal native model ID.' },
+    inputModalities: { type: 'array', items: { type: 'string' } },
+  },
+}
+const reasoningOperation = openapi.paths['/api/studio/sessions/{id}/reasoning-effort']?.post
+if (reasoningOperation) {
+  reasoningOperation.requestBody = { required: true, content: { 'application/json': { schema: {
+    type: 'object', required: ['reasoningEffort'], properties: {
+      reasoningEffort: { type: 'string', enum: ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
+      model: { type: 'string', description: 'Optional literal effort-variant ID for global Cursor/Antigravity sessions. Validated against the native catalog and current family; persisted atomically with effort.' },
+    },
+  } } } }
+  reasoningOperation.responses['400'] = { description: 'Invalid effort, mode or native variant/family' }
+  reasoningOperation.responses['503'] = { description: 'Native catalog unavailable for validating the paired model change' }
+}
+openapi.paths['/api/hermes/available-models'].get.description = 'Visible models for one Profile or all accessible Profiles. Full catalogs and hidden-model aliases are omitted. Each group has model_count; allProviders contains preset descriptors with empty models. Load a full directory on demand with GET /api/hermes/provider-models.'
+openapi.paths['/api/hermes/provider-models'].get = {
+  tags: ['Models'], operationId: 'getProviderModelCatalog', summary: 'Read the full model directory for one Provider',
+  description: 'Settings-only on-demand catalog, including hidden models and their aliases. Reads configured/cached models for the authorized Profile, with preset fallback. Does not probe upstream endpoints or scan capability metadata. Credentials are never returned.',
+  security: [{ BearerAuth: [] }],
+  parameters: [
+    { name: 'provider', in: 'query', required: true, schema: { type: 'string' } },
+    { name: 'profile', in: 'query', required: false, schema: { type: 'string' }, description: 'Authorized Profile; required here or in x-hermes-profile.' },
+  ],
+  responses: {
+    '200': { description: 'Complete Provider directory and current visible models', content: { 'application/json': { schema: {
+      type: 'object', required: ['provider', 'models', 'visible_models', 'model_aliases'], properties: {
+        provider: { type: 'string' }, models: { type: 'array', items: { type: 'string' } },
+        visible_models: { type: 'array', items: { type: 'string' } },
+        model_aliases: { type: 'object', additionalProperties: { type: 'string' } },
+      },
+    } } } },
+    '400': { description: 'Missing Provider or Profile' }, '403': { description: 'Profile access denied' },
+    '404': { description: 'Provider not found' },
+  },
+}
+openapi.paths['/api/coding-agents/models'] = { get: {
+  tags: ['Coding Agents'], operationId: 'getCodingAgentModels', summary: 'Discover native models for one or all Coding Agents',
+  description: 'Reads native CLI/account/config model directories on this Studio server, independently of Hermes Profiles. No chat prompts are sent. Each agent has its own discovery status; an individual failure does not fail the aggregate request. Successful results cache for 60 seconds and failures for 5 seconds. Refresh bypasses the cache while sharing in-flight requests. Builtin/configured entries do not prove account access. Raw native errors and credentials are never returned.',
+  security: [{ BearerAuth: [] }],
+  parameters: [
+    { name: 'agent', in: 'query', required: false, schema: { type: 'string', enum: codingAgentIds }, description: 'Omit to discover all fourteen agents.' },
+    { name: 'refresh', in: 'query', required: false, schema: { type: 'boolean', default: false } },
+  ],
+  responses: {
+    '200': { description: 'Native directories and individual discovery statuses', content: { 'application/json': { schema: {
+      type: 'object', required: ['agents'], properties: { agents: { type: 'array', items: {
+        type: 'object', required: ['agentId', 'name', 'status', 'source', 'scope', 'models', 'checkedAt', 'cached'], properties: {
+          agentId: { type: 'string', enum: codingAgentIds }, name: { type: 'string' },
+          status: { type: 'string', enum: ['ready', 'empty', 'not_installed', 'auth_required', 'unsupported', 'timeout', 'error'] },
+          source: { type: 'string', enum: ['cli', 'app-server', 'control-protocol', 'sdk', 'acp', 'config'] },
+          scope: { type: 'string', enum: ['available', 'configured', 'builtin'] },
+          models: { type: 'array', items: nativeModelSchema }, checkedAt: { type: 'string', format: 'date-time' }, cached: { type: 'boolean' },
+        },
+      } } },
+    } } } },
+    '400': { description: 'Unknown agent or invalid query parameters' },
+    '401': { $ref: '#/components/responses/Unauthorized' },
+    '500': { description: 'Unable to initialize native model discovery' },
+  },
+} }
+
+const usageStatsOperation = openapi.paths['/api/studio/usage/stats']?.get
+if (usageStatsOperation) {
+  usageStatsOperation.description = 'Aggregates all recorded usage across accessible Profiles by default. Account means the Studio user who owns the session, not a provider account. Account options include newly created sessions before their first usage event. Legacy rows use confirmed Studio ownership; unknown ownership remains unassigned.'
+  const accountParameter = usageStatsOperation.parameters.find(parameter => parameter.name === 'account')
+  accountParameter.schema = { type: 'string', pattern: '^(?:[1-9][0-9]*|unassigned)$' }
+  accountParameter.description = 'Studio user ID, or unassigned. Omit to include all accounts.'
+  usageStatsOperation.responses['400'] = { description: 'Invalid account ID or timezone' }
+  usageStatsOperation.responses['403'] = { description: 'Selected Profile is not accessible to this user' }
+}
+
+// Named user themes use the same customization payload as /api/theme.
+const themeNameSchema = { type: 'string', minLength: 1, maxLength: 80 }
+openapi.paths['/api/theme/presets'].get.description = 'Lists themes owned by the authenticated Studio user. Preserves existing customization as the first theme on initial access.'
+openapi.paths['/api/theme/presets'].post.requestBody = { required: true, content: { 'application/json': { schema: {
+  type: 'object', required: ['name'], properties: {
+    name: themeNameSchema,
+    sourceId: { type: 'string', description: 'Owned theme to duplicate. Omit to create default customization without a wallpaper.' },
+    brightness: { type: 'string', enum: ['system', 'light', 'dark'], default: 'system' },
+    style: { type: 'string', enum: ['ink', 'comic'], default: 'ink' },
+  },
+} } } }
+openapi.paths['/api/theme/presets/{id}'].patch.requestBody = { required: true, content: { 'application/json': { schema: {
+  type: 'object', required: ['name'], properties: { name: themeNameSchema },
+} } } }
+openapi.paths['/api/theme/presets/{id}'].delete.description = 'Deletes an owned theme. Deleting the active theme activates the oldest remaining theme; deleting the last theme is rejected.'
+openapi.paths['/api/theme/presets/{id}/activate'].post.description = 'Activates an owned theme and restores brightness, style, appearance and wallpaper together.'
+for (const path of ['/api/theme/presets', '/api/theme/presets/{id}', '/api/theme/presets/{id}/activate']) {
+  for (const operation of Object.values(openapi.paths[path])) {
+    operation.responses['400'] = { description: 'Invalid theme settings, name, or deletion of the last theme' }
+    operation.responses['404'] = { description: 'Theme not found for the authenticated user' }
+  }
+}
+for (const operation of [openapi.paths['/api/theme'].put, openapi.paths['/api/theme/background'].post, openapi.paths['/api/theme/background'].delete]) {
+  operation.responses['409'] = { description: 'The supplied presetId is no longer the active theme. Reload before editing.' }
+}
+
+const themeArchivePreferences = [
+  { name: 'brightness', in: 'query', required: false, schema: { type: 'string', enum: ['system', 'light', 'dark'] }, description: 'Legacy device brightness. Used only when the stored theme has no mode.' },
+  { name: 'style', in: 'query', required: false, schema: { type: 'string', enum: ['ink', 'comic'] }, description: 'Legacy device style. Used only when the stored theme has no style.' },
+]
+const themeZipExport = openapi.paths['/api/theme/presets/{id}/export'].get
+themeZipExport.summary = 'Export an owned theme as a ZIP file'
+themeZipExport.description = 'Downloads an ekko-studio-theme version 1 ZIP containing theme.json and the optional background image. Includes the theme name, modes and all global/regional settings; excludes user IDs, server file paths and preset IDs. Legacy device mode/style query values are fallback values only.'
+themeZipExport.parameters = [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, ...themeArchivePreferences]
+themeZipExport.responses = {
+  '200': { description: 'Theme ZIP download', content: { 'application/zip': { schema: { type: 'string', format: 'binary' } } } },
+  '400': { description: 'Invalid fallback mode or style' }, '401': { $ref: '#/components/responses/Unauthorized' },
+  '404': { description: 'Theme is not owned by the authenticated user' }, '409': { description: 'The saved background file is missing' },
+}
+const themeZipImport = openapi.paths['/api/theme/presets/import'].post
+themeZipImport.summary = 'Import and activate a theme ZIP as a new theme'
+themeZipImport.description = 'Accepts the ZIP bytes directly, up to 12 MiB. Validates a version 1 manifest (up to 64 KiB) and optional PNG/JPEG/WebP/GIF background (up to 10 MiB). Rejects unsupported entries, paths, links, encryption, invalid settings and corrupt/oversized expanded data. Creates a new owned theme and activates it atomically; same-name themes remain separate and existing themes are preserved. On initial migration, query preferences preserve the previous device-only mode/style.'
+themeZipImport.parameters = themeArchivePreferences
+themeZipImport.requestBody = { required: true, content: { 'application/zip': { schema: { type: 'string', format: 'binary' } } } }
+themeZipImport.responses = {
+  '200': { description: 'Updated library and active theme', content: { 'application/json': { schema: {
+    type: 'object', required: ['activeId', 'themes', 'theme'], properties: {
+      activeId: { type: 'string' }, themes: { type: 'array', items: { type: 'object' } }, theme: { type: 'object' },
+    },
+  } } } },
+  '400': { description: 'Invalid or unsupported archive, manifest, settings or entries' },
+  '401': { $ref: '#/components/responses/Unauthorized' },
+  '413': { description: 'ZIP or background exceeds the allowed size' }, '415': { description: 'Expected ZIP bytes or a supported background image' },
+}
 
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')

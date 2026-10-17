@@ -227,7 +227,7 @@ onUnmounted(() => {
 .logs-page-header {
   --header-actions-shrink: 1;
   container: studio-page-header / inline-size;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 
   .header-title { flex-shrink: 0; }
@@ -239,7 +239,7 @@ onUnmounted(() => {
   min-width: 0;
   max-width: 680px;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
@@ -265,12 +265,12 @@ onUnmounted(() => {
   flex: 1 1 160px;
   min-width: 72px;
   max-width: 160px;
-  padding: 4px 10px;
-  border: 1px solid $border-color;
+  padding: calc(4px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
-  background: $bg-input;
+  background: var(--theme-input-bg, $bg-input);
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   outline: none;
   width: 160px;
   transition: border-color $transition-fast;
@@ -281,10 +281,10 @@ onUnmounted(() => {
 
 .logs-filter-popover {
   display: grid;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   width: min(260px, calc(100vw - 48px));
 
-  label { display: grid; gap: 4px; }
+  label { display: grid; gap: calc(4px * var(--spacing-scale, 1)); }
   .search-input { width: 100%; max-width: none; }
 }
 
@@ -296,7 +296,7 @@ onUnmounted(() => {
     .logs-filter-toggle { display: inline-flex; }
     .logs-file-select { min-width: 0; }
     .logs-refresh {
-      padding-inline: 6px;
+      padding-inline: calc(6px * var(--spacing-scale, 1));
       :deep(.n-button__content) { display: none; }
       :deep(.n-button__icon) { margin: 0; }
     }
@@ -330,22 +330,22 @@ onUnmounted(() => {
   justify-content: center;
   height: 100%;
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .log-list {
-  padding: 4px 0;
+  padding: calc(4px * var(--spacing-scale, 1)) 0;
   min-height: 100%;
 }
 
 .log-entry {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 3px 20px;
-  font-family: $font-code;
-  font-size: 12px;
-  line-height: 1.6;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(3px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.6);
   border-inline-start: 2px solid transparent;
 
   &:hover {
@@ -372,9 +372,9 @@ onUnmounted(() => {
 .log-level {
   flex-shrink: 0;
   font-weight: 600;
-  font-size: 10px;
-  padding: 0 4px;
-  border-radius: 2px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
+  padding: 0 calc(4px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 2px);
   min-width: 42px;
   text-align: center;
 
@@ -418,7 +418,7 @@ onUnmounted(() => {
 .access-status {
   font-weight: 600;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 
   &.status-2 { color: $success; }
   &.status-3 { color: $warning; }

@@ -90,7 +90,7 @@ function handleClose() {
   width: var(--studio-drawer-width);
   height: calc(100 * var(--vh));
   max-height: calc(100 * var(--vh));
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   border-radius: 5px 0 0 5px;
   overflow: hidden;
   box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
@@ -117,23 +117,23 @@ function handleClose() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   flex-shrink: 0;
 }
 
 .drawer-tabs {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .tab-button {
-  padding: 8px 16px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   border: none;
   background: transparent;
   color: $text-secondary;
   cursor: pointer;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 500;
   border-bottom: 2px solid transparent;
   transition: all 0.2s;
@@ -153,7 +153,7 @@ function handleClose() {
 }
 
 .close-button {
-  padding: 8px;
+  padding: calc(8px * var(--spacing-scale, 1));
   border: none;
   background: transparent;
   color: $text-secondary;

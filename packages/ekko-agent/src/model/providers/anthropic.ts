@@ -387,7 +387,17 @@ function mergeUsage(current: ModelUsage | undefined, next: ModelUsage): ModelUsa
 }
 
 function anthropicUrl(config: ModelProviderConfig): string {
-  return providerUrl(config, 'https://api.anthropic.com/v1', config.endpointPath ?? defaultAnthropicEndpointPath(config))
+  if (config.endpointPath !== undefined) {
+    return providerUrl(config, 'https://api.anthropic.com/v1', config.endpointPath)
+  }
+  const url = new URL((config.baseUrl ?? 'https://api.anthropic.com/v1').trim())
+  const path = url.pathname.replace(/\/+$/, '')
+  // Match Coding Agent targets: roots need /v1, versioned roots only /messages,
+  // and complete endpoints must not gain a second /messages.
+  url.pathname = /\/messages$/i.test(path)
+    ? path
+    : `${path}/${/\/v\d+(?:beta)?$/i.test(path) ? 'messages' : 'v1/messages'}`
+  return url.toString()
 }
 
 function anthropicHeaders(config: ModelProviderConfig, request: ModelRequest): HeadersInit {
@@ -399,12 +409,12 @@ function anthropicHeaders(config: ModelProviderConfig, request: ModelRequest): H
 }
 
 function isOfficialAnthropicBaseUrl(baseUrl: string | undefined): boolean {
-  return !baseUrl || baseUrl.includes('api.anthropic.com')
-}
-
-function defaultAnthropicEndpointPath(config: ModelProviderConfig): string {
-  const baseUrl = (config.baseUrl || '').replace(/\/+$/, '')
-  return baseUrl.endsWith('/anthropic') ? 'v1/messages' : 'messages'
+  if (!baseUrl) return true
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === 'api.anthropic.com'
+  } catch {
+    return false
+  }
 }
 
 function assertAnthropicSuccess(config: ModelProviderConfig, response: AnthropicResponse): void {

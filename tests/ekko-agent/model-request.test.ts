@@ -1573,6 +1573,64 @@ describe('ekko-agent model requests', () => {
     }])
   })
 
+  it.each([
+    { baseUrl: undefined, expected: 'https://api.anthropic.com/v1/messages' },
+    { baseUrl: 'https://api.anthropic.com', expected: 'https://api.anthropic.com/v1/messages' },
+    { baseUrl: 'https://api.anthropic.com/v1/', expected: 'https://api.anthropic.com/v1/messages' },
+    { baseUrl: 'https://relay.example', expected: 'https://relay.example/v1/messages' },
+    { baseUrl: 'https://relay.example/', expected: 'https://relay.example/v1/messages' },
+    { baseUrl: 'https://relay.example/v1', expected: 'https://relay.example/v1/messages' },
+    { baseUrl: 'https://relay.example/v1/messages', expected: 'https://relay.example/v1/messages' },
+    { baseUrl: 'https://relay.example/v1/messages/', expected: 'https://relay.example/v1/messages' },
+    { baseUrl: 'https://api.z.ai/api/anthropic', expected: 'https://api.z.ai/api/anthropic/v1/messages' },
+    { baseUrl: 'https://api.minimax.io/anthropic', expected: 'https://api.minimax.io/anthropic/v1/messages' },
+    { baseUrl: 'https://relay.example/api/v4', expected: 'https://relay.example/api/v4/messages' },
+    { baseUrl: 'https://relay.example/tenant', expected: 'https://relay.example/tenant/v1/messages' },
+    { baseUrl: 'https://relay.example/v1?tenant=one', expected: 'https://relay.example/v1/messages?tenant=one' },
+    { baseUrl: 'https://relay.example/gateway', endpointPath: 'special/messages', expected: 'https://relay.example/gateway/special/messages' },
+  ])('uses the Anthropic endpoint $expected for create and stream', async ({ baseUrl, endpointPath, expected }) => {
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      if (JSON.parse(String(init?.body)).stream) {
+        return new Response('event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n', {
+          status: 200, headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }
+      return new Response(JSON.stringify({ content: [{ type: 'text', text: 'OK' }], stop_reason: 'end_turn' }), { status: 200 })
+    })
+    const client = new AnthropicMessagesModelClient({
+      id: 'custom:relay.example',
+      type: 'anthropic',
+      requestStyle: 'anthropic-messages',
+      baseUrl,
+      endpointPath,
+      defaultModel: 'claude-opus-5-5',
+    }, { fetch: fetchMock })
+
+    expect(client.requestTarget()).toBe(expected)
+    expect((await client.create({ messages: [{ role: 'user', content: 'hi' }] })).content).toBe('OK')
+    const events = []
+    for await (const event of client.stream({ messages: [{ role: 'user', content: 'hi' }], stream: true })) events.push(event)
+    expect(events).toContainEqual({ type: 'text-delta', text: 'OK' })
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([expected, expected])
+  })
+
+  it.each([
+    { id: 'anthropic', baseUrl: 'https://api.anthropic.com', bearer: false, apiKey: true },
+    { id: 'claude-oauth', baseUrl: 'https://api.anthropic.com/v1', bearer: true, apiKey: false },
+    { id: 'custom:lookalike', baseUrl: 'https://api.anthropic.com.relay.example/v1', bearer: true, apiKey: true },
+  ])('preserves Anthropic authentication for $id', async ({ id, baseUrl, bearer, apiKey }) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ content: [{ type: 'text', text: 'OK' }] }), { status: 200 }))
+    const client = new AnthropicMessagesModelClient({
+      id, baseUrl, type: 'anthropic', requestStyle: 'anthropic-messages', apiKey: 'test-key',
+    }, { fetch: fetchMock })
+    await client.create({ messages: [{ role: 'user', content: 'hi' }] })
+    const headers = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers
+    if (bearer) expect(headers).toHaveProperty('authorization', 'Bearer test-key')
+    else expect(headers).not.toHaveProperty('authorization')
+    if (apiKey) expect(headers).toHaveProperty('x-api-key', 'test-key')
+    else expect(headers).not.toHaveProperty('x-api-key')
+  })
+
   it('calls Anthropic-compatible /anthropic bases through /v1/messages', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       content: [{ type: 'text', text: 'OK' }],

@@ -112,6 +112,7 @@ describe('createBranchedSession', () => {
       null,
       null,
       null,
+      null, // selection_run_marker
       100,
       null,
       null,

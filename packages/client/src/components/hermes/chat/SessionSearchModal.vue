@@ -309,31 +309,31 @@ onUnmounted(() => {
 .session-search-modal {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
 }
 
 .search-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .search-title {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   color: $text-primary;
 }
 
 .search-hint {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .search-scope {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
-  line-height: 1.5;
+  line-height: var(--line-height, 1.5);
 }
 
 .search-body {
@@ -342,30 +342,30 @@ onUnmounted(() => {
 }
 
 .search-empty {
-  padding: 28px 0;
+  padding: calc(28px * var(--spacing-scale, 1)) 0;
   text-align: center;
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .result-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   max-height: min(60vh, 540px);
   overflow-y: auto;
-  padding-inline-end: 2px;
+  padding-inline-end: calc(2px * var(--spacing-scale, 1));
 }
 
 .result-item {
   width: 100%;
   display: flex;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 14px;
-  border: 1px solid $border-color;
+  gap: calc(16px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   color: $text-primary;
   text-align: start;
   cursor: pointer;
@@ -386,11 +386,11 @@ onUnmounted(() => {
 .result-title-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .result-title {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -399,15 +399,15 @@ onUnmounted(() => {
 
 .result-source {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
 }
 
 .result-snippet {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
-  line-height: 1.5;
+  line-height: var(--line-height, 1.5);
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -419,22 +419,22 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
-  font-size: 11px;
+  gap: calc(4px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
   flex-shrink: 0;
 }
 
 .result-match {
-  font-family: $font-code;
+  font-family: var(--font-code, $font-code);
 }
 
 .search-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  font-size: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 

@@ -1,9 +1,11 @@
 import Router from '@koa/router'
 import * as ctrl from '../controllers/models'
+import { requireUserProfile } from '../../studio/public/auth'
 
 export const modelRoutes = new Router()
 
 modelRoutes.get('/api/hermes/available-models', ctrl.getAvailable)
+modelRoutes.get('/api/hermes/provider-models', requireUserProfile, ctrl.getProviderModelCatalog)
 modelRoutes.post('/api/hermes/provider-models', ctrl.fetchProviderModelList)
 modelRoutes.post('/api/hermes/provider-models/cache/refresh', ctrl.refreshProviderModelCatalogCache)
 modelRoutes.get('/api/hermes/config/models', ctrl.getConfigModels)

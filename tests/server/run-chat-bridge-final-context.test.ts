@@ -498,6 +498,58 @@ describe('bridge run final context usage', () => {
     }
   })
 
+  it.each([
+    ['completed', 'usage'], ['completed', 'context'],
+    ['failed', 'usage'], ['failed', 'context'],
+  ])('keeps a newer run intact when old %s finalization awaits %s', async (terminal, stage) => {
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    const emit = vi.fn()
+    const state = makeState()
+    const sessionMap = new Map([['session-1', state]])
+    let entered!: () => void
+    let release!: () => void
+    const waiting = new Promise<void>(resolve => { entered = resolve })
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    if (stage === 'usage') {
+      calcAndUpdateUsageMock.mockImplementationOnce(async () => {
+        entered()
+        await blocked
+        return { inputTokens: 11, outputTokens: 7 }
+      })
+    } else {
+      buildDbSnapshotAwareHistoryMock.mockImplementationOnce(async () => {
+        entered()
+        await blocked
+        return [{ role: 'assistant', content: 'old output' }]
+      })
+    }
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'old-run', status: 'started' }),
+      contextEstimate: vi.fn().mockResolvedValue({ fixed_context_tokens: 10 }),
+      streamOutput: vi.fn(async function* () {
+        if (terminal === 'failed') throw new Error('old failure')
+        yield { run_id: 'old-run', done: true, status: 'complete', output: 'old output' }
+      }),
+    } as any
+    const dequeue = vi.fn()
+    const oldRun = handleBridgeRun(makeNamespace(emit), makeSocket(),
+      { input: 'hello', session_id: 'session-1' }, 'default', sessionMap, bridge, false, vi.fn(), dequeue)
+    await waiting
+    Object.assign(state, {
+      isWorking: true, isAborting: false, runId: 'new-run', activeRunMarker: 'new-marker',
+      bridgeRunPollMarker: 'new-marker', contextTokens: 777, events: [{ event: 'run.started' }],
+    })
+    release()
+    await oldRun
+    expect(state).toMatchObject({
+      isWorking: true, runId: 'new-run', activeRunMarker: 'new-marker',
+      bridgeRunPollMarker: 'new-marker', contextTokens: 777, events: [{ event: 'run.started' }],
+    })
+    expect(emit.mock.calls.some(([event]) => event === 'run.completed' || event === 'run.failed')).toBe(false)
+    expect(completeWorkspaceRunCheckpointMock).not.toHaveBeenCalled()
+    expect(dequeue).not.toHaveBeenCalled()
+  })
+
   it('refreshes full context tokens when a bridge run completes', async () => {
     const emit = vi.fn()
     const nsp = makeNamespace(emit)

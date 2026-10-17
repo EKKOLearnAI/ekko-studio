@@ -280,7 +280,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   color: $text-muted;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 
   .empty-logo {
     width: 48px;
@@ -289,7 +289,7 @@ defineExpose({
   }
 
   p {
-    font-size: 14px;
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   }
 }
 
@@ -327,7 +327,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  border: 1px solid rgba(var(--accent-primary-rgb), 0.24);
+  border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.24);
   background: rgba(255, 255, 255, 0.94);
   color: var(--accent-primary);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);

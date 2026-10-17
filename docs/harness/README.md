@@ -21,8 +21,11 @@ agent can discover without chat history.
 - `docs/harness/startup-tasks.md` describes one-time startup operations and their persistent execution records.
 - `docs/harness/server-module-boundaries.md` defines backend ownership and the migration target.
 - `docs/harness/jev-integrations.md` defines JEV feature switches, frontend configuration and integration registration.
+- `docs/harness/frontend-ui.md` defines theme ownership and UI verification.
+- `scripts/ui-theme-harness.mjs` inspects Vue/SCSS/inline styles; the exact
+  declarations in `scripts/ui-theme-baseline.json` track existing style debt.
 - `scripts/harness-check.mjs` is the single harness entry point. It enforces
-  repository, desktop release/runtime, and backend module-boundary invariants.
+  repository, UI theme, desktop release/runtime, and backend module-boundary invariants.
 - `scripts/server-module-boundaries.mjs` implements the backend boundary portion
   consumed by the unified harness and its focused unit tests.
 - `scripts/jev-integrations.json` registers concrete JEV consumers and their UI fields;

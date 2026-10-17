@@ -54,7 +54,8 @@ export function estimateUsageTokensFromMessages(messages: UsageTokenMessage[]): 
       return (
         sum
         + countTokens(contentToUsageText(m.content))
-        + countTokens(String(m.tool_calls || ''))
+        // History rows carry parsed tool_call arrays; String() would count "[object Object]".
+        + countTokens(typeof m.tool_calls === 'string' ? m.tool_calls : m.tool_calls ? JSON.stringify(m.tool_calls) : '')
         + (estimatedReasoningTokens ?? countTokens(String(reasoning || '')))
       )
     }, 0)

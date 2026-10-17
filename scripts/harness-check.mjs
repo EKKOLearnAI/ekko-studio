@@ -7,12 +7,14 @@ import { hasManagedMcpNodeMode } from './managed-mcp-harness.mjs'
 import { checkDshModuleBoundaries } from './dsh-module-harness.mjs'
 import { checkCodingAgentModuleBoundaries } from './coding-agent-module-harness.mjs'
 import { checkJevIntegrations } from './jev-harness.mjs'
+import { checkUiTheme } from './ui-theme-harness.mjs'
 
 const root = process.cwd()
 const failures = []
 failures.push(...await checkDshModuleBoundaries(root))
 failures.push(...await checkCodingAgentModuleBoundaries(root))
 failures.push(...await checkJevIntegrations(root))
+failures.push(...await checkUiTheme(root))
 
 function fail(message) {
   failures.push(message)
@@ -45,6 +47,8 @@ for (const file of [
   'docs/harness/server-module-boundaries.md',
   'docs/harness/jev-integrations.md',
   'scripts/jev-integrations.json',
+  'docs/harness/frontend-ui.md',
+  'scripts/ui-theme-baseline.json',
 ]) {
   requireFile(file)
 }
@@ -94,6 +98,10 @@ for (const requiredLink of [
   if (!agents.includes(requiredLink)) {
     fail(`AGENTS.md must link to ${requiredLink}`)
   }
+}
+
+if (!agents.includes('docs/harness/frontend-ui.md')) {
+  fail('AGENTS.md must link to docs/harness/frontend-ui.md')
 }
 
 const packageJson = JSON.parse(await readText('package.json'))

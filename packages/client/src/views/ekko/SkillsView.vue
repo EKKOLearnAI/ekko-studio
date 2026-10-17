@@ -254,7 +254,7 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', handleMobileChange)
 
 @include skills-manager.layout;
 
-.header-actions { display: flex; align-items: center; gap: 8px; }
+.header-actions { display: flex; align-items: center; gap: calc(8px * var(--spacing-scale, 1)); }
 
 @media (max-width: $breakpoint-mobile) {
   .header-action-label { display: none; }

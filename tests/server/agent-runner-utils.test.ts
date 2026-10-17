@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import '../../packages/server/src/bootstrap/coding-agent-adapters'
+import { AnthropicMessagesModelClient } from '../../packages/ekko-agent/src/model/providers/anthropic'
 import {
   anthropicMessagesUrl,
   chatCompletionsUrl,
@@ -26,6 +27,22 @@ import { getRecordedUsageTotals, getUsage } from '../../packages/server/src/modu
 import { getChatRunServer, setChatRunServer } from '../../packages/server/src/modules/studio/services/chat-run/server-registry'
 
 describe('agent runner endpoint resolver', () => {
+  it.each([
+    'https://api.anthropic.com',
+    'https://relay.example',
+    'https://relay.example/v1/',
+    'https://relay.example/v1/messages',
+    'https://api.z.ai/api/anthropic',
+    'https://api.minimax.io/anthropic',
+    'https://relay.example/tenant',
+    'https://relay.example/api/v4',
+  ])('keeps Ekko and Coding Agent Anthropic targets consistent for %s', baseUrl => {
+    const ekko = new AnthropicMessagesModelClient({
+      id: 'custom:relay', type: 'anthropic', requestStyle: 'anthropic-messages', baseUrl,
+    })
+    expect(ekko.requestTarget()).toBe(anthropicMessagesUrl(baseUrl))
+  })
+
   it('adds v1 for provider hosts without an API root path', () => {
     expect(chatCompletionsUrl('https://api.deepseek.com')).toBe('https://api.deepseek.com/v1/chat/completions')
     expect(responsesUrl('https://api.openai.com')).toBe('https://api.openai.com/v1/responses')
@@ -658,6 +675,24 @@ describe('coding agent terminal output sanitizer', () => {
 })
 
 describe('coding agent run state', () => {
+  it('restarts a global native runner when its selected model or effort changes', () => {
+    const manager = new CodingAgentRunManager()
+    ;(manager as any).ensureDbSession = () => {}
+    ;(manager as any).emitToChat = () => {}
+    manager.start({
+      agentSessionId: 'native-compat', agentId: 'qwen', mode: 'global', profile: 'default',
+      provider: 'global', model: 'native-model', reasoningEffort: 'high', sessionId: 'native-chat-compat',
+      command: 'qwen', args: [], shellCommand: 'qwen', workspaceDir: process.cwd(),
+      state: { messages: [], isWorking: false, events: [], queue: [] },
+    })
+    const input = { agentId: 'qwen', mode: 'global' as const, provider: 'global', model: 'native-model', reasoningEffort: 'high' }
+    try {
+      expect(manager.isSessionLaunchCompatible('native-chat-compat', input)).toBe(true)
+      expect(manager.isSessionLaunchCompatible('native-chat-compat', { ...input, model: 'other-model' })).toBe(false)
+      expect(manager.isSessionLaunchCompatible('native-chat-compat', { ...input, reasoningEffort: 'low' })).toBe(false)
+    } finally { manager.shutdown() }
+  })
+
   it('stores structured display input separately from the CLI prompt', () => {
     const manager = new CodingAgentRunManager()
     const addUserMessage = vi.fn()

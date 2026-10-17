@@ -87,3 +87,6 @@ groupChatRoutes.get('/api/studio/group-chat/rooms/:roomId/handoffs', ctrl.listRo
 groupChatRoutes.put('/api/studio/group-chat/rooms/:roomId/workspace', ctrl.updateRoomWorkspace)
 groupChatRoutes.get('/api/studio/group-chat/rooms/:roomId/summary', ctrl.getRoomSummary)
 groupChatRoutes.put('/api/studio/group-chat/rooms/:roomId/summary', ctrl.updateRoomSummary)
+
+groupChatRoutes.get('/api/studio/group-chat/rooms/:roomId/message-selection', ctrl.getRoomMessageSelection)
+groupChatRoutes.post('/api/studio/group-chat/rooms/:roomId/messages/delete', ctrl.deleteRoomMessages)

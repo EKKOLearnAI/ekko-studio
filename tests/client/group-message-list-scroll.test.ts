@@ -12,6 +12,11 @@ const mockCaptureViewportPosition = vi.hoisted(() => vi.fn())
 const mockRestoreViewportPosition = vi.hoisted(() => vi.fn())
 const mockIsNearBottom = vi.hoisted(() => vi.fn(() => true))
 
+vi.mock('naive-ui', async importOriginal => ({
+  ...await importOriginal<typeof import('naive-ui')>(),
+  useMessage: () => ({ error: vi.fn(), success: vi.fn() }),
+}))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,

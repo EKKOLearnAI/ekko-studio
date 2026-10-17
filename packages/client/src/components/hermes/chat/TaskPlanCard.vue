@@ -34,19 +34,19 @@ const stateLabel = computed(() => completed.value === props.plan.plan.length
 </template>
 
 <style scoped lang="scss">
-.task-plan-card { color: var(--text-primary, #1a1a1a); background: var(--msg-assistant-bg, #f5f5f5); width: 100%; max-width: 680px; border: 1px solid var(--border-color, #8884); border-radius: 12px; overflow: hidden; }
-.plan-header { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; border: 0; color: inherit; background: transparent; cursor: pointer; text-align: start; font: inherit; }
+.task-plan-card { color: var(--text-primary, #1a1a1a); background: var(--msg-assistant-bg, #f5f5f5); width: 100%; max-width: 680px; border: var(--border-width, 1px) solid var(--border-color, #8884); border-radius: var(--radius-component, 12px); overflow: hidden; }
+.plan-header { display: flex; align-items: center; gap: calc(12px * var(--spacing-scale, 1)); width: 100%; padding: calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)); border: 0; color: inherit; background: transparent; cursor: pointer; text-align: start; font: inherit; }
 .plan-header:focus-visible { outline: 2px solid var(--accent-primary, #333333); outline-offset: -3px; }
 .plan-title { font-weight: 600; }
-.plan-count { margin-inline-start: auto; font-size: 12px; opacity: .75; }
-.plan-body { padding: 0 16px 12px; }
+.plan-count { margin-inline-start: auto; font-size: calc(var(--font-size-base, 14px) * 12 / 14); opacity: .75; }
+.plan-body { padding: 0 calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)); }
 ol { list-style: none; padding: 0; margin: 0; }
-li { display: flex; align-items: baseline; gap: 10px; padding: 6px 0; }
+li { display: flex; align-items: baseline; gap: calc(10px * var(--spacing-scale, 1)); padding: 6px 0; }
 .step-icon { flex: 0 0 16px; }
 .step-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.step-status { flex-shrink: 0; font-size: 12px; opacity: .7; }
+.step-status { flex-shrink: 0; font-size: calc(var(--font-size-base, 14px) * 12 / 14); opacity: .7; }
 .completed .step-icon { color: var(--success, #2e7d32); }
 .in_progress .step-icon { color: var(--accent-primary, #333333); }
-.plan-explanation, .plan-state { margin: 8px 0 0; font-size: 12px; opacity: .7; overflow-wrap: anywhere; }
-@media (max-width: 480px) { .plan-header { gap: 8px; padding-inline: 12px; } .plan-body { padding-inline: 12px; } }
+.plan-explanation, .plan-state { margin: 8px 0 0; font-size: calc(var(--font-size-base, 14px) * 12 / 14); opacity: .7; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .plan-header { gap: calc(8px * var(--spacing-scale, 1)); padding-inline: 12px; } .plan-body { padding-inline: calc(12px * var(--spacing-scale, 1)); } }
 </style>

@@ -29,8 +29,9 @@ export interface AvailableModelGroup {
   label: string      // display name (e.g. "zai", "subrouter.ai")
   base_url: string
   models: string[]
-  /** Full unfiltered model catalog for this provider, used to restore hidden WUI models. */
+  /** Legacy server field. Full directories are now fetched with fetchProviderModelCatalog. */
   available_models?: string[]
+  model_count?: number
   api_key: string
   api_mode?: ProviderApiMode
   builtin?: boolean
@@ -146,6 +147,19 @@ export async function fetchAvailableModelsForProfile(profile: string): Promise<A
   const params = new URLSearchParams()
   params.set('profile', profile || 'default')
   return request<AvailableModelsResponse>(`/api/hermes/available-models?${params.toString()}`)
+}
+
+export interface ProviderModelCatalog {
+  provider: string
+  models: string[]
+  visible_models: string[]
+  model_aliases: Record<string, string>
+}
+
+export async function fetchProviderModelCatalog(provider: string, profile?: string): Promise<ProviderModelCatalog> {
+  const params = new URLSearchParams({ provider })
+  if (profile) params.set('profile', profile)
+  return request<ProviderModelCatalog>(`/api/hermes/provider-models?${params}`)
 }
 
 export async function fetchProviderModels(data: {

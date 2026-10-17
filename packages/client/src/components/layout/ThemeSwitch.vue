@@ -1,12 +1,19 @@
 <script setup lang="ts">
+import { useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 
-const { isDark, toggleBrightness } = useTheme()
+const { isDark, toggleBrightness, presetBusy } = useTheme()
+const message = useMessage()
+const { t } = useI18n()
+async function toggle() {
+  try { await toggleBrightness() } catch { message.error(t('theme.saveFailed')) }
+}
 </script>
 
 <template>
   <div class="theme-switch-container" style="display: flex; gap: 4px; align-items: center;">
-    <button class="theme-switch" :title="isDark ? 'Light mode' : 'Dark mode'" @click="toggleBrightness">
+    <button class="theme-switch" :title="isDark ? 'Light mode' : 'Dark mode'" :disabled="presetBusy" @click="toggle">
       <!-- Sun icon (shown in dark mode) -->
       <svg v-if="isDark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="5" />
@@ -36,7 +43,7 @@ const { isDark, toggleBrightness } = useTheme()
   height: 28px;
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-component, 4px);
   cursor: pointer;
   color: var(--text-muted);
   transition: color 0.15s ease, background-color 0.15s ease;

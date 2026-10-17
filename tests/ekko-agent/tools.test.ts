@@ -476,6 +476,7 @@ describe('ekko-agent tools', () => {
       'browser_type',
       'browser_vision',
       'code_exec',
+      'computer_use',
       'delegate_task',
       'read_file',
       'skill_list',

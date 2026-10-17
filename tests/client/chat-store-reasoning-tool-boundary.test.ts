@@ -850,7 +850,7 @@ describe('chat store reasoning/tool boundaries', () => {
     session.codingAgentId = 'codex'
     session.codingAgentMode = 'global'
     session.provider = 'should-not-send'
-    session.model = 'should-not-send'
+    session.model = 'native-selected'
     session.baseUrl = 'http://example.invalid'
     session.apiKey = 'secret'
     session.apiMode = 'chat_completions'
@@ -868,11 +868,11 @@ describe('chat store reasoning/tool boundaries', () => {
       mode: 'global',
     }))
     expect(body.provider).toBeUndefined()
-    expect(body.model).toBeUndefined()
+    expect(body.model).toBe('native-selected')
     expect(body.baseUrl).toBeUndefined()
     expect(body.apiKey).toBeUndefined()
     expect(body.apiMode).toBeUndefined()
-    expect(body.reasoning_effort).toBeUndefined()
+    expect(body.reasoning_effort).toBe('high')
   })
 
   it('sends the hidden API mode when starting a scoped Ekko run', async () => {

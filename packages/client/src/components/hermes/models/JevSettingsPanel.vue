@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { useModelCatalogNotice } from '@/composables/useModelCatalogNotice'
 import { NSpin, NAlert, NButton, NForm, NInput, NInputNumber, NPopconfirm, NSelect, NSpace, NSwitch, useMessage } from 'naive-ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
@@ -14,6 +15,7 @@ const settings = ref<JevSettings | null>(null)
 const apiKey = ref('')
 const loading = ref(true)
 const busy = ref(false)
+const catalogChanged = useModelCatalogNotice(() => busy.value)
 const error = ref('')
 const testResult = ref<{ model: string; durationMs: number } | null>(null)
 const routingStatus = computed(() => !settings.value?.groupMessageRoutingEnabled ? 'jev.groupRoutingDisabled' : !settings.value.hasApiKey ? 'common.notConfigured' : 'jev.groupRoutingReady')
@@ -64,7 +66,7 @@ async function perform(action: 'save' | 'delete' | 'test') {
         : await saveJevSettings(profile, { groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryRevisionEnabled, groupSummaryReviewTimeoutMs, workflowQualityEnabled, workflowQualityMinConfidence, workflowQualityTimeoutMs, groupMessageRoutingEnabled, groupHandoffReviewEnabled, groupLoopDetectionEnabled, groupMessageRoutingMinConfidence, groupMessageRoutingMode, groupMessageRoutingTimeoutMs, browserMatchEnabled, browserMatchCandidateLimit, browserMatchMinConfidence, browserMatchTimeoutMs, browserVerifyEnabled, browserVerifyMinConfidence, browserVerifyTimeoutMs, baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
           ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs,
           ...(apiKey.value.trim() ? { apiKey: apiKey.value.trim() } : {}) })
-      if (!disposed) { settings.value = result; apiKey.value = ''; message.success(t(action === 'delete' ? 'jev.deleted' : 'common.saved')) }
+      if (!disposed) { settings.value = result; apiKey.value = ''; message.success(t(action === 'delete' ? 'jev.deleted' : 'common.saved')); catalogChanged() }
     }
   } catch (err) { if (!disposed) error.value = errorKey(err) }
   finally { busy.value = false }
@@ -254,7 +256,7 @@ usePageLoadingTask(() => loading.value)
 
 .section-title {
   margin: 0 0 6px;
-  font-size: 18px;
+  font-size: calc(var(--font-size-base, 14px) * 18 / 14);
   color: $text-primary;
 }
 
@@ -262,8 +264,8 @@ usePageLoadingTask(() => loading.value)
 .card-hint {
   margin: 0;
   color: $text-secondary;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, 1.6);
   overflow-wrap: anywhere;
 }
 
@@ -273,30 +275,30 @@ usePageLoadingTask(() => loading.value)
 .jev-form {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: calc(24px * var(--spacing-scale, 1));
 }
 
 .config-grid,
 .connection-fields {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   align-items: start;
 }
 
 .config-card {
   min-width: 0;
-  padding: 20px;
-  border: 1px solid $border-color;
-  border-radius: 12px;
-  background: $bg-card;
+  padding: calc(20px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 12px);
+  background: var(--theme-card-bg, $bg-card);
 }
 
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 
   :deep(.n-switch) { flex-shrink: 0; }
 }
@@ -304,9 +306,9 @@ usePageLoadingTask(() => loading.value)
 .card-title,
 .group-title {
   color: $text-primary;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
-  line-height: 1.5;
+  line-height: var(--line-height, 1.5);
 }
 
 .card-title { margin: 0; overflow-wrap: anywhere; }
@@ -314,12 +316,12 @@ usePageLoadingTask(() => loading.value)
 
 .connection-fields {
   margin-top: 16px;
-  column-gap: 24px;
+  column-gap: calc(24px * var(--spacing-scale, 1));
 
   :deep(.setting-row) {
     flex-direction: column;
     align-items: stretch;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     padding: 0;
     border: 0;
   }
@@ -338,26 +340,26 @@ usePageLoadingTask(() => loading.value)
 .browser-options,
 .memory-advanced {
   margin-top: 16px;
-  border-top: 1px solid $border-light;
+  border-top: var(--border-width, 1px) solid $border-light;
 
   summary {
     cursor: pointer;
-    padding: 12px 0 0;
+    padding: calc(12px * var(--spacing-scale, 1)) 0 0;
     color: $text-primary;
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+    line-height: var(--line-height, 1.5);
   }
 
-  &[open] > summary { padding-bottom: 12px; }
+  &[open] > summary { padding-bottom: calc(12px * var(--spacing-scale, 1)); }
 }
 
 .settings-actions {
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 16px;
-  border-top: 1px solid $border-color;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding-top: calc(16px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-color;
 }
 
 .feedback { margin-bottom: 16px; }
@@ -369,7 +371,7 @@ usePageLoadingTask(() => loading.value)
 }
 
 @media (max-width: $breakpoint-mobile) {
-  .config-card { padding: 16px; }
+  .config-card { padding: calc(16px * var(--spacing-scale, 1)); }
   .config-card :deep(.input-md) { width: 100%; }
 }
 </style>

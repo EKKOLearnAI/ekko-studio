@@ -116,7 +116,7 @@ describe('branch session command', () => {
     getSessionDetailMock.mockReturnValue({
       messages: [
         { id: 1, session_id: 'session-1', role: 'user', content: 'Root prompt', display_role: null, display_content: null, timestamp: 101, tool_call_id: null, tool_calls: null, tool_name: null, token_count: null, finish_reason: null, reasoning: null, reasoning_details: null, reasoning_content: null },
-        { id: 2, session_id: 'session-1', role: 'assistant', content: 'Root answer', display_role: null, display_content: null, timestamp: 102, tool_call_id: null, tool_calls: null, tool_name: null, token_count: null, finish_reason: null, reasoning: null, reasoning_details: null, reasoning_content: null },
+        { id: 2, session_id: 'session-1', role: 'assistant', content: 'Root answer', run_marker: 'hermes_lineage:native-tip:4', selection_run_marker: 'legacy_run_2', display_role: null, display_content: null, timestamp: 102, tool_call_id: null, tool_calls: null, tool_name: null, token_count: null, finish_reason: null, reasoning: null, reasoning_details: null, reasoning_content: null },
       ],
     })
   })
@@ -236,7 +236,7 @@ describe('branch session command', () => {
       last_active: expect.any(Number),
       messages: [
         expect.objectContaining({ role: 'user', content: 'Root prompt' }),
-        expect.objectContaining({ role: 'assistant', content: 'Root answer' }),
+        expect.objectContaining({ role: 'assistant', content: 'Root answer', run_marker: 'hermes_lineage:native-tip:4', selection_run_marker: 'legacy_run_2' }),
       ],
     }))
     expect(addMessagesMock).not.toHaveBeenCalled()

@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
 import { readFileSync } from 'node:fs'
 import type { CodingAgentImageInput } from '../../protocol/types'
+import { logger } from '../../../studio/public/logging'
 
 interface Pending {
   resolve(value: any): void
@@ -31,7 +32,7 @@ export class NativeAcpTurn {
           const line = this.buffer.slice(0, end).trim()
           this.buffer = this.buffer.slice(end + 1)
           if (line.length > 16 * 1024 * 1024) throw new Error('ACP message exceeds 16 MiB')
-          if (line) this.receive(JSON.parse(line))
+          if (line) this.receiveLine(line)
         }
         if (this.buffer.length > 16 * 1024 * 1024) throw new Error('ACP message exceeds 16 MiB')
       } catch (error) { this.dispose(error instanceof Error ? error : new Error(String(error))) }
@@ -39,6 +40,18 @@ export class NativeAcpTurn {
     child.on('error', error => this.dispose(error))
     child.on('close', () => this.dispose(new Error('ACP connection closed before the request completed')))
     child.stdin?.on('error', error => this.dispose(error))
+  }
+
+  // A valid ACP frame is always a JSON object, so any line not starting with '{'
+  // is dependency stdout noise (e.g. the MCP SDK's console.debug), not the
+  // protocol. Skip and warn instead of disposing the whole turn; only a line that
+  // looks like JSON but fails to parse is a real protocol break and stays fatal.
+  private receiveLine(line: string) {
+    if (!line.startsWith('{')) {
+      logger.warn({ line: line.slice(0, 500) }, 'skipping non-JSON line on ACP stdout')
+      return
+    }
+    this.receive(JSON.parse(line))
   }
 
   private write(message: object) {
@@ -87,7 +100,7 @@ export class NativeAcpTurn {
     else pending.resolve(message.result)
   }
 
-  async prompt(input: { cwd: string; text: string; images?: CodingAgentImageInput[]; nativeSessionId?: string; mcpServers: object[] }): Promise<string> {
+  async prompt(input: { cwd: string; text: string; images?: CodingAgentImageInput[]; nativeSessionId?: string; mcpServers: object[]; model?: string; reasoningEffort?: string }): Promise<string> {
     const initialized = await this.request('initialize', {
       protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'ekko-studio', version: '1.0.0' },
     })
@@ -111,6 +124,21 @@ export class NativeAcpTurn {
     this.sessionId = session?.sessionId || input.nativeSessionId
     if (!this.sessionId || typeof this.sessionId !== 'string') throw new Error('ACP returned no session ID')
     this.callbacks.session(this.sessionId)
+    let options = Array.isArray(session.configOptions) ? session.configOptions : []
+    if (input.model) {
+      const selector = options.find((option: any) => option.category === 'model' || option.id === 'model')
+      if (selector) {
+        const configured = await this.request('session/set_config_option', { sessionId: this.sessionId, configId: selector.id, value: input.model })
+        options = configured.configOptions || options
+      } else {
+        await this.request('session/set_model', { sessionId: this.sessionId, modelId: input.model })
+      }
+    }
+    if (input.reasoningEffort) {
+      const selector = options.find((option: any) => option.category === 'thought_level' || option.id === 'reasoning_effort')
+      if (!selector) throw new Error('This CLI does not expose a reasoning effort selector')
+      await this.request('session/set_config_option', { sessionId: this.sessionId, configId: selector.id, value: input.reasoningEffort })
+    }
     const prompt: any[] = input.text ? [{ type: 'text', text: input.text }] : []
     for (const image of input.images || []) prompt.push({
       type: 'image', mimeType: image.mediaType === 'image/jpg' ? 'image/jpeg' : image.mediaType || 'image/png',

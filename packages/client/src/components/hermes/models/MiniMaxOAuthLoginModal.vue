@@ -163,29 +163,29 @@ onUnmounted(stopPolling)
 }
 
 .minimax-login {
-  padding: 8px 0;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
 }
 
 .minimax-login__state {
   min-height: 140px;
   justify-content: center;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 }
 
 .minimax-login__hint,
 .minimax-login__error {
   margin: 0;
   text-align: center;
-  line-height: 1.6;
+  line-height: var(--line-height, 1.6);
 }
 
 .minimax-login__code {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 20px;
-  border: 1px solid var(--n-border-color, #e0e0e6);
-  border-radius: 8px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--n-border-color, #e0e0e6);
+  border-radius: var(--radius-component, 8px);
   color: inherit;
   background: transparent;
   cursor: pointer;

@@ -42,6 +42,36 @@ function modelClient(responder: (request: ModelRequest, call: number) => ModelRe
   }
 }
 
+describe('Computer Use runtime ownership', () => {
+  it('provides a fresh scope per run and closes it on completion and failure', async () => {
+    const scopes: AbortSignal[] = []
+    const tools = new AgentToolRegistry()
+    tools.register({
+      definition: { name: 'inspect_scope', parameters: { type: 'object', properties: {} } },
+      execute: async (_args, context) => {
+        scopes.push(context!.computerUseSessionSignal!)
+        expect(context!.computerUseSessionSignal!.aborted).toBe(false)
+        return { ok: true, content: 'scope recorded' }
+      },
+    })
+    const client = modelClient((_request, call) => call % 2
+      ? { content: '', toolCalls: [{ id: String(call), name: 'inspect_scope', arguments: {} }] }
+      : { content: 'done' })
+    const runtime = new AgentRuntime({ modelClient: client, tools })
+    await runtime.run({ messages: ['first'] })
+    await runtime.run({ messages: ['second'] })
+    expect(scopes).toHaveLength(2)
+    expect(scopes[0]).not.toBe(scopes[1])
+    expect(scopes.every(scope => scope.aborted)).toBe(true)
+    const failing = modelClient((_request, call) => {
+      if (call > 1) throw new Error('fixture model failed')
+      return { content: '', toolCalls: [{ id: 'fail', name: 'inspect_scope', arguments: {} }] }
+    })
+    await expect(new AgentRuntime({ modelClient: failing, tools, maxModelRetries: 0 }).run({ messages: ['fail'] })).rejects.toThrow('fixture model failed')
+    expect(scopes[2].aborted).toBe(true)
+  })
+})
+
 function skillContentHash(content: string): string {
   return createHash('sha256').update(content).digest('hex')
 }

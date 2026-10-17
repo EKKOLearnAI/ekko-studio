@@ -41,6 +41,7 @@ bridge_runtime._hermes_home = lambda *_args, **_kwargs: Path(tempfile.gettempdir
 bridge_runtime._install_execute_code_approval_memory_patch = lambda *_args, **_kwargs: None
 bridge_runtime._jsonable = lambda value: value
 bridge_runtime._load_cfg = lambda *_args, **_kwargs: {}
+bridge_runtime._load_disabled_toolsets = lambda *_args, **_kwargs: None
 bridge_runtime._load_enabled_toolsets = lambda *_args, **_kwargs: []
 bridge_runtime._load_fallback_model = lambda *_args, **_kwargs: None
 bridge_runtime._load_reasoning_config = lambda *_args, **_kwargs: {}
@@ -74,6 +75,31 @@ spec.loader.exec_module(bridge_pool)
 `
 
 describe('agent bridge /learn command', () => {
+  it('expands /plan with the native planning prompt', () => {
+    const result = runPython(`${harness}
+agent_pkg = types.ModuleType("agent")
+agent_pkg.__path__ = []
+sys.modules["agent"] = agent_pkg
+plan_prompt = types.ModuleType("agent.plan_prompt")
+plan_prompt.build_plan_prompt = lambda arg: "planning only: " + arg
+sys.modules["agent.plan_prompt"] = plan_prompt
+pool = bridge_pool.AgentPool()
+print(json.dumps(pool.dispatch_command("s", "/plan implement a parser", "work")))
+`)
+    expect(result).toMatchObject({ handled: true, type: 'plan', message: 'planning only: implement a parser' })
+  })
+
+  it('explains when an older runtime does not implement /plan', () => {
+    const result = runPython(`${harness}
+agent_pkg = types.ModuleType("agent")
+agent_pkg.__path__ = []
+sys.modules["agent"] = agent_pkg
+pool = bridge_pool.AgentPool()
+print(json.dumps(pool.dispatch_command("s", "/plan task", "work")))
+`)
+    expect(result).toMatchObject({ handled: false, type: 'plan' })
+    expect(result.message).toContain('newer Hermes Agent runtime')
+  })
   it('returns a generated learn prompt as a handled bridge command', () => {
     const result = runPython(`${harness}
 agent_pkg = types.ModuleType("agent")

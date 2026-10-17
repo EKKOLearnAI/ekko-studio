@@ -33,6 +33,6 @@ const { t } = useI18n()
 .page-content {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
 }
 </style>

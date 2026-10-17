@@ -52,6 +52,8 @@ vi.mock('@/api/client', () => ({
 }))
 
 vi.mock('@/api/studio/sessions', () => ({
+  deleteSessionMessages: vi.fn(),
+  fetchSessionMessagesPage: vi.fn(async () => undefined),
   archiveSession: vi.fn(),
   deleteSession: vi.fn(),
   fetchSession: vi.fn(),
@@ -71,7 +73,7 @@ vi.mock('@/utils/completion-sound', () => ({
 }))
 
 import { useChatStore, type Session } from '@/stores/hermes/chat'
-import { fetchSessions } from '@/api/studio/sessions'
+import { fetchSessions, fetchSessionMessagesPage, deleteSessionMessages } from '@/api/studio/sessions'
 
 function makeSession(): Session {
   return {
@@ -91,6 +93,83 @@ describe('chat store session.command fanout', () => {
     chatApi.sessionTitleUpdatedHandlers = []
     chatApi.startRunViaSocket.mockReturnValue({ abort: vi.fn() })
     setActivePinia(createPinia())
+  })
+
+  it('does not replace a live transcript when a pending selection hydration is cancelled', async () => {
+    const store = useChatStore()
+    const session = makeSession()
+    store.sessions = [session]
+    store.activeSessionId = session.id
+    store.activeSession = store.sessions[0]
+    let resolve!: (value: any) => void
+    vi.mocked(fetchSessionMessagesPage).mockReturnValueOnce(new Promise(done => { resolve = done }))
+    let eligible = true
+    const pending = store.refreshActiveSession({ canApply: () => eligible })
+    eligible = false
+    store.activeSession.messages.push({ id: 'live', role: 'assistant', content: 'new live output', timestamp: 1 })
+    resolve({ session, messages: [], total: 0, hasMore: false })
+    expect(await pending).toBe(false)
+    expect(store.messages.map(m => m.content)).toEqual(['new live output'])
+  })
+
+  it('syncs deletions from another tab, rejects stale page reads and handles the API response idempotently', async () => {
+    const store = useChatStore()
+    const session = { ...makeSession(), messageTotal: 3, messageCount: 3, contextTokens: 19_000, inputTokens: 100_000, outputTokens: 36_100,
+      messages: [
+        { id: '1', role: 'user', content: 'keep', timestamp: 1 },
+        { id: '2_call', storedMessageId: 2, role: 'tool', content: 'remove', timestamp: 2, runMarker: 'r' },
+        { id: '3', role: 'assistant', content: 'remove', timestamp: 3, runMarker: 'r' },
+      ],
+    } as Session
+    store.sessions = [session]
+    store.activeSessionId = session.id
+    store.activeSession = store.sessions[0]
+    chatApi.resumeSession.mockImplementationOnce((sessionId, onResumed) => {
+      onResumed({ session_id: sessionId, isWorking: false, events: [{ event: 'compression.completed', data: {
+        event: 'compression.completed', compressed: true, beforeTokens: 1200, afterTokens: 400, totalMessages: 10,
+      } }] })
+      return {} as any
+    })
+    await store.switchSession(session.id)
+    const compression = { ...store.compressionState }
+    expect(compression.compressed).toBe(true)
+    let resolveOld!: (value: any) => void
+    vi.mocked(fetchSessionMessagesPage).mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    const pending = store.refreshActiveSession()
+    const result = { deleted: 2, deletedGroups: 1, messageIds: [2, 3], historyRevision: 1, contextTokens: 18_000 }
+    chatApi.sessionCommandHandlers[0]({ event: 'session.command', session_id: session.id, action: 'messages_deleted', ...result })
+    expect(store.messages.map(m => m.id)).toEqual(['1'])
+    expect(store.activeSession).toMatchObject({ contextTokens: 18_000, inputTokens: 100_000, outputTokens: 36_100 })
+    expect(store.activeSession?.messageCount).toBe(1)
+    expect(store.compressionState).toEqual(compression)
+    resolveOld({ messages: [], session: {}, total: 3 })
+    expect(await pending).toBe(false)
+    vi.mocked(deleteSessionMessages).mockResolvedValueOnce(result)
+    await store.deleteMessages(session.id, [2], 0)
+    expect(store.activeSession?.messageCount).toBe(1)
+    expect(store.messages.map(m => m.id)).toEqual(['1'])
+  })
+
+  it('does not let the automatic deletion refresh erase a subsequent turn', async () => {
+    const store = useChatStore()
+    const session = { ...makeSession(), messageTotal: 2, messages: [
+      { id: '1', role: 'user', content: 'keep', timestamp: 1 },
+      { id: '2', role: 'assistant', content: 'delete', timestamp: 2 },
+    ] } as Session
+    store.sessions = [session]
+    store.activeSessionId = session.id
+    store.activeSession = store.sessions[0]
+    let resolve!: (value: any) => void
+    vi.mocked(fetchSessionMessagesPage).mockReturnValueOnce(new Promise(done => { resolve = done }))
+    vi.mocked(deleteSessionMessages).mockResolvedValueOnce({ deleted: 1, deletedGroups: 1, messageIds: [2], historyRevision: 1, contextTokens: 10 })
+    await store.deleteMessages(session.id, [2], 0)
+    store.activeSession.messages.push(
+      { id: '3', role: 'user', content: 'next question', timestamp: 3 },
+      { id: '4', role: 'assistant', content: 'next answer', timestamp: 4 },
+    )
+    resolve({ session, messages: [{ id: 1, role: 'user', content: 'keep', timestamp: 1 }], total: 1, hasMore: false })
+    await Promise.resolve()
+    expect(store.messages.map(m => m.content)).toEqual(['keep', 'next question', 'next answer'])
   })
 
   it.each(['context', 'usage', 'status', 'compact'])('sends Ekko /%s as a built-in command with compatible transport', async command => {

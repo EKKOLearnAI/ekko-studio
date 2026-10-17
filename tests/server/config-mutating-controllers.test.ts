@@ -85,6 +85,86 @@ describe('config mutating controllers', () => {
     expect(config.terminal.backend).toBe('local')
   })
 
+  it('setConfigModel keeps provider-independent keys in the model section', async () => {
+    await writeFile(join(hermesHome, 'config.yaml'), [
+      'model:',
+      '  default: old',
+      '  provider: custom:glm',
+      '  context_length: 256000',
+      '',
+    ].join('\n'), 'utf-8')
+    const { setConfigModel } = await loadModelsController()
+
+    await setConfigModel(makeCtx({ default: 'glm-5.1', provider: 'custom:glm' }))
+
+    const config = YAML.load(await readFile(join(hermesHome, 'config.yaml'), 'utf-8')) as any
+    expect(config.model).toEqual({ default: 'glm-5.1', provider: 'custom:glm', context_length: 256000 })
+  })
+
+  it('setConfigModel keeps the bound provider when the request omits it', async () => {
+    await writeFile(join(hermesHome, 'config.yaml'), [
+      'model:',
+      '  default: old',
+      '  provider: custom:glm',
+      '  context_length: 256000',
+      '',
+    ].join('\n'), 'utf-8')
+    const { setConfigModel } = await loadModelsController()
+
+    await setConfigModel(makeCtx({ default: 'glm-5.1' }))
+
+    const config = YAML.load(await readFile(join(hermesHome, 'config.yaml'), 'utf-8')) as any
+    expect(config.model).toEqual({ default: 'glm-5.1', provider: 'custom:glm', context_length: 256000 })
+  })
+
+  it('setConfigModel drops provider-scoped credentials only when the provider changes', async () => {
+    const fixture = [
+      'model:',
+      '  default: old',
+      '  provider: custom:old',
+      '  context_length: 256000',
+      '  base_url: http://127.0.0.1:8080/v1',
+      '  api_key: sk-test',
+      '',
+    ].join('\n')
+    const { setConfigModel } = await loadModelsController()
+
+    await writeFile(join(hermesHome, 'config.yaml'), fixture, 'utf-8')
+    await setConfigModel(makeCtx({ default: 'glm-5.1', provider: 'custom:old' }))
+    let config = YAML.load(await readFile(join(hermesHome, 'config.yaml'), 'utf-8')) as any
+    expect(config.model.base_url).toBe('http://127.0.0.1:8080/v1')
+    expect(config.model.api_key).toBe('sk-test')
+    expect(config.model.context_length).toBe(256000)
+
+    await writeFile(join(hermesHome, 'config.yaml'), fixture, 'utf-8')
+    await setConfigModel(makeCtx({ default: 'glm-5.1', provider: 'custom:new' }))
+    config = YAML.load(await readFile(join(hermesHome, 'config.yaml'), 'utf-8')) as any
+    expect(config.model).toEqual({ default: 'glm-5.1', provider: 'custom:new', context_length: 256000 })
+  })
+
+  it('setConfigModel preserves credentials when the existing provider is unspecified', async () => {
+    await writeFile(join(hermesHome, 'config.yaml'), [
+      'model:',
+      '  default: old',
+      '  context_length: 256000',
+      '  base_url: http://127.0.0.1:8080/v1',
+      '  api_key: sk-test',
+      '',
+    ].join('\n'), 'utf-8')
+    const { setConfigModel } = await loadModelsController()
+
+    await setConfigModel(makeCtx({ default: 'glm-5.1', provider: 'custom:new' }))
+
+    const config = YAML.load(await readFile(join(hermesHome, 'config.yaml'), 'utf-8')) as any
+    expect(config.model).toEqual({
+      default: 'glm-5.1',
+      provider: 'custom:new',
+      context_length: 256000,
+      base_url: 'http://127.0.0.1:8080/v1',
+      api_key: 'sk-test',
+    })
+  })
+
   it('setConfigModel uses the requested profile header when auth has not populated state.profile', async () => {
     const researchDir = join(hermesHome, 'profiles', 'research')
     await mkdir(researchDir, { recursive: true })

@@ -196,7 +196,7 @@ onUnmounted(() => {
 
 .conversation-monitor__sidebar {
   width: 260px;
-  border-inline-end: 1px solid $border-color;
+  border-inline-end: var(--border-width, 1px) solid $border-color;
   overflow-y: auto;
   flex-shrink: 0;
   scrollbar-gutter: stable;
@@ -207,7 +207,7 @@ onUnmounted(() => {
 
   &::-webkit-scrollbar-thumb {
     background: rgba($text-muted, 0.3);
-    border-radius: 4px;
+    border-radius: var(--radius-component, 4px);
   }
 
   &::-webkit-scrollbar-thumb:hover {
@@ -218,11 +218,11 @@ onUnmounted(() => {
 .conversation-monitor__session {
   width: 100%;
   border: 0;
-  border-bottom: 1px solid rgba($border-color, 0.6);
+  border-bottom: var(--border-width, 1px) solid rgba($border-color, 0.6);
   background: transparent;
   color: inherit;
   text-align: start;
-  padding: 12px 14px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
   cursor: pointer;
 
   &.active {
@@ -241,7 +241,7 @@ onUnmounted(() => {
 .conversation-monitor__message-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .conversation-monitor__session-title,
@@ -250,7 +250,7 @@ onUnmounted(() => {
 }
 
 .conversation-monitor__session-live {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $accent-primary;
 }
 
@@ -258,7 +258,7 @@ onUnmounted(() => {
 .conversation-monitor__session-preview,
 .conversation-monitor__detail-meta,
 .conversation-monitor__message-meta {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
@@ -276,35 +276,35 @@ onUnmounted(() => {
 }
 
 .conversation-monitor__detail-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(16px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 }
 
 .conversation-monitor__messages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: calc(16px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .conversation-monitor__message {
-  padding: 12px 14px;
-  border-radius: 10px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 10px);
   background: rgba($bg-secondary, 0.8);
 
   &.role-user {
-    border: 1px solid rgba($accent-primary, 0.18);
+    border: var(--border-width, 1px) solid rgba($accent-primary, 0.18);
   }
 
   &.role-assistant {
-    border: 1px solid rgba($border-color, 0.9);
+    border: var(--border-width, 1px) solid rgba($border-color, 0.9);
   }
 }
 
 .conversation-monitor__empty {
-  padding: 24px;
+  padding: calc(24px * var(--spacing-scale, 1));
   color: $text-muted;
 }
 
@@ -321,7 +321,7 @@ onUnmounted(() => {
     width: 100%;
     max-height: 220px;
     border-inline-end: 0;
-    border-bottom: 1px solid $border-color;
+    border-bottom: var(--border-width, 1px) solid $border-color;
     flex-shrink: 0;
   }
 

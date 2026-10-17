@@ -657,7 +657,9 @@ export async function createProfile(name: string, clone?: boolean): Promise<stri
 export async function deleteProfile(name: string): Promise<boolean> {
   try {
     await execHermesWithBin(resolveHermesBin(), ['profile', 'delete', name, '--yes'], {
-      timeout: 10000,
+      // Hermes settles gateway/session identity and closes profile resources before
+      // removing files. That cleanup can exceed 10 seconds even for an idle profile.
+      timeout: 120000,
       ...execOpts,
     })
     return true

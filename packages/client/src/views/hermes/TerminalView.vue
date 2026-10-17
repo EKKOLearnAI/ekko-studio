@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PageHeader from '@/components/layout/PageHeader.vue'
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -9,9 +9,12 @@ import { getApiKey, getBaseUrlValue } from "@/api/client";
 import { NSpin, NButton, NPopconfirm, NTooltip, NSelect, useMessage } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import type { ITheme } from "@xterm/xterm";
+import { useTheme } from "@/composables/useTheme";
+import { terminalTheme } from "@/styles/theme-integrations";
 
 const { t } = useI18n();
 const message = useMessage();
+const { customization, isDark } = useTheme();
 
 // ─── Terminal themes ────────────────────────────────────────────
 
@@ -234,7 +237,8 @@ const terminalRef = ref<HTMLDivElement | null>(null);
 const showSessions = ref(true);
 const sessions = ref<SessionInfo[]>([]);
 const activeSessionId = ref<string | null>(null);
-const selectedTheme = ref(localStorage.getItem(STORAGE_KEY_THEME) || "default");
+const storedTheme = localStorage.getItem(STORAGE_KEY_THEME);
+const selectedTheme = ref(storedTheme && (storedTheme === "studio" || TERMINAL_THEMES[storedTheme]) ? storedTheme : "studio");
 
 let ws: WebSocket | null = null;
 // Keep all terminal instances alive, only dispose on close
@@ -257,15 +261,24 @@ const activeSession = computed(
 );
 
 const themeOptions = computed(() =>
-  Object.entries(TERMINAL_THEMES).map(([key, val]) => ({
-    label: val.label,
-    value: key,
-  })),
+  [{ label: t("theme.customization.followStudio"), value: "studio" },
+    ...Object.entries(TERMINAL_THEMES).map(([key, val]) => ({ label: val.label, value: key }))],
 );
 
-const terminalBg = computed(
-  () => TERMINAL_THEMES[selectedTheme.value]?.theme.background ?? "#1a1a2e",
-);
+const activeTerminalTheme = computed(() => selectedTheme.value === "studio"
+  ? terminalTheme(customization.value, isDark.value)
+  : TERMINAL_THEMES[selectedTheme.value].theme);
+const terminalBg = computed(() => selectedTheme.value === "studio" ? "transparent" : activeTerminalTheme.value.background);
+watch([activeTerminalTheme, customization], () => {
+  for (const entry of termMap.values()) {
+    entry.term.options.theme = { ...activeTerminalTheme.value };
+    entry.term.options.fontSize = customization.value.fontSize;
+  }
+  if (terminalRef.value?.clientWidth && terminalRef.value?.clientHeight) {
+    tryFit();
+    sendResize();
+  }
+});
 
 // ─── WebSocket ──────────────────────────────────────────────────
 
@@ -387,9 +400,10 @@ function getOrCreateTerm(id: string): { term: Terminal; fitAddon: FitAddon } {
   if (!entry) {
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize: customization.value.fontSize,
+      allowTransparency: true,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: { ...TERMINAL_THEMES[selectedTheme.value].theme },
+      theme: { ...activeTerminalTheme.value },
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
@@ -533,11 +547,6 @@ function handleTerminalTouchEnd() {
 function applyTheme(themeName: string) {
   selectedTheme.value = themeName;
   localStorage.setItem(STORAGE_KEY_THEME, themeName);
-  const themeObj = TERMINAL_THEMES[themeName]?.theme;
-  if (!themeObj) return;
-  for (const entry of termMap.values()) {
-    entry.term.options.theme = { ...themeObj };
-  }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -751,7 +760,7 @@ onUnmounted(() => {
 
 .session-list {
   width: 220px;
-  border-inline-end: 1px solid $border-color;
+  border-inline-end: var(--border-width, 1px) solid $border-color;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -773,7 +782,7 @@ onUnmounted(() => {
     top: 0;
     height: 100%;
     z-index: 10;
-    background: $bg-card;
+    background: var(--theme-card-bg, $bg-card);
     box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
     width: 280px;
 
@@ -788,18 +797,18 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px;
+  padding: calc(12px * var(--spacing-scale, 1));
   flex-shrink: 0;
 }
 
 .session-list-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .session-list-title {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
   color: $text-muted;
   text-transform: uppercase;
@@ -809,12 +818,12 @@ onUnmounted(() => {
 .session-items {
   flex: 1;
   overflow-y: auto;
-  padding: 0 6px 12px;
+  padding: 0 calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
 }
 
 .session-empty {
-  padding: 16px 10px;
-  font-size: 12px;
+  padding: calc(16px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   text-align: center;
 }
@@ -824,7 +833,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 8px 10px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   border: none;
   background: none;
   border-radius: $radius-sm;
@@ -861,7 +870,7 @@ onUnmounted(() => {
 
 .session-item-title {
   display: block;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -870,26 +879,26 @@ onUnmounted(() => {
 .session-item-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   margin-top: 2px;
 }
 
 .session-item-shell {
-  font-size: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   color: $accent-primary;
   background: rgba(var(--accent-primary-rgb), 0.08);
-  padding: 0 5px;
-  border-radius: 3px;
-  line-height: 16px;
+  padding: 0 calc(5px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 3px);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
 }
 
 .session-item-time {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
 }
 
 .session-item-status {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
   font-style: italic;
 }
@@ -897,12 +906,12 @@ onUnmounted(() => {
 .session-item-delete {
   flex-shrink: 0;
   opacity: 0.5;
-  padding: 2px;
+  padding: calc(2px * var(--spacing-scale, 1));
   border: none;
   background: none;
   color: $text-muted;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius-component, 3px);
   transition: all $transition-fast;
 
   &:hover {
@@ -917,7 +926,7 @@ onUnmounted(() => {
   background: none;
   cursor: pointer;
   color: $text-secondary;
-  padding: 4px;
+  padding: calc(4px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
 
   &:hover {
@@ -939,22 +948,22 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 21px 20px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(21px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   flex-shrink: 0;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   overflow: hidden;
   flex: 1;
   min-width: 0;
 }
 
 .header-session-title {
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
   font-weight: 600;
   color: $text-primary;
   white-space: nowrap;
@@ -965,7 +974,7 @@ onUnmounted(() => {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   flex-shrink: 0;
 }
 
@@ -992,11 +1001,11 @@ onUnmounted(() => {
   flex: 1;
   border-radius: $radius-md;
   overflow: hidden;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
 
   :deep(.xterm) {
     height: 100%;
-    padding: 8px;
+    padding: calc(8px * var(--spacing-scale, 1));
   }
 
   :deep(.xterm-viewport) {
@@ -1060,11 +1069,11 @@ onUnmounted(() => {
   }
 
   .terminal-header {
-    padding: 16px 12px 16px 52px;
+    padding: calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) 52px;
   }
 
   .terminal-container {
-    padding: 8px;
+    padding: calc(8px * var(--spacing-scale, 1));
   }
 
   .terminal-xterm {

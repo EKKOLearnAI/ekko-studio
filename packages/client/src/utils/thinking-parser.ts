@@ -69,7 +69,7 @@ export function parseThinking(content: string, opts: ParseOptions): ParsedThinki
   const openMatch = rest.match(openRe)
   if (openMatch) {
     body += rest.slice(0, openMatch.index)
-    if (opts.streaming) {
+    if (opts.streaming || (lastIndex === 0 && body.trim() === '')) {
       pending = openMatch[2]
     } else {
       body += rest.slice(openMatch.index!)

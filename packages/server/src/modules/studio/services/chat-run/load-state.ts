@@ -7,6 +7,8 @@ import { getRecordedUsageTotals, getUsage } from '../../repositories/usage-store
 import { logger } from '../../public/logging'
 import { handleMessage } from './message-format'
 import { estimateUsageTokensFromMessages } from './usage'
+import { estimateSessionContextTokens } from './context-usage'
+import { getSessionContextUsageEstimate } from '../../repositories/session-context-usage'
 import type { ChatRunSource, SessionState } from './types'
 import { historySessionSource, isBuiltinEkkoAgent } from '../../contracts/history-source'
 
@@ -52,6 +54,11 @@ export function resolveRunSource(source?: string, sessionId?: string): ChatRunSo
 }
 
 export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<string, SessionState>): Promise<SessionState> {
+  return readSessionStateFromDb(sid)
+}
+
+/** Synchronous SQLite hydration keeps cache creation atomic with run admission. */
+export function readSessionStateFromDb(sid: string): SessionState {
   try {
     const displayStartedAt = Date.now()
     const actualDetail = getSessionDetailPaginated(sid)
@@ -77,14 +84,18 @@ export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<strin
         ? 'coding_agent'
         : 'hermes'
     const totals = getRecordedUsageTotals(sid, usageSource)
-    const pageUsage = estimateUsageTokensFromMessages(messages)
     const latestUsage = getUsage(sid)
     const hasPersistedUsage = !!latestUsage || totals.inputTokens > 0 || totals.outputTokens > 0
+    const pageUsage = hasPersistedUsage ? totals : estimateUsageTokensFromMessages(messages)
     inputTokens = hasPersistedUsage ? totals.inputTokens : pageUsage.inputTokens
     outputTokens = hasPersistedUsage ? totals.outputTokens : pageUsage.outputTokens
     // Cursor reports aggregate turn usage, not a current context snapshot.
-    if (latestUsage && (session?.agent !== 'cursor' && (session?.agent !== 'antigravity' && !isNativeCodingAgent(session?.agent)))) {
+    if (latestUsage && (!session?.history_cleared_at || latestUsage.created_at > session.history_cleared_at)
+      && (session?.agent !== 'cursor' && (session?.agent !== 'antigravity' && !isNativeCodingAgent(session?.agent)))) {
       contextTokens = Number(latestUsage.input_tokens || 0) + Number(latestUsage.output_tokens || 0)
+    }
+    if (contextTokens == null && usageSource !== 'coding_agent') {
+      contextTokens = getSessionContextUsageEstimate(sid)?.tokens ?? estimateSessionContextTokens(sid)
     }
 
     logger.info('[chat-run-socket] loaded session %s from DB (%d messages)', sid, messages.length)

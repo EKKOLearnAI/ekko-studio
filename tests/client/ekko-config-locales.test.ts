@@ -8,6 +8,7 @@ import ja from '../../packages/client/src/i18n/locales/ja'
 import ko from '../../packages/client/src/i18n/locales/ko'
 import pt from '../../packages/client/src/i18n/locales/pt'
 import ru from '../../packages/client/src/i18n/locales/ru'
+import tr from '../../packages/client/src/i18n/locales/tr'
 import zhTW from '../../packages/client/src/i18n/locales/zh-TW'
 import zh from '../../packages/client/src/i18n/locales/zh'
 
@@ -18,6 +19,12 @@ function placeholders(value: string): string[] {
 }
 
 describe('Ekko configuration locale coverage', () => {
+  it('includes Computer Use strings in the partial Turkish locale', () => {
+    const keys = Object.keys(en.ekkoConfig).filter(key => key.startsWith('computerUse'))
+    expect(Object.keys(tr.ekkoConfig)).toEqual(expect.arrayContaining(keys))
+    for (const value of Object.values(tr.ekkoConfig)) expect(value.trim()).not.toBe('')
+  })
+
   it('defines every Ekko message and interpolation in every supported locale', () => {
     const englishKeys = Object.keys(en.ekkoConfig).sort()
 

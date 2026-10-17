@@ -222,7 +222,7 @@ async function testCompletionNotification() {
 .notify-controls {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .link-open-target-select {
@@ -232,6 +232,6 @@ async function testCompletionNotification() {
 .chat-input-height-controls {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 </style>

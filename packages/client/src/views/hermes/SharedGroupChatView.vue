@@ -681,17 +681,17 @@ onUnmounted(() => {
 .agent-link-description {
     margin: 0 0 18px;
     color: $text-secondary;
-    line-height: 1.6;
+    line-height: var(--line-height, 1.6);
 }
 
 .agent-link-warning,
 .agent-link-status,
 .agent-link-error {
     margin: 0 0 14px;
-    padding: 10px 12px;
-    border-radius: 9px;
-    font-size: 13px;
-    line-height: 1.5;
+    padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 9px);
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+    line-height: var(--line-height, 1.5);
 }
 
 .agent-link-warning,
@@ -714,11 +714,11 @@ onUnmounted(() => {
 .agent-link-form,
 .agent-link-code {
     display: grid;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
 
     label {
         color: $text-primary;
-        font-size: 13px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
         font-weight: 600;
     }
 }
@@ -726,7 +726,7 @@ onUnmounted(() => {
 .agent-link-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .agent-link-code {
@@ -735,8 +735,8 @@ onUnmounted(() => {
     p {
         margin: 0;
         color: $text-muted;
-        font-size: 12px;
-        line-height: 1.5;
+        font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+        line-height: var(--line-height, 1.5);
     }
 }
 
@@ -745,7 +745,7 @@ onUnmounted(() => {
     height: 100%;
     display: grid;
     place-items: center;
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
 }
 
 
@@ -755,7 +755,7 @@ onUnmounted(() => {
     height: 100%;
     display: grid;
     place-items: center;
-    padding: 24px;
+    padding: calc(24px * var(--spacing-scale, 1));
     overflow-y: auto;
     background:
         radial-gradient(circle at 15% 15%, rgba(var(--accent-primary-rgb), 0.16), transparent 34%),
@@ -766,10 +766,10 @@ onUnmounted(() => {
 .invite-card {
     box-sizing: border-box;
     width: min(100%, 430px);
-    padding: 38px;
-    border: 1px solid $border-color;
-    border-radius: 24px;
-    background: $bg-main-surface;
+    padding: calc(38px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 24px);
+    background: var(--theme-content-bg, $bg-main-surface);
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.14);
 }
 
@@ -778,7 +778,7 @@ onUnmounted(() => {
     width: 52px;
     height: 52px;
     margin-bottom: 24px;
-    border-radius: 14px;
+    border-radius: var(--radius-component, 14px);
 }
 
 .invite-heading {
@@ -788,20 +788,20 @@ onUnmounted(() => {
         margin: 5px 0 10px;
         color: $text-primary;
         font-size: clamp(26px, 5vw, 34px);
-        line-height: 1.15;
+        line-height: var(--line-height, 1.15);
         letter-spacing: -0.025em;
     }
 
     p {
         margin: 0;
         color: $text-secondary;
-        font-size: 14px;
-        line-height: 1.65;
+        font-size: calc(var(--font-size-base, 14px) * 14 / 14);
+        line-height: var(--line-height, 1.65);
     }
 
     .invite-kicker {
         color: var(--accent-primary);
-        font-size: 12px;
+        font-size: calc(var(--font-size-base, 14px) * 12 / 14);
         font-weight: 700;
         letter-spacing: 0.12em;
         text-transform: uppercase;
@@ -810,11 +810,11 @@ onUnmounted(() => {
 
 .invite-form {
     display: grid;
-    gap: 12px;
+    gap: calc(12px * var(--spacing-scale, 1));
 
     label {
         color: $text-secondary;
-        font-size: 13px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
         font-weight: 600;
     }
 }
@@ -822,31 +822,31 @@ onUnmounted(() => {
 .guest-avatar-editor {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: calc(16px * var(--spacing-scale, 1));
     margin-bottom: 4px;
 }
 
 .guest-avatar-controls {
     display: grid;
     min-width: 0;
-    gap: 7px;
+    gap: calc(7px * var(--spacing-scale, 1));
 }
 
 .guest-avatar-label {
     color: $text-primary;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     font-weight: 600;
 }
 
 .guest-avatar-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .guest-avatar-hint {
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 .guest-avatar-file {
@@ -856,15 +856,15 @@ onUnmounted(() => {
 .invite-error {
     margin: 0;
     color: $error;
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+    line-height: var(--line-height, 1.5);
 }
 
 .invite-hint {
     margin: 18px 0 0;
     color: $text-muted;
-    font-size: 12px;
-    line-height: 1.55;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1.55);
     text-align: center;
 }
 
@@ -872,12 +872,12 @@ onUnmounted(() => {
 
 @media (max-width: 520px) {
     .invite-gate {
-        padding: 16px;
+        padding: calc(16px * var(--spacing-scale, 1));
     }
 
     .invite-card {
-        padding: 28px 22px;
-        border-radius: 20px;
+        padding: calc(28px * var(--spacing-scale, 1)) calc(22px * var(--spacing-scale, 1));
+        border-radius: var(--radius-component, 20px);
     }
 
     .guest-avatar-editor {

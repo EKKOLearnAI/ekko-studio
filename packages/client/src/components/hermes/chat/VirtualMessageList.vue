@@ -671,7 +671,7 @@ defineExpose({
   scrollbar-width: thin;
   padding: var(--virtual-list-padding);
   box-sizing: border-box;
-  background-color: $bg-main-surface;
+  background-color: var(--theme-content-bg, $bg-main-surface);
 }
 
 .virtual-message-list-host--positioning .virtual-message-list {

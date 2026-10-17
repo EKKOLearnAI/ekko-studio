@@ -321,7 +321,7 @@ function handleSkillSaved() {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .skills-view.embedded {

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+enableAutoUnmount(afterEach)
 
 const routeMock = vi.hoisted(() => ({
   name: 'hermes.chat' as string,
@@ -37,15 +39,18 @@ vi.mock('vue-i18n', () => ({
   }),
 }))
 
-vi.mock('@/composables/useTheme', () => ({
-  useTheme: () => ({
-    isDark: false,
-    isComic: false,
-    customization: { value: { fontSize: 14, textColor: null, accentColor: null } },
-    hasBackgroundImage: false,
-    syncThemeFromServer: vi.fn().mockResolvedValue(undefined),
-  }),
-}))
+vi.mock('@/composables/useTheme', async () => {
+  const { ref } = await import('vue')
+  return {
+    useTheme: () => ({
+      isDark: ref(false),
+      isComic: ref(false),
+      customization: ref({ fontSize: 14, textColor: null, accentColor: null }),
+      hasCustomBackground: ref(false),
+      syncThemeFromServer: vi.fn().mockResolvedValue(undefined),
+    }),
+  }
+})
 
 vi.mock('@/composables/useKeyboard', () => ({
   useKeyboard: vi.fn(),
@@ -89,6 +94,10 @@ vi.mock('@/components/layout/GlobalPendingActions.vue', () => ({
 
 vi.mock('@/components/layout/RuntimeRestartPrompt.vue', () => ({
   default: { name: 'RuntimeRestartPrompt', template: '<div class="runtime-restart-prompt-test" />' },
+}))
+
+vi.mock('@/components/layout/StudioAnnouncementPrompt.vue', () => ({
+  default: { name: 'StudioAnnouncementPrompt', template: '<div />' },
 }))
 
 vi.mock('@/components/hermes/chat/SessionSearchModal.vue', () => ({

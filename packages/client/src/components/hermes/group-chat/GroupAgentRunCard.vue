@@ -54,6 +54,7 @@ const activeAgentInfo = computed(() => props.agents.find(agent =>
     )
 ))
 const agentInfo = computed(() => groupMessageAgent(props.message, props.agents))
+const isAssistantMessage = computed(() => Boolean(agentInfo.value) || props.message.role === 'agent_run')
 const memberInfo = computed(() => {
     if (agentInfo.value) return null
     return props.members?.find(member =>
@@ -110,7 +111,15 @@ function handleToolListWheel(event: WheelEvent): void {
                 <span class="run-agent-name">{{ message.senderName }}</span>
                 <GroupAgentRobotIcon v-if="agentInfo" class="run-agent-icon" />
             </div>
-            <div v-if="transcriptItems.length || runToolItems.length || (runUsage && !message.isStreaming)" class="run-card" :class="{ streaming: message.isStreaming }">
+            <div
+                v-if="transcriptItems.length || runToolItems.length || (runUsage && !message.isStreaming)"
+                class="run-card group-run-bubble"
+                :class="{
+                    streaming: message.isStreaming,
+                    'group-run-bubble--assistant': isAssistantMessage,
+                    'group-run-bubble--user': !isAssistantMessage,
+                }"
+            >
                 <ToolRunSummary
                     v-if="runToolItems.length"
                     class="run-tools"
@@ -182,7 +191,7 @@ function handleToolListWheel(event: WheelEvent): void {
     align-items: flex-start;
     min-width: 0;
     max-width: 100%;
-    padding: 2px 0;
+    padding: calc(2px * var(--spacing-scale, 1)) 0;
     box-sizing: border-box;
 }
 
@@ -277,11 +286,11 @@ function handleToolListWheel(event: WheelEvent): void {
 .run-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding-bottom: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding-bottom: calc(6px * var(--spacing-scale, 1));
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 22px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 22 / 14));
 }
 
 .run-agent-name {
@@ -307,20 +316,20 @@ function handleToolListWheel(event: WheelEvent): void {
     overflow: visible;
     box-sizing: border-box;
     border: none;
-    border-radius: 10px;
+    border-radius: var(--radius-component, 10px);
     background: rgba(var(--accent-primary-rgb), 0.055);
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.035);
 
     > :deep(.group-message + .group-message),
     .run-transcript-item + .run-transcript-item {
-        border-top: 1px solid rgba(var(--text-primary-rgb), 0.08);
+        border-top: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.08);
     }
 }
 
 .run-tools {
     box-sizing: border-box;
     width: 100%;
-    padding: 6px;
+    padding: calc(6px * var(--spacing-scale, 1));
 }
 
 .run-tool-list {
@@ -335,11 +344,11 @@ function handleToolListWheel(event: WheelEvent): void {
     &:focus-visible {
         outline: 2px solid rgba(var(--accent-primary-rgb), 0.45);
         outline-offset: -2px;
-        border-radius: 10px;
+        border-radius: var(--radius-component, 10px);
     }
 
     .run-tool-item + .run-tool-item {
-        border-top: 1px solid rgba(var(--text-primary-rgb), 0.08);
+        border-top: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.08);
     }
 }
 
@@ -350,27 +359,27 @@ function handleToolListWheel(event: WheelEvent): void {
 }
 
 .run-tools + .run-transcript {
-    border-top: 1px solid rgba(var(--text-primary-rgb), 0.08);
+    border-top: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.08);
 }
 
 .run-time {
     align-self: flex-start;
-    padding: 3px 4px 0;
+    padding: calc(3px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) 0;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     opacity: 0.6;
     user-select: none;
 }
 
 .run-usage-only {
     min-width: 0;
-    padding: 0 14px 10px;
+    padding: 0 calc(14px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
 }
 
-:global(html.theme-has-custom-background .run-card) {
-    background: rgba(var(--bg-main-surface-rgb), 0.78);
-    -webkit-backdrop-filter: blur(8px) saturate(110%);
-    backdrop-filter: blur(8px) saturate(110%);
+:global(html.theme-has-custom-background .group-run-bubble) {
+    background: var(--message-theme-bg, rgba(var(--bg-main-surface-rgb), 0.78));
+    -webkit-backdrop-filter: var(--message-theme-filter, blur(8px) saturate(110%));
+    backdrop-filter: var(--message-theme-filter, blur(8px) saturate(110%));
 }
 
 @media (max-width: $breakpoint-mobile) {

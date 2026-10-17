@@ -102,8 +102,8 @@ onUnmounted(() => stopWindowStateListener?.())
   align-items: center;
   direction: ltr;
   border: 0;
-  border-radius: 12px;
-  background: $bg-main-surface;
+  border-radius: var(--radius-component, 12px);
+  background: var(--theme-content-bg, $bg-main-surface);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
   color: $text-primary;
   user-select: none;
@@ -117,7 +117,7 @@ onUnmounted(() => stopWindowStateListener?.())
     position: absolute;
     z-index: 2;
     inset: 0;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: inherit;
     pointer-events: none;
   }
@@ -159,7 +159,7 @@ onUnmounted(() => stopWindowStateListener?.())
   align-items: stretch;
   overflow: hidden;
   contain: paint;
-  border-inline-start: 1px solid $border-color;
+  border-inline-start: var(--border-width, 1px) solid $border-color;
   border-radius: 0 12px 12px 0;
   clip-path: inset(0 round 0 12px 12px 0);
   -webkit-app-region: no-drag;
@@ -222,13 +222,13 @@ onUnmounted(() => stopWindowStateListener?.())
   }
 
   &:last-child {
-    border-top-right-radius: 11px;
-    border-bottom-right-radius: 11px;
+    border-top-right-radius: var(--radius-component, 11px);
+    border-bottom-right-radius: var(--radius-component, 11px);
   }
 
   .standalone &:first-child {
-    border-top-left-radius: 11px;
-    border-bottom-left-radius: 11px;
+    border-top-left-radius: var(--radius-component, 11px);
+    border-bottom-left-radius: var(--radius-component, 11px);
   }
 }
 

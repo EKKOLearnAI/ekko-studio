@@ -489,7 +489,7 @@ for (const width of [1440, 390]) {
     await expect(sidebar).toBeVisible()
     await expect(sidebar.getByRole('button', { name: 'New Chat', exact: true })).toHaveCount(0)
     if (width < 769) {
-      await expect(page.locator('.studio-mobile-drawer')).toHaveCSS('width', `${width}px`)
+      await expect(page.locator('.studio-mobile-drawer')).toHaveCSS('width', '351px')
       const content = page.locator('.studio-mobile-navigation__content')
       expect((await sidebar.boundingBox())!.width).toBeCloseTo((await content.boundingBox())!.width, 2)
     } else {

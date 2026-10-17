@@ -37,15 +37,15 @@ const { t } = useI18n()
 
 <style scoped lang="scss">
 .data-directory-env-hint {
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 6px);
   color: var(--text-color-2);
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   p {
     margin: 0;
-    line-height: 1.55;
+    line-height: var(--line-height, 1.55);
   }
 
   details {
@@ -63,7 +63,7 @@ const { t } = useI18n()
 .data-directory-env-platforms {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   margin-top: 10px;
 }
 
@@ -71,7 +71,7 @@ const { t } = useI18n()
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 5px;
+  gap: calc(5px * var(--spacing-scale, 1));
 
   strong {
     color: var(--text-color-2);
@@ -79,13 +79,13 @@ const { t } = useI18n()
 
   code {
     display: block;
-    padding: 6px 8px;
+    padding: calc(6px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     overflow-x: auto;
-    border-radius: 4px;
+    border-radius: var(--radius-component, 4px);
     background: var(--hover-color);
     color: var(--text-color-1);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    line-height: 1.45;
+    line-height: var(--line-height, 1.45);
     white-space: pre;
     user-select: text;
   }

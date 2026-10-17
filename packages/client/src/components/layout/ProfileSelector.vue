@@ -358,12 +358,12 @@ onMounted(() => {
 @use '@/styles/variables' as *;
 
 .profile-selector {
-  padding: 0 12px;
+  padding: 0 calc(12px * var(--spacing-scale, 1));
   margin-bottom: 8px;
 }
 
 .selector-label {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 600;
   color: $text-muted;
   text-transform: uppercase;
@@ -377,18 +377,18 @@ onMounted(() => {
   font: inherit;
   text-align: start;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
   height: 34px;
-  padding: 4px 6px;
-  border-radius: 8px;
+  padding: calc(4px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 8px);
   background: $bg-secondary;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   cursor: pointer;
 }
 
 .profile-avatar {
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
 }
 
 .profile-name {
@@ -396,7 +396,7 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
   color: $text-primary;
 }
@@ -404,13 +404,13 @@ onMounted(() => {
 .profile-popover {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .profile-popover-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
@@ -433,7 +433,7 @@ onMounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 }
 
 .profile-popover-name {
@@ -441,7 +441,7 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 700;
   color: $text-primary;
 }
@@ -449,21 +449,21 @@ onMounted(() => {
 .profile-popover-subtitle,
 .runtime-label,
 .runtime-detail {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .runtime-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-height: 62px;
 }
 
 .profile-runtime-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   max-height: 420px;
   min-height: 96px;
   overflow-y: auto;
@@ -472,22 +472,26 @@ onMounted(() => {
 .profile-runtime-item {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid $border-color;
-  border-radius: 8px;
-  background: $bg-card;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 8px);
+  background: var(--theme-card-bg, $bg-card);
 
   &.active {
     border-color: $accent-muted;
-    background: $bg-card-hover;
+    background: var(--theme-card-bg, $bg-card-hover);
   }
 }
 
 .profile-runtime-main {
   display: flex;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   min-width: 0;
+}
+
+html:is(.theme-overlay-bg, .theme-has-custom-background) .profile-runtime-item {
+  background: var(--theme-card-bg, rgba(var(--text-primary-rgb), 0.04));
 }
 
 .profile-runtime-avatar {
@@ -499,13 +503,13 @@ onMounted(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: calc(5px * var(--spacing-scale, 1));
 }
 
 .profile-runtime-name-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
@@ -514,18 +518,18 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 700;
   color: $text-primary;
 }
 
 .active-badge {
   flex: 0 0 auto;
-  padding: 1px 5px;
+  padding: calc(1px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
   border-radius: 999px;
   background: color-mix(in srgb, $success 16%, transparent);
   color: $success;
-  font-size: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   font-weight: 700;
 }
 
@@ -533,7 +537,7 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 
   :deep(.n-button) {
     min-width: 88px;
@@ -544,19 +548,19 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 
   &.compact {
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
   }
 }
 
 .runtime-value {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
 
   &.running {
@@ -576,7 +580,7 @@ onMounted(() => {
 }
 
 .runtime-detail {
-  line-height: 1.4;
+  line-height: var(--line-height, 1.4);
   word-break: break-word;
 }
 
@@ -584,14 +588,14 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
 }
 
 .avatar-editor-meta {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
@@ -600,13 +604,13 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 700;
   color: $text-primary;
 }
 
 .avatar-editor-hint {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   text-align: center;
 }
@@ -619,28 +623,28 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 @media (max-width: 520px) {
   .profile-runtime-actions {
     justify-content: flex-start;
-    gap: 5px;
+    gap: calc(5px * var(--spacing-scale, 1));
 
     :deep(.n-button) {
       min-width: 0;
       --n-height: 26px !important;
-      --n-font-size: 12px !important;
+      --n-font-size: calc(var(--font-size-base, 14px) * 12 / 14) !important;
       --n-padding: 0 8px !important;
     }
   }
 
   .avatar-editor-actions {
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
 
     :deep(.n-button) {
       --n-height: 28px !important;
-      --n-font-size: 12px !important;
+      --n-font-size: calc(var(--font-size-base, 14px) * 12 / 14) !important;
       --n-padding: 0 9px !important;
     }
   }

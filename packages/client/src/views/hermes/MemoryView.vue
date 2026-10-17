@@ -255,7 +255,7 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
 .memory-content {
   flex: 1;
   overflow: hidden;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
   display: flex;
   flex-direction: column;
 }
@@ -265,13 +265,13 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-muted;
 }
 
 .memory-sections {
   display: flex;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   flex: 1;
   min-height: 0;
 
@@ -283,7 +283,7 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
 .memory-section {
   flex: 1;
   min-height: 0;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
   overflow: hidden;
   display: flex;
@@ -294,16 +294,16 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   background: $bg-secondary;
-  border-bottom: 1px solid $border-color;
+  border-bottom: var(--border-width, 1px) solid $border-color;
   flex-shrink: 0;
 }
 
 .section-title-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .section-icon {
@@ -312,34 +312,34 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
 }
 
 .section-title {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   color: $text-primary;
 }
 
 .section-mtime {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
 }
 
 .section-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   min-height: 0;
 }
 
 .empty-text {
   color: $text-muted;
   font-style: italic;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .section-edit {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 12px 16px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   min-height: 0;
 }
 
@@ -347,14 +347,14 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
   flex: 1;
   width: 100%;
   min-height: 0;
-  padding: 12px;
-  border: 1px solid $border-color;
+  padding: calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
-  background: $bg-input;
+  background: var(--theme-input-bg, $bg-input);
   color: $text-primary;
-  font-family: $font-code;
-  font-size: 13px;
-  line-height: 1.6;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, 1.6);
   resize: none;
   outline: none;
 
@@ -366,7 +366,7 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
 .edit-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   margin-top: 10px;
 }
 </style>

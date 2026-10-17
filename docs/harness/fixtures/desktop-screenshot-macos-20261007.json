@@ -1,0 +1,379 @@
+{
+  "timestamp": "2026-10-07T13:10:16.665Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "electron": "42.11.11",
+  "environment": {
+    "ozone": ""
+  },
+  "capabilities": {
+    "capture": "electron",
+    "presentation": "desktop-overlay",
+    "hideWindows": true,
+    "regionSelection": "studio"
+  },
+  "displays": [
+    {
+      "accelerometerSupport": "unknown",
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 2560,
+        "height": 1440
+      },
+      "colorDepth": 24,
+      "colorSpace": "{r:[0.6600, 0.3175], g:[0.2901, 0.6687], b:[0.1543, 0.0410], w:[0.3127, 0.3290]}, transfer:BT709_APPLE, matrix:RGB, range:FULL}",
+      "depthPerComponent": 8,
+      "detected": true,
+      "displayFrequency": 60,
+      "id": 1,
+      "internal": false,
+      "label": "Redmi 27 NQ",
+      "maximumCursorSize": {
+        "width": 0,
+        "height": 0
+      },
+      "monochrome": false,
+      "nativeOrigin": {
+        "x": 0,
+        "y": 0
+      },
+      "rotation": 0,
+      "scaleFactor": 1,
+      "size": {
+        "width": 2560,
+        "height": 1440
+      },
+      "workArea": {
+        "x": 0,
+        "y": 30,
+        "width": 2560,
+        "height": 1294
+      },
+      "workAreaSize": {
+        "width": 2560,
+        "height": 1294
+      },
+      "touchSupport": "unknown"
+    }
+  ],
+  "sourceDisplayIds": [
+    "1"
+  ],
+  "gpu": {
+    "auxAttributes": {
+      "amdSwitchable": false,
+      "canSupportThreadedTextureMailbox": false,
+      "glImplementationParts": "(gl=none,angle=none)",
+      "glResetNotificationStrategy": 0,
+      "inProcessGpu": true,
+      "initializationTime": 0,
+      "isAsan": false,
+      "isClangCoverage": false,
+      "jpegDecodeAcceleratorSupported": false,
+      "optimus": false,
+      "passthroughCmdDecoder": false,
+      "sandboxed": false,
+      "skiaBackendType": "None",
+      "subpixelFontRendering": true,
+      "targetCpuBits": 64,
+      "visibilityCallbackCallCount": 0
+    },
+    "gpuDevice": [
+      {
+        "active": true,
+        "deviceId": 0,
+        "gpuPreference": 0,
+        "vendorId": 4203
+      }
+    ],
+    "machineModelName": "Mac",
+    "machineModelVersion": "16.10"
+  },
+  "screenPermission": "granted",
+  "firstEditorMs": 210.78699999999992,
+  "samples": [
+    {
+      "round": 0,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 106.1674579999999,
+      "hiddenEditorMs": 164.83875000000012,
+      "cleanupMs": 7.419916999999941,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 1,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 123.67858300000012,
+      "hiddenEditorMs": 171.57620799999995,
+      "cleanupMs": 0.3244159999999283,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 2,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 125.46854199999962,
+      "hiddenEditorMs": 180.7539999999999,
+      "cleanupMs": 7.513374999999996,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 3,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 137.16145800000004,
+      "hiddenEditorMs": 159.5050000000001,
+      "cleanupMs": 0.31599999999980355,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 4,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 116.60662499999944,
+      "hiddenEditorMs": 173.55595899999935,
+      "cleanupMs": 6.310083000000304,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 5,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 126.234958,
+      "hiddenEditorMs": 170.39691700000003,
+      "cleanupMs": 0.32225000000016735,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 6,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 126.58529200000066,
+      "hiddenEditorMs": 176.0045,
+      "cleanupMs": 9.815042000000176,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 7,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 122.53758299999936,
+      "hiddenEditorMs": 172.61625000000004,
+      "cleanupMs": 0.3335829999996349,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 8,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 127.08929199999966,
+      "hiddenEditorMs": 167.58841699999994,
+      "cleanupMs": 10.80108300000029,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 9,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 126.32137500000044,
+      "hiddenEditorMs": 171.22008299999925,
+      "cleanupMs": 0.37195900000006077,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 10,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 128.19883300000038,
+      "hiddenEditorMs": 172.76950000000033,
+      "cleanupMs": 6.137667000000874,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 11,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 129.88033300000097,
+      "hiddenEditorMs": 175.63179200000013,
+      "cleanupMs": 0.3197089999994205,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 12,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 122.84187500000007,
+      "hiddenEditorMs": 163.03933300000062,
+      "cleanupMs": 5.018167000000176,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 13,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 125.24537500000042,
+      "hiddenEditorMs": 171.8396670000002,
+      "cleanupMs": 0.33174999999937427,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 14,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 123.48166700000002,
+      "hiddenEditorMs": 164.5410840000004,
+      "cleanupMs": 6.565749999999753,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 15,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 125.8975419999988,
+      "hiddenEditorMs": 167.46637499999997,
+      "cleanupMs": 0.3379580000000715,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 16,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 104.73345799999879,
+      "hiddenEditorMs": 168.75112499999886,
+      "cleanupMs": 7.581207999999606,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 17,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 125.61441599999853,
+      "hiddenEditorMs": 163.48354199999994,
+      "cleanupMs": 0.3852500000011787,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 18,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 128.84799999999996,
+      "hiddenEditorMs": 173.02029199999924,
+      "cleanupMs": 6.725833000000421,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    },
+    {
+      "round": 19,
+      "linuxMeasurementDelayMs": null,
+      "normalEditorMs": 126.81129099999998,
+      "hiddenEditorMs": 160.60220900000058,
+      "cleanupMs": 0.33995800000047893,
+      "residual": {
+        "changedPixels": 0,
+        "fraction": 0,
+        "maxDelta": 0,
+        "tolerance": 3
+      },
+      "restored": true
+    }
+  ],
+  "passed": true,
+  "measurementOnly": false
+}

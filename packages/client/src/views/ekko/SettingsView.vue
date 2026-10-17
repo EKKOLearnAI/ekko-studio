@@ -241,6 +241,12 @@ onBeforeUnmount(() => {
               <SettingRow :label="t('ekkoConfig.permanentAllow')" :hint="t('ekkoConfig.allowlistHint')">
                 <NDynamicTags v-model:value="form.tools.approvals.permanentAllow" class="input-lg" @update:value="saveImmediateChange" />
               </SettingRow>
+              <SettingRow :label="t('ekkoConfig.computerUseEnabled')" :hint="t('ekkoConfig.computerUseHint')">
+                <NSwitch v-model:value="form.tools.computerUse.enabled" data-testid="computer-use-enabled" @update:value="saveImmediateChange" />
+              </SettingRow>
+              <SettingRow :label="t('ekkoConfig.computerUseTimeoutMs')" :hint="t('ekkoConfig.timeoutHint')">
+                <NInputNumber v-model:value="form.tools.computerUse.timeoutMs" data-testid="computer-use-timeout" :min="1" :step="1000" size="small" class="input-sm" @update:value="value => value != null && saveDebouncedChange()" />
+              </SettingRow>
               <SettingRow :label="t('ekkoConfig.codeExecEnabled')" :hint="t('ekkoConfig.featureToggleHint')">
                 <NSwitch v-model:value="form.tools.codeExec.enabled" @update:value="saveImmediateChange" />
               </SettingRow>
@@ -328,7 +334,7 @@ onBeforeUnmount(() => {
 .ekko-settings-content {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
 }
 
 .settings-error {

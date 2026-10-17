@@ -1,3 +1,4 @@
+import { preservedModelKeys } from '../services/models/model-section'
 import { existsSync, readFileSync } from 'fs'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
@@ -475,7 +476,7 @@ export async function remove(ctx: any) {
           delete config.model.base_url
           delete config.model.api_key
         } else {
-          config.model = {}
+          config.model = preservedModelKeys(config.model)
         }
       }
       return { data: config, result: true }

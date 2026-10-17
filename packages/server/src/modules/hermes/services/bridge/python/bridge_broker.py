@@ -313,7 +313,7 @@ class BridgeBroker:
             )
             return self._forward(profile, req, worker_key)
 
-        if action in {"interrupt", "request_boundary_interrupt", "steer", "command", "switch_session_model", "goal_evaluate", "goal_pause", "status", "get_history", "get_session_title", "destroy"}:
+        if action in {"interrupt", "request_boundary_interrupt", "cancel_boundary_interrupt", "steer", "command", "switch_session_model", "goal_evaluate", "goal_pause", "status", "get_history", "get_session_title", "destroy"}:
             session_id = str(req.get("session_id") or "")
             profile, worker_key = self._route_for_session(session_id, req.get("profile"), req.get("worker_key") if "worker_key" in req else None)
             resp = self._forward(profile, req, worker_key)
@@ -489,13 +489,32 @@ class BridgeBroker:
             return
         self._last_gc = now
         with self._lock:
+            busy = set(self._running_run_worker_key.values())
             idle = [
                 key for key, worker in self._workers.items()
                 if worker.running and now - worker.last_used_at > self.IDLE_TIMEOUT_SECONDS
+                and key not in busy and not getattr(worker, "active_requests", 0)
             ]
         for key in idle:
+            worker = self._workers.get(key)
+            if worker is None:
+                continue
+            try:
+                # A parent turn may have ended while a terminal background
+                # process is still running. Probe before retiring its worker.
+                worker.request({"action": "list"}, timeout=2)
+            except Exception:
+                # Failure to establish idleness is not permission to stop work.
+                continue
             with self._lock:
-                worker = self._workers.pop(key, None)
+                worker = self._workers.get(key)
+                if (
+                    worker is None or now - worker.last_used_at <= self.IDLE_TIMEOUT_SECONDS
+                    or key in self._running_run_worker_key.values()
+                    or getattr(worker, "active_requests", 0)
+                ):
+                    continue
+                self._workers.pop(key, None)
             if worker:
                 worker.stop()
 

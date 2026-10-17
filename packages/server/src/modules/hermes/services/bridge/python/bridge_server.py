@@ -197,6 +197,11 @@ class BridgeServer:
                 req.get("expected_run_id"),
             )
 
+        if action == "cancel_boundary_interrupt":
+            return self.pool.cancel_boundary_interrupt(
+                str(req.get("session_id") or ""), req.get("expected_run_id"),
+            )
+
         if action == "steer":
             text = str(req.get("text") or req.get("message") or "").strip()
             if not text:

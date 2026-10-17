@@ -67,6 +67,21 @@ describe('DSH chat runner', () => {
   function finish(child: ReturnType<typeof createChild>) {
     child.stdout.write(`${JSON.stringify({ id: child.sent.find(message => message.method === 'session/prompt').id, result: { stopReason: 'end_turn' } })}\n`)
   }
+  it('uses the opaque native model and effort in global sessions and resumed turns', async () => {
+    const nativeModel = '["native-account","native-model"]'
+    Object.assign((manager as any).getBySession(sessionId).launch, { mode: 'global', model: nativeModel, reasoningEffort: 'high' })
+    for (const text of ['first', 'continue']) {
+      const child = await prompt(text)
+      const configured = child.sent.filter(message => message.method === 'session/set_config_option').map(message => message.params)
+      expect(configured).toEqual([
+        { sessionId: 'dsh-native', configId: 'model', value: nativeModel },
+        { sessionId: 'dsh-native', configId: 'reasoning_effort', value: 'high' },
+      ])
+      if (text === 'continue') expect(child.sent.find(message => message.method === 'session/resume').params.sessionId).toBe('dsh-native')
+      finish(child)
+      await vi.waitFor(() => expect(child.exitCode).toBe(0))
+    }
+  })
   it('keeps a stopped DSH turn usage card attached to its persisted reply', async () => {
     const child = await prompt('stop after usage')
     update(child, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial DSH reply' } })

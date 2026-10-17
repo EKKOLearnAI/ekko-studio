@@ -207,12 +207,12 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 p {
   margin: 0;
-  line-height: 1.6;
+  line-height: var(--line-height, 1.6);
 }
 
 .actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 </style>

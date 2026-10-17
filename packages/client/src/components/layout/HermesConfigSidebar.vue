@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PageSidebar from "./PageSidebar.vue"
+import SidebarResizeHandle from "./SidebarResizeHandle.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import { computed, watch } from "vue";
 import { useRoute } from "vue-router";
@@ -35,6 +36,7 @@ function handleNavClick(event: MouseEvent) {
     class="hermes-config-sidebar"
     :class="{ open: expanded, collapsed: !isMobile && appStore.sidebarCollapsed }"
   >
+    <SidebarResizeHandle />
     <nav class="hermes-config-nav" @click="handleNavClick">
       <RouteLinkItem
         class="hermes-config-nav-item"

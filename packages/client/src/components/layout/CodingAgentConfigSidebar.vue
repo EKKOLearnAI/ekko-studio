@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { agentMetadata } from "@/utils/agent-catalog"
 import PageSidebar from "./PageSidebar.vue"
+import SidebarResizeHandle from "./SidebarResizeHandle.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -41,6 +42,7 @@ function handleNavClick(event: MouseEvent) {
 <template>
   <PageSidebar>
   <aside class="coding-agent-config-sidebar" :class="{ open: expanded, collapsed: !isMobile && appStore.sidebarCollapsed }">
+    <SidebarResizeHandle />
     <nav class="coding-agent-config-nav" @click="handleNavClick">
       <RouteLinkItem
         v-for="item in items"

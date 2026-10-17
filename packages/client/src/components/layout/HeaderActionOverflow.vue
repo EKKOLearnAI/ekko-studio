@@ -66,7 +66,7 @@ onUnmounted(() => observer?.disconnect())
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   max-width: min(320px, calc(100vw - 48px));
   -webkit-app-region: no-drag;
 }

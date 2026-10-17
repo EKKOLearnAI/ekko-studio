@@ -248,13 +248,13 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
 
 .detail-title {
   flex-shrink: 0;
-  padding-bottom: 12px;
-  border-bottom: 1px solid $border-color;
+  padding-bottom: calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   margin-bottom: 12px;
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .detail-heading {
@@ -266,7 +266,7 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
 
 .detail-category {
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -288,7 +288,7 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
 .usage-stats {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-inline-start: auto;
   flex-shrink: 0;
 }
@@ -296,8 +296,8 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
 .usage-stat {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 13px;
+  gap: calc(4px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 500;
   color: $text-secondary;
   white-space: nowrap;
@@ -311,12 +311,12 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
+  border: var(--border-width, 1px) solid transparent;
   background: none;
   color: $text-muted;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
+  padding: calc(4px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 6px);
   opacity: 0.5;
   transition: all $transition-fast;
 
@@ -341,14 +341,14 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
 .detail-action {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  border: 1px solid $border-color;
+  gap: calc(5px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   background: $bg-secondary;
   color: $text-secondary;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 6px);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   transition: all $transition-fast;
 
   &:hover:not(:disabled) {
@@ -367,16 +367,16 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-muted;
 }
 
 .detail-breadcrumb {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 0 12px;
-  border-bottom: 1px solid $border-color;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) 0 calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   margin-bottom: 12px;
   flex-shrink: 0;
 }
@@ -384,14 +384,14 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
 .back-btn {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   border: none;
   background: none;
   color: $accent-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 4px);
 
   &:hover {
     background: rgba(var(--accent-primary-rgb), 0.06);
@@ -399,7 +399,7 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
 }
 
 .breadcrumb-path {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-muted;
 }
 
@@ -407,7 +407,7 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
   flex: 1;
   overflow-y: auto;
   min-height: 0;
-  padding-bottom: 12px;
+  padding-bottom: calc(12px * var(--spacing-scale, 1));
 
   :deep(hr) {
     border: none;
@@ -417,15 +417,15 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
 
 .detail-files {
   flex-shrink: 0;
-  border-top: 1px solid $border-color;
-  padding-top: 12px;
+  border-top: var(--border-width, 1px) solid $border-color;
+  padding-top: calc(12px * var(--spacing-scale, 1));
   margin-top: 12px;
   max-height: 30vh;
   overflow-y: auto;
 }
 
 .files-header {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
   color: $text-muted;
   text-transform: uppercase;
@@ -436,19 +436,19 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
 .files-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .file-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border: 1px solid $border-color;
+  gap: calc(4px * var(--spacing-scale, 1));
+  padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
   background: $bg-secondary;
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   cursor: pointer;
   transition: all $transition-fast;
 
@@ -464,14 +464,14 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
   min-height: 100%;
   height: 100%;
   resize: none;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
   background: $bg-primary;
   color: $text-primary;
-  padding: 12px;
+  padding: calc(12px * var(--spacing-scale, 1));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, 1.55);
   outline: none;
 
   &:focus {
@@ -494,12 +494,12 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
   .usage-stats {
     flex: 1 1 100%;
     margin-inline-start: 0;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     flex-wrap: wrap;
   }
 
   .detail-action {
-    padding: 4px 7px;
+    padding: calc(4px * var(--spacing-scale, 1)) calc(7px * var(--spacing-scale, 1));
   }
 }
 

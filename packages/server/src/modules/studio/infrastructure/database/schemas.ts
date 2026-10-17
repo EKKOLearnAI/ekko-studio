@@ -12,6 +12,7 @@ export const USAGE_TABLE = 'session_usage'
 export const USAGE_SCHEMA: Record<string, string> = {
   id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
   session_id: 'TEXT NOT NULL',
+  account_id: 'TEXT',
   run_id: "TEXT NOT NULL DEFAULT ''",
   parent_run_id: "TEXT NOT NULL DEFAULT ''",
   api_duration: 'REAL',
@@ -129,6 +130,23 @@ export const SESSION_UPLOADS_INDEXES = {
 
 export const SESSION_CATEGORIES_TABLE = 'session_categories'
 
+export const WORKSPACE_DIRECTORIES_TABLE = 'workspace_directories'
+export const WORKSPACE_DIRECTORIES_SCHEMA: Record<string, string> = {
+  id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+  user_id: 'INTEGER NOT NULL',
+  path: 'TEXT NOT NULL',
+  path_key: 'TEXT NOT NULL',
+  is_favorite: 'INTEGER NOT NULL DEFAULT 0',
+  last_used: 'INTEGER NOT NULL DEFAULT 0',
+  use_count: 'INTEGER NOT NULL DEFAULT 0',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+export const WORKSPACE_DIRECTORIES_INDEXES = {
+  uniq_workspace_directories_user_path: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_workspace_directories_user_path ON workspace_directories(user_id, path_key)',
+  idx_workspace_directories_user_recent: 'CREATE INDEX IF NOT EXISTS idx_workspace_directories_user_recent ON workspace_directories(user_id, last_used DESC)',
+}
+
 export const SESSION_CATEGORIES_SCHEMA: Record<string, string> = {
   id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
   name: 'TEXT NOT NULL COLLATE NOCASE',
@@ -150,6 +168,7 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   agent_session_id: 'TEXT NOT NULL DEFAULT \'\'',
   agent_native_session_id: 'TEXT NOT NULL DEFAULT \'\'',
   user_id: 'TEXT',
+  studio_user_id: 'TEXT',
   model: 'TEXT NOT NULL DEFAULT \'\'',
   provider: 'TEXT NOT NULL DEFAULT \'\'',
   api_mode: 'TEXT NOT NULL DEFAULT \'\'',
@@ -179,6 +198,10 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   workspace: 'TEXT',
   category_id: 'INTEGER',
   history_revision: 'INTEGER NOT NULL DEFAULT 0',
+  /** Milliseconds of the last history clear; provider usage before it describes deleted history. */
+  history_cleared_at: 'INTEGER NOT NULL DEFAULT 0',
+  /** Context estimate after a history edit, separate from cumulative billed usage. */
+  context_usage_estimate: 'TEXT',
 }
 
 export const SESSIONS_INDEXES = {
@@ -198,6 +221,8 @@ export const MESSAGES_SCHEMA: Record<string, string> = {
   tool_calls: 'TEXT',
   tool_name: 'TEXT',
   run_marker: 'TEXT',
+  /** Stable deletion grouping, separate from per-message native lineage provenance. */
+  selection_run_marker: 'TEXT',
   timestamp: 'INTEGER NOT NULL',
   token_count: 'INTEGER',
   finish_reason: 'TEXT',
@@ -556,15 +581,32 @@ export const USER_PROFILES_INDEXES = {
 }
 
 export const USER_THEMES_TABLE = 'user_themes'
+export const USER_THEME_PRESETS_TABLE = 'user_theme_presets'
+
+export const USER_THEME_PRESETS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  user_id: 'INTEGER NOT NULL',
+  name: 'TEXT NOT NULL',
+  settings_json: 'TEXT NOT NULL',
+  background_filename: 'TEXT',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+
 
 export const USER_THEMES_SCHEMA: Record<string, string> = {
   user_id: 'INTEGER PRIMARY KEY',
+  active_preset_id: 'TEXT',
+  brightness: 'TEXT',
+  style: 'TEXT',
   font_size: 'INTEGER NOT NULL DEFAULT 14',
   text_color: 'TEXT',
   accent_color: 'TEXT',
   background_filename: 'TEXT',
   background_original_name: 'TEXT',
   background_mime: 'TEXT',
+  appearance_json: "TEXT NOT NULL DEFAULT '{}'",
+  background_updated_at: 'INTEGER NOT NULL DEFAULT 0',
   created_at: 'INTEGER NOT NULL',
   updated_at: 'INTEGER NOT NULL',
 }
@@ -830,6 +872,7 @@ export const GC_ROOMS_SCHEMA: Record<string, string> = {
   summaryApiMode: "TEXT NOT NULL DEFAULT ''",
   summaryEveryTurns: 'INTEGER NOT NULL DEFAULT 20',
   summaryGeneration: 'INTEGER NOT NULL DEFAULT 0',
+  messageDeletionRevision: 'INTEGER NOT NULL DEFAULT 0',
   triggerTokens: 'INTEGER NOT NULL DEFAULT 100000',
   maxHistoryTokens: 'INTEGER NOT NULL DEFAULT 32000',
   tailMessageCount: 'INTEGER NOT NULL DEFAULT 10',
@@ -1654,6 +1697,9 @@ export function initAllHermesTables(): void {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_parent_run ON ${USAGE_TABLE}(session_id, parent_run_id)`)
 
     // Session store
+    syncTable(WORKSPACE_DIRECTORIES_TABLE, WORKSPACE_DIRECTORIES_SCHEMA, {
+      indexes: WORKSPACE_DIRECTORIES_INDEXES,
+    })
     syncTable(SESSION_CATEGORIES_TABLE, SESSION_CATEGORIES_SCHEMA, {
       indexes: SESSION_CATEGORIES_INDEXES,
     })
@@ -1730,6 +1776,9 @@ export function initAllHermesTables(): void {
       indexes: USER_PROFILES_INDEXES,
     })
     syncTable(USER_THEMES_TABLE, USER_THEMES_SCHEMA)
+    syncTable(USER_THEME_PRESETS_TABLE, USER_THEME_PRESETS_SCHEMA, {
+      indexes: { idx_user_theme_presets_user: 'CREATE INDEX IF NOT EXISTS idx_user_theme_presets_user ON user_theme_presets(user_id)' },
+    })
 
     // User-scoped Social Messages accounts. Only one account per user may be active.
     syncTable(SOCIAL_MESSAGE_ACCOUNTS_TABLE, SOCIAL_MESSAGE_ACCOUNTS_SCHEMA, {

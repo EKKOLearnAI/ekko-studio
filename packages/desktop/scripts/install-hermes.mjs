@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { platform as osPlatform, arch as osArch, homedir as osHomedir, tmpdir } from 'node:os'
 import { hermesSource } from './runtime-config.mjs'
+import { hermesInstalledVersionScript } from './hermes-version.mjs'
 import { venvPythonPath } from './python-runtime-layout.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -541,15 +542,17 @@ buildHermesFrontends()
 run(pyBin, [
   '-c',
   [
-    'import importlib.metadata as metadata',
     'import importlib.util',
     'import mcp',
     'import tools.mcp_tool as t',
-    `assert metadata.version("hermes-agent") == ${JSON.stringify(HERMES_VERSION)}`,
     'assert t._MCP_AVAILABLE',
     'assert importlib.util.find_spec("websockets") is not None',
   ].join('; '),
 ])
+run(pyBin, ['-c', [
+  hermesInstalledVersionScript,
+  `assert version == ${JSON.stringify(HERMES_VERSION)}, version`,
+].join('\n')])
 
 const hermesBin = TARGET_OS === 'win32'
   ? resolve(VENV_DIR, 'Scripts', 'hermes.cmd')

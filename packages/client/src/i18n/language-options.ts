@@ -12,6 +12,7 @@ export const languageOptions: Array<{ label: string; value: SupportedLocale }> =
   { label: 'Português', value: 'pt' },
   { label: 'Русский', value: 'ru' },
   { label: 'العربية', value: 'ar' },
+  { label: 'Türkçe', value: 'tr' },
 ]
 
 export function normalizeSupportedLocale(value: unknown): SupportedLocale {

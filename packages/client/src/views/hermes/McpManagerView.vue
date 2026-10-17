@@ -563,44 +563,44 @@ async function saveToolsVisibility() {
 .tools-modal-content {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 }
 
 .tools-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .server-name-label {
   font-weight: 600;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
 }
 
 .tools-mode-selector {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
 .mode-label {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-muted;
   white-space: nowrap;
 }
 
 .tools-list-container {
-  border: 1px solid $border-color;
-  border-radius: 8px;
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 8px);
   overflow: hidden;
 }
 
 .tools-list-header {
-  padding: 10px 12px;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   background: $bg-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
   color: $text-muted;
   text-transform: uppercase;
@@ -608,27 +608,27 @@ async function saveToolsVisibility() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .tools-list-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;
 }
 
 .tools-checkbox-list {
-  padding: 8px 0;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
 }
 
 .tool-checkbox-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
+  gap: calc(10px * var(--spacing-scale, 1));
+  padding: calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   transition: background 0.15s;
 
   &:hover {
@@ -642,19 +642,19 @@ async function saveToolsVisibility() {
 }
 
 .tool-name {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .tools-empty {
-  padding: 24px 12px;
+  padding: calc(24px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   text-align: center;
 }
 
 .tools-summary {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   text-align: center;
 }

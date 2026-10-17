@@ -40,13 +40,25 @@ export class DshAcpTurn {
         while ((end = this.buffer.indexOf('\n')) >= 0) {
           const line = this.buffer.slice(0, end).trim()
           this.buffer = this.buffer.slice(end + 1)
-          if (line) this.receive(JSON.parse(line))
+          if (line) this.receiveLine(line)
         }
       } catch (error) { this.dispose(error instanceof Error ? error : new Error(String(error))) }
     })
     child.on('error', error => this.dispose(error))
     child.on('close', () => this.dispose(new Error('DSH ACP connection closed before the request completed')))
     child.stdin?.on('error', error => this.dispose(error))
+  }
+
+  // A valid ACP frame is always a JSON object, so any line not starting with '{'
+  // is dependency stdout noise (e.g. the MCP SDK's console.debug), not the
+  // protocol. Skip and warn instead of disposing the whole turn; only a line that
+  // looks like JSON but fails to parse is a real protocol break and stays fatal.
+  private receiveLine(line: string) {
+    if (!line.startsWith('{')) {
+      logger.warn({ line: line.slice(0, 500) }, '[dsh] skipping non-JSON line on ACP stdout')
+      return
+    }
+    this.receive(JSON.parse(line))
   }
 
   private write(message: unknown) {

@@ -388,5 +388,5 @@ onBeforeUnmount(() => {
 @include mcp-manager.layout;
 
 .config-hint { margin-top: 6px; }
-.config-hint { color: $text-muted; font-size: 12px; }
+.config-hint { color: $text-muted; font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
 </style>

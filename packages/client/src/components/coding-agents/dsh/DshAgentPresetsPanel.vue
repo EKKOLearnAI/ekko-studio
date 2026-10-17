@@ -88,19 +88,19 @@ usePageLoadingTask(() => loading.value)
 @use '@/styles/variables' as *;
 @include plugins-page.layout(100%);
 .dsh-presets { min-height: 0; }
-.preset-hint { margin: 0; padding-block: 8px 16px; color: $text-secondary; font-size: 13px; }
+.preset-hint { margin: 0; padding-block: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)); color: $text-secondary; font-size: calc(var(--font-size-base, 14px) * 13 / 14); }
 .preset-error { margin-bottom: 16px; }
-.preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; padding-bottom: 24px; }
-.preset-card { min-width: 0; padding: 20px; border: 1px solid $border-color; border-radius: 12px; display: flex; flex-direction: column; gap: 12px; }
+.preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: calc(16px * var(--spacing-scale, 1)); padding-bottom: 24px; }
+.preset-card { min-width: 0; padding: calc(20px * var(--spacing-scale, 1)); border: var(--border-width, 1px) solid $border-color; border-radius: var(--radius-component, 12px); display: flex; flex-direction: column; gap: calc(12px * var(--spacing-scale, 1)); }
 .preset-card.selected { border-color: $accent-primary; }
-.preset-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.preset-heading h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.preset-heading { display: flex; flex-wrap: wrap; align-items: center; gap: calc(8px * var(--spacing-scale, 1)); }
+.preset-heading h3 { margin: 0; font-size: calc(var(--font-size-base, 14px) * 16 / 14); overflow-wrap: anywhere; }
 .preset-card code, .preset-description { color: $text-secondary; overflow-wrap: anywhere; }
 .preset-description { margin: 0; flex: 1; }
-.preset-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 8px; }
+.preset-actions { display: flex; flex-wrap: wrap; gap: calc(8px * var(--spacing-scale, 1)); padding-top: 8px; }
 .preset-modal { width: min(560px, calc(100vw - 32px)); }
-.preset-form { display: flex; flex-direction: column; gap: 12px; }
-.preset-form label { display: flex; flex-direction: column; gap: 8px; }
+.preset-form { display: flex; flex-direction: column; gap: calc(12px * var(--spacing-scale, 1)); }
+.preset-form label { display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); }
 .preset-viewer { width: min(900px, calc(100vw - 32px)); }
-.preset-viewer pre { overflow: auto; max-height: 65vh; margin: 0; font-size: 12px; }
+.preset-viewer pre { overflow: auto; max-height: 65vh; margin: 0; font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
 </style>

@@ -64,6 +64,8 @@ export interface AgentToolContext {
   mcpServers?: Record<string, unknown>
   /** Isolate MCP connections for this scope; aborting it closes them without cancelling the agent. */
   mcpSessionSignal?: AbortSignal
+  /** Computer Use owns a native driver for this run; abort to close it and release the desktop. */
+  computerUseSessionSignal?: AbortSignal
   timeoutMs?: number
   signal?: AbortSignal
   requestToolApproval?: AgentToolApprovalRequester

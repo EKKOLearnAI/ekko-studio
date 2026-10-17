@@ -253,27 +253,27 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 4px 0 14px;
-  border-bottom: 1px solid $border-color;
+  gap: calc(16px * var(--spacing-scale, 1));
+  padding: calc(4px * var(--spacing-scale, 1)) 0 calc(14px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 
   h3 {
     margin: 0;
-    font-size: 16px;
+    font-size: calc(var(--font-size-base, 14px) * 16 / 14);
     color: $text-primary;
   }
 
   p {
     margin: 4px 0 0;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     color: $text-muted;
   }
 }
 
 .write-approval-state {
-  padding: 18px 0;
+  padding: calc(18px * var(--spacing-scale, 1)) 0;
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .write-approval-list {
@@ -284,9 +284,9 @@ onMounted(() => {
 .write-approval-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 14px 0;
-  border-top: 1px solid $border-color;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(14px * var(--spacing-scale, 1)) 0;
+  border-top: var(--border-width, 1px) solid $border-color;
 
   &:first-child {
     border-top: 0;
@@ -301,14 +301,14 @@ onMounted(() => {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  font-size: 12px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .write-approval-summary {
   margin-top: 7px;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-primary;
   overflow-wrap: anywhere;
 }
@@ -316,7 +316,7 @@ onMounted(() => {
 .write-approval-actions {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .write-approval-review {
@@ -324,14 +324,14 @@ onMounted(() => {
   max-height: 360px;
   overflow: auto;
   margin: 0;
-  padding: 10px;
-  border: 1px solid $border-color;
+  padding: calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
-  background: $bg-input;
+  background: var(--theme-input-bg, $bg-input);
   color: $text-primary;
 
   :deep(.markdown-body) {
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 
   :deep(pre) {
