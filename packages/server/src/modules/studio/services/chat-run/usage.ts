@@ -243,6 +243,39 @@ export function updateContextTokenUsage(
   return normalizedContextTokens
 }
 
+/**
+ * The context window size reported by the upstream model itself.
+ *
+ * `estimateUsageTokensFromMessages` counts the stored transcript with a local tokenizer. It is the
+ * only option for a session that has never reached a model, but once the host has recorded a real
+ * `model.usage` row, its token counts ARE the prompt the provider accepted: system prompt, tool
+ * schemas, cached prefix and all. Counting the stored transcript instead drifts away from reality in
+ * both directions — measured on a live session it over-reported by 1.55x-1.77x (a 129k window shown
+ * as 200k), which fires compression early and in large blocks, while a transcript that is not
+ * token-for-token what the wire carried can equally under-report and reach a context-length 400.
+ * Prefer the recorded numbers whenever they belong to the run that is finishing; `minCreatedAt`
+ * gates out rows an earlier run wrote.
+ */
+export function recordedContextWindowTokens(
+  sid: string,
+  source: string,
+  minCreatedAt?: number,
+): number | undefined {
+  const latest = getUsage(sid, source)
+  if (!latest) return undefined
+  if (typeof minCreatedAt === 'number' && Number.isFinite(minCreatedAt)) {
+    const recordedAt = Number(latest.created_at || 0)
+    if (!Number.isFinite(recordedAt) || recordedAt < minCreatedAt) return undefined
+  }
+  // Accounting keeps ordinary and cached input disjoint, but both occupy the model's context window.
+  const inputTokens = Number(latest.input_tokens || 0)
+    + Number(latest.cache_read_tokens || 0)
+    + Number(latest.cache_write_tokens || 0)
+  const outputTokens = Number(latest.output_tokens || 0)
+  const total = Math.floor(inputTokens + outputTokens)
+  return Number.isFinite(total) && total > 0 ? total : undefined
+}
+
 export function getCachedBridgeContextOverhead(state: SessionState): number | undefined {
   const fixedContextTokens = state.bridgeContext?.fixedContextTokens
   if (typeof fixedContextTokens !== 'number' || !Number.isFinite(fixedContextTokens) || fixedContextTokens < 0) {

@@ -25,6 +25,8 @@ import {
   contextTokensWithCachedOverhead,
   estimateUsageTokensFromMessages,
   getCachedBridgeContextOverhead,
+  recordedContextWindowTokens,
+  updateContextTokenUsage,
   updateMessageContextTokenUsage,
 } from './usage'
 import {
@@ -975,6 +977,7 @@ export async function handleBridgeRun(
       instructions: fullInstructions,
       state,
       usage: errUsage,
+      runStartedAt: state.runStartedAt,
       emit,
       bridge,
       isCurrent: () => sessionMap.get(session_id) === state && state.activeRunMarker === runMarker && !state.isAborting,
@@ -1204,6 +1207,8 @@ async function refreshFinalContextUsage(args: {
   instructions: string
   state: SessionState
   usage: { inputTokens: number; outputTokens: number }
+  /** Only usage recorded by THIS run may override the local estimate. */
+  runStartedAt?: number
   emit: (event: string, payload: any) => void
   bridge: AgentBridgeClient
   isCurrent?: () => boolean
@@ -1218,6 +1223,31 @@ async function refreshFinalContextUsage(args: {
     const finalMessageUsage = estimateUsageTokensFromMessages(finalHistory)
     const finalMessageTokens = finalMessageUsage.inputTokens + finalMessageUsage.outputTokens
     if (args.isCurrent && !args.isCurrent()) return undefined
+    // The host records the exact per-request usage of every model call. The newest one IS the
+    // context the provider accepted — system prompt, tool schemas and cached prefix included — so
+    // it wins over counting the transcript locally. The local estimate stays as the fallback for a
+    // session that never reached a model (and for runs whose usage was not recorded).
+    const recordedContextTokens = recordedContextWindowTokens(args.sessionId, 'hermes', args.runStartedAt)
+    if (recordedContextTokens != null) {
+      const contextTokens = updateContextTokenUsage(
+        args.sessionId,
+        args.state,
+        args.emit,
+        recordedContextTokens,
+        args.usage,
+      )
+      bridgeLogger.info({
+        sessionId: args.sessionId,
+        profile: args.profile,
+        model: args.model,
+        provider: args.provider,
+        messages: finalHistory.length,
+        messageTokens: finalMessageTokens,
+        contextTokens,
+        source: 'recorded-usage',
+      }, '[chat-run-socket] final context size from recorded model usage')
+      return contextTokens
+    }
     await ensureBridgeFixedContext({
       sessionId: args.sessionId,
       profile: args.profile,
@@ -1246,6 +1276,7 @@ async function refreshFinalContextUsage(args: {
       fixedContextTokens: args.state.bridgeContext?.fixedContextTokens,
       messageTokens: finalMessageTokens,
       contextTokens,
+      source: 'local-estimate',
     }, '[chat-run-socket] final local context estimate')
     return contextTokens
   } catch (err) {
@@ -1831,6 +1862,7 @@ async function applyBridgeChunkAsync(
     instructions,
     state,
     usage,
+    runStartedAt: state.runStartedAt,
     emit,
     bridge,
     isCurrent,

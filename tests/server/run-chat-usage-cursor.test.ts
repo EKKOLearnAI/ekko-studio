@@ -118,4 +118,29 @@ describe('cursor-aware chat usage', () => {
     expect(result.nativeUsageAvailable).toBe(false)
     expect(emit).not.toHaveBeenCalled()
   })
+  it('reads the context window size from the recorded model usage row', async () => {
+    getUsageMock.mockReturnValue({
+      created_at: 5_000,
+      input_tokens: 1_000,
+      output_tokens: 250,
+      cache_read_tokens: 40_000,
+      cache_write_tokens: 7_000,
+    })
+    const { recordedContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    // Cached input occupies the window too, so all four counts are summed.
+    expect(recordedContextWindowTokens('session-1', 'hermes')).toBe(48_250)
+  })
+
+  it('ignores usage rows written before the current run started', async () => {
+    getUsageMock.mockReturnValue({ created_at: 100, input_tokens: 1_000, output_tokens: 250 })
+    const { recordedContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    expect(recordedContextWindowTokens('session-1', 'hermes', 1_000)).toBeUndefined()
+    expect(recordedContextWindowTokens('session-1', 'hermes', 50)).toBe(1_250)
+  })
+
+  it('returns nothing when no usage row exists', async () => {
+    getUsageMock.mockReturnValue(undefined)
+    const { recordedContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    expect(recordedContextWindowTokens('session-1', 'hermes')).toBeUndefined()
+  })
 })

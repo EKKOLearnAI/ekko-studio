@@ -38,6 +38,8 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/compression'
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () => ({
   calcAndUpdateUsage: calcAndUpdateUsageMock,
+  recordedContextWindowTokens: vi.fn(() => undefined),
+  updateContextTokenUsage: vi.fn(),
 }))
 
 vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({

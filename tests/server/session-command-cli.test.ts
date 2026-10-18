@@ -37,6 +37,8 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () =
   contextTokensWithCachedOverhead: vi.fn(() => 0),
   estimateUsageTokensFromMessages: vi.fn(() => ({ inputTokens: 0, outputTokens: 0 })),
   updateMessageContextTokenUsage: vi.fn(),
+  recordedContextWindowTokens: vi.fn(() => undefined),
+  updateContextTokenUsage: vi.fn(),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/abort', () => ({
