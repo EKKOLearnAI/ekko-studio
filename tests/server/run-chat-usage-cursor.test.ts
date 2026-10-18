@@ -143,4 +143,42 @@ describe('cursor-aware chat usage', () => {
     const { recordedContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
     expect(recordedContextWindowTokens('session-1', 'hermes')).toBeUndefined()
   })
+  it('anchors on the last recorded usage and counts only later messages', async () => {
+    getUsageMock.mockReturnValue({
+      created_at: 1_700_000_500_000,
+      input_tokens: 1_000,
+      output_tokens: 250,
+      cache_read_tokens: 40_000,
+      cache_write_tokens: 0,
+    })
+    const { anchoredContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    const history = [
+      { role: 'user', content: 'before the anchor', timestamp: 1_700_000_400 },
+      { role: 'assistant', content: 'the anchored reply itself', timestamp: 1_700_000_500 },
+      { role: 'user', content: 'appended after the anchor', timestamp: 1_700_000_600 },
+    ]
+    const result = anchoredContextWindowTokens('session-1', 'hermes', history as any)
+    expect(result).toBeDefined()
+    expect(result!.anchorCreatedAt).toBe(1_700_000_500_000)
+    // The anchor call's own reply is already inside output_tokens, so only the newer turn counts.
+    expect(result!.contextTokens).toBeGreaterThan(41_250)
+    expect(result!.deltaTokens).toBe(result!.contextTokens - 41_250)
+    expect(result!.deltaTokens).toBeLessThan(20)
+  })
+
+  it('returns the anchor unchanged when nothing was appended after it', async () => {
+    getUsageMock.mockReturnValue({ created_at: 1_700_000_500_000, input_tokens: 900, output_tokens: 100 })
+    const { anchoredContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    const result = anchoredContextWindowTokens('session-1', 'hermes', [
+      { role: 'user', content: 'older', timestamp: 1_700_000_400 },
+      { role: 'assistant', content: 'newer text, same second as the anchor', timestamp: 1_700_000_500 },
+    ] as any)
+    expect(result).toEqual({ contextTokens: 1_000, anchorCreatedAt: 1_700_000_500_000, deltaTokens: 0 })
+  })
+
+  it('declines to anchor when the session has no recorded usage', async () => {
+    getUsageMock.mockReturnValue(undefined)
+    const { anchoredContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    expect(anchoredContextWindowTokens('session-1', 'hermes', [{ role: 'user', content: 'x', timestamp: 1 }] as any)).toBeUndefined()
+  })
 })

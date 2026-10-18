@@ -18,6 +18,8 @@ import type { SessionState } from './types'
 type UsageTokenMessage = {
   role?: string
   content?: unknown
+  /** Seconds, as stored by the message repository. Used to split a transcript at a usage anchor. */
+  timestamp?: number
   tool_calls?: unknown
   /** DeepSeek/Kimi thinking-mode payload echoed back on subsequent turns. */
   reasoning_content?: unknown
@@ -274,6 +276,55 @@ export function recordedContextWindowTokens(
   const outputTokens = Number(latest.output_tokens || 0)
   const total = Math.floor(inputTokens + outputTokens)
   return Number.isFinite(total) && total > 0 ? total : undefined
+}
+
+/**
+ * Fallback estimate for a run that produced no usage row of its own.
+ *
+ * Counting the whole stored transcript is not a fallback for a session that HAS been talking to a
+ * model: the transcript is the uncompressed record, while the provider receives the compressed and
+ * cached prompt. On a live session the two differed by 2.7x-3.5x (78k shown as 211k), which reads
+ * as a full context bar and fires compression in large blocks long before the window is close.
+ *
+ * The newest recorded usage row is a real measurement of the prompt at one point in time, so keep
+ * it as the anchor and only estimate what came after it. Message timestamps are second resolution
+ * and usage rows are milliseconds, so the boundary is `timestamp > createdAt / 1000`; that also
+ * leaves the anchor call's own assistant reply out of the delta, since it is already counted in
+ * `output_tokens`. Returns undefined when the session has no recorded usage at all — only then is
+ * the whole-transcript estimate the honest answer.
+ */
+export function anchoredContextWindowTokens(
+  sid: string,
+  source: string,
+  history: readonly UsageTokenMessage[],
+): { contextTokens: number; anchorCreatedAt: number; deltaTokens: number } | undefined {
+  const anchor = getUsage(sid, source)
+  if (!anchor) return undefined
+  const anchorTokens = Math.floor(
+    Number(anchor.input_tokens || 0)
+      + Number(anchor.cache_read_tokens || 0)
+      + Number(anchor.cache_write_tokens || 0)
+      + Number(anchor.output_tokens || 0),
+  )
+  if (!Number.isFinite(anchorTokens) || anchorTokens <= 0) return undefined
+  const anchorCreatedAt = Number(anchor.created_at || 0)
+  if (!Number.isFinite(anchorCreatedAt) || anchorCreatedAt <= 0) return undefined
+  const anchorSeconds = Math.floor(anchorCreatedAt / 1000)
+  const tail = history.filter((message) => {
+    const at = Number(message?.timestamp)
+    if (!Number.isFinite(at)) return false
+    return at > anchorSeconds
+  })
+  if (tail.length === 0) {
+    return { contextTokens: anchorTokens, anchorCreatedAt, deltaTokens: 0 }
+  }
+  const tailUsage = estimateUsageTokensFromMessages(tail)
+  const deltaTokens = Math.max(0, Math.floor(tailUsage.inputTokens + tailUsage.outputTokens))
+  return {
+    contextTokens: anchorTokens + deltaTokens,
+    anchorCreatedAt,
+    deltaTokens,
+  }
 }
 
 export function getCachedBridgeContextOverhead(state: SessionState): number | undefined {

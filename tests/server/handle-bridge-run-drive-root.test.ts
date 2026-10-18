@@ -77,6 +77,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () =
   updateContextTokenUsage: vi.fn(),
   updateMessageContextTokenUsage: vi.fn(),
   recordedContextWindowTokens: vi.fn(() => undefined),
+  anchoredContextWindowTokens: vi.fn(() => undefined),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/bridge-message', () => ({

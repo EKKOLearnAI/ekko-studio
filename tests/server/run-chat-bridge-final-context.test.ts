@@ -44,6 +44,9 @@ const updateContextTokenUsageMock = vi.fn((sid: string, state: any, emit: any, c
   })
   return contextTokens
 })
+const anchoredContextWindowTokensMock = vi.fn(
+  (_sid: string, _source: string, _history: any[]): { contextTokens: number; anchorCreatedAt: number; deltaTokens: number } | undefined => undefined,
+)
 const recordedContextWindowTokensMock = vi.fn(
   (_sid: string, _source: string, _minCreatedAt?: number): number | undefined => undefined,
 )
@@ -103,6 +106,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () =
   updateContextTokenUsage: updateContextTokenUsageMock,
   updateMessageContextTokenUsage: updateMessageContextTokenUsageMock,
   recordedContextWindowTokens: recordedContextWindowTokensMock,
+  anchoredContextWindowTokens: anchoredContextWindowTokensMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/bridge-message', () => ({
@@ -189,6 +193,10 @@ describe('bridge run final context usage', () => {
     buildSnapshotAwareHistoryMock.mockImplementation(async (_sessionId: string, _profile: string, history: any[]) => history)
     calcAndUpdateUsageMock.mockResolvedValue({ inputTokens: 11, outputTokens: 7 })
     estimateUsageTokensFromMessagesMock.mockReturnValue({ inputTokens: 11, outputTokens: 7 })
+    // vi.clearAllMocks() drops calls but keeps implementations, so the two context-window probes
+    // must be reset explicitly or a test that armed them leaks into every later test.
+    recordedContextWindowTokensMock.mockReturnValue(undefined)
+    anchoredContextWindowTokensMock.mockReturnValue(undefined)
     completeWorkspaceRunCheckpointMock.mockReturnValue(null)
     ensureOpenBridgeAssistantMessageMock.mockImplementation((state: any, sessionId: string, runMarker: string) => {
       const existing = [...state.messages].reverse().find((message: any) => (
@@ -1612,6 +1620,43 @@ describe('bridge run final context usage', () => {
     expect(state.contextTokens).toBe(18)
     expect(emit).toHaveBeenCalledWith('run.completed', expect.objectContaining({
       contextTokens: 18,
+    }))
+  })
+
+  it('anchors on recorded usage instead of the whole transcript when this run recorded none', async () => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    const state = makeState()
+    state.runStartedAt = 5_000
+    const sessionMap = new Map([['session-1', state]])
+    recordedContextWindowTokensMock.mockReturnValue(undefined)
+    anchoredContextWindowTokensMock.mockReturnValue({ contextTokens: 61_000, anchorCreatedAt: 4_000, deltaTokens: 1_000 })
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'started' }),
+      contextEstimate: vi.fn(),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-1', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1' },
+      'default',
+      sessionMap,
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(anchoredContextWindowTokensMock).toHaveBeenCalledWith('session-1', 'hermes', expect.any(Array))
+    expect(state.contextTokens).toBe(61_000)
+    expect(emit).toHaveBeenCalledWith('run.completed', expect.objectContaining({
+      contextTokens: 61_000,
     }))
   })
 

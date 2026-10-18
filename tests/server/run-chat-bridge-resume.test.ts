@@ -60,6 +60,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () =
   }),
   recordedContextWindowTokens: vi.fn(() => undefined),
   updateContextTokenUsage: vi.fn(),
+  anchoredContextWindowTokens: vi.fn(() => undefined),
 }))
 
 function createNamespace() {

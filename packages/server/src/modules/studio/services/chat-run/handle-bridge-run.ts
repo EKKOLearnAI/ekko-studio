@@ -25,6 +25,7 @@ import {
   contextTokensWithCachedOverhead,
   estimateUsageTokensFromMessages,
   getCachedBridgeContextOverhead,
+  anchoredContextWindowTokens,
   recordedContextWindowTokens,
   updateContextTokenUsage,
   updateMessageContextTokenUsage,
@@ -1246,6 +1247,32 @@ async function refreshFinalContextUsage(args: {
         contextTokens,
         source: 'recorded-usage',
       }, '[chat-run-socket] final context size from recorded model usage')
+      return contextTokens
+    }
+    // No usage row from this run, but an earlier one is a real measurement of the prompt at a
+    // point in time. Anchor on it and estimate only the messages appended after it; the stored
+    // transcript is uncompressed and over-states the window by multiples.
+    const anchored = anchoredContextWindowTokens(args.sessionId, 'hermes', finalHistory)
+    if (anchored) {
+      const contextTokens = updateContextTokenUsage(
+        args.sessionId,
+        args.state,
+        args.emit,
+        anchored.contextTokens,
+        args.usage,
+      )
+      bridgeLogger.info({
+        sessionId: args.sessionId,
+        profile: args.profile,
+        model: args.model,
+        provider: args.provider,
+        messages: finalHistory.length,
+        messageTokens: finalMessageTokens,
+        anchorCreatedAt: anchored.anchorCreatedAt,
+        deltaTokens: anchored.deltaTokens,
+        contextTokens,
+        source: 'anchored-estimate',
+      }, '[chat-run-socket] final context size anchored on recorded model usage')
       return contextTokens
     }
     await ensureBridgeFixedContext({
