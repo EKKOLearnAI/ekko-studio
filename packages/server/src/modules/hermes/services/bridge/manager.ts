@@ -3,6 +3,8 @@ import { existsSync } from 'fs'
 import { createConnection, createServer } from 'net'
 import { isAbsolute, join, resolve } from 'path'
 import { logger } from '../../../studio/public/logging'
+import { config } from '../../../studio/public/config'
+import { OPENROUTER_APP_HEADERS } from '../../../studio/public/openrouter-attribution'
 import { resolveHermesInstallationEnvironment } from '../runtime/installation'
 import { detectHermesHome, getHermesBin } from '../runtime/path'
 import { AgentBridgeClient, DEFAULT_AGENT_BRIDGE_ENDPOINT } from './client'
@@ -17,9 +19,9 @@ const DEFAULT_AGENT_BRIDGE_SHUTDOWN_TIMEOUT_MS = 10_000
 const DEFAULT_AGENT_BRIDGE_FORCE_KILL_WAIT_MS = 2_000
 const FORCE_KILL_COMMAND_TIMEOUT_MS = 5_000
 const OPENROUTER_WEB_UI_ATTRIBUTION_ENV = {
-  HERMES_OPENROUTER_APP_REFERER: 'https://ekkostudio.xyz',
-  HERMES_OPENROUTER_APP_TITLE: 'Ekko Studio',
-  HERMES_OPENROUTER_APP_CATEGORIES: 'cli-agent,personal-agent',
+  HERMES_OPENROUTER_APP_REFERER: OPENROUTER_APP_HEADERS['HTTP-Referer'],
+  HERMES_OPENROUTER_APP_TITLE: OPENROUTER_APP_HEADERS['X-OpenRouter-Title'],
+  HERMES_OPENROUTER_APP_CATEGORIES: OPENROUTER_APP_HEADERS['X-OpenRouter-Categories'],
 } as const
 
 export interface AgentBridgeManagerOptions {
@@ -97,6 +99,14 @@ export function buildAgentBridgeProcessEnv(endpoint: string, hermesHome: string 
     ...process.env,
     HERMES_AGENT_BRIDGE_ENDPOINT: endpoint,
     HERMES_HOME: hermesHome,
+    // Shared Hermes YAML may have been rewritten by another Studio instance.
+    // Carry the owner separately so each worker can scope managed MCP launches.
+    HERMES_AGENT_BRIDGE_STUDIO_MCP_ENV: JSON.stringify({
+      HERMES_WEB_UI_URL: `http://127.0.0.1:${config.port}`,
+      HERMES_WEB_UI_HOME: config.appHome,
+      HERMES_WEBUI_STATE_DIR: config.appHome,
+      ELECTRON_RUN_AS_NODE: '1',
+    }),
     HERMES_OPENROUTER_APP_REFERER: process.env.HERMES_OPENROUTER_APP_REFERER || OPENROUTER_WEB_UI_ATTRIBUTION_ENV.HERMES_OPENROUTER_APP_REFERER,
     HERMES_OPENROUTER_APP_TITLE: process.env.HERMES_OPENROUTER_APP_TITLE || OPENROUTER_WEB_UI_ATTRIBUTION_ENV.HERMES_OPENROUTER_APP_TITLE,
     HERMES_OPENROUTER_APP_CATEGORIES: process.env.HERMES_OPENROUTER_APP_CATEGORIES || OPENROUTER_WEB_UI_ATTRIBUTION_ENV.HERMES_OPENROUTER_APP_CATEGORIES,

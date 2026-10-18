@@ -27,6 +27,7 @@ from bridge_runtime import (
     _install_execute_code_approval_memory_patch,
     _jsonable,
     _load_cfg,
+    _load_disabled_toolsets,
     _load_enabled_toolsets,
     _load_fallback_model,
     _load_reasoning_config,
@@ -43,6 +44,8 @@ from bridge_runtime import (
     _title_user_message,
     _tool_names_from_definitions,
 )
+
+CLARIFY_TIMEOUT_SECONDS = 300
 
 
 def _bind_session_workspace_cwd(session_id: str, workspace: str | None) -> bool:
@@ -152,6 +155,7 @@ class RunRecord:
     error: str | None = None
     deltas: list[str] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
+    worker_thread: threading.Thread | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -230,6 +234,7 @@ class AgentPool:
             "usage": usage,
             "model": kwargs.get("response_model") or kwargs.get("model"),
             "provider": kwargs.get("provider"),
+            "base_url": kwargs.get("base_url"),
             "api_mode": kwargs.get("api_mode"),
             "api_duration": kwargs.get("api_duration"),
             "started_at": kwargs.get("started_at"),
@@ -394,6 +399,10 @@ class AgentPool:
     ) -> AgentSession:
         requested_model = str(model or "").strip()
         requested_provider = str(provider or "").strip()
+        # A profile worker is long-lived while Studio may rotate OAuth access
+        # tokens between runs. Reload its .env before inspecting/reusing a
+        # cached AgentSession.
+        _refresh_worker_profile_env()
         with self._lock:
             existing = self._sessions.get(session_id)
             if existing is not None:
@@ -403,6 +412,30 @@ class AgentPool:
                     (requested_model and existing.config.get("model") != requested_model)
                     or (requested_provider and existing.config.get("provider") != requested_provider)
                 )
+                effective_provider = (
+                    requested_provider
+                    or str(existing.config.get("provider") or "")
+                    or str(getattr(existing.agent, "provider", "") or "")
+                ).strip().lower()
+                # Anthropic's SDK client freezes its credential at construction.
+                # Studio updates ANTHROPIC_TOKEN after centrally refreshing
+                # Claude OAuth, so compare the newly resolved runtime with the
+                # cached client and hot-switch before the next model request.
+                if not profile_changed and not runtime_changed and effective_provider == "anthropic":
+                    target_profile = profile or str(existing.config.get("profile") or "default")
+                    with _profile_env(target_profile):
+                        _refresh_worker_profile_env()
+                        refreshed_runtime = _resolve_runtime(
+                            requested_model or str(existing.config.get("model") or ""),
+                            effective_provider,
+                        )
+                    runtime_changed = (
+                        refreshed_runtime.get("api_key") != getattr(existing.agent, "api_key", None)
+                        or str(refreshed_runtime.get("base_url") or "").rstrip("/")
+                        != str(getattr(existing.agent, "base_url", "") or "").rstrip("/")
+                        or str(refreshed_runtime.get("api_mode") or "")
+                        != str(getattr(existing.agent, "api_mode", "") or "")
+                    )
                 config_changed = profile_changed or runtime_changed
                 if config_changed:
                     if profile_changed and not existing.running:
@@ -472,6 +505,7 @@ class AgentPool:
                     reasoning_config=_load_reasoning_config(resolved_model),
                     service_tier=_load_service_tier(),
                     enabled_toolsets=_load_enabled_toolsets(),
+                    disabled_toolsets=_load_disabled_toolsets(),
                     platform=_bridge_platform(),
                     session_id=session_id,
                     session_db=self._db.get_for_profile(profile),
@@ -1405,28 +1439,108 @@ class AgentPool:
         return callback
 
     def _clarify_callback(self, session_id: str):
-        def callback(question: str, choices: list[str] | None = None) -> str:
-            clarify_id = uuid.uuid4().hex
-            response_queue: queue.Queue[str] = queue.Queue(maxsize=1)
+        def callback(
+            question: str | list[dict[str, Any]],
+            choices: list[str] | None = None,
+            *,
+            multi_select: bool = False,
+            questions: list[dict[str, Any]] | None = None,
+        ) -> str | dict[str, Any]:
+            # 5eea87882a calls callback(normalized_questions) directly. Earlier
+            # kernels use two positional arguments, optionally with batch kwargs.
+            modern = isinstance(question, list)
+            batch = question if modern else questions
+            deadline = time.monotonic() + CLARIFY_TIMEOUT_SECONDS
             with self._lock:
-                self._clarify_requests[clarify_id] = response_queue
+                session = self._sessions.get(session_id)
+                run_id = session.current_run_id if session else None
+            if session is None:
+                notice = "The Studio session is no longer available; no question was delivered."
+                if modern:
+                    return {"answers": {}, "outcome": "undelivered", "notice": notice}
+                if batch is not None:
+                    return {"answers": {}, "timed_out": True, "notice": notice}
+                return ""
+
+            def cancelled() -> bool:
+                with self._lock:
+                    return (
+                        self._sessions.get(session_id) is not session
+                        or session.current_run_id != run_id
+                        or bool(getattr(session.agent, "_interrupt_requested", False))
+                    )
+
+            if batch is not None:
+                answers: dict[str, Any] = {}
+                outcome = "submitted"
+                for entry in batch:
+                    response, outcome = self._clarify_question(
+                        session_id, entry["question"], entry.get("choices"),
+                        bool(entry.get("multi_select")), deadline, cancelled,
+                    )
+                    if outcome != "submitted":
+                        break
+                    # None is a deliberate skip; absent qids remain unanswered.
+                    answers[entry["qid"]] = response if response else None
+                if modern:
+                    return {"answers": answers, "outcome": outcome}
+                return {"answers": answers, "timed_out": outcome != "submitted"}
+
+            response, outcome = self._clarify_question(
+                session_id, str(question or ""), choices, multi_select, deadline, cancelled,
+            )
+            if outcome == "timed_out":
+                from tools import clarify_tool
+
+                return getattr(clarify_tool, "TIMEOUT_RESPONSE", "[user did not respond within 5m]")
+            return response or ""
+
+        return callback
+
+    def _clarify_question(
+        self, session_id: str, question: str, choices: list[str] | None,
+        multi_select: bool, deadline: float, cancelled: Callable[[], bool],
+    ) -> tuple[str | None, str]:
+        if cancelled():
+            return None, "cancelled"
+        if time.monotonic() >= deadline:
+            return None, "timed_out"
+        clarify_id = uuid.uuid4().hex
+        response_queue: queue.Queue[str] = queue.Queue(maxsize=1)
+        with self._lock:
+            self._clarify_requests[clarify_id] = response_queue
+        outcome = "submitted"
+        try:
             self._append_event(session_id, {
                 "event": "clarify.requested",
                 "clarify_id": clarify_id,
-                "question": str(question or ""),
+                "question": question,
                 "choices": list(choices) if choices else None,
-                "timeout_ms": 300_000,
+                "multi_select": multi_select,
+                "timeout_ms": max(0, int((deadline - time.monotonic()) * 1000)),
             })
-            try:
-                user_response = response_queue.get(timeout=300)
-            except queue.Empty:
-                user_response = "[user did not respond within 5m]"
-            finally:
-                with self._lock:
-                    self._clarify_requests.pop(clarify_id, None)
-            return user_response
-
-        return callback
+            while True:
+                if cancelled():
+                    outcome = "cancelled"
+                    return None, outcome
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    outcome = "timed_out"
+                    return None, outcome
+                try:
+                    return response_queue.get(timeout=min(0.1, remaining)), outcome
+                except queue.Empty:
+                    continue
+        finally:
+            with self._lock:
+                self._clarify_requests.pop(clarify_id, None)
+            if outcome != "submitted":
+                self._append_event(session_id, {
+                    "event": "clarify.resolved",
+                    "clarify_id": clarify_id,
+                    "resolved": False,
+                    "reason": outcome,
+                })
 
     def _approval_dispatcher(self, command: str, description: str, *, allow_permanent: bool = True) -> str:
         session_id = str(getattr(self._run_context, "session_id", "") or "")
@@ -1680,11 +1794,15 @@ class AgentPool:
             session.boundary_pending_run_id = None
             session.boundary_reached_run_id = None
             session.last_used_at = time.time()
-            session_cwd_bound = _bind_session_workspace_cwd(session.session_id, workspace)
+            session_cwd_bound = False
             try:
+                session_cwd_bound = _bind_session_workspace_cwd(session.session_id, workspace)
                 context_event = self._bridge_context_ready_event(session, instructions, profile)
                 if context_event:
                     record.events.append(_jsonable(context_event))
+            except BaseException as exc:
+                self._fail_unexpected_run(session, record, exc)
+                raise
             finally:
                 if session_cwd_bound:
                     _clear_session_workspace_cwd()
@@ -1695,10 +1813,49 @@ class AgentPool:
             daemon=True,
             name=f"hermes-bridge-run-{run_id[:8]}",
         )
-        thread.start()
+        # Status readers take the same session lock, so they cannot mistake a
+        # registered thread which has not started yet for a dead worker.
+        with session.lock:
+            record.worker_thread = thread
+            try:
+                thread.start()
+            except BaseException as exc:
+                self._fail_unexpected_run(session, record, exc)
+                raise
         return record
 
     def _run_chat(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None) -> None:
+        try:
+            self._run_chat_inner(session, record, message, storage_message, instructions, conversation_history, profile, force_compress, workspace, source, reasoning_effort)
+        except BaseException as exc:
+            # Includes setup failures outside the inner try and SystemExit from
+            # agent/tool code. These terminate this run, not the bridge worker.
+            self._fail_unexpected_run(session, record, exc)
+        finally:
+            self._fail_unexpected_run(session, record, RuntimeError("Hermes run worker exited without a terminal result"))
+
+    def _fail_unexpected_run(self, session: AgentSession | None, record: RunRecord, exc: BaseException) -> None:
+        with session.lock if session else self._lock:
+            if record.status != "running":
+                return
+            record.error = f"{type(exc).__name__}: {exc}"
+            record.result = {"error": record.error, "failed": True}
+            record.ended_at = time.time()
+            record.status = "error"
+            if session is not None and session.current_run_id == record.run_id:
+                self._reset_boundary_run(session, record.run_id)
+                session.running = False
+                session.current_run_id = None
+                session.last_used_at = time.time()
+
+    def _check_run_worker(self, record: RunRecord) -> None:
+        with self._lock:
+            session = self._sessions.get(record.session_id)
+        with session.lock if session else self._lock:
+            if record.status == "running" and record.worker_thread is not None and not record.worker_thread.is_alive():
+                self._fail_unexpected_run(session, record, RuntimeError("Hermes run worker exited without a terminal result"))
+
+    def _run_chat_inner(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None) -> None:
         with _profile_env(profile):
             _refresh_approval_allowlist()
             _install_execute_code_approval_memory_patch()
@@ -1871,7 +2028,6 @@ class AgentPool:
                 with session.lock:
                     if isinstance(result.get("messages"), list):
                         session.history = result["messages"]
-                    record.status = "interrupted" if result.get("interrupted") else "complete"
                     record.result = result
                     record.ended_at = time.time()
                     if boundary_interrupted:
@@ -1881,6 +2037,7 @@ class AgentPool:
                             "finish_reason": "boundary_interrupt",
                         })
                         self._clear_completed_boundary_interrupt(session.agent)
+                    record.status = "interrupted" if result.get("interrupted") else "complete"
                     self._reset_boundary_run(session, record.run_id)
                     session.running = False
                     session.current_run_id = None
@@ -1904,7 +2061,6 @@ class AgentPool:
                         pass
                 with session.lock:
                     if boundary_interrupted:
-                        record.status = "interrupted"
                         record.error = None
                         record.result = {
                             "interrupted": True,
@@ -1918,10 +2074,10 @@ class AgentPool:
                         })
                         self._clear_completed_boundary_interrupt(session.agent)
                     else:
-                        record.status = "error"
                         record.error = str(exc)
                         record.result = {"error": str(exc), "traceback": traceback.format_exc()}
                     record.ended_at = time.time()
+                    record.status = "interrupted" if boundary_interrupted else "error"
                     self._reset_boundary_run(session, record.run_id)
                     session.running = False
                     session.current_run_id = None
@@ -2053,6 +2209,21 @@ class AgentPool:
                 del session.background_events[:-self.MAX_BACKGROUND_EVENTS_PER_SESSION]
             return interrupted
 
+    def _stop_session_processes(self, session_id: str) -> int:
+        try:
+            from tools.process_registry import process_registry
+        except ImportError:
+            return 0
+        stopped = 0
+        for process in process_registry.list_sessions(session_key=session_id):
+            if process.get("status") != "running":
+                continue
+            process_id = str(process.get("session_id") or "")
+            if process_id:
+                process_registry.kill_process(process_id)
+                stopped += 1
+        return stopped
+
     def interrupt(self, session_id: str, message: str | None = None) -> dict[str, Any]:
         with self._lock:
             session = self._sessions.get(session_id)
@@ -2072,6 +2243,10 @@ class AgentPool:
         if not hasattr(session.agent, "interrupt"):
             raise RuntimeError("agent does not support interrupt")
         session.agent.interrupt(message)
+        try:
+            self._stop_session_processes(session_id)
+        except Exception as exc:
+            print(f"[hermes_bridge] session process cleanup failed: {exc}", file=sys.stderr, flush=True)
         self._cancel_pending_approvals_for_generation(session_id, interrupted_run_id)
         deadline = time.time() + 10.0
         synced = False
@@ -2132,6 +2307,25 @@ class AgentPool:
                 "reason": "Session interrupted",
             })
         return len(terminal_queues) + len(gateway_approvals)
+
+    def cancel_boundary_interrupt(self, session_id: str, expected_run_id: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            session = self._sessions.get(session_id)
+        if session is None:
+            return {"status": "not_running", "session_id": session_id}
+        with session.lock:
+            run_id = session.current_run_id
+            if not expected_run_id or run_id != expected_run_id:
+                return {"status": "run_mismatch", "session_id": session_id}
+            # Model cancellation may already have escaped the worker thread.
+            # Only a still-running tool batch has a safely recallable boundary.
+            if session.boundary_reached_run_id == run_id or session.boundary_phase != "tool_batch":
+                return {"status": "too_late", "session_id": session_id}
+            if session.boundary_pending_run_id != run_id:
+                return {"status": "not_pending", "session_id": session_id}
+            session.boundary_pending_run_id = None
+            self._clear_completed_boundary_interrupt(session.agent)
+            return {"status": "cancelled", "session_id": session_id, "run_id": run_id}
 
     def request_boundary_interrupt(
         self,
@@ -2310,6 +2504,19 @@ class AgentPool:
         arg = parts[1] if len(parts) > 1 else ""
 
         with _profile_env(profile):
+            if name == "plan":
+                try:
+                    from agent.plan_prompt import build_plan_prompt
+                except ImportError:
+                    return {
+                        "session_id": session_id, "command": name, "handled": False,
+                        "type": "plan",
+                        "message": "/plan requires a newer Hermes Agent runtime with agent.plan_prompt.",
+                    }
+                return {
+                    "session_id": session_id, "command": name, "handled": True,
+                    "type": "plan", "message": build_plan_prompt(arg),
+                }
             if name == "goal":
                 return self._dispatch_goal_command(session_id, arg)
             if name == "subgoal":
@@ -2668,6 +2875,7 @@ class AgentPool:
             record = self._runs.get(run_id)
         if record is None:
             raise KeyError(f"unknown run: {run_id}")
+        self._check_run_worker(record)
         return {
             "run_id": record.run_id,
             "session_id": record.session_id,
@@ -2686,6 +2894,10 @@ class AgentPool:
             record = self._runs.get(run_id)
         if record is None:
             raise KeyError(f"unknown run: {run_id}")
+        self._check_run_worker(record)
+        # Read status first. If the worker finishes while deltas are copied,
+        # report running once more so the next poll can include the final tail.
+        status = record.status
         cursor = max(0, int(cursor or 0))
         deltas = list(record.deltas)
         next_cursor = len(deltas)
@@ -2696,12 +2908,12 @@ class AgentPool:
         return {
             "run_id": record.run_id,
             "session_id": record.session_id,
-            "status": record.status,
+            "status": status,
             "delta": "".join(deltas[cursor:]),
             "cursor": next_cursor,
             "output": "".join(deltas),
-            "done": record.status != "running",
-            "result": record.result if record.status != "running" else None,
+            "done": status != "running",
+            "result": record.result if status != "running" else None,
             "error": record.error,
             "events": new_events,
             "event_cursor": next_event_cursor,
@@ -2818,6 +3030,7 @@ class AgentPool:
     def status(self, session_id: str) -> dict[str, Any]:
         with self._lock:
             session = self._sessions.get(session_id)
+            record = self._runs.get(session.current_run_id) if session else None
         if session is None:
             return {
                 "session_id": session_id,
@@ -2825,6 +3038,8 @@ class AgentPool:
                 "running": False,
                 "message_count": 0,
             }
+        if record is not None:
+            self._check_run_worker(record)
         with session.lock:
             return {
                 "session_id": session_id,
@@ -2847,7 +3062,18 @@ class AgentPool:
     def list_sessions(self) -> dict[str, Any]:
         with self._lock:
             sessions = list(self._sessions.values())
+        running_processes = 0
+        try:
+            from tools.process_registry import process_registry
+
+            running_processes = sum(
+                1 for process in process_registry.list_sessions()
+                if process.get("status") == "running"
+            )
+        except ImportError:
+            pass
         return {
+            **({"running_count": running_processes} if running_processes else {}),
             "sessions": [
                 {
                     "session_id": s.session_id,

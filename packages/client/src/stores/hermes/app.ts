@@ -15,10 +15,12 @@ import {
 } from '@/api/hermes/system'
 import { checkHealth, triggerUpdate } from '@/api/studio/system'
 import { hasApiKey } from '@/api/client'
+import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/utils/sidebar-width'
 
 const WEB_UI_VERSION = __APP_VERSION__
 
 const SIDEBAR_COLLAPSED_KEY = 'hermes_sidebar_collapsed'
+const SIDEBAR_WIDTH_KEY = 'hermes_sidebar_width'
 const ACTIVE_PROFILE_STORAGE_KEY = 'hermes_active_profile_name'
 const MODELS_CACHE_TTL_MS = 30000
 
@@ -26,6 +28,14 @@ export const useAppStore = defineStore('app', () => {
   const sidebarOpen = ref(false)
   // Desktop-only collapsed state (icon-rail mode). Persisted to localStorage.
   const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1')
+  const sidebarWidth = ref(SIDEBAR_DEFAULT_WIDTH)
+  const sidebarResizing = ref(false)
+  try {
+    const savedWidth = localStorage.getItem(SIDEBAR_WIDTH_KEY)
+    if (savedWidth !== null) sidebarWidth.value = clampSidebarWidth(Number(savedWidth))
+  } catch {
+    // Keep resizing available when browser storage is unavailable.
+  }
   // Expanded state of route-owned sidebars, used by the Windows title bar.
   const pageSidebarExpanded = ref(true)
 
@@ -340,9 +350,22 @@ export const useAppStore = defineStore('app', () => {
     pageSidebarExpanded.value = expanded
   }
 
+  function setSidebarWidth(width: number, persist = true) {
+    sidebarWidth.value = clampSidebarWidth(width)
+    if (!persist) return
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value))
+    } catch {
+      // Keep the in-memory width when browser storage is unavailable.
+    }
+  }
+
   return {
     sidebarOpen,
     sidebarCollapsed,
+    sidebarWidth,
+    sidebarResizing,
+    setSidebarWidth,
     pageSidebarExpanded,
     toggleSidebar,
     closeSidebar,

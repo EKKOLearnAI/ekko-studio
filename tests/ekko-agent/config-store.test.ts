@@ -233,7 +233,7 @@ describe('EkkoConfigStore', () => {
 
     const config = new EkkoConfigStore({ configPath }).ensureDefaults()
 
-    expect(config.schemaVersion).toBe(9)
+    expect(config.schemaVersion).toBe(15)
     expect(config.memory).not.toHaveProperty('reviewEveryUserMessages')
     expect(config.memory).not.toHaveProperty('summaryEveryUserMessages')
   })
@@ -288,7 +288,7 @@ describe('EkkoConfigStore', () => {
       })
 
       setup.config.setMcpServer('remote-tools', {
-        type: 'streamable_http',
+        type: 'streamableHttp' as 'streamable_http',
         url: 'https://example.com/mcp',
         headers: { Authorization: 'Bearer test' },
         enabled: true,

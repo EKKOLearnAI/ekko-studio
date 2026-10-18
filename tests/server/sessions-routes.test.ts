@@ -48,6 +48,8 @@ const renameWorkspaceFileMock = vi.fn(async (ctx: any) => { ctx.body = { ok: tru
 const copyWorkspaceFileMock = vi.fn(async (ctx: any) => { ctx.body = { ok: true } })
 
 vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => ({
+  messageSelection: vi.fn(async (ctx: any) => { ctx.body = { groups: [], historyRevision: 0 } }),
+  deleteMessages: vi.fn(async (ctx: any) => { ctx.body = { deleted: 1, deletedGroups: 1, messageIds: [1], historyRevision: 1 } }),
   listConversations: listConversationsMock,
   getConversationMessages: getConversationMessagesMock,
   getConversationMessagesPaginated: getConversationMessagesPaginatedMock,
@@ -70,6 +72,7 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
   archive: archiveMock,
   unarchive: unarchiveMock,
   setPushEnabled: setPushEnabledMock,
+  setPinned: vi.fn(),
   setWorkspace: setWorkspaceMock,
   setCategory: setCategoryMock,
   setModel: setModelMock,
@@ -81,6 +84,8 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
   usageBatch: usageBatchMock,
   usageSingle: usageSingleMock,
   usageStats: usageStatsMock,
+  usagePricing: vi.fn(),
+  updateUsagePricing: vi.fn(),
   contextLength: contextLengthMock,
   exportSession: exportSessionMock,
   listWorkspaceRunChanges: listWorkspaceRunChangesMock,

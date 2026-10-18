@@ -1,4 +1,5 @@
 import { openCodeSessionHeaders } from '../../../studio/public/opencode-session'
+import { openRouterAttributionHeaders } from '../../../studio/public/openrouter-attribution'
 import { readFile, chmod } from 'fs/promises'
 import { readdir, stat } from 'fs/promises'
 import { existsSync, readFileSync } from 'fs'
@@ -36,7 +37,6 @@ export const PROVIDER_ENV_MAP: Record<string, { api_key_env: string; base_url_en
   'ai-gateway': { api_key_env: 'AI_GATEWAY_API_KEY', base_url_env: 'AI_GATEWAY_BASE_URL' },
   cliproxyapi: { api_key_env: '', base_url_env: '' },
   'opencode-zen': { api_key_env: 'OPENCODE_ZEN_API_KEY', base_url_env: 'OPENCODE_ZEN_BASE_URL' },
-  'opencode-free': { api_key_env: '', base_url_env: '' },
   'opencode-go': { api_key_env: 'OPENCODE_GO_API_KEY', base_url_env: 'OPENCODE_GO_BASE_URL' },
   huggingface: { api_key_env: 'HF_TOKEN', base_url_env: 'HF_BASE_URL' },
   nvidia: { api_key_env: 'NVIDIA_API_KEY', base_url_env: 'NVIDIA_BASE_URL' },
@@ -228,7 +228,7 @@ export async function fetchProviderModels(baseUrl: string, apiKey: string, freeO
   const modelsUrl = /\/v\d+\/?$/.test(base) ? `${base}/models` : `${base}/v1/models`
   try {
     const res = await fetch(modelsUrl, {
-      headers: { ...openCodeSessionHeaders(modelsUrl), Authorization: `Bearer ${apiKey}` },
+      headers: { ...openCodeSessionHeaders(modelsUrl), ...openRouterAttributionHeaders(modelsUrl), Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(8000),
     })
     if (!res.ok) {

@@ -46,6 +46,8 @@ export type AgentRuntimeEvent =
       cacheReadTokens: number
       cacheWriteTokens: number
       reasoningTokens: number
+      costUsd?: number
+      costSource?: 'reported' | 'estimated'
       continuationContext?: EkkoBackgroundContinuationContext
     }
   | { type: 'run.tool_recovery_required'; runId: string; toolName: string; failures: number }

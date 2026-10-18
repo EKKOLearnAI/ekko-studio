@@ -68,6 +68,31 @@ async function createAppI18n() {
 
 export const i18nReady = createAppI18n()
 
+if (import.meta.hot) {
+  let messageUpdateSequence = 0
+  import.meta.hot.accept('./messages', async (updatedMessages) => {
+    if (!updatedMessages) return
+    const sequence = ++messageUpdateSequence
+    const globalI18n = (await i18nReady).global as any
+    const englishMessages = await updatedMessages.loadLocaleMessages('en')
+    const messages = await Promise.all(
+      (globalI18n.availableLocales as SupportedLocale[]).map(async (loadedLocale) => [
+        loadedLocale,
+        loadedLocale === 'en'
+          ? englishMessages
+          : updatedMessages.mergeMessagesWithFallback(
+              englishMessages,
+              await updatedMessages.loadLocaleMessages(loadedLocale),
+            ),
+      ] as const),
+    )
+    if (sequence !== messageUpdateSequence) return
+    for (const [loadedLocale, localeMessages] of messages) {
+      globalI18n.setLocaleMessage(loadedLocale, localeMessages)
+    }
+  })
+}
+
 let localeSwitchSequence = 0
 
 export async function switchLocale(newLocale: string): Promise<void> {

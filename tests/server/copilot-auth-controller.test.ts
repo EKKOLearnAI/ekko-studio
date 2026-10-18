@@ -153,6 +153,20 @@ describe('copilot-auth controller — disable', () => {
     expect(ctx.body).toEqual(expect.objectContaining({ cleared_default: true }))
   })
 
+  it('preserves provider-independent model settings when disabling copilot', async () => {
+    mockResolveWithSource.mockResolvedValue({ token: '', source: null })
+    mockReadConfigYaml.mockResolvedValue({ model: {
+      default: 'gpt-4o',
+      provider: 'copilot',
+      context_length: 256000,
+    } })
+    const ctx = makeCtx()
+
+    await ctrl.disable(ctx)
+
+    expect(mockWriteConfigYaml).toHaveBeenCalledWith({ model: { context_length: 256000 } })
+  })
+
   it('does NOT touch default model when it belongs to a different provider', async () => {
     mockResolveWithSource.mockResolvedValue({ token: '', source: null })
     mockReadConfigYaml.mockResolvedValue({ model: { default: 'glm-4', provider: 'zhipu' } })

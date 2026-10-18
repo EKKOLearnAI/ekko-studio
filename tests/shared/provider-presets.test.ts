@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   PROVIDER_PRESETS as SERVER_PROVIDER_PRESETS,
   buildProviderModelMap as buildServerProviderModelMap,
+  resolveProviderCatalogApiMode,
 } from '../../packages/server/src/modules/studio/contracts/providers'
 import { PROVIDER_ENV_MAP } from '../../packages/server/src/modules/hermes/services/profiles/config'
 
@@ -228,6 +229,42 @@ function modelsForProvider(providerPresets: Array<{ value: string; models: strin
 }
 
 describe('provider presets', () => {
+  it.each(['opencode-zen', 'opencode-go'])('matches Hermes dynamic model routing for %s', provider => {
+    for (const model of ['gpt-new-version', 'grok-new-version', 'muse-spark-new']) {
+      expect(resolveProviderCatalogApiMode(provider, model)).toBe('codex_responses')
+    }
+    for (const model of ['claude-next', 'qwen-next', 'union-alpha-next']) {
+      expect(resolveProviderCatalogApiMode(provider, model)).toBe('anthropic_messages')
+    }
+    for (const model of ['gemini-next', 'glm-next', 'kimi-next', 'deepseek-next', 'mimo-next', 'unlisted-model']) {
+      expect(resolveProviderCatalogApiMode(provider, model)).toBe('chat_completions')
+    }
+    expect(resolveProviderCatalogApiMode(provider, 'minimax-next')).toBe(provider === 'opencode-go' ? 'anthropic_messages' : 'chat_completions')
+    expect(resolveProviderCatalogApiMode(provider, ` ${provider}/GPT-NEXT `)).toBe('codex_responses')
+    expect(resolveProviderCatalogApiMode(provider)).toBeUndefined()
+    expect(resolveProviderCatalogApiMode(`custom:${provider}`, 'gpt-next')).toBeUndefined()
+  })
+
+  it('keeps Copilot GPT-5-mini and Claude on chat, and GPT-5+ on Responses like Hermes', () => {
+    for (const model of ['gpt-5-mini', 'gpt-5-mini-preview', 'gpt-4.1', 'claude-sonnet-4.6']) {
+      expect(resolveProviderCatalogApiMode('copilot', model)).toBe('chat_completions')
+    }
+    for (const model of ['gpt-5.4-mini', 'gpt-5.5', 'gpt-6-sol']) {
+      expect(resolveProviderCatalogApiMode('copilot', model)).toBe('codex_responses')
+    }
+  })
+
+  it('explicitly declares protocol metadata for each built-in without inventing a single protocol for mixed catalogs', () => {
+    for (const preset of SERVER_PROVIDER_PRESETS) {
+      expect(['chat_completions', 'codex_responses', 'anthropic_messages', 'per_model']).toContain(preset.catalog_api_mode)
+    }
+    for (const provider of ['opencode-zen', 'opencode-go', 'copilot']) {
+      const preset = SERVER_PROVIDER_PRESETS.find(p => p.value === provider)
+      expect(preset?.catalog_api_mode).toBe('per_model')
+      expect(preset?.api_mode).toBeUndefined()
+    }
+  })
+
   it('keeps every built-in provider preset registered in the env map', () => {
     const missingMappings = SERVER_PROVIDER_PRESETS
       .filter(candidate => candidate.builtin)
@@ -290,6 +327,7 @@ describe('provider presets', () => {
     const preset = SERVER_PROVIDER_PRESETS.find(candidate => candidate.value === GLM_CODING_PLAN_PROVIDER)
     expect(preset?.base_url).toBe('https://open.bigmodel.cn/api/coding/paas/v4')
     expect(preset?.api_mode).toBeUndefined()
+    expect(preset?.catalog_api_mode).toBe('chat_completions')
     expect(PROVIDER_ENV_MAP[GLM_CODING_PLAN_PROVIDER]).toEqual({ api_key_env: 'GLM_API_KEY', base_url_env: '' })
     expect(modelsForProvider(SERVER_PROVIDER_PRESETS, GLM_CODING_PLAN_PROVIDER)).toEqual([
       'glm-5.2',

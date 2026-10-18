@@ -23,6 +23,69 @@ describe('session store filtering', () => {
     vi.resetModules()
   })
 
+  it('stores pins on sessions, retains categories, and includes old pins before pagination', async () => {
+    const { createSession, getSession, listSessions, setSessionPinned } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    createSession({ id: 'old', profile: 'default', category_id: 1 })
+    createSession({ id: 'new', profile: 'default' })
+    createSession({ id: 'other', profile: 'work' })
+    db.prepare('UPDATE sessions SET last_active = 1 WHERE id = ?').run('old')
+    expect(getSession('old')?.is_pinned).toBe(0)
+    expect(setSessionPinned('old', true)).toBe(true)
+    expect(getSession('old')).toMatchObject({ is_pinned: 1, category_id: 1 })
+    expect(listSessions('default', undefined, 1).map(s => s.id)).toEqual(['old'])
+    expect(listSessions('default', undefined, 100, { pinned: true }).map(s => s.id)).toEqual(['old'])
+    expect(listSessions('work', undefined, 100, { pinned: true })).toEqual([])
+    expect(listSessions('default', undefined, 1, { pinned: false }).map(s => s.id)).toEqual(['new'])
+    expect(listSessions('default', undefined, 10, { pinned: false, categoryId: 1 })).toEqual([])
+    expect(setSessionPinned('old', false)).toBe(true)
+    expect(listSessions('default', undefined, 100, { pinned: true })).toEqual([])
+    expect(setSessionPinned('missing', true)).toBe(false)
+  })
+
+  it('filters database pins before pagination and category counts', async () => {
+    const { createSession, listSessions, countSessions, setSessionPinned } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    const { createSessionCategory } = await import('../../packages/server/src/modules/studio/repositories/session-category-store')
+    const category = createSessionCategory('Work')
+    for (let i = 0; i < 25; i++) {
+      createSession({ id: `session-${i}`, profile: 'default', category_id: category.id })
+      setSessionPinned(`session-${i}`, i < 12)
+    }
+    const options = { pinned: false, categoryId: category.id }
+    expect(countSessions('default', undefined, options)).toBe(13)
+    const first = listSessions('default', undefined, 10, options)
+    const next = listSessions('default', undefined, 10, { ...options, offset: 10 })
+    expect(first).toHaveLength(10)
+    expect(next).toHaveLength(3)
+    expect(new Set([...first, ...next].map(s => s.id)).size).toBe(13)
+    expect([...first, ...next].every(s => s.is_pinned === 0)).toBe(true)
+  })
+
+  it('filters builtin history before pagination while preserving source, aliases and profile boundaries', async () => {
+    const { createSession, listSessions, countSessions, getSession, setSessionPinned } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    for (let i = 0; i < 80; i++) {
+      createSession({ id: `external-${i}`, profile: 'default', source: 'coding_agent', agent: 'codex' })
+      db.prepare('UPDATE sessions SET last_active = ? WHERE id = ?').run(1000 + i, `external-${i}`)
+    }
+    for (const [i, agent] of ['ekko-agent', ' EKKO ', 'ekko_agent'].entries()) {
+      createSession({ id: `builtin-${i}`, profile: 'default', source: i === 1 ? 'cli' : 'coding_agent', agent })
+      db.prepare('UPDATE sessions SET last_active = ?, is_archived = ? WHERE id = ?').run(10 - i, i === 2 ? 1 : 0, `builtin-${i}`)
+    }
+    setSessionPinned('builtin-2', true)
+    createSession({ id: 'group', profile: 'default', source: 'group_chat', agent: 'ekko-agent' })
+    createSession({ id: 'workflow', profile: 'default', source: 'workflow', agent: 'ekko-agent' })
+    createSession({ id: 'other-profile', profile: 'travel', source: 'coding_agent', agent: 'ekko-agent' })
+    const first = listSessions('default', undefined, 2, { historySource: 'builtin_agent' })
+    const next = listSessions('default', undefined, 2, { historySource: 'builtin_agent', offset: 2 })
+    expect(first.map(row => row.id)).toEqual(['builtin-0', 'builtin-1'])
+    expect(next.map(row => row.id)).toEqual(['builtin-2'])
+    expect(next[0]).toMatchObject({ is_archived: 1, is_pinned: 1, source: 'builtin_agent' })
+    expect(countSessions('default', undefined, { historySource: 'builtin_agent' })).toBe(3)
+    expect(listSessions(undefined, undefined, 10, { historySource: 'builtin_agent', profiles: ['travel'] }).map(row => row.id)).toEqual(['other-profile'])
+    expect(countSessions('default', 'coding_agent', { historySource: 'coding_agent' })).toBe(80)
+    expect(listSessions('default', 'coding_agent', 10, { historySource: 'coding_agent', offset: 70 }).every(row => row.agent === 'codex')).toBe(true)
+    expect(getSession('builtin-0')?.source).toBe('builtin_agent')
+  })
+
   it('resolves notification title for untitled sessions and bounds assistant preview', async () => {
     const { createSession, addMessage, getSessionNotificationPreview } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     createSession({ id: 'untitled-notice', profile: 'default', source: 'coding_agent' })

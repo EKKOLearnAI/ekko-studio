@@ -5,6 +5,7 @@ import { fetchAuthenticatedBlob, saveBlob } from './binary-content'
 // ─── Types ──────────────────────────────────────────────────
 
 export interface RoomInfo {
+    messageDeletionRevision?: number
     id: string
     name: string
     inviteCode: string | null
@@ -74,6 +75,20 @@ export interface RoomSummaryState {
     lastError: string | null
 }
 
+export interface RoomSummaryReview {
+    id: string
+    roomId: string
+    sourceVersion: number
+    sourceSummaryHash: string
+    status: 'completed' | 'skipped'
+    decision: 'pass' | 'needs_improvement' | 'unknown'
+    ruleResults: Array<{ id: string; decision: 'pass' | 'needs_improvement' | 'unknown'; confidence?: number }>
+    reasonCode: string
+    durationMs: number
+    createdAt: number
+    appliedRevisionVersion: number | null
+}
+
 export interface RoomSummaryAnchor {
     id: string
     timestamp: number
@@ -86,8 +101,9 @@ export interface RoomAgent {
     id: string
     roomId: string
     agentId: string
-    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     agentMode: 'scoped' | 'global'
+    priorAgentMode?: 'scoped' | 'global' | ''
     profile: string
     provider: string
     model: string
@@ -111,6 +127,12 @@ export type RoomAgentSummary = Pick<
     'id' | 'roomId' | 'agentId' | 'agent' | 'name' | 'avatar'
 >
 
+export interface GroupMessageRoutingDecision {
+    messageId: string; roomId: string; targetAgentId: string | null; targetAgentName: string | null
+    mode: 'suggest' | 'auto'; status: 'suggested' | 'queued' | 'skipped'; queueId: string | null
+    confidence: number | null; handoffComplete: boolean | null; loopDetected: boolean | null; createdAt: number; updatedAt: number
+}
+
 export interface GroupAgentActivity {
     roomId: string
     /** Stable gc_room_agents row identity. */
@@ -125,8 +147,9 @@ export interface GroupAgentActivity {
 
 export interface RoomAgentInput {
     presetId?: string
-    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     agentMode?: 'scoped' | 'global'
+    priorAgentMode?: 'scoped' | 'global' | ''
     profile: string
     provider?: string
     model?: string
@@ -157,6 +180,7 @@ export function groupAgentPresetToRoomAgentInput(preset: GroupAgentPreset): Room
         presetId: preset.id,
         agent: preset.agent,
         agentMode: preset.agentMode,
+        priorAgentMode: preset.priorAgentMode,
         profile: preset.profile,
         provider: preset.provider,
         model: preset.model,
@@ -179,6 +203,8 @@ export interface AgentAddResult {
 }
 
 export interface ChatMessage {
+    taskPlan?: import('@/utils/task-plan').TaskPlanSnapshot
+    runUsage?: import('@/utils/run-usage').RunUsageSummary
     id: string
     roomId: string
     senderId: string
@@ -535,7 +561,7 @@ export async function updateRoomWorkspace(roomId: string, workspace: string): Pr
     })
 }
 
-export async function getRoomSummary(roomId: string): Promise<{ summary: RoomSummaryState; anchor: RoomSummaryAnchor | null }> {
+export async function getRoomSummary(roomId: string): Promise<{ summary: RoomSummaryState; review: RoomSummaryReview | null; anchor: RoomSummaryAnchor | null }> {
     return request(`/api/studio/group-chat/rooms/${roomId}/summary`)
 }
 
@@ -632,5 +658,33 @@ export async function renameGroupWorkspaceFile(roomId: string, oldPath: string, 
 export async function copyGroupWorkspaceFile(roomId: string, srcPath: string, destPath: string): Promise<void> {
     await request(`/api/studio/group-chat/rooms/${encodeURIComponent(roomId)}/workspace-file/copy`, {
         method: 'POST', body: JSON.stringify({ srcPath, destPath }),
+    })
+}
+
+
+export interface GroupMessageSelectionGroup {
+    id: string
+    kind: 'message' | 'run'
+    messageIds: string[]
+    deleteBlockedReason?: 'summarized' | 'summary_boundary_unknown'
+}
+
+export interface GroupMessagesDeleted {
+    roomId: string
+    messageIds: string[]
+    deletedGroups: number
+    messageCount: number
+    totalTokens: number
+    messageDeletionRevision: number
+}
+
+export function getGroupMessageSelection(roomId: string): Promise<{ groups: GroupMessageSelectionGroup[]; historyRevision: string }> {
+    return request(`/api/studio/group-chat/rooms/${encodeURIComponent(roomId)}/message-selection`)
+}
+
+export function deleteGroupMessages(roomId: string, messageIds: string[], historyRevision: string): Promise<GroupMessagesDeleted> {
+    return request(`/api/studio/group-chat/rooms/${encodeURIComponent(roomId)}/messages/delete`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageIds, historyRevision }),
     })
 }

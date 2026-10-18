@@ -1,0 +1,32 @@
+#!/bin/bash
+set -e
+app_root="/usr/local/@APP_ID@"
+
+case "$1" in
+    configure)
+        # Manual App Center installation may not create the config.ini account.
+        # Reuse an existing identity so upgrades retain ownership of saved data.
+        if ! getent group "@USER@" >/dev/null; then
+            groupadd --system "@USER@"
+        fi
+        if ! id -u "@USER@" >/dev/null 2>&1; then
+            useradd --system --gid "@USER@" --no-create-home \
+                --home-dir "$app_root/data/home" --shell /usr/sbin/nologin "@USER@"
+        fi
+        if [ "$(id -u "@USER@")" = 0 ] || [ "$(getent group "@USER@" | cut -d: -f3)" = 0 ]; then
+            echo "Refusing to run Ekko Studio with a root service identity" >&2
+            exit 1
+        fi
+        install -d -m 0700 -o "@USER@" -g "@USER@" \
+            "$app_root/data" "$app_root/logs" \
+            "$app_root/data/home" "$app_root/data/studio" \
+            "$app_root/data/tmp" "$app_root/data/cache" \
+            "$app_root/data/workspaces" "$app_root/data/npm"
+        rm -rf "$app_root/webui"
+        tar -xjf "$app_root/webui.bz2" -C "$app_root"
+        systemctl daemon-reload
+        systemctl enable "$app_root/init.d/@SERVICE@.service"
+        systemctl restart "@SERVICE@.service"
+        ;;
+esac
+exit 0

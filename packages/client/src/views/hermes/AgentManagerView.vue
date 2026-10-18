@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { agentMetadata } from '@/utils/agent-catalog'
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { getAgentUpdatePolicies, setAgentAutoUpdate, type AgentUpdatePolicyState } from '@/api/coding-agents'
 import { computed, defineAsyncComponent, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NSpin, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import {
   checkCodingAgentUpdate,
   deleteCodingAgent,
@@ -35,14 +38,6 @@ interface CodingAgentCard {
   command: string
   packageName: string
 }
-
-defineProps<{
-  sidebarCollapsed: boolean
-}>()
-
-const emit = defineEmits<{
-  toggleSidebar: []
-}>()
 
 const codingAgents: CodingAgentCard[] = [
   {
@@ -86,6 +81,21 @@ const codingAgents: CodingAgentCard[] = [
     packageName: 'opencode-ai',
   },
   { id: 'dsh', name: 'DeepSeek Harness', provider: 'DeepSeek', logo: '/coding-agents/deepseek.svg', command: 'dsh', packageName: '@deepseek-ai/dsh' },
+  {
+    id: 'cursor',
+    name: 'Cursor',
+    provider: 'Cursor',
+    logo: '/coding-agents/cursor-logo.png',
+    command: 'agent',
+    packageName: 'cursor-agent',
+  },
+  { id: 'antigravity', name: 'Antigravity', provider: 'Google', logo: '/coding-agents/antigravity.png', command: 'agy', packageName: '' },
+  { id: 'qwen', name: 'Qwen Code', provider: 'Alibaba', logo: '/coding-agents/qwen-logo.svg', command: 'qwen', packageName: '@qwen-code/qwen-code' },
+  { id: 'kimi', name: 'Kimi Code', provider: 'Moonshot AI', logo: '/coding-agents/kimi-logo.png', command: 'kimi', packageName: '@moonshot-ai/kimi-code' },
+  { id: 'codebuddy', name: 'CodeBuddy', provider: 'Tencent', logo: '/coding-agents/codebuddy-logo.svg', command: 'codebuddy', packageName: '@tencent-ai/codebuddy-code' },
+  { id: 'qoder', name: 'Qoder', provider: 'Qoder', logo: '/coding-agents/qoder-logo.svg', command: 'qoder', packageName: '@qoder-ai/qodercli' },
+  { id: 'copilot', name: 'GitHub Copilot', provider: 'GitHub', logo: '/coding-agents/copilot-logo.svg', command: 'copilot', packageName: '@github/copilot' },
+  { id: 'zcode', name: 'ZCode', provider: 'Z.ai', logo: '/coding-agents/zcode-logo.png', command: 'zcode', packageName: '' },
 ]
 
 const updatePolicies = ref<Record<string, AgentUpdatePolicyState>>({})
@@ -113,7 +123,7 @@ const router = useRouter()
 
 const tools = ref<CodingAgentToolStatus[]>([])
 const agentStatusSnapshot = ref<AgentStatusSnapshot | null>(null)
-const loading = ref(false)
+const loading = ref(true)
 const loadError = ref('')
 const runtimeManagerVisible = ref(false)
 const hermesCliDetailsVisible = ref(false)
@@ -122,9 +132,9 @@ const hermesRuntimeStatus = ref<RuntimeVersionStatus | null>(null)
 const aiHelpDrawerVisible = ref(false)
 const aiHelpPrompt = ref('')
 const legacyDataMigrationChecked = ref(false)
-const installing = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false })
-const deleting = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false })
-const checkingUpdate = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false })
+const installing = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false, antigravity: false, qwen: false, kimi: false, codebuddy: false, qoder: false, copilot: false, zcode: false })
+const deleting = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false, antigravity: false, qwen: false, kimi: false, codebuddy: false, qoder: false, copilot: false, zcode: false })
+const checkingUpdate = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false, dsh: false, cursor: false, antigravity: false, qwen: false, kimi: false, codebuddy: false, qoder: false, copilot: false, zcode: false })
 const updateInfo = ref<Record<CodingAgentId, CodingAgentUpdateResult | null>>({
   'claude-code': null,
   codex: null,
@@ -132,6 +142,15 @@ const updateInfo = ref<Record<CodingAgentId, CodingAgentUpdateResult | null>>({
   grok: null,
   opencode: null,
   dsh: null,
+  cursor: null,
+  antigravity: null,
+  qwen: null,
+  kimi: null,
+  codebuddy: null,
+  qoder: null,
+  copilot: null,
+  zcode: null,
+
 })
 
 const hermesStatus = computed(() => agentStatusSnapshot.value?.agents.find(agent => agent.id === 'hermes'))
@@ -201,7 +220,7 @@ function buildAiHelpPrompt(agent: CodingAgentCard, operation: AgentManagementOpe
 
 function startAiHelpChat(prompt: string) {
   chatStore.newChat({
-    source: 'coding_agent',
+    source: 'builtin_agent',
     agent: 'ekko-agent',
     codingAgentId: 'ekko-agent',
     codingAgentMode: 'scoped',
@@ -272,6 +291,43 @@ async function loadCachedStatus() {
     loadError.value = errorMessage(error)
   } finally {
     loading.value = false
+    void checkExternalCliInstallation()
+  }
+}
+
+let checkingExternalInstallation = false
+let managerMounted = false
+let externalInstallationRefreshPending = false
+
+async function checkExternalCliInstallation(event?: Event) {
+  // Native CLIs are installed outside Studio. Returning from a guide or terminal
+  // must probe the CLI again instead of reusing the startup inventory.
+  if (!managerMounted || document.visibilityState === 'hidden') return
+  if (loading.value || installing.value.cursor || installing.value.antigravity || checkingExternalInstallation) {
+    externalInstallationRefreshPending = true
+    return
+  }
+  externalInstallationRefreshPending = false
+  const nativeTools = (['cursor', 'antigravity', 'zcode'] as const).filter(id => id === 'cursor' || id === 'antigravity' || agentStatusSnapshot.value?.agents.some(agent => agent.id === id))
+  const knownTools = nativeTools.filter(id => toolStatus(id))
+  // On entry only probe missing tools; on return also refresh installed versions.
+  if (!knownTools.length || (!event && knownTools.every(id => toolStatus(id)?.installed))) return
+  checkingExternalInstallation = true
+  try {
+    const result = await fetchCodingAgentsStatus()
+    if (managerMounted) {
+      // An older server or partial inventory may omit an Agent. Preserve its
+      // cached status instead of turning an installed tool into Not installed.
+      const detected = new Map(result.tools.map(tool => [tool.id, tool]))
+      tools.value = tools.value.map(tool => detected.get(tool.id) || tool)
+      for (const tool of result.tools) if (!tools.value.some(existing => existing.id === tool.id)) tools.value.push(tool)
+      loadError.value = ''
+    }
+  } catch (error) {
+    if (managerMounted) loadError.value = errorMessage(error)
+  } finally {
+    checkingExternalInstallation = false
+    if (externalInstallationRefreshPending) void checkExternalCliInstallation()
   }
 }
 
@@ -294,6 +350,7 @@ async function refreshAll() {
   }
   if (errors.length) loadError.value = errors.join('\n')
   loading.value = false
+  if (externalInstallationRefreshPending) void checkExternalCliInstallation()
 }
 
 async function openHermesCliDetails() {
@@ -361,9 +418,16 @@ async function maybePromptLegacyWindowsDataMigration() {
 async function handleInstall(id: CodingAgentId) {
   installing.value[id] = true
   try {
+    if ((id === 'cursor' || id === 'antigravity' || agentMetadata(id)?.installation.method === 'manual') && typeof window !== 'undefined') {
+      window.open(agentMetadata(id)?.installation.docsUrl || (id === 'antigravity' ? 'https://antigravity.google/docs/cli/install' : 'https://cursor.com/install'), '_blank', 'noopener,noreferrer')
+    }
     const result = await installCodingAgent(id)
     tools.value = result.tools
     if (result.updateState) updatePolicies.value[id] = result.updateState
+    if ((id === 'cursor' || id === 'antigravity' || agentMetadata(id)?.installation.method === 'manual') && !result.success) {
+      message.info(result.message || t('agentManager.codingAgentDescription'))
+      return
+    }
     if (!result.success) throw new Error(result.message || t('codingAgents.installFailed'))
     updateInfo.value[id] = null
     message.success(t('codingAgents.installSuccess'))
@@ -371,6 +435,7 @@ async function handleInstall(id: CodingAgentId) {
     handleMutationError(id, 'install', error)
   } finally {
     installing.value[id] = false
+    if (externalInstallationRefreshPending) void checkExternalCliInstallation()
   }
 }
 
@@ -396,6 +461,12 @@ async function handleCheckUpdate(id: CodingAgentId) {
     if (!result.success) throw new Error(result.message || t('codingAgents.checkUpdateFailed'))
     replaceTool(result.tool)
     updateInfo.value[id] = result
+    const previous = updatePolicies.value[id]
+    if (previous) updatePolicies.value[id] = {
+      ...previous, currentVersion: result.tool.version, latestVersion: result.latestVersion,
+      checkedAt: new Date().toISOString(),
+      status: result.tool.installed && result.updateAvailable ? 'available' : 'current', error: undefined,
+    }
   } catch (error) {
     message.error(errorMessage(error))
   } finally {
@@ -404,6 +475,9 @@ async function handleCheckUpdate(id: CodingAgentId) {
 }
 
 onMounted(() => {
+  managerMounted = true
+  window.addEventListener('focus', checkExternalCliInstallation)
+  document.addEventListener('visibilitychange', checkExternalCliInstallation)
   if (route.query.runtime === 'install') {
     runtimeManagerVisible.value = true
     const query = { ...route.query }
@@ -413,30 +487,20 @@ onMounted(() => {
   void loadCachedStatus()
   void maybePromptLegacyWindowsDataMigration()
 })
+
+onUnmounted(() => {
+  managerMounted = false
+  externalInstallationRefreshPending = false
+  window.removeEventListener('focus', checkExternalCliInstallation)
+  document.removeEventListener('visibilitychange', checkExternalCliInstallation)
+})
 </script>
 
 <template>
-  <div class="agent-manager-panel">
+  <PageLoading :show="loading" class="agent-manager-panel">
+      <PageHeader>
       <header class="page-header">
         <div class="agent-manager-header-left">
-          <NButton
-            class="agent-manager-sidebar-toggle"
-            quaternary
-            size="small"
-            circle
-            :title="sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')"
-            :aria-label="sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')"
-            @click="emit('toggleSidebar')"
-          >
-            <template #icon>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-              </svg>
-            </template>
-          </NButton>
           <h2 class="header-title">{{ t('agentManager.title') }}</h2>
         </div>
         <div class="agent-manager-header-actions">
@@ -448,8 +512,9 @@ onMounted(() => {
           </NButton>
         </div>
       </header>
+      </PageHeader>
 
-      <NSpin :show="loading" class="agent-manager-spin">
+      <div class="agent-manager-spin">
         <div class="agent-manager-content">
           <NAlert v-if="loadError" type="error" :bordered="false">
             {{ loadError }}
@@ -561,7 +626,7 @@ onMounted(() => {
                     <p v-if="toolStatus(agent.id)?.installed" class="agent-version">
                       {{ installedVersion(agent.id) }}
                     </p>
-                    <p v-else>{{ t('agentManager.codingAgentDescription') }}</p>
+                    <p v-else>{{ agent.id === 'antigravity' ? t('agentManager.antigravityDescription') : agent.id === 'cursor' ? t('agentManager.cursorDescription') : t('agentManager.codingAgentDescription') }}</p>
                   </div>
                 </div>
               </header>
@@ -570,10 +635,11 @@ onMounted(() => {
                 <NButton
                   secondary
                   size="small"
+                  v-if="agentMetadata(agent.id)?.config.mcp || agentMetadata(agent.id)?.config.settings"
                   :data-testid="`agent-settings-${agent.id}`"
                   @click="router.push({
                     name: 'codingAgent.config',
-                    params: { agentId: agent.id, section: 'settings' },
+                    params: { agentId: agent.id, section: agentMetadata(agent.id)?.config.settings || agentMetadata(agent.id)?.config.memory ? 'settings' : 'mcp' },
                   })"
                 >
                   {{ t('sidebar.settings') }}
@@ -586,10 +652,10 @@ onMounted(() => {
                   :loading="installing[agent.id]"
                   @click="handleInstall(agent.id)"
                 >
-                  {{ t('codingAgents.installNow') }}
+                  {{ (agentMetadata(agent.id)?.installation.method === 'manual') ? t('codingAgents.cursorInstallGuide') : t('codingAgents.installNow') }}
                 </NButton>
                 <NButton
-                  v-else-if="availableUpdateVersion(agent.id)"
+                  v-else-if="(agentMetadata(agent.id)?.installation.updates) && availableUpdateVersion(agent.id)"
                   type="primary"
                   secondary
                   size="small"
@@ -599,7 +665,7 @@ onMounted(() => {
                   {{ t('agentManager.updateToVersion', { version: formatVersion(availableUpdateVersion(agent.id)) }) }}
                 </NButton>
                 <NButton
-                  v-if="toolStatus(agent.id)?.installed && !availableUpdateVersion(agent.id)"
+                  v-if="(agentMetadata(agent.id)?.installation.updates) && toolStatus(agent.id)?.installed && !availableUpdateVersion(agent.id)"
                   secondary
                   size="small"
                   :loading="checkingUpdate[agent.id]"
@@ -610,7 +676,7 @@ onMounted(() => {
                 </NButton>
 
                 <NPopconfirm
-                  v-if="toolStatus(agent.id)?.installed"
+                  v-if="(agentMetadata(agent.id)?.installation.updates) && toolStatus(agent.id)?.installed"
                   @positive-click="handleDelete(agent.id)"
                 >
                   <template #trigger>
@@ -630,19 +696,19 @@ onMounted(() => {
               <div v-if="toolStatus(agent.id)?.installed && updatePolicies[agent.id]" class="agent-update-policy">
                 <div class="agent-update-policy-row"><span>{{ t('agentAutoUpdate.label') }}</span><NSwitch class="agent-update-switch" size="small" :theme-overrides="{ railHeightSmall: '16px', railWidthSmall: '28px', buttonHeightSmall: '12px', buttonWidthSmall: '12px' }" :disabled="!updatePolicies[agent.id]?.autoUpdateSupported" :value="updatePolicies[agent.id]?.autoUpdate" @update:value="toggleAutoUpdate(agent.id, $event)" /></div>
 
-                <small v-if="updatePolicies[agent.id]?.error" class="agent-update-error">{{ t('codingAgents.checkUpdateFailed') }}</small>
+                <small v-if="updatePolicies[agent.id]?.autoUpdateSupported && updatePolicies[agent.id]?.error" class="agent-update-error">{{ t('codingAgents.checkUpdateFailed') }}</small>
               </div>
             </section>
           </div>
         </div>
-      </NSpin>
+      </div>
 
     <VersionManagementModal v-model:show="runtimeManagerVisible" />
 
     <NDrawer
       v-model:show="hermesCliDetailsVisible"
       placement="right"
-      width="min(620px, 100vw)"
+      width="var(--studio-drawer-width)"
     >
       <NDrawerContent :title="t('runtimeVersions.cliDetailsTitle')" closable>
         <div data-testid="hermes-cli-details" class="hermes-cli-details">
@@ -667,7 +733,7 @@ onMounted(() => {
       v-model:show="aiHelpDrawerVisible"
       class="agent-ai-help-drawer"
       placement="right"
-      width="min(760px, 100vw)"
+      width="var(--studio-drawer-width)"
     >
       <NDrawerContent :title="t('agentManager.aiHelpDrawerTitle')" closable body-content-style="padding: 0; overflow: hidden;">
         <AiHelpChatPanel
@@ -678,7 +744,7 @@ onMounted(() => {
         />
       </NDrawerContent>
     </NDrawer>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -690,33 +756,33 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: $bg-main-surface;
+  background: var(--theme-content-bg, $bg-main-surface);
 }
 
 .hermes-cli-details {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .hermes-cli-detail-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 6px);
 
   strong {
     color: var(--text-color-2);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 
   code {
     overflow-wrap: anywhere;
     color: var(--text-color-1);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 }
 
@@ -731,7 +797,7 @@ onMounted(() => {
 :global(.legacy-data-migration-dialog dl) {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px 12px;
+  gap: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   margin: 0 0 12px;
 }
 
@@ -756,12 +822,12 @@ onMounted(() => {
 :global(.agent-ai-help-error) {
   max-height: 180px;
   margin: 0;
-  padding: 10px 12px;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   overflow: auto;
-  border-radius: 8px;
+  border-radius: var(--radius-component, 8px);
   background: rgba(127, 127, 127, 0.1);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -781,12 +847,12 @@ onMounted(() => {
 
 .agent-manager-header-left {
   min-width: 0;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .agent-manager-header-actions {
   flex: 0 0 auto;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .header-title {
@@ -798,26 +864,23 @@ onMounted(() => {
   flex: 1 1 auto;
   overflow-y: auto;
 
-  :deep(.n-spin-content) {
-    height: 100%;
-  }
 }
 
 .agent-manager-content {
-  max-width: 1240px;
+  container: agent-manager / inline-size;
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   margin: 0 auto;
-  padding: 24px;
+  padding: calc(24px * var(--spacing-scale, 1));
 }
 
 .agent-card {
-  padding: 18px;
-  border: 1px solid $border-color;
-  border-radius: 14px;
-  background: $bg-card;
+  padding: calc(18px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 14px);
+  background: var(--theme-card-bg, $bg-card);
   box-shadow: 0 5px 18px rgba(0, 0, 0, 0.05);
 }
 
@@ -825,7 +888,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 18px;
+  gap: calc(18px * var(--spacing-scale, 1));
 
   &.compact {
     align-items: center;
@@ -835,23 +898,23 @@ onMounted(() => {
 .agent-identity {
   min-width: 0;
   align-items: flex-start;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 
   h3 {
     margin: 0;
-    font-size: 17px;
+    font-size: calc(var(--font-size-base, 14px) * 17 / 14);
   }
 
   p {
     max-width: 720px;
     margin: 5px 0 0;
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 1.55;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1.55);
 
     &.agent-version {
       color: $text-primary;
-      font-size: 13px;
+      font-size: calc(var(--font-size-base, 14px) * 13 / 14);
       font-weight: 650;
       letter-spacing: 0.01em;
     }
@@ -860,52 +923,56 @@ onMounted(() => {
 
 .agent-name-row {
   flex-wrap: wrap;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .agent-logo {
   width: 42px;
   height: 42px;
   flex: 0 0 auto;
-  padding: 4px;
-  border: 1px solid $border-color;
-  border-radius: 11px;
+  padding: calc(4px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 11px);
   background: rgba(255, 255, 255, 0.92);
   object-fit: contain;
 }
 
 .coding-agent-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   align-items: stretch;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
+}
+
+// Keep cards at least 340px wide when showing multiple columns, including 16px gaps.
+@container agent-manager (min-width: 696px) {
+  .coding-agent-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container agent-manager (min-width: 1052px) {
+  .coding-agent-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .coding-agent-card {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: calc(15px * var(--spacing-scale, 1));
 }
 
 .agent-actions {
   flex-wrap: wrap;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   margin-top: auto;
 }
 
 @media (max-width: $breakpoint-mobile) {
-  :global(.agent-ai-help-drawer.n-drawer) {
-    width: 100vw !important;
-    max-width: 100vw;
-  }
-
-  .agent-manager-sidebar-toggle {
-    display: none;
-  }
-
   .agent-manager-content {
-    padding: 16px;
+    padding: calc(16px * var(--spacing-scale, 1));
   }
 
   .coding-agent-grid {
@@ -926,8 +993,8 @@ onMounted(() => {
 </style>
 
 <style scoped>
-.agent-update-policy { min-width: 0; width: 100%; box-sizing: border-box; padding-top: 10px; border-top: 1px solid var(--border-color, #eee); }
-.agent-update-policy-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; }
+.agent-update-policy { min-width: 0; width: 100%; box-sizing: border-box; padding-top: calc(10px * var(--spacing-scale, 1)); border-top: var(--border-width, 1px) solid var(--border-color, #eee); }
+.agent-update-policy-row { display: flex; justify-content: space-between; align-items: center; gap: calc(12px * var(--spacing-scale, 1)); font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
 .agent-update-policy small { display: block; margin-top: 6px; overflow-wrap: anywhere; }
 .agent-update-error { color: #c44; }
 </style>

@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import type { GatewayAutoStartConfig } from '@/api/hermes/config'
 
 const mockSettingsStore = vi.hoisted(() => ({
-  gatewayAutoStart: { enabled: true, include: ['default'], exclude: [] as string[] },
+  gatewayAutoStart: { enabled: true, include: ['default'], exclude: [] } as GatewayAutoStartConfig,
   saveSection: vi.fn().mockResolvedValue(undefined),
+  fetchSettings: vi.fn().mockResolvedValue(undefined),
   updateLocal: vi.fn((section: string, values: Record<string, any>) => {
     if (section === 'gatewayAutoStart') {
       mockSettingsStore.gatewayAutoStart = { ...mockSettingsStore.gatewayAutoStart, ...values }
@@ -37,7 +39,7 @@ vi.mock('naive-ui', async () => {
     NSwitch: {
       props: ['value'],
       emits: ['update:value'],
-      template: `<button class="gateway-enabled" @click="$emit('update:value', !value)"></button>`,
+      template: `<button class="gateway-enabled" :aria-checked="value" @click="$emit('update:value', !value)"></button>`,
     },
     NSelect: {
       props: {
@@ -62,6 +64,17 @@ describe('GatewayAutoStartSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockSettingsStore.gatewayAutoStart = { enabled: true, include: ['default'], exclude: [] }
+  })
+
+  it('defaults the gateway switch to off and allows explicitly enabling it', async () => {
+    mockSettingsStore.gatewayAutoStart = {}
+    const wrapper = mount(GatewayAutoStartSettings)
+    const toggle = wrapper.get('.gateway-enabled')
+
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await toggle.trigger('click')
+    expect(mockSettingsStore.saveSection).toHaveBeenCalledWith('gatewayAutoStart', { enabled: true }, { restart: false })
+    wrapper.unmount()
   })
 
   it('saves gateway auto-start enabled and include-list settings through app config section', async () => {

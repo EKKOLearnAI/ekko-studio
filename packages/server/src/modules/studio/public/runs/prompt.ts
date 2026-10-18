@@ -1,3 +1,5 @@
+import type { StudioMcpCapabilities } from './mcp-capabilities'
+
 /**
  * LLM System Prompts and Instructions
  *
@@ -146,10 +148,20 @@ export const HERMES_MCP_USAGE_GUIDELINES = [
   'Ekko Studio MCP usage: when the user asks to read/check the operation manual, API docs, endpoint docs, 接口文档, 接口手册, or 操作手册, immediately call ekko_studio_api_openapi_get without filters to list API module outlines.',
   'Use the module purpose and keywords from ekko_studio_api_openapi_get to choose the right module, then call it again with a tag, path, or method filter before calling unfamiliar Web UI endpoints.',
   'Use ekko_studio_api_request with method, relative path, and JSON body/query fields that match the OpenAPI requestBody and parameters. Do not call full URLs.',
-  'When the user asks to use the Ekko Studio MCP browser and ekko_studio_browser_toolset is available, call it with action=list to discover browser operations, action=describe for the full schema of the needed operation, then action=call with that tool name and arguments. Browser MCP exposes a compact toolset rather than resources; an empty list_mcp_resources or list_mcp_resource_templates result does not mean the browser toolset is unavailable.',
+  'When the user asks to use the Ekko Studio MCP browser (including 内置浏览器, MCP浏览器, Studio browser, or built-in browser) and ekko_studio_browser_toolset is available, prefer that toolset. The separate browser_navigate/browser_click tools use a different browser environment and do not share Studio tabs or login state. Use that environment only when explicitly requested or Studio browser is unavailable. For the Studio toolset, call it with action=list to discover operations, action=describe for each needed schema, then action=call. Browser MCP exposes a compact toolset rather than resources; an empty list_mcp_resources or list_mcp_resource_templates result does not mean the browser toolset is unavailable. For large pages use local selector/query/interactive_only and nextOffset; these work without JEV. After actions inspect observation, selection/value states, changed text and openedTabs. Completed means dispatched, not that the goal was achieved. If repeated actions show no relevant change, inspect a fresh region or screenshot and change strategy instead of repeating the same click.',
   'Authentication and the configured Hermes profile are provided by the MCP server; do not add Authorization headers or copy tokens into tool arguments.',
   'Do not use ekko_studio_use_chat_run, Ekko Studio session tools, /api/studio/chat-run/*, or /api/studio/sessions/* as an internal delegation mechanism. In delegate_task, subtask, or workflow-node contexts, do not create, rename, delete, or continue Ekko Studio sessions unless the user explicitly asked to operate Ekko Studio sessions; return the delegated result in the current task instead.',
 ];
+
+export function studioMcpUsageGuidelines(capabilities?: StudioMcpCapabilities): string {
+  if (!capabilities) return ''
+  const rules: string[] = []
+  if (capabilities.api) rules.push(...HERMES_MCP_USAGE_GUIDELINES.slice(0, 3))
+  if (capabilities.browser) rules.push(HERMES_MCP_USAGE_GUIDELINES[3])
+  if (Object.values(capabilities).some(Boolean)) rules.push(HERMES_MCP_USAGE_GUIDELINES[4])
+  if (capabilities.api || capabilities.use) rules.push(HERMES_MCP_USAGE_GUIDELINES[5])
+  return rules.join('\n')
+}
 
 export const WORKFLOW_NODE_SYSTEM_CONTEXT = `
 You are executing one node in a workflow.
@@ -166,7 +178,7 @@ Return the result for this node clearly and concisely. Do not describe the workf
  */
 export function getSystemPrompt(
   customPrompt?: string,
-  options?: { source?: string | null; outputLanguage?: 'zh' | 'en' },
+  options?: { source?: string | null; outputLanguage?: 'zh' | 'en'; mcpCapabilities?: StudioMcpCapabilities },
 ): string {
   const parts: string[] = [];
 
@@ -178,7 +190,8 @@ export function getSystemPrompt(
     parts.push(WORKFLOW_NODE_SYSTEM_CONTEXT.trim());
   }
 
-  parts.push(HERMES_MCP_USAGE_GUIDELINES.join('\n'));
+  const mcpGuidance = studioMcpUsageGuidelines(options?.mcpCapabilities);
+  if (mcpGuidance) parts.push(mcpGuidance);
   parts.push(options?.outputLanguage === 'en'
     ? AI_OUTPUT_FORMAT_GUIDELINES_EN
     : AI_OUTPUT_FORMAT_GUIDELINES);

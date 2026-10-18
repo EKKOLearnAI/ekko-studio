@@ -1,17 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
-import {
-  NButton,
-  NCheckbox,
-  NInput,
-  NInputNumber,
-  NModal,
-  NSelect,
-  NSpin,
-  NTag,
-  useDialog,
-  useMessage,
-} from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import type {
   AvailableModelGroup,
@@ -39,6 +29,7 @@ const dialog = useDialog()
 const modelsStore = useModelsStore()
 
 const detail = ref<ProviderEditorDetail | null>(null)
+const catalogModels = ref<string[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
@@ -92,7 +83,7 @@ const API_MODE_OPTIONS = [
 ]
 
 const knownModelIds = computed(() => new Set(
-  props.provider.available_models?.length ? props.provider.available_models : props.provider.models,
+  catalogModels.value,
 ))
 const modelIds = computed(() => {
   const unique = new Set(knownModelIds.value)
@@ -128,7 +119,12 @@ function resetDraft(next: ProviderEditorDetail) {
 async function loadEditor() {
   loading.value = true
   try {
-    resetDraft(await modelsStore.fetchProviderEditor(props.provider.provider))
+    const [editor, catalog] = await Promise.all([
+      modelsStore.fetchProviderEditor(props.provider.provider),
+      modelsStore.fetchProviderCatalog(props.provider.provider),
+    ])
+    catalogModels.value = catalog.models
+    resetDraft(editor)
   } catch (error: any) {
     message.error(error?.message || t('models.providerEditorLoadFailed'))
     close()
@@ -477,10 +473,10 @@ async function clearCredentialNow() {
 .editor-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   max-height: calc(100vh - 220px);
   overflow-y: auto;
-  padding-inline-end: 4px;
+  padding-inline-end: calc(4px * var(--spacing-scale, 1));
 }
 
 .identity-note,
@@ -489,7 +485,7 @@ async function clearCredentialNow() {
 .modal-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .identity-note {
@@ -504,7 +500,7 @@ async function clearCredentialNow() {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
 
   > span {
     color: $text-primary;
@@ -522,9 +518,9 @@ async function clearCredentialNow() {
 
 .credential-section,
 .context-section {
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  padding: 14px;
+  padding: calc(14px * var(--spacing-scale, 1));
 }
 
 .section-heading {
@@ -547,26 +543,26 @@ async function clearCredentialNow() {
 .context-section p,
 .runtime-note {
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .context-list,
 .advanced-settings {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-top: 12px;
 }
 
 .context-list {
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .context-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 
   code {
     overflow: hidden;
@@ -576,7 +572,7 @@ async function clearCredentialNow() {
 }
 
 .runtime-note {
-  padding: 10px 12px;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
   background: color-mix(in srgb, $warning 9%, transparent);
 }

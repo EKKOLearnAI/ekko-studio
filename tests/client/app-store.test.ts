@@ -57,6 +57,42 @@ describe('App Store', () => {
     expect(store.pageSidebarExpanded).toBe(false)
   })
 
+  it('bounds and persists sidebar width, saving only when a drag finishes', () => {
+    const store = useAppStore()
+    expect(store.sidebarWidth).toBe(240)
+    store.setSidebarWidth(350, false)
+    expect(store.sidebarWidth).toBe(350)
+    expect(localStorage.getItem('hermes_sidebar_width')).toBeNull()
+    store.setSidebarWidth(350)
+    expect(localStorage.getItem('hermes_sidebar_width')).toBe('350')
+    store.setSidebarWidth(100)
+    expect(store.sidebarWidth).toBe(200)
+    store.setSidebarWidth(1000)
+    expect(store.sidebarWidth).toBe(480)
+    store.setSidebarWidth(Number.NaN)
+    expect(store.sidebarWidth).toBe(240)
+  })
+
+  it.each([
+    ['340', 340], ['50', 200], ['900', 480], ['invalid', 240], ['Infinity', 240],
+  ])('restores a valid sidebar width from %s', (savedWidth, expected) => {
+    localStorage.setItem('hermes_sidebar_width', savedWidth)
+    expect(useAppStore().sidebarWidth).toBe(expected)
+  })
+
+  it('keeps sidebar resizing available when persisting the width fails', () => {
+    const store = useAppStore()
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage unavailable')
+    })
+    try {
+      expect(() => store.setSidebarWidth(360)).not.toThrow()
+      expect(store.sidebarWidth).toBe(360)
+    } finally {
+      storage.mockRestore()
+    }
+  })
+
   it('loads model visibility and falls back when the configured default is hidden', async () => {
     mockSystemApi.fetchAvailableModels.mockResolvedValue({
       default: 'deepseek-chat',

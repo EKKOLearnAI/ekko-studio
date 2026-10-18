@@ -1,3 +1,4 @@
+import { isNativeCodingAgent } from '../../contracts/agents/native-coding-agents'
 import type { Server, Socket } from 'socket.io'
 import { addMessage, clearSessionMessages, createBranchedSession, createSession, getSession, getSessionDetail, renameSession, updateSessionStats } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
@@ -731,11 +732,12 @@ export async function handleSessionCommand(
     }
 
     case 'compress': {
-      if (state.isWorking) {
+      if (state.isWorking || state.isCompressing) {
         emitCommand({ ok: false, action: 'compress', terminal: false, message: 'Compression can only run while the session is idle.' })
         return
       }
       clearTransientRunState(state)
+      state.isCompressing = true
       const emit = (event: string, payload: any) => emitToSession(ctx.nsp, ctx.socket, sessionId, event, payload)
       try {
         const session = getSession(sessionId)
@@ -805,6 +807,8 @@ export async function handleSessionCommand(
           action: 'compress',
           message: `Compression failed: ${err instanceof Error ? err.message : String(err)}`,
         })
+      } finally {
+        state.isCompressing = false
       }
       return
     }
@@ -1265,7 +1269,7 @@ function createBranchSession(parentSessionId: string, requestedTitle: string, ct
 
 
 function isCodingAgentBranchSource(session: { source?: string | null; agent?: string | null } | null | undefined): boolean {
-  return session?.source === 'coding_agent' || session?.agent === 'claude' || session?.agent === 'codex' || session?.agent === 'pi' || session?.agent === 'grok' || (session?.agent === 'opencode' || session?.agent === 'dsh') || session?.agent === 'ekko-agent'
+  return session?.source === 'coding_agent' || session?.agent === 'claude' || session?.agent === 'codex' || session?.agent === 'pi' || session?.agent === 'grok' || (session?.agent === 'cursor' || (session?.agent === 'antigravity' || isNativeCodingAgent(session?.agent))) || (session?.agent === 'opencode' || session?.agent === 'dsh') || session?.agent === 'ekko-agent'
 }
 
 function generateBranchSessionId(): string {

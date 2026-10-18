@@ -171,11 +171,11 @@ defineExpose({ refresh })
 
 .hermes-config-summary {
   display: grid;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-bottom: 18px;
-  padding: 14px 16px;
-  border: 1px solid $border-color;
-  border-radius: 10px;
+  padding: calc(14px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 10px);
   background: color-mix(in srgb, $bg-secondary 72%, transparent);
 }
 
@@ -187,42 +187,42 @@ defineExpose({ refresh })
 }
 
 .summary-copy h5 {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
 }
 
 .summary-copy p,
 .summary-values dt {
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .summary-copy p {
   margin-top: 3px;
-  line-height: 1.5;
+  line-height: var(--line-height, 1.5);
 }
 
 .summary-values {
   display: grid;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .summary-values > div {
   display: grid;
   grid-template-columns: minmax(120px, 170px) 1fr;
   align-items: start;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .provider-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .summary-actions {
   display: grid;
   grid-template-columns: minmax(180px, 320px) auto;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   align-items: center;
 }
 

@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Release PageLoading timers and native-installation listeners before jsdom closes.
+enableAutoUnmount(afterEach)
 
 const api = vi.hoisted(() => ({
   checkCodingAgentUpdate: vi.fn(),
@@ -233,7 +236,6 @@ describe('Agent Manager page', () => {
 
   function mountPage() {
     return mount(AgentManagerView, {
-      props: { sidebarCollapsed: false },
       global: {
         stubs: {
           VersionManagementModal: true,
@@ -253,7 +255,6 @@ describe('Agent Manager page', () => {
 
   it('shows Hermes with the same compact card structure as other Agents', async () => {
     const wrapper = mount(AgentManagerView, {
-      props: { sidebarCollapsed: false },
       global: {
         stubs: {
           VersionManagementModal: true,
@@ -276,7 +277,7 @@ describe('Agent Manager page', () => {
     expect(wrapper.findComponent({ name: 'VersionManagementModal' }).exists()).toBe(true)
     expect(api.fetchAgentStatusSnapshot).toHaveBeenCalledOnce()
     expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
-    expect(api.fetchCodingAgentsStatus).not.toHaveBeenCalled()
+    expect(api.fetchCodingAgentsStatus).toHaveBeenCalledOnce()
 
     const ekkoCard = wrapper.get('[data-testid="agent-card-ekko"]')
     expect(ekkoCard.findAll('button').map(button => button.text())).toEqual(['sidebar.settings'])
@@ -288,7 +289,9 @@ describe('Agent Manager page', () => {
     expect(wrapper.get('[data-testid="agent-card-codex"]').text()).toContain('agentManager.codingAgentDescription')
     expect(wrapper.get('[data-testid="agent-card-codex"]').text()).toContain('codingAgents.installNow')
     expect(wrapper.get('.coding-agent-grid').findAll('.agent-card').map(card => card.attributes('data-testid')))
-      .toEqual(['agent-card-ekko', 'agent-card-hermes', 'agent-card-claude-code', 'agent-card-codex', 'agent-card-pi', 'agent-card-grok', 'agent-card-opencode', 'agent-card-dsh'])
+      .toEqual(['agent-card-ekko', 'agent-card-hermes', 'agent-card-claude-code', 'agent-card-codex', 'agent-card-pi', 'agent-card-grok', 'agent-card-opencode', 'agent-card-dsh', 'agent-card-cursor', 'agent-card-antigravity', 'agent-card-qwen', 'agent-card-kimi', 'agent-card-codebuddy', 'agent-card-qoder', 'agent-card-copilot', 'agent-card-zcode'])
+    expect(wrapper.find('[data-testid="agent-settings-cursor"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="agent-settings-claude-code"]').exists()).toBe(true)
   })
 
   it('detects the CLI before offering Runtime management in the desktop shell', async () => {
@@ -309,7 +312,6 @@ describe('Agent Manager page', () => {
     cliStatus.hermes.cliInstallations[0].selected = true
     api.fetchRuntimeVersionStatus.mockResolvedValue(cliStatus)
     const wrapper = mount(AgentManagerView, {
-      props: { sidebarCollapsed: false },
       global: {
         stubs: {
           VersionManagementModal: true,
@@ -352,7 +354,6 @@ describe('Agent Manager page', () => {
     api.fetchAgentStatusSnapshot.mockResolvedValue(status)
 
     const wrapper = mount(AgentManagerView, {
-      props: { sidebarCollapsed: false },
       global: {
         stubs: {
           VersionManagementModal: true,
@@ -375,7 +376,6 @@ describe('Agent Manager page', () => {
   it('opens Runtime management only when chat creation requests installation', async () => {
     route.query = { runtime: 'install' }
     const wrapper = mount(AgentManagerView, {
-      props: { sidebarCollapsed: false },
       global: { stubs: { VersionManagementModal: true } },
     })
     await flushPromises()
@@ -432,7 +432,6 @@ describe('Agent Manager page', () => {
       updateAvailable: true,
     })
     const wrapper = mount(AgentManagerView, {
-      props: { sidebarCollapsed: false },
       global: { stubs: { VersionManagementModal: true } },
     })
     await flushPromises()
@@ -449,15 +448,14 @@ describe('Agent Manager page', () => {
       .toContain('agentManager.updateToVersion:v2.1.0')
   })
 
-  it('only probes installed Agents after the user clicks refresh', async () => {
+  it('rechecks a missing Cursor on entry and still supports an explicit full refresh', async () => {
     const wrapper = mount(AgentManagerView, {
-      props: { sidebarCollapsed: false },
       global: { stubs: { VersionManagementModal: true } },
     })
     await flushPromises()
 
     expect(api.fetchAgentStatusSnapshot).toHaveBeenCalledOnce()
-    expect(api.fetchCodingAgentsStatus).not.toHaveBeenCalled()
+    expect(api.fetchCodingAgentsStatus).toHaveBeenCalledOnce()
     expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
 
     const refreshButton = wrapper.findAll('button')
@@ -466,9 +464,42 @@ describe('Agent Manager page', () => {
     await refreshButton!.trigger('click')
     await flushPromises()
 
-    expect(api.fetchCodingAgentsStatus).toHaveBeenCalledOnce()
+    expect(api.fetchCodingAgentsStatus).toHaveBeenCalledTimes(2)
     expect(api.fetchRuntimeVersionStatus).toHaveBeenCalledWith({ includeRemote: false })
     expect(api.fetchAgentStatusSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('automatically detects manually installed Antigravity and refreshes its version on focus', async () => {
+    const snapshot = agentStatusSnapshot()
+    snapshot.agents.push({ id: 'antigravity', installed: false, source: 'not-installed', path: '', version: '' })
+    api.fetchAgentStatusSnapshot.mockResolvedValue(snapshot)
+    api.fetchCodingAgentsStatus.mockResolvedValue({ tools: [claude, {
+      ...missing('antigravity', 'Antigravity', ''), installed: true, version: '1.2.14', path: '/test/agy',
+    }] })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="agent-card-antigravity"]').text()).toContain('v1.2.14')
+    api.fetchCodingAgentsStatus.mockResolvedValue({ tools: [claude, {
+      ...missing('antigravity', 'Antigravity', ''), installed: true, version: '1.2.15', path: '/test/agy',
+    }] })
+    window.dispatchEvent(new Event('focus'))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="agent-card-antigravity"]').text()).toContain('v1.2.15')
+    wrapper.unmount()
+  })
+
+  it('keeps cached loading when native CLIs are already installed', async () => {
+    const snapshot = agentStatusSnapshot()
+    snapshot.agents.push({ id: 'cursor', installed: true, source: 'user-cli', path: '/test/agent', version: '1.0.0' })
+    snapshot.agents.push({ id: 'antigravity', installed: true, source: 'user-cli', path: '/test/agy', version: '1.2.14' })
+    api.fetchAgentStatusSnapshot.mockResolvedValue(snapshot)
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="agent-card-cursor"]').text()).toContain('v1.0.0')
+    expect(api.fetchCodingAgentsStatus).not.toHaveBeenCalled()
+    expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('opens a dedicated Ekko help drawer from the Ask AI button beside refresh', async () => {
@@ -486,7 +517,7 @@ describe('Agent Manager page', () => {
 
     expect(dialogWarning).not.toHaveBeenCalled()
     expect(newChat).toHaveBeenCalledWith({
-      source: 'coding_agent',
+      source: 'builtin_agent',
       agent: 'ekko-agent',
       codingAgentId: 'ekko-agent',
       codingAgentMode: 'scoped',
@@ -520,7 +551,7 @@ describe('Agent Manager page', () => {
     await flushPromises()
 
     expect(newChat).toHaveBeenCalledWith({
-      source: 'coding_agent',
+      source: 'builtin_agent',
       agent: 'ekko-agent',
       codingAgentId: 'ekko-agent',
       codingAgentMode: 'scoped',

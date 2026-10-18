@@ -9,6 +9,7 @@ import { ref, computed, nextTick, onBeforeUnmount, onMounted, watch } from "vue"
 import { useI18n } from "vue-i18n";
 import VirtualMessageList from "./VirtualMessageList.vue";
 import MessageItem from "./MessageItem.vue";
+import { positionTaskPlansAtTurnEnd } from "@/utils/task-plan";
 import ToolRunCard from "./ToolRunCard.vue";
 import { useChatStore } from "@/stores/hermes/chat";
 import { useToolTraceVisibility } from "@/composables/useToolTraceVisibility";
@@ -39,14 +40,14 @@ const activeSessionScrollKey = computed(() =>
 const listInstanceKey = computed(() => activeSessionScrollKey.value || "history-empty");
 
 const displayMessages = computed(() =>
-  groupCompletedToolsByRun((activeSession.value?.messages || []).filter((m) => {
+  groupCompletedToolsByRun(positionTaskPlansAtTurnEnd((activeSession.value?.messages || []).filter((m) => {
     // Tool messages without a name are internal use only and remain hidden.
     if (m.taskPlan) return true
     if (m.role === 'tool') return toolTraceVisible.value && !!m.toolName
     // Filter out messages with empty content.
     if (!m.content?.trim()) return false
     return true
-  })),
+  }))),
 );
 
 function isNearBottom(threshold = 200): boolean {
@@ -208,7 +209,7 @@ defineExpose({
           v-if="activeSession?.hasMoreBefore || activeSession?.isLoadingOlderMessages"
           class="history-loader"
         >
-          <span v-if="activeSession?.isLoadingOlderMessages" class="history-loader-spinner"></span>
+          <span v-if="activeSession?.isLoadingOlderMessages" class="history-loader-spinner" role="status" :aria-label="t('common.loading')"></span>
         </div>
       </template>
       <template #item="{ message: msg }">
@@ -279,7 +280,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   color: $text-muted;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 
   .empty-logo {
     width: 48px;
@@ -288,16 +289,8 @@ defineExpose({
   }
 
   p {
-    font-size: 14px;
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   }
-}
-
-.history-loader {
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
 }
 
 .history-loader-spinner {
@@ -314,6 +307,15 @@ defineExpose({
   }
 }
 
+.history-loader {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+
 .scroll-bottom-button {
   position: absolute;
   right: 18px;
@@ -325,7 +327,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  border: 1px solid rgba(var(--accent-primary-rgb), 0.24);
+  border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.24);
   background: rgba(255, 255, 255, 0.94);
   color: var(--accent-primary);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
@@ -346,11 +348,6 @@ defineExpose({
   height: 19px;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 .fade-enter-active,
 .fade-leave-active {
@@ -359,5 +356,10 @@ defineExpose({
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

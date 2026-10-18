@@ -13,7 +13,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
 
   &.is-loading {
     display: grid;
@@ -33,22 +33,22 @@
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(120px, 1fr));
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-bottom: 16px;
 }
 
 .summary-card {
-  padding: 14px;
-  border: 1px solid $border-color;
+  padding: calc(14px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 
   strong {
-    font-size: 24px;
-    line-height: 1;
+    font-size: calc(var(--font-size-base, 14px) * 24 / 14);
+    line-height: var(--line-height, 1);
   }
 
   &.success strong { color: $success; }
@@ -58,7 +58,7 @@
 }
 
 .summary-label {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -67,15 +67,15 @@
 .filter-row {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) repeat(3, minmax(140px, 180px));
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   margin-bottom: 16px;
 }
 
 .plugins-table-wrap {
   overflow-x: auto;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
 }
 
 .plugins-table {
@@ -85,16 +85,16 @@
 
   th,
   td {
-    padding: 12px;
-    border-bottom: 1px solid $border-color;
+    padding: calc(12px * var(--spacing-scale, 1));
+    border-bottom: var(--border-width, 1px) solid $border-color;
     text-align: start;
     vertical-align: top;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   }
 
   th {
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     background: rgba(var(--accent-primary-rgb), 0.04);
@@ -108,11 +108,11 @@
 .plugin-name {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 
   span {
     color: $text-muted;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 }
 
@@ -127,18 +127,18 @@
 .muted {
   margin-top: 6px;
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 .meta-line {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .capability-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   color: $text-secondary;
 }
 
@@ -150,17 +150,17 @@
   text-overflow: ellipsis;
   color: $text-muted;
   background: rgba(var(--accent-primary-rgb), 0.06);
-  padding: 2px 6px;
-  border-radius: 6px;
+  padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 6px);
 }
 
 .metadata-panel {
   margin-top: 16px;
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 16px;
+  gap: calc(10px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 
   code {
     color: $text-secondary;

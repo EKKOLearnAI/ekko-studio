@@ -10,8 +10,10 @@ import { DshPluginError } from './errors'
 // compatible. Record the source hash for diagnostics, never as an allowlist.
 export const DSH_ACP_ADAPTER_REVISION = 3
 
-export async function writeDshAcpAdapter(installation: string, destination: string) {
-  const directory = await dshPackageDirectory('@deepseek-ai/dsh-acp', [installation])
+export async function writeDshAcpAdapter(installation: string, destination: string, acpAppDirectory: string) {
+  // ACP belongs to the selected bundle and may be nested beneath it. Resolve
+  // from that owner so we adapt the same copy the native profile would load.
+  const directory = await dshPackageDirectory('@deepseek-ai/dsh-acp', [join(acpAppDirectory, 'package.json')])
   const filename = join(directory, 'lib/index.js')
   const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
   let source = await readFile(filename, 'utf8')

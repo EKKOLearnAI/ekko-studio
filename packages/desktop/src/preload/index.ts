@@ -1,4 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { DesktopUpdateState } from '../main/updater-types'
+import type { ComputerUsePermission, ComputerUsePermissions } from '../main/computer-use-permissions'
+import type { MessageSelectionContextMenuRequest } from '../main/selection-context-menu'
+import type { ScreenshotShortcutConfig, ScreenshotShortcutState } from '../main/screenshot-shortcut'
 import type { BrowserBounds, BrowserProfileCreateInput, BrowserProfileSwitchImpact, BrowserProfileUpdateInput, BrowserSelection, DesktopBrowserProfile, DesktopBrowserState, DesktopBrowserTab } from '../main/browser/browser-types'
 
 type DesktopWindowKind = 'main' | 'pet' | 'chat'
@@ -9,7 +13,52 @@ function desktopWindowKind(): DesktopWindowKind {
   return kind === 'pet' || kind === 'chat' ? kind : 'main'
 }
 
+// Set by the main process when the desktop points at a remote Web UI
+// deployment instead of the bundled local server.
+const REMOTE_SERVER_MODE = process.argv.includes('--hermes-remote-mode')
+
 contextBridge.exposeInMainWorld('hermesDesktop', {
+  ...(!REMOTE_SERVER_MODE && process.platform === 'darwin' ? { computerUsePermissions: {
+    claimReminder: (): Promise<ComputerUsePermissions | null> => ipcRenderer.invoke('hermes-desktop:computer-use-claim-reminder'),
+    getStatus: (): Promise<ComputerUsePermissions> => ipcRenderer.invoke('hermes-desktop:computer-use-permissions'),
+    request: (permission: ComputerUsePermission): Promise<void> => ipcRenderer.invoke('hermes-desktop:computer-use-request-permission', permission),
+  } } : {}),
+  messageContextMenu: {
+    show: (request: MessageSelectionContextMenuRequest): Promise<'select-messages' | null> => ipcRenderer.invoke('hermes-desktop:message-context-menu-show', request),
+    close: (): Promise<void> => ipcRenderer.invoke('hermes-desktop:message-context-menu-close'),
+  },
+  screenshot: {
+    shortcut: {
+      getState: (): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-get'),
+      save: (config: ScreenshotShortcutConfig): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-save', config),
+      setTarget: (targetId: string, active: boolean | null): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-target', targetId, active),
+      setEditing: (targetId: string, editing: boolean): Promise<ScreenshotShortcutState> => ipcRenderer.invoke('hermes-desktop:screenshot-shortcut-editing', targetId, editing),
+      onTrigger: (callback: (request: { targetId: string; hideWindows: boolean }) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, request: { targetId: string; hideWindows: boolean }) => callback(request)
+        ipcRenderer.on('hermes-desktop:screenshot-shortcut-trigger', listener)
+        return () => ipcRenderer.removeListener('hermes-desktop:screenshot-shortcut-trigger', listener)
+      },
+      onStateChange: (callback: (state: ScreenshotShortcutState) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: ScreenshotShortcutState) => callback(state)
+        ipcRenderer.on('hermes-desktop:screenshot-shortcut-state', listener)
+        return () => ipcRenderer.removeListener('hermes-desktop:screenshot-shortcut-state', listener)
+      },
+    },
+    getCapabilities: () => ipcRenderer.invoke('hermes-desktop:screenshot-capabilities'),
+    captureRegion: (request: { requestId: string; hideWindows?: boolean; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }) => ipcRenderer.invoke('hermes-desktop:screenshot-capture-region', request),
+    cancel: (requestId: string) => ipcRenderer.invoke('hermes-desktop:screenshot-cancel', requestId),
+  },
+  updater: {
+    getState: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-get-state'),
+    cancel: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-cancel'),
+    download: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-download'),
+    install: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('hermes-desktop:update-install'),
+    onStateChange: (callback: (state: DesktopUpdateState) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: DesktopUpdateState) => callback(state)
+      ipcRenderer.on('hermes-desktop:update-state-change', listener)
+      return () => ipcRenderer.removeListener('hermes-desktop:update-state-change', listener)
+    },
+  },
   getToken: (): Promise<string> => ipcRenderer.invoke('hermes-desktop:get-token'),
   retryBootstrap: (source?: 'cf' | 'github'): Promise<void> => ipcRenderer.invoke('hermes-desktop:retry-bootstrap', source),
   restartApp: (): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:restart-app'),
@@ -18,9 +67,11 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   openExternalUrl: (url: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:open-external-url', url),
   openChatWindow: (sessionId: string, profile?: string): Promise<void> => ipcRenderer.invoke('hermes-desktop:open-chat-window', sessionId, profile),
   ensureAuth: async (): Promise<boolean> => {
-    const token = await ipcRenderer.invoke('hermes-desktop:get-token')
-    if (token) {
-      try { localStorage.setItem('AUTH_TOKEN', token) } catch { /* */ }
+    if (!REMOTE_SERVER_MODE) {
+      const token = await ipcRenderer.invoke('hermes-desktop:get-token')
+      if (token) {
+        try { localStorage.setItem('AUTH_TOKEN', token) } catch { /* */ }
+      }
     }
     return !!localStorage.getItem(API_KEY_LS)
   },
@@ -77,6 +128,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   } } : {}),
   platform: process.platform,
   isDesktop: true,
+  remoteMode: REMOTE_SERVER_MODE,
   windowKind: desktopWindowKind(),
 })
 
@@ -85,7 +137,8 @@ const API_KEY_LS = 'hermes_api_key'
 // Silently strip the "你必须修改默认密码" flag from /api/auth/me responses on
 // desktop. Users on a single-machine install don't benefit from a managed
 // password. The Web UI client uses BOTH fetch and axios (which goes through
-// XMLHttpRequest), so we patch both code paths.
+// XMLHttpRequest), so we patch both code paths. Remote-server deployments
+// keep the server-side password policy, so the patch is local-mode only.
 function isAuthMeUrl(url: string): boolean {
   return /\/api\/auth\/me(?:\?|$)/.test(url)
 }
@@ -165,9 +218,10 @@ function installFetchPatch(): void {
   }
 }
 
-installFetchPatch()
+if (!REMOTE_SERVER_MODE) installFetchPatch()
 
 window.addEventListener('DOMContentLoaded', async () => {
+  if (REMOTE_SERVER_MODE) return
   try {
     const token = await ipcRenderer.invoke('hermes-desktop:get-token')
     if (token) {

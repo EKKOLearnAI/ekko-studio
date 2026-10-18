@@ -4,6 +4,7 @@ import hashlib
 import json
 import locale
 import os
+import posixpath
 import queue
 import socket
 import subprocess
@@ -30,6 +31,7 @@ class WorkerProcess:
         self.hermes_home = hermes_home
         self.process: subprocess.Popen[str] | None = None
         self.last_used_at = time.time()
+        self.active_requests = 0
         self._lock = threading.RLock()
 
     @property
@@ -143,37 +145,80 @@ class WorkerProcess:
         with self._lock:
             proc = self.process
             self.process = None
-        if proc is None:
-            return
-        if proc.poll() is None:
-            try:
-                self.request({"action": "shutdown"}, timeout=self.SHUTDOWN_REQUEST_TIMEOUT_SECONDS)
-            except Exception as exc:
-                print(f"[hermes-bridge-worker:{self.key}] graceful shutdown failed: {exc}", file=sys.stderr, flush=True)
-            proc.terminate()
-            try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=3)
-        if self.endpoint.startswith("ipc://"):
-            try:
-                Path(self.endpoint.removeprefix("ipc://")).unlink(missing_ok=True)
-            except OSError:
-                pass
+            if proc is None:
+                return
+            # Serialize endpoint cleanup with start(), including concurrent requests.
+            if proc.poll() is None:
+                try:
+                    # request() would start a replacement after self.process is cleared.
+                    _send_bridge_request(self.endpoint, {"action": "shutdown"}, self.SHUTDOWN_REQUEST_TIMEOUT_SECONDS)
+                except Exception as exc:
+                    print(f"[hermes-bridge-worker:{self.key}] graceful shutdown failed: {exc}", file=sys.stderr, flush=True)
+                if proc.poll() is None:
+                    proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=3)
+            if self.endpoint.startswith("ipc://"):
+                try:
+                    Path(self.endpoint.removeprefix("ipc://")).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def request(self, req: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
-        self.start()
-        self.last_used_at = time.time()
-        request_timeout = timeout if timeout is not None and timeout > 0 else self.REQUEST_TIMEOUT_SECONDS
-        return _send_bridge_request(self.endpoint, req, request_timeout)
+        passive = req.get("action") in {"status", "status_if_loaded", "background_poll", "list", "get_result", "get_output"}
+        with self._lock:
+            self.active_requests += 1
+        try:
+            self.start()
+            if not passive:
+                self.last_used_at = time.time()
+            request_timeout = timeout if timeout is not None and timeout > 0 else self.REQUEST_TIMEOUT_SECONDS
+            response = _send_bridge_request(self.endpoint, req, request_timeout)
+            sessions = response.get("sessions") or []
+            active = (
+                response.get("running") is True or response.get("status") == "running"
+                or bool(response.get("running_count"))
+                or bool(response.get("pending_count")) or bool(response.get("notifications"))
+                or any(isinstance(s, dict) and (s.get("running") or s.get("running_count")) for s in sessions)
+            )
+            if active:
+                self.last_used_at = time.time()
+            return response
+        finally:
+            with self._lock:
+                self.active_requests -= 1
+
+
+# Unix-domain socket paths are limited by sun_path (macOS/BSD: 104 bytes,
+# Linux: 108 bytes, including the trailing NUL). Keep a small safety margin.
+_AF_UNIX_MAX_PATH = 104 if sys.platform == "darwin" else 108
 
 
 def _worker_endpoint(key: str, namespace: str | None = None) -> str:
     namespace_key = f"{namespace or ''}\0{key}"
     safe = hashlib.sha256(namespace_key.encode("utf-8")).hexdigest()[:16]
     transport = os.environ.get("HERMES_AGENT_BRIDGE_WORKER_TRANSPORT", "").strip().lower()
+    forced_ipc = transport in {"ipc", "unix"}
     use_tcp = transport == "tcp" or (transport not in {"ipc", "unix"} and os.name == "nt")
+    if not use_tcp:
+        # Join as text when the process is not Windows. pathlib.Path follows the
+        # host flavour, and Python 3.13+ refuses to build a PosixPath on Windows
+        # even when a caller is simulating a posix temp directory.
+        sock_path = (
+            str(Path(tempfile.gettempdir()) / "hermes-agent-bridge-workers" / f"{safe}.sock")
+            if os.name == "nt"
+            else posixpath.join(tempfile.gettempdir(), "hermes-agent-bridge-workers", f"{safe}.sock")
+        )
+        # A deep temp dir can push the socket path past the platform's sun_path
+        # limit; the worker then fails to bind and exits before it can report
+        # ready (surfaced as "profile worker ... exited before ready"). Fall
+        # back to a TCP endpoint in that case.
+        if forced_ipc or len(os.fsencode(str(sock_path))) < _AF_UNIX_MAX_PATH - 1:
+            return f"ipc://{sock_path}"
+        use_tcp = True
     if use_tcp:
         port_base = int(os.environ.get("HERMES_AGENT_BRIDGE_WORKER_PORT_BASE", "18780"))
         port_offset = int(safe[:4], 16) % 1000

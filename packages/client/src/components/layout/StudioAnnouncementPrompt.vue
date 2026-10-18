@@ -132,11 +132,11 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  line-height: 1.7;
+  line-height: var(--line-height, 1.7);
 }
 .actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 </style>

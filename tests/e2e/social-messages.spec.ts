@@ -36,7 +36,7 @@ test('sends a Telegram message from Device Connections message push', async ({ p
   await page.goto('/#/social-messages')
 
   await expect(page).toHaveURL(/#\/hermes\/connections\?view=messages$/)
-  await expect(page.getByRole('button', { name: 'Message Push' })).toHaveClass(/view-switch-button--active/)
+  await expect(page.getByRole('button', { name: 'Message Push' })).toHaveCount(0)
   await expect(page.getByText('Push target found. You can now send messages to this Telegram chat.')).toBeVisible()
   await expect(page.getByPlaceholder('Chat ID or @channel_username')).toHaveCount(0)
   await page.getByPlaceholder('Write the message to send…').fill('hello telegram')
@@ -105,6 +105,12 @@ test('creates a standalone Feishu app by QR code', async ({ page }) => {
     ],
     socialMessageFeishuQrStatus: { status: 'confirmed', open_id: 'ou_owner' },
   })
+  let confirmScan!: () => void
+  const scanConfirmation = new Promise<void>(resolve => { confirmScan = resolve })
+  await page.route('**/api/social-messages/feishu/qrcode/status?**', async route => {
+    await scanConfirmation
+    await route.fallback()
+  })
 
   await page.goto('/#/social-messages')
 
@@ -112,6 +118,7 @@ test('creates a standalone Feishu app by QR code', async ({ page }) => {
   await expect(page.getByText('Scan with Feishu to create and connect the app.')).toBeVisible()
   await expect(page.getByLabel('App ID')).toHaveCount(0)
   await expect(page.getByLabel('App Secret')).toHaveCount(0)
+  confirmScan()
   await expect(page.getByText(
     'Send this Bot one message in Feishu first so Studio can identify the push target.',
   )).toBeVisible({ timeout: 5_000 })

@@ -1,5 +1,11 @@
+import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
+import { deleteSessionMessages, type MessageDeletionResult } from '@/api/studio/sessions'
+import { isNativeCodingAgent } from '@/utils/agent-catalog'
+import { historySessionSource, isBuiltinEkkoSession } from '@/utils/hermes/session-agent'
+import { isKnownEkkoSessionCommand } from '@/utils/hermes/bridge-session-commands'
+import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
-import { startRunViaSocket, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
+import { startRunViaSocket, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
 import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
 import { getActiveProfileName } from '@/api/client'
 import { onAuthInvalidated } from '@/api/auth-invalidation'
@@ -14,6 +20,7 @@ import { useProfilesStore } from './profiles'
 import { useSettingsStore } from './settings'
 import { primeCompletionSound, playCompletionSound } from '@/utils/completion-sound'
 import { showCompletionNotification } from '@/utils/completion-notification'
+import { notifyComputerUseStarted } from '@/composables/useComputerUsePermissionPrompt'
 import { detectThinkingBoundary } from '@/utils/thinking-parser'
 import { isKnownBridgeSessionCommand } from '@/utils/hermes/bridge-session-commands'
 import { responseErrorMessage } from '@/utils/http-error'
@@ -30,25 +37,31 @@ export type ContentBlock = ContentBlockImport
 export const LIVE_CHAT_MESSAGE_PAGE_SIZE = 150
 export const LIVE_CHAT_MAX_LOADED_MESSAGES = 300
 const LEGACY_WORKSPACE_RUN_CHANGE_MESSAGE_PREFIX = 'workspace-run-change:'
-type ChatAgentId = 'hermes' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'ekko-agent'
+type ChatAgentId = 'hermes' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode' | 'ekko-agent'
 
 function agentToCodingAgentId(agent?: string): ChatCodingAgentId | undefined {
+  if (isNativeCodingAgent(agent)) return agent
   if (agent === 'codex') return 'codex'
   if (agent === 'pi') return 'pi'
   if (agent === 'grok') return 'grok'
   if (agent === 'dsh') return 'dsh'
   if (agent === 'opencode') return 'opencode'
+  if (agent === 'antigravity') return 'antigravity'
+  if (agent === 'cursor') return 'cursor'
   if (agent === 'claude') return 'claude-code'
-  if (agent === 'ekko-agent') return 'ekko-agent'
+  if (['ekko', 'ekko_agent', 'ekko-agent'].includes(agent || '')) return 'ekko-agent'
   return undefined
 }
 
 function codingAgentIdToAgent(id?: ChatCodingAgentId): ChatAgentId | undefined {
+  if (isNativeCodingAgent(id)) return id
   if (id === 'codex') return 'codex'
   if (id === 'pi') return 'pi'
   if (id === 'grok') return 'grok'
   if (id === 'dsh') return 'dsh'
   if (id === 'opencode') return 'opencode'
+  if (id === 'antigravity') return 'antigravity'
+  if (id === 'cursor') return 'cursor'
   if (id === 'claude-code') return 'claude'
   if (id === 'ekko-agent') return 'ekko-agent'
   return undefined
@@ -79,6 +92,7 @@ export interface Attachment {
 }
 
 export interface Message {
+  storedMessageId?: number
   taskPlan?: TaskPlanSnapshot
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool' | 'command'
@@ -92,6 +106,7 @@ export interface Message {
   toolStatus?: 'running' | 'done' | 'error'
   toolDuration?: number  // 工具执行时长（秒）
   workspaceChanges?: WorkspaceRunChangeSummary[]
+  runUsage?: RunUsageSummary
   isStreaming?: boolean
   attachments?: Attachment[]
   // 思考/推理文本。两条来源：
@@ -443,13 +458,14 @@ export interface QueueInsertionState {
   generation: string
   runId?: string
   queueId: string
-  runtime: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
+  runtime: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
   phase: 'requesting' | 'waiting_for_tool_batch' | 'stopping_current_turn'
   guarantee: 'strict' | 'immediate'
   requestedAt: number
 }
 
 export interface Session {
+  historyRevision?: number
   id: string
   profile?: string
   title: string
@@ -475,6 +491,8 @@ export interface Session {
   isLoadingOlderMessages?: boolean
   inputTokens?: number
   outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
   contextTokens?: number
   endedAt?: number | null
   parentSessionId?: string | null
@@ -483,6 +501,7 @@ export interface Session {
   parentLastMessage?: string | null
   parentLastMessageRole?: string | null
   lastActiveAt?: number
+  isPinned?: boolean
   isArchived?: boolean
   pushEnabled?: boolean
   workspace?: string | null
@@ -897,7 +916,7 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
   // needed to name later tool result rows when resuming persisted history.
   const filteredMsgs = msgs.filter(m => {
     if (m.role === 'assistant') {
-      return (m.tool_calls?.length || 0) > 0 || runtimePayloadText((m as any).content).trim() !== ''
+      return (m.tool_calls?.length || 0) > 0 || runtimePayloadText((m as any).content).trim() !== '' || !!m.run_usage
     }
     return true
   })
@@ -936,9 +955,10 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
           toolStatus: 'done',
           finishReason: readFinishReason(msg),
           runMarker: readRunMarker(msg),
+          storedMessageId: Number(msg.id),
         })
       }
-      continue
+      if (!msg.run_usage) continue
     }
 
     // Tool result messages. MoA display rows are persisted with role "moa"
@@ -1017,6 +1037,7 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
           toolStatus: status === 'running' ? 'running' : status === 'completed' ? 'done' : 'error',
           finishReason: readFinishReason(msg),
           runMarker: readRunMarker(msg),
+          storedMessageId: Number(msg.id),
         })
         continue
       }
@@ -1048,6 +1069,7 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
               toolStatus: status === 'running' ? 'running' : status === 'completed' ? 'done' : 'error',
               finishReason: readFinishReason(msg),
               runMarker: readRunMarker(msg),
+              storedMessageId: Number(msg.id),
             })
           }
           continue
@@ -1077,6 +1099,7 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
             toolStatus: 'done',
             finishReason: readFinishReason(msg),
             runMarker: readRunMarker(msg),
+            storedMessageId: Number(msg.id),
           })
         }
         continue
@@ -1095,6 +1118,7 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
         toolStatus: readFinishReason(msg) === 'error' ? 'error' : 'done',
         finishReason: readFinishReason(msg),
         runMarker: readRunMarker(msg),
+        storedMessageId: Number(msg.id),
       })
       continue
     }
@@ -1106,11 +1130,13 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
       id: String(msg.id),
       role: displayRole === 'moa' ? 'system' : displayRole,
       content: displayContent || '',
+      runUsage: normalizeRunUsage(msg.run_usage),
       timestamp: Math.round(msg.timestamp * 1000),
       reasoning: msg.reasoning ? msg.reasoning : undefined,
       systemType: displayRole === 'command' ? 'command' : undefined,
       finishReason: readFinishReason(msg),
       runMarker: readRunMarker(msg),
+      storedMessageId: Number(msg.id),
     })
   }
   const restored = mergeTaskPlanMessages(result, taskPlans)
@@ -1148,10 +1174,20 @@ function lastVisibleMessageRole(messages?: Message[] | null): string | null {
   return lastVisibleMessage(messages)?.role || null
 }
 
+function applySessionTokenUsage(session: Session, usage: {
+  inputTokens?: number | null; outputTokens?: number | null
+  cacheReadTokens?: number | null; cacheWriteTokens?: number | null; contextTokens?: number | null
+}) {
+  for (const key of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'contextTokens'] as const) {
+    const value = usage[key]
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) session[key] = value
+  }
+}
+
 function mapHermesSession(s: SessionSummary): Session {
   const codingAgentId = agentToCodingAgentId(s.agent)
   const isCodingAgentSession = s.source === 'coding_agent' || Boolean(codingAgentId)
-  const codingAgentMode = isCodingAgentSession
+  const codingAgentMode = isBuiltinEkkoSession(s) ? 'scoped' : isCodingAgentSession
     ? (s.agent_mode === 'global' || s.agent_mode === 'scoped'
         ? s.agent_mode
         : s.provider === 'global' ? 'global' : 'scoped')
@@ -1161,7 +1197,7 @@ function mapHermesSession(s: SessionSummary): Session {
     id: s.id,
     profile: s.profile || 'default',
     title: s.title || '',
-    source: s.source || undefined,
+    source: historySessionSource(s) || undefined,
     agent: s.agent || undefined,
     agentSessionId: s.agent_session_id || undefined,
     agentNativeSessionId: s.agent_native_session_id || undefined,
@@ -1181,6 +1217,8 @@ function mapHermesSession(s: SessionSummary): Session {
     hasMoreBefore: false,
     inputTokens: s.input_tokens,
     outputTokens: s.output_tokens,
+    cacheReadTokens: s.cache_read_tokens,
+    cacheWriteTokens: s.cache_write_tokens,
     endedAt: s.ended_at != null ? Math.round(s.ended_at * 1000) : null,
     parentSessionId: s.parent_session_id || null,
     forkPointMessageId: (s as any).fork_point_message_id != null ? String((s as any).fork_point_message_id) : null,
@@ -1188,6 +1226,7 @@ function mapHermesSession(s: SessionSummary): Session {
     parentLastMessage: s.parent_last_message || null,
     parentLastMessageRole: s.parent_last_message_role || null,
     lastActiveAt: s.last_active != null ? Math.round(s.last_active * 1000) : undefined,
+    isPinned: Boolean(s.is_pinned),
     isArchived: Boolean(s.is_archived),
     pushEnabled: Boolean(s.push_enabled),
     workspace: s.workspace || null,
@@ -1219,20 +1258,20 @@ function runtimeStoragePrefix(): string {
 function storageKey(): string { return runtimeStoragePrefix() + getProfileName() }
 function legacyStorageKey(): string | null { return activeRuntimeMode === 'default' && getProfileName() === 'default' ? LEGACY_STORAGE_KEY : null }
 
-function isCodingAgentLikeSession(session?: Pick<Session, 'source' | 'agent' | 'codingAgentId'> | null): boolean {
-  return session?.source === 'coding_agent' ||
+function isProviderAgentSession(session?: Pick<Session, 'source' | 'agent' | 'codingAgentId'> | null): boolean {
+  return session?.source === 'builtin_agent' || session?.source === 'coding_agent' ||
     Boolean(session?.codingAgentId) ||
     Boolean(agentToCodingAgentId(session?.agent))
 }
 
 function clearCodingAgentRuntimeCredentials(session?: Session | null) {
-  if (!session || !isCodingAgentLikeSession(session)) return
+  if (!session || !isProviderAgentSession(session)) return
   session.baseUrl = undefined
   session.apiKey = undefined
 }
 
 function shouldPreserveRuntimeApiMode(session?: Session | null): boolean {
-  return isCodingAgentLikeSession(session) && session?.codingAgentMode !== 'global'
+  return isProviderAgentSession(session) && session?.codingAgentMode !== 'global'
 }
 
 function isQuotaExceededError(error: unknown): boolean {
@@ -1305,6 +1344,7 @@ function removeItem(key: string) {
 // File objects don't serialize and we only need name/type/size/url for display.
 
 export const useChatStore = defineStore('chat', () => {
+  const messageHistoryRevisions = new Map<string, number>()
   const runtimeMode = ref<ChatRuntimeMode>(activeRuntimeMode)
   const seenSessionCommandEvents = new WeakSet<RunEvent>()
   const sessions = ref<Session[]>([])
@@ -1476,10 +1516,11 @@ export const useChatStore = defineStore('chat', () => {
   const isRunActive = computed(() => isStreaming.value)
   let loadSessionsRequestSequence = 0
   let switchSessionRequestSequence = 0
+  const olderMessageLoads = new WeakMap<Session, object>()
   let activeSelectionSequence = 0
   const reasoningEffortWriteChains = new Map<string, Promise<boolean>>()
-  const reasoningEffortWriteTargets = new Map<string, string | undefined>()
-  const reasoningEffortConfirmedValues = new Map<string, string | undefined>()
+  const reasoningEffortWriteTargets = new Map<string, { effort: string | undefined; model?: string }>()
+  const reasoningEffortConfirmedValues = new Map<string, { effort: string | undefined; model?: string }>()
   const pushEnabledWriteChains = new Map<string, Promise<boolean>>()
   const pushEnabledWriteTargets = new Map<string, boolean>()
   const pushEnabledConfirmedValues = new Map<string, boolean>()
@@ -1523,6 +1564,7 @@ export const useChatStore = defineStore('chat', () => {
     runtimeGeneration += 1
     clearBackgroundObservers()
     sessions.value = []
+    pendingRunUsage.clear()
     completedUnreadSessions.value = new Set()
     queueLengths.value = new Map()
     queuedUserMessages.value = new Map()
@@ -1704,6 +1746,8 @@ export const useChatStore = defineStore('chat', () => {
     return alignedAssistantMessageId
   }
 
+  const pendingRunUsage = new Map<string, Map<string, NonNullable<ReturnType<typeof normalizeRunUsage>>>>()
+
   function handleTerminalWorkspaceRunChange(
     sessionId: string,
     evt: any,
@@ -1713,6 +1757,24 @@ export const useChatStore = defineStore('chat', () => {
     const target = sessions.value.find(session => session.id === sessionId)
     if (target) alignWorkspaceChangeAssistantMessage(target.messages, change, assistantMessageId)
     upsertWorkspaceRunChange(sessionId, change)
+    const originalSummary = normalizeRunUsage(evt?.run_usage)
+    const summary = originalSummary && (pendingRunUsage.get(sessionId)?.get(originalSummary.runId) || originalSummary)
+    if (summary) {
+      pendingRunUsage.get(sessionId)?.delete(summary.runId)
+      if (!pendingRunUsage.get(sessionId)?.size) pendingRunUsage.delete(sessionId)
+    }
+    if (target && summary) {
+      let message = target.messages.find(m => m.role === 'assistant' && m.id === summary.assistantMessageId)
+        || target.messages.find(m => m.role === 'assistant' && m.id === assistantMessageId)
+      if (!message && summary.assistantMessageId) {
+        message = { id: summary.assistantMessageId, role: 'assistant', content: '', timestamp: Date.now() }
+        target.messages.push(message)
+      }
+      if (message) {
+        if (summary.assistantMessageId && !target.messages.some(m => m !== message && m.id === summary.assistantMessageId)) message.id = summary.assistantMessageId
+        message.runUsage = summary
+      }
+    }
   }
 
   async function loadWorkspaceRunChangeFile(sessionId: string, toolCallId: string, fileId: number): Promise<WorkspaceRunChangeFileDetail | null> {
@@ -1746,7 +1808,11 @@ export const useChatStore = defineStore('chat', () => {
       if (requestSequence !== loadSessionsRequestSequence) return
       const fresh = list.map(mapHermesSession)
       const selectionChanged = selectionSequence !== activeSelectionSequence
-      const explicitlySelectedSession = selectionChanged && activeSessionId.value
+      // Search can select a session outside the sidebar's first page. Keep
+      // that selection when mounting its route, including title-only hits.
+      const preserveSelection = selectionChanged || focusMessageId.value
+        || (preferredSessionId && preferredSessionId === activeSessionId.value)
+      const explicitlySelectedSession = preserveSelection && activeSessionId.value
         ? sessions.value.find(session => session.id === activeSessionId.value) || activeSession.value
         : null
       // Preserve already-loaded messages for sessions that are still present,
@@ -1802,7 +1868,7 @@ export const useChatStore = defineStore('chat', () => {
             ? storedId
             : sessions.value[0]?.id
       if (targetId) {
-        await switchSession(targetId)
+        await switchSession(targetId, targetId === currentId ? focusMessageId.value : null)
       } else {
         clearActiveSession()
       }
@@ -1859,9 +1925,9 @@ export const useChatStore = defineStore('chat', () => {
           existing.reasoningEffort = fresh.reasoningEffort
           if (!pushEnabledWriteTargets.has(existing.id)) existing.pushEnabled = fresh.pushEnabled
           existing.messageCount = fresh.messageCount
-          existing.inputTokens = fresh.inputTokens
-          existing.outputTokens = fresh.outputTokens
+          applySessionTokenUsage(existing, fresh)
           existing.workspace = fresh.workspace
+          existing.isPinned = fresh.isPinned
           existing.categoryId = fresh.categoryId
           existing.isLocalOnly = false
           // messageTotal: keep the larger of server count vs what we've loaded,
@@ -1897,18 +1963,58 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function applyMessageDeletion(sessionId: string, result: MessageDeletionResult) {
+    if ((messageHistoryRevisions.get(sessionId) ?? -1) >= result.historyRevision) return
+    messageHistoryRevisions.set(sessionId, result.historyRevision)
+    const target = sessions.value.find(session => session.id === sessionId)
+    if (!target) return
+    target.historyRevision = result.historyRevision
+    const ids = new Set(result.messageIds)
+    const runs = new Set(target.messages.filter(message => ids.has(message.storedMessageId ?? Number(message.id)))
+      .map(message => message.runMarker).filter(Boolean))
+    target.messages = target.messages.filter(message => !ids.has(message.storedMessageId ?? Number(message.id))
+      && !(message.taskPlan && runs.has(message.runMarker)))
+    target.messageTotal = Math.max(0, (target.messageTotal ?? target.messageCount ?? 0) - result.deleted)
+    target.messageCount = target.messageTotal
+    target.contextTokens = typeof result.contextTokens === 'number' && Number.isFinite(result.contextTokens) && result.contextTokens >= 0
+      ? result.contextTokens : undefined
+    target.loadedMessageCount = 0
+    clearMessageReference(sessionId)
+    pendingRunUsage.delete(sessionId)
+    if (activeSessionId.value === sessionId) {
+      focusMessageId.value = null
+      const messagesAtDeletion = target.messages
+      const countAtDeletion = messagesAtDeletion.length
+      // A subsequent run/resume owns the newer transcript, even if it finishes
+      // before this refresh returns.
+      void refreshActiveSession({ canApply: () => !isSessionWorking(sessionId)
+        && target.messages === messagesAtDeletion && target.messages.length === countAtDeletion })
+    }
+  }
+
+  async function deleteMessages(sessionId: string, messageIds: number[], historyRevision: number) {
+    const session = sessions.value.find(item => item.id === sessionId)
+    const result = await deleteSessionMessages(sessionId, messageIds, historyRevision, session?.profile)
+    applyMessageDeletion(sessionId, result)
+    return result
+  }
+
   // Re-pull active session from server. Used on tab-visible events.
-  async function refreshActiveSession(): Promise<boolean> {
+  async function refreshActiveSession(options: { canApply?: () => boolean } = {}): Promise<boolean> {
     const sid = activeSessionId.value
     if (!sid) return false
     try {
       const target = sessions.value.find(s => s.id === sid)
       if (!target) return false
-      const limit = Math.min(
-        Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE),
-        LIVE_CHAT_MAX_LOADED_MESSAGES,
-      )
+      const revision = messageHistoryRevisions.get(sid)
+      const limit = focusMessageId.value
+        ? Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE)
+        : Math.min(
+          Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE),
+          LIVE_CHAT_MAX_LOADED_MESSAGES,
+        )
       const detail = await fetchSessionMessagesPage(sid, 0, limit, activeSession.value?.profile)
+      if (revision !== messageHistoryRevisions.get(sid) || options.canApply?.() === false) return false
       if (!detail) return false
       const mapped = mapHermesMessages(detail.messages || [], detail.taskPlans, target.messages)
       target.messages = mapped
@@ -1920,6 +2026,7 @@ export const useChatStore = defineStore('chat', () => {
       target.hasMoreBefore = detail.hasMore
       if (detail.session.title) target.title = detail.session.title
       target.workspace = detail.session.workspace || target.workspace || null
+      target.isPinned = Boolean(detail.session.is_pinned)
       target.categoryId = detail.session.category_id ?? null
       if (!pushEnabledWriteTargets.has(sid)) target.pushEnabled = Boolean(detail.session.push_enabled)
       target.isLocalOnly = false
@@ -1940,7 +2047,7 @@ export const useChatStore = defineStore('chat', () => {
     profile?: string
     model?: string
     provider?: string
-    source?: 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
+    source?: 'api_server' | 'cli' | 'coding_agent' | 'builtin_agent' | 'global_agent' | 'workflow' | 'group_chat'
     agent?: ChatAgentId
     codingAgentId?: ChatCodingAgentId
     codingAgentMode?: 'global' | 'scoped'
@@ -1950,10 +2057,11 @@ export const useChatStore = defineStore('chat', () => {
     baseUrl?: string
     apiKey?: string
     apiMode?: ProviderApiMode
+    reasoningEffort?: string
   } = {}): Session {
-    const source = runtimeMode.value === 'global_agent' ? 'global_agent' : options.source || 'cli'
     const codingAgentId = options.codingAgentId || agentToCodingAgentId(options.agent)
-    const codingAgentMode = codingAgentId ? (options.codingAgentMode || 'scoped') : undefined
+    const source = historySessionSource({ ...options, codingAgentId, source: runtimeMode.value === 'global_agent' ? 'global_agent' : options.source || 'cli' })
+    const codingAgentMode = codingAgentId ? (codingAgentId === 'ekko-agent' ? 'scoped' : options.codingAgentMode || 'scoped') : undefined
     const session: Session = {
       id: uid(),
       profile: options.profile || useProfilesStore().activeProfileName || 'default',
@@ -1974,6 +2082,7 @@ export const useChatStore = defineStore('chat', () => {
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
       apiMode: options.apiMode,
+      reasoningEffort: options.reasoningEffort || undefined,
     }
     sessions.value.unshift(session)
     return session
@@ -2008,6 +2117,9 @@ export const useChatStore = defineStore('chat', () => {
     const generation = runtimeGeneration
     activeSelectionSequence++
     const requestSequence = ++switchSessionRequestSequence
+    const isCurrentSelection = () => generation === runtimeGeneration
+      && activeSessionId.value === sessionId
+      && requestSequence === switchSessionRequestSequence
     clearThinkingObservationFor(sessionId)
     activeSessionId.value = sessionId
     focusMessageId.value = focusId ?? null
@@ -2017,11 +2129,16 @@ export const useChatStore = defineStore('chat', () => {
     activeSession.value = sessions.value.find(s => s.id === sessionId) || null
     clearSessionCompletedUnread(sessionId)
 
-    if (!activeSession.value) return
+    if (!activeSession.value) return false
+
+    // Unsent drafts have no server history. Resuming them only waits for a
+    // response to a session that does not exist until its first run.
+    if (activeSession.value.isLocalOnly && activeSession.value.messages.length === 0 && !isSessionWorking(sessionId)) return true
 
     beginMessageLoad(sessionId, requestSequence)
     let backgroundPendingOnResume = 0
 
+    let loaded = false
     try {
       // Load messages via Socket.IO resume (server loads from DB if not in memory)
       await new Promise<void>((resolve, reject) => {
@@ -2066,9 +2183,7 @@ export const useChatStore = defineStore('chat', () => {
             setAbortState(sessionId, null)
           }
           if (!data.isWorking) setCompressionState(sessionId, null)
-          if (data.inputTokens != null) target.inputTokens = data.inputTokens
-          if (data.outputTokens != null) target.outputTokens = data.outputTokens
-          if ((data as any).contextTokens != null) target.contextTokens = (data as any).contextTokens
+          applySessionTokenUsage(target, data)
           applyResumedSessionSettings(data)
           if (typeof data.workspace === 'string') {
             target.workspace = data.workspace.trim() || null
@@ -2177,8 +2292,20 @@ export const useChatStore = defineStore('chat', () => {
           resolve()
         }, activeSession.value?.profile, runtimeTransport())
       })
+      // A search hit can be older than both the resume page and the live-chat
+      // history cap. Only explicit message navigation may extend that window.
+      while (focusId && isCurrentSelection()) {
+        const target = activeSession.value
+        if (!target || target.messages.some(message => message.id === focusId)) break
+        const offset = target.loadedMessageCount || 0
+        if (!await loadOlderMessages(sessionId, isCurrentSelection)) break
+        if ((target.loadedMessageCount || 0) <= offset) break
+      }
+      loaded = isCurrentSelection() && (!focusId || !!activeSession.value?.messages.some(message => message.id === focusId))
+      if (isCurrentSelection() && !loaded) focusMessageId.value = null
     } catch (err) {
       console.error('Failed to load session messages via resume:', err)
+      if (isCurrentSelection()) focusMessageId.value = null
     } finally {
       endMessageLoad(sessionId, requestSequence)
     }
@@ -2187,19 +2314,28 @@ export const useChatStore = defineStore('chat', () => {
     if (generation === runtimeGeneration && activeSessionId.value === sessionId && requestSequence === switchSessionRequestSequence) {
       resumeServerWorkingRun(sessionId, backgroundPendingOnResume > 0, !serverWorking.value.has(sessionId))
     }
+    return loaded
   }
 
-  async function loadOlderMessages(sessionId = activeSessionId.value): Promise<boolean> {
+  async function loadOlderMessages(sessionId = activeSessionId.value, searchSelection?: () => boolean): Promise<boolean> {
     if (!sessionId) return false
     const target = sessions.value.find(s => s.id === sessionId)
-    if (!target || target.isLoadingOlderMessages || !target.hasMoreBefore) return false
+    if (!target || (!searchSelection && target.isLoadingOlderMessages) || !target.hasMoreBefore) return false
     const offset = target.loadedMessageCount || 0
-    if (offset >= LIVE_CHAT_MAX_LOADED_MESSAGES) return false
-    const limit = Math.min(LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MAX_LOADED_MESSAGES - offset)
+    if (!searchSelection && offset >= LIVE_CHAT_MAX_LOADED_MESSAGES) return false
+    const limit = searchSelection
+      ? LIVE_CHAT_MESSAGE_PAGE_SIZE
+      : Math.min(LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MAX_LOADED_MESSAGES - offset)
+    const loadToken = {}
+    const previousMessages = target.messages
+    olderMessageLoads.set(target, loadToken)
     target.isLoadingOlderMessages = true
     try {
       const page = await fetchSessionMessagesPage(sessionId, offset, limit, target.profile)
-      if (!page || page.messages.length === 0) {
+      if (olderMessageLoads.get(target) !== loadToken || target.messages !== previousMessages
+        || (searchSelection && !searchSelection())) return false
+      if (!page) return false
+      if (page.messages.length === 0) {
         target.hasMoreBefore = false
         return false
       }
@@ -2218,7 +2354,10 @@ export const useChatStore = defineStore('chat', () => {
       console.error('Failed to load older session messages:', err)
       return false
     } finally {
-      target.isLoadingOlderMessages = false
+      if (olderMessageLoads.get(target) === loadToken) {
+        olderMessageLoads.delete(target)
+        target.isLoadingOlderMessages = false
+      }
     }
   }
 
@@ -2226,7 +2365,7 @@ export const useChatStore = defineStore('chat', () => {
     profile?: string
     model?: string
     provider?: string
-    source?: 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
+    source?: 'api_server' | 'cli' | 'coding_agent' | 'builtin_agent' | 'global_agent' | 'workflow' | 'group_chat'
     agent?: ChatAgentId
     codingAgentId?: ChatCodingAgentId
     codingAgentMode?: 'global' | 'scoped'
@@ -2236,14 +2375,15 @@ export const useChatStore = defineStore('chat', () => {
     baseUrl?: string
     apiKey?: string
     apiMode?: ProviderApiMode
+    reasoningEffort?: string
   } = {}): Session {
     const appStore = useAppStore()
     const storageSource = runtimeMode.value === 'global_agent' ? 'global_agent' : options.source || 'cli'
     const codingAgentId = options.codingAgentId || agentToCodingAgentId(options.agent)
-    const isGlobalCodingAgent = Boolean(codingAgentId) && options.codingAgentMode === 'global'
+    const isGlobalCodingAgent = Boolean(codingAgentId) && codingAgentId !== 'ekko-agent' && options.codingAgentMode === 'global'
     const session = createSession({
       profile: options.profile,
-      model: isGlobalCodingAgent ? undefined : options.model || appStore.selectedModel || undefined,
+      model: isGlobalCodingAgent ? options.model || undefined : options.model || appStore.selectedModel || undefined,
       provider: isGlobalCodingAgent ? '' : options.provider || appStore.selectedProvider || '',
       source: storageSource,
       agent: options.agent,
@@ -2255,6 +2395,7 @@ export const useChatStore = defineStore('chat', () => {
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
       apiMode: options.apiMode,
+      reasoningEffort: !isGlobalCodingAgent && options.provider === 'moa' ? undefined : options.reasoningEffort,
     })
     void switchSession(session.id)
     return session
@@ -2266,11 +2407,11 @@ export const useChatStore = defineStore('chat', () => {
     const target = sessions.value.find(s => s.id === targetId)
     const activeTarget = activeSession.value?.id === targetId ? activeSession.value : null
     const session = target || activeTarget
-    if (session?.codingAgentMode === 'global' && isCodingAgentLikeSession(session)) return false
+    if (session?.codingAgentMode === 'global' && isProviderAgentSession(session)) return false
     const previousProvider = String(target?.provider ?? activeTarget?.provider ?? '')
     const nextProvider = provider || ''
     const shouldClearRuntimeCredentials = previousProvider !== nextProvider && (
-      isCodingAgentLikeSession(target) || isCodingAgentLikeSession(activeTarget)
+      isProviderAgentSession(target) || isProviderAgentSession(activeTarget)
     )
     const preservedApiMode = apiMode || (previousProvider === nextProvider
       ? (shouldPreserveRuntimeApiMode(target) ? target?.apiMode : undefined) ||
@@ -2481,8 +2622,11 @@ export const useChatStore = defineStore('chat', () => {
     )
   }
 
-  function handleToolStartedEvent(sessionId: string, evt: RunEvent, reasoning?: string) {
+  function handleToolStartedEvent(sessionId: string, evt: RunEvent, reasoning?: string, live = false) {
     const toolName = evt.tool || evt.name
+    if (live && activeSessionId.value === sessionId && isEkkoAgentSession(sessionId)) {
+      void notifyComputerUseStarted(toolName, runtimeObjectPayload(evt.arguments))
+    }
     if (
       isBackgroundDelegateToolPayload(toolName, evt.arguments)
       || (isEkkoAgentSession(sessionId) && toolName === 'delegate_task')
@@ -2863,6 +3007,10 @@ export const useChatStore = defineStore('chat', () => {
 
     const sid = evt.session_id
     if (!sid) return
+    if ((evt as any).action === 'messages_deleted') {
+      applyMessageDeletion(sid, evt as unknown as MessageDeletionResult)
+      return
+    }
     const target = sessions.value.find(s => s.id === sid)
     const action = (evt as any).action as string | undefined
     const command = String((evt as any).command || '').toLowerCase()
@@ -2912,10 +3060,8 @@ export const useChatStore = defineStore('chat', () => {
       target.updatedAt = Date.now()
     }
 
-    if (action === 'usage' && target) {
-      target.inputTokens = (evt as any).inputTokens
-      target.outputTokens = (evt as any).outputTokens
-      if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+    if (action === 'usage' && target && (evt as any).available !== false) {
+      applySessionTokenUsage(target, evt as any)
     }
 
     if (action === 'destroy') {
@@ -3089,6 +3235,9 @@ export const useChatStore = defineStore('chat', () => {
         || raw.runtime === 'codex'
         || raw.runtime === 'pi'
         || raw.runtime === 'grok'
+        || raw.runtime === 'opencode'
+        || raw.runtime === 'dsh'
+        || (isNativeCodingAgent(raw.runtime) || raw.runtime === 'cursor' || raw.runtime === 'antigravity')
         ? raw.runtime
         : 'hermes',
       phase,
@@ -3448,12 +3597,14 @@ export const useChatStore = defineStore('chat', () => {
     const targets = [sessions.value.find(s => s.id === sid), activeSession.value?.id === sid ? activeSession.value : null]
       .filter((session): session is Session => Boolean(session))
     for (const target of new Set(targets)) {
-      if (typeof evt.model === 'string') target.model = evt.model
+      const pendingReasoning = reasoningEffortWriteTargets.get(sid)
+      const matchesReasoningWrite = !pendingReasoning || pendingReasoning.effort === (evt.reasoning_effort || undefined)
+      if (typeof evt.model === 'string' && (!pendingReasoning?.model || matchesReasoningWrite)) target.model = evt.model
       if (typeof evt.provider === 'string') target.provider = evt.provider
       if (typeof evt.api_mode === 'string') target.apiMode = evt.api_mode as ProviderApiMode || undefined
       if (typeof evt.reasoning_effort === 'string') {
         const incomingEffort = evt.reasoning_effort || undefined
-        const pendingEffort = reasoningEffortWriteTargets.get(sid)
+        const pendingEffort = reasoningEffortWriteTargets.get(sid)?.effort
         if (!reasoningEffortWriteTargets.has(sid) || pendingEffort === incomingEffort) {
           target.reasoningEffort = incomingEffort
         }
@@ -3516,6 +3667,11 @@ export const useChatStore = defineStore('chat', () => {
     if (codingAgentId === 'opencode') {
       return { icon: '/coding-agents/opencode.png' }
     }
+    if (isNativeCodingAgent(codingAgentId)) return { icon: chatSessionAgentAvatar(session).src }
+    if (codingAgentId === 'antigravity') return { icon: '/coding-agents/antigravity.png' }
+    if (codingAgentId === 'cursor') {
+      return { icon: '/coding-agents/cursor-logo.png' }
+    }
     if (codingAgentId === 'ekko-agent') {
       return { icon: '/coding-agents/ekko-agent.png' }
     }
@@ -3564,8 +3720,10 @@ export const useChatStore = defineStore('chat', () => {
     const shouldSendInitialSessionConfig = activeSession.value
       ? activeSession.value.messageCount == null || activeSession.value.messageCount === 0
       : false
-    const isCodingAgentSession = isCodingAgentLikeSession(activeSession.value)
-    const isBridgeSlashCommand = !isCodingAgentSession && isKnownBridgeSessionCommand(trimmedContent)
+    const isProviderAgent = isProviderAgentSession(activeSession.value)
+    const isBuiltinSlashCommand = !attachments?.length && isBuiltinEkkoSession(activeSession.value) && isKnownEkkoSessionCommand(trimmedContent)
+    const isBridgeSlashCommand = !isProviderAgent && isKnownBridgeSessionCommand(trimmedContent)
+    const isSessionSlashCommand = isBridgeSlashCommand || isBuiltinSlashCommand
     const isBridgeCompressCommand = isBridgeSlashCommand && /^\/compress(?:\s|$)/i.test(trimmedContent)
     const isBridgePlanCommand = isBridgeSlashCommand && /^\/plan(?:\s|$)/i.test(trimmedContent)
     const isBridgeSkillCommand = isBridgeSlashCommand && /^\/skill(?:\s|$)/i.test(trimmedContent)
@@ -3573,36 +3731,36 @@ export const useChatStore = defineStore('chat', () => {
     const isBridgeMoaCommand = isBridgeSlashCommand && /^\/moa(?:\s|$)/i.test(trimmedContent)
     const isBridgeGoalCommand = isBridgeSlashCommand && /^\/goal(?:\s|$)/i.test(trimmedContent)
     const isBridgeForkCommand = isBridgeSlashCommand && /^\/fork(?:\s|$)/i.test(trimmedContent)
-    const messageReference = isBridgeSlashCommand ? null : messageReferences.value.get(sid) || null
+    const messageReference = isSessionSlashCommand ? null : messageReferences.value.get(sid) || null
     const submittedContent = messageReference
       ? formatMessageWithReference(messageReference, trimmedContent)
       : trimmedContent
-    const shouldOptimisticallyShowRunStatus = !isCodingAgentSession && !isBridgeForkCommand
+    const shouldOptimisticallyShowRunStatus = !isProviderAgent && !isBridgeForkCommand
     const wasLiveBeforeSend = isSessionLive(sid)
     if (isBridgeForkCommand) {
       if (pendingForkCommands.value.has(sid)) return
       pendingForkCommands.value = new Set(pendingForkCommands.value).add(sid)
     }
     const shouldQueue = wasLiveBeforeSend && (
-      !isBridgeSlashCommand ||
+      (!isBridgeSlashCommand && !isBuiltinSlashCommand) ||
       isBridgePlanCommand ||
       isBridgeSkillCommand ||
       isBridgeBundleCommand ||
       isBridgeMoaCommand
     )
-    if (isBridgeSlashCommand && !shouldQueue && !wasLiveBeforeSend) {
+    if (isSessionSlashCommand && !shouldQueue && !wasLiveBeforeSend) {
       settleRuntimeDisplayForCommand(sid)
     }
 
     const visibleAttachments = attachments?.filter(attachment => !attachment.videoFrameFor)
     const userMsg: Message = {
       id: uid(),
-      role: isBridgeSlashCommand ? 'command' : 'user',
+      role: isSessionSlashCommand ? 'command' : 'user',
       content: submittedContent,
       timestamp: Date.now(),
       attachments: visibleAttachments && visibleAttachments.length > 0 ? visibleAttachments : undefined,
       queued: shouldQueue,
-      systemType: isBridgeSlashCommand ? 'command' : undefined,
+      systemType: isSessionSlashCommand ? 'command' : undefined,
     }
 
     if (shouldQueue) {
@@ -3677,17 +3835,22 @@ export const useChatStore = defineStore('chat', () => {
         ? 'global_agent'
         : storedSource === 'workflow'
           ? 'workflow'
-        : isCodingAgentSession
+        : storedSource === 'group_chat'
+          ? 'group_chat'
+        : isBuiltinEkkoSession(activeSession.value)
+          ? 'builtin_agent'
+        : isProviderAgent
           ? 'coding_agent'
           : storedSource === 'api_server'
             ? 'api_server'
             : 'cli'
-      const isCodingAgentExecution = sessionSource === 'coding_agent' || (sessionSource === 'workflow' && isCodingAgentSession)
+      const isCodingAgentExecution = sessionSource === 'builtin_agent' || sessionSource === 'coding_agent'
+        || ((sessionSource === 'workflow' || sessionSource === 'group_chat' || sessionSource === 'global_agent') && isProviderAgent)
       const codingAgentId: ChatCodingAgentId =
-        activeSession.value?.codingAgentId ||
+        (isBuiltinEkkoSession(activeSession.value) ? 'ekko-agent' : activeSession.value?.codingAgentId) ||
         agentToCodingAgentId(activeSession.value?.agent) ||
         'claude-code'
-      const codingAgentMode = activeSession.value?.codingAgentMode || 'scoped'
+      const codingAgentMode = codingAgentId === 'ekko-agent' ? 'scoped' : activeSession.value?.codingAgentMode || 'scoped'
       const codingAgentApiMode = isCodingAgentExecution && codingAgentMode !== 'global'
         ? normalizeCodingAgentApiMode(
             activeSession.value?.apiMode || providerGroup?.api_mode,
@@ -3703,7 +3866,7 @@ export const useChatStore = defineStore('chat', () => {
         session_id: sid,
         profile: sessionProfile,
         model: isCodingAgentExecution
-          ? (codingAgentMode === 'global' ? undefined : sessionModel || undefined)
+          ? (codingAgentMode === 'global' ? activeSession.value?.model || undefined : sessionModel || undefined)
           : shouldSendInitialSessionConfig ? sessionModel || undefined : undefined,
         provider: isCodingAgentExecution
           ? (codingAgentMode === 'global' ? undefined : sessionProvider || undefined)
@@ -3720,7 +3883,7 @@ export const useChatStore = defineStore('chat', () => {
         ...(sessionSource === 'workflow' ? { session_source: 'workflow' as const } : {}),
         ...(isCodingAgentExecution
           ? {
-              coding_agent_id: codingAgentId,
+              ...(codingAgentId === 'ekko-agent' ? { agent_id: 'ekko-agent' as const } : { coding_agent_id: codingAgentId }),
               agent_preset: activeSession.value?.agentPreset,
               mode: codingAgentMode,
               baseUrl: codingAgentMode === 'global' ? undefined : activeSession.value?.baseUrl || providerGroup?.base_url || undefined,
@@ -3728,14 +3891,9 @@ export const useChatStore = defineStore('chat', () => {
               apiMode: codingAgentApiMode,
             }
           : {}),
-        // Per-session reasoning effort override. Hermes bridge and scoped coding
-        // agents both consume this when the selected provider/API supports it.
-        // Global coding-agent mode uses the user's native CLI config, so avoid
-        // injecting a per-session override there.
-        reasoning_effort: isCodingAgentExecution && codingAgentMode === 'global'
-          ? undefined
-          : activeSession.value?.reasoningEffort || undefined,
-        push_enabled: Boolean(activeSession.value?.pushEnabled),
+        // An absent override preserves the agent's native reasoning setting.
+        reasoning_effort: activeSession.value?.reasoningEffort || undefined,
+        push_enabled: activeSession.value?.pushEnabled !== false,
       }
       if (shouldSendInitialSessionConfig && activeSession.value) {
         activeSession.value.messageCount = Math.max(activeSession.value.messageCount || 0, 1)
@@ -3803,9 +3961,7 @@ export const useChatStore = defineStore('chat', () => {
         }
         if (!data.isWorking) setCompressionState(sid, null)
 
-        if (data.inputTokens != null) target.inputTokens = data.inputTokens
-        if (data.outputTokens != null) target.outputTokens = data.outputTokens
-        if (data.contextTokens != null) target.contextTokens = data.contextTokens
+        applySessionTokenUsage(target, data)
         applyResumedSessionSettings(data)
 
         if (Array.isArray(data.messages)) {
@@ -4035,6 +4191,10 @@ export const useChatStore = defineStore('chat', () => {
               setAbortState(sid, { aborting: false, synced: (evt as any).synced ?? false })
               settleInterruptedSubagents(sid)
               clearPendingInteractions(sid)
+              const abortedAssistant = getSessionMsgs(sid).find(message => message.id === activeAssistantMessageId)
+                || [...getSessionMsgs(sid)].reverse().find(message => message.role === 'assistant' && message.isStreaming)
+              handleTerminalWorkspaceRunChange(sid, evt, abortedAssistant?.id)
+              if (abortedAssistant) updateMessage(sid, abortedAssistant.id, { isStreaming: false })
               if ((evt as any).queue_length > 0) {
                 queueLengths.value.set(sid, (evt as any).queue_length)
                 setAbortState(sid, null)
@@ -4202,7 +4362,7 @@ export const useChatStore = defineStore('chat', () => {
               }
               activeAssistantMessageId = null
               reasoningAssistantMessageId = null
-              handleToolStartedEvent(sid, evt, toolReasoning)
+              handleToolStartedEvent(sid, evt, toolReasoning, true)
 
               break
             }
@@ -4270,9 +4430,7 @@ export const useChatStore = defineStore('chat', () => {
               if ((evt as any).inputTokens != null) {
                 const target = sessions.value.find(s => s.id === sid)
                 if (target) {
-                  target.inputTokens = (evt as any).inputTokens
-                  target.outputTokens = (evt as any).outputTokens
-                  if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+                  applySessionTokenUsage(target, evt as any)
                 }
               }
               // Belt-and-suspenders: some providers may deliver the final
@@ -4423,9 +4581,7 @@ export const useChatStore = defineStore('chat', () => {
               if ((evt as any).inputTokens != null) {
                 const target = sessions.value.find(s => s.id === sid)
                 if (target) {
-                  target.inputTokens = (evt as any).inputTokens
-                  target.outputTokens = (evt as any).outputTokens
-                  if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+                  applySessionTokenUsage(target, evt as any)
                 }
               }
               if (queueInsertionInterruption) {
@@ -4449,9 +4605,7 @@ export const useChatStore = defineStore('chat', () => {
             case 'usage.updated': {
               const target = sessions.value.find(s => s.id === sid)
               if (target) {
-                target.inputTokens = (evt as any).inputTokens
-                target.outputTokens = (evt as any).outputTokens
-                if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+                applySessionTokenUsage(target, evt as any)
               }
               break
             }
@@ -4490,10 +4644,10 @@ export const useChatStore = defineStore('chat', () => {
       )
       runSubmitted = true
 
-      if (isCodingAgentSession) {
+      if (isProviderAgent && !isBuiltinSlashCommand) {
         serverWorking.value.add(sid)
         streamStates.value.set(sid, ctrl)
-      } else if (!isBridgeSlashCommand || isBridgeCompressCommand || isBridgePlanCommand || isBridgeGoalCommand) {
+      } else if (!isSessionSlashCommand || isBridgeCompressCommand || isBridgePlanCommand || isBridgeGoalCommand) {
         streamStates.value.set(sid, ctrl)
       }
     } catch (err: any) {
@@ -4706,6 +4860,10 @@ export const useChatStore = defineStore('chat', () => {
           setAbortState(sid, { aborting: false, synced: (evt as any).synced ?? false })
           settleInterruptedSubagents(sid)
           clearPendingInteractions(sid)
+          const abortedAssistant = getSessionMsgs(sid).find(message => message.id === activeAssistantMessageId)
+            || [...getSessionMsgs(sid)].reverse().find(message => message.role === 'assistant' && message.isStreaming)
+          handleTerminalWorkspaceRunChange(sid, evt, abortedAssistant?.id)
+          if (abortedAssistant) updateMessage(sid, abortedAssistant.id, { isStreaming: false })
           if ((evt as any).queue_length > 0) {
             queueLengths.value.set(sid, (evt as any).queue_length)
             setAbortState(sid, null)
@@ -4865,7 +5023,7 @@ export const useChatStore = defineStore('chat', () => {
           }
           activeAssistantMessageId = null
           reasoningAssistantMessageId = null
-          handleToolStartedEvent(sid, evt, toolReasoning)
+          handleToolStartedEvent(sid, evt, toolReasoning, true)
 
           break
         }
@@ -4940,9 +5098,7 @@ export const useChatStore = defineStore('chat', () => {
           if ((evt as any).inputTokens != null) {
             const target = sessions.value.find(s => s.id === sid)
             if (target) {
-              target.inputTokens = (evt as any).inputTokens
-              target.outputTokens = (evt as any).outputTokens
-              if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+              applySessionTokenUsage(target, evt as any)
             }
           }
           // Check if backend provided parsed content (from stringified array format)
@@ -5084,9 +5240,7 @@ export const useChatStore = defineStore('chat', () => {
           if ((evt as any).inputTokens != null) {
             const target = sessions.value.find(s => s.id === sid)
             if (target) {
-              target.inputTokens = (evt as any).inputTokens
-              target.outputTokens = (evt as any).outputTokens
-              if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+              applySessionTokenUsage(target, evt as any)
             }
           }
           const hasQueue = (evt as any).queue_remaining > 0
@@ -5117,9 +5271,7 @@ export const useChatStore = defineStore('chat', () => {
         case 'usage.updated': {
           const target = sessions.value.find(s => s.id === sid)
           if (target) {
-            target.inputTokens = (evt as any).inputTokens
-            target.outputTokens = (evt as any).outputTokens
-            if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+            applySessionTokenUsage(target, evt as any)
           }
           break
         }
@@ -5228,6 +5380,10 @@ export const useChatStore = defineStore('chat', () => {
 
   function handleGlobalSessionCommand(evt: RunEvent) {
     const sid = evt.session_id
+    if (sid && (evt as any).action === 'messages_deleted') {
+      handleSessionCommandEvent(evt)
+      return
+    }
     if (!sid || activeSessionId.value !== sid || !activeSession.value) return
     const shouldAttachToStartedRun = (evt as any).started === true && (evt as any).terminal === false
     handleSessionCommandEvent(evt)
@@ -5242,6 +5398,24 @@ export const useChatStore = defineStore('chat', () => {
   onSessionTitleUpdated(applyGeneratedSessionTitle)
   onSessionWorkspaceUpdated(applySessionWorkspaceUpdate)
   onSessionSettingsUpdated(applySessionSettingsUpdate)
+  onRunUsageUpdated(evt => {
+    const sid = evt.session_id
+    const summary = normalizeRunUsage((evt as any).run_usage)
+    const session = sessions.value.find(item => item.id === sid)
+    if (!sid || !session || !summary?.assistantMessageId) return
+    applySessionTokenUsage(session, evt as any)
+    // Late native logs and prices belong to this exact run, even when another
+    // turn is already streaming. Never fall back to the newest assistant.
+    const message = session.messages.find(item => item.role === 'assistant'
+      && (item.id === summary.assistantMessageId || item.runUsage?.runId === summary.runId))
+    const terminalNotReceived = !message?.runUsage
+    if (message) message.runUsage = summary
+    if (terminalNotReceived) {
+      const updates = pendingRunUsage.get(sid) || new Map()
+      updates.set(summary.runId, summary)
+      pendingRunUsage.set(sid, updates)
+    }
+  })
 
   function stopStreaming() {
     const sid = activeSessionId.value
@@ -5298,6 +5472,7 @@ export const useChatStore = defineStore('chat', () => {
             }
             if (!data.isWorking) setCompressionState(sid, null)
             applyResumedSessionSettings(data)
+            if (activeSession.value) applySessionTokenUsage(activeSession.value, data)
             if (Array.isArray(data.messages) && activeSession.value) {
               if (typeof data.workspace === 'string') {
                 activeSession.value.workspace = data.workspace.trim() || null
@@ -5382,32 +5557,41 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function setSessionReasoningEffort(sessionId: string, effort: string): Promise<boolean> {
+  async function setSessionReasoningEffort(sessionId: string, effort: string, nativeModel?: string): Promise<boolean> {
     const target = sessions.value.find(s => s.id === sessionId)
     const activeTarget = activeSession.value?.id === sessionId ? activeSession.value : null
     const session = target || activeTarget
     if (!session) return false
 
     const nextEffort = effort || undefined
-    const previousEffort = session.reasoningEffort
+    const previous = { effort: session.reasoningEffort, model: session.model }
+    const next = { effort: nextEffort, model: nativeModel ?? session.model }
+    const writeTarget = { effort: nextEffort, model: nativeModel }
     if (target) target.reasoningEffort = nextEffort
     if (activeTarget) activeTarget.reasoningEffort = nextEffort
+    if (nativeModel !== undefined) {
+      if (target) target.model = nativeModel
+      if (activeTarget) activeTarget.model = nativeModel
+    }
     if (session.isLocalOnly) return true
 
     if (!reasoningEffortWriteChains.has(sessionId)) {
-      reasoningEffortConfirmedValues.set(sessionId, previousEffort)
+      reasoningEffortConfirmedValues.set(sessionId, previous)
     }
-    reasoningEffortWriteTargets.set(sessionId, nextEffort)
+    reasoningEffortWriteTargets.set(sessionId, writeTarget)
     const previousWrite = reasoningEffortWriteChains.get(sessionId) || Promise.resolve(true)
     const write: Promise<boolean> = previousWrite
       .catch(() => false)
-      .then(() => persistSessionReasoningEffort(sessionId, effort))
+      .then(() => nativeModel === undefined ? persistSessionReasoningEffort(sessionId, effort) : persistSessionReasoningEffort(sessionId, effort, nativeModel))
       .then((ok) => {
-        if (ok) reasoningEffortConfirmedValues.set(sessionId, nextEffort)
-        if (!ok && reasoningEffortWriteTargets.get(sessionId) === nextEffort) {
-          const confirmedEffort = reasoningEffortConfirmedValues.get(sessionId)
-          if (target) target.reasoningEffort = confirmedEffort
-          if (activeTarget) activeTarget.reasoningEffort = confirmedEffort
+        if (ok) reasoningEffortConfirmedValues.set(sessionId, next)
+        if (!ok && reasoningEffortWriteTargets.get(sessionId) === writeTarget) {
+          const confirmed = reasoningEffortConfirmedValues.get(sessionId) || previous
+          for (const session of new Set([target, activeTarget])) {
+            if (!session) continue
+            session.reasoningEffort = confirmed.effort
+            if (nativeModel !== undefined) session.model = confirmed.model
+          }
         }
         return ok
       })
@@ -5532,6 +5716,7 @@ export const useChatStore = defineStore('chat', () => {
     loadSessions,
     refreshSessionListOnly,
     refreshActiveSession,
+    deleteMessages,
     getThinkingObservation,
     noteThinkingDelta,
     noteReasoningStart,

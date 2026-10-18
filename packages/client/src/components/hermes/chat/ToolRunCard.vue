@@ -21,11 +21,11 @@ defineProps<{
 .tool-run-items {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
   margin-block-start: 4px;
   margin-inline-start: 11px;
-  padding: 3px 4px 3px 14px;
-  border-inline-start: 1px solid rgba(var(--text-primary-rgb), 0.12);
+  padding: calc(3px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) calc(3px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
+  border-inline-start: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.12);
 }
 
 </style>

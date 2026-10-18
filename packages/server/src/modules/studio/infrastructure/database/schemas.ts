@@ -9,10 +9,25 @@
 
 export const USAGE_TABLE = 'session_usage'
 
+export const MODEL_API_KEYS_TABLE = 'model_api_keys'
+export const MODEL_API_KEYS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  user_id: 'INTEGER NOT NULL',
+  name: 'TEXT NOT NULL',
+  preview: 'TEXT NOT NULL',
+  token_hash: 'TEXT NOT NULL UNIQUE',
+  created_at: 'INTEGER NOT NULL',
+  last_used_at: 'INTEGER',
+}
+
 export const USAGE_SCHEMA: Record<string, string> = {
   id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
   session_id: 'TEXT NOT NULL',
+  account_id: 'TEXT',
+  origin: "TEXT NOT NULL DEFAULT 'internal'",
   run_id: "TEXT NOT NULL DEFAULT ''",
+  parent_run_id: "TEXT NOT NULL DEFAULT ''",
+  api_duration: 'REAL',
   source: "TEXT NOT NULL DEFAULT ''",
   agent: "TEXT NOT NULL DEFAULT ''",
   usage_scope: "TEXT NOT NULL DEFAULT 'run'",
@@ -27,11 +42,44 @@ export const USAGE_SCHEMA: Record<string, string> = {
   provider: "TEXT NOT NULL DEFAULT ''",
   profile: "TEXT NOT NULL DEFAULT 'default'",
   is_estimated: 'INTEGER NOT NULL DEFAULT 0',
+  cost_usd: 'REAL',
+  cost_source: "TEXT NOT NULL DEFAULT 'unknown'",
+  cost_pricing: 'TEXT',
   created_at: 'INTEGER NOT NULL DEFAULT 0',
 }
 
 export const USAGE_RUN_INDEX = `CREATE UNIQUE INDEX IF NOT EXISTS idx_session_usage_run
   ON ${USAGE_TABLE}(session_id, run_id, source) WHERE run_id <> ''`
+
+export const RUN_USAGE_TABLE = 'run_usage'
+export const RUN_USAGE_SCHEMA = {
+  session_id: 'TEXT NOT NULL',
+  run_id: 'TEXT NOT NULL',
+  assistant_message_id: "TEXT NOT NULL DEFAULT ''",
+  input_tokens: 'INTEGER',
+  output_tokens: 'INTEGER',
+  cache_read_tokens: 'INTEGER',
+  cache_write_tokens: 'INTEGER',
+  cache_hit_rate: 'REAL',
+  cost_usd: 'REAL',
+  model_duration_seconds: 'REAL',
+  run_duration_seconds: 'REAL',
+  tool_duration_seconds: 'REAL',
+  tokens_per_second: 'REAL',
+  is_estimated: 'INTEGER NOT NULL DEFAULT 0',
+  completed_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+export const RUN_USAGE_INDEXES = {
+  idx_run_usage_session_run: `CREATE UNIQUE INDEX IF NOT EXISTS idx_run_usage_session_run ON ${RUN_USAGE_TABLE}(session_id, run_id)`,
+  idx_run_usage_assistant: `CREATE INDEX IF NOT EXISTS idx_run_usage_assistant ON ${RUN_USAGE_TABLE}(session_id, assistant_message_id)`,
+}
+
+export const USAGE_PRICING_TABLE = 'usage_pricing'
+export const USAGE_PRICING_SCHEMA = {
+  profile: 'TEXT PRIMARY KEY',
+  rates: "TEXT NOT NULL DEFAULT '[]'",
+}
 
 // ============================================================================
 // Session Store (session-store.ts)
@@ -50,7 +98,66 @@ export const TASK_PLANS_SCHEMA: Record<string, string> = {
 
 export const SESSIONS_TABLE = 'sessions'
 
+export const SESSION_SHARES_TABLE = 'session_shares'
+export const SESSION_SHARES_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  session_id: 'TEXT NOT NULL',
+  profile: 'TEXT NOT NULL',
+  created_by_user_id: 'INTEGER NOT NULL',
+  sharer_app_user_id: 'INTEGER NOT NULL',
+  sharer_name_snapshot: 'TEXT NOT NULL',
+  recipient_app_user_id: 'INTEGER',
+  recipient_name_snapshot: 'TEXT',
+  token_hash: 'TEXT NOT NULL',
+  permissions: 'TEXT NOT NULL',
+  workspace_root: 'TEXT NOT NULL',
+  // Allow existing tables to migrate. Legacy grants without a pinned real path
+  // remain unable to access workspace files until a new share is created.
+  workspace_real_root: "TEXT NOT NULL DEFAULT ''",
+  extra_paths: "TEXT NOT NULL DEFAULT '[]'",
+  policy_version: 'INTEGER NOT NULL DEFAULT 1',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+  expires_at: 'INTEGER NOT NULL',
+  claimed_at: 'INTEGER',
+  revoked_at: 'INTEGER',
+}
+export const SESSION_SHARES_INDEXES = {
+  uniq_session_shares_token: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_shares_token ON session_shares(token_hash)',
+  idx_session_shares_sender: 'CREATE INDEX IF NOT EXISTS idx_session_shares_sender ON session_shares(session_id, sharer_app_user_id, created_at)',
+  idx_session_shares_recipient: 'CREATE INDEX IF NOT EXISTS idx_session_shares_recipient ON session_shares(recipient_app_user_id)',
+}
+
+export const SESSION_UPLOADS_TABLE = 'session_uploads'
+export const SESSION_UPLOADS_SCHEMA: Record<string, string> = {
+  id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+  session_id: 'TEXT NOT NULL',
+  profile: 'TEXT NOT NULL',
+  path: 'TEXT NOT NULL',
+  real_path: 'TEXT NOT NULL',
+}
+export const SESSION_UPLOADS_INDEXES = {
+  uniq_session_uploads_path: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_uploads_path ON session_uploads(session_id, profile, path)',
+}
+
 export const SESSION_CATEGORIES_TABLE = 'session_categories'
+
+export const WORKSPACE_DIRECTORIES_TABLE = 'workspace_directories'
+export const WORKSPACE_DIRECTORIES_SCHEMA: Record<string, string> = {
+  id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+  user_id: 'INTEGER NOT NULL',
+  path: 'TEXT NOT NULL',
+  path_key: 'TEXT NOT NULL',
+  is_favorite: 'INTEGER NOT NULL DEFAULT 0',
+  last_used: 'INTEGER NOT NULL DEFAULT 0',
+  use_count: 'INTEGER NOT NULL DEFAULT 0',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+export const WORKSPACE_DIRECTORIES_INDEXES = {
+  uniq_workspace_directories_user_path: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_workspace_directories_user_path ON workspace_directories(user_id, path_key)',
+  idx_workspace_directories_user_recent: 'CREATE INDEX IF NOT EXISTS idx_workspace_directories_user_recent ON workspace_directories(user_id, last_used DESC)',
+}
 
 export const SESSION_CATEGORIES_SCHEMA: Record<string, string> = {
   id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
@@ -73,6 +180,7 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   agent_session_id: 'TEXT NOT NULL DEFAULT \'\'',
   agent_native_session_id: 'TEXT NOT NULL DEFAULT \'\'',
   user_id: 'TEXT',
+  studio_user_id: 'TEXT',
   model: 'TEXT NOT NULL DEFAULT \'\'',
   provider: 'TEXT NOT NULL DEFAULT \'\'',
   api_mode: 'TEXT NOT NULL DEFAULT \'\'',
@@ -97,10 +205,15 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   preview: 'TEXT NOT NULL DEFAULT \'\'',
   last_active: 'INTEGER NOT NULL',
   is_archived: 'INTEGER NOT NULL DEFAULT 0',
-  push_enabled: 'INTEGER NOT NULL DEFAULT 0',
+  is_pinned: 'INTEGER NOT NULL DEFAULT 0',
+  push_enabled: 'INTEGER NOT NULL DEFAULT 1',
   workspace: 'TEXT',
   category_id: 'INTEGER',
   history_revision: 'INTEGER NOT NULL DEFAULT 0',
+  /** Milliseconds of the last history clear; provider usage before it describes deleted history. */
+  history_cleared_at: 'INTEGER NOT NULL DEFAULT 0',
+  /** Context estimate after a history edit, separate from cumulative billed usage. */
+  context_usage_estimate: 'TEXT',
 }
 
 export const SESSIONS_INDEXES = {
@@ -284,6 +397,7 @@ export const WORKFLOW_RUNS_TABLE = 'workflow_runs'
 export const WORKFLOW_RUNS_SCHEMA: Record<string, string> = {
   id: 'TEXT PRIMARY KEY',
   workflow_id: 'TEXT NOT NULL',
+  user_id: 'INTEGER',
   profile: "TEXT NOT NULL DEFAULT 'default'",
   workspace: 'TEXT',
   start_node_ids_json: "TEXT NOT NULL DEFAULT '[]'",
@@ -329,6 +443,19 @@ export const WORKFLOW_RUN_NODE_SESSIONS_SCHEMA: Record<string, string> = {
   created_at: 'INTEGER NOT NULL',
   updated_at: 'INTEGER NOT NULL',
   error: 'TEXT',
+}
+
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE = 'workflow_run_quality_evaluations'
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY', run_id: 'TEXT NOT NULL', workflow_id: 'TEXT NOT NULL', node_session_id: 'TEXT NOT NULL',
+  node_id: 'TEXT NOT NULL', execution_id: 'TEXT NOT NULL', iteration_path_json: "TEXT NOT NULL DEFAULT '[]'",
+  input_hash: 'TEXT NOT NULL', config_hash: 'TEXT NOT NULL', status: "TEXT NOT NULL DEFAULT 'completed'",
+  decision: "TEXT NOT NULL DEFAULT 'unknown'", criteria_json: "TEXT NOT NULL DEFAULT '[]'", reason_code: "TEXT NOT NULL DEFAULT ''",
+  duration_ms: 'INTEGER NOT NULL DEFAULT 0', created_at: 'INTEGER NOT NULL',
+}
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES = {
+  idx_workflow_quality_run: 'CREATE INDEX IF NOT EXISTS idx_workflow_quality_run ON workflow_run_quality_evaluations(run_id, created_at)',
+  uniq_workflow_quality_attempt: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_workflow_quality_attempt ON workflow_run_quality_evaluations(node_session_id, input_hash, config_hash)',
 }
 
 export const WORKFLOW_RUN_NODE_SESSIONS_INDEXES = {
@@ -464,15 +591,32 @@ export const USER_PROFILES_INDEXES = {
 }
 
 export const USER_THEMES_TABLE = 'user_themes'
+export const USER_THEME_PRESETS_TABLE = 'user_theme_presets'
+
+export const USER_THEME_PRESETS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  user_id: 'INTEGER NOT NULL',
+  name: 'TEXT NOT NULL',
+  settings_json: 'TEXT NOT NULL',
+  background_filename: 'TEXT',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+
 
 export const USER_THEMES_SCHEMA: Record<string, string> = {
   user_id: 'INTEGER PRIMARY KEY',
+  active_preset_id: 'TEXT',
+  brightness: 'TEXT',
+  style: 'TEXT',
   font_size: 'INTEGER NOT NULL DEFAULT 14',
   text_color: 'TEXT',
   accent_color: 'TEXT',
   background_filename: 'TEXT',
   background_original_name: 'TEXT',
   background_mime: 'TEXT',
+  appearance_json: "TEXT NOT NULL DEFAULT '{}'",
+  background_updated_at: 'INTEGER NOT NULL DEFAULT 0',
   created_at: 'INTEGER NOT NULL',
   updated_at: 'INTEGER NOT NULL',
 }
@@ -582,6 +726,7 @@ export const APP_CONNECTIONS_SCHEMA: Record<string, string> = {
   device_model: "TEXT NOT NULL DEFAULT ''",
   connection_type: "TEXT NOT NULL DEFAULT 'lan'",
   user_id: 'INTEGER NOT NULL',
+  push_enabled: 'INTEGER NOT NULL DEFAULT 1',
   cloud_user_id: 'INTEGER NOT NULL DEFAULT 0',
   token_hash: "TEXT NOT NULL DEFAULT ''",
   token_expires_at: 'INTEGER NOT NULL DEFAULT 0',
@@ -737,6 +882,7 @@ export const GC_ROOMS_SCHEMA: Record<string, string> = {
   summaryApiMode: "TEXT NOT NULL DEFAULT ''",
   summaryEveryTurns: 'INTEGER NOT NULL DEFAULT 20',
   summaryGeneration: 'INTEGER NOT NULL DEFAULT 0',
+  messageDeletionRevision: 'INTEGER NOT NULL DEFAULT 0',
   triggerTokens: 'INTEGER NOT NULL DEFAULT 100000',
   maxHistoryTokens: 'INTEGER NOT NULL DEFAULT 32000',
   tailMessageCount: 'INTEGER NOT NULL DEFAULT 10',
@@ -877,6 +1023,13 @@ export const GC_MESSAGES_SCHEMA: Record<string, string> = {
   reasoning_content: 'TEXT',
 }
 
+export const GC_MESSAGE_ROUTING_CONTEXTS_TABLE = 'gc_message_routing_contexts'
+export const GC_MESSAGE_ROUTING_CONTEXTS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', requesterMemberId: 'TEXT NOT NULL', requesterAuthUserId: 'INTEGER', createdAt: 'INTEGER NOT NULL' }
+export const GC_MESSAGE_ROUTING_DECISIONS_TABLE = 'gc_message_routing_decisions'
+export const GC_MESSAGE_ROUTING_DECISIONS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', candidateHash: 'TEXT NOT NULL', configHash: 'TEXT NOT NULL', targetAgentId: 'TEXT', targetAgentName: 'TEXT', mode: "TEXT NOT NULL DEFAULT 'suggest'", status: "TEXT NOT NULL DEFAULT 'suggested'", queueId: 'TEXT', confidence: 'REAL', handoffComplete: 'INTEGER', loopDetected: 'INTEGER', createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
+export const GC_MESSAGE_ROUTING_CLAIMS_TABLE = 'gc_message_routing_claims'
+export const GC_MESSAGE_ROUTING_CLAIMS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', targetAgentId: 'TEXT NOT NULL', queueId: 'TEXT NOT NULL', status: "TEXT NOT NULL DEFAULT 'queued'", createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
+
 export const GC_EXECUTION_QUEUE_TABLE = 'gc_execution_queue'
 
 export const GC_EXECUTION_QUEUE_SCHEMA: Record<string, string> = {
@@ -918,6 +1071,7 @@ export const GC_ROOM_AGENTS_SCHEMA: Record<string, string> = {
   agentId: 'TEXT NOT NULL',
   agent: "TEXT NOT NULL DEFAULT 'hermes'",
   agentMode: "TEXT NOT NULL DEFAULT 'scoped'",
+  priorAgentMode: "TEXT NOT NULL DEFAULT ''",
   profile: 'TEXT NOT NULL',
   provider: "TEXT NOT NULL DEFAULT ''",
   model: "TEXT NOT NULL DEFAULT ''",
@@ -942,6 +1096,7 @@ export const GC_AGENT_PRESETS_SCHEMA: Record<string, string> = {
   ownerUserId: 'INTEGER NOT NULL',
   agent: "TEXT NOT NULL DEFAULT 'hermes'",
   agentMode: "TEXT NOT NULL DEFAULT 'scoped'",
+  priorAgentMode: "TEXT NOT NULL DEFAULT ''",
   profile: 'TEXT NOT NULL',
   provider: 'TEXT NOT NULL',
   model: 'TEXT NOT NULL',
@@ -1020,6 +1175,29 @@ export const GC_ROOM_SUMMARIES_SCHEMA: Record<string, string> = {
   summaryDrainThroughMessageId: "TEXT NOT NULL DEFAULT ''",
 }
 
+export const GC_SUMMARY_REVIEWS_TABLE = 'gc_summary_reviews'
+export const GC_SUMMARY_REVIEWS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  roomId: 'TEXT NOT NULL',
+  sourceVersion: 'INTEGER NOT NULL',
+  sourceSummaryHash: 'TEXT NOT NULL',
+  sourceAnchor: "TEXT NOT NULL DEFAULT ''",
+  sourceTurnCount: 'INTEGER NOT NULL DEFAULT 0',
+  inputHash: 'TEXT NOT NULL',
+  configHash: 'TEXT NOT NULL',
+  status: "TEXT NOT NULL DEFAULT 'completed'",
+  decision: "TEXT NOT NULL DEFAULT 'unknown'",
+  ruleResultsJson: "TEXT NOT NULL DEFAULT '[]'",
+  reasonCode: "TEXT NOT NULL DEFAULT ''",
+  durationMs: 'INTEGER NOT NULL DEFAULT 0',
+  createdAt: 'INTEGER NOT NULL',
+  appliedRevisionVersion: 'INTEGER',
+}
+export const GC_SUMMARY_REVIEWS_INDEXES = {
+  idx_gc_summary_reviews_room_version: 'CREATE INDEX IF NOT EXISTS idx_gc_summary_reviews_room_version ON gc_summary_reviews(roomId, sourceVersion, createdAt DESC)',
+  idx_gc_summary_reviews_attempt: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_gc_summary_reviews_attempt ON gc_summary_reviews(roomId, inputHash, configHash)',
+}
+
 export const GC_ROOM_MEMBERS_TABLE = 'gc_room_members'
 
 export const GC_ROOM_MEMBERS_SCHEMA: Record<string, string> = {
@@ -1062,6 +1240,7 @@ export const GC_SESSION_PROFILES_SCHEMA: Record<string, string> = {
 // ============================================================================
 
 import { getDb, getStoragePath } from './index'
+import { BUILTIN_EKKO_AGENT_IDS, BUILTIN_HISTORY_SOURCES } from '../../contracts/history-source'
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`
@@ -1200,6 +1379,7 @@ function syncWorkflowRunNodeSessions(
     syncTable(WORKFLOW_RUN_NODE_SESSIONS_TABLE, WORKFLOW_RUN_NODE_SESSIONS_SCHEMA, {
       indexes: WORKFLOW_RUN_NODE_SESSIONS_INDEXES,
     })
+    syncTable(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA, { indexes: WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES })
     return
   }
 
@@ -1215,6 +1395,9 @@ function syncWorkflowRunNodeSessions(
 
   if (!needsMigration) {
     syncTable(WORKFLOW_RUN_NODE_SESSIONS_TABLE, WORKFLOW_RUN_NODE_SESSIONS_SCHEMA)
+    syncTable(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA, {
+      indexes: WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES,
+    })
     return
   }
 
@@ -1227,6 +1410,9 @@ function syncWorkflowRunNodeSessions(
     ).run()
     db.exec('DROP INDEX IF EXISTS uniq_workflow_run_node_sessions_run_node')
     createIndexes(db, WORKFLOW_RUN_NODE_SESSIONS_INDEXES)
+    syncTable(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA, {
+      indexes: WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES,
+    })
     db.exec('COMMIT')
   } catch (error) {
     db.exec('ROLLBACK')
@@ -1512,9 +1698,18 @@ export function initAllHermesTables(): void {
   try {
     // Usage store
     syncTable(USAGE_TABLE, USAGE_SCHEMA, { primaryKey: 'id' })
+    syncTable(USAGE_PRICING_TABLE, USAGE_PRICING_SCHEMA, { primaryKey: 'profile' })
     db.exec(USAGE_RUN_INDEX)
+    syncTable(RUN_USAGE_TABLE, RUN_USAGE_SCHEMA, { indexes: RUN_USAGE_INDEXES })
+    // syncTable only creates indexes for a new table. Existing tables need
+    // these on every startup as well: completion uses the unique run key.
+    createIndexes(db, RUN_USAGE_INDEXES)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_parent_run ON ${USAGE_TABLE}(session_id, parent_run_id)`)
 
     // Session store
+    syncTable(WORKSPACE_DIRECTORIES_TABLE, WORKSPACE_DIRECTORIES_SCHEMA, {
+      indexes: WORKSPACE_DIRECTORIES_INDEXES,
+    })
     syncTable(SESSION_CATEGORIES_TABLE, SESSION_CATEGORIES_SCHEMA, {
       indexes: SESSION_CATEGORIES_INDEXES,
     })
@@ -1528,6 +1723,13 @@ export function initAllHermesTables(): void {
     syncTable(SESSIONS_TABLE, SESSIONS_SCHEMA, {
       indexes: SESSIONS_INDEXES,
     })
+    // Idempotent classification migration. Messages, timestamps and metadata
+    // stay intact; group/workflow/global-agent sessions keep their source.
+    db.prepare(`UPDATE ${SESSIONS_TABLE} SET source = 'builtin_agent', agent = 'ekko-agent'
+      WHERE source IN (${BUILTIN_HISTORY_SOURCES.map(() => '?').join(', ')})
+      AND LOWER(TRIM(COALESCE(agent, ''))) IN (${BUILTIN_EKKO_AGENT_IDS.map(() => '?').join(', ')})
+      AND (source <> 'builtin_agent' OR agent <> 'ekko-agent')`)
+      .run(...BUILTIN_HISTORY_SOURCES, ...BUILTIN_EKKO_AGENT_IDS)
     createIndexes(db, SESSION_CATEGORIES_INDEXES)
     createIndexes(db, SESSIONS_INDEXES)
     syncTable(MESSAGES_TABLE, MESSAGES_SCHEMA)
@@ -1579,11 +1781,17 @@ export function initAllHermesTables(): void {
 
     // Users and profile access
     syncTable(USERS_TABLE, USERS_SCHEMA)
+    syncTable(MODEL_API_KEYS_TABLE, MODEL_API_KEYS_SCHEMA, {
+      indexes: { idx_model_api_keys_owner: `CREATE INDEX IF NOT EXISTS idx_model_api_keys_owner ON ${MODEL_API_KEYS_TABLE}(user_id)` },
+    })
     syncTable(USER_PROFILES_TABLE, USER_PROFILES_SCHEMA, {
       primaryKey: 'user_id, profile_name',
       indexes: USER_PROFILES_INDEXES,
     })
     syncTable(USER_THEMES_TABLE, USER_THEMES_SCHEMA)
+    syncTable(USER_THEME_PRESETS_TABLE, USER_THEME_PRESETS_SCHEMA, {
+      indexes: { idx_user_theme_presets_user: 'CREATE INDEX IF NOT EXISTS idx_user_theme_presets_user ON user_theme_presets(user_id)' },
+    })
 
     // User-scoped Social Messages accounts. Only one account per user may be active.
     syncTable(SOCIAL_MESSAGE_ACCOUNTS_TABLE, SOCIAL_MESSAGE_ACCOUNTS_SCHEMA, {
@@ -1608,6 +1816,10 @@ export function initAllHermesTables(): void {
     })
 
     // App authorization codes and connected mobile devices
+    syncTable(SESSION_SHARES_TABLE, SESSION_SHARES_SCHEMA, { indexes: SESSION_SHARES_INDEXES })
+    createIndexes(db, SESSION_SHARES_INDEXES)
+    syncTable(SESSION_UPLOADS_TABLE, SESSION_UPLOADS_SCHEMA, { indexes: SESSION_UPLOADS_INDEXES })
+    createIndexes(db, SESSION_UPLOADS_INDEXES)
     syncTable(APP_CONNECTIONS_TABLE, APP_CONNECTIONS_SCHEMA, {
       indexes: APP_CONNECTIONS_INDEXES,
     })
@@ -1684,6 +1896,9 @@ export function initAllHermesTables(): void {
     // need the context-window index migrated explicitly to avoid scanning and
     // sorting the full message table on every persisted message.
     createIndexes(db, groupChatMessageIndexes)
+    syncTable(GC_MESSAGE_ROUTING_CONTEXTS_TABLE, GC_MESSAGE_ROUTING_CONTEXTS_SCHEMA)
+    syncTable(GC_MESSAGE_ROUTING_DECISIONS_TABLE, GC_MESSAGE_ROUTING_DECISIONS_SCHEMA)
+    syncTable(GC_MESSAGE_ROUTING_CLAIMS_TABLE, GC_MESSAGE_ROUTING_CLAIMS_SCHEMA)
     syncTable(GC_EXECUTION_QUEUE_TABLE, GC_EXECUTION_QUEUE_SCHEMA, {
       indexes: GC_EXECUTION_QUEUE_INDEXES,
     })
@@ -1691,6 +1906,7 @@ export function initAllHermesTables(): void {
     migrateGroupChatActivityTimes(db, Date.now())
     syncTable(GC_CONTEXT_SNAPSHOTS_TABLE, GC_CONTEXT_SNAPSHOTS_SCHEMA)
     syncTable(GC_ROOM_SUMMARIES_TABLE, GC_ROOM_SUMMARIES_SCHEMA)
+    syncTable(GC_SUMMARY_REVIEWS_TABLE, GC_SUMMARY_REVIEWS_SCHEMA, { indexes: GC_SUMMARY_REVIEWS_INDEXES })
     syncTable(GC_PENDING_SESSION_DELETES_TABLE, GC_PENDING_SESSION_DELETES_SCHEMA)
     syncTable(GC_SESSION_PROFILES_TABLE, GC_SESSION_PROFILES_SCHEMA)
 

@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import { modelReasoningEfforts, DEFAULT_REASONING_EFFORTS } from '@/utils/model-reasoning-effort'
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { useModelCatalogNotice } from '@/composables/useModelCatalogNotice'
+import { NSpin, NButton, NInput, NInputNumber, NModal, NSelect, useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, NInput, NInputNumber, NModal, NSelect, NSpin, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import {
   fetchAuxiliaryModels,
@@ -21,7 +25,7 @@ const message = useMessage()
 const modelsStore = useModelsStore()
 const profilesStore = useProfilesStore()
 
-const loading = ref(false)
+const loading = ref(true)
 const saving = ref(false)
 const savingDelegation = ref(false)
 const tasks = ref<AuxiliaryModelTask[]>([])
@@ -29,6 +33,7 @@ const auxiliary = ref<AuxiliaryModelsConfig>({})
 const delegation = ref<DelegationModelConfig>({})
 const showEditor = ref(false)
 const showDelegationEditor = ref(false)
+const catalogChanged = useModelCatalogNotice(() => showEditor.value || showDelegationEditor.value || saving.value || savingDelegation.value)
 const editingTask = ref<AuxiliaryModelTask | null>(null)
 const hydratingForm = ref(false)
 const hydratingDelegationForm = ref(false)
@@ -73,17 +78,11 @@ const delegationModelOptions = computed(() => {
   return options
 })
 
-const reasoningEffortOptions = computed(() => [
-  { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-  { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-  { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-  { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-  { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-  { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-  { label: t('chat.reasoningEffort.options.max'), value: 'max' },
-  { label: t('chat.reasoningEffort.options.ultra'), value: 'ultra' },
-])
-
+const reasoningEffortOptions = computed(() => modelReasoningEfforts(modelsStore.providers, delegationForm.value.provider, delegationForm.value.model, [...DEFAULT_REASONING_EFFORTS, 'ultra'])
+  .map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })))
+watch([reasoningEffortOptions, () => delegationForm.value.reasoning_effort], ([options, effort]) => {
+  if (effort && !options.some(option => option.value === effort)) delegationForm.value.reasoning_effort = null
+})
 const delegationModelLabel = computed(() => {
   if (!delegation.value.model) return t('models.delegationInheritMain')
   return delegation.value.provider
@@ -239,6 +238,7 @@ async function saveDelegation() {
     delegation.value = saved.delegation
     showDelegationEditor.value = false
     message.success(t('models.delegationSaved'))
+    catalogChanged()
   } catch (e: any) {
     message.error(e.message || t('models.delegationSaveFailed'))
   } finally {
@@ -252,6 +252,7 @@ async function clearDelegation() {
     const saved = await saveDelegationModel({})
     delegation.value = saved.delegation
     message.success(t('models.delegationSaved'))
+    catalogChanged()
   } catch (e: any) {
     message.error(e.message || t('models.delegationSaveFailed'))
   } finally {
@@ -337,6 +338,7 @@ async function saveTask() {
     auxiliary.value = saved.auxiliary
     showEditor.value = false
     message.success(t('models.auxiliarySaved'))
+    catalogChanged()
   } catch (e: any) {
     message.error(e.message || t('models.auxiliarySaveFailed'))
   } finally {
@@ -356,6 +358,7 @@ async function clearTask(task: AuxiliaryModelTask) {
     const saved = await saveAuxiliaryModels(next)
     auxiliary.value = saved.auxiliary
     message.success(t('models.auxiliarySaved'))
+    catalogChanged()
   } catch (e: any) {
     message.error(e.message || t('models.auxiliarySaveFailed'))
   } finally {
@@ -389,6 +392,8 @@ watch(() => delegationForm.value.provider, (provider) => {
     delegationForm.value.model = ''
   }
 }, { flush: 'sync' })
+
+usePageLoadingTask(() => loading.value)
 </script>
 
 <template>
@@ -590,8 +595,8 @@ watch(() => delegationForm.value.provider, (provider) => {
 .auxiliary-panel {
   --auxiliary-table-min-width: 720px;
 
-  background-color: $bg-card;
-  border: 1px solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
   margin-bottom: 16px;
 }
@@ -600,20 +605,20 @@ watch(() => delegationForm.value.provider, (provider) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
-  border-bottom: 1px solid $border-light;
+  gap: calc(16px * var(--spacing-scale, 1));
+  padding: calc(14px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
 
   h3 {
     color: $text-primary;
-    font-size: 15px;
+    font-size: calc(var(--font-size-base, 14px) * 15 / 14);
     font-weight: 600;
     margin: 0 0 4px;
   }
 
   p {
     color: $text-muted;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     margin: 0;
   }
 }
@@ -621,7 +626,7 @@ watch(() => delegationForm.value.provider, (provider) => {
 .delegation-section {
   margin: 16px;
   overflow: hidden;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
   background: $bg-secondary;
 }
@@ -630,8 +635,8 @@ watch(() => delegationForm.value.provider, (provider) => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px 12px;
+  gap: calc(16px * var(--spacing-scale, 1));
+  padding: calc(14px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
 
   h4,
   p {
@@ -640,36 +645,36 @@ watch(() => delegationForm.value.provider, (provider) => {
 
   h4 {
     color: $text-primary;
-    font-size: 14px;
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
     font-weight: 600;
   }
 
   p {
     margin-top: 5px;
     color: $text-muted;
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1.45);
   }
 }
 
 .delegation-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .delegation-summary {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(140px, 1fr);
-  border-top: 1px solid $border-light;
+  border-top: var(--border-width, 1px) solid $border-light;
 }
 
 .summary-item {
   min-width: 0;
-  padding: 11px 16px 12px;
+  padding: calc(11px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
 
   & + & {
-    border-inline-start: 1px solid $border-light;
+    border-inline-start: var(--border-width, 1px) solid $border-light;
   }
 
   span,
@@ -680,7 +685,7 @@ watch(() => delegationForm.value.provider, (provider) => {
   span {
     margin-bottom: 4px;
     color: $text-muted;
-    font-size: 10px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -689,8 +694,8 @@ watch(() => delegationForm.value.provider, (provider) => {
   strong {
     overflow: hidden;
     color: $text-secondary;
-    font-family: $font-code;
-    font-size: 12px;
+    font-family: var(--font-code, $font-code);
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     font-weight: 500;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -698,8 +703,8 @@ watch(() => delegationForm.value.provider, (provider) => {
 }
 
 .auxiliary-tasks-header {
-  padding: 14px 16px 10px;
-  border-top: 1px solid $border-light;
+  padding: calc(14px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
 
   h4,
   p {
@@ -708,14 +713,14 @@ watch(() => delegationForm.value.provider, (provider) => {
 
   h4 {
     color: $text-primary;
-    font-size: 14px;
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
     font-weight: 600;
   }
 
   p {
     margin-top: 4px;
     color: $text-muted;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 }
 
@@ -725,8 +730,8 @@ watch(() => delegationForm.value.provider, (provider) => {
 }
 
 .fallback-section {
-  padding: 16px;
-  border-top: 1px solid $border-light;
+  padding: calc(16px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
 }
 
 .auxiliary-table {
@@ -736,10 +741,10 @@ watch(() => delegationForm.value.provider, (provider) => {
 .auxiliary-row {
   display: grid;
   grid-template-columns: minmax(160px, 1.1fr) minmax(220px, 1.8fr) minmax(110px, 0.8fr) minmax(130px, auto);
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   align-items: center;
-  padding: 10px 16px;
-  border-bottom: 1px solid $border-light;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
 
   &:last-child {
     border-bottom: 0;
@@ -748,22 +753,22 @@ watch(() => delegationForm.value.provider, (provider) => {
 
 .auxiliary-row-head {
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 600;
   text-transform: uppercase;
 }
 
 .task-name {
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 500;
 }
 
 .task-config,
 .task-timeout {
   color: $text-secondary;
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -773,24 +778,24 @@ watch(() => delegationForm.value.provider, (provider) => {
 .task-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .auxiliary-form,
 .delegation-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 
   label {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     min-width: 0;
 
     > span {
       color: $text-secondary;
-      font-size: 12px;
+      font-size: calc(var(--font-size-base, 14px) * 12 / 14);
       font-weight: 500;
     }
   }
@@ -803,8 +808,8 @@ watch(() => delegationForm.value.provider, (provider) => {
 .delegation-form-hint {
   margin: 12px 0 0;
   color: $text-muted;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.5);
 }
 
 .extra-body-field {
@@ -814,7 +819,7 @@ watch(() => delegationForm.value.provider, (provider) => {
 .auxiliary-modal-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 @media (max-width: 760px) {
@@ -832,7 +837,7 @@ watch(() => delegationForm.value.provider, (provider) => {
   }
 
   .summary-item + .summary-item {
-    border-top: 1px solid $border-light;
+    border-top: var(--border-width, 1px) solid $border-light;
     border-inline-start: 0;
   }
 

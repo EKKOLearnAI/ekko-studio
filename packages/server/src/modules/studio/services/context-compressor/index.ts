@@ -29,6 +29,7 @@ import {
 } from '../../public/chat-agent-runtime'
 import { logger } from '../../public/logging'
 import { truncateToolResultForContext } from '../chat-run/tool-result-context'
+import { estimateUsageTokensFromMessages } from '../chat-run/usage'
 import {
   getCompressionSnapshot,
   saveCompressionSnapshot,
@@ -79,6 +80,10 @@ export interface CompressedResult {
 }
 
 export interface SummarizerOptions {
+  /** Manual compression folds small new segments too and reports summarizer failures. */
+  force?: boolean
+  /** The caller already measured the context over budget; fold small new segments instead of skipping. */
+  overBudget?: boolean
   profile?: string
   model?: string | null
   provider?: string | null
@@ -133,7 +138,9 @@ function getEncoder() {
 // hangs, so the catch-based heuristic fallback never fires. Detect that
 // pathological case up front and use the cheap heuristic instead. Normal text
 // (even very long, but space-separated) keeps the exact tiktoken path.
-const MAX_LETTER_RUN = 2000
+// Bound for contiguous runs of any single pat_str class (letters, digits,
+// symbols, or whitespace) that may form one oversized pre-tokenizer piece.
+const MAX_PATHOLOGICAL_RUN = 2000
 // Exact js-tiktoken encoding is synchronous. Even well-separated text takes
 // seconds once tool output reaches megabyte scale, starving unrelated HTTP
 // requests on the server thread. Token totals are estimates, so cap exact
@@ -155,16 +162,27 @@ function exceedsExactTokenBudget(text: string): boolean {
 }
 
 function hasPathologicalRun(text: string): boolean {
-  let maxRun = 0
+  // The GPT pat_str merges contiguous characters of EACH piece class —
+  // letters (\p{L}), digits (\p{N}), other symbols ([^\s\p{L}\p{N}]), and
+  // whitespace (\s+) — into a single pre-tokenizer piece. So a long run of
+  // ANY class, not just letters, becomes one huge piece that pins the event
+  // loop in the O(n²) BPE merge loop (e.g. a real 64 KB run of '!' ≈ 188 s
+  // per encode() and never throws). Track the current class run length and
+  // bail out when any class exceeds the bound.
   let run = 0
+  let cls = -1
   for (let i = 0; i < text.length; i++) {
     const cc = text.charCodeAt(i)
-    // ASCII letters or anything at/above CJK/extended ranges (>0x2e7f)
-    if ((cc >= 65 && cc <= 90) || (cc >= 97 && cc <= 122) || cc > 0x2e7f) {
-      if (++run > maxRun) maxRun = run
-      if (maxRun > MAX_LETTER_RUN) return true
+    const next =
+      cc <= 0x20 ? 0 :
+      (cc >= 65 && cc <= 90) || (cc >= 97 && cc <= 122) || cc > 0x2e7f ? 1 :
+      cc >= 48 && cc <= 57 ? 2 :
+      3
+    if (next === cls) {
+      if (++run > MAX_PATHOLOGICAL_RUN) return true
     } else {
-      run = 0
+      cls = next
+      run = 1
     }
   }
   return false
@@ -201,21 +219,11 @@ export function countTokensForModel(text: string, model: string): number {
   }
 }
 
-function messageTokenEstimate(message: ChatMessage): number {
-  if (typeof message.content === 'string') return countTokens(message.content)
-  if (Array.isArray(message.content)) {
-    return countTokens(message.content.map(block => {
-      if (block.type === 'text') return block.text || ''
-      if (block.type === 'image') return `[Image: ${block.path || ''}]`
-      if (block.type === 'file') return `[File: ${block.path || ''}]`
-      return ''
-    }).join(''))
-  }
-  return 0
-}
-
+// Same counting as the run-level estimate (content, tool_calls, reasoning), so the compressor
+// cannot judge as under budget a context that the caller measured as over budget.
 function messagesTokenEstimate(messages: ChatMessage[]): number {
-  return messages.reduce((sum, message) => sum + messageTokenEstimate(message), 0)
+  const usage = estimateUsageTokensFromMessages(messages)
+  return usage.inputTokens + usage.outputTokens
 }
 
 function truncateTextToTokenBudget(text: string, tokenBudget: number): string {
@@ -837,7 +845,10 @@ export class ChatContextCompressor {
       previousSummaryMessage,
       ...newMessages,
     ]
-    const assembledOverBudget = messagesTokenEstimate(assembledWithPrevious) > this.config.triggerTokens
+    const force = typeof summarizer === 'object' && summarizer.force === true
+    const measuredOverBudget = (typeof summarizer === 'object' && summarizer.overBudget === true)
+      || messagesTokenEstimate(assembledWithPrevious) > this.config.triggerTokens
+    const assembledOverBudget = force || measuredOverBudget
     const canKeepTailWindow = newMessages.length > tailCount
 
     // If the new segment itself is too small to split but already over budget,
@@ -845,11 +856,26 @@ export class ChatContextCompressor {
     const requestedTailStart = assembledOverBudget && !canKeepTailWindow
       ? newMessages.length
       : Math.max(0, newMessages.length - tailCount)
-    const tailStart = safeTailStart(newMessages, requestedTailStart)
+    let tailStart = safeTailStart(newMessages, requestedTailStart)
+    if (assembledOverBudget && tailStart === 0 && newMessages.length > 0) {
+      // The protected tail can start inside the first tool group. Fold that
+      // whole group so compression progresses, preserving the messages after it.
+      tailStart = safeHeadEnd(newMessages, requestedTailStart)
+    }
     const toCompress = newMessages.slice(0, tailStart)
     const tail = newMessages.slice(tailStart)
 
-    if (toCompress.length === 0) {
+    // Over budget with nothing after the cursor: only a summary above its budget can still shrink.
+    // Otherwise the remaining overhead cannot be compressed, so report it instead of a no-op success.
+    const resummarize = toCompress.length === 0 && measuredOverBudget
+    if (resummarize && countTokens(previousSummary) <= this.config.summaryBudget) {
+      const error = new Error(
+        `Context window is too small: the context is over the compression threshold ${this.config.triggerTokens}, but nothing after the last compression point can be folded and the summary is already within its budget. Increase model context length, raise compression.threshold, shorten the input, or disable some tools.`,
+      )
+      error.name = 'ContextWindowTooSmallError'
+      throw error
+    }
+    if (toCompress.length === 0 && !resummarize) {
       return {
         messages: assembledWithPrevious,
         meta: {
@@ -881,6 +907,7 @@ export class ChatContextCompressor {
       summary = await callSummarizer(upstream, apiKey, prompt, [], this.config.summarizationTimeoutMs, previousSummary, summarizer)
       logger.info('[context-compressor] incremental-llm done in %dms, %d chars', Date.now() - t0, summary.length)
     } catch (err: any) {
+      if (force || resummarize) throw err
       logger.warn('[context-compressor] incremental-llm failed: %s — keeping new messages verbatim', err.message)
       const fallback = [
         ...head,
@@ -915,6 +942,7 @@ export class ChatContextCompressor {
 
     const newLastIndex = lastMessageIndex + tailStart
     const compressedThroughCursor = toCompress.at(-1)?.cursorId
+      ?? (cursorSnapshot ? snapshot.compressedThroughMessageId! : undefined)
     const protectedHeadThroughCursor = cursorSnapshot
       ? snapshot.protectedHeadThroughMessageId ?? null
       : head.at(-1)?.cursorId ?? null
@@ -935,7 +963,9 @@ export class ChatContextCompressor {
                 : Number((typeof summarizer === 'object' && summarizer?.historyRevision) || 0),
             },
           )
-        : saveCompressionSnapshot(sessionId, summary, newLastIndex, total)
+        : typeof summarizer === 'object' && summarizer.historyRevision != null
+          ? saveCompressionSnapshot(sessionId, summary, newLastIndex, total, undefined, summarizer.historyRevision)
+          : saveCompressionSnapshot(sessionId, summary, newLastIndex, total)
       if (saved === false) throw new Error('Compression snapshot changed while summarizing')
     }
 
@@ -994,6 +1024,7 @@ export class ChatContextCompressor {
       summary = await callSummarizer(upstream, apiKey, prompt, [], this.config.summarizationTimeoutMs, undefined, summarizer)
       logger.info('[context-compressor] full-llm done in %dms, %d chars', Date.now() - t0, summary.length)
     } catch (err: any) {
+      if (typeof summarizer === 'object' && summarizer.force) throw err
       logger.warn('[context-compressor] full-llm failed: %s', err.message)
     }
 
@@ -1020,7 +1051,9 @@ export class ChatContextCompressor {
               expectedHistoryRevision: Number((typeof summarizer === 'object' && summarizer?.historyRevision) || 0),
             },
           )
-        : saveCompressionSnapshot(sessionId, summary, tailStart - 1, total)
+        : typeof summarizer === 'object' && summarizer.historyRevision != null
+          ? saveCompressionSnapshot(sessionId, summary, tailStart - 1, total, undefined, summarizer.historyRevision)
+          : saveCompressionSnapshot(sessionId, summary, tailStart - 1, total)
       if (saved === false) throw new Error('Compression snapshot changed while summarizing')
     }
 

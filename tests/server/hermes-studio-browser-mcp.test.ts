@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 let child: ChildProcessWithoutNullStreams | null = null
 let server: Server | null = null
@@ -78,26 +78,66 @@ describe('hermes-studio browser MCP toolset', () => {
     const clients: string[] = []
     const registeredPids: number[] = []
     let failScreenshot = false
+    let failBatch = false
+    const batches: unknown[] = []
+    const snapshots: unknown[] = []
+    const assessments: Array<{ path: string; body: any; profile: string }> = []
+    let settingsRequests = 0
+    let assessmentEnabled = true
+    let holdAssessment = false
+    let assessmentCancelled = false
+    const browserSnapshot = { tabId: 'tab-1', snapshotId: 'snapshot-1', title: 'Example', text: '@e1 button name="Example"', nodes: [{ ref: '@e1', role: 'button', name: 'Example' }] }
     server = createServer(async (request, response) => {
       const chunks: Buffer[] = []
       for await (const chunk of request) chunks.push(Buffer.from(chunk))
-      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
       response.setHeader('Content-Type', 'application/json')
+      if (request.url?.startsWith('/api/studio/jev/') && (request.headers.authorization !== 'Bearer studio_run_fixture'
+        || request.headers['x-studio-run-context'] !== 'browser-run')) {
+        response.statusCode = 401
+        response.end(JSON.stringify({ error: 'Run credential required' }))
+        return
+      }
+      if (request.url === '/api/studio/jev/settings') {
+        settingsRequests++
+        response.end(JSON.stringify({ browserMatchEnabled: assessmentEnabled, browserVerifyEnabled: assessmentEnabled,
+          hasApiKey: true, browserMatchTimeoutMs: 100, browserVerifyTimeoutMs: 100 }))
+        return
+      }
+      if (request.url?.startsWith('/api/studio/jev/browser/')) {
+        assessments.push({ path: request.url, body, profile: String(request.headers['x-hermes-profile']) })
+        if (holdAssessment) { response.on('close', () => { assessmentCancelled = true }); return }
+        response.end(JSON.stringify({ tabId: body.snapshot.tabId, snapshotId: body.snapshot.snapshotId,
+          ...(request.url.endsWith('/match') ? { status: 'matched', ref: '@e1', confidence: 0.95 } : { status: 'met', confidence: 0.95 }) }))
+        return
+      }
       if (request.url === '/v1/session') {
         registeredPids.push(body.client_pid)
         response.end(JSON.stringify({ client_id: 'broker-client-1', session_token: 'session-token' }))
         return
       }
       clients.push(String(request.headers['x-hermes-browser-client'] || ''))
+      if (body.method === 'interact.batch') {
+        batches.push(body.params)
+        response.end(JSON.stringify({ operation_id: body.operation_id, result: {
+          tabId: body.params.tab_id, completed: failBatch ? 1 : body.params.actions.length, total: body.params.actions.length,
+          results: body.params.actions.map((action: { action: string }, index: number) => ({
+            index, action: action.action, status: failBatch && index === 1 ? 'failed' : 'completed',
+          })),
+          snapshot: { ...browserSnapshot, snapshotId: 'after-batch' },
+        } }))
+        return
+      }
       if (body.method === 'screenshot' && failScreenshot) {
         response.statusCode = 400
         response.end(JSON.stringify({ error: 'capture failed' }))
         return
       }
+      if (body.method === 'snapshot') snapshots.push(body.params)
       const result = body.method === 'screenshot'
         ? { tabId: 'tab-1', url: 'https://example.com/', title: 'Example', mediaType: 'image/png', data: 'AA==', width: 1, height: 1 }
         : body.method === 'snapshot'
-          ? { tabId: 'tab-1', snapshotId: 'snapshot-1', text: '@e1 button name="Example"' }
+          ? browserSnapshot
           : body.method === 'text.read'
             ? { tabId: 'tab-1', snapshotId: 'snapshot-1', ref: '@e1', text: 'Complete text', totalLength: 13, returnedLength: 13, hasMore: false }
         : { tabs: [{ id: 'tab-1' }] }
@@ -115,8 +155,11 @@ describe('hermes-studio browser MCP toolset', () => {
       schema: 1, desktopPid: process.pid, endpoint: `http://127.0.0.1:${address.port}/v1`, token: 'test-token', instanceId: 'test', createdAt: new Date().toISOString(),
     }), { mode: 0o600 })
 
+    const credentialFile = join(root, 'auth.json')
+    await writeFile(credentialFile, JSON.stringify({ token: 'studio_run_fixture', context_id: 'browser-run', profile: 'research' }))
     child = spawn(process.execPath, [join(process.cwd(), 'bin/ekko-studio-mcp.mjs'), 'browser'], {
-      env: { ...process.env, HERMES_WEB_UI_HOME: root },
+      env: { ...process.env, HERMES_WEB_UI_HOME: root, HERMES_WEB_UI_URL: `http://127.0.0.1:${address.port}`, HERMES_WEB_UI_PROFILE: 'research',
+        AUTH_TOKEN: 'old-static-token', HERMES_WEB_UI_TOKEN: 'old-profile-token', HERMES_WEB_UI_RUN_TOKEN_FILE: credentialFile },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     const rpc = rpcClient(child)
@@ -133,7 +176,7 @@ describe('hermes-studio browser MCP toolset', () => {
     })
     expect(JSON.parse(catalog.result.content[0].text)).toMatchObject({
       toolset: 'browser',
-      operation_count: 7,
+      operation_count: 8,
     })
     const described = await rpc(4, 'tools/call', {
       name: 'ekko_studio_browser_toolset',
@@ -179,6 +222,85 @@ describe('hermes-studio browser MCP toolset', () => {
     })
     expect(fallback.result.content[0].text).toContain('Accessibility snapshot')
     expect(fallback.result.content[0].text).toContain('snapshot-1')
+
+    const batchSchema = await rpc(10, 'tools/call', {
+      name: 'ekko_studio_browser_toolset',
+      arguments: { action: 'describe', tool: 'ekko_studio_browser_batch' },
+    })
+    expect(JSON.parse(batchSchema.result.content[0].text).inputSchema).toMatchObject({
+      required: ['tab_id', 'actions'], properties: { actions: { minItems: 1, maxItems: 50 } },
+    })
+    const batchArguments = { tab_id: 'tab-1', snapshot_id: 'snapshot-1', actions: [{ action: 'click', ref: '@e1' }, { action: 'press', key: 'Tab' }] }
+    const beforeInvalid = clients.length
+    for (const [id, tool, args, field] of [
+      [40, 'ekko_studio_browser_batch', { actions: [{ action: 'press', key: 'Tab' }] }, 'arguments.tab_id'],
+      [41, 'ekko_studio_browser_batch', { ...batchArguments, actions: [{ type: 'click', ref: '@e1' }] }, 'arguments.actions[0].action'],
+      [42, 'ekko_studio_browser_interact', { tab_id: 'tab-1' }, 'arguments.action'],
+      [43, 'ekko_studio_browser_interact', { tab_id: 'tab-1', action: 'click', ref: '@e1' }, 'arguments.snapshot_id'],
+    ] as const) {
+      const invalid = await rpc(id, 'tools/call', { name: 'ekko_studio_browser_toolset', arguments: { action: 'call', tool, arguments: args } })
+      expect(invalid.result.isError).toBe(true)
+      expect(invalid.result.content[0].text).toContain(field)
+    }
+    expect(clients).toHaveLength(beforeInvalid)
+    const invokeBatch = (id: number) => rpc(id, 'tools/call', {
+      name: 'ekko_studio_browser_toolset', arguments: { action: 'call', tool: 'ekko_studio_browser_batch', arguments: batchArguments },
+    })
+    const completedBatch = await invokeBatch(11)
+    expect(completedBatch.result.isError).not.toBe(true)
+    expect(JSON.parse(completedBatch.result.content[0].text).result).toMatchObject({ completed: 2, total: 2, snapshot: { snapshotId: 'after-batch' } })
+    expect(batches).toEqual([batchArguments])
+    failBatch = true
+    const stoppedBatch = await invokeBatch(12)
+    expect(stoppedBatch.result.isError).toBe(true)
+    expect(JSON.parse(stoppedBatch.result.content[0].text).result).toMatchObject({ completed: 1, total: 2 })
+
+    const invoke = async (id: number, tool: string, args: Record<string, unknown>) => {
+      const output = await rpc(id, 'tools/call', { name: 'ekko_studio_browser_toolset', arguments: { action: 'call', tool, arguments: args } })
+      expect(output.result.isError).not.toBe(true)
+      return JSON.parse(output.result.content[0].text).result
+    }
+    expect((await invoke(20, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1', target: 'Example' })).elementMatch).toMatchObject({ status: 'matched', ref: '@e1' })
+    const compact = await invoke(44, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1' })
+    expect(compact.nodes).toEqual(browserSnapshot.nodes)
+    expect(compact).not.toHaveProperty('text')
+    expect((await invoke(45, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1', include_text: true })).text).toBe(browserSnapshot.text)
+    expect((await invoke(21, 'ekko_studio_browser_interact', { tab_id: 'tab-1', action: 'press', key: 'Tab', expectation: 'Example is visible' })).verification.status).toBe('met')
+    failBatch = false
+    expect((await invoke(22, 'ekko_studio_browser_batch', { ...batchArguments, expectation: 'Example is visible' })).verification.status).toBe('met')
+    expect(assessments.map(item => item.path)).toEqual(['/api/studio/jev/browser/match', '/api/studio/jev/browser/verify', '/api/studio/jev/browser/verify'])
+    expect(assessments.every(item => item.profile === 'research')).toBe(true)
+    expect(assessments[2].body.snapshot.snapshotId).toBe('after-batch')
+    // Optional JEV arguments never enter the deterministic Broker batch parser.
+    expect(batches.at(-1)).toEqual(batchArguments)
+    assessmentEnabled = false
+    expect((await invoke(23, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1', target: 'Example' })).elementMatch.reason).toBe('disabled')
+    expect(assessments).toHaveLength(3)
+
+    const settingsBeforeLocalSearch = settingsRequests
+    const localSearch = { tab_id: 'tab-1', selector: '#form-demo-layout', query: 'Field', interactive_only: true, limit: 30 }
+    await invoke(46, 'ekko_studio_browser_snapshot', localSearch)
+    expect(snapshots.at(-1)).toEqual(localSearch)
+    await invoke(47, 'ekko_studio_browser_snapshot', { tab_id: 'tab-1', snapshot_id: 'snapshot-1', offset: 30, limit: 30 })
+    expect(settingsRequests).toBe(settingsBeforeLocalSearch)
+    expect(snapshots.at(-1)).toEqual({ tab_id: 'tab-1', snapshot_id: 'snapshot-1', offset: 30, limit: 30 })
+    expect(assessments).toHaveLength(3)
+    for (const [id, args] of [[48, { limit: 1.5 }], [49, { snapshot_id: 'snapshot-1', query: 'Field' }]] as const) {
+      const invalid = await rpc(id, 'tools/call', { name: 'ekko_studio_browser_toolset', arguments: {
+        action: 'call', tool: 'ekko_studio_browser_snapshot', arguments: { tab_id: 'tab-1', ...args },
+      } })
+      expect(invalid.result.isError).toBe(true)
+    }
+
+    assessmentEnabled = true
+    holdAssessment = true
+    const cancelled = rpc(24, 'tools/call', { name: 'ekko_studio_browser_toolset', arguments: {
+      action: 'call', tool: 'ekko_studio_browser_snapshot', arguments: { tab_id: 'tab-1', target: 'Example' },
+    } })
+    await vi.waitFor(() => expect(assessments).toHaveLength(4))
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 24 } })}\n`)
+    expect((await cancelled).result.isError).toBe(true)
+    await vi.waitFor(() => expect(assessmentCancelled).toBe(true))
 
     await rm(join(brokerRoot, 'broker.json'))
     const unavailable = await rpc(9, 'tools/list')

@@ -21,6 +21,11 @@ const toolImage: AgentMessage = {
   contentParts: [{ type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' }],
 }
 
+const screenshotCall: AgentMessage = {
+  role: 'assistant', content: '',
+  toolCalls: [{ id: 'call-1', name: 'browser_screenshot', arguments: {} }],
+}
+
 const userImage: AgentMessage = {
   role: 'user',
   content: 'Describe this image.',
@@ -48,9 +53,9 @@ describe('Ekko MCP multimodal results', () => {
   })
 
   it('maps tool images into each visual provider wire format', () => {
-    const openai = toOpenAIChatPayload(config, { messages: [toolImage] })
-    expect(openai.messages).toHaveLength(2)
-    expect(JSON.stringify(openai.messages[1])).toContain('data:image/png;base64,aGVsbG8=')
+    const openai = toOpenAIChatPayload(config, { messages: [screenshotCall, toolImage] })
+    expect(openai.messages).toHaveLength(3)
+    expect(JSON.stringify(openai.messages[2])).toContain('data:image/png;base64,aGVsbG8=')
 
     const responses = toOpenAIResponsesPayload(config, {
       messages: [
@@ -97,14 +102,14 @@ describe('Ekko MCP multimodal results', () => {
       apiKey: 'test',
       defaultModel: 'future-chat-model',
       capabilities: { vision: false },
-    }, { messages: [userImage, toolImage] })
+    }, { messages: [userImage, screenshotCall, toolImage] })
 
-    expect(payload.messages).toHaveLength(2)
+    expect(payload.messages).toHaveLength(3)
     expect(payload.messages[0]).toMatchObject({
       role: 'user',
       content: 'Describe this image.',
     })
-    expect(payload.messages[1]).toMatchObject({
+    expect(payload.messages[2]).toMatchObject({
       role: 'tool',
       content: 'browser screenshot',
     })

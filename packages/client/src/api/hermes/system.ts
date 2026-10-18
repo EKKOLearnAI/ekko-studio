@@ -25,15 +25,16 @@ export interface ModelVisibilityRule {
 export type ModelVisibility = Record<string, ModelVisibilityRule>
 export type CustomModels = Record<string, string[]>
 export interface AvailableModelGroup {
-  catalog_status?: 'loading' | 'ready' | 'error' | 'unsupported'
   provider: string   // credential pool key (e.g. "zai", "custom:subrouter.ai")
   label: string      // display name (e.g. "zai", "subrouter.ai")
   base_url: string
   models: string[]
-  /** Full unfiltered model catalog for this provider, used to restore hidden WUI models. */
+  /** Legacy server field. Full directories are now fetched with fetchProviderModelCatalog. */
   available_models?: string[]
+  model_count?: number
   api_key: string
   api_mode?: ProviderApiMode
+  api_mode_by_model?: Record<string, ProviderApiMode | null>
   builtin?: boolean
   /** Env var used by Hermes to override this provider's base URL. If present, the preset URL is editable. */
   base_url_env?: string
@@ -45,8 +46,8 @@ export interface AvailableModelGroup {
   model_refreshable?: boolean
   model_refresh_reason?: string
   model_restore_available?: boolean
-  /** 可选：模型 ID -> 元数据（preview/disabled/alias）。alias 仅用于 Web UI 展示。 */
-  model_meta?: Record<string, { preview?: boolean; disabled?: boolean; alias?: string }>
+  /** 可选：模型 ID -> 展示与能力元数据。alias 仅用于 Web UI 展示。 */
+  model_meta?: Record<string, { preview?: boolean; disabled?: boolean; alias?: string; reasoning?: boolean; reasoning_efforts?: string[] }>
 }
 
 export interface ProfileAvailableModels {
@@ -147,6 +148,19 @@ export async function fetchAvailableModelsForProfile(profile: string): Promise<A
   const params = new URLSearchParams()
   params.set('profile', profile || 'default')
   return request<AvailableModelsResponse>(`/api/hermes/available-models?${params.toString()}`)
+}
+
+export interface ProviderModelCatalog {
+  provider: string
+  models: string[]
+  visible_models: string[]
+  model_aliases: Record<string, string>
+}
+
+export async function fetchProviderModelCatalog(provider: string, profile?: string): Promise<ProviderModelCatalog> {
+  const params = new URLSearchParams({ provider })
+  if (profile) params.set('profile', profile)
+  return request<ProviderModelCatalog>(`/api/hermes/provider-models?${params}`)
 }
 
 export async function fetchProviderModels(data: {

@@ -7,7 +7,7 @@ vi.stubGlobal('fetch', mockFetch)
 // vi.mock is hoisted, so mockReplace must be inside the factory
 vi.mock('@/router', () => ({
   default: {
-    currentRoute: { value: { name: 'hermes.chat' } },
+    currentRoute: { value: { name: 'hermes.chat', query: {} as Record<string, string> } },
     replace: vi.fn(),
   },
 }))
@@ -16,7 +16,7 @@ import { getApiKey, setApiKey, clearApiKey, hasApiKey, getStoredUserRole, isStor
 import { downloadFile, getDownloadUrl } from '../../packages/client/src/api/studio/download'
 import { uploadFiles } from '../../packages/client/src/api/studio/files'
 import { importSkill } from '../../packages/client/src/api/hermes/skills'
-import { archiveSession, batchDeleteSessions, exportSession, fetchHermesSessionGroups, fetchHermesSessionPage, importHermesSession, unarchiveSession } from '../../packages/client/src/api/studio/sessions'
+import { archiveSession, batchDeleteSessions, exportSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchUsageStats, importHermesSession, unarchiveSession } from '../../packages/client/src/api/studio/sessions'
 import router from '@/router'
 
 function fakeJwt(payload: Record<string, unknown>) {
@@ -29,6 +29,48 @@ describe('API Client', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.clearAllMocks()
+    Object.assign(router.currentRoute.value, { name: 'hermes.chat', query: {} })
+  })
+
+  it('uses the Models page Profile for settings requests without changing global Profile or other requests', async () => {
+    localStorage.setItem('hermes_active_profile_name', 'default')
+    Object.assign(router.currentRoute.value, { name: 'hermes.models', query: { modelProfile: 'research' } })
+    mockFetch.mockImplementation(async () => ({ ok: true, json: async () => ({ success: true }) }))
+    for (const path of ['/api/hermes/config/providers', '/api/hermes/config/moa', '/api/hermes/auth/copilot/start', '/api/studio/tts/settings/openai']) {
+      await request(path, { method: 'PUT', body: '{}' })
+      expect(mockFetch.mock.calls.at(-1)?.[1].headers['X-Hermes-Profile']).toBe('research')
+    }
+    await request('/api/studio/chat-run/runs', { method: 'POST', body: '{}' })
+    expect(mockFetch.mock.calls.at(-1)?.[1].headers['X-Hermes-Profile']).toBe('default')
+    Object.assign(router.currentRoute.value, { name: 'hermes.chat', query: {} })
+    await request('/api/hermes/config/moa')
+    expect(mockFetch.mock.calls.at(-1)?.[1].headers['X-Hermes-Profile']).toBe('default')
+    expect(localStorage.getItem('hermes_active_profile_name')).toBe('default')
+  })
+
+  it('preserves an explicit request Profile on the Models page', async () => {
+    Object.assign(router.currentRoute.value, { name: 'hermes.models', query: { modelProfile: 'research' } })
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    await request('/api/hermes/config/moa', { headers: { 'X-Hermes-Profile': 'original' } })
+    expect(mockFetch.mock.calls.at(-1)?.[1].headers['X-Hermes-Profile']).toBe('original')
+  })
+
+  it('requests all usage Profiles independently of the global active Profile and combines an explicit Profile with account and today', async () => {
+    localStorage.setItem('hermes_active_profile_name', 'default')
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    await fetchUsageStats(30)
+    const [allPath, allOptions] = mockFetch.mock.calls.at(-1)!
+    expect(new URL(allPath, 'http://local').searchParams.get('profile')).toBe('')
+    expect(allOptions.headers['X-Hermes-Profile']).toBeUndefined()
+    await fetchUsageStats(1, { profile: 'research', account: 'unassigned' })
+    const [path, options] = mockFetch.mock.calls.at(-1)!
+    const params = new URL(path, 'http://local').searchParams
+    expect(params.get('profile')).toBe('research')
+    expect(params.get('account')).toBe('unassigned')
+    expect(params.get('period')).toBe('today')
+    expect(params.get('time_zone')).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+    expect(options.headers['X-Hermes-Profile']).toBeUndefined()
+    expect(localStorage.getItem('hermes_active_profile_name')).toBe('default')
   })
 
   describe('token management', () => {
@@ -398,20 +440,20 @@ describe('API Client', () => {
       await fetchHermesSessionGroups(20, 'travel', ['pinned-1', 'route-1'])
 
       const [url] = mockFetch.mock.calls[0]
-      expect(url).toBe('/api/studio/sessions/hermes/groups?limit=20&profile=travel&include=pinned-1&include=route-1')
+      expect(url).toBe('/api/studio/sessions/hermes/groups?limit=20&agent_groups=1&profile=travel&include=pinned-1&include=route-1')
     })
 
-    it('requests the next page for one Hermes history source', async () => {
+    it.each(['cli', 'builtin_agent', 'coding_agent'])('requests the next page for the %s history group', async source => {
       mockFetch.mockResolvedValue({
         ok: true,
         status: 200,
         json: () => Promise.resolve({ sessions: [], hasMore: false, offset: 20, limit: 20 }),
       })
 
-      await fetchHermesSessionPage('cli', 20, 20, 'travel')
+      await fetchHermesSessionPage(source, 20, 20, 'travel')
 
       const [url] = mockFetch.mock.calls[0]
-      expect(url).toBe('/api/studio/sessions/hermes?source=cli&offset=20&limit=20&profile=travel')
+      expect(url).toBe(`/api/studio/sessions/hermes?source=${source}&offset=20&limit=20&agent_groups=1&profile=travel`)
     })
 
     it('sends profile-qualified targets for batch deletes', async () => {

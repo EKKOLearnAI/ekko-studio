@@ -1,4 +1,5 @@
 export interface SessionAgentRuntimeDependencies {
+  getAvailableModelGroups?: (profile: string) => Promise<any[]>
   deleteHermesSessionForProfile: (...args: any[]) => Promise<boolean>
   getHermesCliSession: (...args: any[]) => Promise<any>
   getHermesModelContextLength: (...args: any[]) => number
@@ -12,6 +13,7 @@ export interface SessionAgentRuntimeDependencies {
   notifyHermesSessionModelChanged: (...args: any[]) => Promise<void>
   stopCodingAgentSessionRun: (...args: any[]) => any
   invalidateCodingAgentSessionRuntime: (...args: any[]) => any
+  validateCodingAgentModelEffort?: (agent: string, currentModel: string, nextModel: string, effort: string) => Promise<void>
 }
 
 let dependencies: SessionAgentRuntimeDependencies | null = null
@@ -38,3 +40,10 @@ export const listHermesSessionSummaryGroups = (...args: any[]): Promise<any> => 
 export const notifyHermesSessionModelChanged = (...args: any[]): Promise<void> => configured().notifyHermesSessionModelChanged(...args)
 export const stopCodingAgentSessionRun = (...args: any[]) => configured().stopCodingAgentSessionRun(...args)
 export const invalidateCodingAgentSessionRuntime = (...args: any[]) => configured().invalidateCodingAgentSessionRuntime(...args)
+export const validateCodingAgentModelEffort = (agent: string, currentModel: string, nextModel: string, effort: string): Promise<void> => {
+  const validate = configured().validateCodingAgentModelEffort
+  if (!validate) throw Object.assign(new Error('Native model catalog unavailable'), { status: 503 })
+  return validate(agent, currentModel, nextModel, effort)
+}
+
+export const getSessionAvailableModelGroups = (profile: string): Promise<any[]> => configured().getAvailableModelGroups?.(profile) ?? Promise.resolve([])

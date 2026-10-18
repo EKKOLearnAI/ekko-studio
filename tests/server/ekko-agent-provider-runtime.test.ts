@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -33,12 +34,12 @@ describe('resolveEkkoProviderRuntimeConfig', () => {
     mocks.resolveAuthorized.mockResolvedValue({})
   })
 
-  it('resolves OpenCode Free anonymously without reading or borrowing profile credentials', async () => {
+  it('rejects retired OpenCode Free before resolving credentials', async () => {
     const { resolveEkkoProviderRuntimeConfig } = await import('../../packages/server/src/modules/ekko/services/provider-runtime')
     await expect(resolveEkkoProviderRuntimeConfig({
       profile: 'default', provider: 'opencode-free', model: 'muse-spark-free',
       apiKey: 'stale-key', baseUrl: 'https://stale.example/v1', apiMode: 'chat_completions',
-    })).resolves.toEqual({ provider: 'opencode-free', apiKey: '', baseUrl: 'https://opencode.ai/zen/v1', apiMode: 'codex_responses' })
+    })).rejects.toMatchObject({ status: 400, message: expect.stringContaining('OpenCode Free is no longer supported') })
     expect(mocks.readConfigYamlForProfile).not.toHaveBeenCalled()
     expect(mocks.resolveAuthorized).not.toHaveBeenCalled()
   })
@@ -61,7 +62,7 @@ describe('resolveEkkoProviderRuntimeConfig', () => {
       apiKey: 'profile-openai-key',
       apiMode: 'codex_responses',
     })
-    expect(mocks.safeReadFile).toHaveBeenCalledWith('/profiles/work/.env')
+    expect(mocks.safeReadFile).toHaveBeenCalledWith(join('/profiles/work', '.env'))
   })
 
   it('resolves custom provider credentials and protocol from profile config', async () => {

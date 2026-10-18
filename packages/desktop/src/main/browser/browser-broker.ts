@@ -11,6 +11,7 @@ import {
   type BrowserTextMode,
 } from './browser-types'
 import { publicBrowserUrl, redactBrowserText } from './browser-url'
+import { snapshotOptions } from './browser-snapshot'
 
 interface BrokerRequest {
   method?: unknown
@@ -243,7 +244,11 @@ export class BrowserBroker {
           return this.publicTab(tab)
         }
         case 'snapshot':
-          return await this.manager.snapshot(requiredString(params.tab_id, 'tab_id'))
+          return await this.manager.snapshot(requiredString(params.tab_id, 'tab_id'), snapshotOptions({
+            snapshotId: params.snapshot_id as string | undefined, selector: params.selector as string | undefined,
+            query: params.query as string | undefined, interactiveOnly: params.interactive_only as boolean | undefined,
+            offset: params.offset as number | undefined, limit: params.limit as number | undefined,
+          }))
         case 'text.read': {
           const mode = params.mode === undefined ? 'innerText' : requiredString(params.mode, 'mode')
           if (mode !== 'innerText' && mode !== 'textContent') throw new Error('mode must be innerText or textContent')
@@ -257,8 +262,14 @@ export class BrowserBroker {
         }
         case 'interact': {
           const tab = await this.manager.interact(requiredString(params.tab_id, 'tab_id'), asObject(params.action) as unknown as BrowserInteractAction)
-          return this.publicTab(tab)
+          return { ...this.publicTab(tab), snapshot: tab.snapshot, snapshotError: tab.snapshotError, observation: tab.observation }
         }
+        case 'interact.batch':
+          return await this.manager.interactBatch(requiredString(params.tab_id, 'tab_id'), params.actions, params.snapshot_id, () => {
+            if (!this.server || this.leases.get(tabId)?.clientId !== clientId || (this.tabGenerations.get(tabId) || 0) !== tabGeneration) {
+              throw new Error('Browser batch was cancelled or its tab control was revoked')
+            }
+          })
         case 'screenshot':
           return await this.manager.screenshot(requiredString(params.tab_id, 'tab_id'), params.full_page === true)
         case 'console.read':
@@ -279,7 +290,7 @@ export class BrowserBroker {
     } finally {
       if (tabId && (this.tabGenerations.get(tabId) || 0) !== tabGeneration) {
         if (this.manager.state().tabs.some(tab => tab.id === tabId)) this.manager.cancelAgentOperation(tabId)
-        throw new Error('Browser operation was cancelled by user takeover')
+        if (method !== 'interact.batch') throw new Error('Browser operation was cancelled by user takeover')
       }
       void operationId
     }

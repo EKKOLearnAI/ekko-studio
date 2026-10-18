@@ -12,12 +12,48 @@ afterEach(async () => {
 })
 
 describe('Desktop Browser Broker', () => {
+  it.each(['observed', 'popup', 'unavailable'] as const)('preserves single-action %s evidence over HTTP', async mode => {
+    const root = await mkdtemp(join(tmpdir(), 'hermes-browser-broker-interact-'))
+    roots.push(root)
+    const tab = { id: 'tab-1', title: 'Example', url: 'https://example.com/?token=private', agentControl: 'idle' }
+    const snapshot = { tabId: mode === 'popup' ? 'popup' : tab.id, snapshotId: 'fresh', nodes: [] }
+    const evidence = mode === 'unavailable'
+      ? { snapshotError: 'Follow-up snapshot unavailable', observation: { status: 'unavailable', hint: 'Read a fresh snapshot' } }
+      : { snapshot, observation: { status: 'observed', tabId: tab.id, changed: true,
+        ...(mode === 'popup' ? { openedTabs: [{ id: 'popup', title: 'Destination', url: 'https://example.com/next' }] } : {}) } }
+    const manager = {
+      state: () => ({ tabs: [tab] }),
+      interact: async () => ({ ...tab, ...evidence, internalOnly: '/private/profile' }),
+      setAgentControl: () => {}, revokeAgentControl: () => {}, cancelAgentOperation: () => {},
+    } as unknown as BrowserManager
+    const broker = new BrowserBroker(manager, root)
+    const descriptor = await broker.start()
+    try {
+      const registration = await fetch(`${descriptor.endpoint}/session`, {
+        method: 'POST', headers: { Authorization: `Bearer ${descriptor.token}`, 'Content-Type': 'application/json' }, body: '{}',
+      })
+      const client = await registration.json() as { client_id: string; session_token: string }
+      const response = await fetch(descriptor.endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${client.session_token}`, 'Content-Type': 'application/json', 'X-Hermes-Browser-Client': client.client_id },
+        body: JSON.stringify({ method: 'interact', params: { tab_id: tab.id, action: { action: 'press', key: 'Tab' } } }),
+      })
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      expect(body.result).toMatchObject({ id: tab.id, ...evidence })
+      expect(body.result).not.toHaveProperty('internalOnly')
+      expect(JSON.stringify(body)).not.toContain('private')
+    } finally {
+      await broker.stop()
+    }
+  })
+
   it('authenticates loopback MCP clients and enforces per-tab leases', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-browser-broker-'))
     roots.push(root)
     const tabs = [{ id: 'tab-1', agentControl: 'idle' }]
     const manager = {
-      state: () => ({ tabs, activeTabId: 'tab-1', maxTabs: 8, profiles: [{ sessionPath: '/private/profile' }], downloads: [{ savePath: '/private/download' }] }),
+      state: () => ({ tabs, activeTabId: 'tab-1', maxTabs: 12, profiles: [{ sessionPath: '/private/profile' }], downloads: [{ savePath: '/private/download' }] }),
       snapshot: async (tabId: string) => ({ tabId, snapshotId: 'snapshot-1' }),
       setAgentControl: (tabId: string, control: string) => { const tab = tabs.find(item => item.id === tabId); if (tab) tab.agentControl = control },
       revokeAgentControl: (tabId: string) => { const tab = tabs.find(item => item.id === tabId); if (tab) tab.agentControl = 'idle' },
@@ -266,6 +302,73 @@ describe('Desktop Browser Broker', () => {
       expect(maximum).toBe(4)
     } finally {
       releaseSnapshots()
+      await broker.stop()
+    }
+  })
+
+  it.each(['none', 'takeover', 'shutdown'])('holds the tab queue for a whole batch and stops on cancellation: %s', async cancellation => {
+    const takeover = cancellation === 'takeover'
+    const shutdown = cancellation === 'shutdown'
+    const root = await mkdtemp(join(tmpdir(), 'hermes-browser-broker-batch-'))
+    roots.push(root)
+    const tabs = [{ id: 'tab-1', agentControl: 'idle' }]
+    const events: string[] = []
+    let release!: () => void
+    let markStarted!: () => void
+    const started = new Promise<void>(resolve => { markStarted = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const manager = {
+      state: () => ({ tabs }),
+      setAgentControl: () => {}, revokeAgentControl: () => {}, cancelAgentOperation: () => {},
+      snapshot: async () => { events.push('snapshot'); return { snapshotId: 'later' } },
+      interactBatch: async (tabId: string, actions: unknown, snapshotId: unknown, assertControl: () => void) => {
+        expect(tabId).toBe('tab-1')
+        expect(snapshotId).toBe('initial')
+        expect(actions).toEqual([{ action: 'press', key: 'Tab' }, { action: 'press', key: 'Enter' }])
+        events.push('first')
+        markStarted()
+        await gate
+        try {
+          assertControl()
+          events.push('second')
+          return { completed: 2, total: 2 }
+        } catch (error) {
+          return { completed: 1, total: 2, results: [{ index: 1, status: 'failed', error: (error as Error).message }] }
+        }
+      },
+    } as unknown as BrowserManager
+    const broker = new BrowserBroker(manager, root)
+    const descriptor = await broker.start()
+    try {
+      const registration = await fetch(`${descriptor.endpoint}/session`, {
+        method: 'POST', headers: { Authorization: `Bearer ${descriptor.token}`, 'Content-Type': 'application/json' }, body: '{}',
+      })
+      const client = await registration.json() as { client_id: string; session_token: string }
+      const invoke = (method: string, params: Record<string, unknown>) => fetch(descriptor.endpoint, {
+        method: 'POST', headers: { Authorization: `Bearer ${client.session_token}`, 'Content-Type': 'application/json', 'X-Hermes-Browser-Client': client.client_id },
+        body: JSON.stringify({ method, params }),
+      }).catch(() => null)
+      const running = invoke('interact.batch', { tab_id: 'tab-1', snapshot_id: 'initial', actions: [{ action: 'press', key: 'Tab' }, { action: 'press', key: 'Enter' }] })
+      await started
+      const queued = invoke('snapshot', { tab_id: 'tab-1' })
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(events).toEqual(['first'])
+      if (takeover) broker.revokeTab('tab-1')
+      if (shutdown) await broker.stop(25)
+      release()
+      const response = await running
+      if (shutdown) {
+        await queued
+        await new Promise(resolve => setTimeout(resolve, 10))
+        expect(events).not.toContain('second')
+        return
+      }
+      expect(response?.status).toBe(200)
+      expect((await response!.json()).result).toMatchObject({ completed: takeover ? 1 : 2, total: 2 })
+      expect((await queued)?.status).toBe(takeover ? 409 : 200)
+      expect(events).toEqual(takeover ? ['first'] : ['first', 'second', 'snapshot'])
+    } finally {
+      release()
       await broker.stop()
     }
   })

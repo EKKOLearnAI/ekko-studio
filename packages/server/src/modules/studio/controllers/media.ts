@@ -5,6 +5,7 @@ import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '.
 import { readConfigYamlForProfile } from '../public/media-profile-config'
 import { config } from '../public/config'
 import { getCompatibleCustomProviders } from '../contracts/provider-compat'
+import { canChooseMediaOutputPath } from '../services/auth/media-output-access'
 
 const XAI_VIDEO_GENERATIONS_URL = 'https://api.x.ai/v1/videos/generations'
 const XAI_VIDEO_STATUS_URL = 'https://api.x.ai/v1/videos'
@@ -105,7 +106,17 @@ function readJsonFile(path: string): any {
 function buildApiUrl(baseUrl: string, pathWithV1: string): string {
   const base = (baseUrl || 'https://api.apikey.fan/v1').replace(/\/+$/, '')
   const apiPath = pathWithV1.startsWith('/') ? pathWithV1 : `/${pathWithV1}`
-  if (base.endsWith('/v1') && apiPath.startsWith('/v1/')) return `${base}${apiPath.slice(3)}`
+  if (!apiPath.startsWith('/v1/')) return `${base}${apiPath}`
+
+  const providerPath = apiPath.slice(3)
+  if (base.endsWith('/v1')) return `${base}${providerPath}`
+  try {
+    const pathname = new URL(base).pathname.replace(/\/+$/, '')
+    // Match provider catalog API roots; plain proxy prefixes still need /v1.
+    if (/\/(?:v\d+(?:beta)?|openai)$/.test(pathname)) return `${base}${providerPath}`
+  } catch {
+    // Keep the legacy /v1 default for non-standard base URL strings.
+  }
   return `${base}${apiPath}`
 }
 
@@ -629,6 +640,18 @@ function saveGeneratedImages(images: string[], requestedOutputPath?: string): st
   })
 }
 
+function requestedMediaOutputPath(ctx: Context, value: unknown): string {
+  const path = typeof value === 'string' ? value.trim() : ''
+  // Choosing a server filesystem destination is a privileged write, just as
+  // files/write is. Other users can still generate into Studio's media store.
+  if (path && !canChooseMediaOutputPath(ctx.state)) {
+    throw Object.assign(new Error('Only super admins can choose a media output path'), {
+      status: 403, code: 'media_output_path_forbidden',
+    })
+  }
+  return path
+}
+
 export async function apiKeyImageGenerate(ctx: Context) {
   let profile: string
   try {
@@ -641,6 +664,7 @@ export async function apiKeyImageGenerate(ctx: Context) {
 
   try {
     const body = ctx.request.body as any
+    const requestedOutputPath = requestedMediaOutputPath(ctx, body.output_path)
     const mode = normalizeImageMode(body.mode)
     const hermesConfig = await readConfigYamlForProfile(profile)
     const generationSettings = auxiliaryImageSettings(hermesConfig, 'image_generation')
@@ -673,7 +697,6 @@ export async function apiKeyImageGenerate(ctx: Context) {
       { generation: generationSettings.model, edit: editSettings.model },
       activeSettings.timeoutMs,
     )
-    const requestedOutputPath = typeof body.output_path === 'string' ? body.output_path.trim() : ''
     const outputPaths = saveGeneratedImages(images, requestedOutputPath || undefined)
     ctx.body = {
       ok: true,
@@ -854,6 +877,7 @@ export async function miniMaxImageToVideo(ctx: Context) {
       timeout_ms?: number
     } | undefined
     const body = input || {}
+    const requestedOutputPath = requestedMediaOutputPath(ctx, body.output_path)
     const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : MINIMAX_VIDEO_DEFAULT_MODEL
     const tokenInfo = await resolveMiniMaxToken(profile, body.region)
     if (!tokenInfo.token) {
@@ -878,7 +902,6 @@ export async function miniMaxImageToVideo(ctx: Context) {
     const timeoutMs = Number.isFinite(rawTimeoutMs)
       ? Math.max(10000, Math.min(rawTimeoutMs, 30 * 60 * 1000))
       : DEFAULT_TIMEOUT_MS
-    const requestedOutputPath = typeof body.output_path === 'string' ? body.output_path.trim() : ''
     const requestBody = miniMaxV1ImageRequest(body, prompt, image, model, region)
 
     const started = await requestMiniMaxJson(urls.generateUrl, tokenInfo.token, {
@@ -940,14 +963,17 @@ export async function miniMaxImageToVideo(ctx: Context) {
     }
   } catch (err: any) {
     ctx.status = err.status || 500
-    ctx.body = { error: err.message || String(err) }
+    ctx.body = { error: err.message || String(err), ...(err.code ? { code: err.code } : {}) }
   }
 }
 
 export async function grokImageToVideo(ctx: Context) {
   let profile: string
+  let requestedOutputPath: string
+  const body = ctx.request.body as any
   try {
     profile = resolveMediaProfile(ctx)
+    requestedOutputPath = requestedMediaOutputPath(ctx, body.output_path)
   } catch (err: any) {
     ctx.status = err.status || 400
     ctx.body = { error: err.message || String(err), code: err.code || 'invalid_profile' }
@@ -964,7 +990,6 @@ export async function grokImageToVideo(ctx: Context) {
     return
   }
 
-  const body = ctx.request.body as any
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
   if (!prompt) {
     ctx.status = 400
@@ -979,7 +1004,6 @@ export async function grokImageToVideo(ctx: Context) {
     const timeoutMs = Number.isFinite(rawTimeoutMs)
       ? Math.max(10000, Math.min(rawTimeoutMs, 30 * 60 * 1000))
       : DEFAULT_TIMEOUT_MS
-    const requestedOutputPath = typeof body.output_path === 'string' ? body.output_path.trim() : ''
 
     const started = await requestXaiJson(XAI_VIDEO_GENERATIONS_URL, tokenInfo.token, {
       method: 'POST',

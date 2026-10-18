@@ -8,6 +8,15 @@ const buildDbHistoryMock = vi.fn()
 const buildSnapshotAwareHistoryMock = vi.fn()
 const getRecordedUsageTotalsMock = vi.fn()
 const getUsageMock = vi.fn()
+const estimateSessionContextTokensMock = vi.fn()
+const getSessionContextUsageEstimateMock = vi.fn()
+
+vi.mock('../../packages/server/src/modules/studio/services/chat-run/context-usage', () => ({
+  estimateSessionContextTokens: estimateSessionContextTokensMock,
+}))
+vi.mock('../../packages/server/src/modules/studio/repositories/session-context-usage', () => ({
+  getSessionContextUsageEstimate: getSessionContextUsageEstimateMock,
+}))
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   getSession: getSessionMock,
@@ -77,8 +86,23 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/response-str
 }))
 
 describe('loadSessionStateFromDb', () => {
+  it.each(['hermes', 'ekko-agent'])('recalculates %s context after deletion without changing cumulative usage', async agent => {
+    getSessionMock.mockReturnValue({ id: 'session-1', agent, source: 'cli', history_cleared_at: 2000 })
+    getSessionDetailPaginatedMock.mockReturnValue({ messages: [] })
+    getRecordedUsageTotalsMock.mockReturnValue({ inputTokens: 7000, outputTokens: 2000 })
+    getUsageMock.mockReturnValue({ input_tokens: 7000, output_tokens: 2000, created_at: 1000 })
+    const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')
+    const state = await loadSessionStateFromDb('session-1', new Map())
+    expect(state.contextTokens).toBe(18_000)
+    expect(estimateSessionContextTokensMock).toHaveBeenCalledWith('session-1')
+    expect(state.inputTokens).toBe(7000)
+    expect(state.outputTokens).toBe(2000)
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
+    estimateSessionContextTokensMock.mockReturnValue(18_000)
+    getSessionContextUsageEstimateMock.mockReturnValue(undefined)
     getSessionMock.mockReturnValue({
       id: 'session-1',
       profile: 'default',
@@ -124,6 +148,17 @@ describe('loadSessionStateFromDb', () => {
     getUsageMock.mockReturnValue({ input_tokens: 8_000, output_tokens: 1_000 })
   })
 
+  it('restores Ekko totals before interpreting the legacy coding_agent source', async () => {
+    getSessionMock.mockReturnValue({ id: 'session-1', agent: 'ekko-agent', source: 'coding_agent' })
+    getSessionDetailPaginatedMock.mockReturnValue({ messages: [], total: 0 })
+    getRecordedUsageTotalsMock.mockReturnValue({ inputTokens: 1234, outputTokens: 56, cacheReadTokens: 78, cacheWriteTokens: 0 })
+    getUsageMock.mockReturnValue({ input_tokens: 12, output_tokens: 3 })
+    const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')
+    const state = await loadSessionStateFromDb('session-1', new Map())
+    expect(getRecordedUsageTotalsMock).toHaveBeenCalledWith('session-1', 'ekko_agent')
+    expect(state).toMatchObject({ inputTokens: 1234, outputTokens: 56, cacheReadTokens: 78 })
+  })
+
   it('hydrates persisted usage without reconstructing complete history on resume', async () => {
     const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')
 
@@ -131,9 +166,37 @@ describe('loadSessionStateFromDb', () => {
 
     expect(buildDbHistoryMock).not.toHaveBeenCalled()
     expect(buildSnapshotAwareHistoryMock).not.toHaveBeenCalled()
+    expect(estimateUsageTokensFromMessagesMock).not.toHaveBeenCalled()
+    expect(estimateSessionContextTokensMock).not.toHaveBeenCalled()
     expect(state.inputTokens).toBe(28_000)
     expect(state.outputTokens).toBe(2_000)
     expect(state.contextTokens).toBe(9_000)
+  })
+
+  it('restores a valid post-deletion estimate including fixed context without recounting', async () => {
+    getSessionMock.mockReturnValue({ id: 'session-1', source: 'cli', history_cleared_at: 2000 })
+    getUsageMock.mockReturnValue({ input_tokens: 100_000, output_tokens: 36_100, created_at: 1000 })
+    getSessionContextUsageEstimateMock.mockReturnValue({ tokens: 17_200, fixedTokens: 12_000 })
+    const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')
+    expect((await loadSessionStateFromDb('session-1', new Map())).contextTokens).toBe(17_200)
+    expect(estimateSessionContextTokensMock).not.toHaveBeenCalled()
+  })
+
+  it.each([0, undefined])('preserves a zero or unknown context estimate (%s) without substituting old usage', async tokens => {
+    getSessionMock.mockReturnValue({ id: 'session-1', source: 'cli', history_cleared_at: 2000 })
+    getUsageMock.mockReturnValue({ input_tokens: 100_000, output_tokens: 36_100, created_at: 1000 })
+    estimateSessionContextTokensMock.mockReturnValue(tokens)
+    const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')
+    expect((await loadSessionStateFromDb('session-1', new Map())).contextTokens).toBe(tokens)
+  })
+
+  it('estimates page usage only when no persisted usage exists', async () => {
+    getUsageMock.mockReturnValue(null)
+    getRecordedUsageTotalsMock.mockReturnValue({ inputTokens: 0, outputTokens: 0 })
+    const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')
+    const state = await loadSessionStateFromDb('session-1', new Map())
+    expect(estimateUsageTokensFromMessagesMock).toHaveBeenCalledOnce()
+    expect(state.inputTokens).toBe(28_000)
   })
 
   it('restores the persisted tool-result anchor for a Hermes background delegation', async () => {
@@ -165,5 +228,21 @@ describe('loadSessionStateFromDb', () => {
         dispatchPayload: expect.objectContaining({ mode: 'background' }),
       }),
     })
+  })
+
+  it('restores Cursor native usage without turning aggregate consumption into context occupancy', async () => {
+    getSessionMock.mockReturnValue({ id: 'session-1', agent: 'cursor', source: 'coding_agent' })
+    getRecordedUsageTotalsMock.mockReturnValue({ inputTokens: 24_003, outputTokens: 474, cacheReadTokens: 20_736, cacheWriteTokens: 0 })
+    getUsageMock.mockReturnValue({ input_tokens: 24_003, output_tokens: 474, cache_read_tokens: 20_736 })
+    const { loadSessionStateFromDb } = await import('../../packages/server/src/modules/studio/services/chat-run/load-state')
+
+    const state = await loadSessionStateFromDb('session-1', new Map())
+
+    expect(getRecordedUsageTotalsMock).toHaveBeenCalledWith('session-1', 'coding_agent')
+    expect(state.inputTokens).toBe(24_003)
+    expect(state.outputTokens).toBe(474)
+    expect(state.cacheReadTokens).toBe(20_736)
+    expect(state.cacheWriteTokens).toBe(0)
+    expect(state.contextTokens).toBeUndefined()
   })
 })

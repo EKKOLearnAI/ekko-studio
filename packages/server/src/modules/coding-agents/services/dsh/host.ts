@@ -20,8 +20,11 @@ interface DshHostCommands {
 export function createDshHost(host: DshHostCommands) {
   async function runtimeInput() {
     const env = await host.commandEnv()
-    const command = (await host.findCommandPaths('dsh', env))[0]
-    if (!command) throw new DshPluginError(503, 'DSH_DEPENDENCY_UNAVAILABLE', 'DSH is not installed')
+    const discovered = (await host.findCommandPaths('dsh', env))[0]
+    if (!discovered) throw new DshPluginError(503, 'DSH_DEPENDENCY_UNAVAILABLE', 'DSH is not installed')
+    // Windows lookup can return npm's Unix shim before dsh.cmd. Use the shared
+    // execution resolver there; POSIX discovery still needs an absolute path.
+    const command = process.platform === 'win32' ? await host.resolveCommandForExecution('dsh', env) : discovered
     return { installationCommand: command, launchPath: env.PATH,
       sourceHome: process.env.DSH_HOME?.trim() || host.getSourceHome() }
   }

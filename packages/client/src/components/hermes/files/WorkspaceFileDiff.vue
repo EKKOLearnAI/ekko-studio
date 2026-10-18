@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { NSpin, NAlert, NButton, NTooltip, useMessage } from 'naive-ui'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
-import { NAlert, NButton, NSpin, NTooltip, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import type { FileEntry, WorkspaceFileDiff } from '@/api/studio/files'
-import { fetchSessionWorkspaceFileDiff, readSessionWorkspaceFile } from '@/api/studio/sessions'
-import { fetchGroupWorkspaceFileDiff, readGroupWorkspaceFile } from '@/api/studio/group-chat'
+import { fetchSessionWorkspaceFileDiff, readSessionWorkspaceFile, downloadSessionWorkspaceFile } from '@/api/studio/sessions'
+import { fetchGroupWorkspaceFileDiff, readGroupWorkspaceFile, downloadGroupWorkspaceFile } from '@/api/studio/group-chat'
 import { getLanguageFromPath, isMarkdownFile, useFilesStore } from '@/stores/hermes/files'
 import { handleCodeBlockCopyClick, renderHighlightedCodeBlock } from '@/components/hermes/chat/highlight'
 import FileTreeToggle from './FileTreeToggle.vue'
@@ -30,6 +31,17 @@ const { t } = useI18n()
 const message = useMessage()
 const filesStore = useFilesStore()
 const loading = ref(false)
+const downloading = ref(false)
+async function downloadCurrentFile() {
+  if (downloading.value || props.entry.isDir) return
+  downloading.value = true
+  try {
+    if (props.workspaceRoomId) await downloadGroupWorkspaceFile(props.workspaceRoomId, props.entry.path, props.entry.name)
+    else if (props.workspaceSessionId) await downloadSessionWorkspaceFile(props.workspaceSessionId, props.entry.path, props.entry.name)
+    else throw new Error(t('files.backendError'))
+  } catch (error) { message.error(error instanceof Error ? error.message : t('download.downloadFailed')) }
+  finally { downloading.value = false }
+}
 const error = ref('')
 const diff = ref<WorkspaceFileDiff | null>(null)
 const fileContent = ref<string | null>(null)
@@ -134,6 +146,15 @@ watch(
       <div class="diff-actions">
         <NTooltip trigger="hover">
           <template #trigger>
+            <NButton class="diff-action-button" size="small" quaternary circle :loading="downloading"
+              :aria-label="t('files.download')" @click="downloadCurrentFile">
+              <template #icon><svg data-icon="download" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4" /></svg></template>
+            </NButton>
+          </template>
+          {{ t('files.download') }}
+        </NTooltip>
+        <NTooltip trigger="hover">
+          <template #trigger>
             <NButton
               class="diff-action-button"
               size="small"
@@ -218,10 +239,10 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   flex: 0 0 auto;
-  padding: 8px 16px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 }
 
 .diff-file-info,
@@ -229,22 +250,22 @@ watch(
 .diff-stats {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .diff-file-name {
   flex: 0 0 auto;
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .diff-file-path {
   min-width: 0;
   overflow: hidden;
   color: $text-muted;
-  font-family: $font-code;
-  font-size: 11px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -357,13 +378,13 @@ watch(
 @media (max-width: $breakpoint-mobile) {
   .diff-header {
     align-items: flex-start;
-    padding: 8px;
+    padding: calc(8px * var(--spacing-scale, 1));
   }
 
   .diff-file-info {
     align-items: flex-start;
     flex-direction: column;
-    gap: 2px;
+    gap: calc(2px * var(--spacing-scale, 1));
   }
 }
 </style>

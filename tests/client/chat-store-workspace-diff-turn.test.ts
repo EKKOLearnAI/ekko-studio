@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { alignWorkspaceChangeAssistantMessage, attachWorkspaceChangesToExactTurns, useChatStore } from '@/stores/hermes/chat'
+import { onRunUsageUpdated, registerSessionHandlers } from '@/api/studio/chat'
 
 const sessionApi = vi.hoisted(() => ({
   fetchSessions: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock('@/api/studio/chat', () => ({
   onPeerUserMessage: vi.fn(() => vi.fn()),
   onSessionCommand: vi.fn(() => vi.fn()),
   onSessionTitleUpdated: vi.fn(() => vi.fn()),
+  onRunUsageUpdated: vi.fn(() => vi.fn()),
   onSessionWorkspaceUpdated: vi.fn(() => vi.fn()),
   onSessionSettingsUpdated: vi.fn(() => vi.fn()),
 }))
@@ -87,6 +89,37 @@ describe('chat workspace diff turn association', () => {
       ],
       events: [], queueLength: 0, messageLoadedCount: 4, messageTotal: 4, hasMoreBefore: false,
     }
+  })
+
+  it('restores each completed run summary on its own reply, including a summary-only assistant', async () => {
+    const usage = { runId: 'first', assistantMessageId: '2', inputTokens: 100, outputTokens: 20, cacheReadTokens: 50, cacheHitRate: 0.5, costUsd: 0.001, tokensPerSecond: 10, speedSource: 'run', isEstimated: false }
+    chatApi.resumePayload.messages[1].run_usage = usage
+    chatApi.resumePayload.messages[3].run_usage = { ...usage, runId: 'second', assistantMessageId: '4', outputTokens: 0, tokensPerSecond: null }
+    chatApi.resumePayload.messages[3].content = ''
+    chatApi.resumePayload.messages[3].tool_calls = [{ id: 'last-tool', function: { name: 'read_file', arguments: '{}' } }]
+    const store = useChatStore()
+    await store.loadSessions()
+    expect(store.activeSession?.messages.find(message => message.id === '2')?.runUsage).toEqual(usage)
+    expect(store.activeSession?.messages.find(message => message.id === '4')?.runUsage).toMatchObject({ runId: 'second', outputTokens: 0, tokensPerSecond: null })
+    expect(store.activeSession?.messages.filter(message => message.role === 'user').every(message => !message.runUsage)).toBe(true)
+    expect(store.activeSession?.messages.find(message => message.toolCallId === 'last-tool')?.toolName).toBe('read_file')
+  })
+
+  it('preserves usage received before abort completion when the assistant already has its persisted id', async () => {
+    chatApi.resumePayload.isWorking = true
+    const store = useChatStore()
+    await store.loadSessions()
+    const usage = { runId: 'first', assistantMessageId: '4', inputTokens: 100, outputTokens: 20,
+      cacheReadTokens: 50, cacheHitRate: 0.5, costUsd: 0.001, tokensPerSecond: 10, isEstimated: false }
+    const update = vi.mocked(onRunUsageUpdated).mock.calls.at(-1)![0]
+    update({ event: 'run.usage.updated', session_id: 'session-1', run_usage: usage,
+      inputTokens: 300, outputTokens: 50, cacheReadTokens: 70, cacheWriteTokens: 5 } as any)
+    const handlers = vi.mocked(registerSessionHandlers).mock.calls.at(-1)![1]
+    handlers.onAbortCompleted({ event: 'abort.completed', session_id: 'session-1', run_id: 'first',
+      run_usage: { runId: 'first', assistantMessageId: '4' } } as any)
+    expect(store.activeSession?.messages.find(message => message.id === '4')?.runUsage).toMatchObject(usage)
+    expect(store.activeSession?.messages.filter(message => message.runUsage)).toHaveLength(1)
+    expect(store.activeSession).toMatchObject({ inputTokens: 300, outputTokens: 50, cacheReadTokens: 70, cacheWriteTokens: 5 })
   })
 
   it('attaches each persisted change to its exact assistant turn without synthetic cards', async () => {

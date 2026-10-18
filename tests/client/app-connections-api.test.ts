@@ -17,12 +17,14 @@ describe('App connections API', () => {
     await api.createLanAppAuthorization()
     await api.createCloudAppAuthorization(true, 'cloudflare')
     await api.deleteAppConnection(12)
+    await api.updateAppConnectionPush(12, false)
 
     expect(request.mock.calls).toEqual([
       ['/api/app-connections'],
       ['/api/app-connections/authorization-codes/lan', { method: 'POST' }],
       ['/api/app-connections/authorization-codes/cloud', { method: 'POST', body: JSON.stringify({ refresh: true, route: 'cloudflare' }) }],
       ['/api/app-connections/12', { method: 'DELETE' }],
+      ['/api/studio/app-connections/12/push', { method: 'PATCH', body: JSON.stringify({ push_enabled: false }) }],
     ])
   })
 })

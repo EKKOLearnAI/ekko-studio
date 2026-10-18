@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useTheme } from '@/composables/useTheme'
+import { editorTheme } from '@/styles/theme-integrations'
 import { NButton, NSpace, useMessage, useDialog } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useFilesStore } from '@/stores/hermes/files'
@@ -35,6 +37,19 @@ const emit = defineEmits<{
 const editorContainer = ref<HTMLElement | null>(null)
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
 const saving = ref(false)
+const { isDark, customization } = useTheme()
+
+function syncEditorTheme() {
+  if (!editor) return
+  monaco.editor.defineTheme('studio', editorTheme(customization.value, isDark.value))
+  monaco.editor.setTheme('studio')
+  editor.updateOptions({
+    fontSize: customization.value.fontSize * 13 / 14,
+    lineHeight: customization.value.appearance?.global.lineHeight ?? 0,
+    letterSpacing: customization.value.appearance?.global.letterSpacing ?? 0,
+  })
+}
+watch([isDark, customization], syncEditorTheme)
 
 onMounted(() => {
   if (!editorContainer.value || !filesStore.editingFile) return
@@ -63,6 +78,7 @@ onMounted(() => {
     },
   })
 
+  syncEditorTheme()
   editor.onDidChangeModelContent(() => {
     if (filesStore.editingFile) {
       filesStore.editingFile.content = editor!.getValue()
@@ -155,20 +171,20 @@ function handleClose() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
-  border-bottom: 1px solid $border-color;
-  background-color: $bg-card;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
 }
 
 .editor-file-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .editor-filename {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-secondary;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -177,7 +193,7 @@ function handleClose() {
 
   @media (max-width: $breakpoint-mobile) {
     max-width: 120px;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 }
 

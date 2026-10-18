@@ -1,0 +1,175 @@
+name: Build TOS 7 Deb Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_tdp:
+        description: "Attach TOS assets to the selected Release and validate on TerraMaster (no review)"
+        type: boolean
+        default: false
+      release_tag:
+        description: "Existing Release tag to build (required for upload, e.g. v0.7.35)"
+        type: string
+        default: ""
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - ".github/workflows/tos-package-test.yml"
+      - "packages/tos/**"
+      - "scripts/pack-tos-deb.mjs"
+      - "scripts/test-tos-platform.mjs"
+      - "scripts/test-tos-install.sh"
+      - "tests/server/tos-packaging.test.ts"
+      - "tests/server/tos-platform.test.ts"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tos-package-test-${{ github.event.release.tag_name || inputs.release_tag || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tos:
+    name: TOS 7 x86_64 test package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      TOS_SOURCE_DIR: ${{ (github.event.release.tag_name || inputs.release_tag) && '.tos-release-source' || '.' }}
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+
+    steps:
+      - name: Checkout selected revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate release selection
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+          UPLOAD_TO_TDP: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_tdp) }}
+        run: |
+          node <<'NODE'
+          const tag = process.env.RELEASE_TAG
+          if (process.env.UPLOAD_TO_TDP === 'true' && !tag) {
+            throw new Error('release_tag is required when uploading to TerraMaster')
+          }
+          if (tag && !/^v?\d+\.\d+\.\d+$/.test(tag)) throw new Error('Expected a release tag such as v0.7.35')
+          NODE
+
+      - name: Checkout release source
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || inputs.release_tag }}
+          path: .tos-release-source
+
+      - name: Verify package version and record source
+        id: source
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          node <<'NODE'
+          const { readFileSync, appendFileSync } = require('node:fs')
+          const { execFileSync } = require('node:child_process')
+          const { join } = require('node:path')
+          const directory = process.env.TOS_SOURCE_DIR
+          const { name, version } = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'))
+          if (name !== 'ekko-studio') throw new Error('Expected ekko-studio source')
+          const tag = process.env.RELEASE_TAG
+          if (tag && ![version, `v${version}`].includes(tag)) throw new Error('Release tag does not match package version')
+          const sha = execFileSync('git', ['-C', directory, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+          appendFileSync(process.env.GITHUB_OUTPUT, `sha=${sha}\n`)
+          NODE
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ${{ env.TOS_SOURCE_DIR }}/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd "$TOS_SOURCE_DIR"
+          npm ci --ignore-scripts
+          npm rebuild node-pty
+
+      - name: Build Web UI
+        run: cd "$TOS_SOURCE_DIR" && npm run build
+
+      - name: Keep production dependencies only
+        run: cd "$TOS_SOURCE_DIR" && npm prune --omit=dev --no-audit --no-fund
+
+      - name: Verify image processing runtime
+        run: cd "$TOS_SOURCE_DIR" && npm run verify:sharp-runtime
+
+      - name: Stage production Web UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$TOS_SOURCE_DIR"
+          tos_stage="$RUNNER_TEMP/ekko-tos-webui"
+          mkdir -p "$tos_stage"
+          cp package.json package-lock.json "$tos_stage/"
+          cp -R bin dist node_modules "$tos_stage/"
+          printf 'TOS_WEBUI_DIR=%s\n' "$tos_stage" >> "$GITHUB_ENV"
+
+      - name: Build and verify TOS 7 Deb
+        run: npm run pack:tos -- --webui-dir "$TOS_WEBUI_DIR" --output release/tos
+
+      - name: Test clean installation without host venv
+        run: bash scripts/test-tos-install.sh release/tos/*.deb
+
+      - name: Upload TOS test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tos7-x86_64-test
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            release/tos/*.deb
+            release/tos/*.deb.sha256
+            release/tos/*.deb.verification.json
+
+  platform:
+    name: TerraMaster package parsing test (no review)
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_tdp)
+    needs: tos
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: tos-platform-test
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: tos7-x86_64-test
+          path: release/tos
+      - name: Publish test assets and validate on TerraMaster
+        env:
+          # Only attach assets; do not create/edit the Release or trigger main workflows.
+          GH_TOKEN: ${{ github.token }}
+          TDP_API_TOKEN: ${{ secrets.TDP_API_TOKEN }}
+          TOS_RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+          TOS_SOURCE_SHA: ${{ needs.tos.outputs.source_sha }}
+        run: node scripts/test-tos-platform.mjs release/tos
+      - name: Upload platform test receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tos-platform-test-receipt
+          path: release/tos/platform-test.json
+          if-no-files-found: warn
+          retention-days: 7

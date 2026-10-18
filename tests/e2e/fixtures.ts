@@ -1,4 +1,6 @@
 import type { Page, Request, Route } from '@playwright/test'
+import AdmZip from 'adm-zip'
+import type { ThemeAppearance } from '../../packages/shared/theme-appearance'
 
 export const TEST_ACCESS_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwidXNlcm5hbWUiOiJwbGF5d3JpZ2h0Iiwicm9sZSI6InN1cGVyX2FkbWluIiwidHlwZSI6ImFjY2VzcyIsImF1ZCI6Imhlcm1lcy13ZWItdWkiLCJpYXQiOjE3NjAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMH0.playwright-signature'
 
@@ -34,6 +36,10 @@ interface MockSkillBundlePayload {
 }
 
 interface MockThemePayload {
+  activePresetId?: string
+  brightness?: string
+  style?: string
+  appearance?: ThemeAppearance
   fontSize: number
   textColor: string | null
   accentColor: string | null
@@ -65,6 +71,8 @@ interface MockHermesApiOptions {
   channelCredentials?: boolean
   channelConfig?: Record<string, unknown>
   providerEditor?: Record<string, unknown>
+  modelAliases?: Record<string, Record<string, string>>
+  customModels?: Record<string, string[]>
   modelGroups?: Array<{
     provider: string
     label: string
@@ -168,6 +176,9 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
   const skillBundles = [...(options.bundles ?? [])]
   let channelCredentialsPresent = options.channelCredentials ?? false
   let delegationModel: Record<string, string> = {}
+  const workspaceDirectories = new Map<string, {
+    path: string; isFavorite: boolean; lastUsed: number; useCount: number; createdAt: number; updatedAt: number
+  }>()
   let theme: MockThemePayload = {
     fontSize: 14,
     textColor: null,
@@ -175,6 +186,21 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
     background: null,
     updatedAt: 0,
     ...options.theme,
+  }
+  const defaultThemeBackground = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2V9sAAAAASUVORK5CYII=', 'base64')
+  const themeBackgrounds = new Map<number, Buffer>()
+  const themeImageMimes: Record<string, string> = { gif: 'image/gif', webp: 'image/webp', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', apng: 'image/png' }
+  const themeImageMime = (extension: string) => themeImageMimes[extension] || 'image/png'
+  const themePresets: Array<MockThemePayload & { id: string; name: string }> = []
+  let nextThemeId = 1
+  function syncPreset() {
+    const index = themePresets.findIndex(item => item.id === theme.activePresetId)
+    if (index !== -1) themePresets[index] = { ...themePresets[index]!, ...structuredClone(theme) }
+  }
+  function library() { return { activeId: theme.activePresetId, themes: themePresets, theme } }
+  function settingsOf(preset: MockThemePayload & { id: string; name: string }): MockThemePayload {
+    const { id, name, ...settings } = structuredClone(preset)
+    return settings
   }
   let providerEditor = {
     id: 'test-provider',
@@ -211,6 +237,18 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
 
     if (pathname === '/health') {
       await route.fulfill(jsonResponse({ status: 'ok', webui_version: '0.5.23', node_version: '23.0.0' }))
+      return
+    }
+
+    if (pathname === '/api/studio/usage/stats' && request.method() === 'GET') {
+      await route.fulfill(jsonResponse({
+        period_days: Number(url.searchParams.get('days') || 30),
+        total_input_tokens: 0, total_output_tokens: 0, total_cache_read_tokens: 0,
+        total_cache_write_tokens: 0, total_reasoning_tokens: 0, total_sessions: 0,
+        total_api_calls: 0, total_cost: 0, cost_coverage: { reported: 0, estimated: 0, unknown: 0 },
+        filter_options: { accounts: [], models: [], agents: [] },
+        model_usage: [], agent_usage: [], daily_usage: [],
+      }))
       return
     }
 
@@ -311,15 +349,87 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       return
     }
 
+    if (pathname === '/api/theme/presets' || pathname.startsWith('/api/theme/presets/')) {
+      if (!themePresets.length) {
+        theme.activePresetId = 'theme-0'
+        themePresets.push({ ...structuredClone(theme), id: 'theme-0', name: '' })
+      }
+      if (pathname.endsWith('/export')) {
+        const preset = themePresets.find(item => item.id === pathname.split('/')[4])!
+        const zip = new AdmZip()
+        const extension = preset.background?.mime === 'image/jpeg' ? 'jpg' : preset.background?.mime?.split('/')[1] || 'png'
+        const background = preset.background ? { file: `background.${extension}`, name: preset.background.name } : null
+        if (background) zip.addFile(background.file, themeBackgrounds.get(preset.background!.updatedAt) || defaultThemeBackground)
+        zip.addFile('theme.json', Buffer.from(JSON.stringify({
+          format: 'ekko-studio-theme', version: 1, name: preset.name || 'Theme', background,
+          settings: { brightness: preset.brightness || 'system', style: preset.style || 'ink',
+            fontSize: preset.fontSize, textColor: preset.textColor, accentColor: preset.accentColor,
+            appearance: preset.appearance || { global: {}, regions: {} } },
+        })))
+        await route.fulfill({ contentType: 'application/zip', body: zip.toBuffer() })
+        return
+      }
+      if (pathname.endsWith('/import')) {
+        try {
+          const zip = new AdmZip(request.postDataBuffer()!)
+          const manifest = JSON.parse(zip.readAsText('theme.json'))
+          const created = { ...manifest.settings, id: `theme-${nextThemeId++}`, name: manifest.name,
+            background: manifest.background ? { name: manifest.background.name, mime: themeImageMime(manifest.background.file.split('.').at(-1)), updatedAt: Date.now() } : null,
+            updatedAt: Date.now() }
+          if (created.background) themeBackgrounds.set(created.background.updatedAt, zip.readFile(manifest.background.file)!)
+          created.activePresetId = created.id
+          themePresets.push(created)
+          theme = settingsOf(created)
+          await route.fulfill(jsonResponse(library()))
+        } catch { await route.fulfill(jsonResponse({ error: 'Invalid theme ZIP archive' }, 400)) }
+        return
+      }
+      const body = JSON.parse(request.postData() || '{}')
+      const id = pathname.split('/')[4]
+      if (pathname === '/api/theme/presets' && request.method() === 'POST') {
+        theme.brightness ||= body.brightness
+        theme.style ||= body.style
+        syncPreset()
+        const source = body.sourceId ? themePresets.find(item => item.id === body.sourceId)! : {
+          fontSize: 14, textColor: null, accentColor: null, appearance: { global: {}, regions: {} },
+          background: null, updatedAt: Date.now(), brightness: body.brightness, style: body.style,
+        }
+        const created = { ...structuredClone(source), id: `theme-${nextThemeId++}`, name: body.name }
+        created.activePresetId = created.id
+        themePresets.push(created)
+        theme = settingsOf(created)
+      } else if (request.method() === 'PATCH') {
+        themePresets.find(item => item.id === id)!.name = body.name
+      } else if (pathname.endsWith('/activate')) {
+        theme = settingsOf(themePresets.find(item => item.id === id)!)
+      } else if (request.method() === 'DELETE') {
+        themePresets.splice(themePresets.findIndex(item => item.id === id), 1)
+        if (theme.activePresetId === id) theme = settingsOf(themePresets[0]!)
+      }
+      await route.fulfill(jsonResponse(library()))
+      return
+    }
+
     if (pathname === '/api/theme/background') {
+      if (request.method() === 'POST' || request.method() === 'DELETE') {
+        if (request.method() === 'DELETE') theme.background = null
+        else {
+          const form = await new Response(new Uint8Array(request.postDataBuffer()!), {
+            headers: { 'Content-Type': request.headers()['content-type']! },
+          }).formData()
+          const file = form.get('background') as File
+          theme.background = { name: file.name, mime: themeImageMime(file.name.split('.').at(-1)!.toLowerCase()), updatedAt: Date.now() }
+          themeBackgrounds.set(theme.background.updatedAt, Buffer.from(await file.arrayBuffer()))
+        }
+        syncPreset()
+        await route.fulfill(jsonResponse(theme))
+        return
+      }
       if (request.method() === 'GET' && theme.background) {
         await route.fulfill({
           status: 200,
           contentType: theme.background.mime || 'image/png',
-          body: Buffer.from(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2V9sAAAAASUVORK5CYII=',
-            'base64',
-          ),
+          body: themeBackgrounds.get(theme.background.updatedAt) || defaultThemeBackground,
         })
         return
       }
@@ -335,6 +445,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       if (request.method() === 'PUT') {
         const patch = JSON.parse(request.postData() || '{}') as Partial<MockThemePayload>
         theme = { ...theme, ...patch, updatedAt: Date.now() }
+        syncPreset()
         await route.fulfill(jsonResponse(theme))
         return
       }
@@ -546,6 +657,22 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       return
     }
 
+    if (pathname === '/api/studio/workspace/directories') {
+      if (request.method() !== 'GET') {
+        const body = request.postDataJSON() as { path: string; favorite?: boolean }
+        const now = Date.now()
+        const entry = workspaceDirectories.get(body.path) || {
+          path: body.path, isFavorite: false, lastUsed: 0, useCount: 0, createdAt: now, updatedAt: now,
+        }
+        if (request.method() === 'PATCH') entry.isFavorite = Boolean(body.favorite)
+        else { entry.lastUsed = now; entry.useCount++ }
+        entry.updatedAt = now
+        workspaceDirectories.set(body.path, entry)
+      }
+      await route.fulfill(jsonResponse({ directories: [...workspaceDirectories.values()] }))
+      return
+    }
+
     if (pathname === '/api/studio/workspace/folders' && request.method() === 'GET') {
       await route.fulfill(jsonResponse({ base: '/workspace', current: '', folders: [] }))
       return
@@ -687,13 +814,23 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
           default_provider: defaultGroup?.provider || '',
           groups,
         })),
-        model_aliases: {},
+        model_aliases: options.modelAliases || {},
+        custom_models: options.customModels || {},
         model_visibility: {},
       }))
       return
     }
 
     if (pathname === '/api/hermes/provider-models') {
+      if (request.method() === 'GET') {
+        const provider = url.searchParams.get('provider') || ''
+        const group = (options.modelGroups ?? [TEST_MODEL_GROUP]).find(group => group.provider === provider)
+        await route.fulfill(jsonResponse({
+          provider, models: group?.available_models || group?.models || [],
+          visible_models: group?.models || [], model_aliases: options.modelAliases?.[provider] || {},
+        }))
+        return
+      }
       await route.fulfill(jsonResponse({ models: ['proxy-model-a', 'proxy-model-b'] }))
       return
     }
@@ -928,6 +1065,12 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       await route.fulfill(jsonResponse({ tools: [] }))
       return
     }
+    if (pathname === '/api/coding-agents/models' && request.method() === 'GET') {
+      const agentId = new URL(request.url()).searchParams.get('agent') || 'codex'
+      await route.fulfill(jsonResponse({ agents: [{ agentId, name: agentId, status: 'empty', source: 'cli', scope: 'available',
+        models: [], checkedAt: new Date().toISOString(), cached: false }] }))
+      return
+    }
 
     if (
       request.method() === 'GET' &&
@@ -971,7 +1114,26 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
   // Register this after the catch-all API route so Socket.IO's optimized
   // module is intercepted before Vite can proxy a connection to port 8648.
   await mockChatSocket(page)
+  await mockNativeWebSockets(page)
   return { requests, unexpectedRequests }
+}
+
+// HTTP routes do not intercept native WebSockets. Keep these channels local to
+// each browser test instead of reaching Vite's development backend on port 8648.
+export async function mockNativeWebSockets(page: Page) {
+  await page.routeWebSocket(url => url.pathname === '/api/hermes/kanban/events', () => {})
+  await page.routeWebSocket(url => url.pathname === '/api/hermes/terminal', socket => {
+    let count = 1
+    const created = (id: string, shell: string) => socket.send(JSON.stringify({ type: 'created', id, shell, pid: 100 + count }))
+    created('term-1', 'zsh')
+    socket.onMessage(data => {
+      const text = String(data)
+      if (!text.startsWith('{')) return
+      const message = JSON.parse(text)
+      if (message.type === 'create') created(`term-${++count}`, 'bash')
+      if (message.type === 'switch') socket.send(JSON.stringify({ type: 'switched', id: message.sessionId }))
+    })
+  })
 }
 
 export async function authenticate(page: Page, accessKey = TEST_ACCESS_KEY, profileName?: string) {

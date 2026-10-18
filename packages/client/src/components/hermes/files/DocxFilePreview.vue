@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NSpin } from 'naive-ui'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+
 import { assertBoundedOoxmlArchive } from '@/utils/hermes/ooxml-archive'
 
 const MAX_DOCX_DOM_NODES = 50_000

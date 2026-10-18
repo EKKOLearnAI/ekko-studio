@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AgentToolRegistry,
+  AgentRuntime,
   EkkoToolApprovalService,
   setupEkkoAgent,
   toolApprovalRequirement,
@@ -12,6 +13,8 @@ import {
   type AgentToolApprovalChoice,
   type AgentToolApprovalRequest,
   type EkkoAgentSetup,
+  type ModelClient,
+  type ModelRequest,
 } from '../../packages/ekko-agent/src'
 
 let baseDirectory = ''
@@ -33,6 +36,67 @@ function createService(): EkkoToolApprovalService {
 }
 
 describe('Ekko tool approvals', () => {
+  it.each(['once', 'session', 'always'] as const)('delivers %s approval to the next model request without breaking JSON output', async (choice) => {
+    const service = createService()
+    const requestToolApproval = vi.fn(async () => choice)
+    const registry = new AgentToolRegistry(service.authorize)
+    registry.register({
+      definition: { name: 'code_exec', parameters: { type: 'object', properties: {} } },
+      execute: async () => ({ ok: true, content: '{"output":"real result","exitCode":0}' }),
+    })
+    const create = vi.fn(async (request: ModelRequest) => {
+      const result = request.messages.find(message => message.role === 'tool')
+      if (!result) return { content: '', toolCalls: [{ id: 'call-1', name: 'code_exec', arguments: { language: 'python' } }] }
+      expect(JSON.parse(result.content)).toEqual({
+        output: 'real result', exitCode: 0,
+        authorization: { approved: true, scope: choice, key: 'code_exec:python' },
+      })
+      return { content: 'done' }
+    })
+    const modelClient = {
+      provider: 'test', requestStyle: 'custom-runtime',
+      capabilities: { streaming: false, tools: true, vision: false, jsonMode: false, systemPrompt: true },
+      create, stream: vi.fn(),
+    } satisfies ModelClient
+    const runtime = new AgentRuntime({ modelClient, tools: registry })
+    const result = await runtime.run({
+      messages: ['Read current state'],
+      toolContext: { sessionId: 'approval-test', requestToolApproval },
+    })
+    expect(result.output.content).toBe('done')
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(requestToolApproval).toHaveBeenCalledTimes(1)
+    if (choice === 'always') {
+      const reloaded = new EkkoToolApprovalService({ configPath: setup!.layout.configPath })
+      registry.setAuthorizer(reloaded.authorize)
+      const again = await registry.execute('code_exec', { language: 'python' })
+      expect(JSON.parse(again.content).authorization.scope).toBe('always')
+    }
+  })
+
+  it('retains approval on failed execution and multimodal results, but leaves safe reads untouched', async () => {
+    const registry = new AgentToolRegistry(async () => ({ approved: true, scope: 'always', key: 'code_exec:node' }))
+    const original = { ok: false, content: 'failure', error: 'failure', contentParts: [{ type: 'image' as const, data: 'aGVsbG8=', mimeType: 'image/png' }] }
+    registry.register({ definition: { name: 'code_exec', parameters: {} }, execute: async () => original })
+    const failed = await registry.execute('code_exec', {})
+    expect(failed.ok).toBe(false)
+    expect(failed.error).toBe('failure')
+    expect(failed.content).toContain('"scope":"always"')
+    expect(failed.contentParts?.[0]).toEqual(original.contentParts[0])
+    expect(failed.contentParts?.at(-1)).toEqual({ type: 'text', text: expect.stringContaining('"scope":"always"') })
+    registry.setAuthorizer(async () => ({ approved: true, scope: 'safe' }))
+    expect(await registry.execute('code_exec', {})).toBe(original)
+  })
+
+  it('does not lose a granted approval when the executor throws', async () => {
+    const registry = new AgentToolRegistry(async () => ({ approved: true, scope: 'once', key: 'code_exec:python' }))
+    registry.register({ definition: { name: 'code_exec', parameters: {} }, execute: async () => { throw new Error('execution failed') } })
+    const result = await registry.execute('code_exec', {})
+    expect(result.ok).toBe(false)
+    expect(result.error).toBe('execution failed')
+    expect(result.content).toContain('"scope":"once"')
+  })
+
   it('classifies arbitrary code and destructive terminal commands while leaving safe commands alone', () => {
     expect(toolApprovalRequirement('code_exec', {
       language: 'python',
@@ -172,6 +236,44 @@ describe('Ekko tool approvals', () => {
       requestToolApproval,
     })).resolves.toMatchObject({ approved: true, scope: 'always' })
     expect(requestToolApproval).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves existing language grants and safety settings when a replacement runtime reloads approvals', async () => {
+    createService()
+    const configPath = setup!.layout.configPath
+    const initialConfig = JSON.parse(await readFile(configPath, 'utf8'))
+    initialConfig.tools.approvals = {
+      enabled: true,
+      timeoutMs: 120000,
+      permanentAllow: ['code_exec:node'],
+    }
+    initialConfig.futureSetting = { preserved: true }
+    await writeFile(configPath, `${JSON.stringify(initialConfig, null, 2)}\n`)
+    const service = new EkkoToolApprovalService({ configPath })
+    await expect(service.authorize('code_exec', { language: 'python' }, {
+      requestToolApproval: vi.fn(async () => 'always'),
+    })).resolves.toMatchObject({ approved: true, scope: 'always' })
+    const expected = structuredClone(initialConfig)
+    expected.tools.approvals.permanentAllow = ['code_exec:node', 'code_exec:python']
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual(expected)
+
+    const reloaded = new EkkoToolApprovalService({ configPath })
+    const requestToolApproval = vi.fn(async (): Promise<AgentToolApprovalChoice> => 'deny')
+    const registry = new AgentToolRegistry(reloaded.authorize)
+    registry.register({
+      definition: { name: 'code_exec', parameters: {} },
+      execute: async () => ({ ok: true, content: '{"output":"fixture"}' }),
+    })
+    for (const language of ['node', 'python']) {
+      const result = await registry.execute('code_exec', { language }, { requestToolApproval })
+      expect(JSON.parse(result.content).authorization).toEqual({
+        approved: true, scope: 'always', key: `code_exec:${language}`,
+      })
+    }
+    expect(requestToolApproval).not.toHaveBeenCalled()
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual(expected)
+    await expect(reloaded.authorize('terminal_exec', { command: 'rm', args: ['fixture'] }))
+      .resolves.toMatchObject({ approved: false, scope: 'denied' })
   })
 
   it('fails closed when approval is denied or no interactive handler exists', async () => {

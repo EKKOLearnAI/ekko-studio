@@ -21,6 +21,7 @@ export interface ToolResultSanitizerOptions {
   maxTextBytes?: number
   maxTextArtifactBytes?: number
   now?: number
+  compactJson?: boolean
 }
 
 export async function sanitizeAgentToolResult(
@@ -31,7 +32,7 @@ export async function sanitizeAgentToolResult(
   await cleanupExpiredToolAssets(tempRoot, options.ttlMs ?? DEFAULT_TTL_MS, options.now ?? Date.now())
   const seen = new WeakSet<object>()
   const sanitize = (value: unknown, key = ''): Promise<unknown> => sanitizeValue(value, key, tempRoot, options, seen)
-  const content = String(await sanitizeStructuredText(result.content, sanitize))
+  const content = String(await sanitizeStructuredText(result.content, sanitize, options.compactJson))
   const error = result.error === undefined
     ? undefined
     : String(await sanitizeStructuredText(result.error, sanitize))
@@ -134,11 +135,12 @@ export async function cleanupExpiredToolAssets(
 async function sanitizeStructuredText(
   text: string,
   sanitize: (value: unknown, key?: string) => Promise<unknown>,
+  compact = false,
 ): Promise<string> {
   const trimmed = text.trim()
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
-      return JSON.stringify(await sanitize(JSON.parse(trimmed)), null, 2)
+      return JSON.stringify(await sanitize(JSON.parse(trimmed)), null, compact ? undefined : 2)
     } catch {
       // Fall through to embedded data-URL replacement.
     }

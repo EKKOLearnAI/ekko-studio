@@ -35,20 +35,20 @@ const modelsStore = useModelsStore()
   justify-content: center;
   height: 100%;
   color: $text-muted;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 
   .empty-icon {
     opacity: 0.3;
   }
 
   p {
-    font-size: 14px;
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   }
 }
 
 .providers-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
 }
 </style>

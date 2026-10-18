@@ -7,6 +7,7 @@ import { useSettingsStore } from '@/stores/hermes/settings'
 import { useToolTraceVisibility } from '@/composables/useToolTraceVisibility'
 import { extractClipboardFiles } from '@/utils/clipboard-files'
 import ImagePreviewOverlay from '@/components/hermes/chat/ImagePreviewOverlay.vue'
+import ScreenshotButton from '@/components/hermes/chat/ScreenshotButton.vue'
 import { buildMentionOptions, type MentionOption } from './mention-options'
 import type { GroupChatMention } from '@/api/studio/group-chat'
 import type { Attachment } from '@/stores/hermes/chat'
@@ -806,6 +807,7 @@ function openAttachmentPreview(attachment: Attachment) {
                         </template>
                         {{ t('chat.attachFiles') }}
                     </NTooltip>
+                    <ScreenshotButton v-if="props.allowAttachments" :key="props.roomId || 'new'" :mobile="isMobileViewport" :disabled="isSending" @capture="file => addFiles([file])" />
                     <NDropdown
                         v-if="props.showSettings"
                         trigger="click"
@@ -889,16 +891,16 @@ function openAttachmentPreview(attachment: Attachment) {
 @use "@/styles/variables" as *;
 
 .chat-input-area {
-    padding: 8px 20px 14px;
+    padding: calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border-top: 0;
-    background-color: $bg-main-surface;
+    background-color: var(--theme-content-bg, $bg-main-surface);
     flex-shrink: 0;
 }
 
 .input-top-bar {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: calc(7px * var(--spacing-scale, 1));
     min-width: 0;
     flex: 1;
     padding: 0;
@@ -907,8 +909,8 @@ function openAttachmentPreview(attachment: Attachment) {
 .auto-play-speech-switch {
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding-inline-start: 2px;
+    gap: calc(5px * var(--spacing-scale, 1));
+    padding-inline-start: calc(2px * var(--spacing-scale, 1));
     margin-inline-start: 0;
 
     .switch-label {
@@ -917,7 +919,7 @@ function openAttachmentPreview(attachment: Attachment) {
         justify-content: center;
         width: 16px;
         height: 16px;
-        color: #999999;
+        color: var(--text-muted);
     }
 }
 
@@ -925,7 +927,7 @@ function openAttachmentPreview(attachment: Attachment) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #999999;
+    color: var(--text-muted);
     width: 24px;
     min-width: 24px;
     height: 22px;
@@ -949,10 +951,10 @@ function openAttachmentPreview(attachment: Attachment) {
 .input-settings-button {
     color: $text-secondary;
     border-radius: 999px;
-    padding: 0 7px 0 6px;
+    padding: 0 calc(7px * var(--spacing-scale, 1)) 0 calc(6px * var(--spacing-scale, 1));
 
     :deep(.n-button__content) {
-        gap: 4px;
+        gap: calc(4px * var(--spacing-scale, 1));
     }
 
     :deep(.n-button__state-border),
@@ -971,8 +973,8 @@ function openAttachmentPreview(attachment: Attachment) {
     width: 100%;
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 0 0 10px;
+    gap: calc(8px * var(--spacing-scale, 1));
+    padding: 0 0 calc(10px * var(--spacing-scale, 1));
 }
 
 .attachment-preview {
@@ -980,7 +982,7 @@ function openAttachmentPreview(attachment: Attachment) {
     border-radius: $radius-sm;
     overflow: hidden;
     background-color: $bg-secondary;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
 
     &.image {
         width: 112px;
@@ -1016,14 +1018,14 @@ function openAttachmentPreview(attachment: Attachment) {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
-    padding: 8px 12px;
+    gap: calc(2px * var(--spacing-scale, 1));
+    padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
     min-width: 80px;
     max-width: 140px;
     color: $text-secondary;
 
     .file-name {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -1031,7 +1033,7 @@ function openAttachmentPreview(attachment: Attachment) {
     }
 
     .file-size {
-        font-size: 10px;
+        font-size: calc(var(--font-size-base, 14px) * 10 / 14);
         color: $text-muted;
     }
 }
@@ -1065,7 +1067,7 @@ function openAttachmentPreview(attachment: Attachment) {
 .typing-dots {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
+    gap: calc(2px * var(--spacing-scale, 1));
 
     span {
         display: block;
@@ -1088,11 +1090,11 @@ function openAttachmentPreview(attachment: Attachment) {
 .message-reference-preview {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
     min-width: 0;
     margin: 0 8px 8px;
-    padding: 4px 8px;
-    border-radius: 8px;
+    padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 8px);
     background: rgba(var(--accent-primary-rgb), 0.07);
     cursor: default;
 }
@@ -1102,8 +1104,8 @@ function openAttachmentPreview(attachment: Attachment) {
     min-width: 0;
     overflow: hidden;
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 24px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 24 / 14));
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -1117,7 +1119,7 @@ function openAttachmentPreview(attachment: Attachment) {
     height: 24px;
     padding: 0;
     border: 0;
-    border-radius: 7px;
+    border-radius: var(--radius-component, 7px);
     background: transparent;
     color: $text-muted;
     cursor: pointer;
@@ -1132,13 +1134,13 @@ function openAttachmentPreview(attachment: Attachment) {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     width: 100%;
     min-height: 150px;
-    background-color: $bg-card;
-    border: 1px solid var(--input-border-color);
-    border-radius: 18px;
-    padding: 14px 12px 9px;
+    background-color: var(--theme-card-bg, $bg-card);
+    border: var(--border-width, 1px) solid var(--input-border-color);
+    border-radius: $radius-md;
+    padding: calc(12px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     position: relative;
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
     transition: border-color $transition-fast, box-shadow $transition-fast;
@@ -1158,7 +1160,7 @@ function openAttachmentPreview(attachment: Attachment) {
     }
 
     .dark & {
-        background-color: #333333;
+        background-color: var(--theme-content-bg, $bg-main-surface);
         box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32);
     }
 }
@@ -1174,7 +1176,7 @@ function openAttachmentPreview(attachment: Attachment) {
 
     &:hover {
         background: rgba($accent-primary, 0.15);
-        border-radius: 4px;
+        border-radius: var(--radius-component, 4px);
     }
 }
 
@@ -1187,8 +1189,8 @@ function openAttachmentPreview(attachment: Attachment) {
     outline: none;
     color: $text-primary;
     font-family: $font-ui;
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
+    line-height: var(--line-height, 1.5);
     resize: none;
     max-height: 400px;
     min-height: 24px;
@@ -1196,7 +1198,7 @@ function openAttachmentPreview(attachment: Attachment) {
     overflow-y: auto;
 
     @media (max-width: 768px) {
-        font-size: 16px;
+        font-size: calc(var(--font-size-base, 14px) * 16 / 14);
     }
 
     &::placeholder {
@@ -1210,7 +1212,7 @@ function openAttachmentPreview(attachment: Attachment) {
 
 .input-actions {
     display: flex;
-    gap: 7px;
+    gap: calc(7px * var(--spacing-scale, 1));
     flex-shrink: 0;
     align-items: center;
 }
@@ -1219,7 +1221,7 @@ function openAttachmentPreview(attachment: Attachment) {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: calc(12px * var(--spacing-scale, 1));
     min-height: 32px;
 }
 
@@ -1271,11 +1273,11 @@ function openAttachmentPreview(attachment: Attachment) {
 
 @media (max-width: 768px) {
     .chat-input-area {
-        padding: 8px 12px 12px;
+        padding: 6px 8px calc(12px + env(safe-area-inset-bottom, 0px));
     }
 
     .input-top-bar {
-        gap: 5px;
+        gap: calc(5px * var(--spacing-scale, 1));
     }
 
     .auto-play-speech-switch {
@@ -1287,24 +1289,24 @@ function openAttachmentPreview(attachment: Attachment) {
 
 .mention-dropdown {
     position: fixed;
-    background: $bg-card;
-    border: 1px solid $border-color;
-    border-radius: 8px;
+    background: var(--theme-card-bg, $bg-card);
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 8px);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     min-width: 200px;
     max-height: 240px;
     overflow-y: auto;
     z-index: 9999;
-    padding: 4px;
+    padding: calc(4px * var(--spacing-scale, 1));
 }
 
 .mention-dropdown-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 8px 12px;
-    border-radius: 6px;
+    gap: calc(12px * var(--spacing-scale, 1));
+    padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 6px);
     cursor: pointer;
     transition: background 0.1s;
 
@@ -1315,13 +1317,13 @@ function openAttachmentPreview(attachment: Attachment) {
 
     .mention-name {
         color: $text-primary;
-        font-size: 14px;
+        font-size: calc(var(--font-size-base, 14px) * 14 / 14);
         font-weight: 500;
     }
 
     .mention-profile {
         color: $text-muted;
-        font-size: 12px;
+        font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     }
 
     &.mention-all-option .mention-name {
@@ -1352,15 +1354,21 @@ function openAttachmentPreview(attachment: Attachment) {
 
 @media (max-width: 768px) {
     .input-wrapper {
-        min-height: 118px;
+        min-height: 96px;
+        gap: calc(6px * var(--spacing-scale, 1));
+        padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+    }
+
+    .input-textarea {
+        flex: 1 1 auto;
     }
 
     .input-settings-button {
         min-width: 36px;
-        padding: 0 4px 0 6px;
+        padding: 0 calc(4px * var(--spacing-scale, 1)) 0 calc(6px * var(--spacing-scale, 1));
 
         :deep(.n-button__content) {
-            gap: 2px;
+            gap: calc(2px * var(--spacing-scale, 1));
         }
 
         :deep(.n-button__icon) {
@@ -1373,8 +1381,8 @@ function openAttachmentPreview(attachment: Attachment) {
     }
 
     .input-textarea::placeholder {
-        font-size: 13px;
-        line-height: 1.35;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+        line-height: var(--line-height, 1.35);
     }
 }
 </style>

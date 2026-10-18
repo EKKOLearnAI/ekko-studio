@@ -4,6 +4,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, nextTick } from 'vue'
 
+vi.mock('naive-ui', async importOriginal => ({
+  ...await importOriginal<typeof import('naive-ui')>(),
+  useMessage: () => ({ success: vi.fn(), error: vi.fn() }),
+}))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,
@@ -96,6 +101,26 @@ describe('MessageList live reasoning', () => {
     vi.useRealTimers()
   })
 
+  it('updates the thinking logo with the active agent and preserves the Ekko animation', async () => {
+    const wrapper = mountMessageList([])
+    const chatStore = useChatStore()
+    for (const [agent, src] of [
+      ['hermes', '/coding-agents/hermes.png'],
+      ['codex', '/coding-agents/codex-openai.png'],
+      ['claude-code', '/coding-agents/claude-code.svg'],
+      ['ekko-agent', 'thinking.gif'],
+      ['pi', '/coding-agents/pi.svg'],
+    ]) {
+      chatStore.activeSession = { ...makeSession([]), agent }
+      await nextTick()
+      expect(wrapper.get('.thinking-avatar').attributes('src')).toContain(src)
+      expect(wrapper.get('.thinking-avatar').classes()).toContain(
+        agent === 'ekko-agent' ? 'thinking-avatar--animated' : 'thinking-avatar--logo',
+      )
+    }
+    wrapper.unmount()
+  })
+
   it('renders live reasoning between the thinking animation and tool area instead of flashing a message bubble', async () => {
     const wrapper = mountMessageList([
       { id: 'user-1', role: 'user', content: 'Think about this', timestamp: 1 },
@@ -160,6 +185,28 @@ describe('MessageList live reasoning', () => {
       source: 'coding_agent',
       agent: 'codex',
       codingAgentId: 'codex',
+    }
+    await nextTick()
+    expect(wrapper.get('.queue-insert').attributes('title')).toBe('chat.insertQueuedMessage')
+    await wrapper.get('.queue-insert').trigger('click')
+    expect(insertSpy).toHaveBeenLastCalledWith('session-1', 'queue-1')
+
+    chatStore.activeSession = {
+      ...session,
+      source: 'builtin_agent',
+      agent: 'ekko-agent',
+      codingAgentId: 'ekko-agent',
+    }
+    await nextTick()
+    expect(wrapper.get('.queue-insert').attributes('title')).toBe('chat.insertQueuedMessage')
+    await wrapper.get('.queue-insert').trigger('click')
+    expect(insertSpy).toHaveBeenLastCalledWith('session-1', 'queue-1')
+
+    chatStore.activeSession = {
+      ...session,
+      source: 'coding_agent',
+      agent: 'cursor',
+      codingAgentId: 'cursor',
     }
     await nextTick()
     expect(wrapper.get('.queue-insert').attributes('title')).toBe('chat.insertQueuedMessage')

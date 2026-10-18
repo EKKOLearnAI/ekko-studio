@@ -122,12 +122,12 @@ function fileBadgeClass(path: string): string {
 
 .tool-change-card {
   background: $bg-secondary;
-  border: 1px solid $border-light;
-  border-radius: 10px;
+  border: var(--border-width, 1px) solid $border-light;
+  border-radius: var(--radius-component, 10px);
   color: $text-primary;
   display: grid;
-  gap: 10px;
-  padding: 12px 14px;
+  gap: calc(10px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
   width: 100%;
 
   :global(.dark) & {
@@ -144,7 +144,7 @@ function fileBadgeClass(path: string): string {
   color: inherit;
   cursor: pointer;
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   justify-content: flex-start;
   min-width: 0;
   padding: 0;
@@ -164,26 +164,26 @@ function fileBadgeClass(path: string): string {
 
 .tool-change-files {
   display: grid;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .tool-change-card-title {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 700;
 }
 
 .tool-change-card-file-count {
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .tool-change-card-stats,
 .tool-change-file-stats {
   display: inline-flex;
   flex-shrink: 0;
-  font-family: $font-code;
-  font-size: 12px;
-  gap: 6px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  gap: calc(6px * var(--spacing-scale, 1));
 
   .additions { color: #00e676; }
   .deletions { color: #ff3b58; }
@@ -196,10 +196,10 @@ function fileBadgeClass(path: string): string {
   color: $text-primary;
   cursor: pointer;
   display: flex;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   justify-content: space-between;
   min-width: 0;
-  padding: 4px 0;
+  padding: calc(4px * var(--spacing-scale, 1)) 0;
   text-align: start;
 
   &:hover,
@@ -224,21 +224,21 @@ function fileBadgeClass(path: string): string {
 .tool-change-file-main {
   align-items: center;
   display: inline-flex;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .tool-change-file-badge {
   align-items: center;
-  border-radius: 2px;
+  border-radius: var(--radius-component, 2px);
   display: inline-flex;
   flex: 0 0 13px;
-  font-family: $font-code;
+  font-family: var(--font-code, $font-code);
   font-size: 7px;
   font-weight: 700;
   height: 13px;
   justify-content: center;
-  line-height: 1;
+  line-height: var(--line-height, 1);
   overflow: hidden;
   text-transform: uppercase;
   width: 13px;
@@ -256,7 +256,7 @@ function fileBadgeClass(path: string): string {
 }
 
 .tool-change-file-name {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
   min-width: 0;
   overflow: hidden;

@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NAlert, NEmpty, NInput, NSelect, NTag } from 'naive-ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NEmpty, NInput, NSelect, NSpin, NTag } from 'naive-ui'
+
 import { readNativeDshPlugins, type DshNativePluginInventory } from '@/api/coding-agents/dsh'
 import DshWebPackagesPanel from './DshWebPackagesPanel.vue'
 const { t } = useI18n()
@@ -10,6 +12,7 @@ function packagesChanged() { emit('changed'); void refresh() }
 const inventory = ref<DshNativePluginInventory | null>(null)
 const loading = ref(true)
 const failed = ref(false)
+const failureDetail = ref('')
 const selected = ref<string | null>(null)
 const search = ref('')
 const status = ref<string | null>(null)
@@ -34,23 +37,28 @@ let sequence = 0
 let disposed = false
 async function refresh() {
   const version = ++sequence
-  loading.value = true; failed.value = false
+  loading.value = true; failed.value = false; failureDetail.value = ''
   try {
     const result = await readNativeDshPlugins()
     if (disposed || version !== sequence) return
     inventory.value = result
     if (!result.presets.some(item => item.id === selected.value)) selected.value = result.presets.find(item => item.isDefault)?.id || result.presets[0]?.id || null
-  } catch { if (!disposed && version === sequence) failed.value = true }
+  } catch (error) { if (!disposed && version === sequence) {
+    failed.value = true
+    failureDetail.value = error instanceof Error ? [Reflect.get(error, 'code'), error.message].filter(Boolean).join(': ') : ''
+  } }
   finally { if (!disposed && version === sequence) loading.value = false }
 }
 onMounted(refresh)
 onUnmounted(() => { disposed = true })
 defineExpose({ refresh })
+
+usePageLoadingTask(() => loading.value)
 </script>
 <template>
   <div class="native-plugins" data-testid="dsh-native-plugins">
     <div v-if="loading" class="plugins-loading-state"><NSpin /></div>
-    <NAlert v-else-if="failed" type="error" class="plugins-notice">{{ t('dshPlugins.nativeFailed') }}</NAlert>
+    <NAlert v-else-if="failed" type="error" class="plugins-notice">{{ t('dshPlugins.nativeFailed') }}<div v-if="failureDetail">{{ failureDetail }}</div></NAlert>
     <template v-else-if="inventory">
       <DshWebPackagesPanel v-if="inventory.web" :web="inventory.web" @changed="packagesChanged" />
       <h3>{{ t('dshPlugins.presetEntries') }}</h3>

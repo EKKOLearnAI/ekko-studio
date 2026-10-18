@@ -19,7 +19,7 @@ describe('desktop chat window', () => {
     expect(openChatWindowSource).toContain('height: 760')
     expect(openChatWindowSource).toContain("titleBarStyle: 'hiddenInset'")
     expect(openChatWindowSource).toContain('titleBarOverlay: { height: 46 }')
-    expect(openChatWindowSource).toContain("additionalArguments: ['--hermes-window-kind=chat']")
+    expect(openChatWindowSource).toContain("additionalArguments: desktopPreloadArguments('chat', !!activeRemoteServerUrl)")
     expect(mainSource).toContain("ipcMain.handle('hermes-desktop:open-chat-window'")
     expect(preloadSource).toContain("ipcRenderer.invoke('hermes-desktop:open-chat-window'")
     expect(routerSource).toContain("path: '/desktop-chat/:sessionId'")

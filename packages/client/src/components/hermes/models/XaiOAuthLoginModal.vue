@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
-import { NModal, NButton, NSpin, useMessage } from 'naive-ui'
+import { NSpin, NModal, NButton, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { startXaiLogin, pollXaiLogin } from '@/api/hermes/xai-auth'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -145,24 +145,24 @@ startLogin()
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px 0;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
 }
 
 .xai-login__state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   min-height: 120px;
   justify-content: center;
   width: 100%;
 }
 
 .xai-login__hint {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   color: var(--n-text-color, inherit);
   text-align: center;
-  line-height: 1.6;
+  line-height: var(--line-height, 1.6);
 }
 
 .xai-login__state--success {

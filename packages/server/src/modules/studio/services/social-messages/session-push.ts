@@ -23,7 +23,7 @@ import { listTelegramRecipients } from './telegram-runtime'
 import { listWeixinRecipients } from './weixin-runtime'
 
 export type SessionPushEvent = 'run.completed' | 'approval.requested' | 'clarify.requested'
-export type SessionPushAgent = 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
+export type SessionPushAgent = 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
 
 interface SessionPushDependencies {
   readSession: (sessionId: string) => HermesSessionRow | null
@@ -53,6 +53,8 @@ const AGENT_DISPLAY_NAMES: Record<string, string> = {
   pi: 'Pi',
   grok: 'Grok',
   opencode: 'OpenCode',
+  cursor: 'Cursor',
+  antigravity: 'Antigravity',
 }
 
 const SESSION_PUSH_MESSAGES: Record<SocialMessageBindingLocale, Record<SessionPushEvent, string>> = {

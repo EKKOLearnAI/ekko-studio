@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, onUnmounted, ref, unref, watch } from 'vue'
 import QRCode from 'qrcode'
 import {
+  NSpin,
   NAlert,
   NButton,
   NCard,
@@ -9,7 +12,6 @@ import {
   NFormItem,
   NInput,
   NSelect,
-  NSpin,
   NTag,
   useMessage,
 } from 'naive-ui'
@@ -699,14 +701,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="social-messages-view" :class="{ 'social-messages-view--embedded': embedded }">
+  <PageLoading :show="loading" class="social-messages-view" :class="{ 'social-messages-view--embedded': embedded }">
+    <PageHeader>
     <header v-if="!embedded" class="page-header">
       <h1>{{ t('socialMessages.title') }}</h1>
       <p>{{ t('socialMessages.description') }}</p>
     </header>
+    </PageHeader>
 
     <main class="push-content">
-      <NSpin :show="loading">
+      <div>
         <div v-if="loadError" class="load-error">
           <NAlert type="error" class="push-alert">{{ loadError }}</NAlert>
           <NButton size="small" @click="loadPushState">{{ t('common.retry') }}</NButton>
@@ -990,16 +994,16 @@ onUnmounted(() => {
             </NAlert>
           </NForm>
         </NCard>
-      </NSpin>
+      </div>
     </main>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .social-messages-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -1010,7 +1014,7 @@ onUnmounted(() => {
 }
 
 .page-header {
-  padding: 24px 24px 0;
+  padding: calc(24px * var(--spacing-scale, 1)) calc(24px * var(--spacing-scale, 1)) 0;
 
   h1,
   p {
@@ -1026,16 +1030,16 @@ onUnmounted(() => {
 .push-content {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 24px;
+  padding: calc(24px * var(--spacing-scale, 1));
   overflow-y: auto;
 }
 
 .push-card {
   width: min(100%, 620px);
   margin: 0 auto;
-  border: 1px solid $border-color;
-  border-radius: 16px;
-  background: $bg-card;
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 16px);
+  background: var(--theme-card-bg, $bg-card);
 }
 
 .social-messages-language {
@@ -1048,7 +1052,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .weixin-panel,
@@ -1061,14 +1065,14 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 
   img {
     display: block;
     width: min(280px, 100%);
     height: auto;
-    padding: 8px;
-    border-radius: 12px;
+    padding: calc(8px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 12px);
     background: #fff;
   }
 }
@@ -1088,13 +1092,13 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .weixin-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
@@ -1104,10 +1108,10 @@ onUnmounted(() => {
   min-height: 28px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, 1.45);
 }
 
 .weixin-status-dot {
@@ -1138,7 +1142,7 @@ onUnmounted(() => {
   margin-inline-start: auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   flex: 0 0 auto;
 }
 
@@ -1152,7 +1156,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .configured-row {
@@ -1161,7 +1165,7 @@ onUnmounted(() => {
 
 .composer-footer {
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .delivery-result {
@@ -1170,11 +1174,11 @@ onUnmounted(() => {
 
 @media (max-width: $breakpoint-mobile) {
   .push-content {
-    padding: 12px;
+    padding: calc(12px * var(--spacing-scale, 1));
   }
 
   .page-header {
-    padding: 16px 12px 0;
+    padding: calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) 0;
   }
 
   .composer-footer,

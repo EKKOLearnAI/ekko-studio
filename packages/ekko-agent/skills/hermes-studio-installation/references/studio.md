@@ -80,8 +80,8 @@ Do not use Desktop Runtime migration inside the container. Docker owns the runti
 Requirements: Git, Node.js 23 or newer, and npm.
 
 ```bash
-git clone https://github.com/EKKOLearnAI/hermes-studio.git
-cd hermes-studio
+git clone https://github.com/EKKOLearnAI/ekko-studio.git
+cd ekko-studio
 npm install
 npm run dev
 ```

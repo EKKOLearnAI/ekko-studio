@@ -7,6 +7,7 @@ import type {
 } from './types'
 import { UpdatePlanTool } from './plan'
 import { createBrowserTools } from './browser'
+import { ComputerUseTool, type ComputerUseToolOptions } from './computer-use'
 import { createClarificationToolProvider } from './clarify'
 import { CodeExecTool, type CodeExecToolOptions } from './code-exec'
 import { createDelegationTools } from './delegation'
@@ -99,7 +100,36 @@ export class AgentToolRegistry {
         },
       }
     }
-    return tool.execute(input, context)
+    if (!authorization || authorization.scope === 'safe') return tool.execute(input, context)
+
+    let result: AgentToolResult
+    try {
+      result = await tool.execute(input, context)
+    } catch (error) {
+      if (context?.signal?.aborted) throw error
+      const message = error instanceof Error ? error.message : String(error)
+      result = { ok: false, content: message, error: message }
+    }
+    // Approval events reach the UI, not the model. Carry the actual decision in
+    // the persisted tool content too, even when execution after approval fails.
+    const status = { approved: true, scope: authorization.scope, key: authorization.key }
+    const notice = `Tool authorization at execution: ${JSON.stringify(status)}`
+    let content = `${notice}\n${result.content}`
+    try {
+      const payload = JSON.parse(result.content)
+      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        // Keep JSON results parseable; never trust a tool-supplied approval field.
+        const { authorization: _ignored, ...output } = payload
+        content = JSON.stringify({ authorization: status, ...output })
+      }
+    } catch { /* Plain-text tool results retain their original text. */ }
+    return {
+      ...result,
+      content,
+      ...(result.contentParts?.length ? {
+        contentParts: [...result.contentParts, { type: 'text' as const, text: notice }],
+      } : {}),
+    }
   }
 }
 
@@ -111,6 +141,7 @@ export interface DefaultToolRegistryOptions {
   executionTimeoutMs?: number
   codeExec?: (CodeExecToolOptions & { enabled?: boolean }) | false
   recovery?: EkkoRecoveryService
+  computerUse?: ComputerUseToolOptions
 }
 
 export function createDefaultToolRegistry(options: DefaultToolRegistryOptions = {}): AgentToolRegistry {
@@ -121,6 +152,7 @@ export function createDefaultToolRegistry(options: DefaultToolRegistryOptions = 
     ...createImageTools(),
     ...createTerminalTools({ timeoutMs: options.executionTimeoutMs }),
     ...createBrowserTools(),
+    ...(options.computerUse?.enabled === false ? [] : [new ComputerUseTool(options.computerUse)]),
     ...createDelegationTools(),
     ...(options.recovery ? createRecoveryTools(options.recovery) : []),
     ...createSkillTools(options.skillDirectory, {

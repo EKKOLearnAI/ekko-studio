@@ -1,3 +1,4 @@
+import { getCodingAgentManagedMcpServerConfigs, type CodingAgentId } from '../modules/coding-agents/services'
 import './agent-profile-adapter'
 import { AgentBridgeClient } from '../modules/hermes/services/bridge/client'
 import { getAgentBridgeManager } from '../modules/hermes/services/bridge/manager'
@@ -26,11 +27,13 @@ import {
   createModelClient,
   DEFAULT_MODEL_REQUEST_TIMEOUT_MS,
   normalizeAgentReasoning,
+  projectBrowserHistory,
   resolveModelProviderConfigs,
   serializeAgentReasoningDetails,
 } from '../../../ekko-agent/src'
 
 configureChatAgentRuntime({
+  projectBrowserHistory,
   createPrimaryAgentBridge: options => new AgentBridgeClient(options),
   getPrimaryAgentBridgeManager: getAgentBridgeManager,
   redactPrimaryAgentBridgeError: redactAgentBridgeError,
@@ -50,6 +53,7 @@ configureChatAgentRuntime({
   serializeEkkoAgentReasoningDetails: serializeAgentReasoningDetails,
   waitForEkkoToolApproval,
   waitForEkkoClarification,
+  getCodingAgentMcpServers: (id, profile) => getCodingAgentManagedMcpServerConfigs(id as CodingAgentId, profile),
   resolveEkkoMcpServers,
   resolveEkkoProviderRuntimeConfig,
   createEkkoAuthorizedProviderFetch,

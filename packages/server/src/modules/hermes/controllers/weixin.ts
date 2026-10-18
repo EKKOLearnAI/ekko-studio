@@ -12,7 +12,7 @@ function requestedProfile(ctx: any): string {
 
 async function gatewayAutoRestartAllowed(): Promise<boolean> {
   if (gatewayAutostartDisabledByEnv()) return false
-  return normalizeGatewayAutoStartConfig((await readAppConfig()).gatewayAutoStart).enabled !== false
+  return normalizeGatewayAutoStartConfig((await readAppConfig()).gatewayAutoStart).enabled === true
 }
 
 export async function getQrcode(ctx: any) {

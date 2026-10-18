@@ -51,6 +51,15 @@ jobs:
               packages/desktop/release/*.exe
               packages/desktop/release/*.exe.blockmap
               packages/desktop/release/latest*.yml
+          - label: Windows arm64
+            runner: windows-11-arm
+            target_os: win32
+            target_arch: arm64
+            electron_target: "--win nsis --arm64"
+            artifact_files: |
+              packages/desktop/release/*-arm64.exe
+              packages/desktop/release/*-arm64.exe.blockmap
+              packages/desktop/release/latest-arm64.yml
           - label: Linux x64
             runner: ubuntu-22.04
             target_os: linux
@@ -98,8 +107,16 @@ jobs:
       - name: Verify image processing runtime
         run: npm run verify:sharp-runtime
 
+      - name: Build Windows ARM64 speech runtime
+        if: matrix.target_os == 'win32' && matrix.target_arch == 'arm64'
+        run: node packages/desktop/scripts/build-windows-arm64-speech.mjs
+
       - name: Install desktop dependencies
         run: npm ci --prefix packages/desktop --no-audit --no-fund
+
+      - name: Verify desktop updater download lifecycle
+        # This workflow can check out an older release tag without this script.
+        run: npm --prefix packages/desktop run test:updater --if-present
 
       - name: Write runtime release metadata
         shell: bash

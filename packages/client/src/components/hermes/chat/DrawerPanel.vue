@@ -50,7 +50,7 @@ function handleClose() {
             {{ t('drawer.terminal') }}
           </button>
         </div>
-        <button class="close-button" @click="handleClose">
+        <button class="close-button" type="button" :aria-label="t('common.close')" @click="handleClose">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
@@ -86,11 +86,13 @@ function handleClose() {
 .drawer-panel {
   position: fixed;
   top: 0;
-  right: min(-1180px, -88vw);
-  width: min(1180px, 88vw);
+  right: calc(0px - var(--studio-drawer-width));
+  width: var(--studio-drawer-width);
   height: calc(100 * var(--vh));
   max-height: calc(100 * var(--vh));
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
+  border-radius: 5px 0 0 5px;
+  overflow: hidden;
   box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
@@ -115,23 +117,23 @@ function handleClose() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   flex-shrink: 0;
 }
 
 .drawer-tabs {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .tab-button {
-  padding: 8px 16px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   border: none;
   background: transparent;
   color: $text-secondary;
   cursor: pointer;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 500;
   border-bottom: 2px solid transparent;
   transition: all 0.2s;
@@ -151,9 +153,9 @@ function handleClose() {
 }
 
 .close-button {
-  padding: 8px;
+  padding: calc(8px * var(--spacing-scale, 1));
   border: none;
-  background: rgba(var(--accent-primary-rgb), 0.08);
+  background: transparent;
   color: $text-secondary;
   cursor: pointer;
   border-radius: $radius-sm;
@@ -165,7 +167,11 @@ function handleClose() {
 
   &:hover {
     color: $text-primary;
-    background: rgba(var(--accent-primary-rgb), 0.15);
+  }
+
+  &:focus-visible {
+    outline: 2px solid $accent-primary;
+    outline-offset: 2px;
   }
 }
 

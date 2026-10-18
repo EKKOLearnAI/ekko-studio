@@ -20,7 +20,9 @@ const { mockReadFile, mockReadConfigYaml, mockReadConfigYamlForProfile, mockFetc
 }))
 
 vi.mock('fs/promises', () => ({
-  readFile: mockReadFile,
+  readFile: (...args: any[]) => String(args[0]).endsWith('/auth.json')
+    ? Promise.resolve(mockExistsSync(args[0]) ? mockReadFileSync(args[0], 'utf-8') : '{}')
+    : mockReadFile(...args),
 }))
 
 vi.mock('fs', () => ({
@@ -60,7 +62,8 @@ vi.mock('../../packages/server/src/modules/studio/public/provider-catalog', () =
   fetchProviderModels: mockFetchProviderModels,
 }))
 
-vi.mock('../../packages/server/src/modules/studio/contracts/providers', () => ({
+vi.mock('../../packages/server/src/modules/studio/contracts/providers', async importOriginal => ({
+  ...await importOriginal<typeof import('../../packages/server/src/modules/studio/contracts/providers')>(),
   buildProviderModelMap: () => ({
     deepseek: ['deepseek-chat', 'deepseek-reasoner'],
     'xai-oauth': ['grok-4.3', 'grok-4.20-0309-reasoning'],
@@ -77,6 +80,7 @@ vi.mock('../../packages/server/src/modules/studio/contracts/providers', () => ({
     },
     {
       value: 'deepseek',
+      catalog_api_mode: 'chat_completions',
       label: 'DeepSeek',
       base_url: 'https://api.deepseek.com/v1',
       models: ['deepseek-chat', 'deepseek-reasoner'],
@@ -113,6 +117,7 @@ vi.mock('../../packages/server/src/modules/studio/contracts/providers', () => ({
     },
     {
       value: 'copilot',
+      catalog_api_mode: 'per_model',
       label: 'GitHub Copilot',
       base_url: 'https://api.githubcopilot.com',
       models: ['gpt-5.5'],
@@ -150,6 +155,18 @@ vi.mock('../../packages/server/src/modules/studio/public/provider-context', () =
   upsertModelContextRecord: vi.fn(),
 }))
 
+const mockInvalidateProviderRuntime = vi.hoisted(() => vi.fn())
+vi.mock('../../packages/server/src/modules/studio/public/provider-runtime', () => ({ invalidateProviderRuntime: mockInvalidateProviderRuntime }))
+
+const mockResolveCatalogModel = vi.hoisted(() => vi.fn())
+vi.mock('../../packages/server/src/modules/studio/public/model-catalog', async importOriginal => ({
+  ...await importOriginal<typeof import('../../packages/server/src/modules/studio/public/model-catalog')>(),
+  getModelCatalog: () => ({}),
+  resolveCatalogModel: mockResolveCatalogModel,
+}))
+
+import { upsertModelContextRecord } from '../../packages/server/src/modules/studio/public/provider-context'
+
 import * as ctrl from '../../packages/server/src/modules/hermes/controllers/models'
 
 function makeCtx(body: Record<string, unknown> = {}): any {
@@ -175,6 +192,9 @@ function sourceAwareProviderModels(
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockResolveCatalogModel.mockReset().mockImplementation((_catalog, query) => ({
+    model: { id: query.model, reasoning: true, reasoning_options: [{ type: 'effort', values: ['low', 'high'] }] },
+  }))
   mockReadFile.mockResolvedValue('DEEPSEEK_API_KEY=sk-test\n')
   mockFetchProviderModels.mockResolvedValue([])
   mockReadConfigYaml.mockResolvedValue({ model: { default: 'deepseek-chat', provider: 'deepseek' } })
@@ -194,6 +214,17 @@ beforeEach(() => {
 })
 
 describe('models controller — model visibility', () => {
+  it('refreshes the matching provider runtimes after saving a manual model window', async () => {
+    vi.mocked(upsertModelContextRecord).mockReturnValue({ available: true,
+      row: { profile: 'research', provider: 'test', model: 'test-model', context_limit: 80000 } } as any)
+    const ctx = makeCtx({ provider: 'test', model: 'test-model', context_limit: 80000 })
+    ctx.state = { profile: { name: 'research' } }
+    await ctrl.updateModelContext(ctx)
+    expect(ctx.body.success).toBe(true)
+    expect(upsertModelContextRecord).toHaveBeenCalledWith('research', 'test', 'test-model', 80000)
+    expect(mockInvalidateProviderRuntime).toHaveBeenCalledWith('research', 'test')
+  })
+
   it('filters available models per provider without changing canonical IDs', async () => {
     mockReadAppConfig.mockResolvedValue({
       modelVisibility: {
@@ -209,13 +240,144 @@ describe('models controller — model visibility', () => {
     expect(ctx.body.groups[0]).toMatchObject({
       provider: 'deepseek',
       models: ['deepseek-reasoner'],
-      available_models: ['deepseek-chat', 'deepseek-reasoner'],
+      model_count: 2,
     })
     expect(ctx.body.default).toBe('deepseek-reasoner')
     expect(ctx.body.default_provider).toBe('deepseek')
     expect(ctx.body.model_visibility).toEqual({
       deepseek: { mode: 'include', models: ['deepseek-reasoner'] },
     })
+  })
+
+  it.each(['aggregate', 'profile', 'runtime'])('scans only managed visible models in a large %s catalog', async surface => {
+    const models = Array.from({ length: 3000 }, (_, index) => `model-${index}`)
+    const visible = ['model-2900', 'model-2999']
+    mockListProfileNamesFromDisk.mockReturnValue(['default', 'research'])
+    mockReadConfigYamlForProfile.mockResolvedValue({ model: { default: 'model-2999', provider: 'deepseek' } })
+    mockResolveProviderCatalogModels.mockImplementation((_cache, provider, _url, defaults) => provider === 'deepseek' ? models : defaults)
+    mockReadAppConfig.mockResolvedValue({
+      modelVisibility: { deepseek: { mode: 'include', models: visible } },
+      modelAliases: { deepseek: { 'model-2999': 'My model' } },
+    })
+    const ctx = makeCtx()
+    if (surface === 'profile') ctx.query.profile = 'research'
+    if (surface !== 'runtime') await ctrl.getAvailable(ctx)
+    const groups = surface === 'runtime'
+      ? await ctrl.getAvailableModelGroupsForProfile('research')
+      : ctx.body.groups
+
+    const scans = mockResolveCatalogModel.mock.calls.filter(([, query]) => query.provider === 'deepseek')
+    expect(scans.map(([, query]) => query.model)).toEqual(visible)
+    expect(groups[0].models).toEqual(visible)
+    if (surface === 'runtime') expect(groups[0].available_models).toEqual(models)
+    else {
+      expect(groups[0].available_models).toBeUndefined()
+      expect(groups[0].model_count).toBe(3000)
+    }
+    expect(Object.keys(groups[0].model_meta).sort()).toEqual(visible)
+    expect(groups[0].model_meta['model-2999'].reasoning_efforts).toEqual(['low', 'high'])
+    if (surface !== 'runtime') {
+      expect(ctx.body.default).toBe('model-2999')
+      expect(groups[0].model_meta['model-2999'].alias).toBe('My model')
+      const preset = ctx.body.allProviders.find((entry: any) => entry.provider === 'deepseek')
+      expect(preset.models).toEqual([])
+      expect(preset.model_count).toBe(3000)
+      expect(preset.model_meta).toBeUndefined()
+      for (const profile of ctx.body.profiles) expect(profile.groups[0].model_meta['model-2999'].reasoning).toBe(true)
+    }
+  })
+
+  it.each(['all', 'include', 'stale'])('resolves all visible models across profiles and allProviders with an %s visibility rule', async mode => {
+    const models = Array.from({ length: 3000 }, (_, index) => `model-${index}`)
+    const selected = mode === 'include' ? models.slice(2800) : models
+    mockListProfileNamesFromDisk.mockReturnValue(['default', 'research'])
+    mockReadConfigYamlForProfile.mockResolvedValue({ model: { default: 'model-2999', provider: 'deepseek' } })
+    mockResolveProviderCatalogModels.mockImplementation((_cache, provider, _url, defaults) => provider === 'deepseek' ? models : defaults)
+    mockReadAppConfig.mockResolvedValue({
+      modelVisibility: {
+        deepseek: mode === 'all' ? { mode: 'all', models: [] } : { mode: 'include', models: mode === 'stale' ? ['missing'] : selected },
+      },
+    })
+    const ctx = makeCtx()
+    await ctrl.getAvailable(ctx)
+
+    const scans = mockResolveCatalogModel.mock.calls.filter(([, query]) => query.provider === 'deepseek')
+    expect(scans.map(([, query]) => query.model)).toEqual(selected)
+    expect(ctx.body.groups[0].models).toEqual(selected)
+    expect(ctx.body.groups[0].available_models).toBeUndefined()
+    expect(ctx.body.groups[0].model_count).toBe(3000)
+    expect(Object.keys(ctx.body.groups[0].model_meta)).toHaveLength(selected.length)
+    expect(ctx.body.allProviders.find((entry: any) => entry.provider === 'deepseek').models).toEqual([])
+  })
+
+  it.each(['aggregate', 'profile'])('keeps the %s response small when thousands of hidden models have aliases and custom IDs', async surface => {
+    const models = Array.from({ length: 3000 }, (_, index) => `model-${index}`)
+    mockResolveProviderCatalogModels.mockImplementation((_cache, provider, _url, defaults) => provider === 'deepseek' ? models : defaults)
+    mockReadAppConfig.mockResolvedValue({
+      modelVisibility: { deepseek: { mode: 'include', models: ['model-2999'] } },
+      modelAliases: { deepseek: Object.fromEntries(models.map(id => [id, `Alias ${id}`])) },
+      customModels: { deepseek: models },
+    })
+    const ctx = makeCtx()
+    if (surface === 'profile') ctx.query.profile = 'research'
+    await ctrl.getAvailable(ctx)
+    expect(ctx.body.groups[0]).toMatchObject({ models: ['model-2999'], model_count: 3001 })
+    expect(ctx.body.model_aliases).toEqual({ deepseek: { 'model-2999': 'Alias model-2999' } })
+    expect(ctx.body.custom_models).toEqual({ deepseek: ['model-2999'] })
+    expect(JSON.stringify(ctx.body)).not.toContain('"model-2000"')
+    expect(Buffer.byteLength(JSON.stringify(ctx.body))).toBeLessThan(6000)
+
+    const catalogCtx = makeCtx()
+    catalogCtx.query = { provider: 'deepseek', profile: 'research' }
+    mockResolveCatalogModel.mockClear()
+    await ctrl.getProviderModelCatalog(catalogCtx)
+    expect(catalogCtx.body.models).toHaveLength(3001)
+    expect(catalogCtx.body.visible_models).toEqual(['model-2999'])
+    expect(catalogCtx.body.model_aliases['model-2000']).toBe('Alias model-2000')
+    expect(catalogCtx.body.api_key).toBeUndefined()
+    expect(mockResolveCatalogModel).not.toHaveBeenCalled()
+    expect(mockFetchProviderModels).not.toHaveBeenCalled()
+  })
+
+  it('loads a preset catalog before the Provider has credentials', async () => {
+    mockReadFile.mockResolvedValue('')
+    const ctx = makeCtx()
+    ctx.query = { provider: 'deepseek', profile: 'research' }
+    await ctrl.getProviderModelCatalog(ctx)
+    expect(ctx.body).toEqual({ provider: 'deepseek', models: ['deepseek-chat', 'deepseek-reasoner'], visible_models: ['deepseek-chat', 'deepseek-reasoner'], model_aliases: {} })
+    expect(mockReadConfigYamlForProfile).toHaveBeenCalledWith('research')
+  })
+
+  it('keeps full custom Provider catalogs scoped to the requested Profile', async () => {
+    mockReadFile.mockResolvedValue('')
+    mockReadConfigYamlForProfile.mockImplementation(async profile => ({ custom_providers: [{ name: 'local', base_url: `https://${profile}.example/v1`, model: `${profile}-model` }] }))
+    for (const profile of ['default', 'research']) {
+      const ctx = makeCtx()
+      ctx.query = { provider: 'custom:local', profile }
+      await ctrl.getProviderModelCatalog(ctx)
+      expect(ctx.body.models).toEqual([`${profile}-model`])
+    }
+  })
+
+  it.each([undefined, ['deepseek'], 'missing-provider'])('rejects missing, invalid or unknown catalog Provider %s', async provider => {
+    const ctx = makeCtx()
+    ctx.query = { provider }
+    await ctrl.getProviderModelCatalog(ctx)
+    expect(ctx.status).toBe(provider === 'missing-provider' ? 404 : 400)
+    expect(ctx.body.models).toBeUndefined()
+  })
+
+  it('uses updated visibility on the next request without reusing hidden metadata', async () => {
+    mockReadAppConfig.mockResolvedValue({ modelVisibility: { deepseek: { mode: 'include', models: ['deepseek-chat'] } } })
+    await ctrl.getAvailable(makeCtx())
+    mockResolveCatalogModel.mockClear()
+    mockReadAppConfig.mockResolvedValue({ modelVisibility: { deepseek: { mode: 'include', models: ['deepseek-reasoner'] } } })
+    const ctx = makeCtx()
+    await ctrl.getAvailable(ctx)
+
+    const scans = mockResolveCatalogModel.mock.calls.filter(([, query]) => query.provider === 'deepseek')
+    expect(scans.map(([, query]) => query.model)).toEqual(['deepseek-reasoner'])
+    expect(ctx.body.groups[0].model_meta).not.toHaveProperty('deepseek-chat')
   })
 
   it('exposes single-provider refresh for authorized providers that are not editable', async () => {
@@ -257,7 +419,7 @@ describe('models controller — model visibility', () => {
     expect(ctx.body.groups[0]).toMatchObject({
       provider: 'deepseek',
       models: ['deepseek-chat', 'deepseek-reasoner', 'gemma-4-26b-a4b-it'],
-      available_models: ['deepseek-chat', 'deepseek-reasoner', 'gemma-4-26b-a4b-it'],
+      model_count: 3,
     })
     expect(ctx.body.custom_models).toEqual({
       deepseek: ['gemma-4-26b-a4b-it', 'deepseek-chat'],
@@ -320,7 +482,7 @@ describe('models controller — model visibility', () => {
       expect.objectContaining({
         provider: 'deepseek',
         models: ['deepseek-live', 'deepseek-new'],
-        available_models: ['deepseek-live', 'deepseek-new'],
+        model_count: 2,
       }),
     ]))
     expect(mockFetchProviderModels).not.toHaveBeenCalled()
@@ -346,14 +508,13 @@ describe('models controller — model visibility', () => {
     const ctx = makeCtx()
     await ctrl.getAvailable(ctx)
 
-    for (const surface of [ctx.body.groups, ctx.body.allProviders]) {
-      expect(surface).toEqual(expect.arrayContaining([
+    expect(ctx.body.groups).toEqual(expect.arrayContaining([
         expect.objectContaining({
           provider: 'deepseek',
           models: ['deepseek-chat', 'deepseek-reasoner'],
         }),
-      ]))
-    }
+    ]))
+    expect(ctx.body.allProviders.find((group: any) => group.provider === 'deepseek')).toMatchObject({ models: [], model_count: 2 })
     expect(JSON.stringify(ctx.body)).not.toContain('deepseek-old-fallback')
   })
 
@@ -567,7 +728,7 @@ describe('models controller — model visibility', () => {
         provider: 'openrouter',
         label: 'OpenRouter',
         models: ['openrouter/auto'],
-        available_models: ['openrouter/auto'],
+        model_count: 1,
       }),
     ]))
   })
@@ -691,6 +852,20 @@ describe('models controller — model visibility', () => {
     ]))
   })
 
+  it('does not infer a custom Provider protocol from a matching builtin name', async () => {
+    mockReadFile.mockResolvedValue('')
+    mockReadConfigYamlForProfile.mockResolvedValue({
+      model: { default: 'model', provider: 'custom:deepseek' },
+      custom_providers: [{ name: 'deepseek', base_url: 'https://proxy.invalid/v1', model: 'model', api_key: 'test' }],
+    })
+    const ctx = makeCtx()
+    ctx.query = { profile: 'default' }
+    await ctrl.getAvailable(ctx)
+    expect(ctx.body.groups.find((g: any) => g.provider === 'custom:deepseek').api_mode).toBeUndefined()
+    expect(ctx.body.allProviders.find((g: any) => g.provider === 'deepseek').api_mode).toBe('chat_completions')
+    expect(mockWriteAppConfig).not.toHaveBeenCalled()
+  })
+
   it('loads api_mode from custom provider config entries', async () => {
     mockReadConfigYamlForProfile.mockResolvedValue({
       model: { default: 'research-model', provider: 'custom:research-proxy' },
@@ -733,7 +908,7 @@ describe('models controller — model visibility', () => {
         label: 'LM Studio',
         base_url: 'http://127.0.0.1:1234/v1',
         models: ['eee'],
-        available_models: ['eee'],
+        model_count: 1,
       }),
     ]))
     expect(ctx.body.default).toBe('eee')
@@ -813,7 +988,7 @@ describe('models controller — model visibility', () => {
     expect(ctx.body.groups[0]).toMatchObject({
       provider: 'deepseek',
       models: ['deepseek-chat', 'deepseek-reasoner'],
-      available_models: ['deepseek-chat', 'deepseek-reasoner'],
+      model_count: 2,
     })
   })
 
@@ -851,7 +1026,7 @@ describe('models controller — model visibility', () => {
       expect.objectContaining({
         provider: 'Custom',
         models: ['custom-b'],
-        available_models: ['custom-a', 'custom-b'],
+        model_count: 2,
       }),
     ])
     expect(ctx.body.default).toBe('custom-b')

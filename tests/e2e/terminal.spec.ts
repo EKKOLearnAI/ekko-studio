@@ -1,6 +1,26 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockHermesApi, mockTerminalWebSocket, TEST_ACCESS_KEY } from './fixtures'
 
+test('keeps a mounted terminal in sync with Studio brightness and preserves palette overrides', async ({ page }) => {
+  await authenticate(page)
+  await page.addInitScript(() => localStorage.setItem('hermes_brightness', 'light'))
+  await mockHermesApi(page)
+  await mockTerminalWebSocket(page)
+  await page.goto('/#/hermes/terminal')
+  await expect(page.locator('.terminal-header .n-select')).toContainText('Follow Studio theme')
+  await expect(page.locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(250, 250, 250)')
+  await page.locator('.page-sidebar-account-btn').click()
+  await page.getByTitle('Dark mode', { exact: true }).click()
+  await expect(page.locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(26, 26, 26)')
+  await page.keyboard.press('Escape')
+  await page.locator('.terminal-header .n-select').click()
+  await page.locator('.n-base-select-option:visible').getByText('Solarized Dark', { exact: true }).click()
+  await expect(page.locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(0, 43, 54)')
+  await page.locator('.page-sidebar-account-btn').click()
+  await page.getByTitle('Light mode', { exact: true }).click()
+  await expect(page.locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(0, 43, 54)')
+})
+
 test('opens terminal websocket session and forwards user input', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const api = await mockHermesApi(page)

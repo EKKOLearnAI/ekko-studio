@@ -1,7 +1,7 @@
 import { request } from './client'
 import type { ProviderApiMode } from './studio/provider-api-mode'
 
-export type CodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
+export type CodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
 export type ChatCodingAgentId = CodingAgentId | 'ekko-agent'
 export const CODING_AGENT_API_MODES = [
   'chat_completions',
@@ -54,6 +54,7 @@ export interface CodingAgentToolStatus {
   name: string
   provider: string
   command: string
+  capabilities?: { modes: string[]; installation: string; images: boolean; nativeCompact: boolean; automaticUpdates: boolean }
   packageName: string
   installed: boolean
   version: string
@@ -65,6 +66,41 @@ export interface CodingAgentToolStatus {
 
 export interface CodingAgentsStatus {
   tools: CodingAgentToolStatus[]
+}
+
+export interface CodingAgentModel {
+  id: string
+  name: string
+  resolvedModel?: string
+  provider?: string
+  isDefault?: boolean
+  hidden?: boolean
+  contextWindow?: number
+  maxOutputTokens?: number
+  reasoningEfforts?: string[]
+  modelFamily?: string
+  modelFamilyName?: string
+  reasoningEffort?: string
+  inputModalities?: string[]
+}
+
+export interface CodingAgentModelCatalog {
+  agentId: CodingAgentId
+  name: string
+  status: 'ready' | 'empty' | 'not_installed' | 'auth_required' | 'unsupported' | 'timeout' | 'error'
+  source: 'cli' | 'app-server' | 'control-protocol' | 'sdk' | 'acp' | 'config'
+  scope: 'available' | 'configured' | 'builtin'
+  models: CodingAgentModel[]
+  checkedAt: string
+  cached: boolean
+}
+
+export async function fetchCodingAgentModels(options: { agent?: CodingAgentId; refresh?: boolean } = {}) {
+  const params = new URLSearchParams()
+  if (options.agent) params.set('agent', options.agent)
+  if (options.refresh !== undefined) params.set('refresh', String(options.refresh))
+  const query = params.toString()
+  return request<{ agents: CodingAgentModelCatalog[] }>(`/api/coding-agents/models${query ? `?${query}` : ''}`)
 }
 
 export interface CodingAgentMutationResult extends CodingAgentsStatus {

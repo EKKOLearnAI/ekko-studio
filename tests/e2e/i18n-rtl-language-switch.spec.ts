@@ -1,16 +1,33 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
-test('language menu stays usable after switching to an RTL locale', async ({ page }) => {
+test('language menu stays usable after switching locales', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await mockHermesApi(page)
 
   await page.goto('/#/hermes/theme')
 
+  await page.locator('.page-sidebar-account-btn').click()
+
   const languageSwitch = page.locator('.language-switch')
   const languageMenu = page.locator('.n-base-select-menu')
   const option = (label: string) =>
     page.locator('.n-base-select-option').filter({ hasText: new RegExp(`^${label}$`) })
+
+  await languageSwitch.click()
+  await option('Türkçe').click()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'tr')
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr')
+  await expect(languageSwitch).toContainText('Türkçe')
+  await expect(page.getByRole('heading', { name: 'Tema', exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('hermes_locale'))).toBe('tr')
+
+  await page.reload()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'tr')
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr')
+  await expect(page.getByRole('heading', { name: 'Tema', exact: true })).toBeVisible()
+  await page.locator('.page-sidebar-account-btn').click()
+  await expect(languageSwitch).toContainText('Türkçe')
 
   await languageSwitch.click()
   await option('العربية').click()
@@ -19,6 +36,12 @@ test('language menu stays usable after switching to an RTL locale', async ({ pag
   await languageSwitch.click()
   await expect(languageMenu).toBeVisible()
   await expect(languageMenu).toBeInViewport()
+  await option('Türkçe').click()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'tr')
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr')
+  await expect(page.getByRole('heading', { name: 'Tema', exact: true })).toBeVisible()
+
+  await languageSwitch.click()
   await option('English').click()
 
   await expect(page.locator('html')).toHaveAttribute('dir', 'ltr')

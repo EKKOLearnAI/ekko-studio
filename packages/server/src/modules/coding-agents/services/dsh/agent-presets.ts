@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { DshPluginError } from './errors'
 import type { DshManagement } from './management'
 
-export interface DshAgentPreset { id: string; name?: string; description?: string; trust: 'system' | 'user'; isDefault: boolean; broken?: string }
+export interface DshAgentPreset { id: string; name?: string; description?: string; trust?: 'system' | 'user'; isDefault: boolean; broken?: string }
 export interface DshAgentPresets { presets: DshAgentPreset[]; authorable: boolean }
 
 /** Vue owns presentation; the existing native host owns preset discovery and writes. */
@@ -32,7 +32,16 @@ export class DshAgentPresetService {
     if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(value) || value.length > 200) throw new DshPluginError(400, 'DSH_PRESET_INVALID', 'Invalid preset identifier')
     return value
   }
-  list() { return this.call<DshAgentPresets>('agentPresets/list') }
+  private nativeList() { return this.call<{ presets: DshAgentPreset[]; authorable?: boolean }>('agentPresets/list') }
+  private async requireLegacyAuthoring() {
+    if (typeof (await this.nativeList()).authorable !== 'boolean') throw new DshPluginError(422, 'DSH_CAPABILITY_UNSUPPORTED', 'This DSH installation manages preset declarations through native plugin configuration')
+  }
+  async list() {
+    const result = await this.nativeList()
+    // Declaration-based DSH exposes selection/read APIs, not the legacy
+    // filesystem authoring methods. Do not advertise unsupported operations.
+    return { ...result, authorable: result.authorable === true }
+  }
   async choices() {
     const { presets } = await this.list()
     return { presets: presets.map(({ id, name, description, isDefault, broken }) => ({ id, name, description, isDefault, ...(broken ? { unavailable: true } : {}) })) }
@@ -46,23 +55,34 @@ export class DshAgentPresetService {
     if (!preset || preset.broken) throw new DshPluginError(422, 'DSH_PRESET_INVALID', 'Select an available DSH Agent preset')
     return preset.id
   }
-  async read(id: unknown) { return this.call<{ agentPreset: string; content: string; name?: string; trust: 'system' | 'user' }>('agentPresets/read', { agentPreset: this.id(id) }) }
+  async read(id: unknown) { return this.call<{ agentPreset: string; content: string; name?: string; trust?: 'system' | 'user' }>('agentPresets/read', { agentPreset: this.id(id) }) }
   async copy(body: unknown) {
     const value = body as Record<string, unknown> | null
     if (!value || typeof value !== 'object' || Array.isArray(value) || (value.name !== undefined && (typeof value.name !== 'string' || value.name.length > 200))) throw new DshPluginError(400, 'DSH_PRESET_INVALID', 'Invalid preset copy request')
-    await this.call('agentPresets/copy', { from: this.id(value.from), id: this.id(value.id), ...(typeof value.name === 'string' && value.name.trim() ? { name: value.name.trim() } : {}) })
+    const from = this.id(value.from), id = this.id(value.id)
+    await this.requireLegacyAuthoring()
+    await this.call('agentPresets/copy', { from, id, ...(typeof value.name === 'string' && value.name.trim() ? { name: value.name.trim() } : {}) })
     return this.list()
   }
   async remove(id: unknown) {
-    await this.call('agentPresets/deletePreset', { id: this.id(id) })
+    const selected = this.id(id)
+    await this.requireLegacyAuthoring()
+    await this.call('agentPresets/deletePreset', { id: selected })
     return this.list()
   }
   async makeDefault(id: unknown) {
     const selected = this.id(id)
-    const row = (await this.list()).presets.find(preset => preset.id === selected)
+    const roster = await this.nativeList()
+    const row = roster.presets.find(preset => preset.id === selected)
     if (!row || row.broken) throw new DshPluginError(422, 'DSH_PRESET_INVALID', 'Select an available preset')
-    await this.call('settings/update', { ns: 'agent-presets', patch: { default: selected } })
+    await this.call('settings/update', typeof roster.authorable === 'boolean'
+      ? { ns: 'agent-presets', patch: { default: selected } }
+      : { ns: 'agent-preset-registry', patch: { selectedDefault: selected } })
     return this.list()
   }
-  async openLocation(id: unknown) { return this.call<{ path?: string; opened: boolean }>('settings/openAgentPresetDirectory', { agentPreset: this.id(id) }) }
+  async openLocation(id: unknown) {
+    const agentPreset = this.id(id)
+    await this.requireLegacyAuthoring()
+    return this.call<{ path?: string; opened: boolean }>('settings/openAgentPresetDirectory', { agentPreset })
+  }
 }

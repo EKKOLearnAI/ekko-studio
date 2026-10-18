@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { WebContents } from 'electron'
 import { BrowserAutomation } from '../../packages/desktop/src/main/browser/browser-automation'
+import { observeBrowserState } from '../../packages/desktop/src/main/browser/browser-observation'
 
 function fakeContents(options: {
   attributes?: string[]
   protectedValue?: boolean
   role?: string
   name?: string
+  nodes?: any[]
+  scopeIds?: number[]
   runtimeCall?: (params: Record<string, any>) => unknown
 } = {}): WebContents {
   let attached = false
@@ -17,7 +20,7 @@ function fakeContents(options: {
     sendCommand: async (method: string, params: Record<string, any> = {}) => {
       if (method === 'Accessibility.getFullAXTree') {
         return {
-          nodes: [{
+          nodes: options.nodes || [{
             backendDOMNodeId: 7,
             role: { value: options.role || 'textbox' },
             name: { value: options.name || 'Account secret' },
@@ -26,7 +29,10 @@ function fakeContents(options: {
           }],
         }
       }
-      if (method === 'DOM.describeNode') return { node: { nodeName: 'INPUT', attributes: options.attributes || [] } }
+      if (method === 'DOM.getDocument') return { root: { nodeId: 1 } }
+      if (method === 'DOM.querySelector') return { nodeId: options.scopeIds?.length ? 2 : 0 }
+      if (method === 'DOM.describeNode') return { node: { nodeName: 'INPUT', attributes: options.attributes || [],
+        children: options.scopeIds?.map(backendNodeId => ({ backendNodeId })) } }
       if (method === 'DOM.resolveNode') return { object: { objectId: 'object-1' } }
       if (method === 'Runtime.callFunctionOn') {
         return options.runtimeCall ? options.runtimeCall(params) : { result: { value: true } }
@@ -43,6 +49,127 @@ function fakeContents(options: {
 }
 
 describe('desktop browser automation safety', () => {
+  const largeTree = () => Array.from({ length: 750 }, (_, index) => ({ backendDOMNodeId: index + 1,
+    role: { value: index >= 700 ? 'textbox' : 'StaticText' }, name: { value: `Field ${index + 1}` },
+  }))
+
+  it('pages the whole document with stable refs and makes controls after node 300 usable', async () => {
+    const automation = new BrowserAutomation()
+    const contents = fakeContents({ nodes: largeTree() })
+    const first = await automation.snapshot('large', contents)
+    expect(first).toMatchObject({ totalNodes: 750, matchedNodes: 750, hasMore: true, nextOffset: 100, truncated: true })
+    expect(first.nodes).toHaveLength(100)
+    let page = first
+    const seen = [...first.nodes]
+    while (page.hasMore) {
+      page = await automation.snapshot('large', contents, { snapshotId: first.snapshotId, offset: page.nextOffset })
+      expect(page.snapshotId).toBe(first.snapshotId)
+      seen.push(...page.nodes)
+    }
+    expect(seen.map(node => node.ref)).toEqual(Array.from({ length: 750 }, (_, i) => `@e${i + 1}`))
+    await expect(automation.interact('large', contents, {
+      action: 'type', snapshot_id: page.snapshotId, ref: '@e750', text: 'Filled without JEV',
+    })).resolves.toBeUndefined()
+    await expect(automation.snapshot('large', contents, { snapshotId: first.snapshotId, offset: 100 })).rejects.toThrow('stale')
+  })
+
+  it('searches and filters controls before paging, without a semantic provider', async () => {
+    const automation = new BrowserAutomation()
+    const contents = fakeContents({ nodes: largeTree() })
+    const controls = await automation.snapshot('large', contents, { interactiveOnly: true })
+    expect(controls.nodes).toHaveLength(50)
+    expect(controls.nodes[0].ref).toBe('@e701')
+    const found = await automation.snapshot('large', contents, { query: 'ＦＩＥＬＤ 750', limit: 1 })
+    expect(found).toMatchObject({ matchedNodes: 1, hasMore: false, nodes: [{ ref: '@e750', name: 'Field 750' }] })
+  })
+
+  it('scopes a snapshot to a DOM subtree before applying local search and the node budget', async () => {
+    const automation = new BrowserAutomation()
+    const contents = fakeContents({ nodes: largeTree(), scopeIds: [720, 721] })
+    const found = await automation.snapshot('large', contents, { selector: '#form-demo-layout', interactiveOnly: true })
+    expect(found.nodes.map(node => node.ref)).toEqual(['@e720', '@e721'])
+    expect(found).toMatchObject({ totalNodes: 750, matchedNodes: 2, scope: { selector: '#form-demo-layout' } })
+    await expect(automation.snapshot('large', fakeContents(), { selector: '#missing' })).rejects.toThrow('did not match')
+  })
+
+  it('includes selection state for baseline verification', async () => {
+    const automation = new BrowserAutomation()
+    const contents = fakeContents({ nodes: [{ backendDOMNodeId: 1, role: { value: 'radio' }, name: { value: 'Vertical' },
+      properties: [{ name: 'checked', value: { value: 'true' } }, { name: 'selected', value: { value: false } }] }] })
+    expect((await automation.snapshot('tab', contents)).nodes[0]).toMatchObject({ checked: true, selected: false })
+  })
+
+  it.each([
+    ['Alice ', 'Alice', false],
+    [' Alice', 'Alice', false],
+    ['Alice  Smith', 'Alice Smith', false],
+    ['Alice\nSmith', 'Alice Smith', false],
+    [' Alice \n Smith ', ' Alice \n Smith ', true],
+    ['', '', true],
+  ] as const)('compares input value %j with %j without normalizing whitespace', async (value, typed, matches) => {
+    const automation = new BrowserAutomation()
+    const contents = fakeContents({ nodes: [{ backendDOMNodeId: 7, role: { value: 'textbox' },
+      name: { value: 'Name' }, value: { value } }] })
+    const snapshot = await automation.snapshot('tab', contents)
+    const observation = observeBrowserState(undefined, automation.observedState('tab')!, [
+      { nodeId: 7, actionIndex: 0, text: typed },
+    ])
+    expect(observation.targets?.[0].valueMatches).toBe(matches)
+    expect(snapshot.nodes[0].value).toBe(value)
+  })
+
+  it.each([
+    { value: 'password=private', typed: 'public', protectedValue: false },
+    { value: 'private', typed: 'public', protectedValue: true },
+    { value: 'x'.repeat(501), typed: 'x'.repeat(499), protectedValue: false },
+  ])('omits comparisons for protected, redacted or truncated values: %j', async ({ value, typed, protectedValue }) => {
+    const automation = new BrowserAutomation()
+    await automation.snapshot('tab', fakeContents({ nodes: [{ backendDOMNodeId: 7, role: { value: 'textbox' },
+      name: { value: 'Name' }, value: { value },
+      properties: protectedValue ? [{ name: 'protected', value: { value: true } }] : [] }] }))
+    const observation = observeBrowserState(undefined, automation.observedState('tab')!, [
+      { nodeId: 7, actionIndex: 0, text: typed },
+    ])
+    expect(observation.targets?.[0]).not.toHaveProperty('valueMatches')
+    expect(JSON.stringify(observation)).not.toContain('private')
+  })
+
+  it.each([{ limit: 301 }, { offset: -1 }, { offset: 0.5 }, { snapshotId: 'id', query: 'changed' },
+    { query: ' ' }, { interactiveOnly: 'yes' }])('rejects invalid snapshot options: %j', async options => {
+    await expect(new BrowserAutomation().snapshot('tab', fakeContents(), options as any)).rejects.toThrow()
+  })
+
+  it('waits for a temporarily hidden target and dispatches exactly one click', async () => {
+    const automation = new BrowserAutomation()
+    let probes = 0, clicks = 0
+    const contents = fakeContents({ runtimeCall: params => {
+      if (params.functionDeclaration.includes('target.click')) { clicks++; return { result: { value: true } } }
+      return { result: { value: ++probes < 3 ? 'not visible' : true } }
+    } })
+    const snapshot = await automation.snapshot('tab', contents)
+    await automation.interact('tab', contents, { action: 'click', ref: '@e1', snapshot_id: snapshot.snapshotId })
+    expect(probes).toBe(3)
+    expect(clicks).toBe(1)
+  })
+
+  it('does not dispatch after takeover while waiting or retry a failed dispatch', async () => {
+    for (const takeover of [true, false]) {
+      const automation = new BrowserAutomation()
+      let cancelled = false, clicks = 0
+      const contents = fakeContents({ runtimeCall: params => {
+        if (params.functionDeclaration.includes('target.click')) {
+          clicks++
+          return { exceptionDetails: { exception: { description: 'Error: Element is not visible\nstack' } } }
+        }
+        cancelled = takeover
+        return { result: { value: true } }
+      } })
+      const snapshot = await automation.snapshot('tab', contents)
+      await expect(automation.interact('tab', contents, { action: 'click', ref: '@e1', snapshot_id: snapshot.snapshotId },
+        () => { if (cancelled) throw new Error('takeover') })).rejects.toThrow(takeover ? 'takeover' : 'Element is not visible')
+      expect(clicks).toBe(takeover ? 0 : 1)
+    }
+  })
   it('redacts protected accessibility values and rejects stale refs', async () => {
     const automation = new BrowserAutomation()
     const contents = fakeContents({ protectedValue: true })
@@ -157,23 +284,17 @@ describe('desktop browser automation safety', () => {
     expect(second.nextOffset).toBeUndefined()
   })
 
-  it('requires user confirmation for high-risk activation labels', async () => {
+  it.each([
+    ['link', 'APP购买'], ['button', 'Delete account'], ['StaticText', 'Send payment'],
+  ])('dispatches %s clicks without classifying the label %s', async (role, name) => {
     const automation = new BrowserAutomation()
-    const contents = fakeContents({ role: 'button', name: 'Delete account' })
+    let clicks = 0
+    const contents = fakeContents({ role, name, runtimeCall: params => {
+      if (params.functionDeclaration.includes('target.click')) clicks++
+      return { result: { value: true } }
+    } })
     const snapshot = await automation.snapshot('tab-1', contents)
-
-    expect(automation.interactionRisk('tab-1', {
-      action: 'click', snapshot_id: snapshot.snapshotId, ref: '@e1',
-    })).toEqual({ kind: 'high-risk-activation', label: 'Delete account' })
-  })
-
-  it('keeps high-risk confirmation for StaticText refs promoted to clickable parents', async () => {
-    const automation = new BrowserAutomation()
-    const contents = fakeContents({ role: 'StaticText', name: 'Send payment' })
-    const snapshot = await automation.snapshot('tab-1', contents)
-
-    expect(automation.interactionRisk('tab-1', {
-      action: 'click', snapshot_id: snapshot.snapshotId, ref: '@e1',
-    })).toEqual({ kind: 'high-risk-activation', label: 'Send payment' })
+    await automation.interact('tab-1', contents, { action: 'click', snapshot_id: snapshot.snapshotId, ref: '@e1' })
+    expect(clicks).toBe(1)
   })
 })

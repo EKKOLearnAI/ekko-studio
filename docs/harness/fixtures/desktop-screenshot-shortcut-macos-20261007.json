@@ -1,0 +1,74 @@
+{
+  "date": "2026-10-07T13:46:52.991Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "electron": "42.11.11",
+  "events": [
+    {
+      "hideWindows": false,
+      "focusedWindow": null
+    },
+    {
+      "hideWindows": true,
+      "focusedWindow": null
+    },
+    {
+      "hideWindows": true,
+      "focusedWindow": null
+    }
+  ],
+  "checks": [
+    {
+      "name": "default unset",
+      "passed": true
+    },
+    {
+      "name": "register global binding",
+      "passed": true
+    },
+    {
+      "name": "probe app unfocused",
+      "passed": true
+    },
+    {
+      "name": "ordinary callback outside app",
+      "passed": true
+    },
+    {
+      "name": "recorder releases owned binding",
+      "passed": true
+    },
+    {
+      "name": "save hidden mode during recording",
+      "passed": true
+    },
+    {
+      "name": "save stays paused",
+      "passed": true
+    },
+    {
+      "name": "close recorder restores binding",
+      "passed": true
+    },
+    {
+      "name": "hidden callback outside app",
+      "passed": true
+    },
+    {
+      "name": "new manager restores saved binding",
+      "passed": true
+    },
+    {
+      "name": "restored callback outside app",
+      "passed": true
+    },
+    {
+      "name": "clear unregisters binding",
+      "passed": true
+    },
+    {
+      "name": "clear persists",
+      "passed": true
+    }
+  ]
+}

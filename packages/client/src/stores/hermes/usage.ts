@@ -1,8 +1,9 @@
-import { fetchUsageStats, type UsageStatsResponse } from '@/api/studio/sessions'
+import { fetchUsageStats, type UsageStatsResponse, type UsageStatsFilters } from '@/api/studio/sessions'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 interface DailyUsage {
+  cost_coverage?: import('@/utils/usage-cost').UsageCostCoverage
   date: string
   input_tokens: number
   output_tokens: number
@@ -83,18 +84,23 @@ function getModelColor(model: string): string {
 export const useUsageStore = defineStore('usage', () => {
   const stats = ref<UsageStatsResponse | null>(null)
   const isLoading = ref(false)
+  const loadError = ref(false)
   let latestRequestId = 0
 
-  async function loadSessions(days = 30) {
+  async function loadSessions(days = 30, filters?: UsageStatsFilters) {
     const requestId = ++latestRequestId
     isLoading.value = true
+    loadError.value = false
     try {
-      const response = await fetchUsageStats(days)
+      const response = filters ? await fetchUsageStats(days, filters) : await fetchUsageStats(days)
       if (requestId === latestRequestId) {
         stats.value = response
       }
     } catch (err) {
       if (requestId === latestRequestId) {
+        // Do not display data from a previous selection under new filter labels.
+        stats.value = null
+        loadError.value = true
         console.error('Failed to load usage stats:', err)
       }
     } finally {
@@ -104,7 +110,7 @@ export const useUsageStore = defineStore('usage', () => {
     }
   }
 
-  const hasData = computed(() => !!stats.value && stats.value.total_sessions > 0)
+  const hasData = computed(() => !!stats.value && (stats.value.total_sessions > 0 || (stats.value.total_api_calls || 0) > 0))
 
   const totalInputTokens = computed(() => stats.value?.total_input_tokens ?? 0)
   const totalOutputTokens = computed(() => stats.value?.total_output_tokens ?? 0)
@@ -197,6 +203,7 @@ export const useUsageStore = defineStore('usage', () => {
   return {
     stats,
     isLoading,
+    loadError,
     hasData,
     loadSessions,
     totalInputTokens,

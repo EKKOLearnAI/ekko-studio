@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import type { WebContents } from 'electron'
 import type {
+  BrowserBatchAction,
   BrowserInteractAction,
   BrowserReadTextOptions,
   BrowserReadTextResult,
   BrowserScreenshot,
   BrowserSnapshot,
   BrowserSnapshotNode,
+  BrowserSnapshotOptions,
 } from './browser-types'
 import { MAX_BROWSER_TEXT_READ_LIMIT } from './browser-types'
+import { filterSnapshotNodes, snapshotOptions, DEFAULT_SNAPSHOT_LIMIT } from './browser-snapshot'
 import { publicBrowserUrl, redactBrowserContent, redactBrowserText } from './browser-url'
+import type { BrowserObservedState, BrowserObservedTarget } from './browser-observation'
 
 interface AxNode {
   nodeId?: string
@@ -25,12 +29,22 @@ interface AxNode {
 interface StoredSnapshot {
   id: string
   refs: Map<string, { backendDOMNodeId: number; role: string; name: string }>
+  nodes: BrowserSnapshotNode[]
+  allNodes: BrowserSnapshotNode[]
+  totalNodes: number
+  url: string
+  title: string
+  options: BrowserSnapshotOptions
 }
 
-const MAX_SNAPSHOT_NODES = 300
+interface PreparedBatchAction {
+  action: BrowserBatchAction
+  backendDOMNodeId?: number
+  snapshotOptions?: BrowserSnapshotOptions
+}
+
 const MAX_SNAPSHOT_TEXT = 24_000
 const MAX_SCREENSHOT_BYTES = 12 * 1024 * 1024
-const HIGH_RISK_ACTIVATION = /(?:\b(?:buy(?: now)?|purchase|checkout|place order|pay(?: now)?|delete|remove account|publish|post|send|transfer|withdraw|submit order|grant (?:access|permission)|allow access)\b|购买|下单|付款|支付|删除|注销|发布|发送|转账|提现|提交订单|購入|注文|支払|削除|公開|投稿|送信|振込|구매|주문|결제|삭제|게시|전송|송금)/i
 const CLICKABLE_ANCESTOR_SELECTOR = [
   'button',
   'a[href]',
@@ -41,12 +55,26 @@ const CLICKABLE_ANCESTOR_SELECTOR = [
   'label',
   '[role="button"]',
   '[role="link"]',
+  '[role="tab"]',
   '[role="menuitem"]',
   '[role="menuitemcheckbox"]',
   '[role="menuitemradio"]',
   '[onclick]',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
+
+const CLICK_TARGET = `
+  const node = this;
+  const element = node && node.nodeType === 3 ? node.parentElement : node;
+  if (!element || typeof element.getBoundingClientRect !== 'function') throw new Error('Browser node has no clickable element');
+  const target = typeof element.closest === 'function'
+    ? element.closest(${JSON.stringify(CLICKABLE_ANCESTOR_SELECTOR)}) || element : element;
+`
+
+function clickFailure(response: { exceptionDetails?: { exception?: { description?: string }; text?: string } }): Error {
+  const detail = response.exceptionDetails?.exception?.description || response.exceptionDetails?.text || ''
+  return new Error(`Unable to click browser element${detail ? `: ${redactBrowserText(detail.split('\n')[0], 200)}` : ''}`)
+}
 
 function textValue(value: unknown, limit = 500): string {
   return redactBrowserText(value, limit)
@@ -85,44 +113,104 @@ export class BrowserAutomation {
     }
   }
 
-  async snapshot(tabId: string, contents: WebContents): Promise<BrowserSnapshot> {
+  snapshotSelection(tabId: string): BrowserSnapshotOptions {
+    return { ...this.snapshots.get(tabId)?.options, snapshotId: undefined }
+  }
+
+  observedState(tabId: string): BrowserObservedState | undefined {
+    const current = this.snapshots.get(tabId)
+    if (!current) return undefined
+    return { url: current.url, nodes: new Map(current.allNodes.map(node => [current.refs.get(node.ref)!.backendDOMNodeId, node])) }
+  }
+
+  observedTargets(tabId: string, snapshotId: unknown, actions: BrowserBatchAction[]): BrowserObservedTarget[] {
+    return actions.flatMap((action, actionIndex) => action.action === 'click' || action.action === 'type'
+      ? [{ nodeId: this.resolveRef(tabId, String(snapshotId), action.ref).backendDOMNodeId, actionIndex,
+        ...(action.action === 'type' ? { text: action.text } : {}) }] : [])
+  }
+
+  async snapshot(tabId: string, contents: WebContents, input: BrowserSnapshotOptions = {}): Promise<BrowserSnapshot> {
+    const options = snapshotOptions(input)
+    if (options.snapshotId) {
+      const current = this.snapshots.get(tabId)
+      if (!current || current.id !== options.snapshotId) throw new Error('Browser snapshot is stale; take a new snapshot')
+      current.options = { ...current.options, offset: options.offset, limit: options.limit }
+      return this.snapshotPage(tabId, current)
+    }
     await this.ensureAttached(contents)
     await contents.debugger.sendCommand('Accessibility.enable')
     const response = await contents.debugger.sendCommand('Accessibility.getFullAXTree') as { nodes?: AxNode[] }
+    let scope: Set<number> | undefined
+    if (options.selector) {
+      const document = await contents.debugger.sendCommand('DOM.getDocument')
+      const selected = await contents.debugger.sendCommand('DOM.querySelector', { nodeId: document.root.nodeId, selector: options.selector })
+      if (!selected.nodeId) throw new Error('Snapshot selector did not match an element; choose another selector or omit it for the whole document')
+      const subtree = await contents.debugger.sendCommand('DOM.describeNode', { nodeId: selected.nodeId, depth: -1, pierce: true })
+      scope = new Set<number>()
+      const pending = [subtree.node]
+      while (pending.length) {
+        const node = pending.pop()
+        if (!node) continue
+        if (node.backendNodeId) scope.add(node.backendNodeId)
+        pending.push(...(node.children || []), ...(node.shadowRoots || []), node.contentDocument)
+      }
+    }
     const refs = new Map<string, { backendDOMNodeId: number; role: string; name: string }>()
     const nodes: BrowserSnapshotNode[] = []
+    const inScope = new Set<string>()
     for (const node of response.nodes || []) {
-      if (nodes.length >= MAX_SNAPSHOT_NODES || node.ignored || !node.backendDOMNodeId) continue
+      if (node.ignored || !node.backendDOMNodeId) continue
       const role = textValue(node.role?.value, 80)
       const name = textValue(node.name?.value)
       const protectedValue = property(node, 'protected') === true
-      const value = protectedValue ? '' : textValue(node.value?.value)
+      // Input whitespace is significant for local value comparisons.
+      const value = protectedValue ? '' : redactBrowserContent(node.value?.value, 500)
       if (!role || role === 'none' || role === 'generic' && !name && !value) continue
       const ref = `@e${nodes.length + 1}`
       refs.set(ref, { backendDOMNodeId: node.backendDOMNodeId, role, name })
+      if (!scope || scope.has(node.backendDOMNodeId)) inScope.add(ref)
+      const checked = property(node, 'checked')
+      const selected = property(node, 'selected')
+      const expanded = property(node, 'expanded')
+      const pressed = property(node, 'pressed')
       nodes.push({
-        ref,
-        role,
-        name,
-        ...(value ? { value } : {}),
+        ref, role, name,
+        ...(!protectedValue && node.value?.value !== undefined ? { value } : {}),
         ...(node.description?.value ? { description: textValue(node.description.value) } : {}),
         ...(property(node, 'disabled') === true ? { disabled: true } : {}),
         ...(property(node, 'focused') === true ? { focused: true } : {}),
+        ...(checked === 'mixed' ? { checked } : checked === true || checked === 'true' ? { checked: true }
+          : checked === false || checked === 'false' ? { checked: false } : {}),
+        ...(typeof selected === 'boolean' ? { selected } : {}),
+        ...(typeof expanded === 'boolean' ? { expanded } : {}),
+        ...(pressed === 'mixed' ? { pressed } : pressed === true || pressed === 'true' ? { pressed: true }
+          : pressed === false || pressed === 'false' ? { pressed: false } : {}),
       })
     }
-    const snapshotId = randomUUID()
-    this.snapshots.set(tabId, { id: snapshotId, refs })
+    const current: StoredSnapshot = { id: randomUUID(), refs, allNodes: nodes, totalNodes: nodes.length,
+      nodes: filterSnapshotNodes(nodes.filter(node => inScope.has(node.ref)), options), options,
+      url: publicBrowserUrl(contents.getURL()), title: redactBrowserText(contents.getTitle()) }
+    this.snapshots.set(tabId, current)
+    return this.snapshotPage(tabId, current)
+  }
+
+  private snapshotPage(tabId: string, current: StoredSnapshot): BrowserSnapshot {
+    const { selector, query, interactiveOnly, offset = 0, limit = DEFAULT_SNAPSHOT_LIMIT } = current.options
+    const nodes = current.nodes.slice(offset, offset + limit)
+    const hasMore = offset + nodes.length < current.nodes.length
     const lines = nodes.map(node => {
       const details = [node.name && `name=${JSON.stringify(node.name)}`, node.value && `value=${JSON.stringify(node.value)}`].filter(Boolean)
       return `${node.ref} ${node.role}${details.length ? ` ${details.join(' ')}` : ''}`
     })
     return {
-      tabId,
-      snapshotId,
-      url: publicBrowserUrl(contents.getURL()),
-      title: redactBrowserText(contents.getTitle()),
-      nodes,
-      text: lines.join('\n').slice(0, MAX_SNAPSHOT_TEXT),
+      tabId, snapshotId: current.id, url: current.url, title: current.title,
+      nodes, text: lines.join('\n').slice(0, MAX_SNAPSHOT_TEXT),
+      totalNodes: current.totalNodes, matchedNodes: current.nodes.length, offset, limit, hasMore,
+      truncated: nodes.length < current.nodes.length,
+      ...(hasMore ? { nextOffset: offset + nodes.length } : {}),
+      scope: { ...(selector ? { selector } : {}), ...(query ? { query } : {}), ...(interactiveOnly ? { interactiveOnly } : {}) },
+      ...(offset > 0 && !nodes.length ? { hint: `Offset ${offset} is outside the ${current.nodes.length} matched nodes. Offsets refer to the filtered results, not @e ref numbers or the full document. Restart at offset=0 with this snapshot_id, or omit snapshot_id to change filters.` }
+        : hasMore ? { hint: 'Continue with this snapshot_id and offset=nextOffset. Offsets are relative to filtered results, not @e ref numbers. For focused results start a new snapshot with selector, query or interactive_only. Scrolling alone does not page this tree. These options work without JEV.' } : {}),
     }
   }
 
@@ -198,42 +286,82 @@ export class BrowserAutomation {
     }
   }
 
-  async interact(tabId: string, contents: WebContents, action: BrowserInteractAction): Promise<void> {
+  prepareBatch(tabId: string, snapshotId: unknown, actions: BrowserBatchAction[]): PreparedBatchAction[] {
+    return actions.map(action => {
+      if (action.action !== 'click' && action.action !== 'type') return { action }
+      if (typeof snapshotId !== 'string') throw new Error('snapshot_id is required for batch click/type actions')
+      const target = this.resolveRef(tabId, snapshotId, action.ref)
+      return { action, backendDOMNodeId: target.backendDOMNodeId, snapshotOptions: this.snapshotSelection(tabId) }
+    })
+  }
+
+  async resolveBatchAction(tabId: string, contents: WebContents, prepared: PreparedBatchAction): Promise<BrowserInteractAction> {
+    const { action } = prepared
+    if (action.action !== 'click' && action.action !== 'type') return action
+    const snapshot = await this.snapshot(tabId, contents, prepared.snapshotOptions)
+    // Ref numbers can shift after each interaction; preserve the original DOM identity.
+    const current = this.snapshots.get(tabId)
+    const match = [...(current?.refs || [])].find(([, target]) => target.backendDOMNodeId === prepared.backendDOMNodeId)
+    if (!match) throw new Error(`Browser batch target ${action.ref} is no longer available; take a new snapshot`)
+    return { ...action, ref: match[0], snapshot_id: snapshot.snapshotId }
+  }
+
+  async interact(tabId: string, contents: WebContents, action: BrowserInteractAction, assertActive: () => void = () => {}): Promise<void> {
     if (!action || !['click', 'type', 'press', 'scroll'].includes(action.action)) throw new Error('Invalid browser interaction action')
     await this.ensureAttached(contents)
+    assertActive()
     if (action.action === 'click' || action.action === 'type') {
       if (typeof action.snapshot_id !== 'string' || typeof action.ref !== 'string') throw new Error('snapshot_id and ref are required')
       if (action.action === 'type' && typeof action.text !== 'string') throw new Error('text is required for browser typing')
       const backendNodeId = this.resolveRef(tabId, action.snapshot_id, action.ref).backendDOMNodeId
       const objectId = await this.resolveObject(contents, backendNodeId)
       try {
+        assertActive()
         if (action.action === 'click') {
+          // Only readiness is polled. Once dispatch starts, a click is never retried.
+          const deadline = Date.now() + 1500
+          while (true) {
+            assertActive()
+            const ready = await contents.debugger.sendCommand('Runtime.callFunctionOn', {
+              objectId, returnByValue: true,
+              functionDeclaration: `function () { ${CLICK_TARGET}
+                if (!target.isConnected) throw new Error('Browser element was removed');
+                if (target.disabled || target.getAttribute('aria-disabled') === 'true') return 'disabled';
+                target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+                const rect = target.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0 || getComputedStyle(target).visibility === 'hidden') return 'not visible';
+                if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) return 'outside the viewport';
+                return true;
+              }`,
+            }) as { result?: { value?: unknown }; exceptionDetails?: { exception?: { description?: string }; text?: string } }
+            if (ready.exceptionDetails) throw clickFailure(ready)
+            if (ready.result?.value === true) break
+            if (Date.now() >= deadline) throw new Error(`Browser element did not become clickable: ${String(ready.result?.value || 'unavailable')}`)
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+          assertActive()
           const response = await contents.debugger.sendCommand('Runtime.callFunctionOn', {
             objectId,
             returnByValue: true,
-            functionDeclaration: `function () {
-              const node = this;
-              const element = node && node.nodeType === 3 ? node.parentElement : node;
-              if (!element || typeof element.getBoundingClientRect !== 'function') throw new Error('Browser node has no clickable element');
-              const target = typeof element.closest === 'function'
-                ? element.closest(${JSON.stringify(CLICKABLE_ANCESTOR_SELECTOR)}) || element
-                : element;
+            functionDeclaration: `function () { ${CLICK_TARGET}
+              if (!target.isConnected || target.disabled || target.getAttribute('aria-disabled') === 'true') throw new Error('Browser element is unavailable or disabled');
               const rect = target.getBoundingClientRect();
               if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error('Element is not visible');
-              target.scrollIntoView({ block: 'center', inline: 'center' });
+              target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
               const next = target.getBoundingClientRect();
               if (next.bottom <= 0 || next.right <= 0 || next.top >= innerHeight || next.left >= innerWidth) throw new Error('Element is outside the viewport');
               if (typeof target.click === 'function') target.click();
               else target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
               return true;
             }`,
-          }) as { result?: { value?: unknown }; exceptionDetails?: unknown }
-          if (response.exceptionDetails || response.result?.value !== true) throw new Error('Unable to click browser element')
+          }) as { result?: { value?: unknown }; exceptionDetails?: { exception?: { description?: string }; text?: string } }
+          if (response.exceptionDetails || response.result?.value !== true) throw clickFailure(response)
         } else {
-          await contents.debugger.sendCommand('Runtime.callFunctionOn', {
+          const response = await contents.debugger.sendCommand('Runtime.callFunctionOn', {
             objectId,
             returnByValue: true,
             functionDeclaration: `function () {
+              if (!this.isConnected || this.disabled || this.readOnly || this.getAttribute?.('aria-disabled') === 'true') throw new Error('Browser input is unavailable or disabled');
               this.scrollIntoView({ block: 'center', inline: 'center' });
               this.focus();
               if ('value' in this) {
@@ -245,7 +373,9 @@ export class BrowserAutomation {
               }
               return true;
             }`,
-          })
+          }) as { result?: { value?: unknown }; exceptionDetails?: unknown }
+          if (response.exceptionDetails || response.result?.value !== true) throw new Error('Unable to focus browser input')
+          assertActive()
           await contents.debugger.sendCommand('Input.insertText', { text: String(action.text).slice(0, 100_000) })
         }
       } finally {
@@ -276,14 +406,6 @@ export class BrowserAutomation {
     await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', modifiers, ...descriptor, windowsVirtualKeyCode: descriptor.keyCode })
     await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', modifiers, ...descriptor, windowsVirtualKeyCode: descriptor.keyCode })
     this.invalidate(tabId)
-  }
-
-  interactionRisk(tabId: string, action: BrowserInteractAction): { kind: 'high-risk-activation'; label: string } | null {
-    if (action.action !== 'click' || typeof action.snapshot_id !== 'string' || typeof action.ref !== 'string') return null
-    const target = this.resolveRef(tabId, action.snapshot_id, action.ref)
-    if (!['button', 'link', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'statictext', 'text', 'inlinetextbox'].includes(target.role.toLowerCase())) return null
-    const label = textValue(target.name, 160)
-    return label && HIGH_RISK_ACTIVATION.test(label) ? { kind: 'high-risk-activation', label } : null
   }
 
   async screenshot(tabId: string, contents: WebContents, fullPage = false): Promise<BrowserScreenshot> {

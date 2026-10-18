@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { materializeFakePython } from './helpers/windows-fake-python'
 
 describe('Hermes plugin discovery environment', () => {
   const originalEnv = { ...process.env }
@@ -23,7 +24,7 @@ describe('Hermes plugin discovery environment', () => {
     const venvBin = join(agentRoot, '.venv', 'bin')
     const hermesCliDir = join(agentRoot, 'hermes_cli')
     const captureFile = join(tempDir, 'capture.txt')
-    const fakePython = join(venvBin, 'python')
+    let fakePython = join(venvBin, 'python')
     const fakeHermes = join(venvBin, 'hermes')
 
     mkdirSync(venvBin, { recursive: true })
@@ -37,6 +38,7 @@ describe('Hermes plugin discovery environment', () => {
       '',
     ].join('\n'))
     chmodSync(fakePython, 0o755)
+    fakePython = materializeFakePython(fakePython)
     writeFileSync(fakeHermes, `#!${fakePython}\n`)
     chmodSync(fakeHermes, 0o755)
 
@@ -61,7 +63,7 @@ describe('Hermes plugin discovery environment', () => {
   it('uses package Python without isolated mode when no source root is resolved', async () => {
     const binDir = join(tempDir, 'bin')
     const captureFile = join(tempDir, 'capture-package.txt')
-    const fakePython = join(binDir, 'python')
+    let fakePython = join(binDir, 'python')
     const fakeHermes = join(binDir, 'hermes')
 
     mkdirSync(binDir, { recursive: true })
@@ -72,6 +74,7 @@ describe('Hermes plugin discovery environment', () => {
       '',
     ].join('\n'))
     chmodSync(fakePython, 0o755)
+    fakePython = materializeFakePython(fakePython)
     writeFileSync(fakeHermes, `#!${fakePython}\n`)
     chmodSync(fakeHermes, 0o755)
 

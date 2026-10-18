@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
 import { nextTick } from 'vue'
 import { useChatStore } from '@/stores/hermes/chat'
@@ -12,7 +12,7 @@ const fetchSkillBundlesMock = vi.hoisted(() => vi.fn())
 const deleteSkillBundleApiMock = vi.hoisted(() => vi.fn())
 const dialogWarningMock = vi.hoisted(() => vi.fn())
 const setSessionPushEnabledMock = vi.hoisted(() => vi.fn())
-const fetchSocialMessagePlatformsMock = vi.hoisted(() => vi.fn())
+const fetchContextLengthMock = vi.hoisted(() => vi.fn())
 const messageWarningMock = vi.hoisted(() => vi.fn())
 
 vi.mock('vue-i18n', () => ({
@@ -53,16 +53,12 @@ vi.mock('naive-ui', () => ({
 }))
 
 vi.mock('@/api/studio/sessions', () => ({
-  fetchContextLength: vi.fn().mockResolvedValue(256000),
+  fetchContextLength: fetchContextLengthMock,
   setSessionPushEnabled: setSessionPushEnabledMock,
 }))
 
 vi.mock('@/api/hermes/model-context', () => ({
   setModelContext: vi.fn().mockResolvedValue(undefined),
-}))
-
-vi.mock('@/api/studio/social-messages', () => ({
-  fetchSocialMessagePlatforms: fetchSocialMessagePlatformsMock,
 }))
 
 vi.mock('@/api/hermes/skills', () => ({
@@ -121,11 +117,9 @@ describe('ChatInput focusComposer', () => {
     dialogWarningMock.mockReset()
     setSessionPushEnabledMock.mockReset()
     setSessionPushEnabledMock.mockResolvedValue(true)
-    fetchSocialMessagePlatformsMock.mockReset()
-    fetchSocialMessagePlatformsMock.mockResolvedValue([
-      { id: 'telegram', configured: true, active: true, pushReady: true },
-    ])
     messageWarningMock.mockReset()
+    fetchContextLengthMock.mockReset()
+    fetchContextLengthMock.mockResolvedValue(256000)
   })
 
   it('puts the caret in the message box on a desktop viewport', async () => {
@@ -154,44 +148,56 @@ describe('ChatInput focusComposer', () => {
     wrapper.unmount()
   })
 
-  it('shows and toggles the per-session push setting', async () => {
-    const wrapper = mountForSession('session-push-setting')
-    const option = wrapper.findAll('.dropdown-option').find(button => button.text() === 'chat.pushEnabled')
+  it('keeps voice and tool settings without exposing the per-session push setting', () => {
+    const wrapper = mountForSession('session-push-setting', { pushEnabled: true })
+    const options = wrapper.findAll('.dropdown-option').map(button => button.text())
 
-    expect(option).toBeTruthy()
-    await option!.trigger('click')
-    await flushPromises()
-
-    expect(setSessionPushEnabledMock).toHaveBeenCalledWith('session-push-setting', true)
+    expect(options).toContain('realtimeVoice.mode')
+    expect(options).toContain('chat.showToolCalls')
+    expect(options).not.toContain('chat.pushEnabled')
+    expect(setSessionPushEnabledMock).not.toHaveBeenCalled()
     expect(useChatStore().activeSession?.pushEnabled).toBe(true)
     wrapper.unmount()
   })
 
-  it('does not enable push before an active platform and target are configured', async () => {
-    fetchSocialMessagePlatformsMock.mockResolvedValueOnce([
-      { id: 'telegram', configured: true, active: true, pushReady: false },
-    ])
-    const wrapper = mountForSession('session-push-unconfigured')
-    const option = wrapper.findAll('.dropdown-option').find(button => button.text() === 'chat.pushEnabled')
-
-    await option!.trigger('click')
+  it('retries context length for the same model after a transient lookup failure', async () => {
+    fetchContextLengthMock
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce(360000)
+    const wrapper = mountForSession('session-context-a', {
+      profile: 'default',
+      provider: 'custom:test',
+      model: 'model-360k',
+    })
+    const chatStore = useChatStore()
     await flushPromises()
 
-    expect(messageWarningMock).toHaveBeenCalledWith('chat.pushNotConfigured')
-    expect(setSessionPushEnabledMock).not.toHaveBeenCalled()
-    expect(useChatStore().activeSession?.pushEnabled).not.toBe(true)
-    wrapper.unmount()
-  })
-
-  it('allows push to be disabled without checking platform configuration', async () => {
-    const wrapper = mountForSession('session-push-disable', { pushEnabled: true })
-    const option = wrapper.findAll('.dropdown-option').find(button => button.text() === 'chat.pushEnabled')
-
-    await option!.trigger('click')
+    const nextSession = {
+      ...chatStore.sessions[0],
+      id: 'session-context-b',
+      title: 'session-context-b',
+    }
+    chatStore.sessions = [nextSession]
+    chatStore.activeSessionId = nextSession.id
+    chatStore.activeSession = nextSession
+    await nextTick()
     await flushPromises()
 
-    expect(fetchSocialMessagePlatformsMock).not.toHaveBeenCalled()
-    expect(setSessionPushEnabledMock).toHaveBeenCalledWith('session-push-disable', false)
+    expect(fetchContextLengthMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('360.0k')
+
+    const cachedSession = {
+      ...nextSession,
+      id: 'session-context-c',
+      title: 'session-context-c',
+    }
+    chatStore.sessions = [cachedSession]
+    chatStore.activeSessionId = cachedSession.id
+    chatStore.activeSession = cachedSession
+    await nextTick()
+    await flushPromises()
+
+    expect(fetchContextLengthMock).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 })

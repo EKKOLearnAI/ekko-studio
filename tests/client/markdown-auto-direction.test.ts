@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { readFileSync } from 'fs'
+import rendererSource from '@/components/hermes/chat/MarkdownRenderer.vue?raw'
+import inputSource from '@/components/hermes/chat/ChatInput.vue?raw'
+import sessionItemSource from '@/components/hermes/chat/SessionListItem.vue?raw'
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
@@ -35,6 +37,17 @@ async function render(content: string): Promise<string> {
 }
 
 describe('message direction follows the message, not the interface', () => {
+  it('hides stored protocol calls but preserves fenced examples', async () => {
+    const raw = '<tool_call><invoke name="read_file">payload</invoke></tool_call>'
+    expect(await render(raw + '\nVisible answer')).not.toContain('payload')
+    expect(await render('```xml\n' + raw + '\n```')).toContain('payload')
+  })
+  it('keeps bare source filenames as text while linking explicit URLs and emails', async () => {
+    const html = await render('DESIGN.md backup.sh main.py https://example.com test@example.com')
+    expect(html).not.toMatch(/href="http:\/\/(?:DESIGN\.md|backup\.sh|main\.py)/)
+    expect(html).toContain('href="https://example.com"')
+    expect(html).toContain('href="mailto:test@example.com"')
+  })
   it('marks every block so its own text decides the direction', async () => {
     const html = await render([
       'خلصت الجزء الأول ورفعته على السيرفر.',
@@ -65,7 +78,7 @@ describe('message direction follows the message, not the interface', () => {
   })
 
   it('keeps code left-to-right inside a right-to-left message', async () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/MarkdownRenderer.vue', 'utf8')
+    const source = rendererSource
     // A snippet inside an Arabic sentence must not be mirrored, so the rule is
     // in CSS rather than left to the browser's bidi guess.
     expect(source).toMatch(/pre,\s*\n\s*code,[\s\S]*?direction: ltr;/)
@@ -73,20 +86,20 @@ describe('message direction follows the message, not the interface', () => {
   })
 
   it('does not leave a physical alignment in table cells', async () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/MarkdownRenderer.vue', 'utf8')
+    const source = rendererSource
     expect(source).not.toContain('text-align: left;')
   })
 })
 
 describe('user text elsewhere in the chat', () => {
   it('lets the composer show what is being typed in its own direction', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatInput.vue', 'utf8')
+    const source = inputSource
     expect(source).toContain('class="input-textarea"')
     expect(source).toContain('dir="auto"')
   })
 
   it('lets a conversation title in the list read in its own direction', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/SessionListItem.vue', 'utf8')
+    const source = sessionItemSource
     expect(source).toContain('<span class="session-item-title" dir="auto">')
   })
 })

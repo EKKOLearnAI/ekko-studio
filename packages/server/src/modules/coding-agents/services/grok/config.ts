@@ -1,4 +1,6 @@
+import { readTomlAssignment } from '../toml-assignment'
 import { existsSync } from 'fs'
+import { compactionPercent, type CodingAgentContextPolicy } from '../context-policy'
 import { copyFile, cp, lstat, mkdir, readFile, readdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { writeManagedPromptFile } from '../prompt-file'
@@ -13,6 +15,8 @@ const MANAGED_MCP_NAMES = new Set([
   'ekko-studio-browser',
   'ekko-studio-devices',
   'ekko-studio-use',
+  'ekko-studio-plan',
+  'ekko-studio-interaction',
   'hermes-studio',
   'hermes-studio-mcp',
   'ekko-studio-mcp',
@@ -97,9 +101,23 @@ export function grokSettingsConfig(content: string): string {
   return value ? `${value}\n` : ''
 }
 
+function isManagedGrokSection(section: string): boolean {
+  return section === 'models'
+    || section.startsWith('model.')
+    || section.startsWith('mcp_servers.')
+    || section === 'auth'
+    || section.startsWith('auth.')
+    || section === 'account'
+    || section.startsWith('account.')
+}
+
 export function grokRuntimeSettingsConfig(...contents: Array<string | null | undefined>): string {
   const topLevel = new Map<string, string>()
-  const sections = new Map<string, string[]>()
+  const sections = new Map<string, {
+    header: string
+    entries: string[][]
+    assignmentIndexes: Map<string, number>
+  }>()
   const runtimeKeys = new Set([
     'model',
     'default',
@@ -112,37 +130,67 @@ export function grokRuntimeSettingsConfig(...contents: Array<string | null | und
     'auth_token',
   ])
 
+  let arraySectionIndex = 0
   for (const content of contents) {
     let section = ''
-    for (const line of String(content || '').split(/\r?\n/)) {
-      const header = line.match(/^\s*\[([^\]]+)\]\s*$/)
-      if (header) {
-        section = header[1].trim()
+    let sectionKey = ''
+    const lines = String(content || '').split(/\r?\n/)
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex]
+      const arrayHeader = line.match(/^\s*\[\[([^\]]+)\]\]\s*$/)
+      if (arrayHeader) {
+        section = arrayHeader[1].trim()
+        if (isManagedGrokSection(section)) {
+          sectionKey = ''
+          continue
+        }
+        sectionKey = `array:${arraySectionIndex++}`
+        sections.set(sectionKey, { header: line.trim(), entries: [], assignmentIndexes: new Map() })
         continue
       }
-      const assignment = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=/)
+      const tableHeader = line.match(/^\s*\[([^\]]+)\]\s*$/)
+      if (tableHeader) {
+        section = tableHeader[1].trim()
+        sectionKey = `table:${section}`
+        if (!sections.has(sectionKey)) {
+          sections.set(sectionKey, { header: line.trim(), entries: [], assignmentIndexes: new Map() })
+        }
+        continue
+      }
+      const assignment = readTomlAssignment(lines, lineIndex)
+      if (assignment) lineIndex = assignment.endIndex
+      const assignmentKey = assignment ? JSON.stringify(assignment.key) : ''
+      const settingName = assignment?.key.length === 1 ? assignment.key[0] : ''
       if (!section) {
-        if (assignment && !runtimeKeys.has(assignment[1])) topLevel.set(assignment[1], line)
+        if (assignment && !runtimeKeys.has(settingName)) {
+          topLevel.set(assignmentKey, assignment.lines.join('\n'))
+        }
         continue
       }
-      if (
-        section === 'models'
-        || section.startsWith('model.')
-        || section.startsWith('mcp_servers.')
-        || section === 'auth'
-        || section.startsWith('auth.')
-        || section === 'account'
-        || section.startsWith('account.')
-      ) continue
-      const lines = sections.get(section) || []
-      if (line.trim()) lines.push(line)
-      sections.set(section, lines)
+      if (isManagedGrokSection(section)) continue
+      const sectionBlock = sections.get(sectionKey)
+      if (!sectionBlock || !line.trim()) continue
+      if (!assignment) {
+        sectionBlock.entries.push([line])
+        continue
+      }
+
+      const previousIndex = sectionBlock.assignmentIndexes.get(assignmentKey)
+      if (previousIndex === undefined) {
+        sectionBlock.assignmentIndexes.set(assignmentKey, sectionBlock.entries.length)
+        sectionBlock.entries.push(assignment.lines)
+      } else {
+        sectionBlock.entries[previousIndex] = assignment.lines
+      }
     }
   }
 
   const blocks = [...topLevel.values()]
-  for (const [section, lines] of sections) {
-    if (lines.length) blocks.push(`[${section}]\n${lines.join('\n')}`)
+  for (const [key, { header, entries }] of sections) {
+    const lines = entries.flat()
+    if (lines.length || key.startsWith('array:')) {
+      blocks.push(lines.length ? `${header}\n${lines.join('\n')}` : header)
+    }
   }
   return blocks.join('\n\n')
 }
@@ -285,6 +333,7 @@ export async function prepareScopedGrokRuntime(input: {
   proxyBaseUrl: string
   contextWindow: number
   outputLimit: number
+  contextPolicy?: CodingAgentContextPolicy
   reasoningEffort: string
   systemPrompt: string
   userInstructions: string
@@ -309,6 +358,7 @@ export async function prepareScopedGrokRuntime(input: {
     'api_backend = "responses"',
     `context_window = ${Math.max(1, Math.floor(input.contextWindow))}`,
     `max_completion_tokens = ${Math.max(1, Math.floor(input.outputLimit))}`,
+    ...(input.contextPolicy ? [`auto_compact_threshold_percent = ${compactionPercent(input.contextPolicy.threshold)}`] : []),
     '',
     input.managedMcpToml.trim(),
     '',

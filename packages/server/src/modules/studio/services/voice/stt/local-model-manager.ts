@@ -13,7 +13,7 @@ import { transcodeToPcmS16le } from './audio-convert'
 import { SttNoSpeechDetectedError, type SttTranscribeInput, type SttTranscribeResult } from './types'
 
 const DEFAULT_DOWNLOAD_BASE_URL = 'https://download.ekkolearnai.com'
-const DEFAULT_GITHUB_REPO = 'EKKOLearnAI/hermes-studio'
+const DEFAULT_GITHUB_REPO = 'EKKOLearnAI/ekko-studio'
 const MODEL_MANIFEST_FILE = 'model-manifest.json'
 const MODEL_SCHEMA = 1
 const TRANSCRIBE_TIMEOUT_MS = 120_000

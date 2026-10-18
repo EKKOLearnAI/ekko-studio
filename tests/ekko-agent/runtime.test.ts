@@ -42,6 +42,36 @@ function modelClient(responder: (request: ModelRequest, call: number) => ModelRe
   }
 }
 
+describe('Computer Use runtime ownership', () => {
+  it('provides a fresh scope per run and closes it on completion and failure', async () => {
+    const scopes: AbortSignal[] = []
+    const tools = new AgentToolRegistry()
+    tools.register({
+      definition: { name: 'inspect_scope', parameters: { type: 'object', properties: {} } },
+      execute: async (_args, context) => {
+        scopes.push(context!.computerUseSessionSignal!)
+        expect(context!.computerUseSessionSignal!.aborted).toBe(false)
+        return { ok: true, content: 'scope recorded' }
+      },
+    })
+    const client = modelClient((_request, call) => call % 2
+      ? { content: '', toolCalls: [{ id: String(call), name: 'inspect_scope', arguments: {} }] }
+      : { content: 'done' })
+    const runtime = new AgentRuntime({ modelClient: client, tools })
+    await runtime.run({ messages: ['first'] })
+    await runtime.run({ messages: ['second'] })
+    expect(scopes).toHaveLength(2)
+    expect(scopes[0]).not.toBe(scopes[1])
+    expect(scopes.every(scope => scope.aborted)).toBe(true)
+    const failing = modelClient((_request, call) => {
+      if (call > 1) throw new Error('fixture model failed')
+      return { content: '', toolCalls: [{ id: 'fail', name: 'inspect_scope', arguments: {} }] }
+    })
+    await expect(new AgentRuntime({ modelClient: failing, tools, maxModelRetries: 0 }).run({ messages: ['fail'] })).rejects.toThrow('fixture model failed')
+    expect(scopes[2].aborted).toBe(true)
+  })
+})
+
 function skillContentHash(content: string): string {
   return createHash('sha256').update(content).digest('hex')
 }
@@ -729,6 +759,7 @@ describe('ekko-agent runtime', () => {
       content: 'Validation passed',
       finishReason: 'stop',
       usage: {
+        costUsd: 0.04,
         inputTokens: 12,
         outputTokens: 3,
         cacheReadTokens: 5,
@@ -745,6 +776,8 @@ describe('ekko-agent runtime', () => {
         background: true,
         summary: 'Validation passed',
         output: 'Validation passed',
+        costUsd: 0.04,
+        costSource: 'reported',
         childRunId: expect.any(String),
         apiCalls: 1,
         inputTokens: 12,
@@ -982,6 +1015,53 @@ describe('ekko-agent runtime', () => {
       await rm(workspaceRoot, { recursive: true, force: true })
     }
   })
+
+  it('projects old browser snapshots only in model requests and keeps full tool events and history', async () => {
+    const tools = new AgentToolRegistry()
+    let snapshotNumber = 0
+    const toolName = 'ekko_studio_browser_toolset'
+    tools.register({ definition: { name: toolName, parameters: { type: 'object' } }, async execute() {
+      snapshotNumber++
+      return { ok: true, content: JSON.stringify({ result: { tabId: 'tab', snapshotId: String(snapshotNumber),
+        nodes: Array.from({ length: 100 }, (_, i) => ({ ref: `@e${i + 1}`, role: 'button', name: `Item ${i}` })) } }) }
+    } })
+    const client = modelClient((request, call) => {
+      if (call <= 2) return { content: '', toolCalls: [{ id: `call-${call}`, name: toolName, arguments: {} }], finishReason: 'tool_calls' }
+      const history = request.messages.filter(message => message.role === 'tool')
+      expect(JSON.parse(history[0].content).result).toMatchObject({ stale: true, historicalNodeCount: 100 })
+      expect(JSON.parse(history[1].content).result.nodes).toHaveLength(100)
+      expect(history[1].content).not.toContain('\n')
+      return { content: 'done', finishReason: 'stop' }
+    })
+    const events: AgentRuntimeEvent[] = []
+    const result = await new AgentRuntime({ modelClient: client, tools }).run({ messages: ['browse'], onEvent: event => events.push(event) })
+    const completed = events.filter(event => event.type === 'tool.completed')
+    expect(completed).toHaveLength(2)
+    for (const event of completed) expect(JSON.parse((event as any).result.content).result.nodes).toHaveLength(100)
+    for (const message of result.messages.filter(message => message.role === 'tool')) {
+      expect(JSON.parse(message.content).result.nodes).toHaveLength(100)
+    }
+  })
+
+  it.each(['browser_navigate', 'browser_click', 'mcp__other__snapshot', 'ekko_studio_api_request'])(
+    'keeps snapshot-like history and default JSON formatting for %s', async toolName => {
+      const tools = new AgentToolRegistry()
+      const outputs: string[] = []
+      tools.register({ definition: { name: toolName, parameters: { type: 'object' } }, async execute() {
+        const result = { result: { tabId: 'tab', snapshotId: String(outputs.length),
+          nodes: [{ ref: '@e1', role: 'button', name: 'Keep full evidence' }] } }
+        outputs.push(JSON.stringify(result, null, 2))
+        return { ok: true, content: JSON.stringify(result) }
+      } })
+      const client = modelClient((request, call) => {
+        if (call <= 2) return { content: '', toolCalls: [{ id: `call-${call}`, name: toolName, arguments: {} }], finishReason: 'tool_calls' }
+        expect(request.messages.filter(message => message.role === 'tool').map(message => message.content)).toEqual(outputs)
+        return { content: 'done', finishReason: 'stop' }
+      })
+      await new AgentRuntime({ modelClient: client, tools }).run({ messages: ['inspect'] })
+      expect(outputs).toHaveLength(2)
+    },
+  )
 
   it('bounds oversized tool results before the next model request', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'ekko-runtime-large-result-'))

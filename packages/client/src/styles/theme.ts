@@ -1,6 +1,9 @@
+import { resolveAppearance, THEME_FONTS } from './theme-appearance'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import {
+  mixHex,
   resolveThemeCustomization,
+  toRgbComponents,
   type ThemeCustomization,
 } from './theme-customization'
 
@@ -76,6 +79,12 @@ export const lightThemeOverrides: GlobalThemeOverrides = {
   },
   Modal: {
     color: '#ffffff',
+  },
+  Drawer: {
+    borderRadius: '5px',
+    closeBorderRadius: '5px',
+    closeColorHover: 'transparent',
+    closeColorPressed: 'transparent',
   },
   Tag: {
     borderRadius: '6px',
@@ -155,6 +164,12 @@ export const darkThemeOverrides: GlobalThemeOverrides = {
   Modal: {
     color: '#2a2a2a',
   },
+  Drawer: {
+    borderRadius: '5px',
+    closeBorderRadius: '5px',
+    closeColorHover: 'transparent',
+    closeColorPressed: 'transparent',
+  },
   Tag: {
     borderRadius: '6px',
   },
@@ -170,9 +185,10 @@ export function getThemeOverrides(
   isDark: boolean,
   isComic?: boolean,
   customization?: ThemeCustomization,
+  hasCustomBackground = false,
 ): GlobalThemeOverrides {
   const base = isDark ? darkThemeOverrides : lightThemeOverrides
-  if (!isComic && !customization) return base
+  if (!isComic && !customization && !hasCustomBackground) return base
   const comicFont = "'Comic Neue', 'ZCOOL KuaiLe', 'Zen Maru Gothic', 'Gaegu', cursive, sans-serif"
   const custom = customization ? resolveThemeCustomization(customization, isDark) : null
   const common = {
@@ -232,7 +248,7 @@ export function getThemeOverrides(
       }
     : null
 
-  return {
+  const result: GlobalThemeOverrides = {
     ...base,
     common,
     ...(input ? { Input: input } : {}),
@@ -255,4 +271,162 @@ export function getThemeOverrides(
       },
     } : {}),
   }
+  const resolved = resolveAppearance(customization || { fontSize: 14, textColor: null, accentColor: null }, isDark, isComic)
+  const global = resolved.appearance.global
+  if (custom?.textPrimary || custom?.accentPrimary) {
+    result.Menu = {
+      ...result.Menu,
+      itemTextColorActive: resolved.accent,
+      itemTextColorActiveHover: resolved.accent,
+      itemTextColorChildActive: resolved.accent,
+      itemIconColorActive: resolved.accent,
+      itemIconColorActiveHover: resolved.accent,
+      arrowColorActive: resolved.accent,
+    }
+  }
+  result.common = {
+    ...result.common,
+    ...(custom ? {
+      fontSizeMini: `${custom.fontSize * 12 / 14}px`,
+      fontSizeTiny: `${custom.fontSize * 12 / 14}px`,
+      fontSizeSmall: `${custom.fontSize * 14 / 14}px`,
+      fontSizeLarge: `${custom.fontSize * 15 / 14}px`,
+      fontSizeHuge: `${custom.fontSize * 16 / 14}px`,
+    } : {}),
+    ...(global.backgroundColor ? {
+      bodyColor: resolved.background, cardColor: resolved.card, modalColor: resolved.card,
+      popoverColor: resolved.card, inputColor: resolved.card, tableColor: resolved.card,
+      actionColor: resolved.variables['--bg-secondary'],
+    } : {}),
+    ...(global.secondaryTextColor ? { textColor2: global.secondaryTextColor } : {}),
+    ...(global.mutedTextColor ? { textColor3: global.mutedTextColor, placeholderColor: global.mutedTextColor } : {}),
+    ...(global.borderColor || global.opacity !== undefined ? {
+      borderColor: resolved.variables['--theme-global-border'], dividerColor: resolved.variables['--theme-global-border'],
+    } : {}),
+    ...(global.radius !== undefined ? { borderRadius: `${global.radius}px`, borderRadiusSmall: `${global.radius * 0.75}px` } : {}),
+    ...(global.fontFamily ? { fontFamily: THEME_FONTS[global.fontFamily] } : {}),
+    ...(global.controlHeight !== undefined ? {
+      heightMedium: `${global.controlHeight}px`, heightSmall: `${global.controlHeight - 4}px`,
+      heightLarge: `${global.controlHeight + 4}px`, heightTiny: `${global.controlHeight - 8}px`,
+    } : {}),
+    ...(global.lineHeight !== undefined ? { lineHeight: String(global.lineHeight) } : {}),
+  }
+  const surface = (region: 'card' | 'input' | 'overlay') => {
+    const prefix = `--theme-${region}`
+    return {
+      ...(resolved.variables[`${prefix}-bg`] ? { color: resolved.variables[`${prefix}-bg`] } : {}),
+      ...(resolved.variables[`${prefix}-radius`] ? { borderRadius: resolved.variables[`${prefix}-radius`] } : {}),
+      ...(resolved.variables[`${prefix}-border`] ? { borderColor: resolved.variables[`${prefix}-border`] } : {}),
+      ...(resolved.variables[`${prefix}-shadow`] ? { boxShadow: resolved.variables[`${prefix}-shadow`] } : {}),
+    }
+  }
+  result.Card = { ...result.Card, ...surface('card') }
+  const cardSurface = surface('card')
+  const cardBackground = cardSurface.color || (hasCustomBackground ? 'rgba(var(--bg-card-rgb), 0.72)' : undefined)
+  result.Tag = {
+    ...result.Tag,
+    // Default tags have separate fills for bordered and borderless variants.
+    // Leave semantic and checkable-state colors to Naive UI.
+    ...(cardBackground ? { color: cardBackground, colorBordered: cardBackground } : {}),
+    ...(cardSurface.borderColor || global.borderWidth !== undefined ? {
+      border: `${global.borderWidth ?? 1}px solid ${cardSurface.borderColor || resolved.border}`,
+    } : {}),
+  }
+  result.Descriptions = {
+    ...result.Descriptions,
+    ...(cardBackground ? {
+      tdColor: cardBackground, tdColorModal: cardBackground, tdColorPopover: cardBackground,
+      // The wrapper owns the surface; headers add only a translucent tint.
+      thColor: 'rgba(var(--text-primary-rgb), 0.04)',
+      thColorModal: 'rgba(var(--text-primary-rgb), 0.04)',
+      thColorPopover: 'rgba(var(--text-primary-rgb), 0.04)',
+    } : {}),
+    ...(cardSurface.borderRadius ? { borderRadius: cardSurface.borderRadius } : {}),
+    ...(cardSurface.borderColor ? {
+      borderColor: cardSurface.borderColor,
+      borderColorModal: cardSurface.borderColor,
+      borderColorPopover: cardSurface.borderColor,
+    } : {}),
+  }
+  // Naive composites table states into opaque colors. Paint the surface once on
+  // the wrapper and let cells add only a state tint, including in modal/popover tables.
+  const tableSurface = {
+    ...(cardBackground ? {
+      tdColor: 'transparent', tdColorModal: 'transparent', tdColorPopover: 'transparent',
+      thColor: 'rgba(var(--text-primary-rgb), 0.04)',
+      thColorModal: 'rgba(var(--text-primary-rgb), 0.04)',
+      thColorPopover: 'rgba(var(--text-primary-rgb), 0.04)',
+      tdColorStriped: 'rgba(var(--text-primary-rgb), 0.025)',
+      tdColorStripedModal: 'rgba(var(--text-primary-rgb), 0.025)',
+      tdColorStripedPopover: 'rgba(var(--text-primary-rgb), 0.025)',
+    } : {}),
+    ...(cardSurface.borderRadius ? { borderRadius: cardSurface.borderRadius } : {}),
+    ...(cardSurface.borderColor ? {
+      borderColor: cardSurface.borderColor, borderColorModal: cardSurface.borderColor,
+      borderColorPopover: cardSurface.borderColor,
+    } : {}),
+  }
+  result.Table = { ...result.Table, ...tableSurface }
+  result.DataTable = { ...result.DataTable, ...tableSurface,
+    ...(cardBackground ? {
+      tdColorHover: 'rgba(var(--text-primary-rgb), 0.08)',
+      tdColorHoverModal: 'rgba(var(--text-primary-rgb), 0.08)',
+      tdColorHoverPopover: 'rgba(var(--text-primary-rgb), 0.08)',
+      tdColorSorting: 'rgba(var(--text-primary-rgb), 0.04)',
+      tdColorSortingModal: 'rgba(var(--text-primary-rgb), 0.04)',
+      tdColorSortingPopover: 'rgba(var(--text-primary-rgb), 0.04)',
+      thColorHover: 'rgba(var(--text-primary-rgb), 0.08)',
+      thColorHoverModal: 'rgba(var(--text-primary-rgb), 0.08)',
+      thColorHoverPopover: 'rgba(var(--text-primary-rgb), 0.08)',
+      thColorSorting: 'rgba(var(--text-primary-rgb), 0.08)',
+      thColorSortingModal: 'rgba(var(--text-primary-rgb), 0.08)',
+      thColorSortingPopover: 'rgba(var(--text-primary-rgb), 0.08)',
+    } : {}),
+    ...(cardSurface.borderColor ? { actionDividerColor: cardSurface.borderColor } : {}),
+  }
+  result.Modal = { ...result.Modal, ...surface('overlay') }
+  result.Drawer = { ...result.Drawer, ...surface('overlay') }
+  // Popover is also Tooltip's peer. Scope its surface to non-tooltip DOM nodes
+  // in _theme-surfaces.scss so inverted tooltip colors remain readable.
+  result.Dropdown = { ...result.Dropdown, ...surface('overlay') }
+  result.Dialog = { ...result.Dialog, ...surface('overlay') }
+  result.Notification = { ...result.Notification, ...surface('overlay') }
+  const overlayBorder = resolved.variables['--theme-overlay-border']
+  if (overlayBorder) {
+    const border = `${global.borderWidth ?? 1}px solid ${overlayBorder}`
+    result.Drawer = { ...result.Drawer, headerBorderBottom: border, footerBorderTop: border }
+    result.Popover = { ...result.Popover, dividerColor: overlayBorder }
+    result.Dropdown = { ...result.Dropdown, dividerColor: overlayBorder }
+    result.Dialog = { ...result.Dialog, border }
+  }
+  result.Input = { ...result.Input, ...surface('input'),
+    ...(resolved.variables['--theme-input-bg'] ? { colorFocus: resolved.variables['--theme-input-bg'] } : {}),
+    ...(global.mutedTextColor ? { placeholderColor: global.mutedTextColor } : {}),
+  }
+  result.InternalSelection = { ...result.InternalSelection, ...surface('input'),
+    ...(resolved.variables['--theme-input-bg'] ? {
+      colorActive: resolved.variables['--theme-input-bg'],
+      colorFocus: resolved.variables['--theme-input-bg'],
+    } : {}),
+  }
+  if (hasCustomBackground || resolved.variables['--theme-input-bg']) {
+    const opacity = resolved.regions.input.opacity ?? (resolved.variables['--theme-input-bg'] ? 1 : 0.72)
+    // Tint the inactive track so its white thumb remains visible on light fills.
+    const neutral = mixHex(resolved.text, resolved.regions.input.backgroundColor, 0.12)
+    result.Switch = {
+      ...result.Switch,
+      railColor: `rgba(${toRgbComponents(neutral)}, ${opacity})`,
+      railColorActive: `rgba(${toRgbComponents(resolved.accent)}, ${opacity})`,
+    }
+  }
+  if (global.borderWidth !== undefined || resolved.variables['--theme-input-border']) {
+    const width = global.borderWidth ?? 1
+    const border = `${width}px solid ${resolved.variables['--theme-input-border'] || resolved.regions.input.borderColor}`
+    const activeBorder = `${width}px solid ${resolved.accent}`
+    result.Input = { ...result.Input, border, borderHover: border, borderDisabled: border, borderFocus: activeBorder, groupLabelBorder: border }
+    result.InternalSelection = { ...result.InternalSelection, border, borderHover: border, borderActive: activeBorder, borderFocus: activeBorder }
+  }
+  if (global.radius !== undefined) result.Tag = { ...result.Tag, borderRadius: `${global.radius * 0.75}px` }
+  if (global.backgroundColor) result.Layout = { ...result.Layout, color: resolved.background, siderColor: resolved.background, headerColor: resolved.background }
+  return result
 }

@@ -88,10 +88,10 @@ const hasRiskFlag = computed(() => props.task.priority >= 3
   appearance: none;
   width: 100%;
   display: block;
-  background-color: $bg-card;
-  border: 1px solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  padding: 12px 13px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(13px * var(--spacing-scale, 1));
   color: inherit;
   font: inherit;
   text-align: start;
@@ -114,7 +114,7 @@ const hasRiskFlag = computed(() => props.task.priority >= 3
   &.status-archived { --kanban-card-status-color: #777b81; }
 
   &:hover {
-    background-color: $bg-card-hover;
+    background-color: var(--theme-card-bg, $bg-card-hover);
     border-color: color-mix(in srgb, var(--kanban-card-status-color) 52%, $border-color);
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.07);
     transform: translateY(-1px);
@@ -130,7 +130,7 @@ const hasRiskFlag = computed(() => props.task.priority >= 3
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   min-height: 16px;
 }
 
@@ -146,19 +146,19 @@ const hasRiskFlag = computed(() => props.task.priority >= 3
   min-width: 0;
   overflow: hidden;
   color: $text-muted;
-  font-family: $font-code;
-  font-size: 10.5px;
-  line-height: 1;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 10.5 / 14);
+  line-height: var(--line-height, 1);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .card-title {
   margin-top: 8px;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   color: $text-primary;
-  line-height: 1.45;
+  line-height: var(--line-height, 1.45);
   word-break: break-word;
   display: -webkit-box;
   overflow: hidden;
@@ -169,12 +169,12 @@ const hasRiskFlag = computed(() => props.task.priority >= 3
 .priority {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: calc(5px * var(--spacing-scale, 1));
   margin-inline-start: auto;
   color: $text-secondary;
-  font-size: 10.5px;
+  font-size: calc(var(--font-size-base, 14px) * 10.5 / 14);
   font-weight: 500;
-  line-height: 1;
+  line-height: var(--line-height, 1);
   white-space: nowrap;
 
   &.high .priority-dot {
@@ -211,7 +211,7 @@ const hasRiskFlag = computed(() => props.task.priority >= 3
 .card-footer {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
   min-height: 20px;
   margin-top: 12px;
@@ -222,10 +222,10 @@ const hasRiskFlag = computed(() => props.task.priority >= 3
   align-items: center;
   min-width: 0;
   max-width: calc(100% - 64px);
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 11px;
-  line-height: 1;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, 1);
 }
 
 .assignee-name {
@@ -241,7 +241,7 @@ const hasRiskFlag = computed(() => props.task.priority >= 3
 
 .card-time {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
   margin-inline-start: auto;
   white-space: nowrap;

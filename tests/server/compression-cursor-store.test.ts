@@ -44,6 +44,7 @@ describe('compression cursor persistence', () => {
       compressedThroughMessageId: boundaryId,
       protectedHeadThroughMessageId: headId,
       historyRevision: 0,
+      updatedAt: expect.any(Number),
     })
   })
 

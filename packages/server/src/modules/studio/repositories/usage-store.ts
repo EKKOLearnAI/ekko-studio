@@ -1,10 +1,15 @@
 import { isSqliteAvailable, getDb, jsonSet, jsonGet, jsonGetAll, jsonDelete } from '../infrastructure/database'
-import { USAGE_TABLE as TABLE } from '../infrastructure/database/schemas'
+import { randomUUID } from 'crypto'
+import { USAGE_TABLE as TABLE, RUN_USAGE_TABLE } from '../infrastructure/database/schemas'
+import { refreshCompletedRunUsage } from './run-usage-store'
+import { getSessionUsageAccount, getSessionUsageAccounts, usageAccountExpression } from './usage-accounts'
+import { finiteCost, emptyCostCoverage, type UsageCost, type UsagePriceSnapshot } from '../services/usage/usage-cost'
 import type {
   LocalUsageStats,
   UsageStatsAgentRow,
   UsageStatsDailyRow,
   UsageStatsModelRow,
+  UsageStatsFilters,
 } from '../contracts/runs/usage'
 
 export type {
@@ -36,10 +41,17 @@ function hasUpdatedAtColumn(): boolean {
   }
 }
 
+export type UsageRowRef = { id: number } | { id: string; sessionId: string }
+
 export function updateUsage(
   sessionId: string,
   data: {
+    origin?: 'internal' | 'external'
+    accountId?: string
     runId?: string
+    parentRunId?: string
+    createdAt?: number
+    apiDuration?: number
     source?: string
     agent?: string
     usageScope?: 'model_call' | 'run'
@@ -54,20 +66,32 @@ export function updateUsage(
     provider?: string
     profile?: string
     isEstimated?: boolean
+    costUsd?: number
+    costSource?: 'reported' | 'estimated'
+    costPricing?: UsagePriceSnapshot
   },
-): void {
+): UsageRowRef | undefined {
   const cacheReadTokens = data.cacheReadTokens ?? 0
   const cacheWriteTokens = data.cacheWriteTokens ?? 0
   const reasoningTokens = data.reasoningTokens ?? 0
-  const now = Date.now()
+  const now = typeof data.createdAt === 'number' && Number.isSafeInteger(data.createdAt) && data.createdAt > 0
+    ? data.createdAt : Date.now()
   const model = data.model || ''
   const provider = data.provider || ''
   const profile = data.profile || 'default'
+  const account = data.accountId ?? getSessionUsageAccount(sessionId, profile) ?? null
+  const costUsd = finiteCost(data.costUsd) ?? null
+  const costSource = costUsd == null ? 'unknown' : data.costSource || 'reported'
+  const costPricing = costUsd == null || !data.costPricing ? null : JSON.stringify(data.costPricing)
   if (isSqliteAvailable()) {
     const db = getDb()!
     const columns = [
       'session_id',
+      'account_id',
+      'origin',
       'run_id',
+      'parent_run_id',
+      'api_duration',
       'source',
       'agent',
       'usage_scope',
@@ -83,11 +107,18 @@ export function updateUsage(
       'profile',
       'is_estimated',
       'created_at',
+      'cost_usd',
+      'cost_source',
+      'cost_pricing',
     ]
     const values = columns.map(() => '?')
     const params = [
       sessionId,
+      account,
+      data.origin || 'internal',
       data.runId || '',
+      data.parentRunId || '',
+      typeof data.apiDuration === 'number' && Number.isFinite(data.apiDuration) && data.apiDuration > 0 ? data.apiDuration : null,
       data.source || '',
       data.agent || '',
       data.usageScope || 'run',
@@ -103,18 +134,29 @@ export function updateUsage(
       profile,
       data.isEstimated ? 1 : 0,
       now,
+      costUsd,
+      costSource,
+      costPricing,
     ]
     if (hasUpdatedAtColumn()) {
       columns.push('updated_at')
       values.push('?')
-      params.push(now)
+      params.push(Date.now())
     }
-    db.prepare(
+    const result = db.prepare(
       `INSERT OR IGNORE INTO ${TABLE} (${columns.join(', ')}) VALUES (${values.join(', ')})`,
     ).run(...params)
+    if (result?.changes && data.parentRunId) refreshCompletedRunUsage(sessionId, data.parentRunId)
+    return result?.changes ? { id: Number(result.lastInsertRowid) } : undefined
   } else {
-    jsonSet(TABLE, sessionId, {
+    const id = randomUUID()
+    jsonSet(TABLE, data.origin === 'external' ? `external:${data.runId || id}` : sessionId, {
+      id,
+      origin: data.origin || 'internal',
+      account_id: account,
       run_id: data.runId || '',
+      parent_run_id: data.parentRunId || '',
+      api_duration: data.apiDuration ?? null,
       source: data.source || '',
       agent: data.agent || '',
       usage_scope: data.usageScope || 'run',
@@ -130,7 +172,33 @@ export function updateUsage(
       profile,
       is_estimated: data.isEstimated ? 1 : 0,
       created_at: now,
+      cost_usd: costUsd,
+      cost_source: costSource,
+      cost_pricing: costPricing,
     })
+    return { id, sessionId: data.origin === 'external' ? `external:${data.runId || id}` : sessionId }
+  }
+}
+
+/** Enrich only the inserted record, without changing its tokens, timestamp, or an existing price. */
+export function fillMissingUsageCost(row: UsageRowRef, cost: UsageCost): void {
+  const amount = finiteCost(cost.costUsd)
+  if (amount === undefined) return
+  const pricing = cost.costPricing ? JSON.stringify(cost.costPricing) : null
+  if (!('sessionId' in row)) {
+    const db = getDb()
+    const result = db?.prepare(`UPDATE ${TABLE} SET cost_usd = ?, cost_source = ?, cost_pricing = ? WHERE id = ? AND cost_usd IS NULL`)
+      .run(amount, cost.costSource, pricing, row.id)
+    if (result?.changes) {
+      const usage = db!.prepare(`SELECT session_id, parent_run_id FROM ${TABLE} WHERE id = ?`).get(row.id) as
+        { session_id: string; parent_run_id: string } | undefined
+      if (usage?.parent_run_id) refreshCompletedRunUsage(usage.session_id, usage.parent_run_id)
+    }
+  } else {
+    const saved = jsonGet(TABLE, row.sessionId)
+    if (saved?.id === row.id && saved.cost_usd == null) {
+      jsonSet(TABLE, row.sessionId, { ...saved, cost_usd: amount, cost_source: cost.costSource, cost_pricing: pricing })
+    }
   }
 }
 
@@ -173,14 +241,14 @@ export function getRecordedUsageTotals(sessionId: string, source: string): {
   }
 }
 
-export function getUsage(sessionId: string): UsageRecord | undefined {
+export function getUsage(sessionId: string, source?: string): UsageRecord | undefined {
   if (isSqliteAvailable()) {
     return getDb()!.prepare(
-      `SELECT session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, model, profile, created_at FROM ${TABLE} WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
-    ).get(sessionId) as UsageRecord | undefined
+      `SELECT session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, model, profile, created_at FROM ${TABLE} WHERE session_id = ?${source ? ' AND source = ?' : ''} ORDER BY id DESC LIMIT 1`,
+    ).get(...(source ? [sessionId, source] : [sessionId])) as UsageRecord | undefined
   }
   const row = jsonGet(TABLE, sessionId)
-  if (!row) return undefined
+  if (!row || (source && row.source !== source)) return undefined
   return {
     input_tokens: row.input_tokens ?? 0,
     output_tokens: row.output_tokens ?? 0,
@@ -191,6 +259,21 @@ export function getUsage(sessionId: string): UsageRecord | undefined {
     profile: row.profile ?? 'default',
     created_at: row.created_at ?? 0,
   }
+}
+
+type SessionTokenTotals = Pick<UsageRecord,
+  'input_tokens' | 'output_tokens' | 'cache_read_tokens' | 'cache_write_tokens' | 'reasoning_tokens'>
+
+export function getRecordedSessionTokensBatch(sessionIds: string[], source: string): Record<string, SessionTokenTotals> {
+  if (!sessionIds.length || !isSqliteAvailable()) return {}
+  const placeholders = sessionIds.map(() => '?').join(',')
+  const rows = getDb()!.prepare(`
+    SELECT session_id, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+      SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_write_tokens) AS cache_write_tokens,
+      SUM(reasoning_tokens) AS reasoning_tokens
+    FROM ${TABLE} WHERE source = ? AND session_id IN (${placeholders}) GROUP BY session_id
+  `).all(source, ...sessionIds) as unknown as Array<SessionTokenTotals & { session_id: string }>
+  return Object.fromEntries(rows.map(({ session_id, ...usage }) => [session_id, usage]))
 }
 
 export function getUsageBatch(sessionIds: string[]): Record<string, UsageRecord> {
@@ -241,6 +324,7 @@ export function getUsageBatch(sessionIds: string[]): Record<string, UsageRecord>
 export function deleteUsage(sessionId: string): void {
   if (isSqliteAvailable()) {
     getDb()!.prepare(`DELETE FROM ${TABLE} WHERE session_id = ?`).run(sessionId)
+    getDb()!.prepare(`DELETE FROM ${RUN_USAGE_TABLE} WHERE session_id = ?`).run(sessionId)
   } else {
     jsonDelete(TABLE, sessionId)
   }
@@ -258,27 +342,52 @@ export function getRecordedUsageSessionIds(profile?: string): string[] {
     return rows.map(row => String(row.session_id || '')).filter(Boolean)
   }
   return Object.entries(jsonGetAll(TABLE))
+    .filter(([, row]) => row.origin !== 'external')
     .filter(([, row]) => !profile || (row.profile || 'default') === profile)
     .map(([sessionId]) => sessionId)
     .filter(Boolean)
 }
 
-export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats {
+export function getLocalUsageStats(profile?: string, days = 30, selection: UsageStatsFilters = {}): LocalUsageStats {
   const empty: LocalUsageStats = {
     input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
     cache_write_tokens: 0, reasoning_tokens: 0, sessions: 0,
-    by_model: [], by_agent: [], by_day: [], cost: 0, total_api_calls: 0,
+    by_model: [], by_agent: [], by_day: [], cost: 0, cost_coverage: emptyCostCoverage(), total_api_calls: 0,
   }
   if (!isSqliteAvailable()) return empty
 
   const db = getDb()!
   const safeDays = Math.max(1, Math.floor(Number.isFinite(days) ? days : 30))
-  const cutoffMs = Date.now() - safeDays * 24 * 60 * 60 * 1000
-  const filters: string[] = ['created_at > ?']
+  const cutoffMs = selection.today?.startMs ?? Date.now() - safeDays * 24 * 60 * 60 * 1000
+  const filters: string[] = [selection.today ? 'created_at >= ?' : 'created_at > ?']
   const params: any[] = [cutoffMs]
+  if (selection.today) {
+    filters.push('created_at <= ?')
+    params.push(selection.today.endMs)
+  }
   if (profile) {
     filters.unshift('profile = ?')
     params.unshift(profile)
+  }
+  filters.push('origin = ?')
+  params.push(selection.origin || 'internal')
+  // Options remain scoped to the period/profile, rather than shrinking with each selection.
+  const baseWhere = `WHERE ${filters.join(' AND ')}`
+  const optionRows = db.prepare(`SELECT DISTINCT
+    COALESCE(NULLIF(TRIM(model), ''), 'unknown') AS model,
+    COALESCE(NULLIF(TRIM(agent), ''), 'unknown') AS agent
+    FROM ${TABLE} ${baseWhere}`).all(...params) as Array<{ model: string; agent: string }>
+  if (selection.model) {
+    filters.push("COALESCE(NULLIF(TRIM(model), ''), 'unknown') = ?")
+    params.push(selection.model)
+  }
+  if (selection.agent) {
+    filters.push("COALESCE(NULLIF(TRIM(agent), ''), 'unknown') = ?")
+    params.push(selection.agent)
+  }
+  if (selection.account) {
+    filters.push(`${usageAccountExpression} = ?`)
+    params.push(JSON.stringify(selection.sessionAccounts ?? getSessionUsageAccounts(profile)), selection.account)
   }
   const whereClause = `WHERE ${filters.join(' AND ')}`
 
@@ -289,7 +398,8 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
       COALESCE(SUM(cache_write_tokens),0) as cache_write_tokens,
       COALESCE(SUM(reasoning_tokens),0) as reasoning_tokens,
       COALESCE(SUM(api_calls),0) as total_api_calls,
-      COUNT(DISTINCT session_id) as sessions
+      ${costSelect},
+      COUNT(DISTINCT NULLIF(session_id, '')) as sessions
     FROM ${TABLE}
     ${whereClause}
   `).get(...params) as any
@@ -301,7 +411,7 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
       COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
       COALESCE(SUM(cache_write_tokens),0) as cache_write_tokens,
       COALESCE(SUM(reasoning_tokens),0) as reasoning_tokens,
-      COUNT(DISTINCT session_id) as sessions
+      COUNT(DISTINCT NULLIF(session_id, '')) as sessions
     FROM ${TABLE}
     ${whereClause}
     GROUP BY model
@@ -315,7 +425,7 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
       COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
       COALESCE(SUM(cache_write_tokens),0) as cache_write_tokens,
       COALESCE(SUM(reasoning_tokens),0) as reasoning_tokens,
-      COUNT(DISTINCT session_id) as sessions
+      COUNT(DISTINCT NULLIF(session_id, '')) as sessions
     FROM ${TABLE}
     ${whereClause}
     GROUP BY agent
@@ -323,19 +433,24 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
   `).all(...params) as unknown as UsageStatsAgentRow[]
 
   const byDay = db.prepare(`
-    SELECT DATE(created_at / 1000, 'unixepoch') as date,
+    SELECT ${selection.today ? '?' : "DATE(created_at / 1000, 'unixepoch')"} as date,
+      ${costSelect},
       COALESCE(SUM(input_tokens),0) as input_tokens,
       COALESCE(SUM(output_tokens),0) as output_tokens,
       COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
       COALESCE(SUM(cache_write_tokens),0) as cache_write_tokens,
-      COUNT(DISTINCT session_id) as sessions
+      COUNT(DISTINCT NULLIF(session_id, '')) as sessions
     FROM ${TABLE}
     ${whereClause}
     GROUP BY date
     ORDER BY date
-  `).all(...params) as Array<{ date: string; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; sessions: number }>
+  `).all(...(selection.today ? [selection.today.date] : []), ...params) as unknown as Array<UsageStatsDailyRow & CostTotals>
 
   return {
+    filter_options: {
+      models: [...new Set(optionRows.map(row => row.model))].sort(),
+      agents: [...new Set(optionRows.map(row => row.agent))].sort(),
+    },
     input_tokens: totals.input_tokens,
     output_tokens: totals.output_tokens,
     cache_read_tokens: totals.cache_read_tokens,
@@ -344,8 +459,43 @@ export function getLocalUsageStats(profile?: string, days = 30): LocalUsageStats
     sessions: totals.sessions,
     by_model: byModel,
     by_agent: byAgent,
-    by_day: byDay.map(d => ({ ...d, errors: 0, cost: 0 })),
-    cost: 0,
+    by_day: byDay.map(({ cost_reported, cost_estimated, cost_unknown, ...d }) => ({ ...d, errors: 0, cost: d.cost || 0, cost_coverage: coverage({ cost_reported, cost_estimated, cost_unknown }) })),
+    cost: totals.cost || 0,
+    cost_coverage: coverage(totals),
     total_api_calls: totals.total_api_calls,
   }
+}
+
+type CostTotals = { cost_reported?: number; cost_estimated?: number; cost_unknown?: number }
+const costSelect = `COALESCE(SUM(cost_usd), 0) AS cost,
+  COALESCE(SUM(CASE WHEN cost_usd IS NOT NULL AND cost_source <> 'estimated' THEN 1 ELSE 0 END), 0) AS cost_reported,
+  COALESCE(SUM(CASE WHEN cost_usd IS NOT NULL AND cost_source = 'estimated' THEN 1 ELSE 0 END), 0) AS cost_estimated,
+  COALESCE(SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END), 0) AS cost_unknown`
+
+function coverage(row: CostTotals) {
+  return { reported: row.cost_reported || 0, estimated: row.cost_estimated || 0, unknown: row.cost_unknown || 0 }
+}
+
+/** A cumulative Hermes bill can only replace wholly unpriced sessions contained in this period. */
+export function getUnpricedHermesUsageSessions(profile: string, days: number, selection: UsageStatsFilters = {}): Array<{ sessionId: string; days: Array<{ date: string; entries: number }> }> {
+  if (!isSqliteAvailable()) return []
+  const cutoff = selection.today?.startMs ?? Date.now() - days * 86_400_000
+  const accountClause = selection.account ? `AND SUM(CASE WHEN ${usageAccountExpression} <> ? THEN 1 ELSE 0 END) = 0` : ''
+  const accountParams = selection.account
+    ? [JSON.stringify(selection.sessionAccounts ?? getSessionUsageAccounts(profile)), selection.account] : []
+  const rows = getDb()!.prepare(`SELECT session_id, ${selection.today ? '?' : "DATE(created_at / 1000, 'unixepoch')"} AS date, COUNT(*) AS entries
+    FROM ${TABLE} WHERE profile = ? AND source = 'hermes' AND session_id IN (
+      SELECT session_id FROM ${TABLE} WHERE profile = ? GROUP BY session_id
+      HAVING MIN(created_at) ${selection.today ? '>=' : '>'} ? ${selection.today ? 'AND MAX(created_at) <= ?' : ''}
+        AND COUNT(cost_usd) = 0 AND SUM(CASE WHEN source <> 'hermes' THEN 1 ELSE 0 END) = 0
+        ${accountClause}
+    ) GROUP BY session_id, date`).all(...(selection.today ? [selection.today.date] : []), profile, profile, cutoff,
+      ...(selection.today ? [selection.today.endMs] : []), ...accountParams) as Array<{ session_id: string; date: string; entries: number }>
+  const sessions = new Map<string, Array<{ date: string; entries: number }>>()
+  for (const row of rows) {
+    const days = sessions.get(row.session_id) || []
+    days.push({ date: row.date, entries: row.entries })
+    sessions.set(row.session_id, days)
+  }
+  return [...sessions].map(([sessionId, days]) => ({ sessionId, days }))
 }

@@ -107,6 +107,24 @@ afterEach(async () => {
 })
 
 describe('Ekko Streamable HTTP MCP', () => {
+  it('isolates concurrent run credentials and never reconnects a completed scope', async () => {
+    const provider = createMcpToolProvider()
+    const scopes = [new AbortController(), new AbortController()]
+    const contexts = scopes.map((scope, index) => ({ mcpSessionSignal: scope.signal, timeoutMs: 5000,
+      mcpServers: { fetch: { url: endpoint, headers: { 'x-api-key': `run-${index}` } } } }))
+    try {
+      const [a, b] = await Promise.all(contexts.map(context => provider.listTools(context)))
+      expect(initializeCount).toBe(2)
+      expect((await a[0].execute({ text: 'a' }, contexts[0])).ok).toBe(true)
+      expect(apiKeyHeaders.at(-1)).toBe('run-0')
+      scopes[0].abort()
+      expect((await a[0].execute({ text: 'stale' }, contexts[0])).ok).toBe(false)
+      expect((await b[0].execute({ text: 'b' }, contexts[1])).ok).toBe(true)
+      expect(apiKeyHeaders.at(-1)).toBe('run-1')
+      expect(initializeCount).toBe(2)
+      await expect(provider.listTools(contexts[0])).rejects.toThrow()
+    } finally { scopes.forEach(scope => scope.abort()) }
+  })
   it('discovers and calls remote tools through the official MCP client', async () => {
     const provider = createMcpToolProvider()
     const context = {
@@ -132,6 +150,21 @@ describe('Ekko Streamable HTTP MCP', () => {
     expect(apiKeyHeaders.every(value => value === 'test-key')).toBe(true)
     await provider.listTools({ mcpServers: {} })
   })
+
+  it.each(['http', 'streamable-http', 'streamableHttp', ' Streamable_HTTP '])(
+    'accepts the %s transport alias the Ekko config layers normalize',
+    async type => {
+      const provider = createMcpToolProvider()
+      const context = {
+        mcpServers: { fetch: { type, url: endpoint } },
+        timeoutMs: 5_000,
+      }
+
+      const tools = await provider.listTools(context)
+      expect(tools.map(tool => tool.definition.name)).toEqual(['remote_echo'])
+      await provider.listTools({ mcpServers: {} })
+    },
+  )
 
   it('proxies provider-unsafe names while preserving the exact remote tool name', async () => {
     remoteTools = [{

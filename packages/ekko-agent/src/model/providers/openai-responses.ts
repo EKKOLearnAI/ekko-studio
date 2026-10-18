@@ -14,6 +14,7 @@ import type {
 } from '../types'
 import { modelRequestHeaders, isPlainRecord, parseJson, postJson, postStream, providerUrl, readServerSentEvents } from '../http'
 import { collectModelEvents, normalizeAgentReasoning } from '../messages'
+import { createHash } from 'node:crypto'
 
 interface OpenAIResponsesPayload {
   model: string
@@ -87,6 +88,7 @@ interface OpenAIResponsesResponse {
   reasoning_text?: string
   reasoning_summary?: string
   usage?: {
+    cost?: number
     input_tokens?: number
     output_tokens?: number
     total_tokens?: number
@@ -139,7 +141,11 @@ export class OpenAIResponsesModelClient implements ModelClient {
       modelRequestHeaders(this.config, request),
       request.signal,
     )
-    return normalizeOpenAIResponsesResponse(response)
+    return normalizeOpenAIResponsesResponse(response, this.replayScope(request))
+  }
+
+  private replayScope(request: ModelRequest): string {
+    return providerReasoningReplayScope(this.config.id, request.model ?? this.config.defaultModel, responsesUrl(this.config))
   }
 
   async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
@@ -166,6 +172,7 @@ export class OpenAIResponsesModelClient implements ModelClient {
             collectedOutputItems,
             streamedText,
             streamedReasoning,
+            this.replayScope(request),
           ),
         }
         return
@@ -218,7 +225,13 @@ export class OpenAIResponsesModelClient implements ModelClient {
         yield { type: 'error', error: message }
         return
       }
-      if (chunk.type === 'response.completed' && isPlainRecord(chunk.response)) {
+      if (chunk.type === 'response.failed' && isPlainRecord(chunk.response)) {
+        const failed = normalizeOpenAIResponsesResponse(chunk.response as OpenAIResponsesResponse)
+        if (failed.usage) yield { type: 'usage', usage: failed.usage }
+        yield { type: 'error', error: 'Model provider response failed.' }
+        return
+      }
+      if ((chunk.type === 'response.completed' || chunk.type === 'response.incomplete') && isPlainRecord(chunk.response)) {
         yield {
           type: 'done',
           response: normalizeStreamedResponse(
@@ -226,6 +239,7 @@ export class OpenAIResponsesModelClient implements ModelClient {
             collectedOutputItems,
             streamedText,
             streamedReasoning,
+            this.replayScope(request),
           ),
         }
         return
@@ -239,6 +253,7 @@ function normalizeStreamedResponse(
   collectedOutputItems: NonNullable<OpenAIResponsesResponse['output']>,
   streamedText: string,
   streamedReasoning: string,
+  replayScope: string,
 ): ModelResponse {
   const output = collectedOutputItems.length > 0
     ? collectedOutputItems
@@ -250,7 +265,7 @@ function normalizeStreamedResponse(
             content: [{ type: 'output_text', text: streamedText }],
           }]
         : []
-  const normalized = normalizeOpenAIResponsesResponse({ ...terminal, output })
+  const normalized = normalizeOpenAIResponsesResponse({ ...terminal, output }, replayScope)
   if (!normalized.content && streamedText) normalized.content = streamedText
   if (!normalized.reasoning && streamedReasoning) {
     normalized.reasoning = normalizeAgentReasoning(streamedReasoning)
@@ -268,6 +283,7 @@ export function toOpenAIResponsesPayload(config: ModelProviderConfig, request: M
           .map(toolCall => toolCall.id)
       : []),
   )
+  const replayScope = providerReasoningReplayScope(config.id, request.model ?? config.defaultModel, responsesUrl(config))
   const supportsSamplingControls = config.id !== 'openai-codex'
   return {
     model: request.model ?? config.defaultModel,
@@ -275,7 +291,7 @@ export function toOpenAIResponsesPayload(config: ModelProviderConfig, request: M
     ...(shouldIncludeEncryptedReasoning(config) ? { include: ['reasoning.encrypted_content'] as const } : {}),
     input: request.messages
       .filter(message => message.role !== 'system')
-      .flatMap(message => toOpenAIResponseInput(message, replayableToolCallIds)),
+      .flatMap(message => toOpenAIResponseInput(message, replayableToolCallIds, replayScope)),
     ...(supportsSamplingControls && request.temperature !== undefined ? { temperature: request.temperature } : {}),
     ...(supportsSamplingControls && request.maxTokens !== undefined ? { max_output_tokens: request.maxTokens } : {}),
     ...(request.reasoningEffort || request.reasoningSummary
@@ -297,7 +313,7 @@ export function toOpenAIResponsesPayload(config: ModelProviderConfig, request: M
   }
 }
 
-export function normalizeOpenAIResponsesResponse(response: OpenAIResponsesResponse): ModelResponse {
+export function normalizeOpenAIResponsesResponse(response: OpenAIResponsesResponse, replayScope?: string): ModelResponse {
   const normalizedToolCalls = response.output
     ?.filter(item => item.type === 'function_call' && item.name && item.call_id)
     .map(item => normalizeToolCall(item.call_id ?? '', item.name ?? '', item.arguments ?? '{}'))
@@ -316,7 +332,7 @@ export function normalizeOpenAIResponsesResponse(response: OpenAIResponsesRespon
     content: outputContent || (messageItems.length === 0 ? response.output_text ?? '' : ''),
     reasoning: normalizeAgentReasoning(
       normalizeReasoning(response),
-      openAIResponsesReasoningDetails(response.output),
+      openAIResponsesReasoningDetails(response.output, replayScope),
     ),
     toolCalls,
     usage: response.usage ? normalizeUsage(response.usage) : undefined,
@@ -377,6 +393,7 @@ function isReasoningMessagePhase(phase: unknown): boolean {
 function toOpenAIResponseInput(
   message: AgentMessage,
   replayableToolCallIds: ReadonlySet<string>,
+  replayScope: string,
 ): OpenAIResponseInputItem[] {
   if (message.role === 'tool') {
     if (!message.toolCallId || !replayableToolCallIds.has(message.toolCallId)) return []
@@ -399,7 +416,7 @@ function toOpenAIResponseInput(
   }
   if (message.role === 'assistant') {
     const items: OpenAIResponseInputItem[] = [
-      ...openAIResponsesReasoningInput(message),
+      ...openAIResponsesReasoningInput(message, replayScope),
     ]
     if (message.content) items.push({ role: 'assistant', content: message.content })
     for (const toolCall of message.toolCalls ?? []) {
@@ -426,8 +443,10 @@ function toOpenAIResponseInput(
   return [{ role: 'user', content: message.content }]
 }
 
-function openAIResponsesReasoningInput(message: AgentMessage): OpenAIReasoningInputItem[] {
+function openAIResponsesReasoningInput(message: AgentMessage, replayScope: string): OpenAIReasoningInputItem[] {
   if (message.reasoning?.native?.format !== 'openai-responses-items') return []
+  // Protocol compatibility does not make encrypted history portable across targets.
+  if (message.reasoning.native.replayScope !== replayScope) return []
   if (!Array.isArray(message.reasoning.native.data)) return []
   return message.reasoning.native.data
     .filter(isPlainRecord)
@@ -435,11 +454,12 @@ function openAIResponsesReasoningInput(message: AgentMessage): OpenAIReasoningIn
     .map(item => ({ ...item, type: 'reasoning' }) as OpenAIReasoningInputItem)
 }
 
-function openAIResponsesReasoningDetails(output: OpenAIResponsesResponse['output']) {
+function openAIResponsesReasoningDetails(output: OpenAIResponsesResponse['output'], replayScope?: string) {
   const items = output?.filter(item => item.type === 'reasoning') ?? []
   return items.length
     ? {
         format: 'openai-responses-items' as const,
+        ...(replayScope ? { replayScope } : {}),
         data: items,
       }
     : undefined
@@ -475,6 +495,7 @@ function normalizeUsage(usage: NonNullable<OpenAIResponsesResponse['usage']>): M
   const cacheReadTokens = usage.input_tokens_details?.cached_tokens ?? 0
   const inputTokens = usage.input_tokens ?? 0
   return {
+    ...(typeof usage.cost === 'number' && Number.isFinite(usage.cost) && usage.cost >= 0 ? { costUsd: usage.cost } : {}),
     inputTokens: Math.max(0, inputTokens - cacheReadTokens),
     outputTokens: usage.output_tokens,
     totalTokens: usage.total_tokens,
@@ -485,4 +506,9 @@ function normalizeUsage(usage: NonNullable<OpenAIResponsesResponse['usage']>): M
 
 function responsesUrl(config: ModelProviderConfig): string {
   return providerUrl(config, 'https://api.openai.com/v1', config.endpointPath ?? 'responses')
+}
+
+// Hash the routing identity so URLs containing private query values are never persisted.
+function providerReasoningReplayScope(provider: string, model: string, url: string): string {
+  return createHash('sha256').update(JSON.stringify([provider, model, url])).digest('hex')
 }

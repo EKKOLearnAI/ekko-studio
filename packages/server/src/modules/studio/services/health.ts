@@ -1,37 +1,7 @@
-import { existsSync, readFileSync } from 'fs'
-import { resolve } from 'path'
+import { readStudioPackageInfo } from './package-info'
 import type { StudioHealthDependencies } from '../contracts/health'
 
 declare const __APP_VERSION__: string
-
-type PackageInfo = {
-  name: string
-  version: string
-}
-
-function readPackageInfo(): PackageInfo | null {
-  const candidatePaths = [
-    // Dev/test from the repository root.
-    resolve(process.cwd(), 'package.json'),
-    // Direct TypeScript execution from the migrated Studio module.
-    resolve(__dirname, '../../../../../../package.json'),
-    // Bundled server: dist/server -> repository/package root.
-    resolve(__dirname, '../../package.json'),
-  ]
-
-  for (const packagePath of candidatePaths) {
-    if (!existsSync(packagePath)) continue
-    try {
-      const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'))
-      if (pkg?.name && pkg?.version) {
-        return { name: String(pkg.name), version: String(pkg.version) }
-      }
-    } catch {
-      // Try the next candidate path.
-    }
-  }
-  return null
-}
 
 function isUpdateCheckDisabled(): boolean {
   const raw = (process.env.HERMES_WEB_UI_DISABLE_UPDATE_CHECK || '').trim().toLowerCase()
@@ -61,7 +31,7 @@ function isNewerVersion(candidate: string, current: string): boolean {
 }
 
 export class StudioHealthService {
-  private readonly packageInfo = readPackageInfo()
+  private readonly packageInfo = readStudioPackageInfo()
   private readonly localVersion = typeof __APP_VERSION__ !== 'undefined'
     ? __APP_VERSION__
     : this.packageInfo?.version || ''
@@ -72,7 +42,8 @@ export class StudioHealthService {
   async checkLatestVersion(): Promise<void> {
     if (isUpdateCheckDisabled()) return
     try {
-      const packageName = this.packageInfo?.name || 'hermes-web-ui'
+      const packageName = this.packageInfo?.name
+      if (!packageName) return
       const registryName = encodeURIComponent(packageName)
       const response = await fetch(`https://registry.npmjs.org/${registryName}/latest`, {
         signal: AbortSignal.timeout(10000),

@@ -1,17 +1,20 @@
 <script setup lang="ts">
+import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
+import { isGlobalOnlyCodingAgent } from "@/utils/agent-catalog"
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { NodeResizer } from '@vue-flow/node-resizer'
 import { NInput, NSelect, NSwitch, NTooltip, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import WorkflowModelSelector from './WorkflowModelSelector.vue'
+import ScopedModelSelector from '@/components/hermes/models/ScopedModelSelector.vue'
 import WorkflowFieldHelp from './WorkflowFieldHelp.vue'
 import type { WorkflowAgentNodeData, WorkflowAgentNodeEditableData } from './types'
-import type { ChatCodingAgentId, CodingAgentApiMode } from '@/api/coding-agents'
+import type { ChatCodingAgentId, CodingAgentApiMode, CodingAgentId } from '@/api/coding-agents'
 import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
 import { getFileDownloadUrl } from '@/api/studio/files'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 
 import '@vue-flow/node-resizer/dist/style.css'
 
@@ -31,11 +34,11 @@ const statusTip = computed(() => (
     : ''
 ))
 const isCodingAgent = computed(() => props.data.agent !== 'hermes')
-const supportsGlobalMode = computed(() => ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(props.data.agent))
-const usesScopedModel = computed(() => !supportsGlobalMode.value || props.data.agentMode !== 'global')
+const supportsGlobalMode = computed(() => ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(props.data.agent))
+const usesScopedModel = computed(() => !isGlobalOnlyCodingAgent(props.data.agent) && (!supportsGlobalMode.value || props.data.agentMode !== 'global'))
 const agentModeOptions = computed(() => [
-  { label: t('codingAgents.launchModeGlobal'), value: 'global' },
-  { label: t('codingAgents.launchModeScoped'), value: 'scoped' },
+  { label: t('codingAgents.modelScope'), value: 'scoped' },
+  { label: t('codingAgents.launchModeGlobalShort'), value: 'global' },
 ])
 const selectableModelGroups = computed(() => (
   isCodingAgent.value
@@ -45,6 +48,12 @@ const selectableModelGroups = computed(() => (
       ))
     : props.data.modelGroups
 ))
+const configuredApiMode = computed(() => configuredProviderApiMode(
+  props.data.modelGroups.find(group => group.provider === props.data.provider), props.data.model,
+))
+watch([configuredApiMode, () => props.data.apiMode], ([mode]) => {
+  if (mode && !props.data.readonly && usesScopedModel.value && props.data.apiMode !== mode) updateField('apiMode', mode)
+}, { immediate: true })
 const apiModeOptions = computed(() => [
   { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
   { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
@@ -52,14 +61,17 @@ const apiModeOptions = computed(() => [
 ])
 const reasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.default'), value: 'default' },
-  { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-  { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-  { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-  { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-  { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-  { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-  { label: t('chat.reasoningEffort.options.max'), value: 'max' },
+  ...modelReasoningEfforts(
+    props.data.modelGroups,
+    props.data.provider,
+    props.data.model,
+  ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
 ])
+watch([reasoningEffortOptions, () => props.data.reasoningEffort], ([options, effort]) => {
+  if (!props.data.readonly && usesScopedModel.value && effort && !options.some(option => option.value === effort)) {
+    updateField('reasoningEffort', 'default')
+  }
+}, { immediate: true })
 const imageAttachments = computed(() => props.data.images.filter(isImagePath))
 const fileAttachments = computed(() => props.data.images.filter(path => !isImagePath(path)))
 
@@ -191,7 +203,7 @@ async function uploadImages(files: File[]) {
       <DshSessionPresetSelect v-if="data.agent === 'dsh'" :model-value="data.agentPreset" :disabled="data.readonly"
         @update:model-value="updateField('agentPreset', $event)" @valid="updateField('agentPresetReady', $event)" />
       <NSelect
-        v-if="supportsGlobalMode"
+        v-if="supportsGlobalMode && !isGlobalOnlyCodingAgent(data.agent)"
         :value="data.agentMode"
         :options="agentModeOptions"
         size="small"
@@ -199,7 +211,7 @@ async function uploadImages(files: File[]) {
         :placeholder="t('codingAgents.launchModeScope')"
         @update:value="value => updateField('agentMode', value as 'scoped' | 'global')"
       />
-      <WorkflowModelSelector
+      <ScopedModelSelector
         v-if="usesScopedModel"
         :provider="data.provider"
         :model="data.model"
@@ -207,8 +219,11 @@ async function uploadImages(files: File[]) {
         :disabled="data.readonly"
         @select="handleModelSelect"
       />
+      <NativeCodingAgentModelFields v-else :key="data.agent" :agent="data.agent as CodingAgentId"
+        :model="data.model" :reasoning-effort="data.reasoningEffort === 'default' ? '' : data.reasoningEffort"
+        :disabled="data.readonly" @change="selection => data.onUpdate(id, { ...selection, reasoningEffort: selection.reasoningEffort || 'default' })" />
       <NSelect
-        v-if="isCodingAgent && usesScopedModel"
+        v-if="isCodingAgent && usesScopedModel && !configuredApiMode"
         :value="data.apiMode"
         :options="apiModeOptions"
         size="small"
@@ -216,15 +231,22 @@ async function uploadImages(files: File[]) {
         :placeholder="t('workflow.node.apiMode')"
         @update:value="value => updateField('apiMode', value as CodingAgentApiMode)"
       />
-      <NSelect
-        v-if="usesScopedModel"
-        :value="data.reasoningEffort"
-        :options="reasoningEffortOptions"
-        size="small"
-        :disabled="data.readonly"
-        :placeholder="t('chat.reasoningEffort.tooltip')"
-        @update:value="value => updateField('reasoningEffort', value as string)"
-      />
+      <div class="node-field-row">
+        <span class="node-field-label-row">{{ t('chat.reasoningEffort.tooltip') }}</span>
+        <NSelect
+          v-if="usesScopedModel"
+          :value="data.reasoningEffort"
+          :options="reasoningEffortOptions"
+          size="small"
+          :disabled="data.readonly"
+          :aria-label="t('chat.reasoningEffort.tooltip')"
+          :placeholder="t('chat.reasoningEffort.tooltip')"
+          @update:value="value => updateField('reasoningEffort', value as string)"
+        />
+        <NativeCodingAgentModelFields v-else :key="data.agent" :agent="data.agent as CodingAgentId"
+          field="reasoning-effort" :model="data.model" :reasoning-effort="data.reasoningEffort === 'default' ? '' : data.reasoningEffort"
+          :disabled="data.readonly" @change="selection => data.onUpdate(id, { ...selection, reasoningEffort: selection.reasoningEffort || 'default' })" />
+      </div>
       <div class="node-field-row">
         <span class="node-field-label-row">
           <span>{{ t('workflow.node.join') }}</span>
@@ -389,9 +411,9 @@ async function uploadImages(files: File[]) {
   height: 100%;
   min-width: 260px;
   min-height: 360px;
-  border: 1px solid $border-color;
-  border-radius: 8px;
-  background: $bg-card;
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 8px);
+  background: var(--theme-card-bg, $bg-card);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   color: $text-primary;
   display: flex;
@@ -419,10 +441,10 @@ async function uploadImages(files: File[]) {
 .node-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
-  border-bottom: 1px solid $border-light;
-  font-size: 13px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
   flex: 0 0 auto;
   cursor: grab;
@@ -443,7 +465,7 @@ async function uploadImages(files: File[]) {
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .node-status-tip {
@@ -496,8 +518,8 @@ async function uploadImages(files: File[]) {
 .node-controls {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+  gap: calc(10px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1));
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -506,16 +528,16 @@ async function uploadImages(files: File[]) {
 .node-field-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .node-field-label-row {
   display: inline-flex;
   width: fit-content;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .node-toggle-row {
@@ -523,11 +545,11 @@ async function uploadImages(files: File[]) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 0 2px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: 0 calc(2px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 12px;
-  line-height: 1.2;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.2);
 }
 
 .node-prompt-input {
@@ -555,10 +577,10 @@ async function uploadImages(files: File[]) {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   max-height: 180px;
   overflow-y: auto;
-  padding-inline-end: 2px;
+  padding-inline-end: calc(2px * var(--spacing-scale, 1));
 }
 
 .image-upload-input {
@@ -568,9 +590,9 @@ async function uploadImages(files: File[]) {
 .image-upload-trigger {
   width: 64px;
   height: 64px;
-  border: 1px dashed $border-color;
+  border: var(--border-width, 1px) dashed $border-color;
   border-radius: $radius-sm;
-  background: $bg-input;
+  background: var(--theme-input-bg, $bg-input);
   color: $text-muted;
   display: inline-flex;
   align-items: center;
@@ -613,7 +635,7 @@ async function uploadImages(files: File[]) {
   position: relative;
   width: 64px;
   height: 64px;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
   background: $bg-secondary;
   overflow: hidden;
@@ -667,14 +689,14 @@ async function uploadImages(files: File[]) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
   width: 92px;
   min-height: 64px;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
   background: $bg-secondary;
   color: $text-secondary;
-  padding: 8px 10px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   cursor: pointer;
   text-decoration: none;
   overflow: hidden;
@@ -691,7 +713,7 @@ async function uploadImages(files: File[]) {
 
 .file-name {
   max-width: 100%;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -741,7 +763,7 @@ async function uploadImages(files: File[]) {
   max-width: 90vw;
   max-height: 90vh;
   object-fit: contain;
-  border-radius: 4px;
+  border-radius: var(--radius-component, 4px);
   cursor: pointer;
 }
 

@@ -24,7 +24,7 @@ export function foregroundNotificationPreview(
     ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, limit) : ''
   return {
     title: plain(session?.title, 120),
-    content: kind === 'completion' ? plain(payload.output || session?.preview, 240) : '',
+    content: kind === 'completion' ? plain(payload.output, 240) : '',
   }
 }
 
@@ -34,5 +34,5 @@ export function foregroundNotificationAgent(value: unknown): string {
   const agent = value.toLowerCase().trim()
   if (agent === 'claude' || agent === 'claude-code') return 'claude-code'
   if (agent === 'ekko' || agent === 'ekko-agent') return 'ekko-agent'
-  return ['hermes', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(agent) ? agent : ''
+  return ['hermes', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(agent) ? agent : ''
 }

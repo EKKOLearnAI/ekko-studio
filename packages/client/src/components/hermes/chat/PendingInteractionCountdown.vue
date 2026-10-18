@@ -39,15 +39,15 @@ onBeforeUnmount(() => {
 <style scoped>
 .pending-interaction-countdown {
   margin-inline-start: auto;
-  padding: 3px 7px;
-  border: 1px solid rgba(var(--accent-primary-rgb), 0.22);
+  padding: calc(3px * var(--spacing-scale, 1)) calc(7px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.22);
   border-radius: 999px;
   color: var(--accent-primary);
   background: rgba(var(--accent-primary-rgb), 0.08);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 650;
-  line-height: 1.2;
+  line-height: var(--line-height, 1.2);
   letter-spacing: 0;
   text-transform: none;
   white-space: nowrap;

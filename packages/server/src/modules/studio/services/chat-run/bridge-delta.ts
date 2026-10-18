@@ -1,5 +1,8 @@
+import { filterToolCallMarkup, flushToolCallMarkup, type ToolCallMarkupState } from '../../../../../../shared/tool-call-markup'
+
 export interface BridgeDeltaFilterState {
   bridgePendingToolCallMarkup?: string
+  bridgeXmlMarkup?: ToolCallMarkupState
 }
 
 const TOOL_CALL_MARKER = '[Calling tool:'
@@ -23,7 +26,8 @@ const MAX_PENDING_TOOL_MARKUP_LENGTH = 100_000
 export function flushPendingToolCallMarkup(state: BridgeDeltaFilterState): string {
   const pending = state.bridgePendingToolCallMarkup || ''
   state.bridgePendingToolCallMarkup = ''
-  return pending
+  const xmlPending = state.bridgeXmlMarkup ? flushToolCallMarkup(state.bridgeXmlMarkup) : ''
+  return pending + xmlPending
 }
 
 function findToolMarkupEnd(text: string, start: number): number {
@@ -75,6 +79,8 @@ export function filterBridgeToolCallMarkupDelta(
 ): string {
   if (!delta) return ''
 
+  state.bridgeXmlMarkup ||= {}
+  delta = filterToolCallMarkup(state.bridgeXmlMarkup, delta)
   const text = `${state.bridgePendingToolCallMarkup || ''}${delta}`
   state.bridgePendingToolCallMarkup = ''
 

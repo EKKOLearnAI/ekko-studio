@@ -1,0 +1,216 @@
+// Native and teleported surfaces share the same regional tokens. Classes are
+// enabled only for explicitly configured properties, preserving preset defaults.
+$overlay-surfaces: '.n-modal, .n-dialog, .n-drawer-content, .n-popover:not(.n-tooltip), .n-dropdown-menu, .n-base-select-menu, .n-cascader-menu, .n-notification, .slash-command-dropdown, .mention-dropdown, .annotation-popover, .workflow-runs-panel--overlay';
+// Native tables share their containing card; Naive tables own one wrapper fill.
+// Message tables share the bubble's background, filter and border tokens.
+$markdown-card-tables: '.markdown-body table:not(:where(.message-bubble, .msg-content, .group-run-bubble) table)';
+$table-surfaces: '.n-data-table-wrapper, .n-table, .plugins-table-wrap, .relay-usage-card, .daily-trend, .runtime-section, .usage-panel, #{$markdown-card-tables}';
+$regions: (
+  chrome: '.studio-frame-surface, .desktop-titlebar:not(.desktop-titlebar--flush)',
+  sidebar: '.sidebar, .hermes-config-sidebar, .ekko-config-sidebar, .coding-agent-config-sidebar, .session-list, .room-sidebar, .agent-avatar-rail, .workflow-sidebar',
+  content: '.app-main--card, .chat-main-content, .group-chat-surface, .workflow-main, .connections-panel, .agent-manager-panel, .models-view, .voice-stage',
+  card: '#{$table-surfaces}, [data-theme-surface="card"], .theme-card, .settings-card, .provider-card, .profile-card, .model-card, .run-card:not(.group-run-bubble), .run-usage-card, .job-card, .mcp-card, .kanban-task-card, .platform-card, .stat-card, .task-plan-card, .workflow-agent-node, .n-card:not(.n-modal), .n-descriptions-table-wrapper, .theme-appearance-editor',
+  input: '[data-theme-surface="input"], .input-wrapper, .context-usage-row, .n-input, .n-base-selection, .search-input, .profile-display, .model-trigger',
+  overlay: $overlay-surfaces,
+  // Embedded group messages share their enclosing run card's surface.
+  userMessage: '.message.user .message-bubble:not(.agent-error), .group-message.self:not(.embedded) .msg-content:not(.agent-error), .group-run-bubble--user',
+  assistantMessage: '.message.assistant .message-bubble:not(.agent-error), .group-message.agent:not(.embedded) .msg-content:not(.agent-error), .group-run-bubble--assistant'
+);
+
+// Teleported menus and dialogs need the same wallpaper defaults as the shell.
+// Keep this list shared with explicit overlay customization so none are omitted.
+html.theme-has-custom-background :is(#{$overlay-surfaces}) {
+  background: var(--theme-overlay-bg, rgba(var(--bg-main-surface-rgb), 0.72));
+  -webkit-backdrop-filter: var(--theme-overlay-filter, blur(8px) saturate(1.1));
+  backdrop-filter: var(--theme-overlay-filter, blur(8px) saturate(1.1));
+}
+
+html.theme-has-custom-background :is([data-theme-surface="input"], .n-base-selection, .profile-display, .model-trigger) {
+  background: var(--theme-input-bg, rgba(var(--bg-card-rgb), 0.72));
+}
+
+// Paint the segmented track once; selection adds a translucent state tint.
+html:is(.theme-input-bg, .theme-has-custom-background) .view-switch[data-theme-surface="input"] .view-switch-button--active {
+  background: rgba(var(--accent-primary-rgb), 0.16);
+}
+
+// A selection paints on both its wrapper and label/tags. Only the wrapper
+// should own the translucent surface, including while the menu is open.
+// Loading often disables selects: keep that same background while Naive UI
+// continues to dim their text/icons and prevent interaction.
+html:is(.theme-input-bg, .theme-has-custom-background) .n-base-selection:not(.n-base-selection--disabled),
+html:is(.theme-input-bg, .theme-has-custom-background) .n-base-selection.n-base-selection--disabled {
+  > .n-base-selection-label, > .n-base-selection-tags { background-color: transparent; }
+}
+
+html:is(.theme-overlay-bg, .theme-has-custom-background) .n-popover:not(.n-tooltip) {
+  // The arrow also reads this inline Naive UI token.
+  --n-color: var(--theme-overlay-bg, rgba(var(--bg-main-surface-rgb), 0.72)) !important;
+}
+
+@each $region, $selectors in $regions {
+  $border-scopes: $selectors;
+  @if $region == chrome {
+    // Chrome controls are siblings of the shared background layer.
+    $border-scopes: '#{$selectors}, .studio-navigation-rail, .studio-page-header';
+  }
+  // Ordinary child borders/dividers follow their surface. A nested region starts
+  // from its own resolved opacity, never the parent's already faded color.
+  html.theme-customized :where(#{$border-scopes}) {
+    --border-color: var(--theme-#{$region}-border, var(--theme-global-border));
+    --border-light: var(--theme-#{$region}-border-light, var(--theme-global-border-light));
+  }
+  html.theme-customized.theme-#{$region}-bg :is(#{$selectors}) {
+    background: var(--theme-#{$region}-bg);
+  }
+  html.theme-customized.theme-#{$region}-filter :is(#{$selectors}) {
+    -webkit-backdrop-filter: var(--theme-#{$region}-filter);
+    backdrop-filter: var(--theme-#{$region}-filter);
+  }
+  html.theme-customized.theme-#{$region}-radius :is(#{$selectors}) {
+    --radius-component: var(--theme-#{$region}-radius);
+    border-radius: var(--theme-#{$region}-radius);
+  }
+  // Keep specificity below component active/focus/error rules.
+  html.theme-customized.theme-#{$region}-border :where(#{$selectors}) {
+    border-color: var(--theme-#{$region}-border);
+  }
+  html.theme-customized.theme-#{$region}-shadow :is(#{$selectors}) {
+    box-shadow: var(--theme-#{$region}-shadow);
+  }
+}
+
+// A filter on the content container creates a backdrop root: nested card filters
+// can no longer sample the wallpaper, even with blur(0). Paint that outer effect
+// on a sibling layer, keeping the content tint and blur behind the cards.
+html.theme-customized.theme-card-filter :is(.app-main--card, .workflow-main, .connections-panel, .agent-manager-panel, .models-view) {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: inherit;
+    background: var(--theme-content-bg, var(--card-container-bg, var(--bg-main-surface)));
+    -webkit-backdrop-filter: var(--theme-content-filter, var(--card-container-filter, none));
+    backdrop-filter: var(--theme-content-filter, var(--card-container-filter, none));
+  }
+}
+
+html.theme-has-custom-background {
+  --card-container-bg: var(--glass-content-bg);
+  --card-container-filter: blur(8px) saturate(1.1);
+  --theme-card-wallpaper-bg: rgba(var(--bg-card-rgb), 0.72);
+}
+
+html:is(.theme-card-bg, .theme-has-custom-background) :is(.app-download-meta span, .app-platform-icon, .api-relay-features span) {
+  background: rgba(var(--text-primary-rgb), 0.04);
+}
+
+html.theme-has-custom-background :is(#{$table-surfaces}, .n-descriptions-table-wrapper, [data-theme-surface="card"]) {
+  background: var(--theme-card-bg, var(--theme-card-wallpaper-bg));
+}
+
+html:is(.theme-card-bg, .theme-has-custom-background) {
+  // Naive paints the same color on tables, row groups, rows and cells. Only
+  // cells should paint state tints over the wrapper, avoiding compounded alpha.
+  .n-data-table :is(.n-data-table-table, .n-data-table-thead, .n-data-table-tr, .n-data-table-tr:hover) {
+    background-color: transparent;
+  }
+  // Fixed columns blur scrolling content without filtering their own controls.
+  // Use the side not occupied by Naive's fixed-column shadow pseudo-element.
+  .n-data-table :is(.n-data-table-td--fixed-left, .n-data-table-th--fixed-left)::before,
+  .n-data-table :is(.n-data-table-td--fixed-right, .n-data-table-th--fixed-right)::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    // Keep scrolling text out of the fixed controls even when card blur is zero.
+    -webkit-backdrop-filter: blur(12px) saturate(1.1);
+    backdrop-filter: blur(12px) saturate(1.1);
+  }
+  :is(.plugins-table, .worker-table, .relay-usage-table, .trend-table table, .markdown-body table) > thead > tr > th,
+  .skills-table .table-head {
+    background: rgba(var(--text-primary-rgb), 0.04);
+  }
+  :is(.plugins-table, .worker-table, .relay-usage-table, .trend-table table, .markdown-body table) > tbody > tr:hover,
+  .skills-table .skills-row:not(.table-head):hover {
+    background: rgba(var(--text-primary-rgb), 0.08);
+  }
+  .relay-usage-sources li { background: rgba(var(--text-primary-rgb), 0.04); }
+}
+
+// Filtering the table wrapper prevents fixed cells from blurring the scrolling
+// text behind them. Paint the card effect on a sibling, as for content surfaces.
+html.theme-customized.theme-card-filter :is(.n-data-table-wrapper, .settings-card:has(.n-data-table), .n-card:not(.n-modal):has(.n-data-table)) {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: inherit;
+    background: var(--theme-card-bg, var(--theme-card-wallpaper-bg, var(--bg-card)));
+    -webkit-backdrop-filter: var(--theme-card-filter);
+    backdrop-filter: var(--theme-card-filter);
+  }
+}
+
+.message.user, .group-message.self, .group-run-bubble--user {
+  --message-theme-bg: var(--theme-userMessage-bg);
+  --message-theme-filter: var(--theme-userMessage-filter);
+}
+.message.assistant, .group-message.agent, .group-run-bubble--assistant {
+  --message-theme-bg: var(--theme-assistantMessage-bg);
+  --message-theme-filter: var(--theme-assistantMessage-filter);
+}
+
+// Structural wrappers must not add another copy of the same translucent layer.
+html.theme-content-bg :is(.app-layout, .petdex-view) { background-color: transparent; }
+html:is(.theme-content-bg, .theme-has-custom-background) .workflow-main :is(.workflow-canvas, .workflow-flow) {
+  background: transparent;
+  backdrop-filter: none;
+}
+
+html.theme-customized {
+  .input-textarea { min-height: var(--control-height, 36px); }
+  .message-bubble, .markdown-body { line-height: var(--line-height, 1.65); }
+  .n-input__border, .n-input__state-border, .n-base-selection__border, .n-base-selection__state-border,
+  .n-button__border, .n-button__state-border { border-width: var(--border-width, 1px); }
+  .markdown-body a { color: var(--link-color, var(--accent-primary)); }
+  // These components own inline theme variables instead of inheriting borders.
+  .n-divider { --n-color: var(--border-color) !important; }
+  .n-card { --n-border-color: var(--border-color) !important; }
+  .n-tabs { --n-tab-border-color: var(--border-color) !important; }
+  .n-button--default-type > .n-button__border { border-color: var(--border-color); }
+}
+
+// Size the conversation column, not nested messages inside tool/run cards.
+// Surface-only edits must preserve the existing message alignment.
+html.theme-chat-width .virtual-row {
+  max-width: min(100%, var(--chat-max-width));
+  margin-inline: auto;
+}
+
+// Voice illustrations keep their own colors; the surrounding text and controls
+// adopt the configured surface so light custom backgrounds remain readable.
+html.theme-content-bg .voice-stage {
+  --voice-ink: var(--text-primary);
+  .voice-stage__caption, .voice-stage__tool-copy strong { color: var(--text-primary); }
+  .voice-stage__status, .voice-stage__identity span, .voice-stage__tool-copy > span { color: var(--text-secondary); }
+  .voice-stage__tool time { color: var(--text-muted); }
+  .voice-stage__tool, .voice-stage__back { background: var(--theme-card-bg, var(--bg-card)); color: var(--text-primary); border-color: var(--border-color); }
+}

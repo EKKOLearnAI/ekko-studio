@@ -17,6 +17,7 @@ vi.mock('../../packages/server/src/modules/studio/infrastructure/database/index'
 vi.mock('../../packages/server/src/modules/studio/middleware/auth', () => ({
   requireAdmin: vi.fn(async (_ctx: unknown, next: () => Promise<void>) => next()),
   requireSuperAdmin: vi.fn(async (_ctx: unknown, next: () => Promise<void>) => next()),
+  inspectAppUserToken: vi.fn(async () => null),
   isAuthEnabled: vi.fn(async () => groupChatAuthMock.enabled),
   authenticateUserToken: vi.fn(async () => groupChatAuthMock.user),
 }))

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NInput, NModal, NSpin, useMessage } from 'naive-ui'
+import { NSpin, NButton, NInput, NModal, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { fetchSessions, searchSessions, type SessionSearchResult, type SessionSummary } from '@/api/studio/sessions'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useSessionSearch } from '@/composables/useSessionSearch'
-import type { Session } from '@/stores/hermes/chat'
+import { historySessionSource, sessionAgentFields } from '@/utils/hermes/session-agent'
+import { getSourceLabel } from '@/shared/session-display'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -44,21 +45,9 @@ const items = computed<SearchItem[]>(() => {
   }))
 })
 
-function formatSource(source: string): string {
-  const map: Record<string, string> = {
-    api_server: 'API Server',
-    cli: 'CLI',
-    telegram: 'Telegram',
-    discord: 'Discord',
-    slack: 'Slack',
-    matrix: 'Matrix',
-    whatsapp: 'WhatsApp',
-    signal: 'Signal',
-    cron: 'Cron',
-    weixin: 'WeChat',
-    global_agent: 'Global Agent',
-  }
-  return map[source] || source
+function formatSource(item: SearchItem): string {
+  const source = historySessionSource(item)
+  return source === 'builtin_agent' ? t('chat.builtinAgent') : getSourceLabel(source)
 }
 
 function formatTime(ts?: number): string {
@@ -134,23 +123,11 @@ async function openItem(item: SearchItem) {
 
   await ensureChatSessionsLoaded()
   if (!chatStore.sessions.some(session => session.id === item.id) && typeof chatStore.addOrUpdateSession === 'function') {
-    const isCodingAgentSession = item.source === 'coding_agent' || item.agent === 'claude' || item.agent === 'codex' || item.agent === 'pi' || item.agent === 'grok' || (item.agent === 'opencode' || item.agent === 'dsh')
-    const codingAgentId: Session['codingAgentId'] = item.agent === 'codex'
-      ? 'codex'
-      : item.agent === 'pi'
-        ? 'pi'
-      : item.agent === 'grok'
-        ? 'grok'
-      : item.agent === 'dsh' ? 'dsh' : item.agent === 'opencode'
-        ? 'opencode'
-      : item.agent === 'claude'
-          ? 'claude-code'
-          : undefined
     chatStore.addOrUpdateSession({
       id: item.id,
       profile: item.profile || 'default',
       title: item.title || '',
-      source: item.source,
+      source: historySessionSource(item),
       messages: [],
       createdAt: Math.round(item.started_at * 1000),
       updatedAt: Math.round((item.last_active || item.ended_at || item.started_at) * 1000),
@@ -160,18 +137,13 @@ async function openItem(item: SearchItem) {
       endedAt: item.ended_at != null ? Math.round(item.ended_at * 1000) : null,
       lastActiveAt: item.last_active != null ? Math.round(item.last_active * 1000) : undefined,
       workspace: item.workspace || null,
-      agent: item.agent || undefined,
-      agentSessionId: item.agent_session_id || undefined,
-      agentNativeSessionId: item.agent_native_session_id || undefined,
-      codingAgentId,
-      codingAgentMode: isCodingAgentSession
-        ? (item.agent_mode === 'global' || item.agent_mode === 'scoped'
-            ? item.agent_mode
-            : item.provider === 'global' ? 'global' : 'scoped')
-        : undefined,
+      ...sessionAgentFields(item),
     })
   }
-  await chatStore.switchSession(item.id, messageId)
+  const opened = await chatStore.switchSession(item.id, messageId)
+  // A newer selection owns navigation when the user switches during loading.
+  if (chatStore.activeSessionId !== item.id) return
+  if (messageId && opened === false) message.error(t('chat.searchFailed'))
   const routeName = chatStore.runtimeMode === 'global_agent' ? 'hermes.globalAgentSession' : 'hermes.session'
   if (router.currentRoute.value.name !== routeName || router.currentRoute.value.params.sessionId !== item.id) {
     await router.push({ name: routeName, params: { sessionId: item.id } })
@@ -306,7 +278,7 @@ onUnmounted(() => {
               <div class="result-main">
                 <div class="result-title-row">
                   <span class="result-title" dir="auto">{{ getItemTitle(item) }}</span>
-                  <span class="result-source">{{ formatSource(item.source) }}</span>
+                  <span class="result-source">{{ formatSource(item) }}</span>
                 </div>
                 <div class="result-snippet" dir="auto">
                   {{ hasQuery ? item.snippet || t('chat.searchNoSnippet') : item.preview || t('chat.searchRecent') }}
@@ -337,31 +309,31 @@ onUnmounted(() => {
 .session-search-modal {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
 }
 
 .search-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .search-title {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   color: $text-primary;
 }
 
 .search-hint {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .search-scope {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
-  line-height: 1.5;
+  line-height: var(--line-height, 1.5);
 }
 
 .search-body {
@@ -370,30 +342,30 @@ onUnmounted(() => {
 }
 
 .search-empty {
-  padding: 28px 0;
+  padding: calc(28px * var(--spacing-scale, 1)) 0;
   text-align: center;
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .result-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   max-height: min(60vh, 540px);
   overflow-y: auto;
-  padding-inline-end: 2px;
+  padding-inline-end: calc(2px * var(--spacing-scale, 1));
 }
 
 .result-item {
   width: 100%;
   display: flex;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 14px;
-  border: 1px solid $border-color;
+  gap: calc(16px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   color: $text-primary;
   text-align: start;
   cursor: pointer;
@@ -414,11 +386,11 @@ onUnmounted(() => {
 .result-title-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .result-title {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -427,15 +399,15 @@ onUnmounted(() => {
 
 .result-source {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
 }
 
 .result-snippet {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
-  line-height: 1.5;
+  line-height: var(--line-height, 1.5);
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -447,22 +419,22 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
-  font-size: 11px;
+  gap: calc(4px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
   flex-shrink: 0;
 }
 
 .result-match {
-  font-family: $font-code;
+  font-family: var(--font-code, $font-code);
 }
 
 .search-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  font-size: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 

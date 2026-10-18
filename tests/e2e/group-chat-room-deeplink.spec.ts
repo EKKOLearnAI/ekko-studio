@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 import { authenticate, TEST_MODEL_GROUP } from './fixtures'
+import type { AvailableModelGroup } from '../../packages/client/src/api/hermes/system'
 
 type DesktopPlatform = 'darwin' | 'win32'
 
@@ -96,7 +97,7 @@ const agentsByRoom: Record<string, unknown[]> = {
   ],
 }
 
-async function mockGroupChatApi(page: Page, offlinePresence = false) {
+async function mockGroupChatApi(page: Page, offlinePresence = false, modelGroups: AvailableModelGroup[] = [TEST_MODEL_GROUP]) {
   const rooms = baseRooms.map(room => ({ ...room }))
   let roomMessages = structuredClone(messagesByRoom)
   const roomDetailRequests: Array<{ roomId: string, offset: number, limit: number, before: string, history: boolean }> = []
@@ -193,13 +194,13 @@ async function mockGroupChatApi(page: Page, offlinePresence = false) {
       return json({
         default: 'test-model',
         default_provider: 'test-provider',
-        groups: [TEST_MODEL_GROUP],
-        allProviders: [TEST_MODEL_GROUP],
+        groups: modelGroups,
+        allProviders: modelGroups,
         profiles: [{
           profile: 'default',
           default: 'test-model',
           default_provider: 'test-provider',
-          groups: [TEST_MODEL_GROUP],
+          groups: modelGroups,
         }],
         model_aliases: {},
         model_visibility: {},
@@ -330,6 +331,14 @@ async function mockGroupChatApi(page: Page, offlinePresence = false) {
       return json({ policy })
     }
 
+    const workspaceMatch = pathname.match(/^\/api\/studio\/group-chat\/rooms\/([^/]+)\/workspace$/)
+    if (workspaceMatch && request.method() === 'PUT') {
+      const room = rooms.find(item => item.id === decodeURIComponent(workspaceMatch[1]))
+      if (!room || !room.canManage) return json({ error: 'Forbidden' }, 403)
+      room.workspace = request.postDataJSON().workspace
+      return json({ room })
+    }
+
     const workspaceListMatch = pathname.match(/^\/api\/studio\/group-chat\/rooms\/([^/]+)\/workspace-files\/list$/)
     if (workspaceListMatch) {
       return json({
@@ -450,7 +459,7 @@ function makeSocket(url, options) {
       if (event === 'join' && typeof ack === 'function') {
         const roomId = payload && payload.roomId
         const retracted = new Set(JSON.parse(window.localStorage.getItem('__pw_group_retracted__') || '[]'))
-        setTimeout(() => ack({ roomId, roomName: roomNames[roomId] || roomId, members: [], messages: (roomMessages[roomId] || []).filter(message => !retracted.has(message.id)), agents: roomAgents[roomId] || [], rooms: [], typingUsers: [], contextStatuses: [], executionQueue: state.executionQueues[roomId] || [] }), 0)
+        setTimeout(() => ack({ roomId, roomName: roomNames[roomId] || roomId, members: [], messages: [...(roomMessages[roomId] || []), ...(state.liveSnapshots?.[roomId] || [])].filter(message => !retracted.has(message.id)), agents: roomAgents[roomId] || [], rooms: [], typingUsers: [], contextStatuses: [], executionQueue: state.executionQueues[roomId] || [], ...(state.joinStates?.[roomId] || {}) }), state.joinDelays?.[roomId] || 0)
       }
       if (event === 'load_room_agent_activities' && typeof ack === 'function') {
         setTimeout(() => ack({ activities: [] }), 0)
@@ -568,14 +577,11 @@ async function installMockVoiceCapture(page: Page) {
   })
 }
 
-async function setup(page: Page, path: string, platform?: DesktopPlatform, offlinePresence = false) {
+async function setup(page: Page, path: string, platform?: DesktopPlatform, offlinePresence = false, modelGroups?: AvailableModelGroup[]) {
   if (platform) await installDesktopBridge(page, platform)
-  await page.addInitScript(() => {
-    window.localStorage.setItem('hermes.groupChat.refactorNotice.v1.acknowledged', '1')
-  })
   await authenticate(page)
   await mockGroupChatSocket(page)
-  const api = await mockGroupChatApi(page, offlinePresence)
+  const api = await mockGroupChatApi(page, offlinePresence, modelGroups)
   await page.goto(path)
   return api
 }
@@ -601,6 +607,214 @@ async function connectGroupSocket(page: Page) {
   })
   await triggerGroupSocket(page, 'connect', undefined)
 }
+
+test('keeps populated group header actions within the available window width', async ({ page }) => {
+  await setup(page, '/#/hermes/group-chat/room/room-alpha', 'win32')
+  await expect(page.locator('.room-title-text')).toHaveText('Alpha Room')
+  for (const width of [1440, 900, 769, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    const header = page.locator('.chat-header')
+    await expect.poll(() => header.locator('button').evaluateAll(buttons => buttons
+      .filter(button => button.getBoundingClientRect().width > 0)
+      .every(button => {
+        const box = button.getBoundingClientRect()
+        const header = button.closest('.chat-header')!.getBoundingClientRect()
+        return box.left >= Math.max(0, header.left) && box.right <= Math.min(innerWidth, header.right) + 1
+          && box.top >= header.top && box.bottom <= header.bottom + 1
+      }))).toBe(true)
+  }
+})
+
+for (const { label, platform, width } of [
+  { label: 'browser', width: 1280 },
+  { label: 'macOS', platform: 'darwin' as const, width: 1280 },
+  { label: 'Windows', platform: 'win32' as const, width: 1280 },
+  { label: 'mobile', width: 390 },
+]) {
+  test(`keeps the Agent drawer header above the application header on ${label}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await setup(page, '/#/hermes/group-chat/room/room-alpha', platform)
+
+    for (const editing of [false, true]) {
+      await page.locator(editing ? '.agent-avatar-rail-agent' : '.agent-avatar-rail-add').first().click()
+      const drawer = page.locator('.n-drawer').filter({ hasText: editing ? 'Edit Worker' : 'Add Agent' })
+      await expect(drawer).toBeVisible()
+      await expect(drawer).toHaveCSS('width', `${width < 769 ? width : 520}px`)
+      await expect(drawer).toHaveCSS('border-top-left-radius', '5px')
+      for (const selector of ['.n-drawer-header__main', '.n-drawer-header__close']) {
+        await expect.poll(() => drawer.locator(selector).evaluate(element => {
+          const box = element.getBoundingClientRect()
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+          return hit !== null && element.contains(hit)
+        })).toBe(true)
+      }
+
+      await drawer.getByRole('button', { name: editing ? 'Manage presets' : 'Choose preset' }).click()
+      const presetDialog = page.locator('.agent-preset-dialog')
+      await expect(presetDialog).toBeVisible()
+      await presetDialog.getByPlaceholder('Search presets').fill('Reviewer')
+      await presetDialog.getByRole('button', { name: /Preset Reviewer/ }).click()
+      await presetDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(presetDialog).toBeHidden()
+      await expect(drawer).toBeVisible()
+      await expect.poll(() => drawer.evaluate(element => Math.round(element.getBoundingClientRect().right))).toBe(width)
+      if (!editing && label === 'browser') {
+        await page.screenshot({ path: test.info().outputPath('agent-drawer-header.png'), animations: 'disabled' })
+      }
+      await drawer.locator('.n-drawer-header__close').click()
+      await expect(drawer).toBeHidden()
+    }
+  })
+}
+
+for (const editing of [false, true]) {
+  for (const width of [1280, 390]) {
+    test(`keeps the Agent drawer mounted when ${editing ? 'managing' : 'choosing'} presets at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 })
+      await setup(page, '/#/hermes/group-chat/room/room-alpha')
+      await page.locator(editing ? '.agent-avatar-rail-agent' : '.agent-avatar-rail-add').first().click()
+      const drawer = page.locator('.n-drawer').filter({ hasText: editing ? 'Edit Worker' : 'Add Agent' })
+      await expect(drawer).toBeVisible()
+      await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+      const nameInput = drawer.getByPlaceholder('Custom name (leave empty to use profile name)')
+      await nameInput.fill('Keep this draft')
+      await drawer.evaluate(element => { (window as any).__PW_AGENT_DRAWER_NODE__ = element })
+      const presetTrigger = drawer.getByRole('button', { name: editing ? 'Manage presets' : 'Choose preset' })
+      await presetTrigger.click()
+      const presetDialog = page.locator('.agent-preset-dialog')
+      await expect(presetDialog).toBeVisible()
+      expect(await drawer.evaluate(element => element === (window as any).__PW_AGENT_DRAWER_NODE__)).toBe(true)
+
+      const searchInput = presetDialog.getByPlaceholder('Search presets')
+      await searchInput.fill('Reviewer')
+      await expect(searchInput).toBeFocused()
+      await page.keyboard.press('Tab')
+      expect(await presetDialog.evaluate(element => element.contains(document.activeElement))).toBe(true)
+      await page.keyboard.press('Escape')
+      await expect(presetDialog).toBeHidden()
+      await expect(drawer).toBeVisible()
+      expect(await drawer.evaluate(element => element === (window as any).__PW_AGENT_DRAWER_NODE__)).toBe(true)
+      await expect(nameInput).toHaveValue('Keep this draft')
+      await expect(presetTrigger).toBeFocused()
+
+      await presetTrigger.click()
+      await expect(presetDialog).toBeVisible()
+      await presetDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(presetDialog).toBeHidden()
+      expect(await drawer.evaluate(element => element === (window as any).__PW_AGENT_DRAWER_NODE__)).toBe(true)
+      await expect(nameInput).toHaveValue('Keep this draft')
+      await page.keyboard.press('Escape')
+      await expect(drawer).toBeHidden()
+    })
+  }
+}
+
+for (const endpoint of ['/api/hermes/profiles', '/api/hermes/available-models', '/api/agents/status']) {
+  test(`opens the Agent drawer before ${endpoint} finishes and preserves a reopened edit`, async ({ page }) => {
+    await setup(page, '/#/hermes/group-chat/room/room-alpha')
+    await page.locator('.agent-avatar-rail-add').click()
+    const addDrawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+    await expect(addDrawer).toBeVisible()
+    await expect(addDrawer.locator('.agent-form-loading')).toBeHidden()
+    await addDrawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(addDrawer).toBeHidden()
+    await page.clock.setFixedTime(Date.now() + 31_000)
+
+    let releaseRequest!: () => void
+    const responseGate = new Promise<void>(resolve => { releaseRequest = resolve })
+    let requests = 0
+    await page.route(`**${endpoint}`, async route => {
+      requests++
+      await responseGate
+      await route.fallback()
+    })
+    try {
+      await page.locator('.agent-avatar-rail-add').click()
+      await expect.poll(() => requests).toBe(1)
+      await expect(addDrawer).toBeVisible({ timeout: 1000 })
+      await expect(addDrawer.locator('.agent-form-loading')).toBeVisible()
+      await expect(addDrawer.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
+      if (endpoint === '/api/hermes/profiles') {
+        await addDrawer.screenshot({ path: test.info().outputPath('agent-drawer-loading.png'), animations: 'disabled' })
+      }
+      await addDrawer.getByPlaceholder('Custom name (leave empty to use profile name)').fill('Draft while loading')
+      await addDrawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(addDrawer).toBeHidden()
+
+      await page.getByRole('button', { name: 'Worker', exact: true }).click()
+      const editDrawer = page.locator('.n-drawer').filter({ hasText: 'Edit Worker' })
+      await expect(editDrawer).toBeVisible({ timeout: 1000 })
+      await expect(editDrawer.locator('.agent-form-loading')).toBeVisible()
+      const nameInput = editDrawer.getByPlaceholder('Custom name (leave empty to use profile name)')
+      await expect(nameInput).toHaveValue('Worker')
+      await nameInput.fill('Edited while loading')
+      releaseRequest()
+      await expect(editDrawer.locator('.agent-form-loading')).toBeHidden()
+      await expect(nameInput).toHaveValue('Edited while loading')
+      await expect(editDrawer.getByRole('button', { name: 'Update', exact: true })).toBeEnabled()
+      expect(requests).toBe(1)
+      await editDrawer.locator('.n-drawer-header__close').click()
+      await expect(editDrawer).toBeHidden()
+      await expect(addDrawer).toBeHidden()
+    } finally {
+      releaseRequest()
+    }
+  })
+}
+
+test('loads Agent presets only when the preset dialog is opened', async ({ page }) => {
+  await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  let releaseRequest!: () => void
+  const responseGate = new Promise<void>(resolve => { releaseRequest = resolve })
+  let requests = 0
+  await page.route('**/api/studio/group-chat/agent-presets', async route => {
+    requests++
+    await responseGate
+    await route.fallback()
+  })
+  try {
+    await page.locator('.agent-avatar-rail-add').click()
+    const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+    await expect(drawer).toBeVisible({ timeout: 1000 })
+    await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+    expect(requests).toBe(0)
+    const nameInput = drawer.getByPlaceholder('Custom name (leave empty to use profile name)')
+    await nameInput.fill('Draft Agent')
+    await drawer.getByRole('button', { name: 'Choose preset' }).click()
+    const presetDialog = page.locator('.agent-preset-dialog')
+    await expect.poll(() => requests).toBe(1)
+    await expect(presetDialog.getByText('Loading presets…', { exact: true })).toBeVisible()
+    await presetDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(nameInput).toHaveValue('Draft Agent')
+    await drawer.getByRole('button', { name: 'Choose preset' }).click()
+    await expect(presetDialog.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled()
+    releaseRequest()
+    await presetDialog.getByRole('button', { name: /Preset Reviewer/ }).click()
+    await presetDialog.getByRole('button', { name: 'Apply', exact: true }).click()
+    await expect(nameInput).toHaveValue('Preset Reviewer')
+    expect(requests).toBe(1)
+  } finally {
+    releaseRequest()
+  }
+})
+
+test('keeps the Agent drawer closable when Agent status fails to load', async ({ page }) => {
+  await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  await page.locator('.agent-avatar-rail-add').click()
+  const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await expect(drawer).toBeVisible()
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(drawer).toBeHidden()
+  await page.route('**/api/agents/status', route => route.fulfill({ status: 500, json: { error: 'Status unavailable' } }))
+  await page.locator('.agent-avatar-rail-add').click()
+  await expect(drawer).toBeVisible()
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+  await expect(drawer.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
+  await drawer.getByPlaceholder('Custom name (leave empty to use profile name)').fill('Draft Agent')
+  await drawer.locator('.n-drawer-header__close').click()
+  await expect(drawer).toBeHidden()
+})
 
 test.describe('group chat room deep links', () => {
   // This file already covers multi-tab behavior explicitly; keeping the deep-link/socket fixture serial
@@ -1149,10 +1363,37 @@ test.describe('group chat room deep links', () => {
     await expect.poll(async () => (await geometry()).panelWidth).toBeLessThan(rtl.panelWidth)
   })
 
-  test('workspace control sits beside the upper-right settings control and toggles the group workspace panel', async ({ page }) => {
+  test('workspace icon switches the room workspace while the adjacent panel control toggles the drawer', async ({ page }) => {
     await setup(page, '/#/hermes/group-chat/room/room-alpha')
 
     const toolbar = page.locator('.chat-header .header-info')
+    const folderButton = toolbar.locator('.header-workspace-button')
+    await expect(folderButton).toHaveAttribute('title', '/tmp/alpha')
+    await expect(folderButton).toHaveText('')
+    await expect(page.locator('.header-left .workspace-badge')).toHaveCount(0)
+    await folderButton.click()
+    const picker = page.locator('.workspace-modal')
+    await expect(picker).toBeVisible()
+    await expect(page.locator('.group-workspace-panel')).toHaveCount(0)
+    const pathInput = picker.locator('.folder-path-input input')
+    await expect(pathInput).toHaveValue('/tmp/alpha')
+    await pathInput.fill('/tmp/alpha-new')
+    const saveResponse = page.waitForResponse(response =>
+      response.request().method() === 'PUT'
+      && response.url().endsWith('/api/studio/group-chat/rooms/room-alpha/workspace'))
+    await picker.getByRole('button', { name: 'Save', exact: true }).click()
+    const saved = await saveResponse
+    expect(saved.status()).toBe(200)
+    expect(saved.request().postDataJSON()).toEqual({ workspace: '/tmp/alpha-new' })
+    await expect(picker).not.toBeVisible()
+    await expect(folderButton).toHaveAttribute('title', '/tmp/alpha-new')
+    await folderButton.click()
+    await expect(pathInput).toHaveValue('/tmp/alpha-new')
+    await expect(picker).toHaveCSS('transform', 'none')
+    await expect(picker).toHaveCSS('width', '520px')
+    await picker.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(picker).toBeHidden()
+
     const workspaceButton = toolbar.locator('.workspace-panel-toggle')
     const settingsButton = toolbar.locator('.compression-settings-button')
     await expect(workspaceButton).toBeVisible()
@@ -1218,11 +1459,41 @@ test.describe('group chat room deep links', () => {
     }])
   })
 
+  test('uses per-model Provider protocols in the Agent drawer and retains selection for missing metadata', async ({ page }, testInfo) => {
+    const api = await setup(page, '/#/hermes/group-chat/room/room-alpha', undefined, false, [{
+      ...TEST_MODEL_GROUP, models: ['test-model', 'claude-next', 'unknown-model'],
+      api_mode_by_model: { 'test-model': 'codex_responses', 'claude-next': 'anthropic_messages' },
+    }])
+    await page.locator('.agent-avatar-rail-add').click()
+    const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+    await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+    await drawer.locator('.n-select').first().click()
+    await page.locator('.n-base-select-option__content:visible').getByText('Codex', { exact: true }).click()
+    const protocol = drawer.locator('.form-group').filter({ hasText: /^Protocol/ })
+    await expect(protocol).toHaveCount(0)
+    const selectModel = async (model: string) => {
+      await drawer.locator('.model-trigger').click()
+      await page.locator('.model-cascader:visible').getByRole('menuitemradio').filter({ hasText: model }).click()
+    }
+    await selectModel('unknown-model')
+    await expect(protocol).toBeVisible()
+    await selectModel('claude-next')
+    await expect(protocol).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath('provider-protocol-agent.png'), animations: 'disabled' })
+    await drawer.getByPlaceholder('Custom name (leave empty to use profile name)').fill('Provider Protocol Worker')
+    await drawer.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect.poll(() => api.addedAgents.length).toBe(1)
+    expect(api.addedAgents[0]).toMatchObject({ roomId: 'room-alpha', body: {
+      agent: 'codex', agentMode: 'scoped', provider: 'test-provider', model: 'claude-next', apiMode: 'anthropic_messages',
+    } })
+  })
+
   for (const mobile of [false, true]) test(`adds DSH from the ${mobile ? 'mobile' : 'desktop'} Agent drawer with the selected mode`, async ({ page }) => {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 })
     const api = await setup(page, '/#/hermes/group-chat/room/room-alpha')
     await page.locator('.agent-avatar-rail-add').click()
     const modal = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+    await expect(modal.locator('.agent-form-loading')).toBeHidden()
     await modal.locator('.n-select').first().click()
     await page.getByText('DeepSeek Harness', { exact: true }).last().click()
     await expect(modal.locator('img[src="/coding-agents/deepseek.svg"]')).toBeVisible()
@@ -1261,6 +1532,23 @@ test.describe('group chat room deep links', () => {
     await presetDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(presetDialog).toHaveCount(0)
     await expect(nameInput).toHaveValue('Keep this draft')
+  })
+
+  for (const apiMode of [undefined, 'anthropic_messages'] as const) test(`room summary protocol ${apiMode ? 'comes from the Provider' : 'remains selectable when unknown'}`, async ({ page }) => {
+    const api = await setup(page, '/#/hermes/group-chat', undefined, false, [{ ...TEST_MODEL_GROUP, api_mode: apiMode }])
+    await page.getByRole('button', { name: 'Create Room', exact: true }).click()
+    const drawer = page.locator('.n-drawer').filter({ hasText: 'Create Room' })
+    const protocol = drawer.locator('.form-group').filter({ hasText: /^API Mode/ })
+    if (apiMode) await expect(protocol).toHaveCount(0)
+    else await expect(protocol).toBeVisible()
+    await drawer.getByPlaceholder('Enter room name').fill('Protocol Room')
+    await drawer.getByPlaceholder('Enter your display name').fill('Owner')
+    await drawer.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect.poll(() => api.createdRooms.length).toBe(1)
+    expect(api.createdRooms[0]).toMatchObject({
+      name: 'Protocol Room',
+      summary: { provider: 'test-provider', model: 'test-model', apiMode: apiMode || 'chat_completions' },
+    })
   })
 
   test('does not offer or apply Agent presets while creating a Room', async ({ page }) => {
@@ -1462,6 +1750,7 @@ test.describe('group chat room deep links', () => {
     await expect(page.locator('.room-title-text', { hasText: 'Read Only Room' })).toBeVisible()
     await expect(page.locator('.room-item', { hasText: 'Read Only Room' }).locator('.room-code')).toHaveCount(0)
     await expect(page.locator('.chat-header .header-info .compression-settings-button')).toHaveCount(0)
+    await expect(page.locator('.chat-header .header-workspace-button')).toHaveCount(0)
   })
 
   test('group workspace diffs use the single-chat card and shared diff panel', async ({ page }) => {
@@ -1479,6 +1768,118 @@ test.describe('group chat room deep links', () => {
     await expect(panel.locator('.diff-file-name')).toHaveText('example.ts')
     await expect(panel.locator('.diff-code')).toContainText('new')
     await expect(panel.getByRole('button', { name: 'Edit' })).toHaveCount(0)
+  })
+
+  test('preserves every room-list Agent avatar after clearing history and switching rooms', async ({ page }) => {
+    await setup(page, '/#/hermes/group-chat/room/room-alpha')
+    await connectGroupSocket(page)
+    const roster = [1, 2, 3].map(index => ({
+      ...(agentsByRoom['room-alpha'][0] as object), id: `clear-worker-${index}`,
+      agentId: `clear-agent-${index}`, name: `Worker ${index}`,
+      avatar: JSON.stringify({ type: 'generated', seed: `clear-worker-${index}` }),
+    }))
+    let cleared = false
+    await page.route(/\/api\/studio\/group-chat\/rooms\/room-alpha(?:\?.*)?$/, route => route.fulfill({
+      contentType: 'application/json', body: JSON.stringify({
+        room: baseRooms[0], agents: roster, members: [],
+        messages: cleared ? [] : messagesByRoom['room-alpha'], total: 0, hasMore: false,
+      }),
+    }))
+    await page.route('**/api/studio/group-chat/rooms/room-alpha/clear-context', async route => {
+      expect(route.request().method()).toBe('POST')
+      cleared = true
+      await page.evaluate(agents => {
+        (window as any).__PW_GROUP_SOCKET__.joinStates = { 'room-alpha': { agents, messages: [] } }
+      }, roster)
+      // The real clear endpoint returns room metadata without an Agent roster.
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, room: { ...baseRooms[0], totalTokens: 0 } }) })
+    })
+    await triggerGroupSocket(page, 'agents_updated', { roomId: 'room-alpha', agents: roster })
+    const alphaGrid = page.locator('.room-item', { hasText: 'Alpha Room' }).locator('.room-agent-grid')
+    await expect(alphaGrid).toHaveAttribute('data-agent-count', '3')
+    const avatarIds = roster.map(agent => agent.id)
+    await page.getByRole('button', { name: 'Clear context', exact: true }).click()
+    await page.locator('.n-popconfirm').getByRole('button', { name: 'Confirm', exact: true }).click()
+    await expect(page.getByText('Alpha room message', { exact: true })).toHaveCount(0)
+    await expect(alphaGrid).toHaveAttribute('data-agent-count', '3')
+    for (const name of ['Beta Room', 'Alpha Room', 'Beta Room']) {
+      await page.locator('.room-item', { hasText: name }).click()
+      await expect(page.locator('.room-title-text')).toHaveText(name)
+      await expect(alphaGrid).toHaveAttribute('data-agent-count', '3')
+      expect(await alphaGrid.locator('[data-agent-id]').evaluateAll(elements => elements.map(element => element.getAttribute('data-agent-id')))).toEqual(avatarIds)
+      await expect(alphaGrid.locator('svg')).toHaveCount(3)
+    }
+    await alphaGrid.screenshot({ path: '/tmp/ekko-clear-room-avatars.png' })
+  })
+
+  test('isolates typing and summary indicators while switching rooms and clears idle summaries', async ({ page }) => {
+    await setup(page, '/#/hermes/group-chat/room/room-alpha')
+    await connectGroupSocket(page)
+    const member = { id: 'typing-member', userId: 'typing-user', name: 'Typing Member', joinedAt: 1 }
+    const summary = { roomId: 'room-alpha', version: 1, status: 'summarizing', updatedAt: 10, summary: '' }
+    await triggerGroupSocket(page, 'member_joined', { roomId: 'room-alpha', members: [member] })
+    await triggerGroupSocket(page, 'typing', { roomId: 'room-alpha', userId: member.userId, userName: member.name })
+    await triggerGroupSocket(page, 'room_summary_updated', summary)
+    await expect(page.locator('.agent-avatar-rail-typing')).toHaveCount(1)
+    await expect(page.locator('.group-summary-inline-status.is-summarizing')).toBeVisible()
+    await triggerGroupSocket(page, 'room_summary_updated', { ...summary, status: 'idle', updatedAt: 20 })
+    await expect(page.locator('.group-summary-inline-status')).toHaveCount(0)
+
+    await page.evaluate(({ member, summary }) => {
+      const state = (window as any).__PW_GROUP_SOCKET__
+      state.joinStates = {
+        'room-alpha': { members: [member], typingUsers: [{ userId: member.userId, userName: member.name }], roomSummary: { ...summary, updatedAt: 30 } },
+        'room-beta': { roomSummary: { ...summary, roomId: 'room-beta', status: 'idle' } },
+      }
+    }, { member, summary })
+    for (let round = 0; round < 2; round++) {
+      await page.locator('.room-item', { hasText: 'Beta Room' }).click()
+      await expect(page.locator('.room-title-text')).toHaveText('Beta Room')
+      await expect(page.locator('.agent-avatar-rail-typing')).toHaveCount(0)
+      await expect(page.locator('.group-summary-inline-status')).toHaveCount(0)
+      await triggerGroupSocket(page, 'room_summary_updated', { ...summary, updatedAt: 30 })
+      await expect(page.locator('.group-summary-inline-status')).toHaveCount(0)
+      await page.locator('.room-item', { hasText: 'Alpha Room' }).click()
+      await expect(page.locator('.room-title-text')).toHaveText('Alpha Room')
+      await expect(page.locator('.agent-avatar-rail-typing')).toHaveCount(1)
+      await expect(page.locator('.group-summary-inline-status.is-summarizing')).toBeVisible()
+    }
+    await triggerGroupSocket(page, 'stop_typing', { roomId: 'room-alpha', userId: member.userId })
+    await triggerGroupSocket(page, 'room_summary_updated', { ...summary, status: 'idle', updatedAt: 40 })
+    await expect(page.locator('.agent-avatar-rail-typing')).toHaveCount(0)
+    await expect(page.locator('.group-summary-inline-status')).toHaveCount(0)
+  })
+
+  test('restores live text and reasoning after switching rooms and continues streaming', async ({ page }) => {
+    await setup(page, '/#/hermes/group-chat/room/room-beta')
+    await connectGroupSocket(page)
+    const liveMessage = {
+      id: 'switch-run_part_0', roomId: 'room-beta', senderId: 'switch-agent',
+      senderName: 'Switch Worker', role: 'assistant', run_id: 'switch-run',
+      content: 'Recovered stage text', reasoning: 'Recovered thinking',
+      reasoning_content: 'Recovered thinking', timestamp: 1_900_000_000,
+      isStreaming: true, finish_reason: 'streaming',
+    }
+    await page.evaluate(message => {
+      (window as any).__PW_GROUP_SOCKET__.liveSnapshots = { 'room-beta': [message] }
+    }, liveMessage)
+
+    for (let round = 0; round < 2; round++) {
+      await page.locator('.room-item', { hasText: 'Alpha Room' }).click()
+      await expect(page.locator('.room-title-text')).toHaveText('Alpha Room')
+      await page.locator('.room-item', { hasText: 'Beta Room' }).click()
+      await expect(page.locator('.room-title-text')).toHaveText('Beta Room')
+      const message = page.locator('.group-message', { hasText: 'Recovered stage text' })
+      await expect(message).toBeVisible()
+      await message.locator('.thinking-header').click()
+      await expect(message.locator('.thinking-body')).toContainText('Recovered thinking')
+      await triggerGroupSocket(page, 'message_stream_delta', { roomId: 'room-beta', id: liveMessage.id, delta: ' continued' })
+      await triggerGroupSocket(page, 'message_reasoning_delta', { roomId: 'room-beta', id: liveMessage.id, delta: ' continued' })
+      await expect(message).toContainText('Recovered stage text continued')
+      await expect(message.locator('.thinking-body')).toContainText('Recovered thinking continued')
+    }
+    await triggerGroupSocket(page, 'message', { ...liveMessage, content: 'Switch run finished', isStreaming: false, finish_reason: 'stop' })
+    await expect(page.getByText('Switch run finished', { exact: true })).toBeVisible()
   })
 
   test('clicking another room updates URL and reload preserves it', async ({ page }) => {
@@ -1680,4 +2081,104 @@ test.describe('group chat room deep links', () => {
     await expect(page).toHaveURL(/#\/hermes\/group-chat\/room\/room-beta$/)
     await expect(page.locator('.room-title-text', { hasText: 'Beta Room' })).toBeVisible()
   })
+})
+
+
+test('group-chat Agent picker only lists installed Agents in catalog order', async ({ page }) => {
+  await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  await page.route('**/api/agents/status', route => route.fulfill({ json: {
+    revision: 1, updatedAt: new Date().toISOString(), agents: [
+      { id: 'ekko-agent', installed: true, source: 'built-in', path: '', version: '' },
+      { id: 'claude-code', installed: false, source: 'not-installed', path: '', version: '' },
+      { id: 'codex', installed: true, source: 'user-cli', path: '/test/codex', version: '' },
+      { id: 'qwen', installed: true, source: 'user-cli', path: '/test/qwen', version: '' },
+    ],
+  } }))
+  await page.locator('.agent-avatar-rail-add').click()
+  const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+  await drawer.locator('.n-select').first().click()
+  await expect.poll(async () => (await page.locator('.n-base-select-option__content:visible').allTextContents())
+    .map(label => label.split(' · ')[0])).toEqual(['Ekko', 'Codex', 'Qwen Code'])
+})
+
+for (const mobile of [false, true]) test(`group-chat ${mobile ? 'mobile' : 'desktop'} uses the shared dialog for scoped and global native model and effort`, async ({ page }) => {
+  if (mobile) await page.setViewportSize({ width: 390, height: 844 })
+  const api = await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  let discoveries = 0
+  let finishRefresh: (() => void) | undefined
+  await page.route('**/api/coding-agents/models?*', async route => {
+    discoveries++
+    if (discoveries > 1) await new Promise<void>(resolve => { finishRefresh = resolve })
+    await route.fulfill({ json: { agents: [{ agentId: 'codex', name: 'Codex', status: 'ready', source: 'cli',
+      models: [{ id: 'native-review', name: 'Native Review', reasoningEfforts: ['low', 'high'] }] }] } })
+  })
+  await page.locator('.agent-avatar-rail-add').click()
+  const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+  await drawer.locator('.n-select').first().click()
+  await page.getByText('Codex', { exact: true }).last().click()
+  await drawer.locator('.model-trigger').click()
+  const menu = page.locator('.model-cascader:visible')
+  await expect(menu).toBeVisible()
+  await menu.getByRole('menuitemradio', { name: 'test-model', exact: true }).click()
+  const mode = drawer.locator('.form-group').filter({ has: page.locator('.form-label', { hasText: 'Launch mode' }) }).locator('.n-select')
+  await expect(mode).toContainText('Model')
+  await mode.click()
+  await page.getByText('Global', { exact: true }).last().click()
+  await drawer.locator('.native-model-trigger').click()
+  await menu.getByRole('menuitemradio', { name: 'Native Review', exact: true }).click()
+  const effortField = drawer.locator('.form-group').filter({ has: page.locator('.native-reasoning-effort') })
+  await expect(effortField.locator('.form-label')).toHaveText('Reasoning effort')
+  await expect(effortField.locator('.native-model-trigger')).toHaveCount(0)
+  await effortField.locator('.native-reasoning-effort').click()
+  await page.getByText('High', { exact: true }).last().click()
+  await mode.click()
+  await page.getByText('Model', { exact: true }).last().click()
+  await expect(drawer.locator('.model-trigger')).toContainText('test-model')
+  await mode.click()
+  await page.getByText('Global', { exact: true }).last().click()
+  await expect(drawer.locator('.native-model-trigger')).toHaveText('Native Review')
+  await expect(drawer.locator('.native-reasoning-effort')).toContainText('High')
+  await drawer.getByPlaceholder('Custom name (leave empty to use profile name)').fill('Native Reviewer')
+  await drawer.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect.poll(() => api.addedAgents.length).toBe(1)
+  expect(api.addedAgents[0].body).toMatchObject({ agent: 'codex', agentMode: 'global', provider: '', model: 'native-review', reasoningEffort: 'high' })
+  expect(api.addedAgents[0].body.apiMode).toBeUndefined()
+  await page.getByRole('button', { name: 'Native Reviewer', exact: true }).click()
+  const edit = page.locator('.n-drawer').filter({ hasText: 'Edit Native Reviewer' })
+  await expect(edit.locator('.native-model-trigger')).toHaveText('Native Review')
+  await expect(edit.locator('.native-reasoning-effort')).toContainText('High')
+  await edit.locator('.native-model-trigger').click()
+  await expect(menu.getByRole('menuitemradio', { name: 'Native Review', exact: true })).toBeVisible()
+  await expect.poll(() => Boolean(finishRefresh)).toBe(true)
+  finishRefresh!()
+  await menu.getByRole('button', { name: 'Close', exact: true }).click()
+})
+
+test('group-chat applies a global native preset and uses edited effort instead of the preset snapshot', async ({ page }) => {
+  const api = await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  await page.route('**/api/studio/group-chat/agent-presets', route => route.fulfill({ json: { presets: [{
+    id: 'native-preset', agent: 'codex', agentMode: 'global', profile: 'default', provider: '', model: 'native-review',
+    apiMode: '', reasoningEffort: 'high', name: 'Native preset', description: '', avatar: '', available: true,
+  }] } }))
+  await page.route('**/api/coding-agents/models?*', route => route.fulfill({ json: { agents: [{
+    agentId: 'codex', name: 'Codex', status: 'ready', source: 'cli',
+    models: [{ id: 'native-review', name: 'Native Review', reasoningEfforts: ['low', 'high'] }],
+  }] } }))
+  await page.locator('.agent-avatar-rail-add').click()
+  const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+  await drawer.getByRole('button', { name: 'Choose preset', exact: true }).click()
+  const presets = page.locator('.agent-preset-dialog').filter({ hasText: 'Choose preset' })
+  await presets.getByRole('button', { name: /Native preset/ }).click()
+  await presets.getByRole('button', { name: 'Apply', exact: true }).click()
+  await expect(drawer.locator('.native-model-trigger')).toHaveText('Native Review')
+  await expect(drawer.locator('.native-reasoning-effort')).toContainText('High')
+  await drawer.locator('.native-reasoning-effort').click()
+  await page.getByText('Low', { exact: true }).last().click()
+  await drawer.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect.poll(() => api.addedAgents.length).toBe(1)
+  expect(api.addedAgents[0].body).toMatchObject({ agentMode: 'global', model: 'native-review', reasoningEffort: 'low' })
+  expect(api.addedAgents[0].body.presetId).toBeUndefined()
 })

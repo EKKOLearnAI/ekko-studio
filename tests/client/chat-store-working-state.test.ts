@@ -12,7 +12,8 @@ vi.mock('@/api/studio/chat', () => ({
   getChatRunSocket: vi.fn(() => ({ emit: vi.fn() })),
   respondToolApproval: vi.fn(), respondClarify: vi.fn(),
   onPeerUserMessage: vi.fn(), onSessionCommand: vi.fn(),
-  onSessionTitleUpdated: vi.fn(), onSessionWorkspaceUpdated: vi.fn(), onSessionSettingsUpdated: vi.fn(),
+  onSessionTitleUpdated: vi.fn(), onRunUsageUpdated: vi.fn(() => vi.fn()),
+  onSessionWorkspaceUpdated: vi.fn(), onSessionSettingsUpdated: vi.fn(),
 }))
 vi.mock('@/api/client', () => ({ getActiveProfileName: () => 'default', hasApiKey: () => false }))
 vi.mock('@/api/studio/sessions', () => ({

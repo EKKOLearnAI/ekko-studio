@@ -98,17 +98,17 @@ const hasInterrupted = computed(() => props.tools.some(tool => tool.toolStatus =
 .tool-run-header {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   width: 100%;
   min-width: 0;
   min-height: 30px;
-  padding: 4px 8px;
-  border: 1px solid rgba(var(--text-primary-rgb), 0.09);
-  border-radius: 8px;
+  padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.09);
+  border-radius: var(--radius-component, 8px);
   background: rgba(var(--bg-main-surface-rgb), 0.28);
   color: $text-secondary;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   text-align: start;
   cursor: pointer;
 

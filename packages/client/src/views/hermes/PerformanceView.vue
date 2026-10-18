@@ -1,13 +1,15 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NButton, NSpin, useMessage } from 'naive-ui'
+import { NButton, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { fetchPerformanceRuntime, type PerformanceRuntimeSnapshot } from '@/api/studio/performance-monitor'
 
 const { t } = useI18n()
 const message = useMessage()
 const snapshot = ref<PerformanceRuntimeSnapshot | null>(null)
-const loading = ref(false)
+const loading = ref(true)
 const autoRefresh = ref(true)
 let timer: ReturnType<typeof setInterval> | undefined
 
@@ -84,7 +86,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="performance-view">
+  <PageLoading :show="loading && !snapshot" class="performance-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('performance.title') }}</h2>
       <div class="header-actions">
@@ -94,8 +97,9 @@ onBeforeUnmount(() => {
         <NButton size="small" :loading="loading" @click="loadRuntime()">{{ t('performance.refresh') }}</NButton>
       </div>
     </header>
+    </PageHeader>
 
-    <NSpin :show="loading && !snapshot" class="performance-spin">
+    <div class="performance-spin">
       <main v-if="snapshot" class="performance-content">
         <section class="summary-grid">
           <div class="summary-item">
@@ -202,8 +206,8 @@ onBeforeUnmount(() => {
           </div>
         </section>
       </main>
-    </NSpin>
-  </div>
+    </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -218,7 +222,7 @@ onBeforeUnmount(() => {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .performance-spin {
@@ -229,29 +233,29 @@ onBeforeUnmount(() => {
 .performance-content {
   height: 100%;
   overflow-y: auto;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
 }
 
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-bottom: 16px;
 }
 
 .summary-item,
 .runtime-section {
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
 }
 
 .summary-item {
   min-height: 108px;
-  padding: 14px;
+  padding: calc(14px * var(--spacing-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .summary-label,
@@ -259,12 +263,12 @@ onBeforeUnmount(() => {
 .section-header span,
 .process-row div span {
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .summary-item strong {
   color: $text-primary;
-  font-size: 24px;
+  font-size: calc(var(--font-size-base, 14px) * 24 / 14);
   font-weight: 650;
 }
 
@@ -289,17 +293,17 @@ onBeforeUnmount(() => {
 
 .section-header {
   min-height: 46px;
-  padding: 12px 14px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid $border-light;
+  gap: calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
 
   h3 {
     margin: 0;
     color: $text-primary;
-    font-size: 14px;
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
     font-weight: 600;
   }
 }
@@ -311,14 +315,14 @@ onBeforeUnmount(() => {
 
 .process-row {
   min-height: 56px;
-  padding: 10px 14px;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
   display: grid;
   grid-template-columns: minmax(0, 1fr) 80px 110px 86px;
   align-items: center;
-  gap: 12px;
-  border-bottom: 1px solid $border-light;
+  gap: calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
   color: $text-secondary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 
   &:last-child {
     border-bottom: 0;
@@ -328,12 +332,12 @@ onBeforeUnmount(() => {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: calc(3px * var(--spacing-scale, 1));
   }
 
   strong {
     color: $text-primary;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   }
 
   span {
@@ -346,11 +350,11 @@ onBeforeUnmount(() => {
 .status {
   width: fit-content;
   max-width: 100%;
-  padding: 2px 8px;
-  border: 1px solid $border-color;
+  padding: calc(2px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: 999px;
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   &.running {
     border-color: rgba(var(--success-rgb), 0.35);
@@ -360,10 +364,10 @@ onBeforeUnmount(() => {
 }
 
 .runtime-error {
-  padding: 10px 14px;
-  border-top: 1px solid $border-light;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
   color: $error;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .worker-table-wrap {
@@ -375,19 +379,19 @@ onBeforeUnmount(() => {
   min-width: 760px;
   border-collapse: collapse;
   color: $text-secondary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 
   th,
   td {
-    padding: 11px 14px;
-    border-bottom: 1px solid $border-light;
+    padding: calc(11px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
+    border-bottom: var(--border-width, 1px) solid $border-light;
     text-align: start;
     white-space: nowrap;
   }
 
   th {
     color: $text-muted;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     font-weight: 600;
   }
 
@@ -408,7 +412,7 @@ onBeforeUnmount(() => {
 }
 
 .session-list {
-  padding: 6px 14px;
+  padding: calc(6px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
 }
 
 .session-row {
@@ -416,10 +420,10 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid $border-light;
+  gap: calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
   color: $text-secondary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 
   &:last-child {
     border-bottom: 0;
@@ -431,8 +435,8 @@ onBeforeUnmount(() => {
 }
 
 .session-empty {
-  padding: 18px 0;
-  font-size: 13px;
+  padding: calc(18px * var(--spacing-scale, 1)) 0;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 @media (max-width: 960px) {

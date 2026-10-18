@@ -1,3 +1,4 @@
+import { authorizeShareUpload, authorizeSessionShare } from '../services/session-shares/access'
 import { randomBytes } from 'crypto'
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
@@ -55,7 +56,7 @@ export async function handleUpload(ctx: any) {
   const raw = Buffer.concat(chunks)
   const parts = splitMultipart(raw, boundaryBuf)
   const results: { name: string; path: string }[] = []
-  const uploadDir = getProfileUploadDir(requestedProfile(ctx))
+  const uploadDir = ctx.state?.sessionShare ? await authorizeShareUpload(ctx.state.sessionShare) : getProfileUploadDir(requestedProfile(ctx))
   await mkdir(uploadDir, { recursive: true })
   for (const part of parts) {
     const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'))
@@ -74,8 +75,10 @@ export async function handleUpload(ctx: any) {
     }
     if (!filename) continue
     const ext = filename.includes('.') ? '.' + filename.split('.').pop() : ''
-    const savedName = randomBytes(8).toString('hex') + ext
+    const safeExt = ctx.state?.sessionShare && !/^\.[A-Za-z0-9]{1,20}$/.test(ext) ? '' : ext
+    const savedName = randomBytes(8).toString('hex') + safeExt
     const savedPath = join(uploadDir, savedName)
+    if (ctx.state?.sessionShare) authorizeSessionShare(ctx.state.sessionShare, 'upload')
     await writeFile(savedPath, data)
     results.push({ name: filename, path: savedPath })
   }

@@ -112,15 +112,15 @@ const accessibleSummary = computed(() => {
     height: 36px;
     overflow: visible;
     box-sizing: border-box;
-    border: 1px solid $border-color;
-    border-radius: 8px;
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 8px);
     background: $bg-secondary;
 
     &.is-active::after {
         position: absolute;
         z-index: 2;
         inset: -4px;
-        border-radius: 12px;
+        border-radius: var(--radius-component, 12px);
         box-shadow:
             0 0 0 2px #ff6b6b,
             0 0 10px rgba(255, 107, 107, 0.4),
@@ -138,10 +138,10 @@ const accessibleSummary = computed(() => {
     justify-content: center;
     overflow: visible;
     box-sizing: border-box;
-    border-radius: 5px;
+    border-radius: var(--radius-component, 5px);
 
     :deep(.profile-avatar-view) {
-        border-radius: 4px;
+        border-radius: var(--radius-component, 4px);
     }
 
 }
@@ -220,22 +220,22 @@ const accessibleSummary = computed(() => {
 }
 
 .room-agent-grid-overflow {
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
     color: $text-secondary;
-    font-size: 9px;
+    font-size: calc(var(--font-size-base, 14px) * 9 / 14);
     font-weight: 700;
-    line-height: 1;
+    line-height: var(--line-height, 1);
 }
 
 .room-agent-grid-neutral {
     display: grid;
     grid-template-columns: repeat(2, 6px);
     grid-template-rows: repeat(2, 6px);
-    gap: 2px;
+    gap: calc(2px * var(--spacing-scale, 1));
     background: rgba(var(--text-muted-rgb), 0.08);
 
     span {
-        border-radius: 2px;
+        border-radius: var(--radius-component, 2px);
         background: rgba(var(--text-muted-rgb), 0.42);
     }
 }

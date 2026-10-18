@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import 'katex/dist/katex.min.css'
+import { stripToolCallMarkup } from '../../../../../shared/tool-call-markup'
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, unref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
@@ -95,6 +96,9 @@ const md: MarkdownIt = new MarkdownItConstructor({
 // Preserve literal quote characters from user and assistant messages while
 // retaining typographer's other replacements (for example, dashes and ellipses).
 md.disable('smartquotes')
+// Bare source filenames such as DESIGN.md overlap real domain suffixes.
+// Explicit URLs and email addresses still use markdown-it's linkifier.
+md.linkify.set({ fuzzyLink: false })
 
 md.use(markdownItKatex, {
   katex,
@@ -248,7 +252,7 @@ function hasExtension(path: string, extensions: Set<string>): boolean {
 }
 
 const renderedHtml = computed(() => {
-  let html = md.render(repairNestedMarkdownFences(props.content))
+  let html = md.render(repairNestedMarkdownFences(stripToolCallMarkup(props.content)))
   if (props.deferImages) html = html.replace(/<img\b[^>]*>/gi, '')
 
   // Add IDs to headings for anchor links
@@ -446,6 +450,8 @@ async function renderMermaidDiagrams(): Promise<void> {
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: 'strict',
+      theme: 'base',
+      themeVariables: mermaidThemeVariables(),
     })
   } catch {
     if (unmounted || generation !== renderGeneration) return
@@ -469,7 +475,6 @@ async function renderMermaidDiagrams(): Promise<void> {
       const scrollParent = getScrollParent(markdownBody.value)
       const shouldKeepBottom = scrollParent ? isNearScrollBottom(scrollParent) : false
       element.removeAttribute('data-mermaid-pending')
-      element.removeAttribute('data-mermaid-source')
       element.innerHTML = result.svg
       if (scrollParent && shouldKeepBottom) {
         nextTick(() => {
@@ -484,7 +489,32 @@ async function renderMermaidDiagrams(): Promise<void> {
   }
 }
 
+function mermaidThemeVariables() {
+  const root = document.documentElement
+  const css = getComputedStyle(root)
+  const dark = root.classList.contains('dark')
+  const color = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback
+  return {
+    darkMode: dark,
+    background: color('--bg-primary', dark ? '#1a1a1a' : '#fafafa'),
+    primaryColor: color('--bg-card', dark ? '#2a2a2a' : '#ffffff'),
+    primaryTextColor: color('--text-primary', dark ? '#e0e0e0' : '#1a1a1a'),
+    primaryBorderColor: color('--border-color', dark ? '#3a3a3a' : '#e0e0e0'),
+    lineColor: color('--accent-primary', dark ? '#e0e0e0' : '#333333'),
+    fontFamily: color('--font-ui', 'system-ui, sans-serif'),
+    fontSize: color('--font-size-base', '14px'),
+  }
+}
+
+function refreshMermaidTheme() {
+  const diagrams = markdownBody.value?.querySelectorAll('[data-mermaid-source]')
+  if (!diagrams?.length) return
+  diagrams.forEach(element => element.setAttribute('data-mermaid-pending', 'true'))
+  void renderMermaidDiagrams()
+}
+
 onMounted(() => {
+  document.addEventListener('studio-theme-change', refreshMermaidTheme)
   void renderMermaidDiagrams()
 })
 
@@ -493,6 +523,7 @@ watch(renderedHtml, () => {
 }, { flush: 'post' })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('studio-theme-change', refreshMermaidTheme)
   unmounted = true
   renderGeneration += 1
 })
@@ -631,7 +662,7 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
   }
 
   font-size: var(--font-size-base);
-  line-height: 1.65;
+  line-height: var(--line-height, 1.65);
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -652,7 +683,7 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
   }
 
   ul, ol {
-    padding-inline-start: 20px;
+    padding-inline-start: calc(20px * var(--spacing-scale, 1));
     margin: 4px 0 8px;
   }
 
@@ -717,7 +748,7 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
     max-height: 160px;
     object-fit: contain;
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: var(--radius-component, 4px);
     margin: 8px 0;
   }
 
@@ -726,7 +757,7 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
     border-radius: $radius-sm;
     overflow: hidden;
     background: #000;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
   }
 
   .markdown-video {
@@ -740,11 +771,11 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
   .markdown-video-footer {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
+    gap: calc(8px * var(--spacing-scale, 1));
+    padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
     background: rgba(0, 0, 0, 0.85);
     color: #fff;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
     .att-name {
       flex: 1;
@@ -756,8 +787,8 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
 
   .markdown-audio-container {
     margin: 12px 0;
-    padding: 10px 12px;
-    border: 1px solid $border-light;
+    padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-light;
     border-radius: $radius-sm;
     background-color: rgba(0, 0, 0, 0.04);
   }
@@ -771,10 +802,10 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
   .markdown-audio-footer {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     margin-top: 6px;
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
     .att-name {
       flex: 1;
@@ -787,13 +818,13 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
   .markdown-file-card {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     font: inherit;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     color: $text-secondary;
     background-color: rgba(0, 0, 0, 0.04);
-    border: 1px solid $border-light;
+    border: var(--border-width, 1px) solid $border-light;
     border-radius: $radius-sm;
     margin: 8px 0;
     cursor: pointer;
@@ -832,17 +863,17 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
 
   blockquote {
     margin: 8px 0;
-    padding: 4px 12px;
+    padding: calc(4px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
     border-inline-start: 3px solid $border-color;
     color: $text-secondary;
   }
 
   code:not(.hljs) {
     background: $code-bg;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-family: $font-code;
-    font-size: 13px;
+    padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 4px);
+    font-family: var(--font-code, $font-code);
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     color: $accent-primary;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -858,10 +889,10 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
     overflow-x: auto;
 
     th, td {
-      padding: 6px 12px;
-      border: 1px solid $border-color;
+      padding: calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+      border: var(--border-width, 1px) solid $border-color;
       text-align: start;
-      font-size: 13px;
+      font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     }
 
     th {
@@ -877,15 +908,15 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
 
   hr {
     border: none;
-    border-top: 1px solid $border-color;
+    border-top: var(--border-width, 1px) solid $border-color;
     margin: 12px 0;
   }
 
   .mermaid-diagram {
     margin: 10px 0;
-    padding: 14px;
-    border: 1px solid $border-color;
-    border-radius: 8px;
+    padding: calc(14px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 8px);
     background: rgba(var(--accent-primary-rgb), 0.04);
     overflow-x: auto;
 
@@ -899,8 +930,8 @@ async function handleMarkdownClick(event: MouseEvent): Promise<void> {
 
   .mermaid-loading {
     color: $text-secondary;
-    font-size: 13px;
-    font-family: $font-code;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+    font-family: var(--font-code, $font-code);
     min-height: 60px;
     display: flex;
     align-items: center;

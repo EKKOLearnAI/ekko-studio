@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import HeaderActionOverflow from '@/components/layout/HeaderActionOverflow.vue'
 import type { SkillSource } from '@/api/hermes/skills'
 
 type SkillSourceFilter = SkillSource | 'modified'
@@ -21,23 +22,25 @@ function toggle(filter: SkillSourceFilter) {
 </script>
 
 <template>
-  <div class="source-legend">
-    <button class="legend-item" :class="{ active: modelValue === 'builtin' }" @click="toggle('builtin')">
-      <span class="legend-dot dot-builtin" />{{ t('skills.source.builtin') }}
-    </button>
-    <button v-if="showHub !== false" class="legend-item" :class="{ active: modelValue === 'hub' }" @click="toggle('hub')">
-      <span class="legend-dot dot-hub" />{{ t('skills.source.hub') }}
-    </button>
-    <button class="legend-item" :class="{ active: modelValue === 'local' }" @click="toggle('local')">
-      <span class="legend-dot dot-local" />{{ t('skills.source.local') }}
-    </button>
-    <button class="legend-item" :class="{ active: modelValue === 'external' }" @click="toggle('external')">
-      <span class="legend-dot dot-external" />{{ t('skills.source.external') }}
-    </button>
-    <button class="legend-item" :class="{ active: modelValue === 'modified' }" @click="toggle('modified')">
-      <span class="modified-icon">✎</span>{{ t('skills.modified') }}
-    </button>
-  </div>
+  <HeaderActionOverflow :label="t('skills.filterBySource')" :breakpoint="1100" :active="modelValue !== null" placement="bottom-start">
+    <div class="source-legend">
+      <button class="legend-item" :class="{ active: modelValue === 'builtin' }" @click="toggle('builtin')">
+        <span class="legend-dot dot-builtin" />{{ t('skills.source.builtin') }}
+      </button>
+      <button v-if="showHub !== false" class="legend-item" :class="{ active: modelValue === 'hub' }" @click="toggle('hub')">
+        <span class="legend-dot dot-hub" />{{ t('skills.source.hub') }}
+      </button>
+      <button class="legend-item" :class="{ active: modelValue === 'local' }" @click="toggle('local')">
+        <span class="legend-dot dot-local" />{{ t('skills.source.local') }}
+      </button>
+      <button class="legend-item" :class="{ active: modelValue === 'external' }" @click="toggle('external')">
+        <span class="legend-dot dot-external" />{{ t('skills.source.external') }}
+      </button>
+      <button class="legend-item" :class="{ active: modelValue === 'modified' }" @click="toggle('modified')">
+        <span class="modified-icon">✎</span>{{ t('skills.modified') }}
+      </button>
+    </div>
+  </HeaderActionOverflow>
 </template>
 
 <style scoped lang="scss">
@@ -46,22 +49,20 @@ function toggle(filter: SkillSourceFilter) {
 .source-legend {
   display: flex;
   align-items: center;
-  gap: 4px;
-  flex: 1;
+  gap: calc(4px * var(--spacing-scale, 1));
   flex-wrap: wrap;
-  margin-inline-start: 16px;
 }
 
 .legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: calc(4px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
   white-space: nowrap;
-  padding: 2px 6px;
-  border: 1px solid transparent;
-  border-radius: 10px;
+  padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid transparent;
+  border-radius: var(--radius-component, 10px);
   background: none;
   cursor: pointer;
   transition: all $transition-fast;
@@ -92,12 +93,8 @@ function toggle(filter: SkillSourceFilter) {
 .dot-external { background: #f59e0b; }
 
 .modified-icon {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $warning;
   opacity: 0.7;
-}
-
-@media (max-width: $breakpoint-mobile) {
-  .source-legend { display: none; }
 }
 </style>

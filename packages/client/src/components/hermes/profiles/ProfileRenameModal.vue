@@ -98,6 +98,6 @@ function handleClose() {
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>

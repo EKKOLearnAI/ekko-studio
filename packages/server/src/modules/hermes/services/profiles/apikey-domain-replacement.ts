@@ -49,8 +49,10 @@ function replaceConfigDomains(raw: string): string {
 
 function replaceEnvDomains(raw: string): string {
   // Match URL settings only, preserving quoting, comments and line endings.
+  // The separator after '=' stays spaces/tabs: \s would cross the newline of an
+  // empty assignment and capture the following line as that key's value.
   return raw.replace(
-    /^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*BASE_URL\s*=\s*)(["']?)([^\s"'#]+)(\2)(?=\s|#|$)/gm,
+    /^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*BASE_URL\s*=[ \t]*)(["']?)([^\s"'#]+)(\2)(?=\s|#|$)/gm,
     (_match, prefix, quote, value, closingQuote) => `${prefix}${quote}${replaceDomain(value)}${closingQuote}`,
   )
 }

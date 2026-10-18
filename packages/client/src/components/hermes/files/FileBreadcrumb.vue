@@ -35,6 +35,6 @@ function handleClick(index: number) {
 
 <style scoped lang="scss">
 .file-breadcrumb {
-  padding: 0 16px;
+  padding: 0 calc(16px * var(--spacing-scale, 1));
 }
 </style>

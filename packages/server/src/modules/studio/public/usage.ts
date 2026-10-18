@@ -1,1 +1,5 @@
 export * from '../services/usage/usage-recorder'
+export * from '../services/usage/usage-cost'
+export { getUsage, getRecordedUsageTotals } from '../repositories/usage-store'
+export { completeRunUsage, withRunUsage } from '../repositories/run-usage-store'
+export { usageRepairSnapshot, usageRepairHash, applyUsageRepair, type RepairUsageRow } from '../repositories/usage-repair-store'

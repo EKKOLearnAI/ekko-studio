@@ -17,7 +17,13 @@ describe('desktop login reset', () => {
     const source = readFileSync(resolve('packages/desktop/src/main/index.ts'), 'utf-8')
 
     expect(source).toContain('serverUrl = url\n    updateTrayMenu()')
-    expect(source).toContain('enabled: !isResettingLogin && (!isBootstrapping || !!serverUrl)')
+    expect(source).toContain('enabled: !isResettingLogin && !activeRemoteServerUrl && (!isBootstrapping || !!serverUrl)')
+  })
+
+  it('keeps login reset local-only by disabling it in remote-server mode', () => {
+    const source = readFileSync(resolve('packages/desktop/src/main/index.ts'), 'utf-8')
+
+    expect(source).toContain('if (isResettingLogin || activeRemoteServerUrl || (isBootstrapping && !serverUrl)) return')
   })
 
   it('loads the authenticated desktop route instead of the login route on startup', () => {

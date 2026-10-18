@@ -132,6 +132,7 @@ function managedMcpServerConfig(
       HERMES_WEB_UI_PROFILE: profile,
       HERMES_MCP_SERVER_NAME: serverName,
       HERMES_MCP_TOOLSET: toolset,
+      HERMES_MCP_NATIVE_TASK_PLAN: '1',
       [MANAGED_ENV_KEY]: '1',
     },
     enabled: true,
@@ -383,15 +384,28 @@ function validateMcpServerName(name: string): string {
   return normalized
 }
 
+function normalizeMcpServerType(value: unknown): '' | 'stdio' | 'streamable_http' {
+  if (typeof value !== 'string') return ''
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return ''
+  if (normalized === 'stdio') return 'stdio'
+  if (
+    normalized === 'http'
+    || normalized === 'streamable_http'
+    || normalized === 'streamable-http'
+    || normalized === 'streamablehttp'
+  ) {
+    return 'streamable_http'
+  }
+  throw new Error('MCP server type must be stdio or streamable_http.')
+}
+
 function normalizeEkkoMcpServerConfig(value: unknown): EkkoMcpServerConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('MCP server config must be an object.')
   const candidate = value as Record<string, unknown>
   const command = typeof candidate.command === 'string' ? candidate.command.trim() : ''
   const url = typeof candidate.url === 'string' ? candidate.url.trim() : ''
-  const configuredType = typeof candidate.type === 'string' ? candidate.type.trim().toLowerCase() : ''
-  if (configuredType && configuredType !== 'stdio' && configuredType !== 'streamable_http') {
-    throw new Error('MCP server type must be stdio or streamable_http.')
-  }
+  const configuredType = normalizeMcpServerType(candidate.type)
   const type = configuredType || (url && !command ? 'streamable_http' : 'stdio')
   if (type === 'stdio' && !command) throw new Error('MCP server command is required for stdio.')
   if (type === 'streamable_http' && !url) throw new Error('MCP server url is required for streamable_http.')

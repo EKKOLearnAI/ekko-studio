@@ -48,6 +48,14 @@ afterEach(async () => {
 })
 
 describe('Ekko configuration services', () => {
+  it('persists desktop controls without accepting driver arguments or environment overrides', () => {
+    const saved = updateEkkoSettings({ tools: { computerUse: {
+      enabled: false, timeoutMs: 20_000,
+      args: ['--dangerously-bypass-approvals'], env: { CUA_DRIVER_PERMISSION_MODE: 'unrestricted' },
+    } } }, setup)
+    expect(saved.config.tools.computerUse).toEqual({ enabled: false, timeoutMs: 20_000 })
+    expect(getEkkoSettings(setup).config.tools.computerUse).toEqual(saved.config.tools.computerUse)
+  })
   it('updates user-facing settings without exposing or overwriting internal config state', () => {
     setup.config.setModelProvider('acme', {
       type: 'openai-compatible',
@@ -244,6 +252,26 @@ describe('Ekko configuration services', () => {
         enabled: true,
       },
     })
+    for (const [index, alias] of ['http', 'streamable-http', 'streamableHttp', 'streamablehttp'].entries()) {
+      const name = `http-alias-${index}`
+      await createEkkoMcpServer('work', name, {
+        type: alias as 'streamable_http',
+        url: `https://example.com/http-mcp-${index}`,
+      }, setup)
+      expect(listEkkoMcpServers('work', setup)).toContainEqual({
+        name,
+        managed: false,
+        config: {
+          type: 'streamable_http',
+          url: `https://example.com/http-mcp-${index}`,
+          enabled: true,
+        },
+      })
+    }
+    await expect(createEkkoMcpServer('work', 'legacy-sse', {
+      type: 'sse' as 'streamable_http',
+      url: 'https://example.com/sse',
+    }, setup)).rejects.toThrow('MCP server type must be stdio or streamable_http.')
 
     await updateEkkoMcpServer('work', 'local-tools', { command: 'node', enabled: false }, setup)
     expect(listEkkoMcpServers('work', setup).find(server => server.name === 'local-tools')?.config.enabled).toBe(false)

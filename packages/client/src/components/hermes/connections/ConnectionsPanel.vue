@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, ref, watch } from 'vue'
-import { NButton, NTabPane, NTabs } from 'naive-ui'
+import { NTabPane, NTabs } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppConnectionsPanel from '@/components/hermes/connections/AppConnectionsPanel.vue'
@@ -9,14 +10,6 @@ import DevicesView from '@/views/hermes/DevicesView.vue'
 import { isStoredSuperAdmin } from '@/api/client'
 
 type ConnectionTab = 'app' | 'mcu' | 'devices'
-
-defineProps<{
-  sidebarCollapsed: boolean
-}>()
-
-const emit = defineEmits<{
-  toggleSidebar: []
-}>()
 
 const route = useRoute()
 const router = useRouter()
@@ -52,29 +45,13 @@ function updateTab(value: string | number) {
 
 <template>
   <div class="connections-panel">
+    <PageHeader>
     <header class="page-header">
       <div class="connections-header-left">
-        <NButton
-          class="connections-sidebar-toggle"
-          quaternary
-          size="small"
-          circle
-          :title="sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')"
-          :aria-label="sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')"
-          @click="emit('toggleSidebar')"
-        >
-          <template #icon>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-              <rect x="3" y="3" width="7" height="7" />
-              <rect x="14" y="3" width="7" height="7" />
-              <rect x="3" y="14" width="7" height="7" />
-              <rect x="14" y="14" width="7" height="7" />
-            </svg>
-          </template>
-        </NButton>
         <h2 class="header-title">{{ t('connections.title') }}</h2>
       </div>
     </header>
+    </PageHeader>
 
     <NTabs
       :value="activeTab"
@@ -105,14 +82,14 @@ function updateTab(value: string | number) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: $bg-main-surface;
+  background: var(--theme-content-bg, $bg-main-surface);
 }
 
 .connections-header-left {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .connections-tabs {
@@ -121,9 +98,9 @@ function updateTab(value: string | number) {
 
   :deep(.n-tabs-nav) {
     flex: 0 0 auto;
-    padding: 0 20px;
-    border-bottom: 1px solid var(--n-tab-border-color);
-    background: $bg-main-surface;
+    padding: 0 calc(20px * var(--spacing-scale, 1));
+    border-bottom: var(--border-width, 1px) solid var(--n-tab-border-color);
+    background: var(--theme-content-bg, $bg-main-surface);
   }
 
   :deep(.n-tabs-nav-scroll-content) {
@@ -139,12 +116,8 @@ function updateTab(value: string | number) {
 }
 
 @media (max-width: $breakpoint-mobile) {
-  .connections-sidebar-toggle {
-    display: none;
-  }
-
   .connections-tabs :deep(.n-tabs-nav) {
-    padding: 0 12px;
+    padding: 0 calc(12px * var(--spacing-scale, 1));
   }
 }
 </style>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { computed, h, onMounted, ref } from 'vue'
 import { NButton, NDataTable, NForm, NFormItem, NInput, NModal, NSpace, NTag, useDialog, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
@@ -217,8 +218,11 @@ function confirmDeleteDevice(device: McuDevice) {
   })
 }
 
+const initializing = ref(true)
+usePageLoadingTask(() => initializing.value)
+
 onMounted(() => {
-  void loadDevices()
+  void loadDevices().finally(() => { initializing.value = false })
 })
 </script>
 
@@ -312,12 +316,12 @@ onMounted(() => {
 .panel-header {
   flex: 0 0 auto;
   min-height: 68px;
-  padding: 12px 20px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  border-bottom: 1px solid $border-color;
+  gap: calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 }
 
 .panel-heading {
@@ -326,16 +330,16 @@ onMounted(() => {
   h2 {
     margin: 0;
     color: $text-primary;
-    font-size: 16px;
+    font-size: calc(var(--font-size-base, 14px) * 16 / 14);
     font-weight: 650;
-    line-height: 22px;
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 22 / 14));
   }
 
   p {
     margin: 2px 0 0;
     color: $text-muted;
-    font-size: 12px;
-    line-height: 18px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
   }
 }
 
@@ -343,7 +347,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
@@ -351,14 +355,11 @@ onMounted(() => {
   flex: 1 1 auto;
   height: 0;
   min-height: 0;
-  padding: 16px 20px 20px;
+  padding: calc(16px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
   overflow: hidden;
 
   :deep(.n-data-table) {
     height: 100%;
-    --n-td-color: var(--bg-card);
-    --n-th-color: var(--bg-secondary);
-    --n-border-color: var(--border-color);
     --n-td-text-color: var(--text-primary);
     --n-th-text-color: var(--text-secondary);
   }
@@ -373,7 +374,7 @@ onMounted(() => {
   .panel-header {
     align-items: flex-start;
     flex-direction: column;
-    padding: 12px;
+    padding: calc(12px * var(--spacing-scale, 1));
   }
 
   .panel-actions {
@@ -382,7 +383,7 @@ onMounted(() => {
   }
 
   .mcu-device-table {
-    padding: 12px;
+    padding: calc(12px * var(--spacing-scale, 1));
   }
 }
 </style>

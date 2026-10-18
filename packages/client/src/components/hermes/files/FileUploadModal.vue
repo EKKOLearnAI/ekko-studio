@@ -71,7 +71,7 @@ function handleClose() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 20px;
+  padding: calc(40px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
   text-align: center;
   cursor: pointer;
 }
@@ -79,6 +79,6 @@ function handleClose() {
 .upload-dragger p {
   margin-top: 12px;
   opacity: 0.6;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
 }
 </style>

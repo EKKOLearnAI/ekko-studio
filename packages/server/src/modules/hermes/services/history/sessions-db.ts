@@ -1,7 +1,8 @@
 import { getActiveProfileDir, getHermesBaseDir } from '../profiles/profile'
 import { join } from 'path'
 import { existsSync } from 'fs'
-import type { LocalUsageStats } from '../../../studio/contracts/runs/usage'
+import type { LocalUsageStats, UsageStatsFilters } from '../../../studio/contracts/runs/usage'
+import { emptyCostCoverage } from '../../../studio/public/usage'
 import type { ExternalSkillUsageEvent } from '../../../studio/contracts/skills'
 
 const SQLITE_AVAILABLE = (() => {
@@ -940,6 +941,7 @@ export async function findLatestExactSessionIdWithProfile(
 export interface HermesUsageStats extends LocalUsageStats {
   cost: number
   total_api_calls: number
+  cost_fallbacks?: Array<{ session_id: string; date: string; cost: number; source: 'reported' | 'estimated' }>
 }
 
 export interface HermesSkillUsageRow {
@@ -1459,6 +1461,8 @@ export async function getUsageStatsFromDb(
   nowSeconds = Math.floor(Date.now() / 1000),
   profile?: string,
   excludedSessionIds: Iterable<string> = [],
+  unpricedSessionIds: Iterable<string> = [],
+  selection: UsageStatsFilters = {},
 ): Promise<HermesUsageStats> {
   const empty: HermesUsageStats = {
     input_tokens: 0,
@@ -1471,20 +1475,58 @@ export async function getUsageStatsFromDb(
     by_agent: [],
     by_day: [],
     cost: 0,
+    cost_coverage: emptyCostCoverage(),
     total_api_calls: 0,
   }
 
   const normalizedDays = Number.isFinite(days) ? days : 30
   const safeDays = Math.max(1, Math.floor(normalizedDays))
-  const since = nowSeconds - safeDays * 24 * 60 * 60
+  const since = selection.today ? selection.today.startMs / 1000 : nowSeconds - safeDays * 24 * 60 * 60
+  const timeClause = selection.today ? 'started_at >= ? AND started_at <= ?' : 'started_at > ?'
+  const timeParams = selection.today ? [since, selection.today.endMs / 1000] : [since]
   const excludedIds = [...new Set([...excludedSessionIds].map(id => String(id || '').trim()).filter(Boolean))]
   const exclusionClause = excludedIds.length > 0
     ? ` AND id NOT IN (SELECT value FROM json_each(?))`
     : ''
-  const queryParams = excludedIds.length > 0 ? [since, JSON.stringify(excludedIds)] : [since]
+  const queryParams: Array<string | number> = excludedIds.length > 0 ? [...timeParams, JSON.stringify(excludedIds)] : [...timeParams]
+  const dateExpr = selection.today ? '?' : "date(started_at, 'unixepoch')"
+  const dateParams = selection.today ? [selection.today.date] : []
+  let selectionClause = ''
   const db = await openSessionDb(profile)
 
   try {
+    const optionRows = db.prepare(`SELECT DISTINCT COALESCE(NULLIF(TRIM(model), ''), 'unknown') AS model
+      FROM sessions WHERE ${timeClause}${exclusionClause}`).all(...queryParams)
+    const filterOptions = { models: optionRows.map(row => String(row.model)), agents: optionRows.length ? ['hermes'] : [] }
+    if (selection.agent && selection.agent !== 'hermes') return { ...empty, filter_options: filterOptions }
+    if (selection.model) {
+      selectionClause = " AND COALESCE(NULLIF(TRIM(model), ''), 'unknown') = ?"
+      queryParams.push(selection.model)
+    }
+    if (selection.account) {
+      // Native user_id belongs to gateways/providers; only Studio session metadata is authoritative.
+      selectionClause += selection.account === 'unassigned'
+        ? ' AND id NOT IN (SELECT key FROM json_each(?))'
+        : ' AND id IN (SELECT key FROM json_each(?) WHERE value = ?)'
+      queryParams.push(JSON.stringify(selection.sessionAccounts || {}))
+      if (selection.account !== 'unassigned') queryParams.push(selection.account)
+    }
+    // Legacy estimated_cost_usd defaults to zero even when no pricing exists.
+    const hasCostStatus = tableHasColumn(db, 'sessions', 'cost_status')
+    const actualCost = `CASE WHEN actual_cost_usd >= 0 THEN actual_cost_usd END`
+    const estimatedCost = `CASE WHEN estimated_cost_usd > 0${hasCostStatus ? " OR (estimated_cost_usd = 0 AND cost_status IN ('estimated', 'free'))" : ''} THEN estimated_cost_usd END`
+    const costExpr = `COALESCE(${actualCost}, ${estimatedCost})`
+    const costColumns = `COALESCE(SUM(${costExpr}), 0) AS cost,
+      COALESCE(SUM(CASE WHEN ${actualCost} IS NOT NULL THEN 1 ELSE 0 END), 0) AS cost_reported,
+      COALESCE(SUM(CASE WHEN ${actualCost} IS NULL AND ${estimatedCost} IS NOT NULL THEN 1 ELSE 0 END), 0) AS cost_estimated,
+      COALESCE(SUM(CASE WHEN ${costExpr} IS NULL THEN 1 ELSE 0 END), 0) AS cost_unknown`
+    const coverage = (row: Record<string, unknown>) => ({ reported: Number(row.cost_reported || 0), estimated: Number(row.cost_estimated || 0), unknown: Number(row.cost_unknown || 0) })
+    // A whole-session bill cannot safely be attributed to one filtered model.
+    const fallbackIds = selection.model ? [] : [...new Set(unpricedSessionIds)].filter(id => excludedIds.includes(id))
+    const costFallbacks = fallbackIds.length ? db.prepare(`SELECT id AS session_id, ${dateExpr} AS date,
+      ${costExpr} AS cost, CASE WHEN ${actualCost} IS NOT NULL THEN 'reported' ELSE 'estimated' END AS source
+      FROM sessions WHERE ${timeClause} AND id IN (SELECT value FROM json_each(?)) AND ${costExpr} IS NOT NULL
+    `).all(...dateParams, ...timeParams, JSON.stringify(fallbackIds)) as NonNullable<HermesUsageStats['cost_fallbacks']> : []
     const apiCallsExpr = tableHasColumn(db, 'sessions', 'api_call_count')
       ? 'COALESCE(SUM(api_call_count), 0)'
       : '0'
@@ -1495,11 +1537,11 @@ export async function getUsageStatsFromDb(
         COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
         COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
         COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-        COALESCE(SUM(COALESCE(actual_cost_usd, estimated_cost_usd, 0)), 0) AS cost,
+        ${costColumns},
         COUNT(*) AS sessions,
         ${apiCallsExpr} AS total_api_calls
       FROM sessions
-      WHERE started_at > ?${exclusionClause}
+      WHERE ${timeClause}${exclusionClause}${selectionClause}
     `).get(...queryParams) as Record<string, unknown> | undefined
 
     if (!totals) return empty
@@ -1514,7 +1556,7 @@ export async function getUsageStatsFromDb(
         COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
         COUNT(*) AS sessions
       FROM sessions
-      WHERE started_at > ? AND model IS NOT NULL${exclusionClause}
+      WHERE ${timeClause}${exclusionClause}${selectionClause}
       GROUP BY model
       ORDER BY COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) DESC
     `).all(...queryParams).map(row => ({
@@ -1529,18 +1571,18 @@ export async function getUsageStatsFromDb(
 
     const byDay = db.prepare(`
       SELECT
-        date(started_at, 'unixepoch') AS date,
+        ${dateExpr} AS date,
         COALESCE(SUM(input_tokens), 0) AS input_tokens,
         COALESCE(SUM(output_tokens), 0) AS output_tokens,
         COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
         COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
         COUNT(*) AS sessions,
-        COALESCE(SUM(COALESCE(actual_cost_usd, estimated_cost_usd, 0)), 0) AS cost
+        ${costColumns}
       FROM sessions
-      WHERE started_at > ?${exclusionClause}
+      WHERE ${timeClause}${exclusionClause}${selectionClause}
       GROUP BY date
       ORDER BY date ASC
-    `).all(...queryParams).map(row => ({
+    `).all(...dateParams, ...queryParams).map(row => ({
       date: String(row.date || ''),
       input_tokens: normalizeNumber(row.input_tokens),
       output_tokens: normalizeNumber(row.output_tokens),
@@ -1549,9 +1591,11 @@ export async function getUsageStatsFromDb(
       sessions: normalizeNumber(row.sessions),
       errors: 0,
       cost: normalizeNumber(row.cost),
+      cost_coverage: coverage(row),
     }))
 
     return {
+      filter_options: filterOptions,
       input_tokens: normalizeNumber(totals.input_tokens),
       output_tokens: normalizeNumber(totals.output_tokens),
       cache_read_tokens: normalizeNumber(totals.cache_read_tokens),
@@ -1572,6 +1616,8 @@ export async function getUsageStatsFromDb(
         : [],
       by_day: byDay,
       cost: normalizeNumber(totals.cost),
+      cost_coverage: coverage(totals),
+      cost_fallbacks: costFallbacks,
       total_api_calls: normalizeNumber(totals.total_api_calls),
     }
   } finally {

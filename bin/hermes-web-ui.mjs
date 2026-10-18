@@ -12,6 +12,8 @@ const serverEntry = resolve(__dirname, '..', 'dist', 'server', 'index.js')
 const pkgDir = resolve(__dirname, '..')
 const pkg = JSON.parse(readFileSync(resolve(pkgDir, 'package.json'), 'utf-8'))
 const VERSION = pkg.version
+const PACKAGE_NAME = pkg.name
+const CLI_NAME = PACKAGE_NAME === 'ekko-studio' ? 'ekko-studio-web' : 'hermes-web-ui'
 const WEB_UI_HOME = process.env.HERMES_WEB_UI_HOME?.trim()
   ? resolve(process.env.HERMES_WEB_UI_HOME.trim())
   : resolve(homedir(), '.hermes-web-ui')
@@ -100,19 +102,18 @@ function getCurrentNodeEnv() {
   }
 }
 
-function getGlobalPrefix() {
-  return execFileSync(getNpmBin(), ['prefix', '-g'], {
+function getGlobalCliScript() {
+  // .cmd files cannot be executed directly by execFileSync on Windows.
+  const npmCli = join(getNodeBinDir(), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  const command = process.platform === 'win32' ? process.execPath : getNpmBin()
+  const args = process.platform === 'win32' ? [npmCli, 'root', '-g'] : ['root', '-g']
+  const root = execFileSync(command, args, {
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
     env: getCurrentNodeEnv(),
   }).trim()
-}
-
-function getGlobalCliBin() {
-  const prefix = getGlobalPrefix()
-  return process.platform === 'win32'
-    ? join(prefix, 'hermes-web-ui.cmd')
-    : join(prefix, 'bin', 'hermes-web-ui')
+  // Resolve inside this package; a global command shim may belong to the other name.
+  return join(root, PACKAGE_NAME, 'bin', 'hermes-web-ui.mjs')
 }
 
 function getWindowsShell() {
@@ -654,15 +655,15 @@ async function main() {
   const command = process.argv[2] || 'start'
 
   if (['-v', '--version', 'version'].includes(command)) {
-    console.log(`hermes-web-ui v${VERSION}`)
+    console.log(`${CLI_NAME} v${VERSION}`)
     process.exit(0)
   }
 
   if (['-h', '--help', 'help'].includes(command)) {
     console.log(`
-hermes-web-ui v${VERSION}
+${CLI_NAME} v${VERSION}
 
-Usage: hermes-web-ui <command> [options]
+Usage: ${CLI_NAME} <command> [options]
 
 Commands:
   start [port]       Start the server (default port: ${DEFAULT_PORT})
@@ -747,7 +748,10 @@ Options:
 }
 
 function doUpdate() {
-  console.log('  ⬆ Updating hermes-web-ui...')
+  if (!['ekko-studio', 'hermes-web-ui'].includes(PACKAGE_NAME)) {
+    throw new Error(`Unsupported Studio npm package: ${PACKAGE_NAME}`)
+  }
+  console.log(`  ⬆ Updating ${PACKAGE_NAME}...`)
 
   const npm = getNpmBin()
   try {
@@ -764,7 +768,7 @@ function doUpdate() {
 }
 
 function runUpdateInstall(npm) {
-  const child = spawnCli(npm, ['install', '-g', 'hermes-web-ui@latest'], {
+  const child = spawnCli(npm, ['install', '-g', `${PACKAGE_NAME}@latest`], {
     stdio: 'inherit',
     windowsHide: true,
     env: getCurrentNodeEnv(),
@@ -778,13 +782,13 @@ function runUpdateInstall(npm) {
   child.on('exit', (code) => {
     if (code === 0) {
       console.log('  ✓ Update complete, restarting...')
-      const cli = getGlobalCliBin()
+      const cli = getGlobalCliScript()
       if (!existsSync(cli)) {
         console.log(`  ✗ Updated CLI not found: ${cli}`)
         process.exit(1)
       }
 
-      const restart = spawnCli(cli, getRestartArgs(getUpdatePort()), {
+      const restart = spawn(process.execPath, [cli, ...getRestartArgs(getUpdatePort())], {
         stdio: 'inherit',
         windowsHide: true,
         env: getCurrentNodeEnv(),
@@ -809,6 +813,7 @@ if (process.argv[1] && realpathSync(resolve(process.argv[1])) === __filename) {
 }
 
 export {
+  doUpdate,
   clearLoginLocks,
   commandExists,
   getDaemonStopGraceMs,

@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { resolveEkkoJevConfig } from './jev/config'
 import {
   DEFAULT_CODE_EXEC_LANGUAGES,
   DEFAULT_EKKO_CONFIG,
@@ -542,10 +543,17 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig {
   const tools = record(source.tools, 'tools', true)
   const approvals = record(tools.approvals, 'tools.approvals', true)
   const codeExec = record(tools.codeExec, 'tools.codeExec', true)
+  const computerUse = record(tools.computerUse, 'tools.computerUse', true)
   const mcp = record(source.mcp, 'mcp', true)
   const delegation = record(source.delegation, 'delegation', true)
   const compression = record(source.compression, 'compression', true)
   const memory = record(source.memory, 'memory', true)
+  let jev: EkkoConfig['jev']
+  try {
+    jev = resolveEkkoJevConfig(record(source.jev, 'jev', true))
+  } catch (error) {
+    throw new EkkoConfigError(error instanceof Error ? error.message : 'Invalid JEV configuration.', 'jev')
+  }
   const skills = record(source.skills, 'skills', true)
   const logging = record(source.logging, 'logging', true)
   const prompt = record(source.prompt, 'prompt', true)
@@ -563,6 +571,7 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig {
 
   const normalized: EkkoConfig = {
     ...source,
+    jev,
     schemaVersion: EKKO_CONFIG_SCHEMA_VERSION,
     runtime: {
       ...runtime,
@@ -622,6 +631,10 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig {
     },
     tools: {
       ...tools,
+      computerUse: {
+        enabled: booleanValue(computerUse.enabled, true, 'tools.computerUse.enabled'),
+        timeoutMs: integer(computerUse.timeoutMs, 30_000, 'tools.computerUse.timeoutMs', 1),
+      },
       enabled: booleanValue(tools.enabled, DEFAULT_EKKO_CONFIG.tools.enabled, 'tools.enabled'),
       executionTimeoutMs: integer(
         tools.executionTimeoutMs,
@@ -787,6 +800,7 @@ function mergeConfigPatch(current: EkkoConfig, patch: EkkoConfigPatch): JsonReco
       ...patch.tools,
       approvals: { ...current.tools.approvals, ...patch.tools?.approvals },
       codeExec: { ...current.tools.codeExec, ...patch.tools?.codeExec },
+      computerUse: { ...current.tools.computerUse, ...patch.tools?.computerUse },
     },
     mcp: {
       ...current.mcp,
@@ -799,6 +813,7 @@ function mergeConfigPatch(current: EkkoConfig, patch: EkkoConfigPatch): JsonReco
     delegation: { ...current.delegation, ...patch.delegation },
     compression: { ...current.compression, ...patch.compression },
     memory: { ...current.memory, ...patch.memory },
+    jev: { ...current.jev, ...patch.jev },
     skills: {
       ...current.skills,
       ...patch.skills,
@@ -858,11 +873,27 @@ function normalizeMcpProfiles(value: unknown): EkkoConfig['mcp']['profiles'] {
   return profiles
 }
 
+function mcpServerType(value: unknown, path: string): 'stdio' | 'streamable_http' | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') {
+    throw new EkkoConfigError('must be one of: stdio, streamable_http', path)
+  }
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'stdio') return 'stdio'
+  if (
+    normalized === 'http'
+    || normalized === 'streamable_http'
+    || normalized === 'streamable-http'
+    || normalized === 'streamablehttp'
+  ) {
+    return 'streamable_http'
+  }
+  throw new EkkoConfigError('must be one of: stdio, streamable_http', path)
+}
+
 function normalizeMcpServerConfig(value: unknown, path: string): EkkoMcpServerConfig {
   const source = record(value, path)
-  const configuredType = source.type === undefined
-    ? undefined
-    : enumValue(source.type, ['stdio', 'streamable_http'] as const, undefined, `${path}.type`)
+  const configuredType = mcpServerType(source.type, `${path}.type`)
   const command = optionalString(source.command, `${path}.command`)
   const url = optionalString(source.url, `${path}.url`)
   const type = configuredType ?? (url ? 'streamable_http' : 'stdio')

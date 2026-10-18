@@ -3,6 +3,20 @@ import { describe, expect, it } from 'vitest'
 import { filterBridgeToolCallMarkupDelta, flushPendingToolCallMarkup } from '../../packages/server/src/modules/studio/services/chat-run/bridge-delta'
 
 describe('run-chat bridge delta filtering', () => {
+  it('keeps list-nested code while removing a subsequent streamed protocol block', () => {
+    const state = {}
+    const example = '- ~~~xml\n  <tool_call>literal-example</tool_call>\n  ~~~\n\n'
+    const input = `${example}<tool_call>private-arguments</tool_call>\nAnswer`
+    const output = [...input].map(char => filterBridgeToolCallMarkupDelta(state, char)).join('')
+      + flushPendingToolCallMarkup(state)
+    expect(output).toBe(`${example}\nAnswer`)
+  })
+  it('removes split XML calls before buffering assistant text', () => {
+    const state = {}
+    expect(filterBridgeToolCallMarkupDelta(state, '<tool_')).toBe('')
+    expect(filterBridgeToolCallMarkupDelta(state, 'call><invoke name="read_file">secret</invoke></tool_call>\nDone')).toBe('\nDone')
+    expect(flushPendingToolCallMarkup(state)).toBe('')
+  })
   it('keeps ordinary assistant text', () => {
     const state = {}
 

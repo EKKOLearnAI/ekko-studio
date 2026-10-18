@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, ref, watch } from 'vue'
-import { NAlert, NButton, NEmpty, NInput, NSelect, NSpin, NTag, useMessage } from 'naive-ui'
+import { NAlert, NButton, NEmpty, NInput, NSelect, NTag, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { fetchPlugins, setPluginEnabled, type HermesPluginInfo, type HermesPluginsMetadata } from '@/api/hermes/plugins'
 import { useProfilesStore } from '@/stores/hermes/profiles'
@@ -12,7 +14,7 @@ const profilesStore = useProfilesStore()
 const plugins = ref<HermesPluginInfo[]>([])
 const warnings = ref<string[]>([])
 const metadata = ref<HermesPluginsMetadata | null>(null)
-const loading = ref(false)
+const loading = ref(true)
 const error = ref('')
 const actionLoading = ref<Record<string, boolean>>({})
 
@@ -131,17 +133,19 @@ watch(() => profilesStore.activeProfileName || 'default', () => {
 </script>
 
 <template>
-  <div class="plugins-view">
+  <PageLoading :show="loading && plugins.length === 0" class="plugins-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('plugins.title') }}</h2>
       <NButton size="small" quaternary :loading="loading" @click="loadPlugins">
         {{ t('plugins.refresh') }}
       </NButton>
     </header>
+    </PageHeader>
 
     <div class="plugins-content" :class="{ 'is-loading': loading && plugins.length === 0 }">
       <div v-if="loading && plugins.length === 0" class="plugins-loading-state">
-        <NSpin />
+
       </div>
       <template v-else>
         <NAlert type="info" :bordered="false" class="plugins-notice">
@@ -253,7 +257,7 @@ watch(() => profilesStore.activeProfileName || 'default', () => {
         </div>
       </template>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">

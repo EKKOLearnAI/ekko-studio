@@ -100,6 +100,10 @@ export class AgentUpdatePolicy {
     if(this.running)return;this.running=true
     try {
       for(const id of this.adapter.ids()) {
+        if (!this.adapter.safelyManaged(id)) {
+          this.idle.delete(id)
+          continue
+        }
         const state=this.states[id] ||= blank()
         try {
           if (this.manualInstalls.has(id)) continue

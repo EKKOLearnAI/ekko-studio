@@ -12,6 +12,8 @@ and keep this file small enough to fit into every task context.
 - `docs/harness/worktree-runbook.md` - isolated local dev and test setup.
 - `docs/harness/pr-review.md` - self-review checklist before pushing.
 - `docs/harness/server-module-boundaries.md` - target backend modules, ownership, and dependency rules.
+- `docs/harness/jev-integrations.md` - required switches, frontend configuration and registration for JEV consumers.
+- `docs/harness/frontend-ui.md` - required theme surfaces, UI exceptions and automatic checks.
 
 ## Common Commands
 
@@ -46,7 +48,9 @@ Use the smallest relevant check while iterating. Before a broad PR, run
 - Register local API routes before proxy catch-all routes.
 - Use structured APIs and argument arrays instead of shell string construction.
 - Add user-facing strings to every locale file.
+- Register every JEV business integration with its own switch and frontend configuration entry; explicitly register any enabled Studio default, keep standalone defaults off, and run `npm run harness:check`.
 - Do not mix unrelated refactors into a bug fix.
+- New UI must follow the theme surface contract in `docs/harness/frontend-ui.md`; do not expand the legacy style baseline to bypass checks.
 
 ## When The Agent Gets Stuck
 

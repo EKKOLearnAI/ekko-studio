@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Documentation
-    url: https://github.com/EKKOLearnAI/hermes-studio#readme
+    url: https://github.com/EKKOLearnAI/ekko-studio#readme
     about: Please check the documentation first
   - name: GitHub Discussions
-    url: https://github.com/EKKOLearnAI/hermes-studio/discussions
+    url: https://github.com/EKKOLearnAI/ekko-studio/discussions
     about: Use GitHub Discussions for questions that don't fit as issues

@@ -12,7 +12,7 @@ if (!process.argv[2] || !resources) {
 const state = await mkdtemp(join(tmpdir(), 'hermes-desktop-mcp-'))
 try {
   for (const scriptName of ['ekko-studio-mcp.mjs', 'hermes-studio-mcp.mjs', 'hermes-web-ui-mcp.mjs']) {
-    for (const toolset of ['api', 'browser', 'devices', 'use']) {
+    for (const toolset of ['api', 'browser', 'devices', 'use', 'plan']) {
       const env = {
         ...process.env,
         HERMES_WEB_UI_HOME: state,

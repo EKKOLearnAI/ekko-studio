@@ -21,6 +21,7 @@ vi.mock('../../packages/server/src/modules/studio/infrastructure/database/index'
 
 import {
   updateUsage,
+  fillMissingUsageCost,
   getUsage,
   getUsageBatch,
   deleteUsage,
@@ -66,10 +67,32 @@ describe('Usage Store (JSON fallback)', () => {
     expect(mockJsonGet).toHaveBeenCalledWith('session_usage', 'session-1')
   })
 
+  it('fills JSON costs only for the same unpriced row, preserving newer usage and known zero costs', () => {
+    const ref = updateUsage('session-1', { inputTokens: 100, outputTokens: 50 })!
+    const saved = mockJsonSet.mock.calls[0][2]
+    mockJsonGet.mockReturnValue(saved)
+    const cost = { costUsd: 0.25, costSource: 'estimated' as const }
+    fillMissingUsageCost(ref, cost)
+    expect(mockJsonSet).toHaveBeenLastCalledWith('session_usage', 'session-1', { ...saved, cost_usd: 0.25, cost_source: 'estimated', cost_pricing: null })
+    mockJsonSet.mockClear()
+    for (const newer of [undefined, { ...saved, id: 'another-row' }, { ...saved, cost_usd: 0 }]) {
+      mockJsonGet.mockReturnValue(newer)
+      fillMissingUsageCost(ref, cost)
+    }
+    expect(mockJsonSet).not.toHaveBeenCalled()
+  })
+
   it('getUsage returns undefined when jsonGet returns nothing', () => {
     mockJsonGet.mockReturnValue(undefined)
     const result = getUsage('nonexistent')
     expect(result).toBeUndefined()
+  })
+
+  it('filters native command metadata by the requested usage source', () => {
+    mockJsonGet.mockReturnValue({ source: 'hermes', input_tokens: 200, output_tokens: 80, model: 'hermes-model' })
+    expect(getUsage('session-1', 'coding_agent')).toBeUndefined()
+    mockJsonGet.mockReturnValue({ source: 'coding_agent', input_tokens: 0, output_tokens: 0, model: 'native-model' })
+    expect(getUsage('session-1', 'coding_agent')).toMatchObject({ input_tokens: 0, output_tokens: 0, model: 'native-model' })
   })
 
   it('getUsageBatch returns empty map for empty input', () => {
@@ -164,7 +187,11 @@ describe('Usage Store (SQLite path)', () => {
     updateUsage('s1', { inputTokens: 500, outputTokens: 200 })
     expect(runMock).toHaveBeenCalledWith(
       's1',
+      null, // accountId: no known Studio session owner
+      'internal', // origin
       '', // runId
+      '', // parentRunId
+      null, // apiDuration
       '', // source
       '', // agent
       'run', // usageScope
@@ -180,6 +207,9 @@ describe('Usage Store (SQLite path)', () => {
       'default', // profile
       0, // isEstimated
       expect.any(Number), // created_at
+      null, // costUsd
+      'unknown', // costSource
+      null, // costPricing
     )
   })
 
@@ -194,7 +224,11 @@ describe('Usage Store (SQLite path)', () => {
     updateUsage('s1', { inputTokens: 500, outputTokens: 200 })
     expect(runMock).toHaveBeenCalledWith(
       's1',
+      null, // accountId
+      'internal', // origin
       '', // runId
+      '', // parentRunId
+      null, // apiDuration
       '', // source
       '', // agent
       'run', // usageScope
@@ -210,6 +244,9 @@ describe('Usage Store (SQLite path)', () => {
       'default', // profile
       0, // isEstimated
       expect.any(Number), // created_at
+      null, // costUsd
+      'unknown', // costSource
+      null, // costPricing
       expect.any(Number), // updated_at
     )
   })
@@ -271,6 +308,7 @@ describe('Usage Store (SQLite path)', () => {
       sessions: 2,
     })
     allMock
+      .mockReturnValueOnce([{ model: 'gpt-test', agent: 'coding_agent' }])
       .mockReturnValueOnce([
         { model: 'gpt-test', input_tokens: 100, output_tokens: 40, cache_read_tokens: 30, cache_write_tokens: 5, reasoning_tokens: 8, sessions: 2 },
       ])
@@ -287,6 +325,7 @@ describe('Usage Store (SQLite path)', () => {
 
     const { getLocalUsageStats, getRecordedUsageSessionIds } = await import('../../packages/server/src/modules/studio/repositories/usage-store')
     expect(getLocalUsageStats('default', 7)).toEqual({
+      filter_options: { models: ['gpt-test'], agents: ['coding_agent'] },
       input_tokens: 100,
       output_tokens: 40,
       cache_read_tokens: 30,
@@ -300,9 +339,10 @@ describe('Usage Store (SQLite path)', () => {
         { agent: 'coding_agent', input_tokens: 100, output_tokens: 40, cache_read_tokens: 30, cache_write_tokens: 5, reasoning_tokens: 8, sessions: 2 },
       ],
       by_day: [
-        { date: '2026-07-11', input_tokens: 100, output_tokens: 40, cache_read_tokens: 30, cache_write_tokens: 5, sessions: 2, errors: 0, cost: 0 },
+        { date: '2026-07-11', input_tokens: 100, output_tokens: 40, cache_read_tokens: 30, cache_write_tokens: 5, sessions: 2, errors: 0, cost: 0, cost_coverage: { reported: 0, estimated: 0, unknown: 0 } },
       ],
       cost: 0,
+      cost_coverage: { reported: 0, estimated: 0, unknown: 0 },
       total_api_calls: 3,
     })
     expect(getRecordedUsageSessionIds('default')).toEqual(['session-1', 'session-2'])

@@ -16,6 +16,8 @@ const STUDIO_MANAGED_NAMES = new Set([
   'ekko-studio-browser',
   'ekko-studio-devices',
   'ekko-studio-use',
+  'ekko-studio-plan',
+  'ekko-studio-interaction',
 ])
 const MANAGED_ENV_KEY = 'HERMES_WEB_UI_MANAGED_MCP'
 const PROBE_TIMEOUT_MS = 5_000
@@ -42,6 +44,8 @@ function stringRecord(value: unknown): Record<string, string> {
 function normalizeConfig(value: unknown): Record<string, any> {
   if (!isRecord(value)) return {}
   const config = { ...value }
+  if (config.serverUrl && !config.url) config.url = config.serverUrl
+  delete config.serverUrl
   if (Array.isArray(config.command)) {
     const [command, ...args] = config.command.map(String)
     config.command = command || ''
@@ -212,7 +216,7 @@ async function unhealthyCustomServers(
   probe: typeof probeCodingAgentMcpConfig,
 ): Promise<Map<string, string>> {
   const candidates = Object.entries(servers)
-    .filter(([name, config]) => config.enabled !== false && !isManagedServer(name, config))
+    .filter(([name, config]) => config.enabled !== false && config.disabled !== true && !isManagedServer(name, config))
   const results = await Promise.all(candidates.map(async ([name, config]) => {
     let result: CodingAgentMcpProbeResult
     try {
@@ -234,7 +238,7 @@ export async function isolateUnhealthyRuntimeMcpServers(
   configPath: string,
   options: { probe?: typeof probeCodingAgentMcpConfig } = {},
 ): Promise<string[]> {
-  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(agentId)) return []
+  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(agentId)) return []
   let content: string
   try {
     content = await readFile(configPath, 'utf-8')
@@ -249,7 +253,7 @@ export async function isolateUnhealthyRuntimeMcpServers(
           try { assertDshMcpProbeIsLiteral(content, name); return true }
           catch { return false }
         }))
-      : agentId === 'claude-code' || agentId === 'pi'
+      : agentId === 'claude-code' || agentId === 'pi' || (agentId === 'cursor' || agentId === 'antigravity')
       ? jsonMcpServers(content)
       : agentId === 'opencode'
         ? openCodeMcpServers(content)
@@ -265,7 +269,7 @@ export async function isolateUnhealthyRuntimeMcpServers(
   let updated = content
   if (agentId === 'dsh') {
     for (const name of unhealthy.keys()) updated = updateDshMcpServer(updated, name, { ...servers[name], enabled: false })
-  } else if (agentId === 'claude-code' || agentId === 'pi') {
+  } else if (agentId === 'claude-code' || agentId === 'pi' || (agentId === 'cursor' || agentId === 'antigravity')) {
     const parsed = JSON.parse(content || '{}') as Record<string, any>
     const mcpServers = isRecord(parsed.mcpServers) ? { ...parsed.mcpServers } : {}
     for (const name of unhealthy.keys()) delete mcpServers[name]

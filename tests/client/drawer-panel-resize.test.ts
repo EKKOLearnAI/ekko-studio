@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs'
+import { readPresetStyleSource as readFileSync } from './preset-style-source'
 import { describe, expect, it } from 'vitest'
 
 describe('ChatPanel tool drawer resizing support', () => {

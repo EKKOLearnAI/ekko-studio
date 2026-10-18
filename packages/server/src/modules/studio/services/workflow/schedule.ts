@@ -166,8 +166,10 @@ export class WorkflowScheduleService {
       await this.validate(workflow, schedule)
       let accept!: (run: { id: string }) => void
       const accepted = new Promise<{ id: string }>(resolve => { accept = resolve })
+      const owner = schedule.owner_user_id == null ? null : findUserById(schedule.owner_user_id)
       const execution = this.runNow(schedule.workflow_id, {
         profile: schedule.profile,
+        user: owner ? { id: owner.id, username: owner.username, role: owner.role } : undefined,
         startNodeIds: schedule.start_node_ids,
         input: schedule.input,
         timeoutMs: schedule.timeout_ms ?? undefined,

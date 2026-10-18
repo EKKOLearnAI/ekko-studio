@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { NSpin, NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NProgress, NTag, useMessage } from 'naive-ui'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NProgress, NSpin, NTag, useMessage } from 'naive-ui'
+
 import {
   activateRuntimeVersion,
   deleteRuntimeVersion,
@@ -270,7 +271,7 @@ async function removeRuntime(version: string) {
   <NDrawer
     :show="props.show"
     placement="right"
-    :width="'min(860px, calc(100vw - 24px))'"
+    width="var(--studio-drawer-width)"
     @update:show="updateShow"
   >
     <NDrawerContent :title="t('runtimeVersions.title')" closable>
@@ -492,7 +493,7 @@ async function removeRuntime(version: string) {
   <NDrawer
     :show="cliDetailsShow"
     placement="right"
-    :width="'min(620px, calc(100vw - 24px))'"
+    width="var(--studio-drawer-width)"
     @update:show="cliDetailsShow = $event"
   >
     <NDrawerContent :title="t('runtimeVersions.cliDetailsTitle')" closable>
@@ -519,31 +520,31 @@ async function removeRuntime(version: string) {
 .version-management {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 }
 
 .version-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .section-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 
   h3 {
     margin: 0;
-    font-size: 15px;
+    font-size: calc(var(--font-size-base, 14px) * 15 / 14);
     font-weight: 600;
   }
 
   p {
     margin: 4px 0 0;
     color: var(--text-color-3);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 
   &.compact {
@@ -554,18 +555,18 @@ async function removeRuntime(version: string) {
 .section-heading-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .active-path {
   display: grid;
   grid-template-columns: minmax(130px, auto) minmax(0, 1fr);
-  gap: 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 6px);
   color: var(--text-color-2);
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   span {
     min-width: 0;
@@ -576,7 +577,7 @@ async function removeRuntime(version: string) {
 
   &.stacked {
     grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
+    gap: calc(4px * var(--spacing-scale, 1));
 
     span {
       overflow: visible;
@@ -595,24 +596,24 @@ async function removeRuntime(version: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 6px);
 }
 
 .runtime-update-note {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 
   code {
     width: fit-content;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 4px);
     background: var(--hover-color);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 }
 
@@ -621,8 +622,8 @@ async function removeRuntime(version: string) {
   flex: 1 1 auto;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
+  gap: calc(2px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   span {
     overflow: hidden;
@@ -635,39 +636,39 @@ async function removeRuntime(version: string) {
 .runtime-directory-actions {
   display: flex;
   flex: 0 0 auto;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .runtime-directory-hint {
   margin: -4px 2px 0;
   color: var(--text-color-3);
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .cli-details {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .cli-detail-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 6px);
 
   strong {
     color: var(--text-color-2);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 
   code {
     overflow-wrap: anywhere;
     color: var(--text-color-1);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 }
 
@@ -675,8 +676,8 @@ async function removeRuntime(version: string) {
 .job-list {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 6px);
   overflow: hidden;
 }
 
@@ -685,10 +686,10 @@ async function removeRuntime(version: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   min-height: 44px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color);
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid var(--border-color);
 
   &:last-child {
     border-bottom: 0;
@@ -700,14 +701,14 @@ async function removeRuntime(version: string) {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .job-main {
   flex: 1 1 auto;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 
   small {
     color: var(--text-color-3);
@@ -724,7 +725,7 @@ async function removeRuntime(version: string) {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .version-actions {
@@ -732,13 +733,13 @@ async function removeRuntime(version: string) {
   align-items: center;
   justify-content: flex-end;
   flex-shrink: 0;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .empty-row {
-  padding: 14px 10px;
+  padding: calc(14px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   color: var(--text-color-3);
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   text-align: center;
 }
 
@@ -761,7 +762,7 @@ async function removeRuntime(version: string) {
 
   .active-path {
     grid-template-columns: 1fr;
-    gap: 4px;
+    gap: calc(4px * var(--spacing-scale, 1));
   }
 
   .version-actions {

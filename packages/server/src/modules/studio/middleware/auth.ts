@@ -1,6 +1,10 @@
+import { handleSessionShareHttp } from '../services/session-shares/http-access'
 import type { Context, Next } from 'koa'
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { getToken } from '../services/auth/token-auth'
+import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
+import { MODEL_API_KEY_PREFIX, findModelApiKey, touchModelApiKey } from '../services/model-api/keys'
+import { ModelApiError, modelApiErrorBody } from '../services/model-api/errors'
 import {
   findUserById,
   listUserProfiles,
@@ -314,14 +318,86 @@ export async function isAuthEnabled(): Promise<boolean> {
   return true
 }
 
+function isAccountModelApiPath(path: string | undefined): boolean {
+  return path === '/api/studio/models/api-keys' || !!path?.startsWith('/api/studio/models/api-keys/')
+    || path === '/api/ekko-studio/models/v1/models' || path === '/api/ekko-studio/models/v1/responses'
+}
+
 export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
   if (!isProtectedHttpPath(ctx.path)) {
     await next()
     return
   }
 
+  if (await handleSessionShareHttp(ctx, next)) return
+
   const secret = await getJwtSecret()
   const token = requestToken(ctx)
+  if (token.startsWith(MODEL_API_KEY_PREFIX)) {
+    try {
+      // Keys never authenticate UI, management, proxy or WebSocket endpoints.
+      if (!(ctx.method === 'GET' && ctx.path === '/api/ekko-studio/models/v1/models')
+        && !(ctx.method === 'POST' && ctx.path === '/api/ekko-studio/models/v1/responses')) {
+        throw new ModelApiError('This key only permits Model API requests.', 403)
+      }
+      if (ctx.get('authorization') !== `Bearer ${token}`) throw new ModelApiError('Send the API key in the Authorization header.', 401)
+      const key = findModelApiKey(token)
+      if (!key) throw new ModelApiError('Invalid or revoked API key.', 401)
+      const user = findUserById(key.userId)
+      if (!user || user.status !== 'active') throw new ModelApiError('The key owner is disabled or no longer exists.', 403)
+      ctx.state.user = toAuthenticatedUser(user)
+      touchModelApiKey(key.id)
+    } catch (error) {
+      const result = modelApiErrorBody(error)
+      ctx.status = result.status; ctx.body = result.body
+      return
+    }
+    await next()
+    return
+  }
+  if (runMcpCredentials.recognizes(token)) {
+    // A turn-scoped credential must not mint permanent account-wide keys or
+    // escape its bound Profile through the aggregated model directory.
+    if (isAccountModelApiPath(ctx.path)) {
+      ctx.status = 403
+      ctx.body = { error: 'Model API requires a Studio login token or a Model API key' }
+      return
+    }
+    const binding = runMcpCredentials.authenticate(token)
+    if (!binding) {
+      ctx.status = 401
+      ctx.body = { error: 'Run credential is unavailable or has expired' }
+      return
+    }
+    const body = ctx.request.body as Record<string, unknown> | undefined
+    const profiles = [ctx.get('x-hermes-profile'), ctx.query.profile, body?.profile].filter(value => value !== undefined && value !== '')
+    const interaction = ctx.method === 'POST' && (
+      ctx.path === '/api/studio/task-plans/update' || ctx.path === '/api/studio/clarifications/request'
+    )
+    if (ctx.get('x-studio-run-context') !== binding.contextId
+      || profiles.some(value => typeof value !== 'string' || value.trim() !== binding.profile)
+      || (interaction && body?.context_id !== binding.contextId)) {
+      ctx.status = 403
+      ctx.body = { error: 'Request does not belong to this run context' }
+      return
+    }
+    if (binding.userId !== undefined) {
+      const user = findUserById(binding.userId)
+      if (!user || user.status !== 'active' || (user.role !== 'super_admin' && !userCanAccessProfile(user.id, binding.profile))) {
+        ctx.status = 403
+        ctx.body = { error: 'Run requester no longer has access to this profile' }
+        return
+      }
+      ctx.state.user = toAuthenticatedUser(user)
+    } else if (!interaction) {
+      ctx.status = 403
+      ctx.body = { error: 'This run credential only permits its task plan and clarification requests' }
+      return
+    }
+    ctx.state.profile = { name: binding.profile }
+    await next()
+    return
+  }
   const payload = token ? verifyUserJwt(token, secret) : null
   if (!payload) {
     if (await allowServerTokenForAgentEndpoint(ctx, token)) {
@@ -387,6 +463,8 @@ export function resolveRequestedProfile(ctx: Context): string {
 }
 
 export async function resolveUserProfile(ctx: Context, next: Next): Promise<void> {
+  if (isAccountModelApiPath(ctx.path)) { await next(); return }
+  if (ctx.state.sessionShare) { await next(); return }
   const user = ctx.state.user
   if (!user) {
     await next()

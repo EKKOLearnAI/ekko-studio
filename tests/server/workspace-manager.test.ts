@@ -1,8 +1,10 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  ensureWorkspaceDirectory,
+  resolveWorkspaceDirectory,
   resolveWorkspacePath,
   selectWorkspace,
 } from '../../packages/server/src/modules/studio/services/workspace/manager'
@@ -29,6 +31,29 @@ describe('Studio workspace manager', () => {
     const unusedFallback = vi.fn(() => outside)
     expect(selectWorkspace(null, '  ', `  ${workspace}  `, unusedFallback)).toBe(workspace)
     expect(unusedFallback).not.toHaveBeenCalled()
+  })
+
+  it('accepts a Windows drive root instead of failing to create it', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    try {
+      await expect(ensureWorkspaceDirectory('D:')).resolves.toBe('D:\\')
+      await expect(ensureWorkspaceDirectory('D:\\')).resolves.toBe('D:\\')
+      await expect(ensureWorkspaceDirectory('D:/')).resolves.toBe('D:\\')
+    } finally {
+      Object.defineProperty(process, 'platform', originalPlatform)
+    }
+  })
+
+  it.runIf(process.platform === 'win32')('resolves a bare drive letter to the drive root', async () => {
+    const drive = process.env.SystemDrive || 'C:'
+    await expect(resolveWorkspaceDirectory(drive)).resolves.toMatchObject({ fullPath: `${drive}\\` })
+  })
+
+  it('creates a missing workspace directory', async () => {
+    const missing = join(root, 'created', 'workspace')
+    await expect(ensureWorkspaceDirectory(missing)).resolves.toBe(missing)
+    expect((await stat(missing)).isDirectory()).toBe(true)
   })
 
   it('allows local administrator paths outside the selected workspace', async () => {

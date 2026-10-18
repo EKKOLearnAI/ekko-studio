@@ -1,5 +1,6 @@
 @use 'variables' as *;
 @use 'code-block';
+@use 'theme-surfaces';
 
 @font-face {
   font-family: 'Comic Neue';
@@ -113,7 +114,8 @@ body {
   background-color: $bg-primary;
   color: $text-primary;
   font-size: var(--font-size-base);
-  line-height: 1.6;
+  line-height: var(--line-height, 1.6);
+  letter-spacing: var(--letter-spacing, normal);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -122,7 +124,7 @@ body {
 // component-scoped chunk arrives so entering chat does not flash the page bg.
 .chat-input-area,
 .chat-input-area .input-wrapper {
-  background-color: $bg-card;
+  background-color: var(--theme-content-bg, $bg-main-surface);
 }
 
 .settings-check {
@@ -133,12 +135,17 @@ body {
   min-width: 16px;
   height: 16px;
   color: transparent;
-  font-size: 13px;
-  line-height: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
 }
 
 .settings-check.active {
   color: $accent-primary;
+}
+
+.n-drawer-header__close:focus-visible {
+  outline: 2px solid $accent-primary;
+  outline-offset: 2px;
 }
 
 .hermes-desktop-pet-window,
@@ -153,20 +160,6 @@ body {
 .hermes-desktop-windows #app {
   background: transparent !important;
   background-color: transparent !important;
-}
-
-// Naive UI menus are teleported to body, so they need a document-level
-// background-image state instead of relying on the app shell selector.
-html.theme-has-custom-background {
-  .n-base-select-menu,
-  .n-dropdown-menu,
-  .n-cascader-menu,
-  .slash-command-dropdown,
-  .mention-dropdown {
-    background-color: rgba(var(--bg-main-surface-rgb), 0.72) !important;
-    -webkit-backdrop-filter: blur(8px) saturate(110%);
-    backdrop-filter: blur(8px) saturate(110%);
-  }
 }
 
 // Teleported overlays must remain clickable above Electron drag regions.
@@ -199,7 +192,7 @@ html.theme-has-custom-background {
 
 
 code, pre, .mono {
-  font-family: $font-code;
+  font-family: var(--font-code, $font-code);
 }
 
 a {
@@ -224,7 +217,7 @@ a {
 
 ::-webkit-scrollbar-thumb {
   background: $border-color;
-  border-radius: 3px;
+  border-radius: var(--radius-component, 3px);
 
   &:hover {
     background: $text-muted;
@@ -249,18 +242,18 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   min-height: 64px;
-  padding: 14px 20px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(14px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   flex-shrink: 0;
 }
 
 .header-title {
   margin: 0;
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
   font-weight: 600;
-  line-height: 1.4;
+  line-height: var(--line-height, 1.4);
   color: $text-primary;
 }
 
@@ -268,7 +261,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 // Responsive utility classes for inline width replacement
@@ -295,7 +288,7 @@ a {
   width: 36px;
   height: 36px;
   border: none;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   border-radius: $radius-sm;
   cursor: pointer;
   align-items: center;
@@ -315,6 +308,12 @@ a {
 
   .page-header {
     padding: calc(16px + env(safe-area-inset-top, 0px)) 12px 16px 52px !important;
+    flex-wrap: wrap;
+  }
+
+  .page-header > .header-actions {
+    min-width: 0;
+    flex-wrap: wrap;
   }
 
   .input-sm,
@@ -333,6 +332,6 @@ a {
   .n-input__input-element,
   .n-input__textarea-el,
   .n-input__textarea-element {
-    font-size: 16px !important;
+    font-size: calc(var(--font-size-base, 14px) * 16 / 14) !important;
   }
 }

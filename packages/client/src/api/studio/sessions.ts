@@ -25,6 +25,7 @@ export interface SessionSummary {
   started_at: number
   ended_at: number | null
   last_active?: number
+  is_pinned?: number | boolean
   is_archived?: number | boolean
   push_enabled?: number | boolean
   message_count: number
@@ -52,6 +53,36 @@ export interface SessionCategory {
 
 export interface SessionDetail extends SessionSummary {
   messages: HermesMessage[]
+}
+
+export interface MessageSelectionGroup {
+  id: number
+  kind: 'message' | 'run'
+  messageIds: number[]
+  runMarker?: string
+  deleteBlockedReason?: 'compressed' | 'compression_boundary_unknown'
+}
+
+export interface MessageDeletionResult {
+  deleted: number
+  deletedGroups: number
+  messageIds: number[]
+  historyRevision: number
+  contextTokens?: number | null
+}
+
+export function fetchMessageSelection(sessionId: string, profile?: string) {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return request<{ groups: MessageSelectionGroup[]; historyRevision: number }>(
+    `/api/studio/sessions/${encodeURIComponent(sessionId)}/message-selection${query}`,
+  )
+}
+
+export function deleteSessionMessages(sessionId: string, messageIds: number[], historyRevision: number, profile?: string) {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return request<MessageDeletionResult>(`/api/studio/sessions/${encodeURIComponent(sessionId)}/messages/batch-delete${query}`, {
+    method: 'POST', body: JSON.stringify({ messageIds, historyRevision }),
+  })
 }
 
 export interface SessionContextMessage {
@@ -108,6 +139,7 @@ export interface HermesSessionPage {
 }
 
 export interface HermesMessage {
+  run_usage?: import('@/utils/run-usage').RunUsageSummary
   id: number
   session_id: string
   role: 'user' | 'assistant' | 'system' | 'tool' | 'command' | 'moa'
@@ -369,7 +401,7 @@ export async function fetchHermesSessionGroups(
   profile?: string | null,
   includedSessionIds: string[] = [],
 ): Promise<HermesSessionGroupsResult> {
-  const params = new URLSearchParams({ limit: String(limit) })
+  const params = new URLSearchParams({ limit: String(limit), agent_groups: '1' })
   if (profile) params.set('profile', profile)
   for (const sessionId of includedSessionIds) params.append('include', sessionId)
   return request<HermesSessionGroupsResult>(`/api/studio/sessions/hermes/groups?${params}`)
@@ -385,6 +417,7 @@ export async function fetchHermesSessionPage(
     source,
     offset: String(offset),
     limit: String(limit),
+    agent_groups: '1',
   })
   if (profile) params.set('profile', profile)
   return request<HermesSessionPage>(`/api/studio/sessions/hermes?${params}`)
@@ -539,6 +572,13 @@ export async function unarchiveSession(id: string): Promise<boolean> {
   }
 }
 
+export function setSessionPinned(id: string, is_pinned: boolean): Promise<{ ok: boolean; is_pinned: boolean }> {
+  return request(`/api/studio/sessions/${encodeURIComponent(id)}/pin`, {
+    method: 'POST',
+    body: JSON.stringify({ is_pinned }),
+  })
+}
+
 export async function setSessionPushEnabled(id: string, pushEnabled: boolean): Promise<boolean> {
   try {
     await request(`/api/studio/sessions/${encodeURIComponent(id)}/push-enabled`, {
@@ -582,11 +622,11 @@ export async function setSessionModel(id: string, model: string, provider: strin
   }
 }
 
-export async function setSessionReasoningEffort(id: string, reasoningEffort: string): Promise<boolean> {
+export async function setSessionReasoningEffort(id: string, reasoningEffort: string, model?: string): Promise<boolean> {
   try {
     await request(`/api/studio/sessions/${encodeURIComponent(id)}/reasoning-effort`, {
       method: 'POST',
-      body: JSON.stringify({ reasoningEffort }),
+      body: JSON.stringify({ reasoningEffort, ...(model !== undefined ? { model } : {}) }),
     })
     return true
   } catch {
@@ -619,7 +659,19 @@ export async function exportSession(id: string, mode: 'full' | 'compressed' = 'f
   URL.revokeObjectURL(a.href)
 }
 
+export interface UsageStatsFilters {
+  origin?: 'internal' | 'external'
+  profile?: string
+  model?: string
+  agent?: string
+  account?: string
+}
+
 export interface UsageStatsResponse {
+  origin?: 'internal' | 'external'
+  account_attribution_available?: boolean
+  filter_options?: { models: string[]; agents: string[]; accounts?: Array<{ id: string; username: string }> }
+  cost_coverage?: import('@/utils/usage-cost').UsageCostCoverage
   total_input_tokens: number
   total_output_tokens: number
   total_cache_read_tokens: number
@@ -656,13 +708,24 @@ export interface UsageStatsResponse {
     sessions: number
     errors: number
     cost: number
+    cost_coverage?: import('@/utils/usage-cost').UsageCostCoverage
   }>
 }
 
-export async function fetchUsageStats(days = 30): Promise<UsageStatsResponse> {
+export async function fetchUsageStats(days = 30, filters: UsageStatsFilters = {}): Promise<UsageStatsResponse> {
   const safeDays = Number.isFinite(days) ? Math.max(1, Math.floor(days)) : 30
   const params = new URLSearchParams()
   params.set('days', String(safeDays))
+  // An explicit empty selector requests all Profiles and suppresses the global Profile header.
+  params.set('profile', filters.profile || '')
+  if (safeDays === 1) {
+    params.set('period', 'today')
+    params.set('time_zone', Intl.DateTimeFormat().resolvedOptions().timeZone)
+  }
+  if (filters.model) params.set('model', filters.model)
+  if (filters.agent) params.set('agent', filters.agent)
+  if (filters.account) params.set('account', filters.account)
+  if (filters.origin) params.set('origin', filters.origin)
   return request<UsageStatsResponse>(`/api/studio/usage/stats?${params}`)
 }
 

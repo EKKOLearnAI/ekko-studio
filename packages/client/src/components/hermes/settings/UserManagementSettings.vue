@@ -274,27 +274,27 @@ onMounted(loadUsers)
 @use "@/styles/variables" as *;
 
 .user-management {
-  padding: 8px 0;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
 }
 
 .toolbar {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   margin-bottom: 16px;
 }
 
 .section-title {
   margin: 0 0 6px;
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
   font-weight: 600;
   color: $text-primary;
 }
 
 .section-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-muted;
 }
 

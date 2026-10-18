@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { sendNewChatMessage } from './new-chat-helpers'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
 const session = {
@@ -96,7 +97,16 @@ test('consolidates current-session actions into one icon-bearing header menu', a
   await openDesktopChat(page)
 
   const headerActions = page.locator('.header-actions')
-  await expect(headerActions.getByRole('button')).toHaveCount(2)
+  await expect(headerActions.getByRole('button')).toHaveCount(3)
+
+  const workspaceButton = headerActions.getByRole('button', { name: 'Set Workspace', exact: true })
+  await expect(workspaceButton).toHaveAttribute('title', session.workspace)
+  await expect(workspaceButton).toHaveText('')
+  await expect(page.locator('.header-left .workspace-badge')).toHaveCount(0)
+  await workspaceButton.click()
+  const workspaceDialog = page.getByRole('dialog').filter({ hasText: 'Set Session Workspace' })
+  await expect(workspaceDialog.getByRole('textbox')).toHaveValue(session.workspace)
+  await workspaceDialog.getByRole('button', { name: 'Cancel' }).click()
 
   const sidePanelButton = headerActions.getByRole('button', { name: 'Side panel' })
   await expect(sidePanelButton).toHaveAttribute('aria-controls', 'chat-tool-panel')
@@ -218,12 +228,13 @@ test('opens the profiled session route in a browser tab when no desktop bridge e
   ])
 })
 
-test('keeps local-only session actions honest until the first message persists the chat', async ({ page }) => {
+test('keeps local-only session actions honest while the first message awaits persistence', async ({ page }) => {
   await openDesktopChat(page)
 
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
-  await page.getByRole('button', { name: 'Create', exact: true }).click()
+  await sendNewChatMessage(page)
   await expect(page).toHaveURL(/#\/hermes\/session\//)
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.filter((item: any) => item.event === 'run').length || 0)).toBe(1)
 
   await page.getByRole('button', { name: 'Session actions' }).click()
   await expect(visibleOption(page, 'Conversation Outline').locator(':scope > .n-dropdown-option-body'))
@@ -273,4 +284,9 @@ test('shows a matching icon for every sidebar session action and keeps submenu a
   await expect(visibleOption(page, 'Export').locator('.n-dropdown-option-body__suffix')).toBeVisible()
   await visibleOption(page, 'Move to category').hover()
   await expect(visibleOption(page, 'Create new category')).toBeVisible()
+
+  await visibleOption(page, 'Export').hover()
+  await visibleOption(page, 'Full Export (JSON)').hover()
+  await expect(visibleOption(page, 'JSON')).toBeVisible()
+  await expect(visibleOption(page, 'TXT')).toBeVisible()
 })

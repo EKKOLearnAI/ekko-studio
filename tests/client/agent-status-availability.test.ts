@@ -24,6 +24,20 @@ function snapshot(): AgentStatusSnapshot {
 }
 
 describe('Agent status availability', () => {
+  it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'] as const)(
+    'recognizes installation changes for %s in every picker', id => {
+      const status = snapshot()
+      const agent = { id, installed: true, source: 'user-cli' as const, path: `/test/${id}`, version: '' }
+      status.agents.push(agent)
+      expect(resolveAgentStatusId(id.toUpperCase())).toBe(id)
+      expect(isAgentStatusAvailable(status, id)).toBe(true)
+      expect(agentInstallationState(status, id)).toBe('installed')
+      agent.installed = false
+      expect(isAgentStatusAvailable(status, id)).toBe(false)
+      expect(agentInstallationState(status, id)).toBe('not-installed')
+      expect(isAgentStatusAvailable(null, id)).toBe(false)
+    },
+  )
   it('normalizes group-chat and workflow Agent aliases', () => {
     expect(resolveAgentStatusId('ekko')).toBe('ekko-agent')
     expect(resolveAgentStatusId('claude')).toBe('claude-code')

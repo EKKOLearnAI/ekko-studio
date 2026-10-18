@@ -10,7 +10,7 @@ describe('bootstrap body parser limits', () => {
 
     expect(source).toContain("jsonLimit: '20mb'")
     expect(source).toContain("formLimit: '20mb'")
-    expect(source).toContain('/api\\/codex-proxy\\/[^/]+\\/v1\\/responses$')
+    expect(source).toContain('v1\\/responses|gemini\\/v1beta\\/models')
     expect(source.indexOf('if (!isAuthorized(ctx))')).toBeLessThan(source.indexOf('return parse(ctx, next)'))
     expect(source).toContain("jsonLimit: '64mb'")
     expect(bootstrap.indexOf('createCodexProxyRequestBodyParser(isAuthorizedCodexProxyRequest)')).toBeLessThan(bootstrap.indexOf('createRequestBodyParser()'))

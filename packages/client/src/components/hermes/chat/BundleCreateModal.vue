@@ -150,24 +150,24 @@ onMounted(loadSkillOptions)
 <style scoped lang="scss">
 .bundle-command-preview {
   margin: -10px 0 14px;
-  padding: 7px 10px;
-  border-radius: 8px;
+  padding: calc(7px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 8px);
   color: var(--text-secondary);
   background: var(--bg-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .bundle-name-hint {
   margin: -12px 0 14px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .bundle-create-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   margin-top: 8px;
 }
 </style>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { providerModelApiMode } from '@/utils/codingAgentProviders'
 import { computed, ref, watch } from 'vue'
 import { NInput, NModal } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -80,7 +81,7 @@ function modelAlias(model: string, provider: string): string {
 
 function handleSelect(group: AvailableModelGroup, model: string) {
   if (isDisabled(group, model)) return
-  emit('select', { provider: group.provider, model, apiMode: group.api_mode })
+  emit('select', { provider: group.provider, model, apiMode: providerModelApiMode(group, model) })
   if (props.closeOnSelect) emit('update:show', false)
 }
 
@@ -186,10 +187,10 @@ watch(() => props.show, (show) => {
 .model-group-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px;
+  gap: calc(6px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
   cursor: pointer;
   border-radius: $radius-sm;
@@ -216,21 +217,21 @@ watch(() => props.show, (show) => {
 
 .model-group-count {
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 400;
 }
 
 .model-group-items {
-  padding-inline-start: 8px;
+  padding-inline-start: calc(8px * var(--spacing-scale, 1));
 }
 
 .model-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(7px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   border-radius: $radius-sm;
   cursor: pointer;
   transition: all $transition-fast;
@@ -260,25 +261,25 @@ watch(() => props.show, (show) => {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .model-item-name,
 .model-item-id {
   overflow: hidden;
-  font-family: $font-code;
+  font-family: var(--font-code, $font-code);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .model-item-name {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .model-item-id {
   color: $text-muted;
-  font-size: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   font-weight: 400;
 }
 
@@ -291,11 +292,11 @@ watch(() => props.show, (show) => {
 .model-badge-custom,
 .model-badge-disabled {
   flex-shrink: 0;
-  padding: 1px 5px;
-  font-size: 9px;
+  padding: calc(1px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 9 / 14);
   font-weight: 600;
   letter-spacing: 0.03em;
-  border-radius: 3px;
+  border-radius: var(--radius-component, 3px);
 }
 
 .model-badge-preview {
@@ -311,13 +312,13 @@ watch(() => props.show, (show) => {
 .model-badge-disabled {
   color: $text-muted;
   background: transparent;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
 }
 
 .model-empty {
-  padding: 24px 0;
+  padding: calc(24px * var(--spacing-scale, 1)) 0;
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   text-align: center;
 }
 </style>

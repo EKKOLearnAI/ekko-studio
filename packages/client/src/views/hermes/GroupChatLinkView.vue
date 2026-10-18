@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import PageLoading from '@/components/common/PageLoading.vue'
+import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -10,7 +14,8 @@ import {
   defaultGroupAgentAvatar,
   parseStoredAvatar,
 } from '@/utils/group-agent-avatar'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { nextCodingAgentMode, storedPriorAgentMode, submittedCodingAgentSelection } from '@/utils/coding-agent-mode'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import {
   inferCodingAgentApiMode,
   normalizeCodingAgentApiMode,
@@ -43,6 +48,7 @@ type GroupAgentType = RemoteGroupAgentDescriptor['agent']
 const selectedAgentType = ref<GroupAgentType>('hermes')
 const selectedProfile = ref('')
 const selectedAgentMode = ref<'scoped' | 'global'>('scoped')
+const priorAgentMode = ref<'scoped' | 'global' | undefined>()
 const selectedAgentProvider = ref('')
 const selectedAgentModel = ref('')
 const selectedAgentApiMode = ref<CodingAgentApiMode>('codex_responses')
@@ -97,16 +103,7 @@ const hasServerHandoff = computed(() => (
   && !!handoffRequestSecret.value
   && !!handoffPairingTicket.value
 ))
-const groupAgentTypeDefinitions: Array<{ label: string; value: GroupAgentType }> = [
-  { label: 'Hermes', value: 'hermes' },
-  { label: 'Ekko', value: 'ekko' },
-  { label: 'Claude', value: 'claude' },
-  { label: 'Codex', value: 'codex' },
-  { label: 'Pi', value: 'pi' },
-  { label: 'Grok', value: 'grok' },
-  { label: 'OpenCode', value: 'opencode' },
-  { label: 'DeepSeek Harness', value: 'dsh' },
-]
+const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
 const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.map((option) => {
   const disabled = !isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
   return {
@@ -136,6 +133,8 @@ function getAgentModelGroups(profile: string) {
             ? 'pi'
             : selectedAgentType.value === 'grok'
               ? 'grok'
+            : (isGlobalOnlyCodingAgent(selectedAgentType.value) || (selectedAgentType.value === 'antigravity' || isNativeCodingAgent(selectedAgentType.value)))
+              ? 'cursor'
             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
               ? 'opencode'
               : 'codex'
@@ -170,6 +169,10 @@ const agentModelOptions = computed(() => (selectedAgentProviderGroup.value?.mode
   label: appStore.displayModelName(model, selectedAgentProvider.value),
   value: model,
 })))
+const configuredAgentApiMode = computed(() => configuredProviderApiMode(selectedAgentProviderGroup.value, selectedAgentModel.value))
+watch([configuredAgentApiMode, selectedAgentApiMode], ([mode]) => {
+  if (mode && selectedAgentApiMode.value !== mode) selectedAgentApiMode.value = mode
+}, { flush: 'sync' })
 const agentApiModeOptions = computed(() => [
   { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
   { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
@@ -177,20 +180,24 @@ const agentApiModeOptions = computed(() => [
 ])
 const agentReasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.default'), value: '' },
-  { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-  { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-  { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-  { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-  { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-  { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-  { label: t('chat.reasoningEffort.options.max'), value: 'max' },
+  ...modelReasoningEfforts(
+    getAgentModelGroups(selectedProfile.value),
+    selectedAgentProvider.value,
+    selectedAgentModel.value,
+  ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
 ])
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
   { label: t('codingAgents.launchModeScoped'), value: 'scoped' },
 ])
+
+watch([agentReasoningEffortOptions, selectedAgentReasoningEffort], ([options, effort]) => {
+  if (!usesGlobalAgentMode.value && effort && !options.some(option => option.value === effort)) {
+    selectedAgentReasoningEffort.value = ''
+  }
+})
 const agentAvatarPreview = computed(() => (
   agentAvatar.value || defaultGroupAgentAvatar(selectedAgentType.value)
 ))
@@ -198,11 +205,15 @@ const selectedAgent = computed<RemoteGroupAgentDescriptor | null>(() => {
   if (!isAgentStatusAvailable(agentStatusSnapshot.value, selectedAgentType.value)) return null
   if (!selectedProfile.value || (!usesGlobalAgentMode.value && (!selectedAgentProvider.value || !selectedAgentModel.value))) return null
   return {
-    agent: selectedAgentType.value,
-    agentMode: usesGlobalAgentMode.value ? 'global' : 'scoped',
+    ...submittedCodingAgentSelection({
+      agent: selectedAgentType.value,
+      agentMode: selectedAgentMode.value,
+      priorAgentMode: priorAgentMode.value,
+      provider: selectedAgentProvider.value,
+      model: selectedAgentModel.value,
+      usesGlobal: usesGlobalAgentMode.value,
+    }),
     profile: selectedProfile.value,
-    provider: usesGlobalAgentMode.value ? '' : selectedAgentProvider.value,
-    model: usesGlobalAgentMode.value ? '' : selectedAgentModel.value,
     apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
     reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
     name: agentName.value.trim() || selectedProfile.value,
@@ -270,7 +281,7 @@ function closeWindow(): void {
 function syncAgentApiMode(): void {
   const group = selectedAgentProviderGroup.value
   selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-    group?.api_mode,
+    configuredAgentApiMode.value,
     inferCodingAgentApiMode(group?.provider || selectedAgentProvider.value, group?.base_url),
   )
 }
@@ -290,8 +301,15 @@ function handleAgentTypeChange(agent: GroupAgentType): void {
     return
   }
   error.value = ''
+  const switched = nextCodingAgentMode({
+    previousAgent: selectedAgentType.value,
+    nextAgent: agent,
+    agentMode: selectedAgentMode.value,
+    priorAgentMode: priorAgentMode.value,
+  })
   selectedAgentType.value = agent
-  if (!['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(agent)) selectedAgentMode.value = 'scoped'
+  selectedAgentMode.value = switched.agentMode
+  priorAgentMode.value = switched.priorAgentMode
   syncAgentModelSelection(selectedProfile.value)
 }
 
@@ -315,11 +333,12 @@ function handleAgentModelChange(model: string): void {
 function applyAgentConfiguration(agent: RemoteGroupAgentDescriptor): void {
   selectedAgentType.value = agent.agent
   selectedAgentMode.value = agent.agentMode === 'global' ? 'global' : 'scoped'
+  priorAgentMode.value = storedPriorAgentMode(agent.priorAgentMode)
   selectedProfile.value = agent.profile
   selectedAgentProvider.value = agent.provider
   selectedAgentModel.value = agent.model
   selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-    agent.apiMode,
+    configuredAgentApiMode.value || agent.apiMode,
     inferCodingAgentApiMode(agent.provider),
   )
   selectedAgentReasoningEffort.value = agent.reasoningEffort
@@ -611,7 +630,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="group-chat-link-view">
+  <PageLoading :show="loading" class="group-chat-link-view">
     <section class="link-card">
       <img src="/logo.png" alt="" class="link-logo">
       <h1>
@@ -624,7 +643,7 @@ onUnmounted(() => {
         {{ editingConnection?.cloudOrigin || parentOrigin }}
       </code>
 
-      <div v-if="loading" class="link-status">{{ t('common.loading') }}</div>
+      <div v-if="loading" class="link-status"></div>
       <div v-else-if="connected" class="link-success">
         <strong>{{ t('groupChat.agentLinkConnected') }}</strong>
         <NButton type="primary" @click="closeWindow">{{ t('groupChat.agentLinkClose') }}</NButton>
@@ -677,7 +696,7 @@ onUnmounted(() => {
               @update:value="handleAgentProfileChange"
             />
           </div>
-          <div v-if="supportsGlobalAgentMode" class="field">
+          <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="field">
             <label>{{ t('codingAgents.launchModeScope') }}</label>
             <NSelect
               v-model:value="selectedAgentMode"
@@ -707,7 +726,7 @@ onUnmounted(() => {
               @update:value="handleAgentModelChange"
             />
           </div>
-          <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode" class="field">
+          <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode && !configuredAgentApiMode" class="field">
             <label>{{ t('codingAgents.protocolScope') }}</label>
             <NSelect
               v-model:value="selectedAgentApiMode"
@@ -791,57 +810,63 @@ onUnmounted(() => {
       <p v-if="error" class="link-error" role="alert">{{ error }}</p>
       <p class="link-security">{{ t('groupChat.agentLinkSecurityHint') }}</p>
     </section>
-  </main>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .group-chat-link-view {
-  min-height: calc(100 * var(--vh));
+  min-height: 100%;
   box-sizing: border-box;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: calc(24px * var(--spacing-scale, 1));
   background: $bg-primary;
+}
+
+.group-chat-link-view > :deep(.page-loading-content) {
+  width: 100%;
+  display: grid;
+  place-items: center;
 }
 
 .link-card {
   width: min(100%, 480px);
   box-sizing: border-box;
-  padding: 36px;
-  border: 1px solid $border-color;
-  border-radius: 20px;
-  background: $bg-card;
+  padding: calc(36px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 20px);
+  background: var(--theme-card-bg, $bg-card);
   box-shadow: 0 22px 70px rgba(0, 0, 0, 0.16);
 
   h1 {
     margin: 16px 0 8px;
     color: $text-primary;
-    font-size: 25px;
+    font-size: calc(var(--font-size-base, 14px) * 25 / 14);
   }
 
   > p {
     color: $text-secondary;
-    line-height: 1.6;
+    line-height: var(--line-height, 1.6);
   }
 }
 
 .link-logo {
   width: 48px;
   height: 48px;
-  border-radius: 13px;
+  border-radius: var(--radius-component, 13px);
 }
 
 .requesting-origin {
   display: block;
   overflow: hidden;
-  padding: 8px 10px;
-  border: 1px solid $border-color;
-  border-radius: 8px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 8px);
   color: $text-secondary;
   background: $bg-primary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -849,24 +874,24 @@ onUnmounted(() => {
 .link-form,
 .link-success {
   display: grid;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-top: 22px;
 }
 
 .agent-config-form {
-  padding: 14px;
-  border: 1px solid $border-color;
-  border-radius: 12px;
+  padding: calc(14px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 12px);
   background: $bg-primary;
 }
 
 .field {
   display: grid;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 
   > label {
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     font-weight: 600;
   }
 }
@@ -874,13 +899,13 @@ onUnmounted(() => {
 .group-agent-avatar-editor {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .group-agent-avatar-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .group-agent-avatar-file {
@@ -889,28 +914,28 @@ onUnmounted(() => {
 
 .link-form label {
   color: $text-secondary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
 }
 
 .link-status {
-  padding: 30px 0;
+  padding: calc(30px * var(--spacing-scale, 1)) 0;
   color: $text-muted;
   text-align: center;
 }
 
 .link-success strong {
   color: $success;
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
 }
 
 .manual-divider {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-top: 24px;
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   &::before,
   &::after {
@@ -923,21 +948,21 @@ onUnmounted(() => {
 
 .manual-agent-preview {
   display: grid;
-  gap: 2px;
-  padding: 10px;
-  border: 1px solid $border-color;
-  border-radius: 8px;
+  gap: calc(2px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 8px);
   background: $bg-primary;
 
   strong {
     color: $text-primary;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   }
 
   span {
     overflow: hidden;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -945,12 +970,12 @@ onUnmounted(() => {
 
 .link-error {
   color: $error !important;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .link-security {
   margin: 22px 0 0;
   color: $text-muted !important;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 </style>

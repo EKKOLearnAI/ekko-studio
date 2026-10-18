@@ -13,6 +13,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { hermesSource } from './runtime-config.mjs'
+import { needsHermesInstallStamp } from './hermes-version.mjs'
 import { venvPythonPath } from './python-runtime-layout.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -104,20 +105,31 @@ if (versionResult.status !== 0) {
   process.exit(versionResult.status ?? 1)
 }
 const sourceVersion = versionResult.stdout.trim()
-if (sourceVersion !== source.version) {
-  console.error(`Hermes version mismatch: expected ${source.version}, source declares ${sourceVersion}`)
-  process.exit(1)
-}
+const stampWriter = resolve(SOURCE_DIR, 'scripts', 'write_install_stamp.py')
+const needsStamp = needsHermesInstallStamp(sourceVersion, source, existsSync(stampWriter))
 
 // These runtime-owned directories live inside the source root but must never
 // make the checkout dirty or get swept into the updater's include-untracked
 // autostash.
 const excludePath = resolve(SOURCE_DIR, '.git', 'info', 'exclude')
 const exclude = existsSync(excludePath) ? readFileSync(excludePath, 'utf-8') : ''
-const runtimeExcludes = ['/base/', '/node/', '/ms-playwright/']
+const runtimeExcludes = ['/base/', '/node/', '/ms-playwright/', '/install-stamp.json']
 const missingExcludes = runtimeExcludes.filter(pattern => !exclude.split(/\r?\n/).includes(pattern))
 if (missingExcludes.length > 0) {
   appendFileSync(excludePath, `${exclude.endsWith('\n') || !exclude ? '' : '\n'}${missingExcludes.join('\n')}\n`)
+}
+
+if (needsStamp) {
+  run(pyBin, [
+    stampWriter,
+    '--output', resolve(SOURCE_DIR, 'install-stamp.json'),
+    '--base-version', source.version,
+    '--commit', source.commit,
+    '--branch', 'main',
+    '--distance', '0',
+    '--source', 'git',
+    '--update-mechanism', 'self',
+  ])
 }
 
 const dirty = output('git', ['status', '--porcelain'])
@@ -126,4 +138,4 @@ if (dirty) {
   process.exit(1)
 }
 
-console.log(`✓ Hermes source ready at ${SOURCE_DIR} (${sourceVersion}, ${installedCommit.slice(0, 12)})`)
+console.log(`✓ Hermes source ready at ${SOURCE_DIR} (${source.version}, ${installedCommit.slice(0, 12)})`)

@@ -9,6 +9,7 @@ services:
       - "${PORT:-6060}:${PORT:-6060}"
       - "${PREVIEW_FRONTEND_PORT:-8651}:8651"
       - "${XAI_OAUTH_PORT:-56121}:56121"
+      - "${STUDIO_P2P_UDP_PORT_RANGE:-50000-50127}:${STUDIO_P2P_UDP_PORT_RANGE:-50000-50127}/udp"
     volumes:
       - ${HERMES_DATA_DIR:-./hermes_data}:/home/agent/.hermes
       - ${HERMES_DATA_DIR:-./hermes_data}/hermes-web-ui:/home/agent/.hermes-web-ui
@@ -23,6 +24,9 @@ services:
       - HERMES_LAN_ADVERTISE_URL=${HERMES_LAN_ADVERTISE_URL:-}
       - HERMES_APP_ENTITLEMENT_REQUIRED=${HERMES_APP_ENTITLEMENT_REQUIRED:-true}
       - HERMES_APP_ENTITLEMENT_PUBLIC_KEY=${HERMES_APP_ENTITLEMENT_PUBLIC_KEY:-}
+      - STUDIO_P2P_UDP_PORT_RANGE=${STUDIO_P2P_UDP_PORT_RANGE:-50000-50127}
+      - STUDIO_P2P_INTERFACE=${STUDIO_P2P_INTERFACE:-}
+      - STUDIO_P2P_ADVERTISE_ADDRESSES=${STUDIO_P2P_ADVERTISE_ADDRESSES:-}
       - NPM_CONFIG_PREFIX=/home/agent/.hermes-web-ui/coding-agent/npm
       - PATH=/home/agent/.hermes-web-ui/coding-agent/npm/bin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       - HERMES_ALLOW_ROOT_GATEWAY=1

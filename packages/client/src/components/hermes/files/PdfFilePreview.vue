@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NButton, NButtonGroup, NInputNumber } from 'naive-ui'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NButtonGroup, NInputNumber, NSpin } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 
 const MAX_PDF_PAGES = 500
@@ -137,9 +138,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped lang="scss">
-.pdf-preview { display: flex; flex-direction: column; width: 100%; min-height: 0; gap: 10px; }
-.pdf-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.pdf-stage { flex: 1; min-height: 420px; overflow: auto; text-align: center; padding: 12px; background: rgba(127, 127, 127, 0.08); }
+.pdf-preview { display: flex; flex-direction: column; width: 100%; min-height: 0; gap: calc(10px * var(--spacing-scale, 1)); }
+.pdf-toolbar { display: flex; align-items: center; gap: calc(10px * var(--spacing-scale, 1)); flex-wrap: wrap; }
+.pdf-stage { flex: 1; min-height: 420px; overflow: auto; text-align: center; padding: calc(12px * var(--spacing-scale, 1)); background: rgba(127, 127, 127, 0.08); }
 .pdf-stage canvas { display: inline-block; background: white; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.16); }
-.preview-limit { color: var(--n-warning-color); font-size: 12px; }
+.preview-limit { color: var(--n-warning-color); font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
 </style>

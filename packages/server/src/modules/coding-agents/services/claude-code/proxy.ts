@@ -1,4 +1,5 @@
 import { Readable } from 'stream'
+import { isNativeCodingAgent } from '../../../studio/contracts/agents/native-coding-agents'
 import type { Context } from 'koa'
 import { config } from '../../../studio/public/config'
 import {
@@ -290,6 +291,7 @@ async function probeSseEncryptedContentError(
 }
 
 async function callAnthropicMessages(target: ClaudeCodeProxyTarget, body: any): Promise<any> {
+  const startedAt = performance.now()
   if (target.apiMode !== 'anthropic_messages') {
     const err = new Error(`Claude proxy Anthropic adapter only supports anthropic_messages targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -306,37 +308,44 @@ async function callAnthropicMessages(target: ClaudeCodeProxyTarget, body: any): 
     },
     body: anthropicRequestBody(nextBody, target),
   }))
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response: result.value } }, (performance.now() - startedAt) / 1000, target.baseUrl)
   return result.value
 }
 
 async function callOpenAiChat(target: ClaudeCodeProxyTarget, body: any): Promise<any> {
+  const startedAt = performance.now()
   if (target.apiMode !== 'chat_completions') {
     const err = new Error(`Claude proxy MVP only supports chat_completions targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
-  return agentRunGateway.completeJson({
+  const response = await agentRunGateway.completeJson({
     url: resolveChatCompletionsUrl(target.baseUrl),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: anthropicToOpenAiChat(body, target),
   })
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
+  return response
 }
 
 async function callOpenAiResponses(target: ClaudeCodeProxyTarget, body: any): Promise<any> {
+  const startedAt = performance.now()
   if (target.apiMode !== 'codex_responses') {
     const err = new Error(`Claude proxy responses adapter only supports codex_responses targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
-  return agentRunGateway.completeJson({
+  const response = await agentRunGateway.completeJson({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: anthropicToOpenAiResponses(body, target),
   })
+  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
+  return response
 }
 
 function anthropicEventStream(events: AsyncIterable<AnthropicStreamEvent>): Readable {
@@ -348,12 +357,12 @@ function anthropicEventStream(events: AsyncIterable<AnthropicStreamEvent>): Read
   return Readable.from(generate())
 }
 
-function observeResponsesEvents(target: ClaudeCodeProxyTarget, events: AsyncIterable<CanonicalResponsesEvent>) {
+function observeResponsesEvents(target: ClaudeCodeProxyTarget, events: AsyncIterable<CanonicalResponsesEvent>, startedAt: number) {
   void (async () => {
     try {
       for await (const event of events) {
-        codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event)
-        codingAgentRunManager.handleResponseEvent(target.agentSessionId, event)
+        codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event, (performance.now() - startedAt) / 1000, target.baseUrl)
+        if (!isNativeCodingAgent(target.agentId)) codingAgentRunManager.handleResponseEvent(target.agentSessionId, event)
       }
     } catch (err) {
       loggerLikeWarn(err, '[claude-code-proxy] failed to observe provider stream')
@@ -365,7 +374,7 @@ function loggerLikeWarn(err: unknown, message: string) {
   logger.warn(err, message)
 }
 
-async function openAiChatToAnthropicSseStream(target: ClaudeCodeProxyTarget, body: any): Promise<Readable> {
+async function openAiChatToAnthropicSseStream(target: ClaudeCodeProxyTarget, body: any, startedAt = performance.now()): Promise<Readable> {
   if (target.apiMode !== 'chat_completions') {
     const err = new Error(`Claude proxy MVP only supports chat_completions targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -380,11 +389,11 @@ async function openAiChatToAnthropicSseStream(target: ClaudeCodeProxyTarget, bod
     body: anthropicToOpenAiChat(body, target, true),
   })
   const [clientStream, observerStream] = teeAsyncIterable(stream)
-  observeResponsesEvents(target, openAiChatSseToResponsesEvents(observerStream, target))
+  observeResponsesEvents(target, openAiChatSseToResponsesEvents(observerStream, target), startedAt)
   return anthropicEventStream(openAiChatSseToAnthropicEvents(clientStream, target))
 }
 
-async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: any): Promise<Readable> {
+async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: any, startedAt = performance.now()): Promise<Readable> {
   if (target.apiMode !== 'anthropic_messages') {
     const err = new Error(`Claude proxy Anthropic adapter only supports anthropic_messages targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -417,7 +426,7 @@ async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: a
         try {
           const retryStream = await request(retryBody)
           const [clientStream, observerStream] = teeAsyncIterable(retryStream)
-          observeResponsesEvents(target, anthropicMessagesSseToResponsesEvents(observerStream, target))
+          observeResponsesEvents(target, anthropicMessagesSseToResponsesEvents(observerStream, target), startedAt)
           return Readable.from(clientStream)
         } catch (retryError) {
           logEncryptedContentRetryFailure(target, retryError)
@@ -427,16 +436,16 @@ async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: a
     }
     if (probe.stream) {
       const [clientStream, observerStream] = teeAsyncIterable(probe.stream)
-      observeResponsesEvents(target, anthropicMessagesSseToResponsesEvents(observerStream, target))
+      observeResponsesEvents(target, anthropicMessagesSseToResponsesEvents(observerStream, target), startedAt)
       return Readable.from(clientStream)
     }
   }
   const [clientStream, observerStream] = teeAsyncIterable(stream)
-  observeResponsesEvents(target, anthropicMessagesSseToResponsesEvents(observerStream, target))
+  observeResponsesEvents(target, anthropicMessagesSseToResponsesEvents(observerStream, target), startedAt)
   return Readable.from(clientStream)
 }
 
-async function openAiResponsesToAnthropicSseStream(target: ClaudeCodeProxyTarget, body: any): Promise<Readable> {
+async function openAiResponsesToAnthropicSseStream(target: ClaudeCodeProxyTarget, body: any, startedAt = performance.now()): Promise<Readable> {
   if (target.apiMode !== 'codex_responses') {
     const err = new Error(`Claude proxy responses adapter only supports codex_responses targets, got ${target.apiMode}`)
     ;(err as any).status = 501
@@ -451,7 +460,7 @@ async function openAiResponsesToAnthropicSseStream(target: ClaudeCodeProxyTarget
     body: anthropicToOpenAiResponses(body, target, true),
   })
   const [clientStream, observerStream] = teeAsyncIterable(stream)
-  observeResponsesEvents(target, openAiResponsesSseToResponsesEvents(observerStream))
+  observeResponsesEvents(target, openAiResponsesSseToResponsesEvents(observerStream), startedAt)
   return anthropicEventStream(openAiResponsesSseToAnthropicEvents(clientStream, target, body?.tools))
 }
 

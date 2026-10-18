@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { BrowserProfileCreateInput, BrowserProfileUpdateInput, BrowserProxyMode, DesktopBrowserProfile } from './browser-types'
+import { MAX_BROWSER_TABS } from './browser-types'
 
 interface BrowserProfilesDocument {
   schema: 1
@@ -120,7 +121,7 @@ export class BrowserProfileStore {
 
   async setTabs(profileId: string, tabs: string[]): Promise<void> {
     const profile = this.requireProfile(profileId)
-    profile.tabs = tabs.slice(0, 8).map(url => String(url || 'about:blank'))
+    profile.tabs = tabs.slice(-MAX_BROWSER_TABS).map(url => String(url || 'about:blank'))
     await this.persist()
   }
 

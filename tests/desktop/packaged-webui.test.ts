@@ -87,7 +87,7 @@ function createPackagedWebUi(appOutDir: string, platform = 'win32', arch = 'x64'
     'dist/ekko-skills/xlsx/scripts/xlsx_read.py',
     'dist/ekko-skills/xlsx/scripts/xlsx_recalc.py',
     'node_modules/node-pty/package.json',
-    'node_modules/node-pty/prebuilds/win32-x64/pty.node',
+    `node_modules/node-pty/prebuilds/${platform}-${arch}/pty.node`,
     'node_modules/socket.io/package.json',
     'node_modules/sharp/package.json',
     `${sharpRoot}/package.json`,
@@ -166,6 +166,16 @@ describe('packaged desktop Web UI', () => {
     } as never)).rejects.toThrow('Packaged Web UI is incomplete')
   })
 
+  it('accepts Windows ARM64 native dependencies and rejects an x64 speech library', async () => {
+    const appOutDir = packagedRoot()
+    createPackagedWebUi(appOutDir, 'win32', 'arm64')
+    const context = { appOutDir, electronPlatformName: 'win32', arch: 3 }
+    await expect(verifyPackagedWebUi(context as never)).resolves.toBeUndefined()
+    rmSync(join(appOutDir, 'resources/webui/node_modules/sherpa-onnx-win-arm64'), { recursive: true })
+    mkdirSync(join(appOutDir, 'resources/webui/node_modules/sherpa-onnx-win-x64'))
+    await expect(verifyPackagedWebUi(context as never)).rejects.toThrow('sherpa-onnx-win-arm64')
+  })
+
   it('rejects a package that omitted Ekko built-in skills', async () => {
     const appOutDir = packagedRoot()
     createPackagedWebUi(appOutDir)
@@ -179,7 +189,7 @@ describe('packaged desktop Web UI', () => {
       electronPlatformName: 'win32',
       arch: 1,
       packager: { appInfo: { productFilename: 'Ekko Studio' } },
-    } as never)).rejects.toThrow('dist/ekko-skills/github/SKILL.md')
+    } as never)).rejects.toThrow(/dist[/\\]ekko-skills[/\\]github[/\\]SKILL\.md/)
   })
 
   it('rejects a package that omitted the target sherpa-onnx runtime', async () => {

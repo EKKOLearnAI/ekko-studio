@@ -5,6 +5,7 @@ import {
   markCloudAppConnectionRevocationSynced,
   revokeAppConnection,
   findUserById,
+  updateAppConnectionPushEnabled,
 } from '../services/app-relay/app-connections'
 import { config } from '../public/config'
 import { getLanBackendUrlForRequest } from '../services/network/lan-discovery'
@@ -25,7 +26,7 @@ import { getAppRelayRoute, isAppRelayRoute, type AppRelayRoute } from '../servic
 const APP_CONNECTION_QR_TYPE = 'hermes-studio.app-connection'
 const APP_CONNECTION_QR_VERSION = 1
 
-function connectionPayload(now = Math.floor(Date.now() / 1000)) {
+function connectionPayload(user: Context['state']['user'], now = Math.floor(Date.now() / 1000)) {
   return listAppConnections().map(connection => ({
     id: connection.id,
     device_code: connection.device_code,
@@ -34,6 +35,8 @@ function connectionPayload(now = Math.floor(Date.now() / 1000)) {
     device_model: connection.device_model,
     connection_type: connection.connection_type,
     user_id: connection.user_id,
+    push_enabled: connection.push_enabled !== 0,
+    can_manage_push: Boolean(user && (user.id === connection.user_id || user.role === 'super_admin')),
     cloud_user_id: connection.cloud_user_id,
     username: findUserById(connection.user_id)?.username || '',
     token_expires_at: connection.token_expires_at,
@@ -51,7 +54,7 @@ function connectionPayload(now = Math.floor(Date.now() / 1000)) {
 }
 
 export async function listAppConnectionsController(ctx: Context) {
-  const connections = connectionPayload()
+  const connections = connectionPayload(ctx.state.user)
   const localAccessFailure = getLatestLocalAppEntitlementFailure()
   const cloudAccessFailure = getAppRelayClient(APP_RELAY_CONNECTION_ID)?.getLatestAccessFailure() || null
   const accessFailure = !localAccessFailure || (
@@ -106,6 +109,23 @@ export async function deleteAppConnectionController(ctx: Context) {
     notified = revoked ? 1 : 0
   }
   ctx.body = { success: true, notified }
+}
+
+export async function updateAppConnectionPushController(ctx: Context) {
+  const user = ctx.state.user
+  if (!user) { ctx.status = 401; ctx.body = { error: 'Unauthorized' }; return }
+  const id = Number(ctx.params.id)
+  const enabled = (ctx.request.body as Record<string, unknown> | undefined)?.push_enabled
+  if (!Number.isSafeInteger(id) || id <= 0 || typeof enabled !== 'boolean') {
+    ctx.status = 400; ctx.body = { error: 'invalid_push_preference' }; return
+  }
+  const connection = listAppConnections().find(row => row.id === id)
+  if (!connection) { ctx.status = 404; ctx.body = { error: 'App connection not found' }; return }
+  if (user.id !== connection.user_id && user.role !== 'super_admin') {
+    ctx.status = 403; ctx.body = { error: 'push_preference_forbidden' }; return
+  }
+  updateAppConnectionPushEnabled(id, enabled)
+  ctx.body = { success: true, push_enabled: enabled }
 }
 
 export async function createCloudAppAuthorizationCodeController(ctx: Context) {

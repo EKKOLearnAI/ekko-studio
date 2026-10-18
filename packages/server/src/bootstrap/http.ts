@@ -1,3 +1,5 @@
+import { setupMobileTerminal } from '../modules/hermes/sockets/mobile-terminal'
+import { getSessionMetadata as getTerminalSessionMetadata } from '../modules/studio/public/sessions'
 import Koa from 'koa'
 import type { Context } from 'koa'
 import cors from '@koa/cors'
@@ -31,7 +33,7 @@ import { injectBundledMcpServer } from '../modules/hermes/services/mcp/studio-au
 import { ensureProfileGatewaysRunning } from '../modules/hermes/services/gateway/autostart'
 import { runRegisteredStartupTasks } from './startup-tasks'
 import { refreshConfiguredProviderModelCatalogsInBackground } from '../modules/hermes/services/providers/model-catalog-cache'
-import { initializeOpenCodeFreeInBackground } from '../modules/hermes/services/providers/opencode-free'
+import { refreshModelCatalog } from '../modules/studio/public/model-catalog'
 import {
   scanLanDevices,
   selectLanIPv4Address,
@@ -496,6 +498,8 @@ export async function bootstrap() {
   // Initialize all web-ui SQLite tables
   const { initAllStores } = await import('../modules/studio/infrastructure/database/init')
   initAllStores()
+  // Refresh once on every startup; context and cost lookups can use the disk cache immediately.
+  void refreshModelCatalog(true)
   const { interruptOrphanedTaskPlans } = await import('../modules/studio/repositories/task-plan-store')
   interruptOrphanedTaskPlans()
   startChatWebhookDispatcher()
@@ -598,6 +602,15 @@ export async function bootstrap() {
   setChatRunServer(chatRunServer)
   activeGroupChatServer.setChatRunService(chatRunServer)
   chatRunServer.init()
+  const mobileTerminal = setupMobileTerminal(activeGroupChatServer.getIO(), context => {
+    if (context.source === 'single') {
+      const session = getTerminalSessionMetadata(context.sourceId)
+      return session ? { profile: session.profile, workspace: session.workspace || '' } : null
+    }
+    const room = activeGroupChatServer.getStorage().getRoom(context.sourceId)
+    return room ? { profile: context.profile, workspace: room.workspace || '' } : null
+  })
+  additionalShutdownSteps.push({ name: 'Mobile terminal PTY sessions', close: () => mobileTerminal.close() })
   startLocalAppRelayServer(activeGroupChatServer.getIO(), { localBaseUrl: loopbackBaseUrl })
   console.log('[bootstrap] local App relay server ready')
   if (
@@ -684,7 +697,6 @@ export async function bootstrap() {
     close: stopLanDiscoveryResponder,
   })
   refreshConfiguredProviderModelCatalogsInBackground('bootstrap')
-  initializeOpenCodeFreeInBackground()
 
   if (isDesktopRuntime()) {
     await startRuntimeServicesAfterListen(hermesAgentAvailable)

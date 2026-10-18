@@ -23,6 +23,8 @@ export type AgentReasoningFormat =
   | 'gemini-content-parts'
 
 export interface AgentReasoningNative {
+  /** Opaque origin identity; Responses history without it cannot be replayed safely. */
+  replayScope?: string
   format: AgentReasoningFormat
   data: unknown
 }
@@ -61,6 +63,9 @@ export interface AgentToolCall {
 }
 
 export interface ModelUsage {
+  /** Provider-reported USD cost, when supplied. Missing is not free. */
+  costUsd?: number
+  costSource?: 'reported' | 'estimated'
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number

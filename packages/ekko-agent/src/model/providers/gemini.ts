@@ -112,20 +112,26 @@ export class GeminiContentsModelClient implements ModelClient {
     )
 
     const streamedParts: GeminiPart[] = []
+    let finishReason: string | undefined
+    let toolCallIndex = 0
     for await (const event of readServerSentEvents(response)) {
       const chunk = parseJson<GeminiResponse>(event)
       if (!chunk) continue
       streamedParts.push(...(chunk.candidates?.[0]?.content?.parts ?? []))
       const normalized = normalizeGeminiResponse(chunk, request.model ?? this.config.defaultModel)
+      finishReason = normalized.finishReason ?? finishReason
       if (normalized.content) yield { type: 'text-delta', text: normalized.content }
       const reasoningText = agentReasoningText(normalized.reasoning)
       if (reasoningText) yield { type: 'reasoning-delta', text: reasoningText }
-      for (const toolCall of normalized.toolCalls ?? []) yield { type: 'tool-call', toolCall }
+      for (const toolCall of normalized.toolCalls ?? []) {
+        yield { type: 'tool-call', toolCall: { ...toolCall, id: `gemini_call_${toolCallIndex++}` } }
+      }
       if (normalized.usage) yield { type: 'usage', usage: normalized.usage }
     }
     yield {
       type: 'done',
       response: {
+        finishReason,
         reasoning: normalizeAgentReasoning(
           undefined,
           geminiReasoningDetails(streamedParts),
@@ -238,8 +244,10 @@ function toGeminiTool(tool: AgentToolDefinition): NonNullable<NonNullable<Gemini
 
 function normalizeUsage(usage: NonNullable<GeminiResponse['usageMetadata']>): ModelUsage {
   return {
-    inputTokens: usage.promptTokenCount,
-    outputTokens: usage.candidatesTokenCount,
+    // Gemini promptTokenCount includes cache; thoughts are separate from candidates.
+    // https://ai.google.dev/api/generate-content#UsageMetadata
+    inputTokens: usage.promptTokenCount == null ? undefined : Math.max(0, usage.promptTokenCount - (usage.cachedContentTokenCount ?? 0)),
+    outputTokens: usage.candidatesTokenCount == null ? undefined : usage.candidatesTokenCount + (usage.thoughtsTokenCount ?? 0),
     totalTokens: usage.totalTokenCount,
     cacheReadTokens: usage.cachedContentTokenCount,
     reasoningTokens: usage.thoughtsTokenCount,

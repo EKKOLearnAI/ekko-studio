@@ -64,6 +64,20 @@ const DEFAULT_EVENT_TYPES: ChatWebhookEventType[] = [
   'chat.clarification.resolved',
   'chat.run.completed',
   'chat.run.failed',
+  'group.message.created',
+  'group.run.failed',
+  'group.approval.requested',
+  'group.approval.resolved',
+  'group.clarification.requested',
+  'group.clarification.resolved',
+  'workflow.run.completed',
+  'workflow.run.failed',
+  'chat.run.updated',
+  'group.run.updated',
+  'workflow.run.updated',
+  'chat.plan.updated',
+  'group.plan.updated',
+  'workflow.plan.updated',
 ]
 
 const EVENT_LABEL_KEYS: Record<ChatWebhookEventType, string> = {
@@ -79,6 +93,20 @@ const EVENT_LABEL_KEYS: Record<ChatWebhookEventType, string> = {
   'chat.clarification.resolved': 'clarificationResolved',
   'chat.run.completed': 'completed',
   'chat.run.failed': 'failed',
+  'group.message.created': 'groupMessageCreated',
+  'group.run.failed': 'failed',
+  'group.approval.requested': 'approvalRequested',
+  'group.approval.resolved': 'approvalResolved',
+  'group.clarification.requested': 'clarificationRequested',
+  'group.clarification.resolved': 'clarificationResolved',
+  'workflow.run.completed': 'completed',
+  'workflow.run.failed': 'failed',
+  'chat.run.updated': 'runUpdated',
+  'group.run.updated': 'runUpdated',
+  'workflow.run.updated': 'runUpdated',
+  'chat.plan.updated': 'planUpdated',
+  'group.plan.updated': 'planUpdated',
+  'workflow.plan.updated': 'planUpdated',
 }
 
 const form = reactive({
@@ -96,12 +124,13 @@ const form = reactive({
 })
 
 const eventOptions = computed(() => DEFAULT_EVENT_TYPES.map(value => ({
-  label: t(`settings.webhooks.events.${EVENT_LABEL_KEYS[value]}`),
+  label: eventLabel(value),
   value,
 })))
 
 function eventLabel(event: ChatWebhookEventType): string {
-  return t(`settings.webhooks.events.${EVENT_LABEL_KEYS[event]}`)
+  const label = t(`settings.webhooks.events.${EVENT_LABEL_KEYS[event]}`)
+  return event.startsWith('chat.') ? label : `${event} · ${label}`
 }
 
 const profileOptions = computed(() => profilesStore.profiles.map(profile => ({
@@ -613,7 +642,7 @@ onBeforeUnmount(() => {
 @use "@/styles/variables" as *;
 
 .webhook-settings {
-  padding: 8px 0;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
 }
 
 .toolbar {
@@ -621,20 +650,20 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   margin-bottom: 16px;
 }
 
 .section-title {
   margin: 0 0 6px;
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
   font-weight: 600;
   color: $text-primary;
 }
 
 .section-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-muted;
 }
 
@@ -651,20 +680,20 @@ onBeforeUnmount(() => {
 }
 
 .local-inbox-empty {
-  padding: 28px 16px;
+  padding: calc(28px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   text-align: center;
-  border: 1px dashed $border-color;
-  border-radius: 8px;
+  border: var(--border-width, 1px) dashed $border-color;
+  border-radius: var(--radius-component, 8px);
 }
 
 .payload-preview {
   max-height: 60vh;
   margin: 0;
-  padding: 14px;
+  padding: calc(14px * var(--spacing-scale, 1));
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  border-radius: 8px;
+  border-radius: var(--radius-component, 8px);
   background: $bg-secondary;
   color: $text-primary;
   font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;

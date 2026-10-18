@@ -114,6 +114,61 @@ describe('ekko-agent skill tools', () => {
     })
   })
 
+  it.each(['\n', '\r\n'].flatMap(newline =>
+    [[], [''], [' \t '], ['', ' \t ', '']].map(blankLines => ({ newline, blankLines })),
+  ))('preserves indented descriptions without consuming the next key (%j)', async ({ newline, blankLines }) => {
+    const directory = join(skillDirectory, 'blank-description')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'SKILL.md'), [
+      '---',
+      'name: blank-description',
+      'description: \t',
+      ...blankLines,
+      'metadata:',
+      '  keywords: [blank description]',
+      '---',
+      '# Blank Description',
+      'Body guidance.',
+      '',
+    ].join(newline))
+
+    await expect(inspectLocalSkillValidationIssues(skillDirectory)).resolves.toContainEqual(
+      expect.objectContaining({
+        name: 'blank-description',
+        status: 'invalid',
+        error: 'SKILL.md frontmatter requires a description.',
+      }),
+    )
+    const listed = await new SkillListTool(skillDirectory).execute({ query: 'blank-description' })
+    expect(listed.data).toMatchObject({
+      skills: [{ name: 'blank-description', description: 'Body guidance.', validationStatus: 'invalid' }],
+    })
+    await expect(matchSkillsForUserMessage(skillDirectory, 'blank description')).resolves.toEqual([])
+
+    const indented = join(skillDirectory, 'indented-description')
+    await mkdir(indented, { recursive: true })
+    await writeFile(join(indented, 'SKILL.md'), [
+      '---',
+      'name: indented-description',
+      'description: \t',
+      ...blankLines,
+      '  Indented guidance.',
+      'metadata:',
+      '  keywords: [indented description]',
+      '---',
+      '# Indented Description',
+      'Body guidance.',
+      '',
+    ].join(newline))
+    const indentedListed = await new SkillListTool(skillDirectory).execute({ query: 'indented-description' })
+    expect(indentedListed.data).toMatchObject({
+      skills: [{ name: 'indented-description', description: 'Indented guidance.', validationStatus: 'valid' }],
+    })
+    await expect(matchSkillsForUserMessage(skillDirectory, 'indented description')).resolves.toMatchObject([
+      { name: 'indented-description' },
+    ])
+  })
+
   it('hard-matches only skill names and maintained keywords', async () => {
     await expect(matchSkillsForUserMessage(skillDirectory, 'Please prepare a release summary.')).resolves.toMatchObject([
       { name: 'release-notes' },

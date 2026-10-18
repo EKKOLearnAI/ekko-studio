@@ -3,7 +3,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { readCodexTurnModel, readOpenCodeMessageModel } from '../../packages/server/src/modules/coding-agents/services/runtime/native-model'
+import { readCodexTurnModel } from '../../packages/server/src/modules/coding-agents/services/codex/model'
+import { readOpenCodeMessageModel } from '../../packages/server/src/modules/coding-agents/services/opencode/model'
 import { NativeTurnUsage } from '../../packages/server/src/modules/coding-agents/services/runtime/native-usage'
 
 describe('native model metadata', () => {
@@ -47,6 +48,22 @@ describe('native model metadata', () => {
 })
 
 describe('native usage normalization', () => {
+  it('uses native model request milliseconds and never substitutes total tool-inclusive time', () => {
+    const tracker = new NativeTurnUsage()
+    tracker.observeClaude({ type: 'result', duration_api_ms: 2500, duration_ms: 30000, usage: { input_tokens: 10, output_tokens: 25 } })
+    expect(tracker.rows('claude-code', undefined)[0].apiDuration).toBe(2.5)
+    expect(new NativeTurnUsage().rows('cursor', { inputTokens: 10, outputTokens: 25, duration_api_ms: 2000, duration_ms: 20000 })[0].apiDuration).toBe(2)
+    expect(new NativeTurnUsage().rows('cursor', { inputTokens: 10, outputTokens: 25, duration_ms: 20000 })[0].apiDuration).toBeUndefined()
+  })
+  it('does not duplicate an aggregate API duration across several models', () => {
+    const tracker = new NativeTurnUsage()
+    tracker.observeClaude({ type: 'result', duration_api_ms: 2500, usage: { input_tokens: 30, output_tokens: 5 }, modelUsage: {
+      first: { inputTokens: 10, outputTokens: 2 }, second: { inputTokens: 20, outputTokens: 3 },
+    } })
+    const rows = tracker.rows('claude-code', undefined)
+    expect(rows).toHaveLength(2)
+    expect(rows.every(row => row.apiDuration == null)).toBe(true)
+  })
   it('separates all Codex input buckets and preserves native reasoning output', () => {
     const tracker = new NativeTurnUsage()
     expect(tracker.rows('codex', { input_tokens: 100, cached_input_tokens: 40, cache_write_input_tokens: 10, output_tokens: 20, reasoning_output_tokens: 15 })[0].usage).toMatchObject({
@@ -75,5 +92,21 @@ describe('native usage normalization', () => {
     tracker.observeGrok({ type: 'usage', usage: { input_tokens: 10, output_tokens: 2 } })
     tracker.observeGrok({ type: 'error', usage: { input_tokens: 30, output_tokens: 5 }, modelUsage: { actual: { inputTokens: 30, outputTokens: 5, modelCalls: 2 } } })
     expect(tracker.rows('grok', { input_tokens: 10, output_tokens: 2 })).toMatchObject([{ model: 'actual', apiCalls: 2, usage: { inputTokens: 30, outputTokens: 5 } }])
+  })
+
+  it.each(['claude-code', 'grok'])('keeps unpriced %s request boundaries when the final aggregate reconciles', agent => {
+    const tracker = new NativeTurnUsage()
+    for (const [id, input] of [['a', 150000], ['b', 180000]] as const) {
+      const usage = { input_tokens: input, output_tokens: 5 }
+      if (agent === 'grok') tracker.observeGrok({ type: 'usage', messageId: id, usage })
+      else tracker.observeClaude({ type: 'assistant', message: { id, model: 'actual', usage } })
+    }
+    const final = { usage: { input_tokens: 330000, output_tokens: 10 }, modelUsage: { actual: { inputTokens: 330000, outputTokens: 10 } } }
+    if (agent === 'grok') tracker.observeGrok({ type: 'end', ...final })
+    else tracker.observeClaude({ type: 'result', ...final })
+    expect(tracker.rows(agent, undefined)).toMatchObject([
+      { model: 'actual', apiCalls: 1, scope: 'model_call', usage: { inputTokens: 150000 } },
+      { model: 'actual', apiCalls: 1, scope: 'model_call', usage: { inputTokens: 180000 } },
+    ])
   })
 })

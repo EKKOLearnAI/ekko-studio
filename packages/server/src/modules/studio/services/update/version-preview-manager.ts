@@ -1,3 +1,4 @@
+import { isStudioPackageName, readStudioPackageInfo, type StudioPackageName } from '../package-info'
 import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process'
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { createServer } from 'net'
@@ -92,44 +93,6 @@ class PreviewRuntimeState {
 
 const previewState = new PreviewRuntimeState()
 
-interface PackageInfo {
-  name: string
-  version: string
-  repositoryUrl?: string
-}
-
-function readPackageInfo(): PackageInfo | null {
-  const candidatePaths = [
-    // ts-node dev: packages/server/src/modules/studio/services/update -> repo root
-    resolve(__dirname, '../../../../../../../package.json'),
-    // bundled server: dist/server -> repo root/package root
-    resolve(__dirname, '../../package.json'),
-    // fallback for processes started at the repo root
-    resolve(process.cwd(), 'package.json'),
-  ]
-
-  for (const packagePath of candidatePaths) {
-    if (!existsSync(packagePath)) continue
-    try {
-      const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'))
-      if (pkg?.name && pkg?.version) {
-        const repository = typeof pkg.repository === 'string'
-          ? pkg.repository
-          : typeof pkg.repository?.url === 'string'
-            ? pkg.repository.url
-            : ''
-        return {
-          name: String(pkg.name),
-          version: String(pkg.version),
-          repositoryUrl: repository,
-        }
-      }
-    } catch {}
-  }
-
-  return null
-}
-
 function normalizeGithubRepoUrl(raw: string): string {
   return raw
     .trim()
@@ -140,7 +103,7 @@ function normalizeGithubRepoUrl(raw: string): string {
 
 function getPreviewRepoBaseUrl(): string {
   const configured = process.env.HERMES_WEB_UI_PREVIEW_REPO?.trim()
-  const repository = configured || readPackageInfo()?.repositoryUrl || ''
+  const repository = configured || readStudioPackageInfo()?.repositoryUrl || ''
   const normalized = normalizeGithubRepoUrl(repository)
   if (!normalized) throw new Error('Preview repository is not configured')
   return normalized
@@ -380,8 +343,8 @@ function getPreviewViteHostArg() {
   return isTermuxRuntime() ? '127.0.0.1' : ''
 }
 
-function getGlobalPackageBin(root: string) {
-  return join(root, 'hermes-web-ui', 'bin', 'hermes-web-ui.mjs')
+function getGlobalPackageBin(root: string, packageName: StudioPackageName) {
+  return join(root, packageName, 'bin', 'hermes-web-ui.mjs')
 }
 
 function getCurrentNodeEnv() {
@@ -744,8 +707,8 @@ function assertPreviewPackage() {
   }
 
   const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'))
-  if (pkg?.name !== 'hermes-web-ui') {
-    throw new Error(`Preview directory is not hermes-web-ui: ${getPreviewDir()}`)
+  if (!isStudioPackageName(pkg?.name)) {
+    throw new Error(`Preview directory is not a Studio package: ${getPreviewDir()}`)
   }
 }
 
@@ -1047,26 +1010,26 @@ function getGlobalRoot() {
   return runNpmSync(['root', '-g'])
 }
 
-function getGlobalCliScript() {
-  const cli = getGlobalPackageBin(getGlobalRoot())
+function getGlobalCliScript(packageName: StudioPackageName) {
+  const cli = getGlobalPackageBin(getGlobalRoot(), packageName)
   if (!existsSync(cli)) {
-    throw new Error(`Updated hermes-web-ui CLI not found: ${cli}`)
+    throw new Error(`Updated ${packageName} CLI not found: ${cli}`)
   }
   return cli
 }
 
-function runUpdateInstall() {
+function runUpdateInstall(packageName: StudioPackageName) {
   try {
     runNpmSync(['cache', 'clean', '--force'], { timeout: 2 * 60 * 1000 })
   } catch (err) {
     console.warn('[update] failed to clean npm cache, continuing update:', err)
   }
 
-  return runNpmSync(['install', '-g', 'hermes-web-ui@latest'], { timeout: 10 * 60 * 1000 })
+  return runNpmSync(['install', '-g', `${packageName}@latest`], { timeout: 10 * 60 * 1000 })
 }
 
-function spawnRestart(port: string) {
-  const cli = getGlobalCliScript()
+function spawnRestart(port: string, packageName: StudioPackageName) {
+  const cli = getGlobalCliScript(packageName)
 
   return spawn(process.execPath, [cli, 'restart', '--port', port], {
     detached: true,
@@ -1081,7 +1044,7 @@ export async function handleUpdate(ctx: any) {
     ctx.status = 409
     ctx.body = {
       success: false,
-      message: 'hermes-web-ui update is already in progress',
+      message: 'Ekko Studio update is already in progress',
     }
     return
   }
@@ -1092,7 +1055,7 @@ export async function handleUpdate(ctx: any) {
     ctx.body = {
       success: false,
       code: DOCKER_ENVIRONMENT_CODE,
-      message: 'hermes-web-ui update is not available inside Docker. '
+      message: 'Ekko Studio update is not available inside Docker. '
         + 'Please pull a new image and recreate the container:\n\n'
         + '  docker compose pull\n'
         + '  docker compose up -d --force-recreate',
@@ -1104,18 +1067,20 @@ export async function handleUpdate(ctx: any) {
   let keepUpdateLockForRestart = false
 
   try {
-    const output = runUpdateInstall()
+    const packageName = readStudioPackageInfo()?.name
+    if (!packageName) throw new Error('Cannot identify the installed Studio npm package')
+    const output = runUpdateInstall(packageName)
 
     ctx.body = {
       success: true,
-      message: output.trim() || 'hermes-web-ui updated successfully',
+      message: output.trim() || `${packageName} updated successfully`,
     }
 
     keepUpdateLockForRestart = true
     setTimeout(() => {
       let restart
       try {
-        restart = spawnRestart(process.env.PORT || '8648')
+        restart = spawnRestart(process.env.PORT || '8648', packageName)
       } catch (err) {
         updateInProgress = false
         console.error('[update] failed to spawn restart:', err)

@@ -1,4 +1,4 @@
-import { mkdir, stat } from 'fs/promises'
+import { stat } from 'fs/promises'
 import { homedir } from 'os'
 import {
   isAbsolute,
@@ -10,6 +10,7 @@ import {
 import { config, getWebUiHome } from '../../public/config'
 import { getProfileDir } from '../../public/profile-config'
 import { isNearestExistingRealPathWithin, isPathWithin } from '../files/path'
+import { ensureDirectory, normalizeDirectoryTarget } from './directory'
 
 export type WorkspacePathAccess = 'contained' | 'unrestricted'
 
@@ -92,8 +93,7 @@ export async function ensureWorkspaceDirectory(...candidates: WorkspaceCandidate
   if (!workspace) {
     throw Object.assign(new Error('Workspace is required'), { code: 'workspace_required', status: 400 })
   }
-  await mkdir(workspace, { recursive: true })
-  return workspace
+  return ensureDirectory(workspace)
 }
 
 export async function ensureHermesRunWorkspace(profile: string, workspace?: string | null): Promise<string> {
@@ -161,7 +161,9 @@ export async function resolveWorkspacePath(
  * compatibility; absolute selections may point anywhere on the host.
  */
 export async function resolveWorkspaceDirectory(inputPath: unknown): Promise<{ base: string; fullPath: string } | null> {
-  const raw = typeof inputPath === 'string' ? inputPath.trim() : ''
+  // A bare drive letter is drive-relative on Windows; canonicalize it first so
+  // `D:` selects the drive root instead of resolving against a per-drive cwd.
+  const raw = normalizeDirectoryTarget(typeof inputPath === 'string' ? inputPath : '')
   if (!raw) return null
 
   const base = workspaceBaseDirectory()

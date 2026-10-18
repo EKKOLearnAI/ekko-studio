@@ -48,6 +48,8 @@ const sessionStoreMock = vi.hoisted(() => ({
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => sessionStoreMock)
 
+vi.mock('../../packages/server/src/modules/studio/services/task-plans', () => ({ getSessionTaskPlans: vi.fn(() => []) }))
+
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
   getActiveProfileName: vi.fn(() => 'default'),
   getProfileDir: vi.fn(() => '/tmp/hermes-default'),
@@ -99,6 +101,41 @@ describe('ChatRunSocket clarify responses', { timeout: 15_000 }, () => {
     respondToEkkoClarificationMock.mockReset()
     respondToEkkoClarificationMock.mockReturnValue({ handled: false, resolved: false })
     bridgeMock.statusIfLoaded.mockResolvedValue({ ok: true, exists: false, running: false, loaded: false })
+  })
+
+  it.each(['socket', 'group'])('round-trips MCP questions through the %s reply path and removes replay state', async surface => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket, namespaceEmit } = createSocketHarness()
+    const server = new ChatRunSocket(io as any)
+    const state = { isWorking: true, activeRunMarker: 'mcp-turn', events: [], profile: 'default' }
+    ;(server as any).sessionMap.set('session-1', state)
+    ;(server as any).clarificationRuns.begin('mcp-context', 'session-1', 'default', () => state)
+    ;(server as any).onConnection(socket)
+    const result = server.requestClarification('mcp-context', 'default', { question: 'Which folder?', choices: ['client', 'server'] })
+    const payload = namespaceEmit.mock.calls.find(call => call[0] === 'clarify.requested')![1]
+    expect(state.events).toContainEqual(expect.objectContaining({ event: 'clarify.requested' }))
+    if (surface === 'socket') {
+      await handlers.get('clarify.respond')?.({ session_id: 'session-1', clarify_id: payload.clarify_id, response: 'custom-folder' })
+    } else {
+      expect(server.respondCodingAgentClarification('session-1', payload.clarify_id, 'custom-folder')).toBe(true)
+    }
+    await expect(result).resolves.toMatchObject({ response: 'custom-folder', reason: 'response' })
+    expect(state.events).not.toContainEqual(expect.objectContaining({ event: 'clarify.requested' }))
+    expect(respondToEkkoClarificationMock).not.toHaveBeenCalled()
+    expect(bridgeMock.clarifyRespond).not.toHaveBeenCalled()
+  })
+
+  it('settles MCP questions when a coding run stops and rejects expired contexts', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = createSocketHarness()
+    const server = new ChatRunSocket(io as any)
+    const state = { isWorking: true, activeRunMarker: 'mcp-turn', events: [], profile: 'default' }
+    ;(server as any).sessionMap.set('session-1', state)
+    ;(server as any).clarificationRuns.begin('mcp-context', 'session-1', 'default', () => state)
+    const result = server.requestClarification('mcp-context', 'default', { question: 'Q' })
+    server.emitExternalEvent('session-1', 'abort.completed', {})
+    await expect(result).resolves.toMatchObject({ reason: 'cancelled' })
+    expect(() => server.requestClarification('mcp-context', 'default', { question: 'Old Q' })).toThrow('expired')
   })
 
   it('routes Ekko clarification responses without calling the Hermes bridge', async () => {

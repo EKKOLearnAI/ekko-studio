@@ -338,12 +338,12 @@ function confirmDelete(category: string, skillName: string) {
 .skill-list {
     flex: 1;
     overflow-y: auto;
-    padding: 8px;
+    padding: calc(8px * var(--spacing-scale, 1));
 }
 
 .skill-empty {
-    padding: 24px 16px;
-    font-size: 13px;
+    padding: calc(24px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     color: $text-muted;
     text-align: center;
 }
@@ -355,13 +355,13 @@ function confirmDelete(category: string, skillName: string) {
 .category-header {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     width: 100%;
-    padding: 6px 10px;
+    padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border: none;
     background: none;
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.3px;
@@ -373,8 +373,8 @@ function confirmDelete(category: string, skillName: string) {
     }
 
     &.sub {
-        padding-inline-start: 22px;
-        font-size: 11px;
+        padding-inline-start: calc(22px * var(--spacing-scale, 1));
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         text-transform: none;
         letter-spacing: 0;
     }
@@ -388,13 +388,13 @@ function confirmDelete(category: string, skillName: string) {
 .path-header {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     width: 100%;
-    padding: 6px 10px;
+    padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border: none;
     background: none;
     color: #f59e0b;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     font-weight: 600;
     cursor: pointer;
     border-radius: $radius-sm;
@@ -423,7 +423,7 @@ function confirmDelete(category: string, skillName: string) {
 }
 
 .path-group-body {
-    padding-inline-start: 4px;
+    padding-inline-start: calc(4px * var(--spacing-scale, 1));
 }
 
 .category-arrow {
@@ -444,15 +444,15 @@ function confirmDelete(category: string, skillName: string) {
 }
 
 .category-count {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $text-muted;
     background: rgba(var(--accent-primary-rgb), 0.06);
-    padding: 1px 6px;
-    border-radius: 8px;
+    padding: calc(1px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 8px);
 }
 
 .category-skills {
-    padding: 2px 0 4px;
+    padding: calc(2px * var(--spacing-scale, 1)) 0 calc(4px * var(--spacing-scale, 1));
 }
 
 .skill-item {
@@ -460,16 +460,16 @@ function confirmDelete(category: string, skillName: string) {
     flex-direction: row;
     align-items: center;
     width: 100%;
-    padding: 6px 10px 6px 28px;
+    padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1)) calc(28px * var(--spacing-scale, 1));
     border: none;
     background: none;
     color: $text-secondary;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     text-align: start;
     cursor: pointer;
     border-radius: $radius-sm;
     transition: all $transition-fast;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
 
     &:hover {
         background: rgba(var(--accent-primary-rgb), 0.06);
@@ -524,14 +524,14 @@ function confirmDelete(category: string, skillName: string) {
 }
 
 .modified-badge {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $warning;
     margin-inline-start: 2px;
     opacity: 0.7;
 }
 
 .skill-desc {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $text-muted;
     white-space: nowrap;
     overflow: hidden;
@@ -541,8 +541,8 @@ function confirmDelete(category: string, skillName: string) {
 
 .archive-section {
     margin-top: 12px;
-    padding-top: 8px;
-    border-top: 1px solid $border-color;
+    padding-top: calc(8px * var(--spacing-scale, 1));
+    border-top: var(--border-width, 1px) solid $border-color;
 }
 
 .archive-header {
@@ -551,7 +551,7 @@ function confirmDelete(category: string, skillName: string) {
 
 .skill-archived {
     opacity: 0.6;
-    padding-inline-start: 28px;
+    padding-inline-start: calc(28px * var(--spacing-scale, 1));
 }
 
 .skill-action-btn {

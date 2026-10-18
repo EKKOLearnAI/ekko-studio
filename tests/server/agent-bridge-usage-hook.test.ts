@@ -23,6 +23,7 @@ bridge_runtime._hermes_home = lambda *_args, **_kwargs: Path(tempfile.gettempdir
 bridge_runtime._install_execute_code_approval_memory_patch = lambda *_args, **_kwargs: None
 bridge_runtime._jsonable = lambda value: value
 bridge_runtime._load_cfg = lambda *_args, **_kwargs: {}
+bridge_runtime._load_disabled_toolsets = lambda *_args, **_kwargs: None
 bridge_runtime._load_enabled_toolsets = lambda *_args, **_kwargs: []
 bridge_runtime._load_fallback_model = lambda *_args, **_kwargs: None
 bridge_runtime._load_reasoning_config = lambda *_args, **_kwargs: {}
@@ -120,6 +121,7 @@ bridge_runtime._hermes_home = lambda *_args, **_kwargs: Path(tempfile.gettempdir
 bridge_runtime._install_execute_code_approval_memory_patch = lambda *_args, **_kwargs: None
 bridge_runtime._jsonable = lambda value: value
 bridge_runtime._load_cfg = lambda *_args, **_kwargs: {}
+bridge_runtime._load_disabled_toolsets = lambda *_args, **_kwargs: None
 bridge_runtime._load_enabled_toolsets = lambda *_args, **_kwargs: []
 bridge_runtime._load_fallback_model = lambda *_args, **_kwargs: None
 bridge_runtime._load_reasoning_config = lambda *_args, **_kwargs: {}
@@ -181,8 +183,12 @@ callback(
     api_request_id="request-1",
     turn_id="turn-1",
     api_call_count=2,
+    api_duration=2.5,
+    started_at=100.0,
+    ended_at=102.5,
     model="requested-model",
     response_model="response-model",
+    base_url="https://runtime.test/v1",
     provider="openai",
     api_mode="responses",
     usage={
@@ -202,7 +208,11 @@ print(json.dumps({"callback_count": len(manager._hooks["post_api_request"]), "ev
       api_request_id: 'request-1',
       turn_id: 'turn-1',
       api_call_count: 2,
+      api_duration: 2.5,
+      started_at: 100,
+      ended_at: 102.5,
       model: 'response-model',
+      base_url: 'https://runtime.test/v1',
       provider: 'openai',
       api_mode: 'responses',
       usage: {

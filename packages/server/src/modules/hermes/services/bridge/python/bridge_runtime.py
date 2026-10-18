@@ -498,7 +498,19 @@ def _ensure_agent_imports() -> None:
         )
     os.environ.setdefault("HERMES_HOME", str(_hermes_home()))
     os.environ.setdefault("HERMES_AGENT_BRIDGE_BASE_HOME", str(_hermes_home()))
+    # Updated Hermes installs may re-exec into a new Python interpreter here.
+    # Finish that bootstrap before either bridge binds its socket/reports ready;
+    # deferring it to the first run_agent import drops the in-flight chat socket.
+    try:
+        importlib.import_module("hermes_bootstrap")
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_bootstrap":
+            raise
+        # Older Hermes runtimes do not have a bootstrap module.
     _apply_openrouter_attribution_override()
+    from bridge_mcp import install_studio_mcp_env
+
+    install_studio_mcp_env()
 
 
 def _apply_openrouter_attribution_override() -> None:
@@ -526,6 +538,16 @@ def _apply_openrouter_attribution_override() -> None:
         pass
 
 
+def _load_yaml_module():
+    """Use Hermes' YAML policy, with PyYAML support for older runtimes."""
+    try:
+        return importlib.import_module("hermes_yaml")
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_yaml":
+            raise
+        return importlib.import_module("yaml")
+
+
 def _load_cfg(profile: str | None = None) -> dict[str, Any]:
     _ensure_agent_imports()
     try:
@@ -535,7 +557,7 @@ def _load_cfg(profile: str | None = None) -> dict[str, Any]:
         return cfg if isinstance(cfg, dict) else {}
     except Exception:
         try:
-            import yaml
+            yaml = _load_yaml_module()
 
             path = _hermes_home() / "config.yaml"
             if not path.exists():
@@ -611,7 +633,9 @@ def _set_worker_profile_env(profile: str | None) -> None:
     profile_home = _profile_home(profile)
     os.environ["HERMES_HOME"] = str(profile_home)
     os.environ["HERMES_AGENT_BRIDGE_WORKER_PROFILE"] = profile or "default"
-    _refresh_worker_profile_env()
+    # Bind the worker's home and credentials before importing any Hermes code.
+    # Terminal config requires Hermes' YAML adapter and is refreshed after bootstrap.
+    _apply_profile_dotenv(profile)
 
 
 def _refresh_worker_profile_env() -> None:
@@ -654,7 +678,7 @@ def _refresh_terminal_env() -> None:
     if not config_path.exists():
         return
     try:
-        import yaml
+        yaml = _load_yaml_module()
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
         terminal_cfg = cfg.get("terminal", {})
@@ -801,6 +825,31 @@ def _resolve_runtime(model: str, provider: str | None = None) -> dict[str, Any]:
     return resolve_runtime_provider(requested=requested, target_model=model or None)
 
 
+def _load_disabled_toolsets() -> list[str] | None:
+    """``agent.disabled_toolsets`` from config.yaml, or ``None``.
+
+    Mirrors Hermes' own ``tui_gateway.server._load_disabled_toolsets`` /
+    ``hermes_cli.cli_init_mixin`` loader. AIAgent only strips these toolsets when the
+    caller forwards the list (``agent/agent_init.py::_load_tools``): the CLI passes it,
+    so ``disabled_toolsets: [web, browser]`` worked there, but this bridge historically
+    passed ``enabled_toolsets`` alone — so the block silently never reached Studio /
+    desktop / TUI sessions and ``web_search`` / ``web_extract`` / every ``browser_*``
+    tool stayed callable even though ``hermes-cli`` resolves them and
+    ``_get_platform_tools`` cannot strip them from a composite default toolset.
+    """
+    _ensure_agent_imports()
+    try:
+        from agent.skill_utils import parse_config_string_list
+
+        from hermes_cli.config import load_config
+
+        agent_cfg = load_config().get("agent") or {}
+        disabled = parse_config_string_list(agent_cfg.get("disabled_toolsets"))
+        return [str(ts) for ts in disabled] or None
+    except Exception:
+        return None
+
+
 def _load_enabled_toolsets() -> list[str] | None:
     _ensure_agent_imports()
     raw = os.environ.get("HERMES_BRIDGE_TOOLSETS", "").strip()
@@ -858,6 +907,7 @@ def _log_worker_startup_context(profile: str | None) -> None:
     try:
         cfg = _load_cfg()
         enabled_toolsets = _load_enabled_toolsets()
+        disabled_toolsets = _load_disabled_toolsets()
         discovered_mcp_tools = _discover_bridge_mcp_tools()
         tool_names: list[str] = []
         tool_error: str | None = None
@@ -866,7 +916,7 @@ def _log_worker_startup_context(profile: str | None) -> None:
 
             tool_names = _tool_names_from_definitions(
                 get_tool_definitions(
-                    enabled_toolsets=enabled_toolsets,
+                    enabled_toolsets=enabled_toolsets, disabled_toolsets=disabled_toolsets,
                     quiet_mode=True,
                 )
             )
@@ -890,6 +940,7 @@ def _log_worker_startup_context(profile: str | None) -> None:
             "config_path": str(_hermes_home() / "config.yaml"),
             "model": _resolve_model(cfg),
             "enabled_toolsets": enabled_toolsets,
+            "disabled_toolsets": disabled_toolsets,
             "tool_count": len(tool_names),
             "tool_names": tool_names,
             "tool_error": tool_error,

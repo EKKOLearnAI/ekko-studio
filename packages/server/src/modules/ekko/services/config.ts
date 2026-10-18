@@ -176,6 +176,7 @@ export function updateEkkoSettings(
   assignKnown(next.tools, tools, TOOL_KEYS)
   assignKnown(next.tools.approvals, record(tools.approvals), APPROVAL_KEYS)
   assignKnown(next.tools.codeExec, record(tools.codeExec), CODE_EXEC_KEYS)
+  assignKnown(next.tools.computerUse, record(tools.computerUse), ['enabled', 'timeoutMs'])
 
   assignKnown(next.mcp, record(source.mcp), ['enabled'])
   assignKnown(next.delegation, record(source.delegation), DELEGATION_KEYS)

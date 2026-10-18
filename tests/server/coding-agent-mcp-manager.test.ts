@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -76,13 +78,39 @@ afterEach(() => {
 })
 
 describe('coding Agent MCP manager', () => {
+  it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'] as const)('gives %s a shared plan/clarification MCP with enough time for a user answer', async agent => {
+    makeHome()
+    const { servers } = await listCodingAgentMcpServers(agent)
+    expect(servers.some(server => server.name === 'ekko-studio-plan')).toBe(false)
+    const interaction = servers.find(server => server.name === 'ekko-studio-interaction')!
+    expect(interaction.managed).toBe(true)
+    const config = interaction.raw_config
+    if (agent === 'codex' || agent === 'grok') expect(config.tool_timeout_sec).toBeGreaterThanOrEqual(360)
+    else if (agent === 'pi') expect(config.requestTimeoutMs).toBeGreaterThanOrEqual(360_000)
+    else if (agent === 'dsh') expect(config.toolCallTimeoutMs).toBeGreaterThanOrEqual(360_000)
+    else expect(config.timeout).toBeGreaterThanOrEqual(360_000)
+    expect((config.env || config.environment).ELECTRON_RUN_AS_NODE).toBe('1')
+    expect((config.env || config.environment).HERMES_MCP_USER_CLARIFICATION).toBe('1')
+  })
+
+  it('round-trips Antigravity remote URL and enable state in the native schema', async () => {
+    const home = makeHome()
+    await upsertCodingAgentMcpServer('antigravity', 'remote', { url: 'https://example.test/mcp', enabled: false })
+    const path = join(home, '.gemini', 'config', 'mcp_config.json')
+    expect(JSON.parse(readFileSync(path, 'utf8')).mcpServers.remote).toMatchObject({ serverUrl: 'https://example.test/mcp', disabled: true })
+    const { servers } = await listCodingAgentMcpServers('antigravity')
+    expect(servers.find(server => server.name === 'remote')?.raw_config).toMatchObject({ url: 'https://example.test/mcp', enabled: false })
+    await removeCodingAgentMcpServer('antigravity', 'remote')
+    expect(JSON.parse(readFileSync(path, 'utf8')).mcpServers).not.toHaveProperty('remote')
+  })
+
   it('manages DSH native patches without persisting Studio-managed entries', async () => {
     const home = makeHome()
     await upsertCodingAgentMcpServer('dsh', 'docs', { command: 'node', args: ['docs.mjs'] })
     const listed = await listCodingAgentMcpServers('dsh')
     expect(listed.servers.find(server => server.name === 'docs')).toMatchObject({ raw_config: { enabled: true }, managed: false })
     const managed = listed.servers.filter(server => server.managed)
-    expect(managed).toHaveLength(4)
+    expect(managed).toHaveLength(5)
     for (const server of managed) expect(server.raw_config.env.ELECTRON_RUN_AS_NODE).toBe('1')
     const path = join(home, '.dsh', 'cordis.patch.yml')
     expect(readFileSync(path, 'utf8')).not.toContain('ekko-studio-api')
@@ -110,6 +138,7 @@ describe('coding Agent MCP manager', () => {
       'ekko-studio-browser',
       'ekko-studio-devices',
       'ekko-studio-use',
+      'ekko-studio-interaction',
     ]))
     expect(initial.servers.find(server => server.name === 'ekko-studio-api')).toMatchObject({
       managed: true,
@@ -126,6 +155,43 @@ describe('coding Agent MCP manager', () => {
 
     const persisted = JSON.parse(readFileSync(path, 'utf-8'))
     expect(persisted.enabledMcpjsonServers).toEqual(['docs'])
+    expect(persisted.mcpServers).toEqual({
+      search: { command: 'node', args: ['search.mjs'], enabled: true },
+    })
+    expect(persisted.mcpServers['ekko-studio-api']).toBeUndefined()
+  })
+
+  it('manages Cursor JSON MCP at ~/.cursor/mcp.json without persisting Studio-managed entries', async () => {
+    const home = makeHome()
+    const path = join(home, '.cursor', 'mcp.json')
+    mkdirSync(join(home, '.cursor'), { recursive: true })
+    writeFileSync(path, `${JSON.stringify({
+      mcpServers: {
+        docs: { url: 'https://example.com/mcp', enabled: true },
+      },
+    }, null, 2)}\n`)
+
+    const initial = await listCodingAgentMcpServers('cursor')
+    expect(initial.servers.map(server => server.name)).toEqual(expect.arrayContaining([
+      'docs',
+      'ekko-studio-api',
+      'ekko-studio-browser',
+      'ekko-studio-devices',
+      'ekko-studio-use',
+      'ekko-studio-interaction',
+    ]))
+    expect(initial.servers.find(server => server.name === 'ekko-studio-api')).toMatchObject({
+      managed: true,
+    })
+
+    await upsertCodingAgentMcpServer('cursor', 'search', {
+      command: 'node',
+      args: ['search.mjs'],
+      enabled: true,
+    })
+    await removeCodingAgentMcpServer('cursor', 'docs')
+
+    const persisted = JSON.parse(readFileSync(path, 'utf-8'))
     expect(persisted.mcpServers).toEqual({
       search: { command: 'node', args: ['search.mjs'], enabled: true },
     })
@@ -346,6 +412,21 @@ describe('coding Agent MCP manager', () => {
       .toEqual(['-y', '@example/docs-mcp'])
   })
 
+  it('migrates legacy plan overrides and disables the renamed interaction server without duplicates', async () => {
+    const home = makeHome()
+    const path = join(home, 'coding-agent', 'mcp-overrides.json')
+    mkdirSync(join(home, 'coding-agent'), { recursive: true })
+    writeFileSync(path, JSON.stringify({
+      disabled: { codex: { default: ['ekko-studio-plan'] } },
+      configs: { codex: { default: { 'ekko-studio-plan': { command: 'custom-plan' } } } },
+    }))
+    const listed = await listCodingAgentMcpServers('codex')
+    expect(listed.servers.some(server => server.name === 'ekko-studio-plan')).toBe(false)
+    expect(listed.servers.find(server => server.name === 'ekko-studio-interaction')?.raw_config).toMatchObject({ command: 'custom-plan', enabled: false })
+    await upsertCodingAgentMcpServer('codex', 'ekko-studio-plan', { enabled: true })
+    expect((await listCodingAgentMcpServers('codex')).servers.find(server => server.name === 'ekko-studio-interaction')?.raw_config.enabled).not.toBe(false)
+  })
+
   it('migrates persisted managed overrides and allows enabling an old disabled entry', async () => {
     const home = makeHome()
     const path = join(home, 'coding-agent', 'mcp-overrides.json')
@@ -438,4 +519,52 @@ describe('coding Agent MCP manager', () => {
 
     expect(processTree.kill).toHaveBeenCalledWith(4321, expect.any(Function))
   })
+})
+
+
+it('uses the current profile token in new managed MCP processes despite stale parent tokens', async () => {
+  const home = makeHome()
+  mkdirSync(join(home, 'profiles', 'default'), { recursive: true })
+  const tokenFile = join(home, 'profiles', 'default', '.model-run-token')
+  const seen: string[] = []
+  const server = createServer((req, res) => {
+    seen.push(req.headers.authorization || '')
+    res.writeHead(req.headers.authorization === `Bearer ${readFileSync(tokenFile, 'utf8')}` ? 200 : 401)
+    res.end(JSON.stringify({ ok: true }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const listed = await listCodingAgentMcpServers('claude-code')
+    const config = listed.servers.find(server => server.name === 'ekko-studio-api')!.raw_config
+    for (const token of ['fixture-first', 'fixture-rotated']) {
+      writeFileSync(tokenFile, token)
+      const child = spawn(process.execPath, ['bin/ekko-studio-mcp.mjs', 'plan'], { env: {
+        PATH: process.env.PATH, HOME: home,
+        AUTH_TOKEN: 'fixture-stale', HERMES_WEB_UI_TOKEN: 'fixture-stale',
+        ...config.env, HERMES_WEB_UI_PROFILE: 'default',
+        HERMES_WEB_UI_URL: `http://127.0.0.1:${(server.address() as any).port}`,
+      } })
+      try {
+        const response = new Promise<any>((resolve, reject) => {
+          let buffer = ''
+          const timer = setTimeout(() => reject(new Error('MCP response timed out')), 4000)
+          child.stdout.on('data', chunk => {
+            buffer += chunk
+            const line = buffer.split('\n')[0]
+            if (!line) return
+            try { const value = JSON.parse(line); clearTimeout(timer); resolve(value) } catch {}
+          })
+        })
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+          name: 'ekko_studio_update_plan', arguments: { profile: 'default', context_id: 'fixture-context',
+            plan: [{ id: 'work', step: 'Test', status: 'in_progress' }] },
+        } })}\n`)
+        expect((await response).result.isError).not.toBe(true)
+      } finally { child.kill() }
+    }
+    expect(seen).toEqual(['Bearer fixture-first', 'Bearer fixture-rotated'])
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
 })

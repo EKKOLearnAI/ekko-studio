@@ -1,0 +1,115 @@
+name: Publish npm package
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish to npm"
+        required: true
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    outputs:
+      dist_tag: ${{ steps.release.outputs.dist_tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate release version
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease || false }}
+        run: |
+          node <<'NODE'
+          const { appendFileSync } = require('node:fs')
+          const { name, version, private: isPrivate } = require('./package.json')
+          if (name !== 'ekko-studio' || isPrivate) {
+            throw new Error('Expected the public ekko-studio source package')
+          }
+          if (![version, `v${version}`].includes(process.env.RELEASE_TAG)) {
+            throw new Error(`Release tag must match package version ${version}`)
+          }
+          const prerelease = version.includes('-') || process.env.RELEASE_PRERELEASE === 'true'
+          appendFileSync(process.env.GITHUB_OUTPUT, `dist_tag=${prerelease ? 'next' : 'latest'}\n`)
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`)
+          NODE
+
+      - name: Install dependencies
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild node-pty
+
+      - name: Check repository harness
+        run: npm run harness:check
+
+      - name: Build package
+        run: npm run build
+
+      - name: Pack and verify both npm packages
+        run: |
+          npm run pack:npm -- "$RUNNER_TEMP/npm-packages"
+
+      - name: Upload verified npm packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/npm-packages/*.tgz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [ekko-studio, hermes-web-ui]
+    steps:
+      - name: Download verified npm packages
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-packages
+          path: npm-packages
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGE_TARBALL: ./npm-packages/${{ matrix.package }}-${{ needs.build.outputs.version }}.tgz
+          NPM_DIST_TAG: ${{ needs.build.outputs.dist_tag }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN repository secret is not configured" >&2
+            exit 1
+          fi
+          test -f "$PACKAGE_TARBALL"
+          npm publish "$PACKAGE_TARBALL" --access public --tag "$NPM_DIST_TAG" --ignore-scripts --registry https://registry.npmjs.org
