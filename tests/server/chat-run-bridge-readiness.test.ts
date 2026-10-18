@@ -1281,14 +1281,14 @@ describe('session upload provenance at the socket boundary', () => {
     expect(recordSessionUploadAttachmentsMock).toHaveBeenCalledWith('new-local-session', 'default', input, { allowPendingSession: true })
   })
 
-  it('still rejects existing attachments from a different profile before registering or running', async () => {
+  it('rejects attachments when the requested run profile differs from the stored session profile', async () => {
     getSessionMock.mockReturnValue({ id: 'research-session', profile: 'research', source: 'cli', model: 'gpt-test', provider: 'openai' })
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const { handlers, io, socket } = makeServerHarness()
     const server = new ChatRunSocket(io as any)
     const run = vi.spyOn(server as any, 'handleRun').mockResolvedValue(undefined)
     ;(server as any).onConnection(socket)
-    await handlers.get('run')!({ session_id: 'research-session', input: [{ type: 'file', path: '/uploads/private.txt' }] })
+    await handlers.get('run')!({ session_id: 'research-session', profile: 'default', input: [{ type: 'file', path: '/uploads/private.txt' }] })
     expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'Profile "research" is not available on this connection' }))
     expect(recordSessionUploadAttachmentsMock).not.toHaveBeenCalled()
     expect(run).not.toHaveBeenCalled()

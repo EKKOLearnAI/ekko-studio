@@ -864,11 +864,10 @@ export class ChatRunSocket {
       }
       return profile
     }
-    const requireSocketSessionAccess = (sessionId: string) => {
+    const requireSocketSessionAccess = (sessionId: string, authorizedProfile = currentProfile()) => {
       const session = getSession(sessionId)
       if (!session) throw new Error('Session not found')
       const sessionProfile = String(session.profile || 'default').trim() || 'default'
-      const authorizedProfile = currentProfile()
       if (sessionProfile !== authorizedProfile) {
         throw new Error(`Profile "${sessionProfile}" is not available on this connection`)
       }
@@ -884,7 +883,7 @@ export class ChatRunSocket {
     // user can access: the UI switches between profiles without always reconnecting (see
     // #1884), so pinning every read to the handshake profile made `resume` fail and left
     // the conversation permanently blank. Mutating operations keep the stricter
-    // connection-scoped check above (see the attachment provenance boundary in `run`).
+    // connection-scoped check above; attachment runs pass their separately authorized run profile.
     const requireSocketSessionReadAccess = (sessionId: string) => {
       const session = getSession(sessionId)
       if (!session) throw new Error('Session not found')
@@ -952,7 +951,7 @@ export class ChatRunSocket {
         normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
         if (!shared && data.session_id && Array.isArray(data.input)) {
           // New chats carry a client-generated id; the runtime persists them on the first run.
-          if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id)
+          if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id, runProfile)
           await recordSessionUploadAttachments(data.session_id, runProfile, data.input, { allowPendingSession: true })
         }
       } catch (err) {
