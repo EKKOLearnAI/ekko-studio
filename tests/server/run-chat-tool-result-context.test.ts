@@ -123,4 +123,40 @@ describe('Bridge tool result context projection', () => {
       vi.fn(), { truncateToolResultsForContext: true })
     expect(usage.contextOutputTokens).toBe(estimateUsageTokensFromMessages(history).outputTokens)
   })
+  it('projects a complete Unicode tool result into scalar-safe provider and summary context', async () => {
+    const {
+      TOOL_RESULT_CONTEXT_HEAD_CHARS: head,
+      TOOL_RESULT_CONTEXT_TAIL_CHARS: tail,
+      TOOL_RESULT_CONTEXT_MARKER: marker,
+    } = await import('../../packages/server/src/modules/studio/services/chat-run/tool-result-context')
+    const input = 'a'.repeat(head - 1) + '😀' + 'middle'.repeat(1_000) + '😀' + 'z'.repeat(tail - 1)
+    addMessageMock.mockReturnValue(88)
+    const state: any = { messages: [], bridgePendingTools: [
+      { id: 'unicode-tool', name: 'synthetic_tool', arguments: '{}', startedAt: 0 },
+    ] }
+    const { recordBridgeToolCompleted } = await import('../../packages/server/src/modules/studio/services/chat-run/bridge-message')
+    recordBridgeToolCompleted(state, 'synthetic-session', 'run-unicode', 'synthetic_tool', {
+      tool_call_id: 'unicode-tool', result: input,
+    })
+    const stored = addMessageMock.mock.calls[0][0]
+    expect(stored.content).toBe(input)
+    const { buildDbHistoryFromContextRows } = await import('../../packages/server/src/modules/studio/services/chat-run/context-history')
+    const history = buildDbHistoryFromContextRows('synthetic-session', [{ ...stored, id: 88 }])
+    const expected = 'a'.repeat(head - 1) + marker + 'z'.repeat(tail - 1)
+    const mockProvider = vi.fn((body: string) => {
+      const payload = JSON.parse(body)
+      // A synthetic provider policy requiring scalar values, not a JSON grammar claim.
+      for (const message of payload.messages) encodeURIComponent(message.content)
+      return { status: 200 }
+    })
+    expect(mockProvider(JSON.stringify({ messages: history })).status).toBe(200)
+    expect(history[0].content).toBe(expected)
+    expect(state.messages[0].content).toBe(input)
+    expect(stored.content).toBe(input)
+    const { serializeForSummary } = await import('../../packages/server/src/modules/studio/services/context-compressor')
+    const summary = serializeForSummary(state.messages)
+    expect(summary.endsWith(expected)).toBe(true)
+    expect(() => encodeURIComponent(summary)).not.toThrow()
+  })
+
 })
