@@ -292,12 +292,20 @@ export function recordedContextWindowTokens(
  * leaves the anchor call's own assistant reply out of the delta, since it is already counted in
  * `output_tokens`. Returns undefined when the session has no recorded usage at all — only then is
  * the whole-transcript estimate the honest answer.
+ *
+ * A measurement only describes the prompt the proxy was sending AT THAT MOMENT. An in-place
+ * compressor keeps its own session state, and that state can be evicted or rebuilt between runs;
+ * after that the next request replays more of the transcript than the anchor ever saw. Measured on
+ * a live session: a two-day-old anchor of 141k sat behind a request the upstream rejected as 402k.
+ * So an anchor older than `freshAfterCreatedAt` is reported as `stale` and the caller must not
+ * treat it as the current window.
  */
 export function anchoredContextWindowTokens(
   sid: string,
   source: string,
   history: readonly UsageTokenMessage[],
-): { contextTokens: number; anchorCreatedAt: number; deltaTokens: number } | undefined {
+  freshAfterCreatedAt?: number,
+): { contextTokens: number; anchorCreatedAt: number; deltaTokens: number; stale: boolean } | undefined {
   const anchor = getUsage(sid, source)
   if (!anchor) return undefined
   const anchorTokens = Math.floor(
@@ -315,8 +323,11 @@ export function anchoredContextWindowTokens(
     if (!Number.isFinite(at)) return false
     return at > anchorSeconds
   })
+  const stale = typeof freshAfterCreatedAt === 'number'
+    && Number.isFinite(freshAfterCreatedAt)
+    && anchorCreatedAt < freshAfterCreatedAt
   if (tail.length === 0) {
-    return { contextTokens: anchorTokens, anchorCreatedAt, deltaTokens: 0 }
+    return { contextTokens: anchorTokens, anchorCreatedAt, deltaTokens: 0, stale }
   }
   const tailUsage = estimateUsageTokensFromMessages(tail)
   const deltaTokens = Math.max(0, Math.floor(tailUsage.inputTokens + tailUsage.outputTokens))
@@ -324,7 +335,25 @@ export function anchoredContextWindowTokens(
     contextTokens: anchorTokens + deltaTokens,
     anchorCreatedAt,
     deltaTokens,
+    stale,
   }
+}
+
+/**
+ * Keep a derived window inside the model's own limit.
+ *
+ * Every estimate above is a projection, and a projection that reads 348% of the window is not
+ * information — it is noise that makes the meter unreadable. The raw value stays in the log next to
+ * the clamped one, so the difference is still debuggable.
+ */
+export function clampContextWindowTokens(
+  contextTokens: number,
+  contextLength: number | undefined,
+): number {
+  if (typeof contextLength !== 'number' || !Number.isFinite(contextLength) || contextLength <= 0) {
+    return Math.floor(contextTokens)
+  }
+  return Math.min(Math.floor(contextTokens), Math.floor(contextLength))
 }
 
 export function getCachedBridgeContextOverhead(state: SessionState): number | undefined {

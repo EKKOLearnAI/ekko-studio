@@ -44,8 +44,9 @@ const updateContextTokenUsageMock = vi.fn((sid: string, state: any, emit: any, c
   })
   return contextTokens
 })
+const clampContextWindowTokensMock = vi.fn((tokens: number, _contextLength?: number) => tokens)
 const anchoredContextWindowTokensMock = vi.fn(
-  (_sid: string, _source: string, _history: any[]): { contextTokens: number; anchorCreatedAt: number; deltaTokens: number } | undefined => undefined,
+  (_sid: string, _source: string, _history: any[], _freshAfterCreatedAt?: number): { contextTokens: number; anchorCreatedAt: number; deltaTokens: number; stale: boolean } | undefined => undefined,
 )
 const recordedContextWindowTokensMock = vi.fn(
   (_sid: string, _source: string, _minCreatedAt?: number): number | undefined => undefined,
@@ -107,6 +108,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () =
   updateMessageContextTokenUsage: updateMessageContextTokenUsageMock,
   recordedContextWindowTokens: recordedContextWindowTokensMock,
   anchoredContextWindowTokens: anchoredContextWindowTokensMock,
+  clampContextWindowTokens: clampContextWindowTokensMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/bridge-message', () => ({
@@ -1631,7 +1633,7 @@ describe('bridge run final context usage', () => {
     state.runStartedAt = 5_000
     const sessionMap = new Map([['session-1', state]])
     recordedContextWindowTokensMock.mockReturnValue(undefined)
-    anchoredContextWindowTokensMock.mockReturnValue({ contextTokens: 61_000, anchorCreatedAt: 4_000, deltaTokens: 1_000 })
+    anchoredContextWindowTokensMock.mockReturnValue({ contextTokens: 61_000, anchorCreatedAt: 4_000, deltaTokens: 1_000, stale: false })
     const bridge = {
       chat: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'started' }),
       contextEstimate: vi.fn(),
@@ -1653,10 +1655,48 @@ describe('bridge run final context usage', () => {
       vi.fn(),
     )
 
-    expect(anchoredContextWindowTokensMock).toHaveBeenCalledWith('session-1', 'hermes', expect.any(Array))
+    expect(anchoredContextWindowTokensMock).toHaveBeenCalledWith('session-1', 'hermes', expect.any(Array), 5_000)
     expect(state.contextTokens).toBe(61_000)
     expect(emit).toHaveBeenCalledWith('run.completed', expect.objectContaining({
       contextTokens: 61_000,
+    }))
+  })
+
+  it('rejects a stale anchor and falls back to the local estimate', async () => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    const state = makeState()
+    state.runStartedAt = 5_000
+    const sessionMap = new Map([['session-1', state]])
+    recordedContextWindowTokensMock.mockReturnValue(undefined)
+    // An anchor from before this run describes a prompt the proxy was sending then, not now.
+    anchoredContextWindowTokensMock.mockReturnValue({ contextTokens: 141_144, anchorCreatedAt: 4_000, deltaTokens: 0, stale: true })
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'started' }),
+      contextEstimate: vi.fn(),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-1', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1' },
+      'default',
+      sessionMap,
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(anchoredContextWindowTokensMock).toHaveBeenCalledWith('session-1', 'hermes', expect.any(Array), 5_000)
+    expect(state.contextTokens).toBe(18)
+    expect(emit).toHaveBeenCalledWith('run.completed', expect.objectContaining({
+      contextTokens: 18,
     }))
   })
 

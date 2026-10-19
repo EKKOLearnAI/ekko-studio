@@ -1,5 +1,6 @@
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
+import { getModelContextLength } from '../../public/provider-runtime'
 import { hermesStudioMcpCapabilities } from './studio-mcp'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 /**
@@ -26,6 +27,7 @@ import {
   estimateUsageTokensFromMessages,
   getCachedBridgeContextOverhead,
   anchoredContextWindowTokens,
+  clampContextWindowTokens,
   recordedContextWindowTokens,
   updateContextTokenUsage,
   updateMessageContextTokenUsage,
@@ -1215,6 +1217,17 @@ async function refreshFinalContextUsage(args: {
   isCurrent?: () => boolean
 }): Promise<number | undefined> {
   try {
+    let contextLength: number | undefined
+    try {
+      contextLength = getModelContextLength({
+        profile: args.profile,
+        model: args.model,
+        provider: args.provider,
+      })
+    } catch {
+      // The runtime facade is not configured in every host; an unknown window means no clamp.
+      contextLength = undefined
+    }
     const finalHistory = await buildDbSnapshotAwareHistory(
       args.sessionId,
       args.profile,
@@ -1234,7 +1247,7 @@ async function refreshFinalContextUsage(args: {
         args.sessionId,
         args.state,
         args.emit,
-        recordedContextTokens,
+        clampContextWindowTokens(recordedContextTokens, contextLength),
         args.usage,
       )
       bridgeLogger.info({
@@ -1252,13 +1265,13 @@ async function refreshFinalContextUsage(args: {
     // No usage row from this run, but an earlier one is a real measurement of the prompt at a
     // point in time. Anchor on it and estimate only the messages appended after it; the stored
     // transcript is uncompressed and over-states the window by multiples.
-    const anchored = anchoredContextWindowTokens(args.sessionId, 'hermes', finalHistory)
-    if (anchored) {
+    const anchored = anchoredContextWindowTokens(args.sessionId, 'hermes', finalHistory, args.runStartedAt)
+    if (anchored && !anchored.stale) {
       const contextTokens = updateContextTokenUsage(
         args.sessionId,
         args.state,
         args.emit,
-        anchored.contextTokens,
+        clampContextWindowTokens(anchored.contextTokens, contextLength),
         args.usage,
       )
       bridgeLogger.info({
@@ -1270,10 +1283,24 @@ async function refreshFinalContextUsage(args: {
         messageTokens: finalMessageTokens,
         anchorCreatedAt: anchored.anchorCreatedAt,
         deltaTokens: anchored.deltaTokens,
+        rawContextTokens: anchored.contextTokens,
+        contextLength,
         contextTokens,
         source: 'anchored-estimate',
       }, '[chat-run-socket] final context size anchored on recorded model usage')
       return contextTokens
+    }
+    if (anchored) {
+      bridgeLogger.info({
+        sessionId: args.sessionId,
+        profile: args.profile,
+        model: args.model,
+        provider: args.provider,
+        anchorCreatedAt: anchored.anchorCreatedAt,
+        runStartedAt: args.runStartedAt,
+        anchoredContextTokens: anchored.contextTokens,
+        source: 'anchored-stale',
+      }, '[chat-run-socket] recorded usage anchor predates this run; falling back to the local estimate')
     }
     await ensureBridgeFixedContext({
       sessionId: args.sessionId,
@@ -1287,11 +1314,21 @@ async function refreshFinalContextUsage(args: {
       isCurrent: args.isCurrent,
     })
     if (args.isCurrent && !args.isCurrent()) return undefined
+    const rawContextTokens = contextTokensWithCachedOverhead(
+      args.state,
+      finalMessageTokens,
+    )
+    // `updateMessageContextTokenUsage` re-adds the fixed overhead itself, so the clamp belongs on
+    // the message budget that goes in — otherwise the emitted value can exceed the window.
+    const fixedOverhead = Math.max(0, rawContextTokens - finalMessageTokens)
+    const messageBudget = typeof contextLength === 'number' && Number.isFinite(contextLength)
+      ? Math.max(0, Math.floor(contextLength) - fixedOverhead)
+      : finalMessageTokens
     const contextTokens = updateMessageContextTokenUsage(
       args.sessionId,
       args.state,
       args.emit,
-      finalMessageTokens,
+      Math.min(finalMessageTokens, messageBudget),
       args.usage,
     )
     bridgeLogger.info({
@@ -1302,6 +1339,8 @@ async function refreshFinalContextUsage(args: {
       messages: finalHistory.length,
       fixedContextTokens: args.state.bridgeContext?.fixedContextTokens,
       messageTokens: finalMessageTokens,
+      rawContextTokens,
+      contextLength,
       contextTokens,
       source: 'local-estimate',
     }, '[chat-run-socket] final local context estimate')
