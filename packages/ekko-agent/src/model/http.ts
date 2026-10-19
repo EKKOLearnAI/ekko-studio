@@ -62,29 +62,42 @@ export async function parseResponseJson<T>(provider: string, response: Response)
   }
 }
 
+const PROVIDER_ERROR_BODY_PREVIEW_CHARS = 500
+
+function errorBodyPreview(body: string): string {
+  const collapsed = body.replace(/\s+/g, ' ').trim()
+  return collapsed.length > PROVIDER_ERROR_BODY_PREVIEW_CHARS
+    ? `${collapsed.slice(0, PROVIDER_ERROR_BODY_PREVIEW_CHARS)}...`
+    : collapsed
+}
+
 export async function providerHttpError(provider: string, response: Response): Promise<ModelProviderError> {
-  let details: unknown
+  // The body can only be read once; reading it twice used to throw inside the
+  // catch block, which silently discarded the provider's message and left users
+  // with a bare status line for every failure.
+  const body = await response.text().catch(() => '')
+  const parsed = parseJson<unknown>(body)
   let message = `Model provider request failed with HTTP ${response.status}.`
-  try {
-    details = await response.json()
-    if (isPlainRecord(details) && typeof details.error === 'string') {
-      message = details.error
-    } else if (isPlainRecord(details) && isPlainRecord(details.error) && typeof details.error.message === 'string') {
-      message = details.error.message
-    } else if (isPlainRecord(details) && typeof details.detail === 'string') {
-      message = details.detail
-    } else if (isPlainRecord(details) && typeof details.message === 'string') {
-      message = details.message
+  if (isPlainRecord(parsed)) {
+    if (typeof parsed.error === 'string') {
+      message = parsed.error
+    } else if (isPlainRecord(parsed.error) && typeof parsed.error.message === 'string') {
+      message = parsed.error.message
+    } else if (typeof parsed.detail === 'string') {
+      message = parsed.detail
+    } else if (typeof parsed.message === 'string') {
+      message = parsed.message
     }
-  } catch {
-    details = await response.text().catch(() => undefined)
+  } else if (body.trim()) {
+    // Non-JSON error pages (gateways, proxies, HTML) still carry the real cause.
+    message = `${message} ${errorBodyPreview(body)}`
   }
 
   return new ModelProviderError(message, {
     provider,
     statusCode: response.status,
     retryable: isRetryableStatus(response.status),
-    details,
+    details: parsed ?? (body || undefined),
   })
 }
 
