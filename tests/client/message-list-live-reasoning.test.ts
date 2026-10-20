@@ -101,6 +101,43 @@ describe('MessageList live reasoning', () => {
     vi.useRealTimers()
   })
 
+  it('stops the run indicator after an abort is finalized', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountMessageList([], false)
+    const intervals = vi.spyOn(globalThis, 'setInterval')
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
+    const store = useChatStore()
+    store.abortState = { aborting: true, synced: null }
+    await nextTick()
+    expect(wrapper.find('.streaming-indicator').exists()).toBe(true)
+    const timerIndex = intervals.mock.calls.findIndex(([, delay]) => delay === 1000)
+    expect(timerIndex).toBeGreaterThanOrEqual(0)
+    const timer = intervals.mock.results[timerIndex].value
+    const elapsed = wrapper.get('.thinking-status-time').text()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.get('.thinking-status-time').text()).not.toBe(elapsed)
+    store.abortState = { aborting: false, synced: true }
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(wrapper.find('.streaming-indicator').exists()).toBe(false)
+    expect(wrapper.find('.thinking-status').exists()).toBe(false)
+    expect(clearIntervalSpy).toHaveBeenCalledWith(timer)
+    intervals.mockRestore()
+    clearIntervalSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('keeps a live run visible even when an earlier abort is finalized', async () => {
+    const wrapper = mountMessageList([], false)
+    const store = useChatStore()
+    Object.defineProperty(store, 'isRunActive', { value: true, configurable: true })
+    store.abortState = { aborting: false, synced: true }
+    await nextTick()
+    expect(wrapper.find('.streaming-indicator').exists()).toBe(true)
+    expect(wrapper.find('.thinking-status').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('updates the thinking logo with the active agent and preserves the Ekko animation', async () => {
     const wrapper = mountMessageList([])
     const chatStore = useChatStore()

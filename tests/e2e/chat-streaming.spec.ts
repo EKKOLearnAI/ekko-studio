@@ -586,6 +586,8 @@ test('settles a running subagent card when Stop completes without a child termin
   await expect(panel.locator('.message.assistant')).toHaveCount(0)
   await expect(subagentCard.locator('.tool-call-spinner, .tool-spinner')).toHaveCount(0)
   expect(api.unexpectedRequests).toEqual([])
+  await expect(page.locator('.streaming-indicator')).toHaveCount(0)
+  await expect(page.locator('.thinking-status')).toHaveCount(0)
 })
 
 test('uses the newly selected profile for the next chat-run socket after profile switch reload', async ({ page }) => {

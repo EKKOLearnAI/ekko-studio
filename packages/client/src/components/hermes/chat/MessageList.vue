@@ -107,7 +107,7 @@ function stopThinkingTimer() {
   }
 }
 
-const isRunIndicatorActive = computed(() => chatStore.isRunActive || !!chatStore.abortState);
+const isRunIndicatorActive = computed(() => chatStore.isRunActive || chatStore.abortState?.aborting === true);
 const formattedThinkingElapsed = computed(() => formatElapsed(thinkingElapsedMs.value));
 
 const currentToolCalls = computed(() => {
