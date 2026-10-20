@@ -15,6 +15,27 @@ export function assertProviderAvailable(provider: string): void {
   }
 }
 
+/** Curate discovered built-in catalogs only; configured/custom IDs are added by callers. */
+export function currentMiniMaxCatalogModels(provider: string, baseUrl: string, models: string[]): string[] {
+  provider = provider.replace(/^custom:/, '')
+  const preset = PROVIDER_PRESETS.find(candidate => candidate.value === provider)
+  const normalizeUrl = (url: string) => url.replace(/\/+$/, '').replace(/\/v1$/, '')
+  const directMiniMax = ['minimax', 'minimax-cn', 'minimax-oauth'].includes(provider) &&
+    /^https:\/\/api\.(?:minimax\.io|minimaxi\.com)\/(?:anthropic(?:\/v1)?|v1)\/?$/.test(baseUrl)
+  if (!preset || (!directMiniMax && normalizeUrl(preset.base_url) !== normalizeUrl(baseUrl))) return [...models]
+  const current = models.filter(model =>
+    !/^(?:(?:minimax|minimaxai)\/)?minimax-m\d/i.test(model) ||
+    /^(?:(?:minimax|minimaxai)\/)?minimax-(?:m3|m3\.1-flash(?::free|-free)?)$/i.test(model))
+  if (provider === 'minimax' || provider === 'minimax-cn') {
+    return [...new Set([...preset.models, ...current])]
+  }
+  // Keep unrelated model positions stable while recommending Flash before M3.
+  const isMiniMax = (model: string) => /^(?:(?:minimax|minimaxai)\/)?minimax-m\d/i.test(model)
+  const miniMaxModels = current.filter(isMiniMax)
+    .sort((left, right) => Number(/m3\.1-flash/i.test(right)) - Number(/m3\.1-flash/i.test(left)))
+  return current.map(model => isMiniMax(model) ? miniMaxModels.shift()! : model)
+}
+
 export type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
 
 export interface ProviderPreset {
@@ -238,7 +259,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     base_url: 'https://api.minimax.io/anthropic/v1',
     api_mode: 'anthropic_messages',
     catalog_api_mode: 'anthropic_messages',
-    models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'],
+    models: ['MiniMax-M3.1-Flash', 'MiniMax-M3'],
   },
   {
     label: 'MiniMax Coding Plan (OAuth)',
@@ -247,7 +268,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     base_url: 'https://api.minimax.io/anthropic',
     api_mode: 'anthropic_messages',
     catalog_api_mode: 'anthropic_messages',
-    models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed'],
+    models: ['MiniMax-M3'],
   },
   {
     label: 'MiniMax (China)',
@@ -256,7 +277,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     base_url: 'https://api.minimaxi.com/anthropic/v1',
     api_mode: 'anthropic_messages',
     catalog_api_mode: 'anthropic_messages',
-    models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'],
+    models: ['MiniMax-M3.1-Flash', 'MiniMax-M3'],
   },
   {
     label: 'Alibaba Cloud',
@@ -273,7 +294,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'qwen3-coder-next',
       'glm-5',
       'glm-4.7',
-      'MiniMax-M2.5',
     ],
   },
   {
@@ -297,7 +317,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'kimi-k2.5',
       'glm-5',
       'glm-4.7',
-      'MiniMax-M2.5',
     ],
   },
   {
@@ -311,7 +330,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'Qwen/Qwen3.5-397B-A17B',
       'Qwen/Qwen3.5-35B-A3B',
       'deepseek-ai/DeepSeek-V3.2',
-      'MiniMaxAI/MiniMax-M2.5',
       'zai-org/GLM-5',
       'XiaomiMiMo/MiMo-V2-Flash',
       'moonshotai/Kimi-K2-Thinking',
@@ -341,7 +359,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     catalog_api_mode: 'chat_completions',
     models: [
       'moonshotai/kimi-k2.5',
-      'minimax/minimax-m2.7',
       'zai-org/glm-5',
       'deepseek/deepseek-v3-0324',
       'deepseek/deepseek-r1-0528',
@@ -426,7 +443,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'moonshotai/kimi-k2.6',
       'alibaba/qwen3.6-plus',
       'zai/glm-5.1',
-      'minimax/minimax-m2.7',
       'anthropic/claude-sonnet-4.6',
       'anthropic/claude-opus-4.7',
       'anthropic/claude-opus-4.6',
@@ -494,9 +510,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'gemini-3.5-flash',
       'gemini-3.1-pro',
       'gemini-3-flash',
+      'minimax-m3.1-flash-free',
       'minimax-m3',
-      'minimax-m2.7',
-      'minimax-m2.5',
       'glm-5.2',
       'glm-5.1',
       'glm-5',
@@ -532,8 +547,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'mimo-v2-pro',
       'mimo-v2-omni',
       'minimax-m3',
-      'minimax-m2.7',
-      'minimax-m2.5',
       'deepseek-v4-pro',
       'deepseek-v4-flash',
       'qwen3.7-max',

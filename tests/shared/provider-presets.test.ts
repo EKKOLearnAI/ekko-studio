@@ -134,8 +134,6 @@ const EXPECTED_SYNCED_PROVIDER_MODELS = {
     'mimo-v2-pro',
     'mimo-v2-omni',
     'minimax-m3',
-    'minimax-m2.7',
-    'minimax-m2.5',
     'deepseek-v4-pro',
     'deepseek-v4-flash',
     'qwen3.7-max',
@@ -202,9 +200,8 @@ const EXPECTED_SYNCED_PROVIDER_MODELS = {
     'gemini-3.5-flash',
     'gemini-3.1-pro',
     'gemini-3-flash',
+    'minimax-m3.1-flash-free',
     'minimax-m3',
-    'minimax-m2.7',
-    'minimax-m2.5',
     'glm-5.2',
     'glm-5.1',
     'glm-5',
@@ -392,22 +389,13 @@ describe('provider presets', () => {
     expect(modelsForProvider(SERVER_PROVIDER_PRESETS, STEPFUN_PROVIDER)).toContain('step-3.7-flash')
   })
 
-  it('keeps MiniMax M3 first while retaining currently supported M2.x Anthropic models', () => {
+  it('recommends MiniMax M3.1 Flash before M3 for direct API keys', () => {
     expect(PROVIDER_ENV_MAP[MINIMAX_PROVIDER]).toEqual({ api_key_env: 'MINIMAX_API_KEY', base_url_env: 'MINIMAX_BASE_URL' })
     expect(PROVIDER_ENV_MAP[MINIMAX_CN_PROVIDER]).toEqual({ api_key_env: 'MINIMAX_CN_API_KEY', base_url_env: 'MINIMAX_CN_BASE_URL' })
 
     for (const provider of [MINIMAX_PROVIDER, MINIMAX_CN_PROVIDER]) {
       const models = modelsForProvider(SERVER_PROVIDER_PRESETS, provider)
-      expect(models[0]).toBe('MiniMax-M3')
-      expect(models).toEqual(expect.arrayContaining([
-        'MiniMax-M2.7',
-        'MiniMax-M2.7-highspeed',
-        'MiniMax-M2.5',
-        'MiniMax-M2.5-highspeed',
-        'MiniMax-M2.1',
-        'MiniMax-M2.1-highspeed',
-        'MiniMax-M2',
-      ]))
+      expect(models).toEqual(['MiniMax-M3.1-Flash', 'MiniMax-M3'])
     }
   })
 
@@ -420,8 +408,6 @@ describe('provider presets', () => {
     })
     expect(modelsForProvider(SERVER_PROVIDER_PRESETS, MINIMAX_OAUTH_PROVIDER)).toEqual([
       'MiniMax-M3',
-      'MiniMax-M2.7',
-      'MiniMax-M2.7-highspeed',
     ])
   })
 
