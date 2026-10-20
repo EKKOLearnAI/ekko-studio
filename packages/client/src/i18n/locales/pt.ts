@@ -386,6 +386,18 @@ export default {
   },
   socialMessages: socialMessagesPt,
   browser: {
+    cookieConnectPrompt: "Allow the local Chrome extension to send cookies to this browser profile? You will review domains before importing.",
+    cookieImport: "Import Chrome cookies",
+    cookieImportHint: "Install the Ekko Studio Cookie Import Helper in Chrome on this computer. Generate a code, copy the address and code into the extension, select websites, then return here to review. No passwords are transferred. Cookies may not be sufficient to sign in.",
+    cookieImportStart: "Generate one-time import code",
+    cookieImportTarget: "Target profile",
+    cookieImportExpires: "Expires at (5 minutes)",
+    cookieImportAddress: "Manager address (this computer only)",
+    cookieImportCode: "One-time import code",
+    cookieImportReview: "Review {count} cookies from these domains before importing:",
+    cookieImportWarning: "Matching cookies will be overwritten. Only approve domains you trust. Refresh the target page after importing. Partitioned cookies are not supported.",
+    cookieImportResult: "Imported: {imported}; failed: {failed}.",
+
     title: 'Navegador', settings: 'Configurações do navegador', desktopOnly: 'O navegador integrado está disponível apenas no Ekko Studio Desktop.', newTab: 'Nova aba',
     back: 'Voltar', forward: 'Avançar', reload: 'Recarregar', stop: 'Parar', addressPlaceholder: 'Pesquisar ou inserir endereço',
     undoAnnotation: 'Desfazer última', deleteAnnotation: 'Excluir anotação {index}',

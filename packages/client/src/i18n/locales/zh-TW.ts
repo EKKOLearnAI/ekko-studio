@@ -386,6 +386,18 @@ export default {
   },
   socialMessages: socialMessagesZhTw,
   browser: {
+    cookieConnectPrompt: "Allow the local Chrome extension to send cookies to this browser profile? You will review domains before importing.",
+    cookieImport: "Import Chrome cookies",
+    cookieImportHint: "Install the Ekko Studio Cookie Import Helper in Chrome on this computer. Generate a code, copy the address and code into the extension, select websites, then return here to review. No passwords are transferred. Cookies may not be sufficient to sign in.",
+    cookieImportStart: "Generate one-time import code",
+    cookieImportTarget: "Target profile",
+    cookieImportExpires: "Expires at (5 minutes)",
+    cookieImportAddress: "Manager address (this computer only)",
+    cookieImportCode: "One-time import code",
+    cookieImportReview: "Review {count} cookies from these domains before importing:",
+    cookieImportWarning: "Matching cookies will be overwritten. Only approve domains you trust. Refresh the target page after importing. Partitioned cookies are not supported.",
+    cookieImportResult: "Imported: {imported}; failed: {failed}.",
+
     title: '瀏覽器', settings: '瀏覽器設定', desktopOnly: '內建瀏覽器僅在 Ekko Studio 桌面版可用。', newTab: '新分頁',
     back: '上一頁', forward: '下一頁', reload: '重新整理', stop: '停止', addressPlaceholder: '搜尋或輸入網址',
     undoAnnotation: '復原上一個', deleteAnnotation: '刪除標註 {index}',

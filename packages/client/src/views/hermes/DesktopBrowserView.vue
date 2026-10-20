@@ -4,7 +4,7 @@ import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NCard, NInput, NModal, NSelect, NSwitch, NTabPane, NTabs, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { desktopBridge, type DesktopBrowserDownload, type DesktopBrowserProfile, type DesktopBrowserState } from '@/utils/desktop-bridge'
+import { desktopBridge, type DesktopCookieImportStatus, type DesktopBrowserDownload, type DesktopBrowserProfile, type DesktopBrowserState } from '@/utils/desktop-bridge'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -20,6 +20,52 @@ const profileProxyRules = ref('')
 const profileModalMode = ref<'create' | 'edit'>('create')
 const showProfileModal = ref(false)
 const busy = ref(false)
+const cookieImport = ref<DesktopCookieImportStatus | null>(null)
+let cookieImportPoll: ReturnType<typeof setInterval> | undefined
+let cookieImportPolling = false
+
+async function refreshCookieImport(): Promise<void> {
+  if (cookieImportPolling || !bridge?.cookieImportStatus) return
+  cookieImportPolling = true
+  try {
+    const status = await bridge.cookieImportStatus()
+    if (!unmounting) cookieImport.value = status
+    if (!status && cookieImportPoll) { clearInterval(cookieImportPoll); cookieImportPoll = undefined }
+  }
+  catch {
+    cookieImport.value = null
+    if (cookieImportPoll) clearInterval(cookieImportPoll)
+    cookieImportPoll = undefined
+  }
+  finally { cookieImportPolling = false }
+}
+
+function startCookieImport(profileId: string): void {
+  void run(async () => {
+    cookieImport.value = await bridge!.startCookieImport!(profileId)
+    if (!cookieImportPoll) cookieImportPoll = setInterval(() => { void refreshCookieImport() }, 1000)
+  })
+}
+
+function cancelCookieImport(): void {
+  void run(async () => {
+    await bridge!.cancelCookieImport!()
+    cookieImport.value = null
+    if (cookieImportPoll) clearInterval(cookieImportPoll)
+    cookieImportPoll = undefined
+  })
+}
+
+function confirmCookieImport(): void {
+  void run(async () => {
+    const result = await bridge!.confirmCookieImport!()
+    cookieImport.value = null
+    if (cookieImportPoll) clearInterval(cookieImportPoll)
+    cookieImportPoll = undefined
+    message.success(t('browser.cookieImportResult', result))
+  })
+}
+
 const loadError = ref('')
 let stopStateListener: (() => void) | undefined
 let unmounting = false
@@ -244,6 +290,8 @@ onMounted(async () => {
 onUnmounted(() => {
   unmounting = true
   stopStateListener?.()
+  if (cookieImportPoll) clearInterval(cookieImportPoll)
+  void bridge?.cancelCookieImport?.().catch(() => undefined)
 })
 </script>
 
@@ -313,6 +361,29 @@ onUnmounted(() => {
                   </NButton>
                 </div>
               </article>
+            </div>
+          </NTabPane>
+
+          <NTabPane v-if="bridge?.startCookieImport" name="cookie-import" :tab="t('browser.cookieImport')">
+            <div class="settings-form">
+              <p class="hint">{{ t('browser.cookieImportHint') }}</p>
+              <label>{{ t('browser.profiles') }}<NSelect v-model:value="settingsProfileId" :options="profileOptions" :disabled="!!cookieImport || busy" /></label>
+              <NButton v-if="!cookieImport" :disabled="busy || !settingsProfileId" @click="startCookieImport(settingsProfileId)">{{ t('browser.cookieImportStart') }}</NButton>
+              <template v-if="cookieImport">
+                <p>{{ t('browser.cookieImportTarget') }}: {{ state?.profiles.find(profile => profile.id === cookieImport?.profileId)?.name }}</p>
+                <p class="hint">{{ t('browser.cookieImportExpires') }}: {{ new Date(cookieImport.expiresAt).toLocaleTimeString() }}</p>
+                <template v-if="cookieImport.phase === 'waiting'">
+                  <label>{{ t('browser.cookieImportAddress') }}<NInput :value="cookieImport.managerUrl" readonly /></label>
+                  <label>{{ t('browser.cookieImportCode') }}<NInput :value="cookieImport.token" readonly type="password" show-password-on="click" /></label>
+                </template>
+                <template v-else>
+                  <p>{{ t('browser.cookieImportReview', { count: cookieImport.cookieCount }) }}</p>
+                  <p v-for="domain in cookieImport.domains" :key="domain">{{ domain }}</p>
+                  <p class="hint">{{ t('browser.cookieImportWarning') }}</p>
+                  <NButton type="primary" :disabled="busy" @click="confirmCookieImport">{{ t('common.confirm') }}</NButton>
+                </template>
+                <NButton :disabled="busy" @click="cancelCookieImport">{{ t('common.cancel') }}</NButton>
+              </template>
             </div>
           </NTabPane>
 

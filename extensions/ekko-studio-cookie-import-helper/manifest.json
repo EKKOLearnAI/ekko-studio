@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Ekko Studio Cookie Import Helper",
+  "description": "将本机 Chrome 中选定网站的 Cookie 安全导入 Ekko Studio 浏览器配置。",
+  "version": "1.3.1",
+  "permissions": [
+    "cookies"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Ekko Studio Cookie 导入助手",
+    "default_icon": {
+      "16": "icons/ekko-16.png",
+      "32": "icons/ekko-32.png",
+      "48": "icons/ekko-48.png",
+      "128": "icons/ekko-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/ekko-16.png",
+    "32": "icons/ekko-32.png",
+    "48": "icons/ekko-48.png",
+    "128": "icons/ekko-128.png"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqRY9qwVI83Yebh4hAaVphaBq2yGeW018qtKQHVavuS1YkW1AViHr0xVkFYu0wZgg/veF/+a9Bp2elF49vRL/kgxX6vZwDftDJNH9PxwvtW7OT7KZ64FyTYiTTfbWm6gvWAaRPX8vlgR2oU15dHPeD20ViJOXfC24Y/v0lLDkqrrI6+fwweBdhKA7Ad9wDqODntHHHhrrWFOmQ3rqdVSnSvSH42SjWhX78yQLp0KAYqqnxcm3TgN6NEry38V7087672P5JZMBzkE/y2y1ySNrLdbrhNuIcLnWAlGj2N0UAWEA1QwZMSjchMe5NqtQLoPV+maHPIhsK3nsikr/lBbLeQIDAQAB"
+}

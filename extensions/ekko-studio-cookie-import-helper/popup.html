@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Ekko Studio Cookie</title><link rel="stylesheet" href="popup.css" /></head>
+<body><main class="panel">
+  <div class="actions"><button id="scan" type="button">扫描</button><button id="import" type="button" disabled>导入</button></div>
+  <section id="toolbar" class="toolbar">
+    <input id="filterInput" type="text" placeholder="输入关键词过滤域名" aria-label="筛选域名" autocomplete="off" />
+    <div class="batch-actions"><button id="selectAll" type="button">全选</button><button id="selectNone" type="button">取消全选</button><button id="selectMore" type="button">批量选择</button></div>
+  </section>
+  <p id="status" class="status" role="status"></p>
+  <section id="domains" class="domains" aria-label="可导入的网站列表"></section>
+</main><script src="popup.js"></script></body></html>

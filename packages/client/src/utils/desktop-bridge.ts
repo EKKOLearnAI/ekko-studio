@@ -80,7 +80,22 @@ export interface DesktopBrowserSelection {
   screenshot: { mediaType: 'image/png' | 'image/jpeg'; data: string; width: number; height: number }
 }
 
+export interface DesktopCookieImportStatus {
+  profileId: string
+  managerUrl: string
+  token: string
+  expiresAt: number
+  phase: 'waiting' | 'review'
+  domains: string[]
+  cookieCount: number
+}
+
 export interface DesktopBrowserBridge {
+  startCookieImport?: (profileId: string) => Promise<DesktopCookieImportStatus>
+  cookieImportStatus?: () => Promise<DesktopCookieImportStatus | null>
+  cancelCookieImport?: () => Promise<void>
+  confirmCookieImport?: () => Promise<{ imported: number; failed: number }>
+
   getState: () => Promise<DesktopBrowserState>
   setViewport: (bounds: DesktopWindowBounds, visible: boolean) => Promise<DesktopBrowserState>
   createTab: (url?: string, activate?: boolean) => Promise<DesktopBrowserTab>

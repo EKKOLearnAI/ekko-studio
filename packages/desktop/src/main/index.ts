@@ -1336,6 +1336,10 @@ function browserForEvent(event: IpcMainInvokeEvent): BrowserManager {
   return browserManager
 }
 
+ipcMain.handle('hermes-desktop:browser-cookie-import-start', (event, profileId?: unknown) => browserForEvent(event).startCookieImport(String(profileId || '')))
+ipcMain.handle('hermes-desktop:browser-cookie-import-status', event => browserForEvent(event).cookieImportStatus())
+ipcMain.handle('hermes-desktop:browser-cookie-import-cancel', event => browserForEvent(event).cancelCookieImport())
+ipcMain.handle('hermes-desktop:browser-cookie-import-confirm', event => browserForEvent(event).confirmCookieImport())
 ipcMain.handle('hermes-desktop:browser-get-state', event => browserForEvent(event).state())
 ipcMain.handle('hermes-desktop:browser-set-viewport', (event, bounds?: unknown, visible?: unknown) => {
   const input = bounds && typeof bounds === 'object' ? bounds as Partial<BrowserBounds> : {}

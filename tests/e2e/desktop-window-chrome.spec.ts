@@ -40,6 +40,8 @@ async function installDesktopBridge(page: Page, platform: DesktopPlatform, withB
     }
     const browserHarness = {
       viewportCalls: [] as Array<{ bounds: unknown; visible: boolean }>,
+      cookieImport: null as null | { profileId: string; managerUrl: string; token: string; expiresAt: number; phase: 'waiting' | 'review'; domains: string[]; cookieCount: number },
+      cookieImportConfirmations: 0,
       createdProfiles: [] as Array<{ name: string; proxyMode?: string }>,
       annotationCount: 0,
       clearAnnotationCalls: 0,
@@ -74,6 +76,13 @@ async function installDesktopBridge(page: Page, platform: DesktopPlatform, withB
       activateTab: async () => browserState,
       navigate: async () => browserState.tabs[0],
       navigationAction: async () => browserState.tabs[0],
+      startCookieImport: async (profileId: string) => {
+        browserHarness.cookieImport = { profileId, managerUrl: 'http://127.0.0.1:54321', token: 'test-only-code', expiresAt: Date.now() + 300000, phase: 'waiting', domains: [], cookieCount: 0 }
+        return { ...browserHarness.cookieImport }
+      },
+      cookieImportStatus: async () => browserHarness.cookieImport ? { ...browserHarness.cookieImport } : null,
+      cancelCookieImport: async () => { browserHarness.cookieImport = null },
+      confirmCookieImport: async () => { browserHarness.cookieImportConfirmations++; browserHarness.cookieImport = null; return { imported: 2, failed: 0 } },
       createProfile: async (input: { name: string; proxyMode?: string }) => {
         browserHarness.createdProfiles.push(input)
         return browserState.profiles[0]
@@ -885,4 +894,30 @@ test('manages desktop browser profiles with switchable cards and editor modals',
   }).__PW_DESKTOP_BROWSER__?.createdProfiles)).toEqual([
     expect.objectContaining({ name: 'Work', proxyMode: 'system' }),
   ])
+})
+
+
+test('reviews cookie domains for the bound profile before confirming and can cancel', async ({ page }) => {
+  await installDesktopBridge(page, 'darwin', true)
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await page.goto('/#/hermes/browser')
+  await page.getByText('Import Chrome cookies', { exact: true }).click()
+  await page.getByRole('button', { name: 'Generate one-time import code' }).click()
+  await expect(page.getByText('Target profile: Default', { exact: true })).toBeVisible()
+  await expect(page.locator('input[value="http://127.0.0.1:54321"]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Confirm', exact: true })).toHaveCount(0)
+  await page.evaluate(() => {
+    const harness = (window as any).__PW_DESKTOP_BROWSER__
+    Object.assign(harness.cookieImport, { phase: 'review', token: '', domains: ['example.com'], cookieCount: 2 })
+  })
+  await expect(page.getByText('example.com', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.cookieImportConfirmations)).toBe(0)
+  await page.getByRole('button', { name: 'Confirm', exact: true }).click()
+  await expect(page.getByText('Imported: 2; failed: 0.', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.cookieImportConfirmations)).toBe(1)
+  await page.getByRole('button', { name: 'Generate one-time import code' }).click()
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Generate one-time import code' })).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.cookieImport)).toBeNull()
 })

@@ -16,6 +16,8 @@ import {
 } from 'electron'
 import { BrowserAutomation } from './browser-automation'
 import { BrowserProfileStore } from './browser-profile-store'
+import { COOKIE_EXTENSION_ORIGIN, BrowserCookieDiscovery } from './browser-cookie-discovery'
+import { BrowserCookieImport } from './browser-cookie-import'
 import { BrowserSessionCookieStore } from './browser-session-cookie-store'
 import { MAX_BROWSER_TABS } from './browser-types'
 import { BROWSER_BATCH_TIMEOUT_MS, parseBrowserBatchActions } from './browser-batch'
@@ -92,6 +94,20 @@ function proxyConfig(profile: DesktopBrowserProfile): ProxyConfig {
 
 export class BrowserManager {
   readonly automation = new BrowserAutomation()
+  private readonly cookieDiscovery = new BrowserCookieDiscovery()
+  private automaticImport = false
+  private cookieImportsDisposed = false
+  private readonly cookieImport = new BrowserCookieImport(async () => {
+    if (!this.automaticImport) return undefined
+    return this.confirmCookieImport(true)
+  })
+
+  private async connectCookieExtension() {
+    if (this.cookieImportsDisposed || this.cookieImport.getStatus()) throw new Error('Import unavailable')
+    const profile = this.requireProfile(this.activeProfileId)
+    this.automaticImport = true
+    return this.cookieImport.start(profile.id, COOKIE_EXTENSION_ORIGIN)
+  }
   private readonly profileStore: BrowserProfileStore
   private readonly records = new Map<string, TabRecord>()
   private tabMutationQueue: Promise<void> = Promise.resolve()
@@ -119,11 +135,40 @@ export class BrowserManager {
     this.profileStore = new BrowserProfileStore(stateRoot)
   }
 
+  async startCookieImport(profileId: string) {
+    this.requireProfile(profileId)
+    this.automaticImport = false
+    return this.cookieImport.start(profileId)
+  }
+
+  cookieImportStatus() { return this.cookieImport.getStatus() }
+
+  async cancelCookieImport(): Promise<void> { this.automaticImport = false; await this.cookieImport.cancel() }
+
+  async confirmCookieImport(keepReceiver = false): Promise<{ imported: number; failed: number }> {
+    const { profileId, cookies } = await this.cookieImport.take(keepReceiver)
+    const profile = this.requireProfile(profileId)
+    const browserSession = this.profileSession(profile)
+    await this.configureSession(profile, browserSession)
+    // No raw Electron error is returned: it can include sensitive cookie details.
+    let imported = 0
+    let failed = 0
+    for (const cookie of cookies) {
+      try { await browserSession.cookies.set(cookie); imported++ } catch { failed++ }
+    }
+    try { await this.flushProfileSession(profile) }
+    catch { throw new Error('Cookie import could not be persisted; some cookies may already be applied') }
+    return { imported, failed }
+  }
+
   async initialize(): Promise<void> {
     await this.profileStore.initialize()
     const profile = this.profileStore.active()
     this.activeProfileId = profile.id
     await this.restoreTabs(profile)
+    await this.cookieDiscovery.start(() => this.connectCookieExtension()).catch(() => {
+      console.warn('[desktop-browser] Cookie extension discovery unavailable (another Studio instance may be running)')
+    })
     this.emitState()
   }
 
@@ -336,6 +381,7 @@ export class BrowserManager {
   }
 
   async deleteProfile(profileId: string): Promise<DesktopBrowserState> {
+    if (this.cookieImport.getStatus()?.profileId === profileId) await this.cookieImport.cancel()
     if (profileId === this.activeProfileId) throw new Error('Switch away from a profile before deleting it')
     const removed = await this.profileStore.deleteProfile(profileId)
     const managedRoot = resolve(this.profileStore.root, 'profiles')
@@ -748,6 +794,9 @@ export class BrowserManager {
   }
 
   async destroy(timeoutMs = SESSION_SHUTDOWN_TIMEOUT_MS): Promise<void> {
+    this.cookieImportsDisposed = true
+    await this.cookieDiscovery.stop()
+    await this.cookieImport.cancel()
     for (const item of this.downloadItems.values()) item.cancel()
     this.downloadItems.clear()
     this.destroyViews()

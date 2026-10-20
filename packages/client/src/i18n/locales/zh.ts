@@ -386,6 +386,18 @@ export default {
   },
   socialMessages: socialMessagesZh,
   browser: {
+    cookieConnectPrompt: "允许本机 Chrome 扩展向此浏览器配置发送 Cookie？发送后仍需确认域名。",
+    cookieImport: "导入 Chrome Cookie",
+    cookieImportHint: "在本机 Chrome 安装 Ekko Studio Cookie 导入助手。生成导入码，将地址和导入码复制到插件，选择网站后回到此处确认。不传输密码。仅导入 Cookie 不保证获得登录状态。",
+    cookieImportStart: "生成一次性导入码",
+    cookieImportTarget: "目标配置",
+    cookieImportExpires: "到期时间（5 分钟）",
+    cookieImportAddress: "Manager 地址（仅限本机）",
+    cookieImportCode: "一次性导入码",
+    cookieImportReview: "请确认以下域名的 {count} 个 Cookie：",
+    cookieImportWarning: "同名同路径 Cookie 将被覆盖。只确认可信域名。导入后请刷新目标页面。不支持分区 Cookie。",
+    cookieImportResult: "已导入：{imported}；失败：{failed}。",
+
     title: '浏览器', settings: '浏览器设置', desktopOnly: '内置浏览器仅在 Ekko Studio 桌面端可用。', newTab: '新标签页',
     back: '后退', forward: '前进', reload: '刷新', stop: '停止', addressPlaceholder: '搜索或输入网址',
     undoAnnotation: '撤销上一个', deleteAnnotation: '删除标注 {index}',

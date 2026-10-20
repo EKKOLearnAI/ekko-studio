@@ -101,6 +101,10 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     return () => ipcRenderer.removeListener('hermes-desktop:pet-window-refresh', listener)
   },
   ...(desktopWindowKind() === 'main' ? { browser: {
+    startCookieImport: (profileId: string) => ipcRenderer.invoke('hermes-desktop:browser-cookie-import-start', profileId),
+    cookieImportStatus: () => ipcRenderer.invoke('hermes-desktop:browser-cookie-import-status'),
+    cancelCookieImport: () => ipcRenderer.invoke('hermes-desktop:browser-cookie-import-cancel'),
+    confirmCookieImport: () => ipcRenderer.invoke('hermes-desktop:browser-cookie-import-confirm'),
     getState: (): Promise<DesktopBrowserState> => ipcRenderer.invoke('hermes-desktop:browser-get-state'),
     setViewport: (bounds: BrowserBounds, visible: boolean): Promise<DesktopBrowserState> => ipcRenderer.invoke('hermes-desktop:browser-set-viewport', bounds, visible),
     createTab: (url?: string, activate?: boolean): Promise<DesktopBrowserTab> => ipcRenderer.invoke('hermes-desktop:browser-create-tab', url, activate),
