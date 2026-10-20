@@ -190,6 +190,9 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   api_mode: 'TEXT NOT NULL DEFAULT \'\'',
   reasoning_effort: 'TEXT NOT NULL DEFAULT \'\'',
   title: 'TEXT',
+  /** Empty for legacy titles; explicit provenance protects manual and AI titles. */
+  title_origin: "TEXT NOT NULL DEFAULT ''",
+  title_generation_attempts: 'INTEGER NOT NULL DEFAULT 0',
   parent_session_id: 'TEXT',
   fork_point_message_id: 'TEXT',
   started_at: 'INTEGER NOT NULL',

@@ -6,6 +6,12 @@ import { respondToEkkoToolApproval } from '../../packages/server/src/modules/ekk
 import { respondToEkkoClarification } from '../../packages/server/src/modules/ekko/services/clarifications'
 import * as runUsageStore from '../../packages/server/src/modules/studio/repositories/run-usage-store'
 
+const autoTitleSnapshot = vi.hoisted(() => ({ id: 'session-1', history_revision: 0 }))
+const generateEkkoAutoTitleMock = vi.hoisted(() => vi.fn(async (_options: any) => {}))
+vi.mock('../../packages/server/src/modules/studio/services/chat-run/ekko-auto-title', () => ({
+  prepareEkkoAutoTitle: vi.fn(() => autoTitleSnapshot), generateEkkoAutoTitle: generateEkkoAutoTitleMock,
+}))
+
 const saveTaskPlanMock = vi.hoisted(() => vi.fn())
 vi.mock('../../packages/server/src/modules/studio/repositories/task-plan-store', () => ({ saveTaskPlan: saveTaskPlanMock }))
 
@@ -224,6 +230,33 @@ describe('ekko-agent context usage events', () => {
       },
     })
     completeWorkspaceRunCheckpointMock.mockReturnValue(null)
+  })
+
+  it.each([
+    ['normal success', 'A useful answer', 'stop', true],
+    ['empty success', '', 'stop', false],
+    ['reasoning only', '', 'stop', false],
+    ['boundary interrupt', 'Interrupted', 'boundary_interrupt', false],
+    ['max steps', 'Stopped', 'max_steps', false],
+    ['provider error', 'Error text', 'error', false],
+    ['truncated reply', 'Partial', 'length', false],
+  ])('schedules AI titles only for successful output: %s', async (_name, content, finishReason, expected) => {
+    agentRunMock.mockResolvedValueOnce({ runId: 'title-run', output: { content, finishReason, reasoning: _name === 'reasoning only' ? 'Thoughts' : '' }, steps: [], messages: [], events: [] })
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap } = makeHarness()
+    await handleEkkoAgentRun(nsp as any, socket as any, { session_id: 'session-1', input: 'Question', coding_agent_id: 'ekko-agent' }, 'default', sessionMap, vi.fn(() => false))
+    expect(generateEkkoAutoTitleMock).toHaveBeenCalledTimes(expected ? 1 : 0)
+    if (expected) expect(generateEkkoAutoTitleMock).toHaveBeenCalledWith(expect.objectContaining({ snapshot: autoTitleSnapshot, reply: content, replyId: '1', model: 'ekko-test-model', provider: 'test-provider' }))
+  })
+
+  it('does not await the detached title task before completing the foreground run', async () => {
+    generateEkkoAutoTitleMock.mockImplementationOnce(() => new Promise<void>(() => {}))
+    agentRunMock.mockResolvedValueOnce({ runId: 'title-run', output: { content: 'Answer' }, steps: [], messages: [], events: [] })
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap, state } = makeHarness()
+    await handleEkkoAgentRun(nsp as any, socket as any, { session_id: 'session-1', input: 'Question', coding_agent_id: 'ekko-agent' }, 'default', sessionMap, vi.fn(() => false))
+    expect(generateEkkoAutoTitleMock).toHaveBeenCalledOnce()
+    expect(state.isWorking).toBe(false)
   })
 
   it('persists plan snapshots before broadcasting and records update_plan calls in chat history', async () => {
