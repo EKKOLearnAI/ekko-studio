@@ -166,6 +166,8 @@ class AgentSession:
     config: dict[str, Any] = field(default_factory=dict)
     running: bool = False
     current_run_id: str | None = None
+    title_generation: str | None = None
+    title_update: dict[str, Any] | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
     created_at: float = field(default_factory=time.time)
     last_used_at: float = field(default_factory=time.time)
@@ -1788,6 +1790,8 @@ class AgentPool:
             record = RunRecord(run_id=run_id, session_id=session_id)
             with self._lock:
                 self._runs[run_id] = record
+                session.title_generation = run_id
+                session.title_update = None
             session.running = True
             session.current_run_id = run_id
             session.boundary_phase = "model"
@@ -1823,6 +1827,122 @@ class AgentPool:
                 self._fail_unexpected_run(session, record, exc)
                 raise
         return record
+
+    def _maybe_auto_title(
+        self, session: AgentSession, record: RunRecord, title_db: Any,
+        message: Any, final_response: str, history: list[dict[str, Any]],
+    ) -> None:
+        with self._lock:
+            if session.title_generation is None:
+                session.title_generation = record.run_id
+
+        def current_generation() -> bool:
+            return self._sessions.get(session.session_id) is session and session.title_generation == record.run_id
+
+        with self._lock:
+            if not current_generation():
+                return
+        pool = self
+
+        class GenerationDb:
+            # Prevent deferred native title writers from changing a later turn
+            # or a destroyed/recreated session, not just its Studio callback.
+            __wrapped__ = title_db
+
+            def __getattr__(self, name: str) -> Any:
+                target = getattr(title_db, name)
+                if name not in ("set_auto_title", "set_auto_title_if_empty", "set_session_title"):
+                    return target
+
+                def write(*args: Any, **kwargs: Any) -> Any:
+                    with pool._lock:
+                        return target(*args, **kwargs) if current_generation() else False
+                return write
+
+        def title_failure(*_args: Any, **_kwargs: Any) -> None:
+            # Provider exceptions and callback payloads may contain credentials.
+            # Emit only a fixed diagnostic, never their text or runtime config.
+            with self._lock:
+                record.events.append({
+                    "event": "session.title.failed",
+                    "session_id": session.session_id,
+                    "reason": "title_generation_failed",
+                })
+            print("[hermes_bridge] auto-title failed", file=sys.stderr, flush=True)
+
+        def title_callback(title: str, source: str | None = None) -> None:
+            cleaned = str(title or "").strip()
+            if not cleaned:
+                return
+            event = {
+                "event": "session.title.updated",
+                "session_id": session.session_id,
+                "title": cleaned,
+            }
+            # Only known metadata is exposed; arbitrary provider payloads are not.
+            if source in ("derived", "llm", "user"):
+                event["source"] = source
+            with self._lock:
+                if not current_generation():
+                    return
+                event["run_id"] = record.run_id
+                session.title_update = dict(event)
+                record.events.append(event)
+
+        try:
+            from agent import title_generator
+
+            generate = title_generator.maybe_auto_title
+            signature = inspect.signature(generate)
+            parameters = signature.parameters
+            accepts_extra = any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values()
+            )
+            values = {
+                "conversation_history": history,
+                "failure_callback": title_failure,
+                "main_runtime": {
+                    "model": getattr(session.agent, "model", None),
+                    "provider": getattr(session.agent, "provider", None),
+                    "base_url": getattr(session.agent, "base_url", None),
+                    "api_key": getattr(session.agent, "api_key", None),
+                    "api_mode": getattr(session.agent, "api_mode", None),
+                },
+                "title_callback": title_callback,
+            }
+            # Older Hermes consumes the completed assistant response; newer
+            # Hermes removed it. Never guess from a version or retry TypeError.
+            if "assistant_response" in parameters:
+                values["assistant_response"] = final_response
+            args = [GenerationDb(), session.session_id, _title_user_message(message)]
+            kwargs = {}
+            for parameter in list(parameters.values())[3:]:
+                if parameter.kind == inspect.Parameter.POSITIONAL_ONLY:
+                    if parameter.name in values:
+                        args.append(values.pop(parameter.name))
+                    elif parameter.default is not inspect.Parameter.empty:
+                        args.append(parameter.default)
+                    else:
+                        raise ValueError("Unsupported title generator signature")
+            for name, value in values.items():
+                if name in parameters or accepts_extra:
+                    kwargs[name] = value
+            # Validate before invoking: an internal TypeError must not cause a
+            # second model request. Uninspectable/incompatible APIs fail safely.
+            signature.bind(*args, **kwargs)
+            upgrade = generate(*args, **kwargs)
+            # This call is after the turn's model request. New runtimes may
+            # return an unstarted upgrade; old ones may return None or a thread
+            # already running (or finished). Never start the latter twice.
+            if isinstance(upgrade, threading.Thread) and upgrade.ident is None:
+                starter = getattr(title_generator, "start_title_upgrade", None)
+                if callable(starter):
+                    starter(upgrade)
+                else:
+                    upgrade.start()
+        except Exception:
+            title_failure()
 
     def _run_chat(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None) -> None:
         try:
@@ -1993,38 +2113,10 @@ class AgentPool:
                 ).strip()
                 title_db = self._db.get_for_profile(profile)
                 if title_db is not None and final_response and not result.get("failed") and not result.get("partial"):
-                    try:
-                        from agent.title_generator import maybe_auto_title
-
-                        def title_callback(title: str) -> None:
-                            cleaned = str(title or "").strip()
-                            if not cleaned:
-                                return
-                            with self._lock:
-                                record.events.append(_jsonable({
-                                    "event": "session.title.updated",
-                                    "session_id": session.session_id,
-                                    "title": cleaned,
-                                }))
-
-                        maybe_auto_title(
-                            title_db,
-                            session.session_id,
-                            _title_user_message(message),
-                            final_response,
-                            result.get("messages", []) if isinstance(result.get("messages"), list) else [],
-                            failure_callback=getattr(session.agent, "_emit_auxiliary_failure", None),
-                            main_runtime={
-                                "model": getattr(session.agent, "model", None),
-                                "provider": getattr(session.agent, "provider", None),
-                                "base_url": getattr(session.agent, "base_url", None),
-                                "api_key": getattr(session.agent, "api_key", None),
-                                "api_mode": getattr(session.agent, "api_mode", None),
-                            },
-                            title_callback=title_callback,
-                        )
-                    except Exception:
-                        pass
+                    self._maybe_auto_title(
+                        session, record, title_db, message, final_response,
+                        result.get("messages", []) if isinstance(result.get("messages"), list) else [],
+                    )
                 with session.lock:
                     if isinstance(result.get("messages"), list):
                         session.history = result["messages"]
@@ -2483,6 +2575,17 @@ class AgentPool:
     def get_session_title(self, session_id: str, profile: str | None = None) -> dict[str, Any]:
         if not session_id:
             raise ValueError("session_id is required")
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is not None and session.title_update is not None:
+                update = session.title_update
+                return {"session_id": session_id, "title": update["title"],
+                        "run_id": update["run_id"],
+                        **({"source": update["source"]} if "source" in update else {})}
+            if session is not None and session.title_generation is not None:
+                # The current generation has not produced a callback yet. A
+                # native DB value could belong to old history: do not guess.
+                return {"session_id": session_id, "title": "", "run_id": session.title_generation}
         db = self._db.get_for_profile(profile)
         title = None
         if db is not None and hasattr(db, "get_session_title"):
@@ -2490,6 +2593,8 @@ class AgentPool:
                 title = db.get_session_title(session_id)
             except Exception:
                 title = None
+        # Legacy runtimes have no atomic title/source record. Never pair two
+        # separate reads and accidentally label a derived title as final LLM.
         return {"session_id": session_id, "title": str(title or "")}
 
     def dispatch_command(self, session_id: str, command: str, profile: str | None = None) -> dict[str, Any]:

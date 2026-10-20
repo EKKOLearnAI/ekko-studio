@@ -22,7 +22,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/skill-usage-store
 vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () => ({ getRecordedSessionTokensBatch: () => ({}) }))
 import { SESSIONS_SCHEMA, MESSAGES_SCHEMA, TASK_PLANS_SCHEMA, COMPRESSION_SNAPSHOT_SCHEMA } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
 import { clearSessionMessages, createSession, deleteSession, renameSession, updateSession } from '../../packages/server/src/modules/studio/repositories/session-store'
-import { generateEkkoAutoTitle, prepareEkkoAutoTitle } from '../../packages/server/src/modules/studio/services/chat-run/ekko-auto-title'
+import { generateSessionAutoTitle, prepareSessionAutoTitle } from '../../packages/server/src/modules/studio/services/chat-run/session-auto-title'
 
 function row() { return state.db!.prepare('SELECT * FROM sessions WHERE id = ?').get('s') as Record<string, any> | undefined }
 function seed(origin: 'fallback' | 'manual' = 'fallback') {
@@ -35,7 +35,7 @@ function harness() {
   const replyId = seed()
   const client = { capabilities: { streaming: false }, create: vi.fn(async (_request: any) => ({ content: 'Async conversation titles' })) }
   const emit = vi.fn()
-  const options = { snapshot: prepareEkkoAutoTitle('s'), replyId, reply: 'Here is an explanation', provider: 'openai-codex', model: 'test-model', modelClient: client, emit }
+  const options = { snapshot: prepareSessionAutoTitle('s'), replyId, reply: 'Here is an explanation', provider: 'openai-codex', model: 'test-model', modelClient: client, emit }
   return { client, emit, options }
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
@@ -51,11 +51,11 @@ beforeEach(() => {
 })
 afterEach(() => { vi.useRealTimers(); state.db?.close(); state.db = null })
 
-describe('Native Ekko asynchronous AI conversation titles', () => {
+describe('Studio asynchronous AI conversation titles', () => {
   it('uses the session model without tools and persists AI provenance before notifying clients', async () => {
     const { client, emit, options } = harness()
     emit.mockImplementation(() => expect(row()?.title_origin).toBe('ai'))
-    await generateEkkoAutoTitle(options)
+    await generateSessionAutoTitle(options)
     expect(client.create).toHaveBeenCalledWith(expect.objectContaining({ model: 'test-model', tools: [], toolChoice: 'none' }))
     expect(row()?.title).toBe('Async conversation titles')
     expect(row()?.title_generation_attempts).toBe(1)
@@ -63,31 +63,31 @@ describe('Native Ekko asynchronous AI conversation titles', () => {
   })
   it('does not regenerate an AI title', async () => {
     const { client, options } = harness()
-    await generateEkkoAutoTitle(options)
-    await generateEkkoAutoTitle({ ...options, snapshot: prepareEkkoAutoTitle('s') })
+    await generateSessionAutoTitle(options)
+    await generateSessionAutoTitle({ ...options, snapshot: prepareSessionAutoTitle('s') })
     expect(client.create).toHaveBeenCalledTimes(1)
   })
   it('protects explicit manual names even when identical to the fallback', () => {
     seed('manual')
-    expect(prepareEkkoAutoTitle('s')).toBeNull()
+    expect(prepareSessionAutoTitle('s')).toBeNull()
   })
   it('recognizes a legacy first-input fallback', () => {
     seed()
     state.db!.prepare("UPDATE sessions SET title_origin = ''").run()
-    expect(prepareEkkoAutoTitle('s')).not.toBeNull()
+    expect(prepareSessionAutoTitle('s')).not.toBeNull()
     state.db!.prepare("UPDATE sessions SET title = 'Human topic'").run()
-    expect(prepareEkkoAutoTitle('s')).toBeNull()
+    expect(prepareSessionAutoTitle('s')).toBeNull()
   })
   it('does not trigger for group-chat sessions', () => {
     seed()
     state.db!.prepare("UPDATE sessions SET source = 'group_chat'").run()
-    expect(prepareEkkoAutoTitle('s')).toBeNull()
+    expect(prepareSessionAutoTitle('s')).toBeNull()
   })
   it.each(['renamed', 'cleared', 'deleted', 'recreated', 'updated'])('discards pending results after the session is %s', async action => {
     const { client, emit, options } = harness()
     const pending = deferred<{ content: string }>()
     client.create.mockReturnValueOnce(pending.promise)
-    const task = generateEkkoAutoTitle(options)
+    const task = generateSessionAutoTitle(options)
     await vi.waitFor(() => expect(client.create).toHaveBeenCalledOnce())
     if (action === 'renamed') renameSession('s', 'Human title')
     if (action === 'cleared') clearSessionMessages('s')
@@ -103,9 +103,9 @@ describe('Native Ekko asynchronous AI conversation titles', () => {
     const { client, options } = harness()
     const pending = deferred<{ content: string }>()
     client.create.mockReturnValueOnce(pending.promise)
-    const task = generateEkkoAutoTitle(options)
+    const task = generateSessionAutoTitle(options)
     await vi.waitFor(() => expect(client.create).toHaveBeenCalledOnce())
-    await generateEkkoAutoTitle(options)
+    await generateSessionAutoTitle(options)
     pending.resolve({ content: 'One title' })
     await task
     expect(client.create).toHaveBeenCalledOnce()
@@ -113,8 +113,8 @@ describe('Native Ekko asynchronous AI conversation titles', () => {
   it('bounds failures across subsequent turns and sanitizes provider exceptions', async () => {
     const { client, emit, options } = harness()
     client.create.mockRejectedValue(new Error('secret-key echoed-provider-content'))
-    await generateEkkoAutoTitle(options)
-    await generateEkkoAutoTitle(options)
+    await generateSessionAutoTitle(options)
+    await generateSessionAutoTitle(options)
     expect(client.create).toHaveBeenCalledTimes(2)
     expect(row()?.title_generation_attempts).toBe(2)
     expect(emit).not.toHaveBeenCalled()
@@ -123,21 +123,21 @@ describe('Native Ekko asynchronous AI conversation titles', () => {
   it.each(['', 'line one\nline two', 'x'.repeat(101)])('rejects malformed title output %j', async content => {
     const { client, emit, options } = harness()
     client.create.mockResolvedValue({ content })
-    await generateEkkoAutoTitle(options)
+    await generateSessionAutoTitle(options)
     expect(row()?.title_origin).toBe('fallback')
     expect(emit).not.toHaveBeenCalled()
   })
   it('accepts a streamed response and strips wrapping quotes', async () => {
     const { emit, options } = harness()
     const client = { capabilities: { streaming: true }, async *stream() { yield { type: 'text-delta', text: '“Streaming title”' }; yield { type: 'done' } } }
-    await generateEkkoAutoTitle({ ...options, modelClient: client })
+    await generateSessionAutoTitle({ ...options, modelClient: client })
     expect(row()?.title).toBe('Streaming title')
     expect(emit).toHaveBeenCalledOnce()
   })
   it('does not write a tool-call response as a title', async () => {
     const { emit, options } = harness()
     const client = { capabilities: { streaming: true }, async *stream() { yield { type: 'tool-call', toolCall: { name: 'bad' } } } }
-    await generateEkkoAutoTitle({ ...options, modelClient: client })
+    await generateSessionAutoTitle({ ...options, modelClient: client })
     expect(emit).not.toHaveBeenCalled()
   })
   it('resolves explicit auxiliary providers through authorized runtime configuration', async () => {
@@ -145,7 +145,7 @@ describe('Native Ekko asynchronous AI conversation titles', () => {
     const { client, options } = harness()
     const auxiliary = { create: vi.fn(async () => ({ content: 'Auxiliary title' })) }
     createClient.mockReturnValue(auxiliary)
-    await generateEkkoAutoTitle(options)
+    await generateSessionAutoTitle(options)
     expect(client.create).not.toHaveBeenCalled()
     expect(resolveRuntime).toHaveBeenCalledWith(expect.objectContaining({ profile: 'p', provider: 'custom:title', model: 'title-model' }))
     expect(resolveRuntime.mock.calls[0][0].apiKey).toBeUndefined()
@@ -156,7 +156,7 @@ describe('Native Ekko asynchronous AI conversation titles', () => {
     readConfig.mockResolvedValue({ auxiliary: { title_generation: { provider: 'disabled', model: 'title-model' } } })
     resolveRuntime.mockRejectedValue(new Error('disabled secret-key'))
     const { client, options } = harness()
-    await generateEkkoAutoTitle(options)
+    await generateSessionAutoTitle(options)
     expect(client.create).not.toHaveBeenCalled()
     expect(createClient).not.toHaveBeenCalled()
     expect(JSON.stringify(warn.mock.calls)).not.toContain('secret-key')
@@ -167,7 +167,7 @@ describe('Native Ekko asynchronous AI conversation titles', () => {
     const { client, emit, options } = harness()
     const pending = deferred<{ content: string }>()
     client.create.mockReturnValue(pending.promise)
-    const task = generateEkkoAutoTitle(options)
+    const task = generateSessionAutoTitle(options)
     await vi.advanceTimersByTimeAsync(2100)
     await task
     expect(client.create).toHaveBeenCalledTimes(2)
@@ -178,10 +178,52 @@ describe('Native Ekko asynchronous AI conversation titles', () => {
   })
   it('does not consume attempts for empty replies or missing assistant anchors', async () => {
     const { client, options } = harness()
-    await generateEkkoAutoTitle({ ...options, reply: ' ' })
-    await generateEkkoAutoTitle({ ...options, replyId: null })
-    await generateEkkoAutoTitle({ ...options, replyId: '99999' })
+    await generateSessionAutoTitle({ ...options, reply: ' ' })
+    await generateSessionAutoTitle({ ...options, replyId: null })
+    await generateSessionAutoTitle({ ...options, replyId: '99999' })
     expect(client.create).not.toHaveBeenCalled()
     expect(row()?.title_generation_attempts).toBe(0)
   })
+  it.each(['codex', 'claude-code', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi'])('uses the Studio Profile model for %s, not CLI-native model IDs', async agent => {
+    readConfig.mockResolvedValue({ model: { provider: 'openai-codex', default: 'studio-title-model' } })
+    const { client, options } = harness()
+    state.db!.prepare("UPDATE sessions SET agent = ?, source = 'coding_agent', model = 'cli-native-only'").run(agent)
+    const auxiliary = { create: vi.fn(async () => ({ content: 'Cross-agent title' })) }
+    createClient.mockReturnValue(auxiliary)
+    await generateSessionAutoTitle({ ...options, snapshot: prepareSessionAutoTitle('s'), modelClient: undefined, provider: undefined, model: undefined })
+    expect(resolveRuntime).toHaveBeenCalledWith(expect.objectContaining({ profile: 'p', provider: 'openai-codex', model: 'studio-title-model' }))
+    expect(client.create).not.toHaveBeenCalled()
+    expect(row()?.title_origin).toBe('ai')
+  })
+
+  it.each([{ enabled: false }, { model_upgrade_enabled: false }])('honors disabled auxiliary title settings without consuming attempts: %j', async setting => {
+    readConfig.mockResolvedValue({ auxiliary: { title_generation: setting } })
+    const { client, options } = harness()
+    await generateSessionAutoTitle(options)
+    expect(client.create).not.toHaveBeenCalled()
+    expect(row()?.title_generation_attempts).toBe(0)
+  })
+
+  it('leaves CLI titles unchanged if no Studio title/default model is configured', async () => {
+    const { client, emit, options } = harness()
+    state.db!.prepare("UPDATE sessions SET agent = 'codex', source = 'coding_agent'").run()
+    await generateSessionAutoTitle({ ...options, snapshot: prepareSessionAutoTitle('s'), modelClient: undefined, provider: undefined, model: undefined })
+    expect(client.create).not.toHaveBeenCalled()
+    expect(row()?.title_generation_attempts).toBe(0)
+    expect(emit).not.toHaveBeenCalled()
+  })
+
+  it('does not apply a title after the session agent changes during generation', async () => {
+    const { client, emit, options } = harness()
+    const pending = deferred<{ content: string }>()
+    client.create.mockReturnValueOnce(pending.promise)
+    const task = generateSessionAutoTitle(options)
+    await vi.waitFor(() => expect(client.create).toHaveBeenCalledOnce())
+    state.db!.prepare("UPDATE sessions SET agent = 'codex', source = 'coding_agent'").run()
+    pending.resolve({ content: 'Wrong agent title' })
+    await task
+    expect(row()?.title_origin).toBe('fallback')
+    expect(emit).not.toHaveBeenCalled()
+  })
+
 })

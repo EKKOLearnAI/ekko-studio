@@ -4,6 +4,7 @@ import { extractTextForPreview } from '../../packages/server/src/modules/studio/
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getFirstSessionMessageByRole: vi.fn(),
+  getSessionMessageCountByRole: vi.fn(),
   updateSession: vi.fn(),
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   bridgeLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   getSession: mocks.getSession,
   getFirstSessionMessageByRole: mocks.getFirstSessionMessageByRole,
+  getSessionMessageCountByRole: mocks.getSessionMessageCountByRole,
   updateSession: mocks.updateSession,
 }))
 
@@ -23,6 +25,7 @@ vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({
 describe('syncBridgeGeneratedTitle', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    mocks.getSessionMessageCountByRole.mockReturnValue(1)
     mocks.getSession.mockReturnValue({
       id: 'session-1',
       source: 'cli',
@@ -86,4 +89,43 @@ describe('syncBridgeGeneratedTitle', () => {
     expect(syncBridgeGeneratedTitle('session-1', 'Notes summary', vi.fn())).toBe(true)
     expect(mocks.updateSession).toHaveBeenCalledWith('session-1', expect.objectContaining({ title: 'Notes summary' }))
   })
+  it.each(['manual', 'ai'])('protects explicit %s provenance even when the text equals the first input', async title_origin => {
+    mocks.getSession.mockReturnValue({ id: 'session-1', source: 'cli', title: '帮忙检查并扩充该笔记。', title_origin })
+    const { syncBridgeGeneratedTitle } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    expect(syncBridgeGeneratedTitle('session-1', 'Replacement', vi.fn(), 'llm')).toBe(false)
+    expect(mocks.updateSession).not.toHaveBeenCalled()
+  })
+
+  it('upgrades a derived title to LLM provenance instead of treating it as a manual name', async () => {
+    mocks.getSession.mockReturnValue({ id: 'session-1', source: 'cli', title: 'A derived topic', title_origin: 'fallback' })
+    const { syncBridgeGeneratedTitle } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    expect(syncBridgeGeneratedTitle('session-1', 'A derived topic', vi.fn(), 'llm')).toBe(true)
+    expect(mocks.updateSession).toHaveBeenCalledWith('session-1', expect.objectContaining({ title_origin: 'ai' }))
+  })
+
+  it('keeps polling past an instant derived title to receive the delayed LLM upgrade on turn three', async () => {
+    mocks.getSessionMessageCountByRole.mockReturnValue(3)
+    const session = { id: 'session-1', source: 'cli', profile: 'p', agent: '', history_revision: 0, title: '', title_origin: 'fallback' }
+    mocks.getSession.mockImplementation(() => ({ ...session }))
+    mocks.getFirstSessionMessageByRole.mockReturnValue({ id: 10, content: 'Explain async titles' })
+    mocks.updateSession.mockImplementation((_id, patch) => Object.assign(session, patch))
+    const bridge = { getSessionTitle: vi.fn().mockResolvedValueOnce({ title: 'Stale summary', source: 'llm', run_id: 'old-run' }).mockResolvedValueOnce({ title: 'Instant slice', source: 'derived', run_id: 'current-run' }).mockResolvedValueOnce({ title: 'LLM summary', source: 'llm', run_id: 'current-run' }) }
+    const { pollBridgeGeneratedTitleAfterRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await pollBridgeGeneratedTitleAfterRun(bridge as any, 'session-1', 'p', vi.fn(), 'current-run')
+    expect(bridge.getSessionTitle).toHaveBeenCalledTimes(3)
+    expect(mocks.updateSession).not.toHaveBeenCalledWith('session-1', expect.objectContaining({ title: 'Stale summary' }))
+    expect(session.title).toBe('LLM summary')
+    expect(session.title_origin).toBe('ai')
+  })
+
+  it('discards a poll result when history was cleared while the request was pending', async () => {
+    const session = { id: 'session-1', source: 'cli', profile: 'p', agent: '', history_revision: 0, title: '', title_origin: 'fallback' }
+    mocks.getSession.mockImplementation(() => ({ ...session }))
+    mocks.getFirstSessionMessageByRole.mockReturnValue({ id: 10, content: 'First input' })
+    const bridge = { getSessionTitle: vi.fn(async () => { session.history_revision++; return { title: 'Old history title', source: 'llm' } }) }
+    const { pollBridgeGeneratedTitleAfterRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await pollBridgeGeneratedTitleAfterRun(bridge as any, 'session-1', 'p', vi.fn())
+    expect(mocks.updateSession).not.toHaveBeenCalled()
+  })
+
 })

@@ -1,3 +1,4 @@
+import { generateSessionAutoTitle, prepareSessionAutoTitle, type SessionTitleSnapshot } from '../../../studio/public/session-titles'
 import { startOpenCodeTurn as startOpenCodeTurnProcess } from '../opencode/chat-turn'
 import { applyOpenCodeLine } from '../opencode/event-adapter'
 import type { OpenCodeTurnHost } from '../opencode/turn-host'
@@ -233,6 +234,7 @@ export interface ManagedCodingAgentRun {
   memoryExportStarted?: boolean
   nativeCompactCommandActive?: boolean
   assistantMessageId?: string
+  titleSnapshot?: SessionTitleSnapshot | null
   piDetachJsonl?: () => void
   piToolBlocks?: Map<string, { id: string; name: string; arguments: string; done: boolean }>
   piPendingError?: string
@@ -900,6 +902,7 @@ export class CodingAgentRunManager {
     this.ensureDbSession(run)
     run.assistantMessageId = undefined
     const messageId = this.addUserMessage(run, options.storageInput ?? text)
+    run.titleSnapshot = prepareSessionAutoTitle(run.launch.sessionId)
     run.usageRunId = `${run.id}:turn:${messageId ?? Date.now()}`
     run.usageStartedAt = performance.now()
     run.usageDurationSeconds = undefined
@@ -1496,6 +1499,7 @@ export class CodingAgentRunManager {
       reasoning_effort: run.launch.reasoningEffort || '',
       agent_preset: run.launch.agentPreset || '',
       title: '',
+      title_origin: 'fallback',
       workspace: run.launch.workspaceDir,
     })
   }
@@ -3724,7 +3728,18 @@ export class CodingAgentRunManager {
     run.state.abortController = undefined
     run.state.activeRunMarker = undefined
     run.state.events = []
-    if (event === 'run.completed') this.startCodingAgentMemoryExport(run)
+    if (event === 'run.completed') {
+      if (!run.state.isAborting && run.titleSnapshot && run.assistantMessageId && typeof payload?.output === 'string' && payload.output.trim()) {
+        void generateSessionAutoTitle({
+          snapshot: run.titleSnapshot ?? null,
+          replyId: run.assistantMessageId || null,
+          reply: payload.output,
+          emit: (titleEvent, titlePayload) => this.emitToChat(run.launch.sessionId, titleEvent, titlePayload),
+        })
+      }
+      this.startCodingAgentMemoryExport(run)
+    }
+    run.titleSnapshot = undefined
     run.runMarker = undefined
     if (run.launch.agentId === 'pi' || run.disposeAfterTurn) {
       this.cleanupRun(run, { kill: true, reportClosed: false })

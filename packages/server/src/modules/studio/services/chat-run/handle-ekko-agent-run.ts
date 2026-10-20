@@ -1,4 +1,4 @@
-import { generateEkkoAutoTitle, prepareEkkoAutoTitle } from './ekko-auto-title'
+import { generateSessionAutoTitle, prepareSessionAutoTitle } from './session-auto-title'
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
@@ -631,7 +631,7 @@ export async function handleEkkoAgentRun(
     })
   }
 
-  const autoTitleSnapshot = prepareEkkoAutoTitle(sessionId)
+  const autoTitleSnapshot = prepareSessionAutoTitle(sessionId)
 
   const { providerConfig, fallbackProviderConfig } = resolveModelProviderConfigs({
     provider: modelConfig.provider,
@@ -1665,7 +1665,7 @@ export async function handleEkkoAgentRun(
     if (!boundaryInterrupted && !abortController.signal.aborted &&
       !['error', 'max_steps', 'tool_calls', 'length', 'content_filter'].includes(result.output.finishReason || '') &&
       !result.output.toolCalls?.length && String(result.output.content || '').trim()) {
-      void generateEkkoAutoTitle({
+      void generateSessionAutoTitle({
         snapshot: autoTitleSnapshot, replyId: assistantMessageId, reply: assistantText,
         model: modelConfig.model, provider: modelConfig.provider, modelClient, emit,
       })

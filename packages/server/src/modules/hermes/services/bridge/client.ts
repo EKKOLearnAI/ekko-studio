@@ -117,6 +117,8 @@ export interface AgentBridgeBoundaryInterrupt extends AgentBridgeResponse {
 export interface AgentBridgeSessionTitle extends AgentBridgeResponse {
   session_id: string
   title: string
+  run_id?: string
+  source?: string
 }
 
 export interface AgentBridgeContextEstimate extends AgentBridgeResponse {

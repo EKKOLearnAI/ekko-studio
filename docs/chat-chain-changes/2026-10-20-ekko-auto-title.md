@@ -1,20 +1,34 @@
-# Native Ekko AI conversation titles
+# Studio AI conversation titles across Agent runtimes
 
 ## Problem
 
-Native Ekko direct chats initialize a title from the first user input but do not schedule an AI title request after a successful answer. Hermes bridge runs have a separate title-generation path, which native Ekko never executes.
+Native Ekko and external coding-agent completion paths did not schedule Studio AI titles. Hermes had its own producer, but the bridge used a removed positional argument, accepted only a one-argument callback, swallowed failures, and stopped polling after the first nonempty derived placeholder.
 
-## Changes
+## Studio contract
 
-- Schedule tool-free title generation after a successful, nonempty native Ekko reply without awaiting it in the foreground completion path.
-- Reuse the authorized session model client in automatic mode. Resolve explicitly configured auxiliary providers through the existing authorized provider runtime, without carrying the session provider's credentials into another provider.
-- Track fallback/manual/AI provenance and a persistent two-attempt budget through the Studio-owned schema synchronizer.
-- Protect explicit renames, history clears, deletion/recreation, and concurrent turns with history revisions, message anchors, and conditional title updates.
-- Publish the existing `session.title.updated` event only after a successful write.
-- Bound request deadlines and log sanitized failure reasons rather than provider exceptions or prompts.
+| Runtime | Producer | Automatic model selection |
+| --- | --- | --- |
+| Native Ekko | Shared Studio title service | Reuse the authorized session model client |
+| Codex, Claude Code, Pi, Grok and other external coding runtimes | Shared Studio title service after a successful persisted turn | Profile default model, never assume CLI-native model IDs or credentials are HTTP-compatible |
+| Hermes bridge | Hermes native generator, adapted to old/new signatures | Hermes auxiliary title settings; Studio must not issue a duplicate generation request |
+
+Explicit auxiliary provider/model selections go through the existing authorized runtime resolver. The enabled/model-upgrade switches are honored. Group-chat rooms and workflow node names keep their separate naming policies.
+
+## Safety and synchronization
+
+- Native/CLI title requests are detached from foreground completion, tool-free, deadline-bound, deduplicated, and limited to two persisted attempts.
+- Studio-owned schema synchronization adds title provenance and an attempt budget. Conditional updates protect manual/AI titles using exact Agent/source identity, history revision and message anchors.
+- Hermes compatibility is detected with `inspect.signature`, not version guesses or retrying an internal `TypeError`. Both `(title)` and `(title, source)` callbacks are accepted, and unstarted native upgrade threads are started once after the main turn.
+- Hermes generations are bound to a run and session identity. A guarded native title DB proxy blocks obsolete producers; callbacks and polling carry the producer run ID.
+- Polling reads an atomic cached callback record rather than pairing independent title/source reads. Legacy native database titles have no claimed AI provenance.
+- Derived placeholders remain replaceable while Studio polls for the final LLM upgrade. Renames, clears, recreation and stale generations invalidate writes.
+- Provider exceptions, keys and prompts are not included in failure logs.
 
 ## Validation
 
-The focused service and foreground-run regression suites cover asynchronous completion, provider selection, streaming output, bounded retries, deadlines, title provenance, and stale-write races. Real-model service smoke tests also generated and persisted AI titles through the configured Codex Responses provider.
+- 263 related Vitest tests passed, including Agent completion, title policy, Hermes polling, and queue regressions.
+- 20 Python compatibility/provenance/generation tests passed without requiring an installed Hermes or external provider.
+- Repository harness, service TypeScript checking and server bundle build passed with isolated build dependencies.
+- Real-model title-service checks generated and persisted AI titles for five synthetic completed histories (Ekko, Codex, Claude Code, Pi and Grok) in an isolated database. These validate the real shared producer, not five real CLI process end-to-end runs.
 
-A separate HTTP chat-run end-to-end attempt is not claimed as passed: after correcting its missing `apiMode`, the endpoint returned a Socket.IO authentication failure before a run could start. This is independent of the title-service regression coverage.
+The separate HTTP chat-run transport authentication issue observed during an earlier acceptance attempt is not claimed fixed by this title change.

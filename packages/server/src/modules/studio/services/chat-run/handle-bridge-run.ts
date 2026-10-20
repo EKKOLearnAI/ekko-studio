@@ -157,6 +157,8 @@ function addTitleVariants(variants: Set<string>, text: string): void {
 function isReplaceableLocalTitle(sessionId: string): boolean {
   const session = getSession(sessionId)
   if (!session) return false
+  if (session.title_origin === 'manual' || session.title_origin === 'ai') return false
+  if (session.title_origin === 'fallback' || session.title_origin === 'bridge') return true
   const current = normalizeTitleText(session.title)
   if (!current) return true
   const variants = new Set<string>([''])
@@ -178,7 +180,7 @@ function isBridgeSessionSource(source?: string | null): boolean {
   return source === 'cli' || source === 'global_agent'
 }
 
-export function syncBridgeGeneratedTitle(sessionId: string, title: unknown, emit: (event: string, payload: any) => void): boolean {
+export function syncBridgeGeneratedTitle(sessionId: string, title: unknown, emit: (event: string, payload: any) => void, source?: unknown): boolean {
   const nextTitle = normalizeTitleText(title)
   if (!nextTitle) return false
   const session = getSession(sessionId)
@@ -187,9 +189,11 @@ export function syncBridgeGeneratedTitle(sessionId: string, title: unknown, emit
     logger.info('[chat-run-socket] skipped Hermes generated title for manually titled session %s', sessionId)
     return false
   }
-  if (normalizeTitleText(session.title) === nextTitle) return false
+  const origin = source === 'derived' ? 'fallback' : source === 'llm' || source === 'ai' ? 'ai' : source === 'user' ? 'manual' : 'bridge'
+  if (normalizeTitleText(session.title) === nextTitle && session.title_origin === origin) return false
   updateSession(sessionId, {
     title: nextTitle,
+    title_origin: origin,
     last_active: Math.floor(Date.now() / 1000),
   } as any)
   emit('session.title.updated', {
@@ -204,7 +208,7 @@ function shouldPollBridgeGeneratedTitle(sessionId: string): boolean {
   const session = getSession(sessionId)
   if (!session || !isBridgeSessionSource(session.source)) return false
   const userMessageCount = getSessionMessageCountByRole(sessionId, 'user')
-  return userMessageCount <= 2 && isReplaceableLocalTitle(sessionId)
+  return userMessageCount <= 3 && isReplaceableLocalTitle(sessionId)
 }
 
 function looksLikeAgentFailure(value: string): boolean {
@@ -902,7 +906,7 @@ export async function handleBridgeRun(
       )
       if (chunk.done) {
         sawTerminalChunk = true
-        void pollBridgeGeneratedTitleAfterRun(bridge, session_id, profile, emit)
+        void pollBridgeGeneratedTitleAfterRun(bridge, session_id, profile, emit, started.run_id)
         break
       }
     }
@@ -1344,7 +1348,9 @@ async function applyBridgeChunkAsync(
     } else if (evType === 'model.usage') {
       recordBridgeModelUsage(sessionId, chunk.run_id, ev, profile, modelContext)
     } else if (evType === 'session.title.updated') {
-      syncBridgeGeneratedTitle(sessionId, (ev as any).title, emit)
+      if (!(ev as any).run_id || (ev as any).run_id === chunk.run_id) {
+        syncBridgeGeneratedTitle(sessionId, (ev as any).title, emit, (ev as any).source)
+      }
     } else if (evType === 'bridge.context.ready') {
       cacheBridgeContext(state, ev, workspace)
       const usage = await calcAndUpdateUsage(sessionId, state, emit)
@@ -1931,26 +1937,38 @@ async function applyBridgeChunkAsync(
   }
 }
 
-async function pollBridgeGeneratedTitleAfterRun(
+export async function pollBridgeGeneratedTitleAfterRun(
   bridge: AgentBridgeClient,
   sessionId: string,
   profile: string,
   emit: (event: string, payload: any) => void,
+  expectedRunId?: string,
 ) {
   if (!shouldPollBridgeGeneratedTitle(sessionId)) return
+  const original = getSession(sessionId)
+  const firstUserId = getFirstSessionMessageByRole(sessionId, 'user')?.id
   const deadline = Date.now() + BRIDGE_TITLE_EVENT_POLL_TIMEOUT_MS
   while (Date.now() < deadline) {
     await delay(BRIDGE_TITLE_EVENT_POLL_INTERVAL_MS)
-    let title = ''
+    if (!shouldPollBridgeGeneratedTitle(sessionId)) return
+    const current = getSession(sessionId)
+    if (!current || !original || current.profile !== original.profile || current.agent !== original.agent ||
+      current.history_revision !== original.history_revision || getFirstSessionMessageByRole(sessionId, 'user')?.id !== firstUserId) return
     try {
       const result = await bridge.getSessionTitle(sessionId, profile, { timeoutMs: 2000 })
-      title = normalizeTitleText(result.title)
-    } catch (err) {
-      logger.debug(err, '[chat-run-socket] stopped polling bridge generated title for session %s', sessionId)
-      return
-    }
-    if (title) {
-      syncBridgeGeneratedTitle(sessionId, title, emit)
+      if (expectedRunId && result.run_id && result.run_id !== expectedRunId) continue
+      if (expectedRunId && !result.run_id && original.history_revision > 0) continue
+      const latest = getSession(sessionId)
+      if (!latest || latest.profile !== original.profile || latest.agent !== original.agent ||
+        latest.history_revision !== original.history_revision || getFirstSessionMessageByRole(sessionId, 'user')?.id !== firstUserId) return
+      const title = normalizeTitleText(result.title)
+      if (!title) continue
+      syncBridgeGeneratedTitle(sessionId, title, emit, result.source)
+      // A nonempty derived title is only a placeholder, not proof the LLM
+      // upgrade has finished. Keep polling; never return on the first slice.
+      if (result.source === 'llm' || result.source === 'user' || result.source === 'ai') return
+    } catch {
+      logger.debug({ sessionId }, '[chat-run-socket] stopped polling bridge generated title')
       return
     }
   }

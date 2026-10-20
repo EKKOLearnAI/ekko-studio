@@ -9,12 +9,12 @@ import {
   type ChatModelRequest,
 } from '../../public/chat-agent-runtime'
 import {
-  applyEkkoGeneratedTitle,
-  claimEkkoTitleAttempt,
-  isEkkoTitleSnapshotCurrent,
-  readEkkoTitleSnapshot,
-  type EkkoTitleSnapshot,
-} from '../../repositories/ekko-title-store'
+  applySessionGeneratedTitle,
+  claimSessionTitleAttempt,
+  isSessionTitleSnapshotCurrent,
+  readSessionTitleSnapshot,
+  type SessionTitleSnapshot,
+} from '../../repositories/session-title-store'
 
 const inFlight = new Set<string>()
 const normalize = (value: string) => value.replace(/\s+/g, ' ').trim()
@@ -30,9 +30,9 @@ function userText(content: string): string {
 }
 
 /** Capture before running the model, so history clears during a run invalidate it. */
-export function prepareEkkoAutoTitle(sessionId: string): EkkoTitleSnapshot | null {
+export function prepareSessionAutoTitle(sessionId: string): SessionTitleSnapshot | null {
   try {
-    const snapshot = readEkkoTitleSnapshot(sessionId)
+    const snapshot = readSessionTitleSnapshot(sessionId)
     if (!snapshot) return null
     if (snapshot.title_origin === 'fallback' || !snapshot.title?.trim()) return snapshot
     // Legacy sessions have no provenance. Only the exact old first-input
@@ -41,7 +41,7 @@ export function prepareEkkoAutoTitle(sessionId: string): EkkoTitleSnapshot | nul
     return variants.some(text => normalize(text.replace(/[\r\n]/g, ' ').slice(0, 100)) === normalize(snapshot.title!))
       ? snapshot : null
   } catch {
-    logger.warn({ sessionId, reason: 'snapshot_failed' }, '[ekko-auto-title] skipped')
+    logger.warn({ sessionId, reason: 'snapshot_failed' }, '[session-auto-title] skipped')
     return null
   }
 }
@@ -90,47 +90,52 @@ async function titleText(client: ChatModelClient, request: ChatModelRequest): Pr
   return title
 }
 
-export interface EkkoAutoTitleOptions {
-  snapshot: EkkoTitleSnapshot | null
+export interface SessionAutoTitleOptions {
+  snapshot: SessionTitleSnapshot | null
   replyId: string | null
   reply: string
-  model: string
-  provider: string
-  modelClient: ChatModelClient
+  model?: string
+  provider?: string
+  modelClient?: ChatModelClient
   emit: (event: string, payload: Record<string, unknown>) => void
 }
 
-/** Detached from the foreground run; no tools, memory, skills or Hermes bridge. */
-export async function generateEkkoAutoTitle(options: EkkoAutoTitleOptions): Promise<void> {
+/** Shared Studio title producer for native Ekko and external CLI sessions.
+ * CLI-native model IDs/credentials are never assumed to be HTTP model clients:
+ * without a supplied session client, auto selection uses the Profile default. */
+export async function generateSessionAutoTitle(options: SessionAutoTitleOptions): Promise<void> {
   const { snapshot, replyId } = options
   if (!snapshot || !replyId || !options.reply.trim()) return
-  const flightKey = `${snapshot.id}:${snapshot.first_user_id}:${snapshot.history_revision}`
+  const flightKey = `${snapshot.profile}:${snapshot.id}:${snapshot.first_user_id}:${snapshot.history_revision}`
   if (inFlight.has(flightKey)) return
   inFlight.add(flightKey)
   try {
+    const config = await withDeadline(30_000, () => readConfigYamlForProfile(snapshot.profile))
+    const raw = config?.auxiliary?.title_generation
+    const settings = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+    if (settings.enabled === false || settings.model_upgrade_enabled === false) return
+    const configuredProvider = String(settings.provider || '').trim()
+    const auto = !configuredProvider || configuredProvider === 'auto'
+    const useSessionClient = auto && !!options.modelClient && !!options.model && !!options.provider
+    const main = config?.model
+    const mainProvider = String(typeof main === 'object' ? main?.provider || '' : '').trim()
+    const mainModel = String(typeof main === 'string' ? main : main?.default || '').trim()
+    const provider = useSessionClient ? options.provider! : auto || configuredProvider === 'main'
+      ? mainProvider || options.provider || '' : configuredProvider
+    const model = useSessionClient ? options.model! : auto || configuredProvider === 'main'
+      ? mainModel || options.model || '' : String(settings.model || '').trim()
+    if (!provider || !model) {
+      logger.warn({ sessionId: snapshot.id, reason: 'title_configuration_invalid' }, '[session-auto-title] skipped')
+      return
+    }
+    const seconds = Number(settings.timeout)
+    const timeoutMs = Number.isFinite(seconds) && seconds > 0 ? Math.min(120, Math.max(1, seconds)) * 1_000 : 30_000
     for (let attempt = 1; attempt <= 2; attempt++) {
-      if (!claimEkkoTitleAttempt(snapshot, replyId)) return
+      if (!claimSessionTitleAttempt(snapshot, replyId)) return
       try {
-        const config = await withDeadline(30_000, () => readConfigYamlForProfile(snapshot.profile))
-        const raw = config?.auxiliary?.title_generation
-        const settings = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
-        const configuredProvider = String(settings.provider || '').trim()
-        const auto = !configuredProvider || configuredProvider === 'auto'
-        const main = config?.model
-        const provider = auto ? options.provider : configuredProvider === 'main'
-          ? String(typeof main === 'object' ? main?.provider || options.provider : options.provider).trim()
-          : configuredProvider
-        const model = auto ? options.model : configuredProvider === 'main'
-          ? String(typeof main === 'string' ? main : main?.default || options.model).trim()
-          : String(settings.model || '').trim()
-        if (!provider || !model) throw new Error('title_configuration_invalid')
-        const seconds = Number(settings.timeout)
-        const timeoutMs = Number.isFinite(seconds) && seconds > 0 ? Math.min(120, Math.max(1, seconds)) * 1_000 : 30_000
         const title = await withDeadline(timeoutMs, async signal => {
-          let client = options.modelClient
-          if (!auto) {
-            // Do not carry the conversation's key or URL into a different provider.
-            // This resolver enforces provider availability and authorized OAuth routing.
+          let client = useSessionClient ? options.modelClient : undefined
+          if (!client) {
             const runtime = await resolveChatEkkoProviderRuntimeConfig({
               profile: snapshot.profile, provider, model,
               baseUrl: typeof settings.base_url === 'string' ? settings.base_url : undefined,
@@ -146,7 +151,7 @@ export async function generateEkkoAutoTitle(options: EkkoAutoTitleOptions): Prom
               }),
             })
           }
-          if (signal.aborted || !isEkkoTitleSnapshotCurrent(snapshot, replyId)) return null
+          if (signal.aborted || !isSessionTitleSnapshotCurrent(snapshot, replyId)) return null
           return titleText(client, {
             model, signal, tools: [], toolChoice: 'none', maxTokens: 1_024, reasoningEffort: 'low',
             messages: [
@@ -155,20 +160,19 @@ export async function generateEkkoAutoTitle(options: EkkoAutoTitleOptions): Prom
             ],
           })
         })
-        if (!title || !applyEkkoGeneratedTitle(snapshot, replyId, title)) return
+        if (!title || !applySessionGeneratedTitle(snapshot, replyId, title)) return
         options.emit('session.title.updated', { event: 'session.title.updated', session_id: snapshot.id, title })
-        logger.info({ sessionId: snapshot.id }, '[ekko-auto-title] generated')
+        logger.info({ sessionId: snapshot.id, agent: snapshot.agent }, '[session-auto-title] generated')
         return
       } catch (error) {
-        // Provider exceptions can contain URLs, headers, keys or echoed prompts.
-        // Never log the exception or expose it to the foreground run.
-        const reason = error instanceof Error && ['title_timeout', 'title_response_invalid', 'title_configuration_invalid'].includes(error.message)
+        // Provider errors can contain keys or echoed prompts; expose only categories.
+        const reason = error instanceof Error && ['title_timeout', 'title_response_invalid'].includes(error.message)
           ? error.message : 'request_failed'
-        logger.warn({ sessionId: snapshot.id, attempt, reason }, '[ekko-auto-title] attempt failed')
+        logger.warn({ sessionId: snapshot.id, attempt, reason }, '[session-auto-title] attempt failed')
       }
     }
   } catch {
-    logger.warn({ sessionId: snapshot.id, reason: 'storage_failed' }, '[ekko-auto-title] skipped')
+    logger.warn({ sessionId: snapshot.id, reason: 'configuration_or_storage_failed' }, '[session-auto-title] skipped')
   } finally {
     inFlight.delete(flightKey)
   }
