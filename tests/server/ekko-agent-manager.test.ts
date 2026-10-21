@@ -98,7 +98,11 @@ function modelClient(content: string): ModelClient {
 }
 
 describe('GlobalEkkoAgent', () => {
+  // Several real runtimes and disk snapshots need a bounded coverage-CI budget.
   it('passes current Profile JEV settings to Ekko without overwriting its persisted defaults', async () => {
+    // Configuration propagation uses fake model clients, never a live JEV endpoint.
+    const unexpectedUpstream = vi.fn(async () => { throw new Error('Unexpected network request in Profile JEV config test') })
+    vi.stubGlobal('fetch', unexpectedUpstream)
     const setup = createTestSetup(['work', 'personal'])
     setup.config.update({ skills: { enabled: false }, jev: { enabled: true, memoryEnabled: true, skillsEnabled: true, apiKey: 'ekko-local-key' } })
     const before = await readFile(setup.layout.configPath, 'utf8')
@@ -147,7 +151,8 @@ describe('GlobalEkkoAgent', () => {
     expect(workRuntime.jev.available).toBe(false)
     expect(workRuntime.jev.settings.memoryEnabled).toBe(false)
     expect(await readFile(setup.layout.configPath, 'utf8')).toBe(before)
-  })
+    expect(unexpectedUpstream).not.toHaveBeenCalled()
+  }, 15_000)
 
   it('passes Profile JEV settings into isolated runs and degrades config read failures', async () => {
     const setup = createTestSetup(['work'])
