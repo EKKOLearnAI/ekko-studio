@@ -110,7 +110,12 @@ export function parseSessionCommand(input: string | ContentBlock[]): ParsedSessi
   if (typeof input !== 'string') return null
   const trimmed = input.trim()
   if (!trimmed.startsWith('/')) return null
-  const match = trimmed.match(/^\/([a-zA-Z][\w-]*)(?:\s+([\s\S]*))?$/)
+  // The separator between the command name and its argument must not require
+  // ASCII whitespace: CJK IMEs emit full-width punctuation by default, and
+  // `/steer：do it` must stay a command rather than being forwarded to the agent
+  // as plain text. `[\s:：、,，]*` also makes the separator optional so that
+  // `/steerdo it` still resolves to `steer` + `do it`.
+  const match = trimmed.match(/^\/([a-zA-Z][\w-]*)[\s:：、,，]*([\s\S]*)$/)
   if (!match) return null
   const rawName = match[1].toLowerCase()
   const name = COMMAND_ALIASES[rawName]
