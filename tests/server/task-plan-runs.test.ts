@@ -113,6 +113,7 @@ describe('shared MCP task plans', () => {
     expect(taskPlanRunInstruction()).not.toContain('context_id=')
     expect(text).toContain('ekko_studio_update_plan')
     expect(text).toContain('context_id="current-turn"')
+    expect(text).toContain("language of the user's latest message")
   })
 })
 
