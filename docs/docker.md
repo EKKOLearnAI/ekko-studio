@@ -40,6 +40,7 @@ All key runtime settings are configured from compose variables.
 | `PORT` | `6060` | Web UI listen port |
 | `BIND_HOST` | `0.0.0.0` | Optional Web UI bind host. Defaults to IPv4 for stable WSL/Windows access. Set `::` explicitly if you want IPv6 listening. |
 | `CORS_ORIGINS` | same host only | Comma- or space-separated cross-origin allowlist for HTTP, Socket.IO, and WebSocket requests. Set `*` only when you intentionally need legacy wildcard CORS. |
+| `HERMES_WEB_UI_ALLOW_REMOTE_IMAGES` | unset (off) | Set to `1` or `true` to let the browser load remote `https:` images (adds `https:` to the CSP `img-src`). By default only same-origin, `data:` and `blob:` images load. |
 | `HERMES_LAN_ADVERTISE_URL` | unset | Reachable Docker host origin placed in App LAN QR codes when the browser origin is localhost. Example: `http://192.168.1.20:6060`. |
 | `HERMES_APP_ENTITLEMENT_REQUIRED` | `true` | Require an RS256 cloud entitlement for App LAN relay connections. |
 | `HERMES_APP_ENTITLEMENT_PUBLIC_KEY` | built in | Optional PEM public-key override for App entitlement verification. |
