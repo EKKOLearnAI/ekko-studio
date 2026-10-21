@@ -154,6 +154,80 @@ describe('LocalAppRelayServer', () => {
     expect(loginOnly.data.localUserToken).toBe('')
   })
 
+  it('records why a handshake was refused without leaking the App token', async () => {
+    const namespace = createMockNamespace()
+    const io = { of: vi.fn(() => namespace) }
+    const { logger } = await import('../../packages/server/src/modules/studio/public/logging')
+    const warnSpy = vi.spyOn(logger, 'warn')
+    const { LocalAppRelayServer } = await import('../../packages/server/src/modules/studio/services/app-relay/server')
+    const server = new LocalAppRelayServer(io as any)
+    server.init()
+
+    const socket = createMockAppSocket('refused-machine', {
+      role: 'app',
+      machineId: 'hwui_other_machine_1234567890',
+      deviceCode: 'EAA6B4046499B58D918ABAC428555DED',
+      token: 'sup3r-s3cret-app-token',
+    })
+    const next = vi.fn()
+    await namespace.__middleware[0](socket, next)
+
+    expect((next.mock.calls[0][0] as Error).message).toBe('app_relay_unauthorized')
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const [fields, message] = warnSpy.mock.calls[0] as [Record<string, unknown>, string]
+    expect(message).toBe('[app-relay:lan] socket rejected')
+    expect(fields).toMatchObject({
+      reason: 'app_relay_unauthorized',
+      connectionType: 'lan',
+      stage: 'handshake',
+      machineMatched: false,
+    })
+    expect(JSON.stringify(fields)).not.toContain('sup3r-s3cret-app-token')
+    warnSpy.mockRestore()
+  })
+
+  it('records a revoked App connection with a device fingerprint instead of the raw code', async () => {
+    const namespace = createMockNamespace()
+    const io = { of: vi.fn(() => namespace) }
+    const rawDeviceCode = 'EAA6B4046499B58D918ABAC428555DED'
+    authMocks.inspectAppUserToken.mockResolvedValue({
+      status: 'revoked',
+      deviceCode: rawDeviceCode,
+      connectionType: 'cloud',
+    })
+    const { logger } = await import('../../packages/server/src/modules/studio/public/logging')
+    const warnSpy = vi.spyOn(logger, 'warn')
+    const { LocalAppRelayServer } = await import('../../packages/server/src/modules/studio/services/app-relay/server')
+    const server = new LocalAppRelayServer(io as any)
+    server.init()
+
+    const socket = createMockAppSocket('revoked-connection', {
+      role: 'app',
+      machineId: 'hwui_local_machine_1234567890',
+      deviceCode: rawDeviceCode,
+      token: 'sup3r-s3cret-app-token',
+    })
+    const next = vi.fn()
+    await namespace.__middleware[0](socket, next)
+
+    expect((next.mock.calls[0][0] as Error).message).toBe('app_connection_deleted')
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const [fields, message] = warnSpy.mock.calls[0] as [Record<string, unknown>, string]
+    expect(message).toBe('[app-relay:lan] socket rejected')
+    expect(fields).toMatchObject({
+      reason: 'app_connection_deleted',
+      connectionType: 'lan',
+      stage: 'app_token',
+      appConnectionType: 'cloud',
+      tokenStatus: 'revoked',
+    })
+    const serialized = JSON.stringify(fields)
+    expect(serialized).not.toContain(rawDeviceCode)
+    expect(serialized).not.toContain('sup3r-s3cret-app-token')
+    expect(String(fields.deviceCode)).toMatch(/^[0-9a-f]{16}$/)
+    warnSpy.mockRestore()
+  })
+
   it('requires and binds cloud entitlements to the App account and device when enforcement is enabled', async () => {
     const namespace = createMockNamespace()
     const io = { of: vi.fn(() => namespace) }
