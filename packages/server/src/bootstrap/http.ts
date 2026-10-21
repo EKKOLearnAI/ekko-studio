@@ -35,12 +35,10 @@ import { runRegisteredStartupTasks } from './startup-tasks'
 import { refreshConfiguredProviderModelCatalogsInBackground } from '../modules/hermes/services/providers/model-catalog-cache'
 import { refreshModelCatalog } from '../modules/studio/public/model-catalog'
 import {
-  scanLanDevices,
   selectLanIPv4Address,
   startLanDiscoveryResponder,
   stopLanDiscoveryResponder,
 } from './lan-discovery'
-import { getLanPeerSocketManager, getLanPeerSocketPath } from './lan-peer'
 import { startGlobalAgentServer } from '../modules/studio/public/global-agent'
 import { startLocalAppRelayServer } from '../modules/studio/services/app-relay/server'
 import {
@@ -315,24 +313,6 @@ async function startRuntimeServicesAfterListen(hermesAvailable: boolean): Promis
   }
 }
 
-function startLanDiscovery(): void {
-  const discoverySocket = startLanDiscoveryResponder({ httpPort: config.port })
-  let initialScanStarted = false
-  const runInitialScan = () => {
-    if (initialScanStarted) return
-    initialScanStarted = true
-    void scanLanDevices().catch(err => logger.warn(err, '[lan-discovery] initial scan failed'))
-  }
-
-  if (discoverySocket) {
-    discoverySocket.once('listening', runInitialScan)
-    const fallbackTimer = setTimeout(runInitialScan, 500)
-    fallbackTimer.unref?.()
-  } else {
-    runInitialScan()
-  }
-}
-
 function recordLockedHermesSelection(selection: HermesRuntimeSelection): void {
   if (selection.source === 'none' || !selection.path) {
     const activationError = readActiveVersionManifest()?.runtimeActivationError || ''
@@ -570,14 +550,7 @@ export async function bootstrap() {
     close: () => kanbanEventsWebSocket.close(),
     forceClose: () => kanbanEventsWebSocket.forceClose(),
   })
-  const lanPeerSocketManager = getLanPeerSocketManager()
-  lanPeerSocketManager.setupServer(servers)
-  additionalShutdownSteps.push({
-    name: 'LAN peer WebSocket and child runtimes',
-    close: () => lanPeerSocketManager.shutdown(),
-    forceClose: () => lanPeerSocketManager.forceClose(),
-  })
-  console.log('[bootstrap] terminal + kanban + LAN peer websocket setup')
+  console.log('[bootstrap] terminal + kanban websocket setup')
 
   const loopbackBaseUrl = getLoopbackBaseUrl(server)
 
@@ -673,7 +646,6 @@ export async function bootstrap() {
       if (!dshPluginUi.handlesUpgrade(req) &&
         url.pathname !== '/api/hermes/terminal' &&
         url.pathname !== '/api/hermes/kanban/events' &&
-        url.pathname !== getLanPeerSocketPath() &&
         !url.pathname.startsWith('/socket.io/')) {
         socket.destroy()
       }
@@ -685,7 +657,8 @@ export async function bootstrap() {
   console.log(`Server: http://localhost:${config.port} (LAN: http://${localIp}:${config.port})`)
   console.log(`Log: ${config.appHome}/logs/server.log`)
   logger.info('Server: http://localhost:%d (LAN: http://%s:%d)', config.port, localIp, config.port)
-  startLanDiscovery()
+  // Small Box firmware discovers its Studio backend through this shared responder.
+  startLanDiscoveryResponder({ httpPort: config.port })
   additionalShutdownSteps.push({
     name: 'LAN discovery responder',
     close: stopLanDiscoveryResponder,

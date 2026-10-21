@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import PageLoading from '@/components/common/PageLoading.vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -556,7 +557,7 @@ onUnmounted(() => {
 
         <main v-else class="invite-gate">
             <section class="invite-card" aria-labelledby="shared-group-chat-title">
-                <img class="invite-logo" src="/logo.png" alt="" />
+                <img class="invite-logo" :src="deploymentUrl('/logo.png')" alt="" />
                 <div class="invite-heading">
                     <p class="invite-kicker">{{ t('groupChat.title') }}</p>
                     <h1 id="shared-group-chat-title">{{ t('groupChat.shareTitle') }}</h1>

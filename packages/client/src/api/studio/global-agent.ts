@@ -1,3 +1,4 @@
+import { socketEndpoint } from '@/utils/deployment-url'
 import { io, type Socket } from 'socket.io-client'
 import { getApiKey, getBaseUrlValue, getActiveProfileName } from '../client'
 import type { RunEvent, StartRunRequest } from './chat'
@@ -53,7 +54,8 @@ export function connectGlobalAgent(profile?: string | null): Socket {
   }
 
   socketProfile = nextProfile
-  socket = io(`${getBaseUrlValue()}/global-agent`, {
+  socket = io(socketEndpoint(getBaseUrlValue(), '/global-agent').url, {
+    path: socketEndpoint(getBaseUrlValue(), '/global-agent').path,
     auth: {
       token: getApiKey(),
       profile: nextProfile,

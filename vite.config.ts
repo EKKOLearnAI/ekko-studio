@@ -32,6 +32,7 @@ function createProxyConfig(): ProxyOptions {
 
 export default defineConfig({
   root: 'packages/client',
+  base: process.env.STUDIO_BASE_PATH || '/',
   // Concurrent test/dev servers must not replace each other's optimized Vue runtime.
   cacheDir: resolve(__dirname, process.env.HERMES_WEB_UI_VITE_CACHE_DIR || 'node_modules/.vite/client'),
   plugins: [vue()],

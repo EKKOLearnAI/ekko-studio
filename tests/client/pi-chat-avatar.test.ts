@@ -20,7 +20,7 @@ describe('Pi chat identity', () => {
     const avatarHelper = readFileSync('packages/client/src/utils/chat-agent-avatar.ts', 'utf8')
     const chatStore = readFileSync('packages/client/src/stores/hermes/chat.ts', 'utf8')
 
-    expect(avatarHelper).toContain("pi: { label: 'Pi', src: '/coding-agents/pi.svg' }")
+    expect(avatarHelper).toContain("pi: { label: 'Pi', src: deploymentUrl('/coding-agents/pi.svg') }")
     expect(chatStore).toContain("if (codingAgentId === 'pi')")
     expect(chatStore).toContain("return { icon: '/coding-agents/pi.svg' }")
   })

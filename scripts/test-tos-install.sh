@@ -18,6 +18,8 @@ apt-get install -y --no-install-recommends \
 cat >/usr/local/bin/systemctl <<'STUB'
 #!/bin/bash
 printf '%s\n' "$*" >>/tmp/systemctl.log
+# Reproduce the unloaded-unit failure from the TOS review on every stop.
+if [ "$1" = stop ]; then exit 5; fi
 STUB
 chmod 0755 /usr/local/bin/systemctl
 export PATH="/usr/local/bin:$PATH"
@@ -75,17 +77,21 @@ test "$(cat "$app/data/workspaces/install-smoke.txt")" = retained
 start_server
 stop_server
 dpkg --remove "$package"
-test "$(cat "$app/data/workspaces/install-smoke.txt")" = retained
-test "$(id -u "$user")" = "$uid"
+test ! -e "$app/data"
+test ! -e "$app/logs"
+! id -u "$user" >/dev/null 2>&1
+! getent group "$user" >/dev/null
 dpkg -i /package.deb
-test "$(id -u "$user")" = "$uid"
 dpkg --purge "$package"
-test "$(cat "$app/data/workspaces/install-smoke.txt")" = retained
-test "$(id -u "$user")" = "$uid"
-grep -Fx "enable $app/init.d/$package.service" /tmp/systemctl.log
+test ! -e "$app/data"
+test ! -e "$app/logs"
+! id -u "$user" >/dev/null 2>&1
+! getent group "$user" >/dev/null
+test ! -L "/etc/systemd/system/$package.service"
+grep -Fx "enable $package.service" /tmp/systemctl.log
 grep -Fx "restart $package.service" /tmp/systemctl.log
 grep -Fx "stop $package.service" /tmp/systemctl.log
 grep -Fx "disable $package.service" /tmp/systemctl.log
-echo "PASS: fresh install without host venv, non-root startup, reconfigure, reinstall and data retention"
+echo "PASS: fresh install without host venv, non-root startup, reconfigure, upgrade retention and uninstall cleanup"
 echo "LIMIT: service-manager calls were recorded; real TOS/systemd acceptance remains required"
 CONTAINER

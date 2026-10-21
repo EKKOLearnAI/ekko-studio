@@ -13,7 +13,6 @@ const MANAGED_ENV_KEY = 'HERMES_WEB_UI_MANAGED_MCP'
 const MANAGED_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
   { name: 'ekko-studio-api', toolset: 'api' },
   { name: 'ekko-studio-browser', toolset: 'browser' },
-  { name: 'ekko-studio-devices', toolset: 'devices' },
   { name: 'ekko-studio-use', toolset: 'use' },
 ]
 const MANAGED_SERVER_NAMES = new Set(MANAGED_SERVERS.map(server => server.name))
@@ -21,6 +20,7 @@ const LEGACY_MANAGED_SERVER_NAMES = new Set([
   'hermes-studio-api',
   'hermes-studio-browser',
   'hermes-studio-devices',
+  'ekko-studio-devices',
   'hermes-studio-use',
   'hermes-studio-mcp',
   'hermes-studio',

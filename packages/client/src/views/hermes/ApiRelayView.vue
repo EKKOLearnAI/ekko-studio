@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -51,7 +52,7 @@ onBeforeUnmount(() => { requestController?.abort() })
           <div class="api-relay-brand">
             <img
               class="api-relay-logo"
-              src="/relay-logo.png"
+              :src="deploymentUrl('/relay-logo.png')"
               width="54"
               height="54"
               alt=""

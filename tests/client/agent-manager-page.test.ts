@@ -424,6 +424,15 @@ describe('Agent Manager page', () => {
     expect(api.fetchLegacyWindowsDataMigrationStatus).not.toHaveBeenCalled()
   })
 
+  it('does not offer a local Windows migration when the desktop is connected remotely', async () => {
+    ;(window as any).hermesDesktop = { isDesktop: true, platform: 'win32', remoteMode: true, restartApp }
+    mountPage()
+    await flushPromises()
+    expect(api.fetchLegacyWindowsDataMigrationStatus).not.toHaveBeenCalled()
+    expect(api.decideLegacyWindowsDataMigration).not.toHaveBeenCalled()
+    expect(restartApp).not.toHaveBeenCalled()
+  })
+
   it('puts the available version directly on the update button', async () => {
     api.checkCodingAgentUpdate.mockResolvedValue({
       success: true,

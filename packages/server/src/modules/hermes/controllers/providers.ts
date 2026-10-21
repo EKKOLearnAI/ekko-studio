@@ -116,6 +116,14 @@ function buildProviderEntry(name: string, base_url: string, api_key: string, mod
   return entry
 }
 
+function applyCustomProviderApiMode(entry: Record<string, any>, mode: ProviderApiMode | null | undefined): void {
+  if (mode === undefined) return
+  delete entry.api_mode
+  delete entry.transport
+  delete entry.apiMode
+  if (mode !== null) entry.api_mode = mode
+}
+
 function normalizeBaseUrl(url: string): string {
   return String(url || '').trim().replace(/\/+$/, '')
 }
@@ -291,7 +299,7 @@ export async function restoreModels(ctx: any) {
 
 export async function create(ctx: any) {
   const { name, base_url, api_key, model, context_length, providerKey, api_mode, create_only } = ctx.request.body as {
-    name: string; base_url: string; api_key: string; model: string; context_length?: number; providerKey?: string | null; api_mode?: ProviderApiMode; create_only?: boolean
+    name: string; base_url: string; api_key: string; model: string; context_length?: number; providerKey?: string | null; api_mode?: ProviderApiMode | null; create_only?: boolean
   }
   const normalizedName = String(name || '').trim()
   const poolKey = providerKey || `custom:${normalizedName.toLowerCase().replace(/ /g, '-')}`
@@ -327,8 +335,7 @@ export async function create(ctx: any) {
           existing.api_key = api_key
           existing.model = model
           const preset = PROVIDER_PRESETS.find(p => p.value === poolKey.replace('custom:', ''))
-          if (preset?.api_mode) existing.api_mode = preset.api_mode
-          else if (customApiMode) existing.api_mode = customApiMode
+          applyCustomProviderApiMode(existing, api_mode === null ? null : customApiMode || preset?.api_mode)
           if (context_length && context_length > 0) {
             if (!existing.models) existing.models = {}
             existing.models[model] = existing.models[model] || {}
@@ -337,7 +344,7 @@ export async function create(ctx: any) {
         } else {
           const entry = buildProviderEntry(normalizedName.toLowerCase().replace(/ /g, '-'), effectiveBaseUrl, api_key, model, context_length, customApiMode)
           const preset = PROVIDER_PRESETS.find(p => p.value === poolKey.replace('custom:', ''))
-          if (preset?.api_mode) entry.api_mode = preset.api_mode
+          applyCustomProviderApiMode(entry, api_mode === null ? null : customApiMode || preset?.api_mode)
           config.custom_providers.push(entry)
         }
         config.model.default = model
@@ -394,7 +401,7 @@ export async function create(ctx: any) {
 export async function update(ctx: any) {
   const poolKey = decodeURIComponent(ctx.params.poolKey)
   const { name, base_url, api_key, model, api_mode } = ctx.request.body as {
-    name?: string; base_url?: string; api_key?: string; model?: string; api_mode?: ProviderApiMode
+    name?: string; base_url?: string; api_key?: string; model?: string; api_mode?: ProviderApiMode | null
   }
   const customApiMode = normalizeApiMode(api_mode)
   try {
@@ -411,7 +418,7 @@ export async function update(ctx: any) {
         if (base_url !== undefined) entry.base_url = base_url
         if (api_key !== undefined) entry.api_key = api_key
         if (model !== undefined) entry.model = model
-        if (customApiMode !== undefined) entry.api_mode = customApiMode
+        applyCustomProviderApiMode(entry, api_mode === null ? null : customApiMode)
         return { data: config, result: true }
       })
       if (!found) {

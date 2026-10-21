@@ -184,34 +184,6 @@ describe('user auth tables and middleware', () => {
   })
 
   it.each([
-    '/api/devices/peer-connections',
-    '/api/devices/peer-connections/conn-1/terminals',
-    '/api/devices/peer-connections/conn-1/exec',
-  ])('rejects server token for local MCP device endpoint %s', async (path) => {
-    vi.stubEnv('AUTH_TOKEN', 'server-token')
-    const { auth } = await initUsers()
-    const ctx = {
-      path,
-      headers: { authorization: 'Bearer server-token' },
-      query: {},
-      ip: '127.0.0.1',
-      request: { ip: '127.0.0.1', body: {} },
-      req: { socket: { remoteAddress: '127.0.0.1' } },
-      state: {},
-      status: 200,
-      body: null,
-    } as any
-    const next = vi.fn(async () => {})
-
-    await auth.requireUserJwt(ctx, next)
-
-    expect(next).not.toHaveBeenCalled()
-    expect(ctx.status).toBe(401)
-    expect(ctx.body).toEqual({ error: 'Unauthorized' })
-    expect(ctx.state.serverTokenAuth).toBeUndefined()
-  })
-
-  it.each([
     '/api/studio/media/apikey-image-generate',
     '/api/studio/media/grok-image-to-video',
     '/api/studio/voice/proxy/default/v1/tts',
@@ -243,20 +215,6 @@ describe('user auth tables and middleware', () => {
     '/api/studio/media/grok-image-to-video',
     '/api/studio/voice/proxy/default/v1/tts',
     '/api/studio/voice/proxy/work/v1/audio/transcriptions',
-    '/api/devices',
-    '/api/devices/scan',
-    '/api/devices/device-1/connect',
-    '/api/devices/peer-connections',
-    '/api/devices/peer-connections/conn-1/disconnect',
-    '/api/devices/peer-connections/conn-1/terminal',
-    '/api/devices/peer-connections/conn-1/terminals',
-    '/api/devices/peer-connections/conn-1/terminal/term-1/read',
-    '/api/devices/peer-connections/conn-1/terminal/term-1/input',
-    '/api/devices/peer-connections/conn-1/terminal/term-1/resize',
-    '/api/devices/peer-connections/conn-1/terminal/term-1/close',
-    '/api/devices/peer-connections/conn-1/exec',
-    '/api/devices/peer-connections/conn-1/download',
-    '/api/devices/peer-connections/conn-1/upload',
   ])('rejects server token for local-only endpoint %s from non-loopback clients', async (path) => {
     vi.stubEnv('AUTH_TOKEN', 'server-token')
     const { auth } = await initUsers()

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import {
   computed,
   defineAsyncComponent,
@@ -386,7 +387,7 @@ useKeyboard();
                   @click="handleMobileMenuClick"
                 >
                   <img
-                    src="/logo.png"
+                    :src="deploymentUrl('/logo.png')"
                     alt="Menu"
                     style="width: 24px; height: 24px"
                   />
@@ -601,6 +602,7 @@ useKeyboard();
       min-height: 0;
       margin: 0;
       padding: 0 calc(16px * var(--spacing-scale, 1));
+      padding-right: var(--studio-header-controls-gap, calc(16px * var(--spacing-scale, 1))); // rtl-physical: the native device and window controls stay on the physical right in every locale.
       border: 0;
       background: transparent;
       overflow-x: auto;
@@ -679,6 +681,7 @@ useKeyboard();
   // Three 46px window buttons.
   &.desktop-platform-win32 .studio-page-header,
   &.desktop-platform-linux .studio-page-header {
+    --studio-header-controls-gap: calc(8px * var(--spacing-scale, 1));
     padding-right: var(--desktop-window-controls-width); // rtl-physical: window controls stay on the physical right in every locale.
   }
 

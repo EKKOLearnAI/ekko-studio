@@ -50,7 +50,7 @@ export async function testTosPlatform({
     const checksum = (await readFile(`${deb}.sha256`, 'utf8')).trim().split(/\s+/)
     const bytes = await readFile(deb)
     const hash = createHash('sha256').update(bytes).digest('hex')
-    if (report.id !== APP_ID || report.platform !== 'x86_64' || report.beta !== true
+    if (report.id !== APP_ID || report.platform !== 'x86_64' || report.beta !== false
       || report.filename !== filename || report.sha256 !== hash
       || checksum[0] !== hash || checksum[1] !== filename) {
       throw new Error('TOS package identity/checksum mismatch')

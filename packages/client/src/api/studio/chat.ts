@@ -1,3 +1,4 @@
+import { socketEndpoint } from '@/utils/deployment-url'
 import type { TaskPlanSnapshot } from '@/utils/task-plan'
 import { io, type Socket } from 'socket.io-client'
 import { disconnectBackgroundStatusObservers } from './background-status'
@@ -817,7 +818,8 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
   chatRunSocketTransport = transport
 
   const namespace = transport === 'global-agent' ? '/global-agent' : '/chat-run'
-  chatRunSocket = io(`${baseUrl}${namespace}`, {
+  chatRunSocket = io(socketEndpoint(baseUrl, namespace).url, {
+    path: socketEndpoint(baseUrl, namespace).path,
     auth: { token },
     query: { profile },
     transports: ['websocket', 'polling'],

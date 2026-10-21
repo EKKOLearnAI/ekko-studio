@@ -58,6 +58,7 @@ describe('standalone TOS test workflow', () => {
     }
     expect(workflow.on.pull_request.paths).toEqual([
       '.github/workflows/tos-package-test.yml', 'packages/tos/**',
+      'PRIVACY.md', 'tests/server/tos-lifecycle.test.ts',
       'scripts/pack-tos-deb.mjs', 'scripts/test-tos-platform.mjs',
       'scripts/test-tos-install.sh',
       'tests/server/tos-packaging.test.ts', 'tests/server/tos-platform.test.ts',
@@ -198,7 +199,7 @@ describe.runIf(process.platform === 'linux' && process.arch === 'x64')('TOS Debi
     put(source, 'package.json', JSON.stringify({ name: 'ekko-studio', version: '99.0.0' }))
     put(source, 'bin/hermes-web-ui.mjs', '/* CLI fixture */')
     put(source, 'bin/ekko-studio-mcp.mjs', '/* MCP entry fixture */')
-    put(source, 'dist/client/index.html', '<html>Ekko Studio fixture</html>')
+    put(source, 'dist/client/index.html', '<html><script src="/com.hermeswebui.studio/assets/fixture.js"></script>Ekko Studio fixture</html>')
     put(source, 'dist/server/index.js', `
       const server = require('node:http').createServer((_req, res) => res.end(JSON.stringify({
         ok: true, major: Number(process.versions.node.split('.')[0]), uid: process.getuid(),
@@ -215,7 +216,7 @@ describe.runIf(process.platform === 'linux' && process.arch === 'x64')('TOS Debi
     const output = join(root, 'output')
     const result = packTosDeb({ webuiDir: source, outputDir: output })
     const deb = join(output, result.filename)
-    expect(result).toMatchObject({ id: 'com.hermeswebui.studio', version: '99.0.0', beta: true, tosDeviceTested: false })
+    expect(result).toMatchObject({ id: 'com.hermeswebui.studio', version: '99.0.0', beta: false, tosDeviceTested: false })
     expect(result.filename).toBe('com.hermeswebui.studio_99.0.0_x86_64.deb')
     expect(result.elfFilesChecked).toBeGreaterThan(0)
     expect(result.md5FilesChecked).toBeGreaterThan(0)
@@ -235,11 +236,22 @@ describe.runIf(process.platform === 'linux' && process.arch === 'x64')('TOS Debi
     expect(config).toMatchObject({ open_path: true, path: '/com.hermeswebui.studio/', port: 8648, application_type: 'deb', platform: 'x86_64' })
     expect(config.type).toBeUndefined()
     expect(config.user).not.toBe('root')
+    expect(config.beta).toBe(false)
+    expect(config.help).toContain('/blob/main/PRIVACY.md')
+    expect(readFileSync(join(app, 'PRIVACY.md'), 'utf8')).toContain('Retention and deletion')
+    const inventory = JSON.parse(readFileSync(join(app, 'BINARY-INVENTORY.json'), 'utf8'))
+    expect(inventory).toEqual(expect.arrayContaining([expect.objectContaining({
+      path: 'depends/bin/node', package: 'node', provenanceVerified: false,
+      sha256: createHash('sha256').update(readFileSync(join(app, 'depends/bin/node'))).digest('hex'),
+    })]))
     const service = readFileSync(join(app, 'init.d/ekko-studio-tos.service'), 'utf8')
+    expect(service).toContain('Environment=HERMES_LAN_DISCOVERY_ENABLED=0')
     expect(service).not.toMatch(/^\s*Restart(?:Sec)?\s*=/m)
     const nginx = readFileSync(join(app, 'nginx/com.hermeswebui.studio.conf'), 'utf8')
-    expect(nginx).toContain(`location = ${config.path} {`)
-    expect(nginx).toContain(`return 302 http://$host:${config.port}/;`)
+    expect(nginx).toContain(`location ${config.path} {`)
+    expect(nginx).not.toContain('http://$host:')
+    expect(nginx).toContain(`proxy_pass http://127.0.0.1:${config.port}/;`)
+    expect(service).toContain('BIND_HOST=127.0.0.1')
     for (const key of ['HERMES_WEB_UI_MCP_BIN', 'HERMES_AGENT_NODE']) {
       const configured = service.split('\n').find(line => line.startsWith(`Environment=${key}=`))!.split('=').slice(2).join('=')
       const installed = join(unpacked, configured)

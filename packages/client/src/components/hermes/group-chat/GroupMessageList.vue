@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import { computed, onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import { NButton, NCheckbox, NDropdown, NModal, NSpin } from 'naive-ui'
 import { desktopBridge } from '@/utils/desktop-bridge'
@@ -33,14 +34,14 @@ const { toolTraceVisible } = useToolTraceVisibility()
 const listRef = ref<InstanceType<typeof VirtualMessageList> | null>(null)
 const showScrollBottomButton = ref(false)
 const emptyStateAgents = [
-    { name: 'Hermes', src: '/coding-agents/hermes.png' },
-    { name: 'Ekko', src: '/coding-agents/ekko-agent.png' },
-    { name: 'Codex', src: '/coding-agents/codex-openai.png' },
-    { name: 'Claude', src: '/coding-agents/claude-code.svg' },
-    { name: 'Pi', src: '/coding-agents/pi.svg' },
-    { name: 'Grok', src: '/coding-agents/grok.svg' },
-    { name: 'OpenCode', src: '/coding-agents/opencode.png' },
-    { name: 'DeepSeek Harness', src: '/coding-agents/deepseek.svg' },
+    { name: 'Hermes', src: deploymentUrl('/coding-agents/hermes.png') },
+    { name: 'Ekko', src: deploymentUrl('/coding-agents/ekko-agent.png') },
+    { name: 'Codex', src: deploymentUrl('/coding-agents/codex-openai.png') },
+    { name: 'Claude', src: deploymentUrl('/coding-agents/claude-code.svg') },
+    { name: 'Pi', src: deploymentUrl('/coding-agents/pi.svg') },
+    { name: 'Grok', src: deploymentUrl('/coding-agents/grok.svg') },
+    { name: 'OpenCode', src: deploymentUrl('/coding-agents/opencode.png') },
+    { name: 'DeepSeek Harness', src: deploymentUrl('/coding-agents/deepseek.svg') },
 ]
 const displayMessages = computed(() => groupAgentRunMessages(store.sortedMessages.filter(msg =>
     msg.role !== 'tool' ||

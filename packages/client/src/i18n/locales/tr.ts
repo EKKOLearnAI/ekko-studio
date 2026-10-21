@@ -1,3 +1,4 @@
+import { remoteDeviceMessages } from '../remote-device-messages'
 import { themePresetMessages } from '../theme-preset-locales'
 import { themeAppearanceMessages } from '../theme-appearance-locales'
 const writeApprovalMessages = {
@@ -29,6 +30,7 @@ const writeApprovalMessages = {
 }
 
 export default {
+  remoteDevices: remoteDeviceMessages["tr"],
   modelApi: {
     "localRoute": "Yerel adres",
     "officialRoute": "Resmî rota",
@@ -134,6 +136,16 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_7_38_1: "Bilinen bağlantı ve modeller için otomatik API modu eklendi; sağlayıcı önekli model adları desteklenir ve yeni bağlantılarda varsayılan hâlâ Chat Completions’tır (#3469)",
+    new_0_7_38_2: "Masaüstüne yerel ve uzak cihazlar arasında geçiş ve cihaz yönetimi eklendi; eski LAN eşleştirme girişi değiştirildi (#3464)",
+    new_0_7_38_3: "Model API’ye bulut erişimi, anahtar başına model kısıtlamaları ve toplam USD bütçeleri eklendi; Agent bazında kullanım dökümü geri getirildi ve panel genişliği düzeltildi (#3440, #3450)",
+    new_0_7_38_4: "Sağlayıcılar artık masaüstü ve web bağlantılarından içe aktarılabilir; içe aktarmadan önce bağlantı bilgileri onaylanıp tamamlanabilir (#3438)",
+    new_0_7_38_5: "Ekko Computer Use için ayrı ayrı açılıp kapatılabilen isteğe bağlı JEV anlamsal öğe eşleştirme ve sonuç doğrulama eklendi (#3463)",
+    new_0_7_38_6: "Yerleşik tarayıcının yeni profilleri varsayılan olarak sistem proxy’sini kullanarak bağlantı kurulumunu kolaylaştırır (#3455)",
+    new_0_7_38_7: "Yanıtlar tamamlandıktan sonra oturumların doğru kaydedilmesi için DSH ACP 0.2.1 tur kalıcılığı uyumluluğu düzeltildi (#3452)",
+    new_0_7_38_8: "Sohbet eklerinin izinleri artık gerçek çalıştırma Profile’ına göre denetlenir; Profile değişiminden sonraki yetkilendirme hataları giderildi (#3439)",
+    new_0_7_38_9: "TOS 7 kurulumu, yükseltmesi, kaldırılması ve ters proxy erişimi iyileştirildi; gizlilik politikasına erişim eklendi ve güvenlik açığı bulunan bağımlılıklar güncellendi (#3466)",
+    new_0_7_38_10: "M5Stack Cardputer-Adv için metin ve kısa sesli sohbet destekli LAN donanım yazılımı geliştirme önizlemesi eklendi; uyumlu bölüm düzenine sahip cihazlarda elle güncellenebilir (#3451)",
     new_0_7_37_1: "Kullanılabilir modelleri OpenAI Responses API üzerinden çağırmak, özel anahtarları yönetmek ve harici kullanımı ayrı izlemek için hesap genelinde Model API eklendi (#3433)",
     new_0_7_37_2: "Masaüstü Ekko’ya yerel uygulamaları görme ve yönetme için Computer Use, macOS izin rehberi ve izin hatırlatmaları eklendi (#3411, #3427)",
     new_0_7_37_3: "Bireysel ve grup sohbetlerinde mesajları kopyalamak ve silmek için çoklu seçim eklendi; etkin görevler ve grup özetleri korundu, işlem çubukları sadeleştirildi (#3422, #3423, #3425)",
@@ -154,14 +166,6 @@ export default {
     new_0_7_36_7: 'Grup sohbetlerinde AI mesaj teması eşitlemesi ve mesaj balonları ile tablolarda yinelenen arka plan ve bulanıklık düzeltildi (#3398)',
     new_0_7_36_8: 'Sürüm yayımlandığında TOS 7 x86_64 test paketlerinin otomatik derlenmesi ve doğrulanması eklendi (#3397)',
     new_0_7_36_9: '30 MB boyutuna kadar GIF, hareketli WebP ve APNG arka plan desteği iyileştirildi; kaydetme, önbelleğe alma ve tema içe ve dışa aktarmada animasyon korundu',
-    new_0_7_35_1: 'Agent kartlarından sohbetteki düşünme avatarlarına geçiş animasyonları eklendi; azaltılmış hareket ayarında görünürlük ve tema arka planları iyileştirildi (#3378, #3386)',
-    new_0_7_35_2: 'Türkçe arayüz desteği eklendi (#3338)',
-    new_0_7_35_3: 'Maliyet gösterimi kapatıldığında sohbet kullanım kartlarının görünmeye devam etmesi düzeltildi (#3381)',
-    new_0_7_35_4: 'Edge TTS ses hizmeti uç noktasıyla uyumluluk güncellendi (#3381)',
-    new_0_7_35_5: 'Silinen ve arşivlenen sohbetlerin ve okunmamış durumunun cihazlar arasında eşitlenmesi iyileştirildi (#3380)',
-    new_0_7_35_6: 'Uyumlu model uç noktalarını kullanan Coding Agent’ların token kullanım bildirimi düzeltildi; otomatik sıkıştırmanın bağlam kullanımını doğru izlemesi sağlandı (#3334)',
-    new_0_7_35_7: 'Anthropic uyumlu istekler artık modelin çıktı sınırlarını kullanarak uzun yanıtların ve araç çağrılarının erken kesilmesini azaltır (#3334)',
-    new_0_7_35_8: 'Ekko’da özel Anthropic URL’lerinin işlenmesi kök adresleri, sürümlü yolları ve tam mesaj uç noktalarını destekleyecek şekilde düzeltildi (#3384)',
   },
 
   profiles: {
@@ -790,6 +794,7 @@ export default {
     writeApprovalUnsupported: 'Bu Hermes Aracısı sürümü yazma onaylarını desteklemiyor. Bu özelliği kullanmak için Hermes Aracısını yükseltin.',
   },
   models: {
+    apiModeAuto: 'Otomatik (modele göre)',
     importTitle: "Sağlayıcıyı içe aktar",
     importNotice: "Adresi, modeli ve hedef profili kontrol edin. Onaylandığında API anahtarı Studio’ya kaydedilir ve model profilin varsayılanı olur. Onaydan önce hiçbir şey içe aktarılmaz.",
     importConfirm: "İçe aktarmayı onayla",
@@ -881,6 +886,9 @@ export default {
     },
   },
   settings: {
+    privacy: {
+      policy: 'Gizlilik bildirimi',
+    },
     session: {
       ...writeApprovalMessages,
       requireAuth: 'Oturum yetkilendirmesi',

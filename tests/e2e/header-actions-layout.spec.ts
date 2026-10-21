@@ -170,11 +170,11 @@ test('keeps usage filters accessible below the standalone header at the minimum 
   await expect(filters.getByRole('button', { name: '90d', exact: true })).toHaveAttribute('aria-pressed', 'true')
 })
 
-for (const tab of ['app', 'mcu', 'devices']) {
+for (const tab of ['app', 'mcu']) {
   test(`keeps embedded connection header actions visible in the ${tab} panel`, async ({ page }) => {
     await setup(page)
     await page.goto(`/#/hermes/connections?tab=${tab}`)
-    const header = page.locator(tab === 'devices' ? '.devices-view .page-header' : '.connections-panel .panel-header')
+    const header = page.locator('.connections-panel .panel-header')
     await expect(header).toBeVisible()
     for (const width of [1440, 900, 769, 390]) {
       await page.setViewportSize({ width, height: 900 })

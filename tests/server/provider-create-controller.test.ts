@@ -90,6 +90,16 @@ describe('providers controller create', () => {
     expect(envAfter).not.toContain('DEEPSEEK_BASE_URL')
   })
 
+  it('omits the protocol for automatic custom connections even when their name matches a preset', async () => {
+    const { create } = await loadProvidersController()
+    const ctx = makeCtx({ name: 'anthropic', base_url: 'https://relay.example/v1', api_key: 'fixture-key', model: 'model-a', api_mode: null, create_only: true })
+    await create(ctx)
+    expect(ctx.status).toBe(200)
+    const entry = readYaml(join(hermesHome, 'config.yaml')).custom_providers[0]
+    expect(entry).toMatchObject({ name: 'anthropic', base_url: 'https://relay.example/v1' })
+    expect(entry).not.toHaveProperty('api_mode')
+  })
+
   it.each(['deepseek', 'opencode-zen', 'opencode-go'])('does not persist catalog protocol metadata when adding %s', async provider => {
     const { create } = await loadProvidersController()
     const ctx = makeCtx({ name: provider, providerKey: provider, api_key: 'test-key', model: 'dynamic-model' })

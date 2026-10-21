@@ -40,7 +40,7 @@ describe('Ekko MCP server context', () => {
     const servers = buildManagedEkkoMcpServers('work')
     expect(servers['ekko-studio-plan']).toBeUndefined()
     expect(servers['ekko-studio-interaction']).toBeUndefined()
-    expect(Object.keys(servers)).toHaveLength(4)
+    expect(Object.keys(servers)).toHaveLength(3)
 
     expect(servers['ekko-studio-api']).toEqual({
       command: process.execPath,
@@ -62,10 +62,7 @@ describe('Ekko MCP server context', () => {
       args: [join(process.cwd(), 'bin/ekko-studio-mcp.mjs'), 'browser'],
       env: { HERMES_WEB_UI_PROFILE: 'work', HERMES_MCP_TOOLSET: 'browser' },
     })
-    expect(servers['ekko-studio-devices']).toMatchObject({
-      args: [join(process.cwd(), 'bin/ekko-studio-mcp.mjs'), 'devices'],
-      env: { HERMES_WEB_UI_PROFILE: 'work', HERMES_MCP_TOOLSET: 'devices' },
-    })
+    expect(servers['ekko-studio-devices']).toBeUndefined()
     expect(servers['ekko-studio-use']).toMatchObject({
       args: [join(process.cwd(), 'bin/ekko-studio-mcp.mjs'), 'use'],
       env: { HERMES_WEB_UI_PROFILE: 'work', HERMES_MCP_TOOLSET: 'use', HERMES_MCP_NATIVE_TASK_PLAN: '1' },
@@ -96,7 +93,7 @@ describe('Ekko MCP server context', () => {
     expect(servers?.['ekko-studio-api']).toEqual({ command: 'custom-api' })
     expect(servers?.custom).toEqual({ command: 'custom-mcp' })
     expect(servers?.['ekko-studio-browser']).toBeDefined()
-    expect(servers?.['ekko-studio-devices']).toBeDefined()
+    expect(servers?.['ekko-studio-devices']).toBeUndefined()
     expect(servers?.['ekko-studio-use']).toBeDefined()
   })
 
@@ -130,12 +127,12 @@ describe('Ekko MCP server context', () => {
     expect(injectManagedEkkoMcpServers(setup).targets.every(target => target.status === 'unchanged')).toBe(true)
   })
 
-  it('removes stale managed interaction servers instead of injecting shared tools into Ekko', async () => {
+  it('removes retired managed device and interaction servers from Ekko', async () => {
     const { injectManagedEkkoMcpServers } = await import('../../packages/server/src/modules/ekko/services/mcp')
     injectManagedEkkoMcpServers(setup)
     const stale = structuredClone(setup.config.read())
     for (const profile of Object.values(stale.mcp.profiles)) {
-      for (const name of ['ekko-studio-plan', 'ekko-studio-interaction']) {
+      for (const name of ['ekko-studio-plan', 'ekko-studio-interaction', 'ekko-studio-devices']) {
         profile.servers[name] = {
           command: 'ekko-studio-mcp', args: ['plan'],
           env: { HERMES_WEB_UI_MANAGED_MCP: '1', HERMES_MCP_USER_CLARIFICATION: '1' },
@@ -146,9 +143,10 @@ describe('Ekko MCP server context', () => {
     setup.config.replace(stale)
     injectManagedEkkoMcpServers(setup)
     for (const profile of ['default', 'work']) {
+      expect(setup.config.getMcpServer('ekko-studio-devices', profile)).toBeUndefined()
       expect(setup.config.getMcpServer('ekko-studio-plan', profile)).toBeUndefined()
       expect(setup.config.getMcpServer('ekko-studio-interaction', profile)).toBeUndefined()
-      expect(Object.keys(setup.config.listMcpServers(profile))).toHaveLength(4)
+      expect(Object.keys(setup.config.listMcpServers(profile))).toHaveLength(3)
     }
   })
 
@@ -190,7 +188,7 @@ describe('Ekko MCP server context', () => {
     expect(servers['ekko-studio-use'].enabled).toBe(false)
     expect(servers['ekko-studio-api'].args).toContain(join(process.cwd(), 'bin/ekko-studio-mcp.mjs'))
     expect(servers.custom.command).toBe('user-command')
-    expect(Object.keys(servers)).toHaveLength(5)
+    expect(Object.keys(servers)).toHaveLength(4)
     expect(injectManagedEkkoMcpServers(setup).targets.every(target => target.status === 'unchanged')).toBe(true)
   })
 

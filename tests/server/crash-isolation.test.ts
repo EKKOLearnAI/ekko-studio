@@ -7,7 +7,6 @@ describe('Studio crash isolation wiring', () => {
       'packages/server/src/bootstrap/http.ts',
       'packages/server/src/modules/hermes/sockets/terminal.ts',
       'packages/server/src/modules/hermes/sockets/kanban-events.ts',
-      'packages/server/src/modules/studio/services/network/lan-peer-socket.ts',
     ]
 
     for (const file of files) {

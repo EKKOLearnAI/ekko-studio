@@ -191,15 +191,6 @@ const router = createRouter({
       component: () => import('@/views/hermes/ChatView.vue'),
     },
     {
-      path: '/hermes/devices',
-      name: 'hermes.devices',
-      redirect: to => ({
-        name: 'hermes.connections',
-        query: { ...to.query, tab: 'devices' },
-      }),
-      meta: { requiresSuperAdmin: true },
-    },
-    {
       path: '/studio/agents',
       name: 'hermes.agentManager',
       component: () => import('@/views/hermes/ChatView.vue'),

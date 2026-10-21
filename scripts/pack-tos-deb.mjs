@@ -61,6 +61,31 @@ function* regularFiles(root) {
   }
 }
 
+// Inventory the final bytes, including native addons nested below npm packages.
+export function binaryInventory(root, nodeVersion) {
+  const entries = []
+  for (const path of regularFiles(root)) {
+    const fd = openSync(path, 'r')
+    const magic = Buffer.alloc(4)
+    try { readSync(fd, magic, 0, 4, 0) } finally { closeSync(fd) }
+    if (!magic.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) continue
+    let metadata = {}
+    for (let directory = dirname(path); directory.startsWith(root + sep); directory = dirname(directory)) {
+      const manifest = join(directory, 'package.json')
+      if (!existsSync(manifest)) continue
+      const pkg = JSON.parse(readFileSync(manifest, 'utf8'))
+      metadata = { package: pkg.name, version: pkg.version, license: pkg.license, repository: pkg.repository }
+      break
+    }
+    if (relative(root, path) === 'depends/bin/node') {
+      metadata = { package: 'node', version: nodeVersion, license: 'SEE upstream LICENSE', repository: 'https://github.com/nodejs/node' }
+    }
+    entries.push({ path: relative(root, path), sha256: fileDigest(path, 'sha256'), ...metadata,
+      provenanceVerified: false })
+  }
+  return entries
+}
+
 function render(name, values) {
   const result = readFileSync(join(templates, name), 'utf8')
     .replace(/@([A-Z_]+)@/g, (_, key) => {
@@ -74,12 +99,12 @@ function languageFile(publisher) {
   const english = {
     name: 'Ekko Studio', auth: publisher,
     descript: 'AI workspace for multi-agent chat, coding and visual workflows, accessible in your browser.',
-    important: 'TOS test build. Configure your login and model provider before use. Service port: 8648.',
+    important: 'Configure your login and model provider before use. Back up data before uninstalling.',
   }
   const chinese = {
     ...english,
     descript: '通过浏览器使用的 AI 工作台，支持多智能体聊天、编程和可视化工作流。',
-    important: 'TOS 测试版。使用前请配置登录账号和模型服务。服务端口：8648。',
+    important: '使用前请配置登录账号和模型服务。卸载前请备份数据。',
   }
   return TOS_LANGUAGES.map(language => {
     const fields = language === 'zh-cn' ? chinese : english
@@ -149,9 +174,10 @@ export function verifyTosDeb(deb) {
     if (config.id !== defaults.id || config.package !== defaults.package || config.system_id !== defaults.system_id
       || config.user !== defaults.user || config.icon !== `/images/icons/${defaults.id}.svg`
       || config.application_type !== 'deb' || config.platform !== 'x86_64'
-      || config.open_path !== true || 'type' in config || config.user === 'root' || !config.beta) {
+      || config.open_path !== true || 'type' in config || config.user === 'root' || config.beta !== false) {
       throw new Error('Invalid TOS application identity or external-open configuration')
     }
+    if (!/^\d+\.\d+\.\d+$/.test(config.version)) throw new Error('TOS requires a stable numeric version')
     if (config.path !== `/${config.id}/` || config.port !== defaults.port) {
       throw new Error('C21: TOS path must be the application portal route with a separate service port')
     }
@@ -165,7 +191,7 @@ export function verifyTosDeb(deb) {
     }
     for (const file of ['bin/ekko-studio', `init.d/${config.system_id}.service`,
       `nginx/${config.id}.conf`, config.icon.replace(/^\//, ''), `${config.id}.lang`,
-      'webui.bz2', 'depends/bin/node', 'depends/bin/npm', 'depends/bin/npx',
+      'PRIVACY.md', 'REVIEW-REMEDIATION.md', 'BINARY-INVENTORY.json', 'webui.bz2', 'depends/bin/node', 'depends/bin/npm', 'depends/bin/npx',
       'depends/webui/bin/ekko-studio-mcp.mjs',
       'depends/webui/dist/server/index.js', 'depends/webui/dist/client/index.html']) {
       requireFile(join(app, file))
@@ -183,7 +209,7 @@ export function verifyTosDeb(deb) {
       throw new Error('S05: TOS service restart must be controlled by App Center')
     }
     if (!service.includes(`User=${config.user}\n`) || !service.includes('NoNewPrivileges=true\n')
-      || !service.includes('ProtectSystem=strict\n') || !service.includes('BIND_HOST=0.0.0.0\n')) {
+      || !service.includes('ProtectSystem=strict\n') || !service.includes('BIND_HOST=127.0.0.1\n')) {
       throw new Error('Invalid TOS service configuration')
     }
     if (!service.includes(`HERMES_WEB_UI_MCP_BIN=/usr/local/${config.id}/depends/webui/bin/ekko-studio-mcp.mjs\n`)
@@ -250,13 +276,17 @@ export function packTosDeb({ webuiDir, nodeRoot = dirname(dirname(process.execPa
       writeFileSync(destination, content, { mode })
     }
     const values = { APP_ID: settings.id, USER: settings.user, SERVICE: settings.system_id, PORT: settings.port }
+    if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) throw new Error('TOS requires a stable numeric version')
     const config = {
       ...settings, version: pkg.version, icon: `/images/icons/${settings.id}.svg`,
       exec: true, open_path: true, path: `/${settings.id}/`,
-      recommend: false, beta: true, category: ['Utilities'], platform: 'x86_64',
+      recommend: false, beta: false, category: ['Utilities'], platform: 'x86_64',
       application_type: 'deb', official: 'https://ekkostudio.xyz',
-      help: 'https://github.com/EKKOLearnAI/ekko-studio', depend: [], relation: [],
+      help: 'https://github.com/EKKOLearnAI/ekko-studio/blob/main/PRIVACY.md', depend: [], relation: [],
       all_user_display: false, allow_open_in_mobile: true,
+    }
+    if (!readFileSync(join(webuiDir, 'dist/client/index.html'), 'utf8').includes(`/${settings.id}/assets/`)) {
+      throw new Error('TOS frontend must be built with STUDIO_BASE_PATH=/' + settings.id + '/')
     }
     put('config.ini', JSON.stringify(config, null, 2) + '\n')
     put(`${settings.id}.lang`, languageFile(settings.publisher))
@@ -265,6 +295,8 @@ export function packTosDeb({ webuiDir, nodeRoot = dirname(dirname(process.execPa
     put(`init.d/${settings.system_id}.service`, render('ekko-studio.service.in', values))
     put(`nginx/${settings.id}.conf`, render('nginx.conf.in', values))
     put('README.md', readFileSync(join(templates, 'README.md')))
+    put('PRIVACY.md', readFileSync(join(repository, 'PRIVACY.md')))
+    put('REVIEW-REMEDIATION.md', readFileSync(join(templates, 'REVIEW-REMEDIATION.md')))
     put('LICENSE', readFileSync(join(repository, 'LICENSE')))
     const webui = join(app, 'depends/webui')
     mkdirSync(webui, { recursive: true })
@@ -282,6 +314,7 @@ export function packTosDeb({ webuiDir, nodeRoot = dirname(dirname(process.execPa
     mkdirSync(frontend, { recursive: true })
     cpSync(join(webui, 'dist/client'), frontend, { recursive: true })
     run('tar', ['-cjf', join(app, 'webui.bz2'), '-C', dirname(frontend), 'webui'])
+    put('BINARY-INVENTORY.json', JSON.stringify(binaryInventory(app, run(node, ['--version']).trim()), null, 2) + '\n')
     const control = join(stage, 'DEBIAN')
     mkdirSync(control)
     writeFileSync(join(control, 'control'), `Package: ${settings.package}

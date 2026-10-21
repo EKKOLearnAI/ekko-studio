@@ -111,6 +111,32 @@ test('edits a provider without rendering its existing credential', async ({ page
   expect(api.unexpectedRequests).toEqual([])
 })
 
+for (const dark of [false, true]) test(`automatic provider mode clears the fixed protocol and survives reopening (${dark ? 'dark mobile' : 'light desktop'})`, async ({ page }, testInfo) => {
+  if (dark) await page.setViewportSize({ width: 390, height: 844 })
+  await authenticate(page, TEST_ACCESS_KEY)
+  const api = await mockHermesApi(page, { theme: { brightness: dark ? 'dark' : 'light' }, providerEditor: {
+    builtin: false,
+    source: 'custom_providers',
+    api_mode: 'anthropic_messages',
+    editable_fields: ['label', 'base_url', 'api_key', 'api_mode', 'preferred_model', 'context_lengths'],
+  } })
+  await page.goto('/#/hermes/models')
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  const editor = page.getByRole('dialog')
+  const mode = editor.locator('label.field').filter({ hasText: /^API Mode/ })
+  await mode.locator('.n-base-selection').click()
+  await page.locator('.n-base-select-option').filter({ hasText: 'Auto (match model)' }).click()
+  await expect(mode).toContainText('Auto (match model)')
+  await page.screenshot({ path: testInfo.outputPath('automatic-provider-mode.png'), animations: 'disabled' })
+  await editor.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(editor).toHaveCount(0)
+  const patch = api.requests.find(request => request.method === 'PATCH' && request.pathname.endsWith('/editor'))
+  expect(JSON.parse(patch?.postData || '{}').api_mode).toBeNull()
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(mode).toContainText('Auto (match model)')
+  expect(api.unexpectedRequests).toEqual([])
+})
+
 
 for (const mode of ['scoped', 'global']) test(`DSH ${mode} chat selects its model and displays deltas before completion`, async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY)

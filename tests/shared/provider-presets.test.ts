@@ -4,6 +4,7 @@ import {
   PROVIDER_PRESETS as SERVER_PROVIDER_PRESETS,
   buildProviderModelMap as buildServerProviderModelMap,
   resolveProviderCatalogApiMode,
+  resolveProviderConnectionApiMode,
 } from '../../packages/server/src/modules/studio/contracts/providers'
 import { PROVIDER_ENV_MAP } from '../../packages/server/src/modules/hermes/services/profiles/config'
 
@@ -229,6 +230,46 @@ function modelsForProvider(providerPresets: Array<{ value: string; models: strin
 }
 
 describe('provider presets', () => {
+  it.each([
+    ['https://opencode.ai/zen/v1', 'gpt-next', 'codex_responses'],
+    ['https://opencode.ai/zen/v1/', 'claude-next', 'anthropic_messages'],
+    ['https://opencode.ai/zen/v1', 'claude/claude-opus-5.5', 'anthropic_messages'],
+    ['https://opencode.ai/zen/v1', 'openai/gpt-6.1-sol', 'codex_responses'],
+    ['https://opencode.ai/zen/go/v1', 'channel/minimax/minimax-next', 'anthropic_messages'],
+    ['https://opencode.ai/zen/go', 'minimax-next', 'anthropic_messages'],
+    ['https://opencode.ai/zen', 'minimax-next', 'chat_completions'],
+    ['https://openrouter.ai/api/v1', 'claude-next', 'chat_completions'],
+    ['https://openrouter.ai/api/v1', 'claude/claude-opus-5.5', 'chat_completions'],
+    ['https://api.anthropic.com/v1', 'claude-next', 'anthropic_messages'],
+    ['https://api.apikey.fan/v1', 'gpt-next', 'codex_responses'],
+    ['https://api.apikey.fan', 'claude-next', 'anthropic_messages'],
+  ])('matches a custom connection at %s for %s', (baseUrl, model, expected) => {
+    expect(resolveProviderConnectionApiMode('custom:gateway', baseUrl, model)).toBe(expected)
+  })
+
+  it.each([
+    'https://unknown.example/v1',
+    'https://opencode.ai.unknown.example/zen/v1',
+    'https://unknown.example/opencode.ai/zen/v1',
+    'https://opencode.ai/unrecognized/v1',
+    'https://api.openai.com/v1?route=custom',
+    'not a URL',
+  ])('leaves an unrecognized connection %s for manual selection', baseUrl => {
+    expect(resolveProviderConnectionApiMode('custom:opencode-zen', baseUrl, 'gpt-next')).toBeUndefined()
+    expect(resolveProviderConnectionApiMode('custom:opencode-zen', baseUrl, 'openai/gpt-6.1-sol')).toBeUndefined()
+  })
+
+  it.each(['opencode-zen', 'opencode-go', 'copilot'])('matches the final model ID segment for %s', provider => {
+    for (const model of ['claude-opus-5.5', 'gpt-6.1-sol', 'gpt-5-mini', 'qwen-next', 'minimax-next']) {
+      const expected = resolveProviderCatalogApiMode(provider, model)
+      expect(resolveProviderCatalogApiMode(provider, `vendor/${model}`)).toBe(expected)
+      expect(resolveProviderCatalogApiMode(provider, ` channel/vendor/${model.toUpperCase()} `)).toBe(expected)
+    }
+    for (const model of ['/', 'vendor/', 'channel/vendor/ ']) {
+      expect(resolveProviderCatalogApiMode(provider, model)).toBeUndefined()
+    }
+  })
+
   it.each(['opencode-zen', 'opencode-go'])('matches Hermes dynamic model routing for %s', provider => {
     for (const model of ['gpt-new-version', 'grok-new-version', 'muse-spark-new']) {
       expect(resolveProviderCatalogApiMode(provider, model)).toBe('codex_responses')

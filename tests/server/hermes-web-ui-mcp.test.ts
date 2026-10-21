@@ -1138,92 +1138,26 @@ describe('hermes-web-ui MCP server', () => {
     await new Promise<void>(resolve => server.close(() => resolve()))
   })
 
-  it('filters exposed tools by MCP toolset argument', async () => {
-    const server = createServer((req, res) => {
-      if (req.url === '/api/devices') {
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ devices: [{ id: 'device-1' }] }))
-        return
-      }
-      res.statusCode = 404
-      res.end('{}')
-    })
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-    const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('expected TCP server address')
-
+  it('does not expose retired device operations even when an old launcher requests devices', async () => {
     const responses = new Map<number, any>()
     child = spawn(process.execPath, ['bin/ekko-studio-mcp.mjs', 'devices'], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        HERMES_WEB_UI_URL: `http://127.0.0.1:${address.port}`,
-      },
+      cwd: process.cwd(), env: { ...process.env, HERMES_MCP_TOOLSET: '' },
     })
-    child.stdout.on('data', (chunk) => {
+    child.stdout.on('data', chunk => {
       for (const line of String(chunk).trim().split('\n')) {
         if (!line) continue
         const message = JSON.parse(line)
         responses.set(message.id, message)
       }
     })
-
     writeRpc(child, 1, 'initialize', {})
     writeRpc(child, 2, 'tools/list')
-    writeRpc(child, 3, 'tools/call', {
-      name: 'ekko_studio_api_request',
-      arguments: { path: '/health' },
-    })
-    writeRpc(child, 4, 'tools/call', {
-      name: 'hermes_lan_devices_list',
-      arguments: {},
-    })
-    writeRpc(child, 5, 'tools/call', {
-      name: 'ekko_studio_devices_toolset',
-      arguments: { action: 'list' },
-    })
-    writeRpc(child, 6, 'tools/call', {
-      name: 'ekko_studio_devices_toolset',
-      arguments: {
-        action: 'call',
-        tool: 'ekko_studio_lan_devices_list',
-        arguments: {},
-      },
-    })
-
-    const initialized = await waitForRpc(responses, 1)
-    expect(initialized.result.serverInfo).toMatchObject({ toolset: 'devices' })
-    expect(initialized.result.instructions).toContain('interactive terminal lifecycle')
-
+    writeRpc(child, 3, 'tools/call', { name: 'hermes_lan_devices_list', arguments: {} })
     const list = await waitForRpc(responses, 2)
-    expectProviderSafeToolNames('ekko-studio-devices', list.result.tools)
-    expect(list.result.tools).toHaveLength(1)
-    expect(list.result.tools[0].name).toBe('ekko_studio_devices_toolset')
-    expect(list.result.tools[0].description).toContain('remote file upload/download')
-
-    const catalog = JSON.parse((await waitForRpc(responses, 5)).result.content[0].text)
-    expect(catalog).toMatchObject({ toolset: 'devices', operation_count: 14 })
-    expect(catalog.operations.map((tool: any) => tool.name)).toEqual(expect.arrayContaining([
-      'ekko_studio_lan_devices_list',
-      'ekko_studio_lan_command_exec',
-      'ekko_studio_lan_terminal_create',
-      'ekko_studio_lan_terminal_read',
-      'ekko_studio_lan_file_download',
-      'ekko_studio_lan_file_upload',
-    ]))
-
-    const hiddenCall = await waitForRpc(responses, 3)
-    expect(hiddenCall.result.isError).toBe(true)
-    expect(hiddenCall.result.content[0].text).toContain("active 'devices' MCP toolset")
-
-    const legacyDevicesCall = await waitForRpc(responses, 4)
-    const legacyDevicesPayload = JSON.parse(legacyDevicesCall.result.content[0].text)
-    expect(legacyDevicesPayload.devices[0].id).toBe('device-1')
-
-    const gatewayDevicesCall = await waitForRpc(responses, 6)
-    const gatewayDevicesPayload = JSON.parse(gatewayDevicesCall.result.content[0].text)
-    expect(gatewayDevicesPayload.devices[0].id).toBe('device-1')
-
-    await new Promise<void>(resolve => server.close(() => resolve()))
+    expect(list.result.tools.map((tool: any) => tool.name)).toEqual([
+      'ekko_studio_api_openapi_get', 'ekko_studio_api_request',
+    ])
+    const retired = await waitForRpc(responses, 3)
+    expect(retired.result.isError).toBe(true)
   })
 })

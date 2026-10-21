@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY, TEST_MODEL_GROUP } from './fixtures'
 import catalog from '../../config/agents.json'
 import { expectNewChatEffectsMoving, selectNewChatAgent } from './new-chat-helpers'
+import { resolveProviderConnectionApiMode } from '../../packages/server/src/modules/studio/contracts/providers'
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) test(`Agent card interiors keep moving with ${reducedMotion} system motion preference`, async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
@@ -458,11 +459,19 @@ for (const mobile of [false, true]) test(`missing required connection fields fit
   })
 })
 
-test('new chat shares the session model picker and automatically sends the Provider protocol and asks only when missing', async ({ page }, testInfo) => {
+for (const { automatic, selectedModel, apiMode } of [
+  { automatic: false, selectedModel: 'other-model', apiMode: 'anthropic_messages' },
+  { automatic: true, selectedModel: 'claude/claude-opus-5.5', apiMode: 'anthropic_messages' },
+  { automatic: true, selectedModel: 'openai/gpt-6.1-sol', apiMode: 'codex_responses' },
+] as const) test(`new chat uses the ${automatic ? `matched automatic ${selectedModel}` : 'configured'} Provider protocol and asks only when unresolved`, async ({ page }, testInfo) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const api = await mockHermesApi(page, { modelGroups: [TEST_MODEL_GROUP, {
-    ...TEST_MODEL_GROUP, provider: 'other-provider', label: 'Other Provider', models: ['other-model', 'disabled-model'],
-    api_mode: 'anthropic_messages', model_meta: { 'disabled-model': { disabled: true } },
+    ...TEST_MODEL_GROUP, provider: 'custom:other-provider', label: 'Other Provider', models: [selectedModel, 'disabled-model'],
+    ...(automatic ? {
+      base_url: 'https://opencode.ai/zen/v1',
+      api_mode_by_model: { [selectedModel]: resolveProviderConnectionApiMode('custom:other-provider', 'https://opencode.ai/zen/v1', selectedModel) },
+    } : { api_mode: apiMode }),
+    model_meta: { 'disabled-model': { disabled: true } },
   }, { provider: 'moa', label: 'MoA', models: ['ensemble'] }] })
   await mockChatSocket(page)
   await page.goto('/#/hermes/chat')
@@ -479,12 +488,12 @@ test('new chat shares the session model picker and automatically sends the Provi
   await expect(disabled).toHaveAttribute('aria-disabled', 'true')
   await disabled.click({ force: true })
   await expect(page.getByRole('dialog').filter({ hasText: 'Protocol' })).toBeHidden()
-  await models.locator('.model-cascader-search input').fill('other-model')
-  await models.locator('.model-cascader-item').filter({ hasText: 'other-model' }).click()
+  await models.locator('.model-cascader-search input').fill(selectedModel)
+  await models.locator('.model-cascader-item').filter({ hasText: selectedModel }).click()
   const protocol = page.getByRole('dialog').filter({ hasText: 'Protocol' })
   await expect(protocol).toBeHidden()
   await expect(models).toBeHidden()
-  await expect(draft.locator('.input-model-button')).toContainText('other-model')
+  await expect(draft.locator('.input-model-button')).toHaveAttribute('aria-label', selectedModel)
   await expect(draft.locator('textarea')).toHaveValue('Use the model I selected')
   await draft.getByRole('button', { name: 'Chat settings', exact: true }).click()
   const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true })
@@ -495,11 +504,11 @@ test('new chat shares the session model picker and automatically sends the Provi
   expect(api.requests.filter(request => request.pathname.endsWith('/model') && request.method !== 'GET')).toEqual([])
   await draft.getByRole('button', { name: 'Send', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({
-    agent_id: 'ekko-agent', model: 'other-model', provider: 'other-provider', apiMode: 'anthropic_messages', input: 'Use the model I selected',
+    agent_id: 'ekko-agent', model: selectedModel, provider: 'custom:other-provider', apiMode, input: 'Use the model I selected',
   })
   // The same picker still works for the newly created conversation.
   await page.locator('.input-model-button').click()
-  await expect(models.locator('.model-cascader-item.active')).toContainText('other-model')
+  await expect(models.locator('.model-cascader-item.active')).toContainText(selectedModel)
   await expect(models).toContainText('Test Provider')
   await models.locator('.model-cascader-provider').filter({ hasText: 'Test Provider' }).click()
   await models.locator('.model-cascader-item').filter({ hasText: 'test-model' }).click()

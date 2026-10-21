@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
@@ -632,7 +633,7 @@ onUnmounted(() => {
 <template>
   <PageLoading :show="loading" class="group-chat-link-view">
     <section class="link-card">
-      <img src="/logo.png" alt="" class="link-logo">
+      <img :src="deploymentUrl('/logo.png')" alt="" class="link-logo">
       <h1>
         {{ editingConnection
           ? t('groupChat.editAgentTitle', { name: editingConnection.agent.name })

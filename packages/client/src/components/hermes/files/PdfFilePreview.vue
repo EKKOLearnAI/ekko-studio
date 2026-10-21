@@ -71,7 +71,7 @@ async function loadPdf(): Promise<void> {
     try { await previousLoadTask?.destroy?.() } catch { /* replacing a stale load */ }
     const previousDocument = documentProxy
     documentProxy = null
-    try { await previousDocument?.destroy?.() } catch { /* replacing a stale document */ }
+    try { await previousDocument?.loadingTask?.destroy?.() } catch { /* replacing a stale document */ }
     const [pdfjs, workerModule] = await Promise.all([
       import('pdfjs-dist'),
       import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
@@ -87,7 +87,7 @@ async function loadPdf(): Promise<void> {
     const loaded = await task.promise
     if (loadTask === task) loadTask = null
     if (currentGeneration !== generation) {
-      await loaded.destroy()
+      await task.destroy()
       return
     }
     documentProxy = loaded
@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
   generation += 1
   renderTask?.cancel?.()
   loadTask?.destroy?.()
-  void documentProxy?.destroy?.()
+  void documentProxy?.loadingTask?.destroy?.()
 })
 </script>
 

@@ -106,13 +106,13 @@ for (const theme of ['light', 'dark']) {
     releaseSkills()
     await expect(page.locator('.skills-loading')).toHaveCount(0)
 
-    let releaseDevices!: () => void
-    const devicesGate = new Promise<void>(resolve => { releaseDevices = resolve; pendingReleases.add(resolve) })
-    await page.route(/\/api\/devices(?:\?.*)?$/, async route => {
-      await devicesGate
+    let releaseMcuDevices!: () => void
+    const mcuDevicesGate = new Promise<void>(resolve => { releaseMcuDevices = resolve; pendingReleases.add(resolve) })
+    await page.route(/\/api\/mcu-devices(?:\?.*)?$/, async route => {
+      await mcuDevicesGate
       await route.fulfill({ json: { scanning: false, last_scanned_at: null, devices: [], requests: [] } })
     })
-    await page.goto('/#/hermes/devices')
+    await page.goto('/#/hermes/connections?tab=mcu')
     const overlay = page.locator('.chat-view')
     await expect(overlay).toHaveAttribute('aria-busy', 'true')
     const overlayLogo = overlay.locator('.studio-loading-logo')
@@ -121,7 +121,7 @@ for (const theme of ['light', 'dark']) {
     await expect(overlay.locator(':scope > .page-loading-content')).toHaveCount(1)
     await page.emulateMedia({ reducedMotion: 'reduce' })
     expect((await sweepStyle(overlayLogo)).name).toBe('none')
-    releaseDevices()
+    releaseMcuDevices()
     await expect(overlay).toHaveAttribute('aria-busy', 'false')
     await expect(overlayLogo).toHaveCount(0)
   })

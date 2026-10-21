@@ -9,7 +9,8 @@ Group=@USER@
 WorkingDirectory=/usr/local/@APP_ID@/data
 ExecStart=/usr/local/@APP_ID@/bin/ekko-studio
 Environment=NODE_ENV=production
-Environment=BIND_HOST=0.0.0.0
+Environment=BIND_HOST=127.0.0.1
+Environment=HERMES_LAN_DISCOVERY_ENABLED=0
 Environment=PORT=@PORT@
 Environment=HOME=/usr/local/@APP_ID@/data/home
 Environment=HERMES_HOME=/usr/local/@APP_ID@/data/home/.hermes

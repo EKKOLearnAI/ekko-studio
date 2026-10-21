@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
+
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NCard, NModal, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -111,7 +113,7 @@ function restartStandaloneWebUi() {
   restartWaitTimer = setInterval(async () => {
     attempts += 1
     try {
-      const response = await fetch('/health', { cache: 'no-store' })
+      const response = await fetch(deploymentUrl('/health'), { cache: 'no-store' })
       if (response.ok && (sawUnavailable || attempts >= 15)) {
         if (restartWaitTimer) clearInterval(restartWaitTimer)
         restartWaitTimer = null
@@ -133,9 +135,9 @@ async function restartNow() {
   restarting.value = true
   try {
     const bridge = desktopBridge()
-    if (bridge?.isDesktop === true) {
+    if (bridge?.isDesktop === true && bridge.remoteMode !== true) {
       if (!bridge.restartApp) throw new Error('Desktop restart is unavailable')
-      await bridge.restartApp()
+      if (!await bridge.restartApp()) throw new Error('Desktop restart could not be scheduled')
     } else {
       await restartWebUiAfterRuntimeChange()
       restartStandaloneWebUi()

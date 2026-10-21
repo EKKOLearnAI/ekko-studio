@@ -157,6 +157,20 @@ jobs:
       - name: Verify desktop updater download lifecycle
         run: npm --prefix packages/desktop run test:updater
 
+      - name: Verify native device menu with Windows mouse input
+        id: native_devices
+        if: needs.validate.outputs.target_os == 'win32'
+        run: node packages/desktop/scripts/verify-native-device-switcher.cjs --output-dir=packages/desktop/native-device-checks
+
+      - name: Upload native device interaction report
+        if: always() && needs.validate.outputs.target_os == 'win32' && steps.native_devices.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-win32-${{ needs.validate.outputs.target_arch }}-native-devices
+          path: packages/desktop/native-device-checks/*.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Verify Windows screenshot overlay coverage
         id: screenshot_geometry
         if: needs.validate.outputs.target_os == 'win32'

@@ -159,7 +159,7 @@ function buildWsUrl(): string {
       : "ws:";
 
   if (base) {
-    return `${wsProtocol}//${new URL(base).host}/api/hermes/terminal${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    return `${wsProtocol}//${new URL(base).host}${new URL(base).pathname.replace(/\/$/, "")}/api/hermes/terminal${token ? `?token=${encodeURIComponent(token)}` : ""}`;
   }
 
   const directDevPort = import.meta.env.VITE_HERMES_DIRECT_WS_PORT;

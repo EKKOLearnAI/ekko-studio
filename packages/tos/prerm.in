@@ -2,11 +2,11 @@
 set -e
 case "$1" in
     remove|deconfigure)
-        systemctl stop "@SERVICE@.service"
-        systemctl disable "@SERVICE@.service"
+        systemctl stop "@SERVICE@.service" || true
+        systemctl disable "@SERVICE@.service" || true
         ;;
     upgrade)
-        systemctl stop "@SERVICE@.service"
+        systemctl stop "@SERVICE@.service" || true
         ;;
 esac
 exit 0

@@ -83,6 +83,20 @@ describe('providers controller update', () => {
     expect(mockInvalidateProviderRuntime).toHaveBeenCalledWith('research', 'deepseek')
   })
 
+  it('clears saved protocol aliases when a custom connection switches to automatic', async () => {
+    const path = join(hermesHome, 'profiles', 'research', 'config.yaml')
+    const config = readYaml(path)
+    Object.assign(config.custom_providers[0], { api_mode: 'codex_responses', transport: 'anthropic_messages', apiMode: 'chat_completions' })
+    writeFileSync(path, YAML.dump(config))
+    const { update } = await loadProvidersController()
+    const ctx = makeCtx('custom:research-proxy', { api_mode: null })
+    await update(ctx)
+    expect(ctx.body).toEqual({ success: true })
+    const saved = readYaml(path).custom_providers[0]
+    for (const key of ['api_mode', 'transport', 'apiMode']) expect(saved).not.toHaveProperty(key)
+    expect(mockInvalidateProviderRuntime).toHaveBeenCalledWith('research', 'custom:research-proxy')
+  })
+
   it('does not invalidate a runtime when a custom provider update is rejected', async () => {
     const { update } = await loadProvidersController()
     const ctx = makeCtx('custom:missing-provider', { api_key: 'unused-key' })

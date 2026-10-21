@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import thinkingImage from '@/assets/thinking.gif'
@@ -11,7 +12,7 @@ const props = withDefaults(defineProps<{
   agent?: ChatAgentAvatar
   deploymentSessionId?: string
 }>(), {
-  agent: () => ({ label: 'Hermes', src: '/coding-agents/hermes.png' }),
+  agent: () => ({ label: 'Hermes', src: deploymentUrl('/coding-agents/hermes.png') }),
 })
 const isEkko = computed(() => props.agent.label === 'Ekko')
 

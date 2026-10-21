@@ -209,6 +209,25 @@ beforeEach(() => {
 })
 
 describe('ProviderEditorModal', () => {
+  it('sends a clear operation when switching a fixed protocol to automatic', async () => {
+    const wrapper = await mountEditor()
+    const protocol = wrapper.findAll('select').find(select => select.find('option[value="auto"]').exists())!
+    await protocol.setValue('auto')
+    await wrapper.findAll('button').find(button => button.text() === 'Save')!.trigger('click')
+    await flushPromises()
+    expect(storeMock.saveProviderEditor.mock.calls[0][2].api_mode).toBeNull()
+    expect(apiMock.testProviderEditor.mock.calls[0][1].api_mode).toBeNull()
+  })
+
+  it('loads an unset protocol as automatic even when the model catalog includes a resolved protocol', async () => {
+    const wrapper = await mountEditor({ detail: detail({ api_mode: undefined }) })
+    const protocol = wrapper.findAll('select').find(select => select.find('option[value="auto"]').exists())!
+    expect((protocol.element as HTMLSelectElement).value).toBe('auto')
+    await wrapper.findAll('button').find(button => button.text() === 'Save')!.trigger('click')
+    await flushPromises()
+    expect(storeMock.saveProviderEditor.mock.calls[0][2].api_mode).toBeNull()
+  })
+
   it('never renders the plaintext credential already present in the model list response', async () => {
     const credential = ['do', 'not', 'render'].join('-')
     const wrapper = await mountEditor({ providerCredential: credential })

@@ -57,7 +57,7 @@ export interface ProviderEditorPatch {
   revision?: string
   label?: string
   base_url?: string
-  api_mode?: ProviderApiMode
+  api_mode?: ProviderApiMode | null
   preferred_model?: string
   credential_action?: CredentialAction
   api_key?: string
@@ -511,7 +511,7 @@ export async function testProviderEditorDraft(
   const apiKey = patch.credential_action === 'replace' ? String(patch.api_key || '') : existingCredential
   if (patch.credential_action === 'clear') throw new ProviderEditorError('Cannot test a cleared credential', 422, 'PROVIDER_TEST_NO_CREDENTIAL')
   const baseUrl = patch.base_url !== undefined ? normalizeUrl(patch.base_url) : detail.base_url
-  const apiMode = patch.api_mode || detail.api_mode
+  const apiMode = patch.api_mode === undefined ? detail.api_mode : patch.api_mode ?? undefined
   const capability = connectionTestCapability(apiMode)
   if (!capability.supported) {
     throw new ProviderEditorError(capability.reason || 'Provider connection testing is not supported', 422, 'PROVIDER_TEST_UNSUPPORTED')
@@ -589,7 +589,7 @@ function changedFields(before: ProviderEditorDetail, patch: ProviderEditorPatch)
   const fields: string[] = []
   if (patch.label !== undefined && patch.label.trim() !== before.label) fields.push('label')
   if (patch.base_url !== undefined && patch.base_url.replace(/\/+$/, '') !== before.base_url.replace(/\/+$/, '')) fields.push('base_url')
-  if (patch.api_mode !== undefined && patch.api_mode !== before.api_mode) fields.push('api_mode')
+  if (patch.api_mode !== undefined && patch.api_mode !== (before.api_mode ?? null)) fields.push('api_mode')
   if (patch.preferred_model !== undefined && patch.preferred_model.trim() !== before.preferred_model) fields.push('preferred_model')
   if (patch.discover_models !== undefined && patch.discover_models !== before.discover_models) fields.push('discover_models')
   if (patch.rate_limit_delay !== undefined && patch.rate_limit_delay !== (before.rate_limit_delay ?? null)) fields.push('rate_limit_delay')
@@ -622,7 +622,7 @@ function validatePatch(before: ProviderEditorDetail, patch: ProviderEditorPatch)
   if (patch.credential_action && patch.credential_action !== 'keep' && !allowed.has('api_key')) throw new ProviderEditorError('Provider credential is read-only', 400, 'FIELD_READ_ONLY')
   if (patch.label !== undefined && (!patch.label.trim() || patch.label.trim().length > 100)) throw new ProviderEditorError('Provider label must contain 1-100 characters', 400, 'INVALID_LABEL')
   if (patch.base_url !== undefined) normalizeUrl(patch.base_url)
-  if (patch.api_mode !== undefined && !normalizeApiMode(patch.api_mode)) throw new ProviderEditorError('Invalid API mode', 400, 'INVALID_API_MODE')
+  if (patch.api_mode != null && !normalizeApiMode(patch.api_mode)) throw new ProviderEditorError('Invalid API mode', 400, 'INVALID_API_MODE')
   if (patch.preferred_model !== undefined && (!patch.preferred_model.trim() || /[\r\n]/.test(patch.preferred_model))) throw new ProviderEditorError('Preferred model is invalid', 400, 'INVALID_MODEL')
   if (patch.credential_action === 'replace' && (!String(patch.api_key || '').trim() || /[\r\n]/.test(String(patch.api_key)))) throw new ProviderEditorError('A non-empty API key is required', 400, 'INVALID_API_KEY')
   validateOptionalRuntimeNumber(patch.rate_limit_delay, 'rate_limit_delay')
@@ -683,7 +683,8 @@ export async function updateProviderEditorDetail(
       }
     }
     if (patch.api_mode !== undefined && !source.builtin) {
-      setExistingAlias(source.configEntry!, ['api_mode', 'transport', 'apiMode'], patch.api_mode, 'api_mode')
+      if (patch.api_mode === null) deleteAliases(source.configEntry!, ['api_mode', 'transport', 'apiMode'])
+      else setExistingAlias(source.configEntry!, ['api_mode', 'transport', 'apiMode'], patch.api_mode, 'api_mode')
     }
     if (!source.builtin) {
       if (patch.discover_models !== undefined) {

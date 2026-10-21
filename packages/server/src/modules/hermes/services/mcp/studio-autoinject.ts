@@ -11,20 +11,20 @@ const LEGACY_SERVER_NAME = 'hermes-studio'
 const MANAGED_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
   { name: 'ekko-studio-api', toolset: 'api' },
   { name: 'ekko-studio-browser', toolset: 'browser' },
-  { name: 'ekko-studio-devices', toolset: 'devices' },
   { name: 'ekko-studio-use', toolset: 'use' },
   { name: 'ekko-studio-interaction', toolset: 'plan' },
 ]
 const MANAGED_SERVER_NAMES: Set<string> = new Set(MANAGED_SERVERS.map(server => server.name))
 // Hermes Agent applies this per managed MCP server. Keep the long-running
 // `use` toolset above Studio's 30-minute chat-run cap with bounded delivery
-// headroom; unrelated API/browser/device calls retain the client default.
+// headroom; unrelated API/browser calls retain the client default.
 const MANAGED_USE_MCP_TIMEOUT_SECONDS = 30 * 60 + 60
 const LEGACY_SERVER_NAMES = new Set([
   'ekko-studio-plan',
   'hermes-studio-api',
   'hermes-studio-browser',
   'hermes-studio-devices',
+  'ekko-studio-devices',
   'hermes-studio-use',
   'hermes-studio-mcp',
   LEGACY_SERVER_NAME,

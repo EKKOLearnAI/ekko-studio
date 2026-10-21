@@ -162,7 +162,28 @@ export type DesktopComputerUsePermissions = { supported: false } | {
   screenRecording: DesktopComputerUsePermissionStatus
 }
 
+export interface DesktopRemoteDevice {
+  id: string
+  name: string
+  serverUrl: string
+}
+
+export interface DesktopRemoteDevicesState {
+  devices: DesktopRemoteDevice[]
+  activeDeviceId: string | null
+  activeServerUrl: string | null
+}
+
+export interface DesktopRemoteDevicesBridge {
+  list: () => Promise<DesktopRemoteDevicesState>
+  add: (input: { name: string; serverUrl: string }) => Promise<DesktopRemoteDevicesState>
+  remove: (id: string) => Promise<DesktopRemoteDevicesState>
+  switchTo: (id: string | null) => Promise<void>
+  returnLocal: () => Promise<void>
+}
+
 export interface HermesDesktopBridge {
+  remoteDevices?: DesktopRemoteDevicesBridge
   computerUsePermissions?: {
     claimReminder?: () => Promise<DesktopComputerUsePermissions | null>
     getStatus: () => Promise<DesktopComputerUsePermissions>

@@ -70,15 +70,29 @@ export function remoteReadyTimeoutMs(env: NodeJS.ProcessEnv = process.env): numb
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_REMOTE_READY_TIMEOUT_MS
 }
 
+export function requireRemoteServerRootUrl(serverUrl: string): void {
+  // Client API, Socket.IO and asset URLs are rooted at /. Reject a deployment
+  // prefix instead of silently sending its requests to another root service.
+  if (new URL(serverUrl).pathname !== '/') {
+    throw new Error('REMOTE_DEVICE_UNSUPPORTED_PATH: Use a Studio server at the root of a domain or port (for example https://studio.example.com). Subpath deployments are not supported.')
+  }
+}
+
 export async function waitForRemoteServerReady(serverUrl: string, timeoutMs: number): Promise<void> {
+  requireRemoteServerRootUrl(serverUrl)
   const deadline = Date.now() + timeoutMs
   const healthUrl = `${serverUrl}/health/ready`
   let lastFailure = 'no response'
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(healthUrl, { signal: AbortSignal.timeout(REMOTE_READY_REQUEST_TIMEOUT_MS) })
-      if (res.ok) return
-      lastFailure = `HTTP ${res.status}`
+      const res = await fetch(healthUrl, { signal: AbortSignal.timeout(REMOTE_READY_REQUEST_TIMEOUT_MS), redirect: 'error', cache: 'no-store' })
+      if (res.ok) {
+        const data = await res.json().catch(() => null) as { status?: unknown } | null
+        if (data?.status === 'ready') return
+        lastFailure = 'Expected a ready Studio server at /health/ready'
+      } else {
+        lastFailure = `HTTP ${res.status}`
+      }
     } catch (err) {
       lastFailure = err instanceof Error ? err.message : String(err)
     }

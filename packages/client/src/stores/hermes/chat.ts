@@ -1,3 +1,4 @@
+import { deploymentUrl } from '@/utils/deployment-url'
 import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 import { deleteSessionMessages, type MessageDeletionResult } from '@/api/studio/sessions'
 import { isNativeCodingAgent } from '@/utils/agent-catalog'
@@ -622,7 +623,7 @@ async function uploadFiles(attachments: Attachment[]): Promise<{ name: string; p
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
   if (profileName) headers['X-Hermes-Profile'] = profileName
-  const res = await fetch('/api/studio/uploads', {
+  const res = await fetch(deploymentUrl('/api/studio/uploads'), {
     method: 'POST',
     body: formData,
     headers,

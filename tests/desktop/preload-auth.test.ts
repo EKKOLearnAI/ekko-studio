@@ -3,6 +3,7 @@ import { resolve } from 'path'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
+import type { DesktopRemoteDevicesBridge } from '../../packages/client/src/utils/desktop-bridge'
 
 function loadPreload(argv: string[], storedToken = 'remote-session', platform = 'darwin') {
   const storage = new Map(storedToken ? [['hermes_api_key', storedToken], ['AUTH_TOKEN', storedToken]] : [])
@@ -42,6 +43,9 @@ function loadPreload(argv: string[], storedToken = 'remote-session', platform = 
     remoteMode: boolean
     windowKind: string
     ensureAuth: () => Promise<boolean>
+    remoteDevices?: DesktopRemoteDevicesBridge
+    selectRuntimeDirectory?: (defaultPath?: string) => Promise<string | null>
+    restartApp?: () => Promise<boolean>
     computerUsePermissions?: {
       claimReminder: () => Promise<unknown>
       getStatus: () => Promise<unknown>
@@ -56,6 +60,33 @@ function loadPreload(argv: string[], storedToken = 'remote-session', platform = 
 }
 
 describe('desktop preload auth', () => {
+  it('exposes Runtime directory picking and app restarts only for a local backend', async () => {
+    const local = loadPreload([])
+    await local.bridge.selectRuntimeDirectory!('/runtime')
+    expect(local.invoke).toHaveBeenCalledWith('hermes-desktop:select-runtime-directory', '/runtime')
+    expect(loadPreload(['--hermes-remote-mode']).bridge.selectRuntimeDirectory).toBeUndefined()
+    await local.bridge.restartApp!()
+    expect(local.invoke).toHaveBeenLastCalledWith('hermes-desktop:restart-app')
+    expect(loadPreload(['--hermes-remote-mode']).bridge.restartApp).toBeUndefined()
+  })
+  it.each([false, true])('exposes remote device management only in the main window (remote=%s)', async remote => {
+    const args = remote ? ['--hermes-remote-mode'] : []
+    const { bridge, invoke } = loadPreload(args)
+    const devices = bridge.remoteDevices!
+    await devices.list()
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:remote-devices-list')
+    const input = { name: 'Home', serverUrl: 'http://home:6060' }
+    await devices.add(input)
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:remote-devices-add', input)
+    await devices.remove('home')
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:remote-devices-remove', 'home')
+    await devices.switchTo(null)
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:remote-devices-switch', null)
+    await devices.returnLocal()
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:remote-devices-return-local')
+    for (const kind of ['pet', 'chat']) expect(loadPreload([...args, `--hermes-window-kind=${kind}`]).bridge.remoteDevices).toBeUndefined()
+  })
+
   it('exposes permission checks and explicit authorization only on a local Mac', async () => {
     const { bridge, invoke } = loadPreload([])
     expect(invoke).not.toHaveBeenCalled()

@@ -667,41 +667,6 @@ export const SOCIAL_MESSAGE_RUNTIME_STATES_INDEXES = {
 }
 
 // ============================================================================
-// LAN Devices
-// ============================================================================
-
-export const DEVICES_TABLE = 'devices'
-
-export const DEVICES_SCHEMA: Record<string, string> = {
-  id: 'TEXT PRIMARY KEY',
-  status: "TEXT NOT NULL DEFAULT 'none'",
-  inbound_status: "TEXT NOT NULL DEFAULT 'none'",
-  outbound_status: "TEXT NOT NULL DEFAULT 'none'",
-  device_public_key: "TEXT NOT NULL DEFAULT ''",
-  computer_name: "TEXT NOT NULL DEFAULT ''",
-  endpoint_kind: "TEXT NOT NULL DEFAULT 'custom'",
-  ip: "TEXT NOT NULL DEFAULT ''",
-  http_port: 'INTEGER NOT NULL DEFAULT 0',
-  url: "TEXT NOT NULL DEFAULT ''",
-  os_json: "TEXT NOT NULL DEFAULT '{}'",
-  hermes_agent_version: "TEXT NOT NULL DEFAULT ''",
-  hermes_web_ui_version: "TEXT NOT NULL DEFAULT ''",
-  response_ms: 'INTEGER NOT NULL DEFAULT 0',
-  requested_at: 'INTEGER NOT NULL DEFAULT 0',
-  decided_at: 'INTEGER',
-  outbound_requested_at: 'INTEGER NOT NULL DEFAULT 0',
-  outbound_decided_at: 'INTEGER',
-  inbound_history_deleted_at: 'INTEGER',
-  last_seen_at: 'INTEGER NOT NULL DEFAULT 0',
-  updated_at: 'INTEGER NOT NULL',
-}
-
-export const DEVICES_INDEXES = {
-  idx_devices_status: 'CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status)',
-  idx_devices_last_seen: 'CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen_at)',
-}
-
-// ============================================================================
 // MCU Devices
 // ============================================================================
 
@@ -1812,11 +1777,6 @@ export function initAllHermesTables(): void {
     })
     createIndexes(db, SOCIAL_MESSAGE_ACCOUNTS_INDEXES)
     createIndexes(db, SOCIAL_MESSAGE_RUNTIME_STATES_INDEXES)
-
-    // LAN devices and link request status
-    syncTable(DEVICES_TABLE, DEVICES_SCHEMA, {
-      indexes: DEVICES_INDEXES,
-    })
 
     // MCU devices
     syncTable(MCU_DEVICES_TABLE, MCU_DEVICES_SCHEMA, {

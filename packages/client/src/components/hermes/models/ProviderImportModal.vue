@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { NAlert, NButton, NForm, NFormItem, NInput, NModal, NSelect, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { addCustomProvider, fetchProviderModels } from '@/api/hermes/system'
 import type { ProviderImport } from '@/utils/provider-import'
+import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
 
 const props = defineProps<{
   draft: ProviderImport
@@ -18,11 +19,14 @@ const host = new URL(props.draft.baseUrl).hostname
 const generatedName = (host.charAt(0).toUpperCase() + host.slice(1)).replace(/[^\p{L}\p{N} ._-]/gu, '-').slice(0, 80)
 const name = ref(props.draft.name || generatedName)
 const model = ref(props.draft.model)
-const apiMode = ref(props.draft.apiMode)
+const apiMode = ref<ProviderApiMode | 'auto'>(props.draft.apiMode)
 const modelOptions = ref(props.draft.model ? [{ label: props.draft.model, value: props.draft.model }] : [])
 const fetching = ref(false)
 let requestId = 0
-const modes = ['chat_completions', 'codex_responses', 'anthropic_messages'].map(value => ({ label: value, value }))
+const modes = computed(() => [
+  ...['chat_completions', 'codex_responses', 'anthropic_messages'].map(value => ({ label: value, value })),
+  { label: t('models.apiModeAuto'), value: 'auto' },
+])
 const apiKey = ref(props.draft.apiKey || '')
 const saving = ref(false)
 const keyInputProps = { autocomplete: 'new-password', name: 'import-provider-api-key', 'data-1p-ignore': 'true' }
@@ -53,7 +57,7 @@ async function save() {
   try {
     await addCustomProvider({
       name: name.value.trim(), base_url: props.draft.baseUrl, model: model.value.trim(),
-      api_key: apiKey.value.trim(), api_mode: apiMode.value, create_only: true,
+      api_key: apiKey.value.trim(), api_mode: apiMode.value === 'auto' ? null : apiMode.value, create_only: true,
     }, profile)
     apiKey.value = ''
     message.success(t('models.providerAdded'))

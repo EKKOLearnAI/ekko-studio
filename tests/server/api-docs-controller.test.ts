@@ -17,6 +17,16 @@ describe('api docs controller', () => {
     const providerCatalog = ctx.body.paths['/api/hermes/provider-models'].get
     expect(providerCatalog.parameters).toContainEqual(expect.objectContaining({ name: 'provider', in: 'query', required: true }))
     expect(providerCatalog.responses['200'].content['application/json'].schema.required).toContain('visible_models')
+    for (const operation of [
+      ctx.body.paths['/api/hermes/config/providers'].post,
+      ctx.body.paths['/api/hermes/config/providers/{poolKey}'].put,
+    ]) {
+      expect(operation.requestBody.content['application/json'].schema.properties.api_mode).toMatchObject({
+        type: 'string',
+        nullable: true,
+        enum: ['chat_completions', 'codex_responses', 'anthropic_messages', 'bedrock_converse', 'codex_app_server', null],
+      })
+    }
     expect(ctx.body.paths['/api/coding-agents/models'].get.parameters).toEqual([
       expect.objectContaining({ name: 'agent', in: 'query', required: false }),
       expect.objectContaining({ name: 'refresh', in: 'query', schema: { type: 'boolean', default: false } }),

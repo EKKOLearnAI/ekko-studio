@@ -75,7 +75,7 @@ export interface CustomProvider {
   api_key: string
   model: string
   context_length?: number
-  api_mode?: ProviderApiMode
+  api_mode?: ProviderApiMode | null
   providerKey?: string | null
   create_only?: boolean
 }
@@ -120,7 +120,7 @@ export interface ProviderEditorDetail {
 export interface ProviderEditorPatch {
   label?: string
   base_url?: string
-  api_mode?: ProviderApiMode
+  api_mode?: ProviderApiMode | null
   preferred_model?: string
   credential_action?: ProviderCredentialAction
   api_key?: string

@@ -7,7 +7,7 @@ const api = vi.hoisted(() => ({
   restartWebUiAfterRuntimeChange: vi.fn(),
 }))
 const desktop = vi.hoisted(() => ({
-  bridge: null as null | { isDesktop: boolean; restartApp?: ReturnType<typeof vi.fn> },
+  bridge: null as null | { isDesktop: boolean; remoteMode?: boolean; restartApp?: ReturnType<typeof vi.fn> },
 }))
 const auth = vi.hoisted(() => ({ isStoredSuperAdmin: vi.fn(() => true) }))
 vi.mock('@/api/client', () => auth)
@@ -107,6 +107,29 @@ describe('RuntimeRestartPrompt', () => {
     await flushPromises()
 
     expect(api.restartWebUiAfterRuntimeChange).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('restarts the remote server when the desktop is connected to a remote device', async () => {
+    const restartApp = vi.fn().mockResolvedValue(true)
+    desktop.bridge = { isDesktop: true, remoteMode: true, restartApp }
+    const wrapper = mount(RuntimeRestartPrompt)
+    await flushPromises()
+    await wrapper.get('[data-testid="runtime-restart-now"]').trigger('click')
+    await flushPromises()
+    expect(api.restartWebUiAfterRuntimeChange).toHaveBeenCalledOnce()
+    expect(restartApp).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not mark a restart handled when the local desktop cannot restart', async () => {
+    desktop.bridge = { isDesktop: true, restartApp: vi.fn().mockResolvedValue(false) }
+    const wrapper = mount(RuntimeRestartPrompt)
+    await flushPromises()
+    await wrapper.get('[data-testid="runtime-restart-now"]').trigger('click')
+    await flushPromises()
+    expect(message.error).toHaveBeenCalled()
+    expect(localStorage.getItem('hermes-runtime-restart-handled-jobs')).toBeNull()
     wrapper.unmount()
   })
 

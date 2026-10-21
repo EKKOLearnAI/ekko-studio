@@ -1,10 +1,7 @@
-# Studio uses root-relative assets, API and Socket.IO URLs. Open its dedicated
-# origin from the TOS portal instead of serving the SPA below a shared prefix.
+# Keep application requests inside its portal namespace. No public service-port
+# redirect and no root /api or /socket.io locations on TOS's shared origin.
 location = /@APP_ID@ {
-    return 302 http://$host:@PORT@/;
-}
-location = /@APP_ID@/ {
-    return 302 http://$host:@PORT@/;
+    return 302 /@APP_ID@/;
 }
 
 location /@APP_ID@/ {

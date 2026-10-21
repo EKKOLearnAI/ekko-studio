@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopUpdateState } from '../main/updater-types'
+import type { DesktopRemoteDevicesState } from '../main/remote-devices'
 import type { ComputerUsePermission, ComputerUsePermissions } from '../main/computer-use-permissions'
 import type { MessageSelectionContextMenuRequest } from '../main/selection-context-menu'
 import type { ScreenshotShortcutConfig, ScreenshotShortcutState } from '../main/screenshot-shortcut'
@@ -18,6 +19,13 @@ function desktopWindowKind(): DesktopWindowKind {
 const REMOTE_SERVER_MODE = process.argv.includes('--hermes-remote-mode')
 
 contextBridge.exposeInMainWorld('hermesDesktop', {
+  ...(desktopWindowKind() === 'main' ? { remoteDevices: {
+    list: (): Promise<DesktopRemoteDevicesState> => ipcRenderer.invoke('hermes-desktop:remote-devices-list'),
+    add: (input: { name: string; serverUrl: string }): Promise<DesktopRemoteDevicesState> => ipcRenderer.invoke('hermes-desktop:remote-devices-add', input),
+    remove: (id: string): Promise<DesktopRemoteDevicesState> => ipcRenderer.invoke('hermes-desktop:remote-devices-remove', id),
+    switchTo: (id: string | null): Promise<void> => ipcRenderer.invoke('hermes-desktop:remote-devices-switch', id),
+    returnLocal: (): Promise<void> => ipcRenderer.invoke('hermes-desktop:remote-devices-return-local'),
+  } } : {}),
   ...(!REMOTE_SERVER_MODE && process.platform === 'darwin' ? { computerUsePermissions: {
     claimReminder: (): Promise<ComputerUsePermissions | null> => ipcRenderer.invoke('hermes-desktop:computer-use-claim-reminder'),
     getStatus: (): Promise<ComputerUsePermissions> => ipcRenderer.invoke('hermes-desktop:computer-use-permissions'),
@@ -61,8 +69,10 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   },
   getToken: (): Promise<string> => ipcRenderer.invoke('hermes-desktop:get-token'),
   retryBootstrap: (source?: 'cf' | 'github'): Promise<void> => ipcRenderer.invoke('hermes-desktop:retry-bootstrap', source),
-  restartApp: (): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:restart-app'),
-  selectRuntimeDirectory: (defaultPath?: string): Promise<string | null> => ipcRenderer.invoke('hermes-desktop:select-runtime-directory', defaultPath),
+  ...(!REMOTE_SERVER_MODE ? {
+    restartApp: (): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:restart-app'),
+    selectRuntimeDirectory: (defaultPath?: string): Promise<string | null> => ipcRenderer.invoke('hermes-desktop:select-runtime-directory', defaultPath),
+  } : {}),
   notifyCompletion: (payload: { title: string; body?: string; icon?: string; tag?: string; clickUrl?: string }): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:notify-completion', payload),
   openExternalUrl: (url: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:open-external-url', url),
   openChatWindow: (sessionId: string, profile?: string): Promise<void> => ipcRenderer.invoke('hermes-desktop:open-chat-window', sessionId, profile),

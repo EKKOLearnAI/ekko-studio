@@ -245,7 +245,7 @@ for (const platform of ['win32', 'linux'] as const) {
     expect(controlsBox!.width).toBe(138)
     expect(controlsBox!.x + controlsBox!.width).toBe(page.viewportSize()!.width)
     expect((await sidebar.boundingBox())?.y).toBe(40)
-    await expect(header).toHaveCSS('padding-right', '16px')
+    await expect(header).toHaveCSS('padding-right', '8px')
     await expect(page.locator('.app-main .page-header')).toHaveCount(0)
     await expect(header.getByRole('button').last()).toHaveCSS('-webkit-app-region', 'no-drag')
     await header.getByRole('button').last().click()

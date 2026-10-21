@@ -8,7 +8,6 @@ import {
   nativeImage,
   Notification,
   screen,
-  session,
   shell,
   systemPreferences,
   Tray,
@@ -42,6 +41,10 @@ import { registerComputerUsePermissionsIpc } from './computer-use-permissions'
 import { groupChatAgentLinkPopupResponse } from './group-chat-agent-popup'
 import { isTrustedDesktopAppUrl, normalizeExternalHttpUrl } from './window-open-policy'
 import { desktopPreloadArguments, remoteReadyTimeoutMs, resolveRemoteServerUrl, waitForRemoteServerReady } from './remote-server'
+import { DesktopRemoteDevices } from './remote-devices'
+import { NativeDeviceSwitcher } from './native-device-switcher'
+import { registerRemoteDevicesIpc } from './remote-devices-ipc'
+import { desktopDeviceStoragePaths, desktopWindowSession } from './desktop-device-storage'
 import {
   ensureDesktopRuntime,
   isDesktopRuntimeReady,
@@ -89,6 +92,9 @@ let pendingProviderImport: string | null = null
 // Resolved once at startup so createWindow can flag remote mode into the main
 // window's preload; bootstrap() re-resolves it on every (re)start attempt.
 let activeRemoteServerUrl: string | null = resolveRemoteServerUrl()
+let remoteDevices: DesktopRemoteDevices | null = null
+let nativeDeviceSwitcher: NativeDeviceSwitcher | null = null
+let serviceFailurePageUrl: string | null = null
 let tray: Tray | null = null
 let appShutdownPromise: Promise<void> | null = null
 let isBootstrapping = false
@@ -193,6 +199,16 @@ function scheduleAppRestart(delayMs = 100): boolean {
   return appLifecycle.scheduleRestart(delayMs)
 }
 
+function desktopRemoteDevices(): DesktopRemoteDevices {
+  return remoteDevices ??= new DesktopRemoteDevices({
+    home: webUiHome(),
+    activeServerUrl: activeRemoteServerUrl,
+    env: process.env,
+    checkReady: url => waitForRemoteServerReady(url, Math.min(remoteReadyTimeoutMs(), 5000)),
+    restart: () => scheduleAppRestart(250),
+  })
+}
+
 async function prepareAppShutdown(): Promise<void> {
   appLifecycle.prepareShutdown()
   if (!appShutdownPromise) {
@@ -204,6 +220,9 @@ async function prepareAppShutdown(): Promise<void> {
       await browserManager?.destroy().catch(() => undefined)
       browserBroker = null
       browserManager = null
+      const windowSession = desktopWindowSession(webUiHome(), activeRemoteServerUrl)
+      windowSession.flushStorageData()
+      await windowSession.cookies.flushStore().catch(() => undefined)
       await stopWebUiServer().catch(() => undefined)
     })()
   }
@@ -304,6 +323,7 @@ function ensurePetWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: false,
       additionalArguments: desktopPreloadArguments('pet', !!activeRemoteServerUrl),
+      session: desktopWindowSession(webUiHome(), activeRemoteServerUrl),
     },
   })
   petWindow.setBackgroundColor('#00000000')
@@ -491,6 +511,18 @@ function updateTrayMenu() {
       },
     },
     {
+      label: t('desktop.returnLocal'),
+      visible: !!activeRemoteServerUrl,
+      enabled: !isBootstrapping && !appLifecycle.isQuitting,
+      click: async () => {
+        try {
+          await desktopRemoteDevices().switchTo(null)
+        } catch {
+          dialog.showErrorBox('Ekko Studio', t('desktop.switchDeviceFailed'))
+        }
+      },
+    },
+    {
       label: t('tray.openAtLogin'),
       type: 'checkbox',
       enabled: process.platform !== 'linux' || app.isPackaged,
@@ -573,8 +605,11 @@ async function createWindow(): Promise<void> {
       nodeIntegration: false,
       sandbox: false,
       additionalArguments: desktopPreloadArguments('main', !!activeRemoteServerUrl),
+      session: desktopWindowSession(webUiHome(), activeRemoteServerUrl),
     },
   })
+
+  nativeDeviceSwitcher = new NativeDeviceSwitcher(mainWindow, desktopRemoteDevices, process.platform, () => appLifecycle.isQuitting)
 
   mainWindow.once('ready-to-show', () => {
     if (!START_HIDDEN) showWindowWithFade(true)
@@ -689,6 +724,7 @@ async function openChatWindow(sessionIdInput: unknown, profileInput?: unknown): 
       nodeIntegration: false,
       sandbox: false,
       additionalArguments: desktopPreloadArguments('chat', !!activeRemoteServerUrl),
+      session: desktopWindowSession(webUiHome(), activeRemoteServerUrl),
     },
   })
   chatWindows.set(windowKey, chatWindow)
@@ -720,8 +756,9 @@ async function openChatWindow(sessionIdInput: unknown, profileInput?: unknown): 
 
 async function initializeDesktopBrowser(): Promise<void> {
   if (!mainWindow || mainWindow.isDestroyed() || browserManager) return
-  const root = join(webUiHome(), 'desktop-browser')
-  const manager = new BrowserManager(mainWindow, root, {
+  const brokerRoot = join(webUiHome(), 'desktop-browser')
+  const { browserRoot } = desktopDeviceStoragePaths(webUiHome(), activeRemoteServerUrl)
+  const manager = new BrowserManager(mainWindow, browserRoot, {
     selectElementLabel: t('browser.selectElement'),
     selectRegionLabel: t('browser.selectRegion'),
     onAnnotationRequest: (tabId, mode) => {
@@ -731,10 +768,11 @@ async function initializeDesktopBrowser(): Promise<void> {
       }
     },
   })
-  const broker = new BrowserBroker(manager, root)
+  const broker = new BrowserBroker(manager, brokerRoot)
   try {
     await manager.initialize()
     manager.onStateChange(state => {
+      nativeDeviceSwitcher?.raise()
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_STATE_CHANGE_CHANNEL, state)
     })
     await broker.start()
@@ -748,7 +786,7 @@ async function initializeDesktopBrowser(): Promise<void> {
 }
 
 function installMicrophonePermissionHandler() {
-  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+  desktopWindowSession(webUiHome(), activeRemoteServerUrl).setPermissionRequestHandler((webContents, permission, callback, details) => {
     const isMainRenderer = !!mainWindow
       && !mainWindow.isDestroyed()
       && webContents === mainWindow.webContents
@@ -1025,6 +1063,7 @@ async function bootstrap(source?: RuntimeDownloadSource) {
       await loadServiceFailurePage(err, t('desktop.failedConnectRemote'))
     } finally {
       isBootstrapping = false
+      updateTrayMenu()
     }
     return
   }
@@ -1088,17 +1127,28 @@ async function loadServiceFailurePage(error: unknown, title = t('desktop.failedS
       <h2>${escapeHtml(title)}</h2>
       <pre style="white-space:pre-wrap;color:#f88">${msg}</pre>
       <button id="retry" style="padding:8px 14px;cursor:pointer">Retry</button>
+      ${activeRemoteServerUrl ? `<button id="return-local" style="padding:8px 14px;cursor:pointer">${escapeHtml(t('desktop.returnLocal'))}</button><p id="switch-error"></p>` : ''}
       <script>
         document.getElementById('retry').addEventListener('click', async function () {
           this.disabled = true
           try { await window.hermesDesktop.retryBootstrap() } finally { this.disabled = false }
         })
+        document.getElementById('return-local')?.addEventListener('click', async function () {
+          this.disabled = true
+          try { await window.hermesDesktop.remoteDevices.returnLocal() }
+          catch {
+            document.getElementById('switch-error').textContent = ${JSON.stringify(t('desktop.switchDeviceFailed'))}
+            this.disabled = false
+          }
+        })
       </script>
     </main>
   </body></html>`
-  await mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch(loadError => {
+  serviceFailurePageUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html)
+  await mainWindow.loadURL(serviceFailurePageUrl).catch(loadError => {
     console.error('[desktop] failed to display Web UI failure page:', loadError)
   })
+  nativeDeviceSwitcher?.setVisible(true)
 }
 
 async function recoverUnexpectedWebUiExit(details: { code: number | null; signal: NodeJS.Signals | null }): Promise<void> {
@@ -1130,11 +1180,19 @@ ipcMain.handle('hermes-desktop:get-token', () => {
   return activeRemoteServerUrl ? '' : getToken()
 })
 ipcMain.handle('hermes-desktop:restart-app', event => {
+  requireDesktopUpdaterSender(event)
+  if (activeRemoteServerUrl) throw new Error('Remote service restarts must be requested from the remote server')
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
     throw new Error('Desktop restart can only be requested from the main window')
   }
   return scheduleAppRestart()
 })
+registerRemoteDevicesIpc(desktopRemoteDevices, () => ({
+  mainContents: mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null,
+  serverUrl,
+  recoveryUrl: serviceFailurePageUrl,
+  onChanged: () => nativeDeviceSwitcher?.refresh(),
+}))
 ipcMain.handle('hermes-desktop:open-chat-window', (event, sessionId?: unknown, profile?: unknown) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
     throw new Error('Chat windows can only be opened from the main window')
@@ -1374,7 +1432,9 @@ ipcMain.handle('hermes-desktop:browser-update-annotation-note', (event, tabId?: 
 ipcMain.handle('hermes-desktop:browser-capture-annotations', (event, tabId?: unknown) => browserForEvent(event).captureAnnotations(String(tabId || '')))
 ipcMain.handle('hermes-desktop:browser-clear-annotations', (event, tabId?: unknown) => browserForEvent(event).clearAnnotations(String(tabId || '')))
 ipcMain.handle('hermes-desktop:browser-remove-annotation', (event, tabId?: unknown, marker?: unknown) => browserForEvent(event).removeAnnotation(String(tabId || ''), Number(marker)))
-ipcMain.handle('hermes-desktop:select-runtime-directory', async (_event, defaultPath?: unknown) => {
+ipcMain.handle('hermes-desktop:select-runtime-directory', async (event, defaultPath?: unknown) => {
+  requireDesktopUpdaterSender(event)
+  if (activeRemoteServerUrl) throw new Error('Runtime directories belong to the remote host')
   const options: OpenDialogOptions = {
     properties: ['openDirectory'],
     defaultPath: typeof defaultPath === 'string' && defaultPath.trim()

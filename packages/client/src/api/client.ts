@@ -1,3 +1,4 @@
+import { deploymentBasePath } from '@/utils/deployment-url'
 import router from '@/router'
 import { invalidateAuth } from './auth-invalidation'
 
@@ -22,7 +23,9 @@ export async function ensureDesktopAuthReady(): Promise<void> {
 export function getBaseUrl(): string {
   if (import.meta.env.VITE_HERMES_PREVIEW === '1') return DEFAULT_BASE_URL
   if (isDesktopShell()) return DEFAULT_BASE_URL
-  return localStorage.getItem('hermes_server_url') || DEFAULT_BASE_URL
+  const deploymentBase = deploymentBasePath()
+  return localStorage.getItem('hermes_server_url') ||
+    (deploymentBase ? `${window.location.origin}${deploymentBase}` : DEFAULT_BASE_URL)
 }
 
 export function getApiKey(): string {

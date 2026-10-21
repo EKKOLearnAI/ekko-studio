@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NSpin, NAlert, NButton, NDataTable, NEmpty, NModal, NPopconfirm, NSwitch, NTabPane, NTabs, NTag, useMessage } from 'naive-ui'
@@ -705,7 +706,7 @@ onUnmounted(() => {
         <section class="app-download-hero" data-theme-surface="card">
           <div class="app-download-intro">
             <div class="app-download-brand">
-              <img class="app-download-logo" src="/logo.png" alt="">
+              <img class="app-download-logo" :src="deploymentUrl('/logo.png')" alt="">
               <div>
                 <span>Ekko Studio Mobile</span>
                 <h3>{{ t('connections.app.downloadTitle') }}</h3>

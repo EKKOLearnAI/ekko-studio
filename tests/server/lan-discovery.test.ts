@@ -1,16 +1,14 @@
-import { readFileSync } from 'fs'
+import dgram from 'node:dgram'
 import { createHash, generateKeyPairSync } from 'crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   HERMES_DISCOVERY_PORT,
   discoveryPortForHttpPort,
-  getDiscoveryHttpPorts,
   getLanBackendUrl,
   getLanBackendUrlForRequest,
   getLanEndpointKind,
   isPrivateOrLoopbackIPv4,
   resetLanDiscoveryState,
-  scanLanDevices,
   selectLanIPv4Address,
   startLanDiscoveryResponder,
 } from '../../packages/server/src/modules/studio/services/network/lan-discovery'
@@ -37,12 +35,8 @@ const fakeInfo: PublicSystemInfo = {
 }
 
 describe('LAN discovery', () => {
-  const originalPorts = process.env.HERMES_LAN_DISCOVERY_HTTP_PORTS
-
   afterEach(() => {
     resetLanDiscoveryState()
-    if (originalPorts === undefined) delete process.env.HERMES_LAN_DISCOVERY_HTTP_PORTS
-    else process.env.HERMES_LAN_DISCOVERY_HTTP_PORTS = originalPorts
   })
 
   it('maps HTTP ports to UDP discovery ports', () => {
@@ -148,140 +142,22 @@ describe('LAN discovery', () => {
     expect(isPrivateOrLoopbackIPv4('8.8.8.8')).toBe(false)
   })
 
-  it('uses configured scan ports plus the active server port', () => {
-    process.env.HERMES_LAN_DISCOVERY_HTTP_PORTS = '8648, 8748'
-
-    expect(getDiscoveryHttpPorts(9999)).toEqual([8648, 8748, 9999])
-  })
-
-  it('discovers a local responder over UDP', async () => {
-    const httpPort = 19001
-    const socket = startLanDiscoveryResponder({
-      httpPort,
-      getSystemInfo: async () => fakeInfo,
-    })
+  it('still answers the UDP discovery request used by shipped Small Box firmware', async () => {
+    const socket = startLanDiscoveryResponder({ httpPort: 19001, getSystemInfo: async () => fakeInfo })
     if (!socket) throw new Error('expected discovery responder socket')
-    await new Promise<void>(resolve => socket.once('listening', () => resolve()))
-
-    const result = await scanLanDevices({
-      httpPorts: [httpPort],
-      targetAddresses: ['127.0.0.1'],
-      timeoutMs: 300,
-      includeSelf: true,
-    })
-
-    expect(result.scanning).toBe(false)
-    const device = result.devices.find(item => item.device_id === fakeDeviceId && item.http_port === httpPort)
-    expect(device).toMatchObject({
-      id: fakeDeviceId,
-      device_id: fakeDeviceId,
-      ip: '127.0.0.1',
-      http_port: httpPort,
-      url: `http://127.0.0.1:${httpPort}`,
-      endpoint_kind: 'custom',
-      computer_name: 'test-machine',
-      hermes_agent_version: 'v1.2.3',
-      hermes_web_ui_version: '9.9.9',
-    })
-  })
-
-  it('builds device URLs from the UDP source address instead of announced URLs', async () => {
-    const httpPort = 19003
-    const socket = startLanDiscoveryResponder({
-      httpPort,
-      getSystemInfo: async () => fakeInfo,
-    })
-    if (!socket) throw new Error('expected discovery responder socket')
-    await new Promise<void>(resolve => socket.once('listening', () => resolve()))
-
-    const originalSend = socket.send.bind(socket)
-    socket.send = ((message: any, port: any, address: any, callback?: any) => {
-      const announced = JSON.parse(Buffer.from(message).toString('utf8'))
-      announced.url = 'http://127.0.0.1:1'
-      return originalSend(Buffer.from(JSON.stringify(announced)), port, address, callback)
-    }) as typeof socket.send
-
-    const result = await scanLanDevices({
-      httpPorts: [httpPort],
-      targetAddresses: ['127.0.0.1'],
-      timeoutMs: 300,
-      includeSelf: true,
-    })
-
-    const device = result.devices.find(item => item.device_id === fakeDeviceId && item.http_port === httpPort)
-    expect(device?.url).toBe(`http://127.0.0.1:${httpPort}`)
-  })
-
-  it('excludes the local machine from scan results by default', async () => {
-    const httpPort = 19002
-    const socket = startLanDiscoveryResponder({
-      httpPort,
-      getSystemInfo: async () => fakeInfo,
-    })
-    if (!socket) throw new Error('expected discovery responder socket')
-    await new Promise<void>(resolve => socket.once('listening', () => resolve()))
-
-    const result = await scanLanDevices({
-      httpPorts: [httpPort],
-      targetAddresses: ['127.0.0.1'],
-      timeoutMs: 300,
-    })
-
-    expect(result.scanning).toBe(false)
-    expect(result.devices).toEqual([])
-  })
-
-  it('registers device request routes before auth and device management routes behind super admin auth', () => {
-    const source = readFileSync('packages/server/src/bootstrap/routes.ts', 'utf8')
-    const deviceRoutesSource = readFileSync('packages/server/src/modules/studio/routes/devices.ts', 'utf8')
-    const mcuDeviceRoutesSource = readFileSync('packages/server/src/modules/studio/routes/mcu-devices.ts', 'utf8')
-    const bootstrapSource = readFileSync('packages/server/src/bootstrap/http.ts', 'utf8')
-
-    const authIndex = source.indexOf('authMiddleware.forEach')
-    const publicDeviceIndex = source.indexOf('app.use(devicePublicRoutes.routes())')
-    const deviceIndex = source.indexOf('app.use(deviceRoutes.routes())')
-
-    expect(authIndex).toBeGreaterThanOrEqual(0)
-    expect(publicDeviceIndex).toBeGreaterThanOrEqual(0)
-    expect(deviceIndex).toBeGreaterThanOrEqual(0)
-    expect(deviceRoutesSource).toContain("devicePublicRoutes.post('/api/devices/link-status'")
-    expect(deviceRoutesSource).toContain("devicePublicRoutes.get('/api/devices/link-info'")
-    expect(deviceRoutesSource).toContain("import { requireSuperAdmin }")
-    expect(deviceRoutesSource).toContain('deviceRoutes.use(requireSuperAdmin)')
-    expect(deviceRoutesSource).toContain("deviceRoutes.get('/api/devices/pairing-link'")
-    expect(deviceRoutesSource).toContain("deviceRoutes.post('/api/devices/manual-request'")
-    expect(deviceRoutesSource).toContain("deviceRoutes.delete('/api/devices/:id/request-history'")
-    expect(deviceRoutesSource).toContain("deviceRoutes.get('/api/devices/peer-connections'")
-    expect(deviceRoutesSource).toContain("deviceRoutes.post('/api/devices/:id/connect'")
-    expect(deviceRoutesSource).toContain("deviceRoutes.get('/api/devices/peer-connections/:connectionId/terminals'")
-    expect(mcuDeviceRoutesSource).not.toContain('requireSuperAdmin')
-    expect(bootstrapSource).toContain('getLanPeerSocketPath()')
-    expect(publicDeviceIndex).toBeLessThan(authIndex)
-    expect(deviceIndex).toBeGreaterThan(authIndex)
-  })
-
-  it('keeps LAN peer terminals bounded and idle-reclaimable', () => {
-    const peerSocketSource = readFileSync('packages/server/src/modules/studio/services/network/lan-peer-socket.ts', 'utf8')
-
-    expect(peerSocketSource).toContain("boundedEnvInt('HERMES_LAN_PEER_MAX_TERMINALS', 4")
-    expect(peerSocketSource).toContain("boundedEnvInt('HERMES_LAN_PEER_TERMINAL_IDLE_MS', 10 * 60 * 1000")
-    expect(peerSocketSource).toContain("boundedEnvInt('HERMES_LAN_PEER_TERMINAL_BUFFER_BYTES', 1024 * 1024")
-    expect(peerSocketSource).toContain('Terminal limit reached')
-    expect(peerSocketSource).toContain('[lan-peer] closing idle terminal')
-    expect(peerSocketSource).toContain('this.disposeTerminalSession(session, { notify: false })')
-  })
-
-  it('exposes an MCP terminal list tool so agents can recover forgotten terminal ids', () => {
-    const mcpSource = readFileSync('bin/ekko-studio-mcp.mjs', 'utf8')
-
-    expect(mcpSource).toContain("name: 'ekko_studio_lan_devices_list'")
-    expect(mcpSource).toContain('online status')
-    expect(mcpSource).toContain('temporary profile token')
-    expect(mcpSource).toContain("'X-Hermes-Profile': profile")
-    expect(mcpSource).toContain('token: args.token')
-    expect(mcpSource).toContain('profile: args.profile')
-    expect(mcpSource).toContain("join(appHome(), 'profiles', segment, '.model-run-token')")
-    expect(mcpSource).toContain("name: 'ekko_studio_lan_terminal_list'")
-    expect(mcpSource).toContain('/terminals`, withAuthArgs(args))')
+    await new Promise<void>(resolve => socket.once('listening', resolve))
+    const client = dgram.createSocket('udp4')
+    try {
+      const response = new Promise<any>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('discovery response timed out')), 1500)
+        client.once('message', message => { clearTimeout(timer); resolve(JSON.parse(message.toString())) })
+        client.once('error', error => { clearTimeout(timer); reject(error) })
+      })
+      client.send(Buffer.from(JSON.stringify({ type: 'hermes.discover', version: 1, request_id: 'mcu-1' })), discoveryPortForHttpPort(19001), '127.0.0.1')
+      expect(await response).toMatchObject({
+        ...fakeInfo, type: 'hermes.announce', version: 1, request_id: 'mcu-1',
+        http_port: 19001, endpoint_kind: 'custom', url: `http://${selectLanIPv4Address('127.0.0.1')}:19001`,
+      })
+    } finally { client.close() }
   })
 })

@@ -57,6 +57,7 @@ describe('client TTS unified synthesize flow', () => {
     vi.resetModules()
     vi.clearAllMocks()
     localStorage.clear()
+    delete (window as any).hermesDesktop
     localStorage.setItem('hermes_server_url', 'https://hermes.example')
     localStorage.setItem('hermes_api_key', 'secret-key')
     objectUrlCounter = 0
@@ -108,6 +109,34 @@ describe('client TTS unified synthesize flow', () => {
     expect(result.audio.size).toBeGreaterThan(0)
     expect(result.engine).toBe('openai-engine')
     expect(result.provider).toBe('openai')
+  })
+
+  it.each([false, true])('uses the active desktop origin instead of an old configured server for TTS (remote=%s)', async remoteMode => {
+    ;(window as any).hermesDesktop = { isDesktop: true, remoteMode }
+    mockFetch.mockImplementation(async () => new Response('audio'))
+    const { generateSpeech, synthesizeSpeech } = await import('../../packages/client/src/api/studio/tts')
+    await generateSpeech({ text: 'Hello' })
+    await synthesizeSpeech({ text: 'Hello' })
+    expect(mockFetch.mock.calls.map(call => call[0])).toEqual(['/api/studio/tts', '/api/studio/tts/synthesize'])
+    expect(mockFetch.mock.calls.every(call => call[1].headers.Authorization === 'Bearer secret-key')).toBe(true)
+    delete (window as any).hermesDesktop
+  })
+
+  it('does not dispatch a canceled TTS request after waiting for desktop authentication', async () => {
+    localStorage.removeItem('hermes_api_key')
+    let finishAuth!: () => void
+    ;(window as any).hermesDesktop = { isDesktop: true, remoteMode: true,
+      ensureAuth: () => new Promise<boolean>(resolve => { finishAuth = () => resolve(false) }),
+    }
+    const { synthesizeSpeech } = await import('../../packages/client/src/api/studio/tts')
+    const controller = new AbortController()
+    const pending = synthesizeSpeech({ text: 'Canceled', signal: controller.signal })
+    const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    controller.abort()
+    finishAuth()
+    await rejection
+    expect(mockFetch).not.toHaveBeenCalled()
+    delete (window as any).hermesDesktop
   })
 
   it('uses an explicit message profile and lets the server resolve that profile active provider', async () => {
@@ -370,6 +399,8 @@ describe('client TTS unified synthesize flow', () => {
     expect(speech.isCustomPaused.value).toBe(false)
     expect(speech.currentCustomMessageId.value).toBe('msg-stop')
 
+    await vi.waitFor(() => expect(capturedSignal).toBeDefined())
+
     speech.stop()
 
     expect(capturedSignal?.aborted).toBe(true)
@@ -541,6 +572,8 @@ describe('client TTS unified synthesize flow', () => {
       baseUrl: 'https://custom.example/v1',
     })
     expect(speech.isCustomPlaying.value).toBe(true)
+
+    await vi.waitFor(() => expect(capturedSignal).toBeDefined())
 
     speech.openaiToggle('msg-pending-toggle', 'Audio still synthesizing', {
       provider: 'custom',

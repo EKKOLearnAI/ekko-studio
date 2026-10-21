@@ -715,17 +715,15 @@ export function buildProviderModelMap(): Record<string, string[]> {
   return map
 }
 
-/** Mirrors Hermes hermes_cli/models.py per-model routing for the existing relay URLs.
- * Catalog-only: custom providers get their mode from their saved configuration.
- */
+/** Provider-specific protocol rules; callers retain the original model ID for requests. */
 export function resolveProviderCatalogApiMode(provider: string, model = ''): ProviderApiMode | undefined {
   const preset = PROVIDER_PRESETS.find(item => item.value === provider)
   if (!preset) return undefined
   const mode = preset.catalog_api_mode
   if (mode !== 'per_model') return mode
-  let id = model.trim().toLowerCase()
+  // Relays may prepend one or more namespaces, e.g. channel/openai/gpt-6.1-sol.
+  const id = model.slice(model.lastIndexOf('/') + 1).trim().toLowerCase()
   if (!id) return undefined
-  if (id.startsWith(`${provider}/`)) id = id.slice(provider.length + 1)
   if (provider === 'copilot') {
     const major = /^gpt-(\d+)/.exec(id)?.[1]
     return major && Number(major) >= 5 && !id.startsWith('gpt-5-mini') ? 'codex_responses' : 'chat_completions'
@@ -737,4 +735,39 @@ export function resolveProviderCatalogApiMode(provider: string, model = ''): Pro
     return 'chat_completions'
   }
   return undefined
+}
+
+function normalizedProviderEndpoint(baseUrl: string): string | undefined {
+  try {
+    const url = new URL(baseUrl)
+    if (!['http:', 'https:'].includes(url.protocol) || url.search) return undefined
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+  } catch {
+    return undefined
+  }
+}
+
+const PROVIDER_ENDPOINTS = PROVIDER_PRESETS.map(preset => ({
+  provider: preset.value,
+  endpoint: normalizedProviderEndpoint(preset.base_url),
+})).filter(candidate => candidate.endpoint)
+
+/** Match known connection rules without treating an unknown relay as Chat Completions. */
+export function resolveProviderConnectionApiMode(
+  provider: string,
+  baseUrl: string,
+  model = '',
+): ProviderApiMode | undefined {
+  if (PROVIDER_PRESETS.some(preset => preset.value === provider)) {
+    return resolveProviderCatalogApiMode(provider, model)
+  }
+  const endpoint = normalizedProviderEndpoint(baseUrl)
+  if (!endpoint) return undefined
+  const exact = PROVIDER_ENDPOINTS.filter(candidate => candidate.endpoint === endpoint)
+  // Prefer the exact path: some relays expose different protocols at / and /v1.
+  const matches = exact.length ? exact : PROVIDER_ENDPOINTS.filter(candidate => (
+    candidate.endpoint!.replace(/\/v1$/, '') === endpoint.replace(/\/v1$/, '')
+  ))
+  const modes = new Set(matches.map(candidate => resolveProviderCatalogApiMode(candidate.provider, model)))
+  return modes.size === 1 ? modes.values().next().value : undefined
 }

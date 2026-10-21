@@ -22,7 +22,7 @@ async function fixture({
   await writeFile(join(directory, filename), bytes)
   await writeFile(join(directory, `${filename}.sha256`), `${hash}  ${filename}\n`)
   await writeFile(join(directory, `${filename}.verification.json`), JSON.stringify({
-    id: 'com.hermeswebui.studio', version: '1.2.3', platform: 'x86_64', beta: true, filename, sha256: hash,
+    id: 'com.hermeswebui.studio', version: '1.2.3', platform: 'x86_64', beta: false, filename, sha256: hash,
   }))
   const app = {
     id: '550e8400-e29b-41d4-a716-446655440000', app_id: 'com.hermeswebui.studio',

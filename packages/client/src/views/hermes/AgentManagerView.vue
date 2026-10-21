@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import { agentMetadata } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
@@ -383,7 +384,7 @@ async function submitLegacyDataMigrationDecision(action: 'migrate' | 'decline'):
 
 async function maybePromptLegacyWindowsDataMigration() {
   const bridge = desktopBridge()
-  if (legacyDataMigrationChecked.value || bridge?.isDesktop !== true || bridge.platform !== 'win32') return
+  if (legacyDataMigrationChecked.value || bridge?.isDesktop !== true || bridge.remoteMode === true || bridge.platform !== 'win32') return
   legacyDataMigrationChecked.value = true
 
   try {
@@ -524,7 +525,7 @@ onUnmounted(() => {
             <section class="agent-card coding-agent-card" data-testid="agent-card-ekko">
               <header class="agent-card-header compact">
                 <div class="agent-identity">
-                  <img :src="'/coding-agents/ekko-agent.png'" alt="" class="agent-logo" />
+                  <img :src="deploymentUrl('/coding-agents/ekko-agent.png')" alt="" class="agent-logo" />
                   <div>
                     <div class="agent-name-row">
                       <h3>Ekko</h3>
@@ -548,7 +549,7 @@ onUnmounted(() => {
           <section class="agent-card coding-agent-card hermes-card" data-testid="agent-card-hermes">
             <header class="agent-card-header compact">
               <div class="agent-identity">
-                <img :src="'/coding-agents/hermes.png'" alt="" class="agent-logo" />
+                <img :src="deploymentUrl('/coding-agents/hermes.png')" alt="" class="agent-logo" />
                 <div>
                   <div class="agent-name-row">
                     <h3>Hermes</h3>

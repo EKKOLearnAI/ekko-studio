@@ -16,8 +16,8 @@
   /* Move the highlight inside a fixed mask without a blended compositor layer. */
   background: linear-gradient(105deg, transparent 44%, rgba(255, 255, 255, 0.85) 50%, transparent 56%) 120% 0 / 300% 100% no-repeat;
   pointer-events: none;
-  -webkit-mask: url("/logo.png") center / contain no-repeat;
-  mask: url("/logo.png") center / contain no-repeat;
+  -webkit-mask: url("./logo.png") center / contain no-repeat;
+  mask: url("./logo.png") center / contain no-repeat;
   animation: studio-logo-shimmer 1.8s cubic-bezier(0.45, 0, 0.25, 1) infinite;
 }
 

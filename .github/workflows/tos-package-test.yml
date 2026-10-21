@@ -17,6 +17,8 @@ on:
     paths:
       - ".github/workflows/tos-package-test.yml"
       - "packages/tos/**"
+      - "PRIVACY.md"
+      - "tests/server/tos-lifecycle.test.ts"
       - "scripts/pack-tos-deb.mjs"
       - "scripts/test-tos-platform.mjs"
       - "scripts/test-tos-install.sh"
@@ -98,7 +100,7 @@ jobs:
           npm rebuild node-pty
 
       - name: Build Web UI
-        run: cd "$TOS_SOURCE_DIR" && npm run build
+        run: cd "$TOS_SOURCE_DIR" && STUDIO_BASE_PATH=/com.hermeswebui.studio/ npm run build
 
       - name: Keep production dependencies only
         run: cd "$TOS_SOURCE_DIR" && npm prune --omit=dev --no-audit --no-fund

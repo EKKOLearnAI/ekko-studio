@@ -49,7 +49,7 @@ describe('Hermes schema initialization', () => {
   })
 
   it('initializes all tables with correct schemas', async () => {
-    const { initAllHermesTables, USAGE_TABLE, SESSIONS_TABLE, SESSION_CATEGORIES_TABLE, MESSAGES_TABLE, GC_ROOMS_TABLE, GC_MESSAGES_TABLE, GC_ROOM_AGENTS_TABLE, USERS_TABLE, USER_PROFILES_TABLE, SOCIAL_MESSAGE_ACCOUNTS_TABLE, SOCIAL_MESSAGE_RUNTIME_STATES_TABLE, DEVICES_TABLE, MCU_DEVICES_TABLE } =
+    const { initAllHermesTables, USAGE_TABLE, SESSIONS_TABLE, SESSION_CATEGORIES_TABLE, MESSAGES_TABLE, GC_ROOMS_TABLE, GC_MESSAGES_TABLE, GC_ROOM_AGENTS_TABLE, USERS_TABLE, USER_PROFILES_TABLE, SOCIAL_MESSAGE_ACCOUNTS_TABLE, SOCIAL_MESSAGE_RUNTIME_STATES_TABLE, MCU_DEVICES_TABLE } =
       await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
 
     expect(() => initAllHermesTables()).not.toThrow()
@@ -67,7 +67,7 @@ describe('Hermes schema initialization', () => {
     expect(tables.map(t => t.name)).toContain(USER_PROFILES_TABLE)
     expect(tables.map(t => t.name)).toContain(SOCIAL_MESSAGE_ACCOUNTS_TABLE)
     expect(tables.map(t => t.name)).toContain(SOCIAL_MESSAGE_RUNTIME_STATES_TABLE)
-    expect(tables.map(t => t.name)).toContain(DEVICES_TABLE)
+    expect(tables.map(t => t.name)).not.toContain('devices')
     expect(tables.map(t => t.name)).toContain(MCU_DEVICES_TABLE)
 
     // Verify USAGE_TABLE structure
@@ -120,17 +120,22 @@ describe('Hermes schema initialization', () => {
     const groupMessageCols = db.prepare(`PRAGMA table_info("${GC_MESSAGES_TABLE}")`).all() as Array<{ name: string }>
     expect(groupMessageCols.some(c => c.name === 'run_id')).toBe(true)
 
-    const deviceCols = db.prepare(`PRAGMA table_info("${DEVICES_TABLE}")`).all() as Array<{ name: string }>
-    expect(deviceCols.some(c => c.name === 'id')).toBe(true)
-    expect(deviceCols.some(c => c.name === 'status')).toBe(true)
-    expect(deviceCols.some(c => c.name === 'device_public_key')).toBe(true)
-
     const mcuDeviceCols = db.prepare(`PRAGMA table_info("${MCU_DEVICES_TABLE}")`).all() as Array<{ name: string }>
     expect(mcuDeviceCols.some(c => c.name === 'id')).toBe(true)
     expect(mcuDeviceCols.some(c => c.name === 'name')).toBe(true)
     expect(mcuDeviceCols.some(c => c.name === 'device_code')).toBe(true)
     expect(mcuDeviceCols.some(c => c.name === 'is_official')).toBe(true)
     expect(mcuDeviceCols.some(c => c.name === 'created_at')).toBe(true)
+  })
+
+  it('leaves historical LAN device records intact when upgrading', async () => {
+    db.exec("CREATE TABLE devices (id TEXT PRIMARY KEY, computer_name TEXT)")
+    db.prepare('INSERT INTO devices (id, computer_name) VALUES (?, ?)').run('legacy-device', 'Old computer')
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    initAllHermesTables()
+    expect(db.prepare('SELECT * FROM devices').all()).toEqual([
+      { id: 'legacy-device', computer_name: 'Old computer' },
+    ])
   })
 
   it('preserves existing data when adding safe schema columns', async () => {

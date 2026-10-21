@@ -90,7 +90,6 @@ packages/server/src/
         auth.ts
         update.ts
         health.ts
-        devices.ts
         mcu-devices.ts
         upload.ts                   # /api/studio/uploads
         app-upload.ts               # /api/studio/app-uploads/*
@@ -114,7 +113,6 @@ packages/server/src/
         auth.ts
         update.ts
         health.ts
-        devices.ts
         mcu-devices.ts
         upload.ts
         app-upload.ts

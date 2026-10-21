@@ -24,8 +24,19 @@ case "$1" in
             "$app_root/data/workspaces" "$app_root/data/npm"
         rm -rf "$app_root/webui"
         tar -xjf "$app_root/webui.bz2" -C "$app_root"
+        # Register at a standard search path; refuse to replace another unit.
+        unit="/etc/systemd/system/@SERVICE@.service"
+        target="$app_root/init.d/@SERVICE@.service"
+        if [ -e "$unit" ] || [ -L "$unit" ]; then
+            if [ ! -L "$unit" ] || [ "$(readlink "$unit")" != "$target" ]; then
+                echo "Refusing to overwrite unrelated systemd unit: $unit" >&2
+                exit 1
+            fi
+        else
+            ln -s "$target" "$unit"
+        fi
         systemctl daemon-reload
-        systemctl enable "$app_root/init.d/@SERVICE@.service"
+        systemctl enable "@SERVICE@.service"
         systemctl restart "@SERVICE@.service"
         ;;
 esac

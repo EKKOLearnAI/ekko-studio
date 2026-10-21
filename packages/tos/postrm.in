@@ -1,11 +1,30 @@
 #!/bin/bash
 set -e
-# Persistent data is deliberately retained on both remove and purge.
-# See packages/tos/README.md for explicit, administrator-controlled cleanup.
+app_root="/usr/local/@APP_ID@"
 case "$1" in
     remove|purge|disappear)
-        rm -rf "/usr/local/@APP_ID@/webui"
-        systemctl daemon-reload
+        # Upgrades never enter this branch. Only delete application-owned paths,
+        # never a volume, an external workspace, or the target of a data symlink.
+        systemctl disable "@SERVICE@.service" >/dev/null 2>&1 || true
+        unit="/etc/systemd/system/@SERVICE@.service"
+        if [ -L "$unit" ] && [ "$(readlink "$unit")" = "$app_root/init.d/@SERVICE@.service" ]; then
+            rm -f "$unit"
+        fi
+        owned_user=false
+        if [ "$(getent passwd "@USER@" | cut -d: -f6)" = "$app_root/data/home" ] &&
+            [ "$(id -u "@USER@" 2>/dev/null)" != 0 ]; then
+            owned_user=true
+        fi
+        for path in webui data logs; do
+            rm -rf -- "$app_root/$path"
+        done
+        if [ "$owned_user" = true ]; then
+            userdel "@USER@"
+            if getent group "@USER@" >/dev/null; then
+                groupdel "@USER@"
+            fi
+        fi
+        systemctl daemon-reload || true
         ;;
 esac
 exit 0

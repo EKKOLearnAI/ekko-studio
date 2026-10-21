@@ -113,7 +113,7 @@ describe('remote readiness timeout', () => {
 
 describe('remote server readiness probe', () => {
   it('resolves once /health/ready responds ok', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true } as Response))
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 'ready' })))
     vi.stubGlobal('fetch', fetchMock)
 
     await waitForRemoteServerReady('http://remote.example:6060', 5_000)
@@ -124,7 +124,7 @@ describe('remote server readiness probe', () => {
   it('retries while the server answers non-2xx', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 503 } as Response)
-      .mockResolvedValueOnce({ ok: true } as Response)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'ready' })))
     vi.stubGlobal('fetch', fetchMock)
 
     await waitForRemoteServerReady('http://remote.example:6060', 10_000)
@@ -146,6 +146,20 @@ describe('remote server readiness probe', () => {
     const throwingFetch = vi.fn(async () => { throw new Error('ECONNREFUSED') })
     vi.stubGlobal('fetch', throwingFetch)
     await expect(waitForRemoteServerReady('http://remote.example:6060', 600)).rejects.toThrow('ECONNREFUSED')
+  })
+
+  it.each(['<html>Login page</html>', '{"status":"starting"}', '{"service":"something else"}'])('rejects an HTTP 200 that is not a ready Studio server: %s', async body => {
+    const fetchMock = vi.fn(async () => new Response(body))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(waitForRemoteServerReady('http://remote.example:6060', 50)).rejects.toThrow('Expected a ready Studio server')
+    expect(fetchMock).toHaveBeenCalledWith('http://remote.example:6060/health/ready', expect.objectContaining({ redirect: 'error', cache: 'no-store' }))
+  })
+
+  it('rejects subpath deployments before making a request', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(waitForRemoteServerReady('https://remote.example/studio', 5000)).rejects.toThrow('UNSUPPORTED_PATH')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 

@@ -15,7 +15,7 @@ const DEFAULT_PORT = process.env.HERMES_WEB_UI_PORT || process.env.PORT || '8648
 const DEFAULT_BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`
 const DISPLAY_COMMAND = 'ekko-studio-mcp'
 const SERVER_NAME = process.env.HERMES_MCP_SERVER_NAME || DISPLAY_COMMAND
-const TOOLSETS = new Set(['api', 'browser', 'devices', 'use', 'plan'])
+const TOOLSETS = new Set(['api', 'browser', 'use', 'plan'])
 const ALLOWED_PUBLIC_REQUEST_HEADERS = new Set([
   'accept',
   'accept-language',
@@ -50,7 +50,7 @@ function printHelp() {
 Ekko Studio MCP stdio server.
 
 Usage:
-  ${DISPLAY_COMMAND} [api|browser|devices|use|plan]
+  ${DISPLAY_COMMAND} [api|browser|use|plan]
   ${DISPLAY_COMMAND} --help
   ${DISPLAY_COMMAND} --version
 
@@ -61,7 +61,7 @@ Environment:
   HERMES_WEB_UI_PROFILE   Default Hermes profile when a tool call omits profile.
   HERMES_WEB_UI_TOKEN     Optional explicit API token.
   AUTH_TOKEN              Optional explicit API token fallback.
-  HERMES_MCP_TOOLSET      Tool category to expose: api, browser, devices, use, or plan. Default: api.
+  HERMES_MCP_TOOLSET      Tool category to expose: api, browser, use, or plan. Default: api.
 
 When run without options, this process waits for MCP JSON-RPC messages on stdin.
 `)
@@ -453,10 +453,6 @@ const moduleHints = {
   Config: {
     purpose: 'Read and update Hermes Web UI configuration.',
     keywords: ['config', 'settings', 'preferences'],
-  },
-  Devices: {
-    purpose: 'Discover, pair, and operate LAN peer devices, terminals, commands, and file transfer.',
-    keywords: ['device', 'lan', 'peer', 'terminal', 'file transfer'],
   },
   Files: {
     purpose: 'Browse and operate files exposed through the Hermes file browser.',
@@ -1667,148 +1663,12 @@ const tools = [
         },
       }, ['workflow_id', 'run_id']),
   },
-  {
-    name: 'ekko_studio_lan_devices_list',
-    toolset: 'devices',
-    description: 'List known LAN and remote devices from Hermes Web UI, including pairing and online status.',
-    inputSchema: inputSchema(),
-  },
-  {
-    name: 'ekko_studio_lan_devices_scan',
-    toolset: 'devices',
-    description: 'Refresh LAN device discovery cache and return known devices with pairing and online status.',
-    inputSchema: inputSchema(),
-  },
-  {
-    name: 'ekko_studio_lan_peer_connect',
-    toolset: 'devices',
-    description: 'Connect to a paired LAN device by device id.',
-    inputSchema: inputSchema({ device_id: { type: 'string' } }, ['device_id']),
-  },
-  {
-    name: 'ekko_studio_lan_peer_connections',
-    toolset: 'devices',
-    description: 'List active LAN peer socket connections.',
-    inputSchema: inputSchema(),
-  },
-  {
-    name: 'ekko_studio_lan_peer_disconnect',
-    toolset: 'devices',
-    description: 'Disconnect an active LAN peer socket connection.',
-    inputSchema: inputSchema({ connection_id: { type: 'string' } }, ['connection_id']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_create',
-    toolset: 'devices',
-    description: 'Create an interactive terminal on a connected LAN peer.',
-    inputSchema: inputSchema({
-        connection_id: { type: 'string' },
-        shell: { type: 'string' },
-        cols: { type: 'number' },
-        rows: { type: 'number' },
-      }, ['connection_id']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_list',
-    toolset: 'devices',
-    description: 'List interactive terminals tracked for a connected LAN peer, including IDs that can be read or closed.',
-    inputSchema: inputSchema({
-        connection_id: { type: 'string' },
-      }, ['connection_id']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_input',
-    toolset: 'devices',
-    description: 'Write input to an interactive terminal on a connected LAN peer.',
-    inputSchema: inputSchema({
-        connection_id: { type: 'string' },
-        terminal_id: { type: 'string' },
-        data: { type: 'string' },
-      }, ['connection_id', 'terminal_id', 'data']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_read',
-    toolset: 'devices',
-    description: 'Read buffered terminal output from an interactive terminal.',
-    inputSchema: inputSchema({
-        connection_id: { type: 'string' },
-        terminal_id: { type: 'string' },
-      }, ['connection_id', 'terminal_id']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_resize',
-    toolset: 'devices',
-    description: 'Resize an interactive terminal on a connected LAN peer.',
-    inputSchema: inputSchema({
-        connection_id: { type: 'string' },
-        terminal_id: { type: 'string' },
-        cols: { type: 'number' },
-        rows: { type: 'number' },
-      }, ['connection_id', 'terminal_id', 'cols', 'rows']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_close',
-    toolset: 'devices',
-    description: 'Close an interactive terminal on a connected LAN peer.',
-    inputSchema: inputSchema({
-        connection_id: { type: 'string' },
-        terminal_id: { type: 'string' },
-      }, ['connection_id', 'terminal_id']),
-  },
-  {
-    name: 'ekko_studio_lan_command_exec',
-    toolset: 'devices',
-    description: 'Run a command on a connected LAN peer using command plus args, without shell string execution.',
-    inputSchema: inputSchema({
-        connection_id: { type: 'string' },
-        command: { type: 'string' },
-        args: { type: 'array', items: { type: 'string' } },
-        cwd: { type: 'string' },
-        timeout_ms: { type: 'number' },
-      }, ['connection_id', 'command']),
-  },
-  {
-    name: 'ekko_studio_lan_file_download',
-    toolset: 'devices',
-    description: 'Download a file from a connected LAN peer remote path to a local path on this machine.',
-    inputSchema: inputSchema({
-        connection_id: { type: 'string' },
-        remote_path: { type: 'string' },
-        local_path: { type: 'string' },
-        timeout_ms: { type: 'number' },
-      }, ['connection_id', 'remote_path', 'local_path']),
-  },
-  {
-    name: 'ekko_studio_lan_file_upload',
-    toolset: 'devices',
-    description: 'Upload a local file path from this machine to a connected LAN peer remote path.',
-    inputSchema: inputSchema({
-        connection_id: { type: 'string' },
-        local_path: { type: 'string' },
-        remote_path: { type: 'string' },
-        timeout_ms: { type: 'number' },
-      }, ['connection_id', 'local_path', 'remote_path']),
-  },
 ]
 
 const TOOL_ALIASES = new Map([
   ['hermes_api_openapi_get', 'ekko_studio_api_openapi_get'],
   ['hermes_api_request', 'ekko_studio_api_request'],
   ['ekko_studio_use_workflow_run_rerun_from_node', 'ekko_studio_use_workflow_rerun_node'],
-  ['hermes_lan_devices_list', 'ekko_studio_lan_devices_list'],
-  ['hermes_lan_devices_scan', 'ekko_studio_lan_devices_scan'],
-  ['hermes_lan_peer_connect', 'ekko_studio_lan_peer_connect'],
-  ['hermes_lan_peer_connections', 'ekko_studio_lan_peer_connections'],
-  ['hermes_lan_peer_disconnect', 'ekko_studio_lan_peer_disconnect'],
-  ['hermes_lan_terminal_create', 'ekko_studio_lan_terminal_create'],
-  ['hermes_lan_terminal_list', 'ekko_studio_lan_terminal_list'],
-  ['hermes_lan_terminal_input', 'ekko_studio_lan_terminal_input'],
-  ['hermes_lan_terminal_read', 'ekko_studio_lan_terminal_read'],
-  ['hermes_lan_terminal_resize', 'ekko_studio_lan_terminal_resize'],
-  ['hermes_lan_terminal_close', 'ekko_studio_lan_terminal_close'],
-  ['hermes_lan_command_exec', 'ekko_studio_lan_command_exec'],
-  ['hermes_lan_file_download', 'ekko_studio_lan_file_download'],
-  ['hermes_lan_file_upload', 'ekko_studio_lan_file_upload'],
 ])
 
 const CATEGORY_TOOLSETS = {
@@ -1816,11 +1676,6 @@ const CATEGORY_TOOLSETS = {
     name: 'ekko_studio_browser_toolset',
     coverage: 'Ekko Studio Desktop browser tabs and leases; HTTP/HTTPS navigation; accessibility snapshots with stable refs; single or sequential batch click, type, key press, and scroll interaction; viewport or full-page screenshots; bounded console log read and clear.',
     description: 'Discover and invoke Ekko Studio Desktop browser operations without loading every browser tool schema into the model context. Covers tab list/create/activate/close/release, navigation back/forward/reload/stop/open, accessibility snapshots, single or batch click/type/key/scroll interaction, screenshots, and console logs. Use action=list for the compact operation catalog, action=describe for one full input schema, then action=call with that exact tool name and arguments.',
-  },
-  devices: {
-    name: 'ekko_studio_devices_toolset',
-    coverage: 'LAN and remote device discovery and status; paired peer connect/disconnect; interactive terminal create/list/input/read/resize/close; structured remote command execution; file upload and download.',
-    description: 'Discover and invoke Ekko Studio LAN/remote-device operations without loading every device tool schema into the model context. Covers device list/scan, paired peer connections, interactive terminal lifecycle and I/O, structured command execution using command plus argument arrays, and remote file upload/download. Use action=list for the compact operation catalog, action=describe for one full input schema, then action=call with that exact tool name and arguments.',
   },
   use: {
     name: 'ekko_studio_use_toolset',
@@ -2229,52 +2084,6 @@ async function callTool(name, args = {}, signal) {
     case 'ekko_studio_use_workflow_run_delete':
       return jsonText(await request(`/api/studio/workflows/${encodeURIComponent(args.workflow_id)}/runs/${encodeURIComponent(args.run_id)}`, withAuthArgs(args, {
         method: 'DELETE',
-      })))
-    case 'ekko_studio_lan_devices_list':
-      return jsonText(await request('/api/devices', withAuthArgs(args)))
-    case 'ekko_studio_lan_devices_scan':
-      return jsonText(await request('/api/devices/scan', withAuthArgs(args, { method: 'POST' })))
-    case 'ekko_studio_lan_peer_connect':
-      return jsonText(await request(`/api/devices/${encodeURIComponent(args.device_id)}/connect`, withAuthArgs(args, { method: 'POST' })))
-    case 'ekko_studio_lan_peer_connections':
-      return jsonText(await request('/api/devices/peer-connections', withAuthArgs(args)))
-    case 'ekko_studio_lan_peer_disconnect':
-      return jsonText(await request(`/api/devices/peer-connections/${encodeURIComponent(args.connection_id)}/disconnect`, withAuthArgs(args, { method: 'POST' })))
-    case 'ekko_studio_lan_terminal_create':
-      return jsonText(await request(`/api/devices/peer-connections/${encodeURIComponent(args.connection_id)}/terminal`, withAuthArgs(args, {
-        method: 'POST',
-        body: { shell: args.shell, cols: args.cols, rows: args.rows },
-      })))
-    case 'ekko_studio_lan_terminal_list':
-      return jsonText(await request(`/api/devices/peer-connections/${encodeURIComponent(args.connection_id)}/terminals`, withAuthArgs(args)))
-    case 'ekko_studio_lan_terminal_input':
-      return jsonText(await request(`/api/devices/peer-connections/${encodeURIComponent(args.connection_id)}/terminal/${encodeURIComponent(args.terminal_id)}/input`, withAuthArgs(args, {
-        method: 'POST',
-        body: { data: args.data },
-      })))
-    case 'ekko_studio_lan_terminal_read':
-      return jsonText(await request(`/api/devices/peer-connections/${encodeURIComponent(args.connection_id)}/terminal/${encodeURIComponent(args.terminal_id)}/read`, withAuthArgs(args)))
-    case 'ekko_studio_lan_terminal_resize':
-      return jsonText(await request(`/api/devices/peer-connections/${encodeURIComponent(args.connection_id)}/terminal/${encodeURIComponent(args.terminal_id)}/resize`, withAuthArgs(args, {
-        method: 'POST',
-        body: { cols: args.cols, rows: args.rows },
-      })))
-    case 'ekko_studio_lan_terminal_close':
-      return jsonText(await request(`/api/devices/peer-connections/${encodeURIComponent(args.connection_id)}/terminal/${encodeURIComponent(args.terminal_id)}/close`, withAuthArgs(args, { method: 'POST' })))
-    case 'ekko_studio_lan_command_exec':
-      return jsonText(await request(`/api/devices/peer-connections/${encodeURIComponent(args.connection_id)}/exec`, withAuthArgs(args, {
-        method: 'POST',
-        body: { command: args.command, args: args.args || [], cwd: args.cwd, timeout_ms: args.timeout_ms },
-      })))
-    case 'ekko_studio_lan_file_download':
-      return jsonText(await request(`/api/devices/peer-connections/${encodeURIComponent(args.connection_id)}/download`, withAuthArgs(args, {
-        method: 'POST',
-        body: { remote_path: args.remote_path, local_path: args.local_path, timeout_ms: args.timeout_ms },
-      })))
-    case 'ekko_studio_lan_file_upload':
-      return jsonText(await request(`/api/devices/peer-connections/${encodeURIComponent(args.connection_id)}/upload`, withAuthArgs(args, {
-        method: 'POST',
-        body: { local_path: args.local_path, remote_path: args.remote_path, timeout_ms: args.timeout_ms },
       })))
     default:
       return errorText(`Unknown tool: ${name}`)

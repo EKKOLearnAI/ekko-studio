@@ -86,7 +86,6 @@ const CODEX_VERSION_CACHE_TTL_MS = 5 * 60 * 1000
 const HERMES_MCP_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
   { name: 'ekko-studio-api', toolset: 'api' },
   { name: 'ekko-studio-browser', toolset: 'browser' },
-  { name: 'ekko-studio-devices', toolset: 'devices' },
   { name: 'ekko-studio-use', toolset: 'use' },
   { name: 'ekko-studio-interaction', toolset: 'plan' },
 ]
@@ -96,6 +95,7 @@ const LEGACY_HERMES_MCP_SERVER_NAMES = new Set([
   'hermes-studio-api',
   'hermes-studio-browser',
   'hermes-studio-devices',
+  'ekko-studio-devices',
   'hermes-studio-use',
   'hermes-studio', 'hermes-studio-mcp', 'ekko-studio-mcp', 'hermes-web-ui-mcp',
 ])
