@@ -25,6 +25,7 @@ vi.mock('../../packages/server/src/modules/studio/public/runs/prompt', () => ({
 }))
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
+  HIDDEN_DISPLAY_ROLE: 'hidden',
   getSession: vi.fn(() => ({ id: 'session-1', profile: 'default', model: '', provider: '', history_revision: 0 })),
   getSessionContextMessages: vi.fn(() => mocks.rows),
   getSessionContextMessage: vi.fn(),

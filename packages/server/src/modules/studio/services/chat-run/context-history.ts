@@ -1,5 +1,6 @@
 import type { CompressionSnapshot } from '../../repositories/compression-snapshot'
 import {
+  HIDDEN_DISPLAY_ROLE,
   getSession,
   getSessionContextMessage,
   getSessionContextMessages,
@@ -30,7 +31,11 @@ export function buildDbHistoryFromContextRows(
     truncateToolResults?: boolean
   } = {},
 ): ChatMessage[] {
-  const selectedRows = options.excludeLastUser ? excludeLatestUserAndFollowing(rows) : rows
+  const cutRows = options.excludeLastUser ? excludeLatestUserAndFollowing(rows) : rows
+  // A hidden automatic-turn input that no assistant answered (failed, aborted or still running)
+  // would send the abandoned input again and break user/assistant alternation.
+  const selectedRows = cutRows.filter((row, index) =>
+    row.role !== 'user' || row.display_role !== HIDDEN_DISPLAY_ROLE || cutRows[index + 1]?.role === 'assistant')
   const sourceRows = options.truncateToolResults === false ? selectedRows
     : projectChatBrowserHistory(selectedRows, { truncateOtherTools: truncateToolResultForContext })
   return sourceRows.map((row, index, allRows) => {
