@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { choice, noul, createJevSidecar, hashJevCanonical, type JevSettings, type JevSidecarAdapter, type JevSidecarTaskSpec } from '../../public/jev'
+import { logger } from '../../public/logging'
 
 export interface GroupRoutingCandidate { id: string; name: string; description: string }
 export interface GroupRoutingMessage { id: string; roomId: string; senderId: string; senderName: string; content: string; timestamp: number; mentions?: unknown[] }
@@ -47,10 +48,20 @@ const adapter = (storage: GroupRoutingStorage): JevSidecarAdapter<RoutingApplica
     : storage.saveRoutingSuggestion(request.decision) ? request.decision : null,
 })
 
+const routingWarningReasons = new Set([
+  'settings_unavailable', 'authorization_unavailable', 'queue_full', 'queue_unavailable',
+  'deadline_exceeded', 'provider_timeout', 'provider_rate_limited', 'provider_auth_failed',
+  'provider_error', 'invalid_result', 'record_write_failed', 'storage_unavailable', 'storage_busy',
+])
+
 export class GroupMessageRoutingService {
   private readonly sidecar
   constructor(private readonly storage: GroupRoutingStorage, private readonly onDecision?: (decision: GroupRoutingDecision) => void) {
-    this.sidecar = createJevSidecar({ adapters: [adapter(storage)] })
+    this.sidecar = createJevSidecar({ adapters: [adapter(storage)], observe: diagnostic => {
+      if (!diagnostic.reason) return
+      const level = routingWarningReasons.has(diagnostic.reason) ? 'warn' : 'debug'
+      logger[level]({ diagnostic }, '[group-message-routing] JEV evaluation skipped')
+    } })
   }
 
   cancelRoom(roomId: string): void { this.sidecar.cancel({ sourceKey: roomId }) }
