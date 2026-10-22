@@ -31,7 +31,11 @@ of `ccswitch://` or the mobile app's `hermes-studio://` session-sharing scheme.
 ```
 
 `apiMode` is optional and defaults to `chat_completions`; allowed values are
-`chat_completions`, `codex_responses`, and `anthropic_messages`. An optional
+`chat_completions`, `codex_responses`, `anthropic_messages`, and `auto`.
+`auto` preselects **Auto (match model)** in the confirmation dialog and saves the
+provider without a fixed API mode, so each model uses its matching protocol. Use it
+for relays that serve several protocol families (for example Claude and Codex
+models) behind one endpoint. An optional
 `apiKey` can prefill the password field. Prefer omitting it from public links:
 base64url is **not encryption**, and whoever receives a link can decode it.
 The user can enter the key in the confirmation dialog.

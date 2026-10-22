@@ -6,11 +6,12 @@ export interface ProviderImport {
   baseUrl: string
   model: string
   apiKey?: string
-  apiMode: 'chat_completions' | 'codex_responses' | 'anthropic_messages'
+  /** `auto` leaves the provider without a fixed API mode so each model picks its own protocol. */
+  apiMode: 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'auto'
 }
 
 const fields = new Set(['version', 'name', 'baseUrl', 'model', 'apiKey', 'apiMode'])
-const modes = new Set(['chat_completions', 'codex_responses', 'anthropic_messages'])
+const modes = new Set(['chat_completions', 'codex_responses', 'anthropic_messages', 'auto'])
 
 function text(value: unknown, max: number, optional = false): string {
   if (optional && value === undefined) return ''

@@ -103,3 +103,20 @@ test('completes a minimal draft only after an explicit model fetch', async ({ pa
   await expect(modal).toHaveCount(0)
   expect(saves[0]).toMatchObject({ name: 'Relay.example', model: 'fixture-chat-model', create_only: true })
 })
+
+test('imports apiMode auto as Auto (match model) and saves without a fixed API mode', async ({ page }) => {
+  await authenticate(page)
+  await mockHermesApi(page)
+  const bodies: any[] = []
+  await page.route('**/api/hermes/config/providers', async route => {
+    bodies.push(route.request().postDataJSON())
+    await route.fulfill({ status: 200, json: { success: true } })
+  })
+  await page.goto(importPath({ ...draft, apiMode: 'auto' }))
+  const modal = page.getByRole('dialog')
+  await expect(modal).toContainText('Auto (match model)')
+  await modal.getByRole('button', { name: 'Confirm import' }).click()
+  await expect(modal).toHaveCount(0)
+  expect(bodies).toHaveLength(1)
+  expect(bodies[0].api_mode).toBeNull()
+})

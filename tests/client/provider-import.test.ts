@@ -22,7 +22,7 @@ describe('provider import payload', () => {
     expect(result.name).toBe('')
     expect(result.model).toBe('')
   })
-  it.each(['chat_completions', 'codex_responses', 'anthropic_messages'])('preserves explicit %s protocol', apiMode => {
+  it.each(['chat_completions', 'codex_responses', 'anthropic_messages', 'auto'])('preserves explicit %s protocol', apiMode => {
     expect(parseProviderImport(encode({ ...draft, apiMode })).apiMode).toBe(apiMode)
   })
   it.each([
