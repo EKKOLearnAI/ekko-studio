@@ -497,7 +497,11 @@ onUnmounted(() => {
 .global-pending-title { appearance: none; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
 .global-pending-title:hover { text-decoration-color: currentcolor; }
 .global-pending-title:focus-visible { border-radius: var(--radius-component, 2px); outline: 2px solid var(--accent-info); outline-offset: 3px; }
-.global-pending-actions, .global-clarify-choices { display: flex; flex-wrap: wrap; gap: calc(8px * var(--spacing-scale, 1)); }
+.global-pending-actions, .global-clarify-choices { display: flex; flex-wrap: wrap; align-items: flex-start; gap: calc(8px * var(--spacing-scale, 1)); }
+/* Choice labels are free-form sentences. Naive UI buttons are nowrap and flex-shrink: 0, so a long
+   choice widens the button past the notification edge instead of wrapping. */
+.global-pending-actions .n-button, .global-clarify-choices .n-button { flex: 0 1 auto; min-width: 0; max-width: 100%; height: auto; padding-top: 5px; padding-bottom: 5px; line-height: var(--line-height, 1.45); white-space: normal; text-align: start; }
+.global-pending-actions .n-button__content, .global-clarify-choices .n-button__content { display: block; min-width: 0; max-width: 100%; line-height: var(--line-height, 1.45); white-space: normal; overflow-wrap: anywhere; word-break: break-word; text-align: start; }
 .global-approval-content, .global-clarify-content { display: grid; gap: calc(12px * var(--spacing-scale, 1)); max-width: 520px; max-height: min(420px, calc(100dvh - 190px)); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
 .global-approval-description { padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)); border: var(--border-width, 1px) solid rgba(var(--warning-rgb), 0.28); border-radius: var(--radius-component, 10px); background: rgba(var(--warning-rgb), 0.08); color: var(--text-secondary); font-size: calc(var(--font-size-base, 14px) * 13 / 14); line-height: var(--line-height, 1.55); }
 .global-approval-command { min-width: 0; overflow: hidden; border: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.1); border-radius: var(--radius-component, 10px); background: rgba(var(--accent-primary-rgb), 0.055); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.035); }
@@ -505,7 +509,7 @@ onUnmounted(() => {
 .global-approval-command-label { color: var(--text-secondary); font-size: calc(var(--font-size-base, 14px) * 12 / 14); font-weight: 600; }
 .global-approval-command pre { max-height: 240px; margin: 0; padding: calc(12px * var(--spacing-scale, 1)); overflow: auto; overscroll-behavior: contain; white-space: pre; }
 .global-approval-command code { display: block; width: max-content; min-width: 100%; color: var(--text-primary); font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace; font-size: calc(var(--font-size-base, 14px) * 12 / 14); line-height: var(--line-height, 1.55); }
-.global-clarify-question { font-weight: 600; }
+.global-clarify-question { font-weight: 600; overflow-wrap: anywhere; }
 
 @media (max-width: 600px) {
   .n-notification:has(.global-approval-content, .global-clarify-content) { width: calc(100vw - 24px); }
