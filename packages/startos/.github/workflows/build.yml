@@ -1,0 +1,20 @@
+name: Build
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main']
+    paths-ignore: ['*.md']
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: ['main']
+    paths-ignore: ['*.md']
+permissions: {}
+concurrency:
+  group: package-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    uses: Start9Labs/start-technologies/.github/workflows/build.yml@master

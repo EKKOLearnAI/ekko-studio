@@ -1,0 +1,9 @@
+{
+  "name": "ekko-studio-startos",
+  "dependencies": {
+    "@start9labs/start-sdk": "3.0.6"
+  },
+  "overrides": {
+    "@start9labs/start-sdk": "$@start9labs/start-sdk"
+  }
+}

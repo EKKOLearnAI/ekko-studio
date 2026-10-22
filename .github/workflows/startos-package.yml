@@ -1,0 +1,85 @@
+name: Build StartOS Package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/startos-package.yml'
+      - 'packages/startos/**'
+      - 'tests/server/startos-packaging.test.ts'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: startos-package-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: StartOS ${{ matrix.arch }} package
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86
+            arch: x86_64
+            runner: ubuntu-24.04
+          - target: arm
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: packages/startos
+    steps:
+      - name: Checkout packaging revision
+        uses: actions/checkout@v4
+      - name: Set up official StartOS build environment
+        uses: Start9Labs/start-technologies/.github/actions/setup-build-env@master
+      - name: Install package dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Provision temporary build identity
+        run: |
+          start-cli init-key
+          mkdir -p "$GITHUB_WORKSPACE/../.startos"
+          cp "$HOME/.startos/id.key.pem" "$GITHUB_WORKSPACE/../.startos/build.key.pem"
+          chmod 600 "$GITHUB_WORKSPACE/../.startos/build.key.pem"
+      - name: Build architecture-specific package
+        env:
+          STARTOS_TARGET: ${{ matrix.target }}
+        run: make "$STARTOS_TARGET"
+      - name: Record checksum and build provenance
+        env:
+          STARTOS_ARCH: ${{ matrix.arch }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          sha256sum "ekko-studio_${STARTOS_ARCH}.s9pk" > "ekko-studio_${STARTOS_ARCH}.s9pk.sha256"
+          node <<'NODE'
+          const fs = require('node:fs')
+          const cp = require('node:child_process')
+          const arch = process.env.STARTOS_ARCH
+          fs.writeFileSync(`ekko-studio_${arch}.build.json`, JSON.stringify({
+            repository: process.env.GITHUB_REPOSITORY,
+            sourceSha: process.env.SOURCE_SHA,
+            runId: process.env.GITHUB_RUN_ID,
+            architecture: arch,
+            startCli: cp.execFileSync('start-cli', ['--version'], { encoding: 'utf8' }).trim(),
+            sdkVersion: require('./node_modules/@start9labs/start-sdk/package.json').version,
+            signingIdentity: 'temporary CI identity; not a registry release',
+            startosDeviceTested: false,
+            registryPublished: false,
+          }, null, 2) + '\n')
+          NODE
+      - name: Upload package and verification files
+        uses: actions/upload-artifact@v4
+        with:
+          name: startos-${{ matrix.arch }}
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            packages/startos/*.s9pk
+            packages/startos/*.s9pk.sha256
+            packages/startos/*.build.json

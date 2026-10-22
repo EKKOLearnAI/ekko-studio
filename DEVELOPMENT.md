@@ -151,3 +151,36 @@ Closes #123
 - `npm run test:coverage`
 - `npm run build`
 ```
+
+## StartOS packaging
+
+The StartOS wrapper lives in `packages/startos` and has its own locked SDK
+installation. **Build StartOS Package** (`.github/workflows/startos-package.yml`)
+runs manually or for StartOS-related PRs and builds x86_64/aarch64 `.s9pk`
+artifacts from the pinned upstream image. It does not publish to a registry or
+run the application's existing release workflows.
+
+For local development, place this checkout inside a StartOS packaging workspace,
+install `start-cli` and Docker Engine API 1.48+, then run:
+
+```bash
+cd packages/startos
+npm ci --ignore-scripts
+npx tsc --noEmit
+make x86
+make arm
+```
+
+CI creates a temporary signing identity and retains packages, checksums and
+provenance for seven days. These are review/test builds, not registry releases.
+The current package is pinned independently of the application manifest;
+update its version and image digest using `packages/startos/UPDATING.md`.
+
+Start9's Community Registry review currently forks a standalone public wrapper
+repository into Start9-Community. `packages/startos` remains exportable as such a
+repository; its nested `.github` workflow is only used after export. The organization
+`EKKOLearnAI/ekko-studio-startOS` repository is the review copy named by `packageRepo`.
+Main-repository CI does not require creating an EKKOLearnAI organization wrapper
+repository. Synchronize the review copy before submitting it and confirm the
+review layout with Start9; a main-repository build alone is not listing approval.
+No StartOS device acceptance has been performed.

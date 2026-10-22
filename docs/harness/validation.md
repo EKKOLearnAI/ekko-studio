@@ -11,6 +11,13 @@ after packaging to verify a clean installation without a pre-created account
 or host venv, non-root HTTP startup, upgrade retention and destructive uninstall cleanup. This check
 records systemctl calls and simulates stop exit code 5; it does not exercise the real service manager.
 
+For StartOS packaging, install dependencies in `packages/startos`, run its
+`npx tsc --noEmit`, the focused `tests/server/startos-packaging.test.ts` tests,
+`npm run harness:check`, and the independent StartOS package workflow. Validate
+real authentication/rotation and persistence in the pinned image after runtime
+changes. Successful builds and Docker smoke tests do not establish StartOS
+installation, task, interface, or backup/restore compatibility.
+
 Run the smallest relevant checks while iterating. Escalate to the broad checks
 when touching shared behavior, release automation, auth, persistence, or chat.
 
