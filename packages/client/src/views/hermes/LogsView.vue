@@ -49,7 +49,7 @@ const filteredEntries = computed(() => {
   return entries.value.filter(e =>
     e.message.toLowerCase().includes(q) ||
     e.logger.toLowerCase().includes(q) ||
-    e.raw.toLowerCase().includes(q),
+    (e.raw || '').toLowerCase().includes(q),
   )
 })
 
