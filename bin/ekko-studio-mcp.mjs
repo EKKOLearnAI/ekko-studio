@@ -1094,7 +1094,7 @@ const tools = [
   {
     name: 'ekko_studio_update_plan',
     toolset: 'plan',
-    description: 'Create or update the current turn task plan shown in Studio and App. For multi-step work, send the full ordered plan before starting and whenever progress changes. Keep step ids stable, use at most one in_progress step, and mark completion only after verification. Requires the context_id supplied in the current run instructions; cannot start a run or modify another turn.',
+    description: 'Create or update the current turn task plan shown in Studio and App. For multi-step work, send the full ordered plan before starting and whenever progress changes. Keep step ids stable, use at most one in_progress step, and mark completion only after verification. Write every step and explanation in the language of the user\'s latest message: a Chinese conversation gets Simplified Chinese step text, never an English paraphrase of the work. Requires the context_id supplied in the current run instructions; cannot start a run or modify another turn.',
     inputSchema: inputSchema({
       context_id: { type: 'string', description: 'Current turn context supplied by Studio. Never reuse a previous turn context.' },
       explanation: { type: 'string', maxLength: 1000 },
