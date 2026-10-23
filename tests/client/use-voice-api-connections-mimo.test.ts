@@ -18,6 +18,8 @@ const sttApiMock = vi.hoisted(() => ({
 const voiceSettingsMock = vi.hoisted(() => {
   const state = {
     provider: { value: 'mimo' },
+    customUrl: { value: '' },
+    customVoice: { value: 'alloy' },
     edgeVoice: { value: 'zh-CN-XiaoxiaoNeural' },
     edgeRate: { value: 1 },
     edgePitchHz: { value: 0 },
@@ -31,6 +33,8 @@ const voiceSettingsMock = vi.hoisted(() => {
   return {
     ...state,
     setProvider: vi.fn((value: string) => { state.provider.value = value }),
+    setCustomUrl: vi.fn((value: string) => { state.customUrl.value = value }),
+    setCustomVoice: vi.fn((value: string) => { state.customVoice.value = value }),
     setMimoBaseUrl: vi.fn(),
     setMimoModel: vi.fn(),
     setMimoVoice: vi.fn(),
@@ -106,5 +110,29 @@ describe('useVoiceApiConnections MiMo voice clone', () => {
     expect(voiceSettingsMock.setMimoVoiceCloneDataUri).toHaveBeenCalledWith(dataUri)
     expect(voiceSettingsMock.setMimoVoiceCloneFileName).toHaveBeenCalledWith('sample.mp3')
     expect(voiceSettingsMock.setMimoVoiceCloneFormat).toHaveBeenCalledWith('mp3')
+  })
+
+  it('applies a saved custom TTS voice to legacy playback state', async () => {
+    ttsApiMock.saveActiveTtsProvider.mockResolvedValue('custom')
+    ttsApiMock.fetchTtsSettings.mockResolvedValue({
+      activeProvider: 'custom',
+      providers: [{
+        provider: 'custom',
+        settings: {
+          baseUrl: 'https://api.groq.com/openai/v1',
+          model: 'playai-tts',
+          voice: 'Fritz-PlayAI',
+        },
+        secrets: { apiKey: '[stored]' },
+        updatedAt: 1,
+      }],
+    })
+
+    const connections = useVoiceApiConnections()
+    await connections.refresh()
+    await connections.setActiveConnection('tts', 'tts-custom')
+
+    expect(voiceSettingsMock.setCustomUrl).toHaveBeenCalledWith('https://api.groq.com/openai/v1')
+    expect(voiceSettingsMock.setCustomVoice).toHaveBeenCalledWith('Fritz-PlayAI')
   })
 })
