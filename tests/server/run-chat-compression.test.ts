@@ -77,6 +77,10 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () =
   calcAndUpdateUsage: calcAndUpdateUsageMock,
   estimateUsageTokensFromMessages: estimateUsageTokensFromMessagesMock,
   updateMessageContextTokenUsage: updateMessageContextTokenUsageMock,
+  recordedContextWindowTokens: vi.fn(() => undefined),
+  updateContextTokenUsage: vi.fn(),
+  anchoredContextWindowTokens: vi.fn(() => undefined),
+  clampContextWindowTokens: vi.fn((tokens: number) => tokens),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/message-format', () => ({
