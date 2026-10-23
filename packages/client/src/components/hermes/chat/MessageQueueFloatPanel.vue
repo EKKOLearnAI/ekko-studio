@@ -12,25 +12,34 @@ const props = withDefaults(defineProps<{
   items: MessageQueueFloatItem[]
   testId?: string
   canInsert?: boolean
+  canSteer?: boolean
   activeInsertId?: string | null
   insertTitle?: (item: MessageQueueFloatItem) => string
+  steerTitle?: string
   removeTitle?: string | ((item: MessageQueueFloatItem) => string)
 }>(), {
   testId: undefined,
   canInsert: false,
+  canSteer: false,
   activeInsertId: null,
   insertTitle: undefined,
+  steerTitle: undefined,
   removeTitle: undefined,
 })
 
 const emit = defineEmits<{
   insert: [id: string]
+  steer: [id: string]
   remove: [id: string]
 }>()
 const { t } = useI18n()
 
 function resolvedInsertTitle(item: MessageQueueFloatItem): string {
   return props.insertTitle?.(item) || t('chat.insertQueuedMessage')
+}
+
+function resolvedSteerTitle(): string {
+  return props.steerTitle || t('chat.steerQueuedMessage')
 }
 
 function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
@@ -75,6 +84,20 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
             <path d="M12 19V5" />
             <path d="m5 12 7-7 7 7" />
           </svg>
+        </button>
+        <button
+          v-if="canSteer"
+          type="button"
+          class="queue-steer"
+          :title="resolvedSteerTitle()"
+          :aria-label="resolvedSteerTitle()"
+          @click="emit('steer', item.id)"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7h11a4 4 0 0 1 4 4v6" />
+            <path d="m15 14 3 3 3-3" />
+          </svg>
+          <span class="queue-steer-label">{{ t('chat.steerQueuedMessageLabel') }}</span>
         </button>
         <button
           type="button"
@@ -211,6 +234,30 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
 }
 
 .queue-insert,
+.queue-steer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: $text-muted;
+  cursor: pointer;
+  transition: color $transition-fast;
+
+  &:hover {
+    color: $text-primary;
+  }
+}
+
+.queue-steer-label {
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .queue-remove {
   flex: 0 0 auto;
   width: 24px;
