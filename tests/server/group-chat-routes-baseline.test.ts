@@ -1299,10 +1299,11 @@ describe('group chat REST route baseline', () => {
   it.each([
     { agent: 'codex', effort: 'high', nextEffort: 'low' },
     { agent: 'dsh', effort: 'high', nextEffort: 'low' },
+    { agent: 'zcode', effort: 'enabled', nextEffort: 'disabled' },
     { agent: 'kimi', effort: 'off', nextEffort: 'on' },
     { agent: 'kimi', effort: 'on', nextEffort: 'off' },
   ])('persists global $agent native model and effort $effort through add and update', async ({ agent, effort, nextEffort }) => {
-    updateAgentStatus(agent as 'codex' | 'dsh' | 'kimi', { installed: true, source: 'user-cli', path: `/test/${agent}` })
+    updateAgentStatus(agent as 'codex' | 'dsh' | 'kimi' | 'zcode', { installed: true, source: 'user-cli', path: `/test/${agent}` })
     storage.rooms.set('room-global', { id: 'room-global', name: 'Global Room', inviteCode: 'GLOBAL1' })
 
     const res = await fetch(`${baseUrl}/api/studio/group-chat/rooms/room-global/agents`, {
@@ -1377,6 +1378,40 @@ describe('group chat REST route baseline', () => {
     expect(unsupported.status).toBe(400)
     await expect(unsupported.json()).resolves.toEqual({
       error: 'Global mode is only available for Claude, Codex, Pi, Grok, OpenCode, DSH, and Cursor',
+    })
+  })
+
+  it('switches a scoped ZCode room agent to its native global configuration', async () => {
+    updateAgentStatus('zcode', { installed: true, source: 'user-cli', path: '/test/zcode' })
+    storage.rooms.set('room-zcode', { id: 'room-zcode', name: 'ZCode Room', inviteCode: 'ZCODE1' })
+
+    const added = await fetch(`${baseUrl}/api/studio/group-chat/rooms/room-zcode/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent: 'zcode', agentMode: 'scoped', profile: 'research',
+        provider: 'glm', model: 'scoped-model', apiMode: 'chat_completions', name: 'ZCode' }),
+    })
+    expect(added.status).toBe(200)
+    const created = await added.json()
+
+    const updated = await fetch(`${baseUrl}/api/studio/group-chat/rooms/room-zcode/agents/${created.agent.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent: 'zcode', agentMode: 'global', profile: 'research',
+        provider: 'glm', model: 'native-model', apiMode: 'chat_completions', reasoningEffort: 'enabled', name: 'ZCode' }),
+    })
+
+    expect(updated.status).toBe(200)
+    expect(await updated.json()).toMatchObject({ agent: {
+      id: created.agent.id, agent: 'zcode', agentMode: 'global', provider: '',
+      model: 'native-model', apiMode: '', reasoningEffort: 'enabled',
+    } })
+    expect(agentClients.createAgent).toHaveBeenLastCalledWith(expect.objectContaining({
+      agent: 'zcode', agentMode: 'global', provider: '',
+      model: 'native-model', apiMode: '', reasoningEffort: 'enabled',
+    }))
+    expect(storage.getRoomAgent('room-zcode', created.agent.id)).toMatchObject({
+      agentMode: 'global', provider: '', model: 'native-model', apiMode: '', reasoningEffort: 'enabled',
     })
   })
 
