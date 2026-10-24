@@ -2575,6 +2575,11 @@ export default {
     hasEnv: '有 .env',
     hasSoulMd: '有 soul.md',
     noProfiles: '暂无配置，创建一个开始吧。',
+    scope: {
+      label: 'Profile',
+      hint: '选择本页面管理哪个 Profile 的 MCP 与 Skills 配置，不会切换当前激活的 Profile。',
+      differsHint: '正在管理 {name}，与当前激活 Profile（{active}）不同。',
+    },
     avatar: {
       title: '自定义头像',
       customize: '头像',

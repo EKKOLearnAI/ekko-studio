@@ -13,6 +13,11 @@ const mockProfilesStore = vi.hoisted(() => ({
 
 vi.mock('@/api/hermes/skills', () => ({
   fetchSkills: mockFetchSkills,
+  deleteSkillApi: vi.fn(),
+  fetchExternalDirs: vi.fn(),
+  importSkill: vi.fn(),
+  saveExternalDirs: vi.fn(),
+  toggleSkill: vi.fn(),
 }))
 
 vi.mock('@/api/hermes/write-gate', () => ({

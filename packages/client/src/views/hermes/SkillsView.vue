@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderActionOverflow from '@/components/layout/HeaderActionOverflow.vue'
+import ProfileScopeSelect from '@/components/common/ProfileScopeSelect.vue'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NBadge, NButton, NDrawer, NDrawerContent, NInput } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -10,8 +12,21 @@ import SkillImportModal from '@/components/hermes/skills/SkillImportModal.vue'
 import SkillExternalDirsModal from '@/components/hermes/skills/SkillExternalDirsModal.vue'
 import SkillSourceLegend from '@/components/hermes/skills/SkillSourceLegend.vue'
 import PendingWriteApprovals from '@/components/hermes/skills/PendingWriteApprovals.vue'
-import { deleteSkillApi, importSkill, fetchSkills, type SkillCategory, type SkillSource, type SkillInfo, type SkillTarget } from '@/api/hermes/skills'
+import {
+  deleteSkillApi,
+  fetchExternalDirs,
+  fetchSkills,
+  importSkill,
+  saveExternalDirs,
+  toggleSkill,
+  type ExternalDirEntry,
+  type SkillCategory,
+  type SkillSource,
+  type SkillInfo,
+  type SkillTarget,
+} from '@/api/hermes/skills'
 import { fetchPendingWrites } from '@/api/hermes/write-gate'
+import { useManagedProfileScope } from '@/composables/useManagedProfileScope'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 
 type SourceFilter = SkillSource | 'modified'
@@ -52,6 +67,10 @@ const selectedSkillData = computed(() => {
 })
 
 const isHermesTarget = computed(() => skillTarget.value === 'hermes')
+const { managedProfile } = useManagedProfileScope()
+// 只有 hermes 目标的 skills 是按 profile 隔离的；coding agent 目标不参与
+const profileParam = computed(() => (isHermesTarget.value ? managedProfile.value ?? undefined : undefined))
+
 const canManageTarget = computed(() => isHermesTarget.value || skillTarget.value === 'dsh' || (skillTarget.value === 'cursor' || skillTarget.value === 'antigravity'))
 const selectedSkillReadonly = computed(() => {
   if (!selectedSkillData.value) return true
@@ -82,13 +101,21 @@ watch(() => props.target, () => {
   loadSkills()
 })
 
+// 切换管理目标后清空选中并加载新 profile 的技能列表
+watch(managedProfile, () => {
+  if (!isHermesTarget.value) return
+  selectedCategory.value = ''
+  selectedSkill.value = ''
+  loadSkills()
+})
+
 async function loadSkills() {
   loading.value = true
   try {
     if (!profilesStore.activeProfileName || profilesStore.profiles.length === 0) {
       await profilesStore.fetchProfiles()
     }
-    const data = await fetchSkills(undefined, skillTarget.value)
+    const data = await fetchSkills(profileParam.value, skillTarget.value)
     categories.value = data.categories
     archived.value = data.archived
     ensureSelectedSkill()
@@ -97,6 +124,26 @@ async function loadSkills() {
   } finally {
     loading.value = false
   }
+}
+
+function handleToggleSkill(_category: string, name: string, enabled: boolean): Promise<void> {
+  return toggleSkill(name, enabled, profileParam.value)
+}
+
+function handleDeleteSkill(category: string, name: string): Promise<void> {
+  return deleteSkillApi(category, name, skillTarget.value, profileParam.value)
+}
+
+function handleImportSkill(files: File[], category?: string): Promise<{ name: string }> {
+  return importSkill(files, category, skillTarget.value, profileParam.value)
+}
+
+function handleFetchExternalDirs(): Promise<ExternalDirEntry[]> {
+  return fetchExternalDirs(profileParam.value)
+}
+
+function handleSaveExternalDirs(dirs: string[]): Promise<void> {
+  return saveExternalDirs(dirs, profileParam.value)
 }
 
 async function loadPendingWriteCount() {
@@ -178,64 +225,68 @@ function handleSkillSaved() {
         <SkillSourceLegend v-model="sourceFilter" :show-hub="isHermesTarget" />
       </div>
       <div class="header-actions">
-        <NButton
-          v-if="isHermesTarget && writeApprovalSupported"
-          class="header-action-btn"
-          size="small"
-          :title="t('skills.writeApprovalTitle')"
-          @click="showWriteApprovalDrawer = true"
-        >
-          <template #icon>
-            <NBadge :value="pendingWriteCount" :max="99" :show="pendingWriteCount > 0">
+        <ProfileScopeSelect v-if="isHermesTarget" v-model="managedProfile" />
+        <!-- embedded 视图（coding agent 配置页）保持操作常驻：breakpoint 0 永不收纳 -->
+        <HeaderActionOverflow :label="t('chat.more')" :breakpoint="embedded ? 0 : 1100">
+          <NButton
+            v-if="isHermesTarget && writeApprovalSupported"
+            class="header-action-btn"
+            size="small"
+            :title="t('skills.writeApprovalTitle')"
+            @click="showWriteApprovalDrawer = true"
+          >
+            <template #icon>
+              <NBadge :value="pendingWriteCount" :max="99" :show="pendingWriteCount > 0">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 11l3 3L22 4" />
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg>
+              </NBadge>
+            </template>
+            <span class="header-action-label">
+              {{ t('skills.writeApprovalButton', { count: pendingWriteCount }) }}
+            </span>
+          </NButton>
+          <NButton
+            v-if="canManageTarget"
+            class="header-action-btn"
+            size="small"
+            :title="t('skills.import')"
+            @click="showImportModal = true"
+          >
+            <template #icon>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 11l3 3L22 4" />
-                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
-            </NBadge>
-          </template>
-          <span class="header-action-label">
-            {{ t('skills.writeApprovalButton', { count: pendingWriteCount }) }}
-          </span>
-        </NButton>
-        <NButton
-          v-if="canManageTarget"
-          class="header-action-btn"
-          size="small"
-          :title="t('skills.import')"
-          @click="showImportModal = true"
-        >
-          <template #icon>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-          </template>
-          <span class="header-action-label">{{ t('skills.import') }}</span>
-        </NButton>
-        <NButton
-          v-if="isHermesTarget"
-          class="header-action-btn"
-          size="small"
-          :title="t('skills.externalDirs.manage')"
-          @click="showExternalDirsModal = true"
-        >
-          <template #icon>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
-          </template>
-          <span class="header-action-label">{{ t('skills.externalDirs.manage') }}</span>
-        </NButton>
+            </template>
+            <span class="header-action-label">{{ t('skills.import') }}</span>
+          </NButton>
+          <NButton
+            v-if="isHermesTarget"
+            class="header-action-btn"
+            size="small"
+            :title="t('skills.externalDirs.manage')"
+            @click="showExternalDirsModal = true"
+          >
+            <template #icon>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+            </template>
+            <span class="header-action-label">{{ t('skills.externalDirs.manage') }}</span>
+          </NButton>
+        </HeaderActionOverflow>
         <NInput
           v-model:value="searchQuery"
           :placeholder="t('skills.searchPlaceholder')"
           size="small"
           clearable
-          style="width: 130px"
+          class="search-input"
         />
       </div>
     </header>
@@ -244,11 +295,13 @@ function handleSkillSaved() {
     <SkillImportModal
       v-if="showImportModal"
       :allow-category="skillTarget !== 'dsh'"
-      :import-handler="!isHermesTarget ? (files, category) => importSkill(files, category, skillTarget) : undefined"
+      :import-handler="handleImportSkill"
       @close="showImportModal = false"
       @saved="handleImported"
     />
     <SkillExternalDirsModal v-if="showExternalDirsModal"
+      :fetch-handler="handleFetchExternalDirs"
+      :save-handler="handleSaveExternalDirs"
       @close="showExternalDirsModal = false" @saved="handleExternalDirsSaved" />
     <NDrawer
       v-model:show="showWriteApprovalDrawer"
@@ -277,7 +330,8 @@ function handleSkillSaved() {
               :source-filter="sourceFilter"
               :readonly="!canManageTarget"
               :toggleable="isHermesTarget"
-              :delete-handler="!isHermesTarget ? (category, name) => deleteSkillApi(category, name, skillTarget) : undefined"
+              :toggle-handler="handleToggleSkill"
+              :delete-handler="handleDeleteSkill"
               @select="handleSelect"
               @deleted="handleSkillDeleted"
             />
@@ -293,6 +347,7 @@ function handleSkillSaved() {
               :view-count="selectedSkillData?.viewCount"
               :pinned="selectedSkillData?.pinned"
               :target="skillTarget"
+              :profile="profileParam"
               :readonly="selectedSkillReadonly"
               :can-pin="isHermesTarget"
               @pin-toggled="handlePinToggled"
@@ -332,11 +387,12 @@ function handleSkillSaved() {
 }
 
 @media (max-width: $breakpoint-mobile) {
-  .header-action-label {
+  // 只压缩 header 里直接展示的按钮；溢出菜单（teleport 到 body）中的按钮保留文字
+  .header-actions > .header-action-btn .header-action-label {
     display: none;
   }
 
-  .header-action-btn {
+  .header-actions > .header-action-btn {
     width: 30px;
     padding: 0;
 
@@ -351,10 +407,13 @@ function handleSkillSaved() {
 }
 
 .search-input {
-  width: 100px;
+  width: 130px;
+  min-width: 88px;
+  flex: 0 1 130px;
 
   @media (max-width: $breakpoint-mobile) {
-    width: 100%;
+    flex-basis: 100%;
+    min-width: 0;
   }
 }
 

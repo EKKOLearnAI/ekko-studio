@@ -2081,6 +2081,11 @@ export default {
     hasEnv: '.env あり',
     hasSoulMd: 'soul.md あり',
     noProfiles: 'プロファイルがありません。作成して始めましょう。',
+    scope: {
+      label: 'プロファイル',
+      hint: 'このページで管理するプロファイルの MCP サーバーと Skills を選択します。アクティブなプロファイルは切り替わりません。',
+      differsHint: '現在 {name} を管理しています。アクティブなプロファイル（{active}）とは異なります。',
+    },
     avatar: {
       title: 'カスタムアバター',
       customize: 'アバター',

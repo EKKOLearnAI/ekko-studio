@@ -2081,6 +2081,11 @@ jobTriggered: 'Job ausgelost',
     hasEnv: 'Hat .env',
     hasSoulMd: 'Hat soul.md',
     noProfiles: 'Keine Profile gefunden. Erstellen Sie eines, um zu beginnen.',
+    scope: {
+      label: 'Profil',
+      hint: 'Wählt, welches Profil diese Seite an MCP-Servern und Skills verwaltet. Das aktive Profil wird dabei nicht gewechselt.',
+      differsHint: 'Sie verwalten {name}, nicht Ihr aktives Profil ({active}).',
+    },
     avatar: {
       title: 'Eigenes Avatar',
       customize: 'Avatar anpassen',

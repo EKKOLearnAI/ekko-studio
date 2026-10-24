@@ -2081,6 +2081,11 @@ jobTriggered: 'Job declenche',
     hasEnv: 'A un .env',
     hasSoulMd: 'A un soul.md',
     noProfiles: 'Aucun profil trouve. Creez-en un pour commencer.',
+    scope: {
+      label: 'Profil',
+      hint: 'Choisit le profil dont cette page gère les serveurs MCP et les skills. Ne change pas votre profil actif.',
+      differsHint: 'Vous gérez {name}, et non votre profil actif ({active}).',
+    },
     avatar: {
       title: 'Avatar personnalisé',
       customize: 'Personnaliser l’avatar',

@@ -48,43 +48,52 @@ export interface McpServerConfig {
   resources?: boolean
 }
 
-export async function fetchMcpServers(): Promise<McpServersResponse> {
-  return request<McpServersResponse>('/api/hermes/mcp/servers')
+export async function fetchMcpServers(profile?: string): Promise<McpServersResponse> {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return request<McpServersResponse>(`/api/hermes/mcp/servers${query}`)
 }
 
-export async function fetchMcpTools(server?: string, raw?: boolean): Promise<McpToolsResponse> {
+export async function fetchMcpTools(server?: string, raw?: boolean, profile?: string): Promise<McpToolsResponse> {
   const params = new URLSearchParams()
   if (server) params.set('server', server)
   if (raw) params.set('raw', '1')
+  if (profile) params.set('profile', profile)
   const query = params.toString() ? `?${params.toString()}` : ''
   return request<McpToolsResponse>(`/api/hermes/mcp/tools${query}`)
 }
 
-export async function mcpServerAdd(name: string, config: McpServerConfig): Promise<{ ok: boolean; name?: string; error?: string }> {
-  return request('/api/hermes/mcp/servers', {
+export async function mcpServerAdd(name: string, config: McpServerConfig, profile?: string): Promise<{ ok: boolean; name?: string; error?: string }> {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return request(`/api/hermes/mcp/servers${query}`, {
     method: 'POST',
     body: JSON.stringify({ name, config }),
   })
 }
 
-export async function mcpServerRemove(name: string): Promise<{ ok: boolean; error?: string }> {
-  return request(`/api/hermes/mcp/servers/${encodeURIComponent(name)}`, {
+export async function mcpServerRemove(name: string, profile?: string): Promise<{ ok: boolean; error?: string }> {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return request(`/api/hermes/mcp/servers/${encodeURIComponent(name)}${query}`, {
     method: 'DELETE',
   })
 }
 
-export async function mcpServerUpdate(name: string, config: McpServerConfig): Promise<{ ok: boolean; error?: string }> {
-  return request(`/api/hermes/mcp/servers/${encodeURIComponent(name)}`, {
+export async function mcpServerUpdate(name: string, config: McpServerConfig, profile?: string): Promise<{ ok: boolean; error?: string }> {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return request(`/api/hermes/mcp/servers/${encodeURIComponent(name)}${query}`, {
     method: 'PATCH',
     body: JSON.stringify({ config }),
   })
 }
 
-export async function mcpReload(name?: string): Promise<{ ok: boolean; message?: string; error?: string }> {
-  const query = name ? `?server=${encodeURIComponent(name)}` : ''
+export async function mcpReload(name?: string, profile?: string): Promise<{ ok: boolean; message?: string; error?: string }> {
+  const params = new URLSearchParams()
+  if (name) params.set('server', name)
+  if (profile) params.set('profile', profile)
+  const query = params.toString() ? `?${params.toString()}` : ''
   return request(`/api/hermes/mcp/reload${query}`, { method: 'POST' })
 }
 
-export async function mcpServerTest(name: string): Promise<{ ok: boolean; tools?: string[]; error?: string }> {
-  return request(`/api/hermes/mcp/servers/${encodeURIComponent(name)}/test`, { method: 'POST' })
+export async function mcpServerTest(name: string, profile?: string): Promise<{ ok: boolean; tools?: string[]; error?: string }> {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return request(`/api/hermes/mcp/servers/${encodeURIComponent(name)}/test${query}`, { method: 'POST' })
 }
