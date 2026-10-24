@@ -85,8 +85,9 @@ export function parseBrowserUploadMethod(value: unknown): BrowserUploadMethod {
 export const UPLOAD_FUNCTION = `function (files, method) {
   const node = this;
   const element = node && node.nodeType === 3 ? node.parentElement : node;
-  if (!element || !element.isConnected) throw new Error('Browser element was removed');
   const isFileInput = item => item instanceof HTMLInputElement && item.type === 'file';
+  // Pages may open a picker from an input that was never attached to the document.
+  if (!element || !element.isConnected && !isFileInput(element)) throw new Error('Browser element was removed');
   const findInput = () => {
     if (isFileInput(element)) return element;
     if (element instanceof HTMLLabelElement && isFileInput(element.control)) return element.control;

@@ -1039,24 +1039,31 @@ const tools = [
   {
     name: 'ekko_studio_browser_interact',
     toolset: 'browser',
-    description: 'Click, type, hover, select a native <select> option, press a key, or scroll in one Desktop browser tab. Click/type/hover/select require a ref and snapshot_id from the latest snapshot; select takes the option value or visible label. Returns a fresh snapshot and local observation of target states, changes and openedTabs even without JEV. Use the returned snapshot.tabId (it may be a newly opened destination). Dispatch alone does not prove success; if no change is observed, inspect a relevant region or screenshot instead of blindly repeating. Supply expectation for optional JEV judgment; verification is advisory and never retries the action.',
+    description: 'Click, double-click, right-click, type, hover, drag, select a native <select> option, press a key, or scroll in one Desktop browser tab. Ref actions require a ref and snapshot_id from the latest snapshot (drag also target_ref); select takes the option value or visible label. Clicks are trusted mouse input at the element center. For canvas, maps or other content without refs use click_at/drag_at with CSS-pixel coordinates from a viewport screenshot. If the page opens alert/confirm, observation.dialog is set and the page waits for ekko_studio_browser_dialog. Returns a fresh snapshot and local observation of target states, changes and openedTabs even without JEV. Use the returned snapshot.tabId (it may be a newly opened destination). Dispatch alone does not prove success; if no change is observed, inspect a relevant region or screenshot instead of blindly repeating. Supply expectation for optional JEV judgment; verification is advisory and never retries the action.',
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
       expectation: { type: 'string', minLength: 1, maxLength: 2000, description: 'Expected visible outcome to judge after the action, when enabled in Models > JEV.' },
       include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside snapshot nodes. Defaults to false.' },
-      action: { type: 'string', enum: ['click', 'type', 'hover', 'select', 'press', 'scroll'] },
+      action: { type: 'string', enum: ['click', 'double_click', 'right_click', 'type', 'hover', 'select', 'drag', 'press', 'scroll', 'click_at', 'drag_at'] },
       ref: { type: 'string' }, snapshot_id: { type: 'string' }, text: { type: 'string' }, key: { type: 'string' },
       value: { type: 'string', maxLength: 1000, description: 'Option value or visible label for action=select.' },
+      target_ref: { type: 'string', description: 'Drop target ref for action=drag.' },
       direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, pixels: { type: 'number' },
+      x: { type: 'number', minimum: 0, maximum: 100000, description: 'Viewport CSS pixel x for click_at/drag_at.' },
+      y: { type: 'number', minimum: 0, maximum: 100000 },
+      to_x: { type: 'number', minimum: 0, maximum: 100000, description: 'Destination for drag_at.' },
+      to_y: { type: 'number', minimum: 0, maximum: 100000 },
+      button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'click_at button; defaults to left.' },
+      click_count: { type: 'number', enum: [1, 2], description: 'click_at clicks; 2 is a double-click.' },
     }, ['tab_id', 'action']),
   },
   {
     name: 'ekko_studio_browser_batch',
     toolset: 'browser',
-    description: 'Execute 1-50 click/type/hover/select/press/scroll actions sequentially in one tab in a single call. For click/type/hover/select, pass one current snapshot_id and refs from that snapshot; original DOM targets are revalidated before each step. Stops on the first failure, new-document navigation/reload, user takeover, or the 30-second execution budget. Same-document URL/SKU changes can continue when targets remain valid. Returns zero-based per-step completed/failed/skipped results, local observation and a fresh snapshot when available, even without JEV. Completed means dispatched, not a confirmed outcome; completed actions are not rolled back. Inspect target states and use snapshot.tabId if a new tab opened. Supply expectation for optional JEV verification after a fully completed batch; verification does not change completion status or retry actions.',
+    description: 'Execute 1-50 interact actions (click, double_click, right_click, type, hover, select, drag, press, scroll, click_at, drag_at) sequentially in one tab in a single call. For ref actions, pass one current snapshot_id and refs from that snapshot; original DOM targets are revalidated before each step. Stops on the first failure, a page dialog, new-document navigation/reload, user takeover, or the 30-second execution budget. Same-document URL/SKU changes can continue when targets remain valid. Returns zero-based per-step completed/failed/skipped results, local observation and a fresh snapshot when available, even without JEV. Completed means dispatched, not a confirmed outcome; completed actions are not rolled back. Inspect target states and use snapshot.tabId if a new tab opened. Supply expectation for optional JEV verification after a fully completed batch; verification does not change completion status or retry actions.',
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
-      snapshot_id: { type: 'string', description: 'Current snapshot used by all click/type/hover/select refs; optional for a batch containing only press/scroll.' },
+      snapshot_id: { type: 'string', description: 'Current snapshot used by all refs; optional for a batch without ref actions.' },
       include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside final snapshot nodes. Defaults to false.' },
       expectation: { type: 'string', minLength: 1, maxLength: 2000, description: 'Expected visible outcome after all actions finish. Prefer one batch assessment over assessing every intermediate click.' },
       actions: {
@@ -1064,11 +1071,18 @@ const tools = [
         items: {
           oneOf: [
             browserInputSchema({ action: { type: 'string', const: 'click' }, ref: { type: 'string' } }, ['action', 'ref']),
+            browserInputSchema({ action: { type: 'string', const: 'double_click' }, ref: { type: 'string' } }, ['action', 'ref']),
+            browserInputSchema({ action: { type: 'string', const: 'right_click' }, ref: { type: 'string' } }, ['action', 'ref']),
+            browserInputSchema({ action: { type: 'string', const: 'drag' }, ref: { type: 'string' }, target_ref: { type: 'string' } }, ['action', 'ref', 'target_ref']),
             browserInputSchema({ action: { type: 'string', const: 'type' }, ref: { type: 'string' }, text: { type: 'string', maxLength: 100000 } }, ['action', 'ref', 'text']),
             browserInputSchema({ action: { type: 'string', const: 'hover' }, ref: { type: 'string' } }, ['action', 'ref']),
             browserInputSchema({ action: { type: 'string', const: 'select' }, ref: { type: 'string' }, value: { type: 'string', maxLength: 1000 } }, ['action', 'ref', 'value']),
             browserInputSchema({ action: { type: 'string', const: 'press' }, key: { type: 'string', minLength: 1, maxLength: 64 } }, ['action', 'key']),
             browserInputSchema({ action: { type: 'string', const: 'scroll' }, direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, pixels: { type: 'number', minimum: 1, maximum: 10000 } }, ['action', 'direction']),
+            browserInputSchema({ action: { type: 'string', const: 'click_at' }, x: { type: 'number', minimum: 0, maximum: 100000 }, y: { type: 'number', minimum: 0, maximum: 100000 },
+              button: { type: 'string', enum: ['left', 'right', 'middle'] }, click_count: { type: 'number', enum: [1, 2] } }, ['action', 'x', 'y']),
+            browserInputSchema({ action: { type: 'string', const: 'drag_at' }, x: { type: 'number', minimum: 0, maximum: 100000 }, y: { type: 'number', minimum: 0, maximum: 100000 },
+              to_x: { type: 'number', minimum: 0, maximum: 100000 }, to_y: { type: 'number', minimum: 0, maximum: 100000 } }, ['action', 'x', 'y', 'to_x', 'to_y']),
           ],
         },
       },
@@ -1083,7 +1097,7 @@ const tools = [
   {
     name: 'ekko_studio_browser_upload',
     toolset: 'browser',
-    description: 'Give 1-4 files (10 MB total) to a page as if the user picked them, without the OS file dialog and without writing files on the Desktop. ref may be the <input type=file>, its label, or a visible upload button/dropzone near a hidden file input. method=auto uses the nearby file input and otherwise dispatches a drop on the element; use paste for editors that accept pasted images. Each file is either a local path readable by this MCP server or name+data_base64. Returns the local observation and a fresh snapshot; check for the page\'s preview before submitting.',
+    description: 'Give 1-4 files (10 MB total) to a page as if the user picked them, without the OS file dialog and without writing files on the Desktop. ref may be the <input type=file>, its label, or a visible upload button/dropzone near a hidden file input. After a click reports observation.fileChooser (the page tried to open a picker, which was suppressed), omit ref and snapshot_id to answer that picker. method=auto uses the nearby file input and otherwise dispatches a drop on the element; use paste for editors that accept pasted images. Each file is either a local path readable by this MCP server or name+data_base64. Returns the local observation and a fresh snapshot; check for the page\'s preview before submitting.',
     inputSchema: browserInputSchema({
       tab_id: { type: 'string' },
       snapshot_id: { type: 'string' },
@@ -1099,7 +1113,7 @@ const tools = [
         }),
       },
       include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside snapshot nodes. Defaults to false.' },
-    }, ['tab_id', 'snapshot_id', 'ref', 'files']),
+    }, ['tab_id', 'files']),
   },
   {
     name: 'ekko_studio_browser_download',
@@ -1124,6 +1138,29 @@ const tools = [
       text_gone: { type: 'string', minLength: 1, maxLength: 1000 },
       timeout_ms: { type: 'number', minimum: 0, maximum: 30000, description: 'Defaults to 10000.' },
     }, ['tab_id']),
+  },
+  {
+    name: 'ekko_studio_browser_dialog',
+    toolset: 'browser',
+    description: 'Answer the alert/confirm dialog that is blocking a Desktop browser tab (reported as observation.dialog), or check whether one is open. accept presses OK, dismiss presses Cancel; prompt_text fills a prompt. While a dialog is open snapshots and actions fail until it is answered. Returns the answered dialog and a fresh snapshot.',
+    inputSchema: browserInputSchema({
+      tab_id: { type: 'string' },
+      action: { type: 'string', enum: ['status', 'accept', 'dismiss'] },
+      prompt_text: { type: 'string', maxLength: 10000 },
+      include_text: { type: 'boolean', description: 'Include the duplicate text rendering alongside snapshot nodes. Defaults to false.' },
+    }, ['tab_id', 'action']),
+  },
+  {
+    name: 'ekko_studio_browser_network',
+    toolset: 'browser',
+    description: 'Read or clear the bounded network log of one Desktop browser tab: method, URL (secrets redacted), resource type, status, MIME type, duration, size and failure reason. Headers and bodies are never recorded. Logging starts once the agent has operated the tab. Use it to explain clicks with no visible effect, failed submits or slow pages.',
+    inputSchema: browserInputSchema({
+      tab_id: { type: 'string' },
+      action: { type: 'string', enum: ['read', 'clear'] },
+      filter: { type: 'string', minLength: 1, maxLength: 500, description: 'Case-insensitive URL substring.' },
+      only_failed: { type: 'boolean', description: 'Only failed requests and HTTP status >= 400.' },
+      limit: { type: 'number', minimum: 1, maximum: 200, description: 'Most recent entries to return; defaults to 50.' },
+    }, ['tab_id', 'action']),
   },
   {
     name: 'ekko_studio_browser_console',
@@ -1815,8 +1852,8 @@ const TOOL_ALIASES = new Map([
 const CATEGORY_TOOLSETS = {
   browser: {
     name: 'ekko_studio_browser_toolset',
-    coverage: 'Ekko Studio Desktop browser tabs and leases; HTTP/HTTPS navigation; accessibility snapshots with stable refs; single or sequential batch click, type, hover, select, key press, and scroll interaction; in-memory file upload and download; waiting for page text; viewport or full-page screenshots; bounded console log read and clear.',
-    description: 'Discover and invoke Ekko Studio Desktop browser operations without loading every browser tool schema into the model context. Covers tab list/create/activate/close/release, navigation back/forward/reload/stop/open, accessibility snapshots, single or batch click/type/hover/select/key/scroll interaction, file upload and download, waiting for text, screenshots, and console logs. Use action=list for the compact operation catalog, action=describe for one full input schema, then action=call with that exact tool name and arguments.',
+    coverage: 'Ekko Studio Desktop browser tabs and leases; HTTP/HTTPS navigation; accessibility snapshots with stable refs including iframes; single or sequential batch trusted click, double/right click, type, hover, select, drag, coordinate click/drag, key press, and scroll interaction; alert/confirm dialog handling; in-memory file upload (including intercepted file pickers) and download; waiting for page text; viewport or full-page screenshots; bounded console and network log read and clear.',
+    description: 'Discover and invoke Ekko Studio Desktop browser operations without loading every browser tool schema into the model context. Covers tab list/create/activate/close/release, navigation back/forward/reload/stop/open, accessibility snapshots including iframes, single or batch click/double/right click/type/hover/select/drag/coordinate/key/scroll interaction, page dialogs, file upload and download, waiting for text, screenshots, and console and network logs. Use action=list for the compact operation catalog, action=describe for one full input schema, then action=call with that exact tool name and arguments.',
   },
   use: {
     name: 'ekko_studio_use_toolset',
@@ -1993,7 +2030,7 @@ async function callToolInner(name, args = {}, signal) {
     case 'ekko_studio_browser_interact': {
       const expectation = browserIntent(args.expectation, 'expectation')
       const action = { action: args.action }
-      for (const key of ['ref', 'snapshot_id', 'text', 'key', 'direction', 'pixels', 'value']) {
+      for (const key of ['ref', 'snapshot_id', 'text', 'key', 'direction', 'pixels', 'value', 'target_ref', 'x', 'y', 'to_x', 'to_y', 'button', 'click_count']) {
         if (args[key] !== undefined) action[key] = args[key]
       }
       const envelope = await browserRequest('interact', { tab_id: args.tab_id, action }, signal)
@@ -2027,6 +2064,13 @@ async function callToolInner(name, args = {}, signal) {
       return await browserDownload(args, signal)
     case 'ekko_studio_browser_wait':
       return jsonText(await browserRequest('wait', pickDefined(args, ['tab_id', 'text', 'text_gone', 'timeout_ms']), signal))
+    case 'ekko_studio_browser_dialog': {
+      const envelope = await browserRequest('dialog', pickDefined(args, ['tab_id', 'action', 'prompt_text']), signal)
+      return args.action === 'status' ? jsonText(envelope) : browserOutput(envelope, args.include_text)
+    }
+    case 'ekko_studio_browser_network':
+      return jsonText(await browserRequest(args.action === 'clear' ? 'network.clear' : 'network.read',
+        args.action === 'clear' ? { tab_id: args.tab_id } : pickDefined(args, ['tab_id', 'filter', 'only_failed', 'limit']), signal))
     case 'ekko_studio_browser_console':
       return jsonText(await browserRequest(args.action === 'clear' ? 'console.clear' : 'console.read', { tab_id: args.tab_id }))
     case 'ekko_studio_api_openapi_get':

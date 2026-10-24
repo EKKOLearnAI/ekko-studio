@@ -112,6 +112,10 @@ export interface BrowserObservation {
   targets?: Array<{ before?: BrowserSnapshotNode; after?: BrowserSnapshotNode; valueMatches?: boolean }>
   navigation?: 'same_document' | 'new_document'
   openedTabs?: Array<Pick<DesktopBrowserTab, 'id' | 'title' | 'url'>>
+  dialog?: BrowserPageDialog
+  fileChooser?: { multiple: boolean }
+  /** Main-viewport CSS point where mouse input was dispatched. */
+  pointer?: { x: number; y: number; to_x?: number; to_y?: number }
   hint: string
 }
 
@@ -232,21 +236,50 @@ export interface BrowserBrokerDescriptor {
   createdAt: string
 }
 
-export type BrowserInteractAction =
-  | { action: 'click'; ref: string; snapshot_id: string }
-  | { action: 'type'; ref: string; snapshot_id: string; text: string }
-  | { action: 'hover'; ref: string; snapshot_id: string }
-  | { action: 'select'; ref: string; snapshot_id: string; value: string }
+export type BrowserMouseButton = 'left' | 'right' | 'middle'
+
+/** Actions that do not address a snapshot element. Coordinates are CSS pixels of the viewport screenshot. */
+type BrowserFreeAction =
   | { action: 'press'; key: string }
   | { action: 'scroll'; direction: 'up' | 'down' | 'left' | 'right'; pixels?: number }
+  | { action: 'click_at'; x: number; y: number; button?: BrowserMouseButton; click_count?: number }
+  | { action: 'drag_at'; x: number; y: number; to_x: number; to_y: number }
 
-export type BrowserBatchAction =
+type BrowserRefAction =
   | { action: 'click'; ref: string }
+  | { action: 'double_click'; ref: string }
+  | { action: 'right_click'; ref: string }
   | { action: 'type'; ref: string; text: string }
   | { action: 'hover'; ref: string }
   | { action: 'select'; ref: string; value: string }
-  | { action: 'press'; key: string }
-  | { action: 'scroll'; direction: 'up' | 'down' | 'left' | 'right'; pixels?: number }
+  | { action: 'drag'; ref: string; target_ref: string }
+
+export type BrowserInteractAction = (BrowserRefAction & { snapshot_id: string }) | BrowserFreeAction
+
+export type BrowserBatchAction = BrowserRefAction | BrowserFreeAction
+
+export interface BrowserPageDialog {
+  type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'
+  message: string
+  defaultPrompt?: string
+  url: string
+  openedAt: string
+}
+
+export interface BrowserNetworkEntry {
+  method: string
+  url: string
+  type: string
+  startedAt: string
+  status?: number
+  mimeType?: string
+  durationMs?: number
+  encodedBytes?: number
+  fromCache?: boolean
+  failed?: boolean
+  error?: string
+  frame?: 'iframe'
+}
 
 export interface BrowserWaitOptions {
   text?: string

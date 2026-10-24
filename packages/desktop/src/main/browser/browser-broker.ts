@@ -39,6 +39,8 @@ const MAX_WAIT_MS = 30_000
 const LEASE_TTL_MS = 60_000
 const STOP_TIMEOUT_MS = 2_000
 
+const MAX_NETWORK_READ = 200
+
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
@@ -217,7 +219,7 @@ export class BrowserBroker {
     if (tabId && (this.tabGenerations.get(tabId) || 0) !== tabGeneration) {
       throw new Error('Browser operation was cancelled by user takeover')
     }
-    const mutating = !['state', 'tabs.list', 'console.read', 'download.read'].includes(method)
+    const mutating = !['state', 'tabs.list', 'console.read', 'network.read', 'download.read'].includes(method)
     if (tabId && mutating) this.claimLease(tabId, clientId, method)
     if (tabId && mutating && method !== 'lease.release') {
       this.manager.setAgentControl(tabId, 'active', clientId.slice(0, 24), method)
@@ -283,7 +285,9 @@ export class BrowserBroker {
           })
         case 'upload': {
           const uploadTabId = requiredString(params.tab_id, 'tab_id')
-          const tab = await this.manager.upload(uploadTabId, requiredString(params.snapshot_id, 'snapshot_id'), requiredString(params.ref, 'ref'),
+          // Without a ref the files go to the file picker the page just tried to open.
+          const ref = params.ref === undefined ? undefined : requiredString(params.ref, 'ref')
+          const tab = await this.manager.upload(uploadTabId, ref ? requiredString(params.snapshot_id, 'snapshot_id') : undefined, ref,
             parseBrowserUploadFiles(params.files), parseBrowserUploadMethod(params.method), () => {
               if (!this.server || this.leases.get(uploadTabId)?.clientId !== clientId || (this.tabGenerations.get(uploadTabId) || 0) !== tabGeneration) {
                 throw new Error('Browser upload was cancelled or its tab control was revoked')
@@ -320,6 +324,27 @@ export class BrowserBroker {
           }))
         case 'console.clear':
           this.manager.clearConsole(requiredString(params.tab_id, 'tab_id'))
+          return { ok: true }
+        case 'dialog': {
+          const dialogTabId = requiredString(params.tab_id, 'tab_id')
+          const action = params.action === undefined ? 'status' : params.action
+          if (action === 'status') return { dialog: this.manager.pageDialog(dialogTabId) || null }
+          if (action !== 'accept' && action !== 'dismiss') throw new Error('action must be status, accept or dismiss')
+          if (params.prompt_text !== undefined && (typeof params.prompt_text !== 'string' || params.prompt_text.length > 10_000)) {
+            throw new Error('prompt_text must be a string of at most 10000 characters')
+          }
+          const tab = await this.manager.handleDialog(dialogTabId, action === 'accept', params.prompt_text as string | undefined)
+          return { ...this.publicTab(tab), dialog: tab.dialog, snapshot: tab.snapshot, snapshotError: tab.snapshotError, observation: tab.observation }
+        }
+        case 'network.read': {
+          const filter = params.filter === undefined ? '' : requiredString(params.filter, 'filter').toLowerCase()
+          const limit = boundedInteger(params.limit, 'limit', 50, 1, MAX_NETWORK_READ)
+          const entries = this.manager.networkEntries(requiredString(params.tab_id, 'tab_id'))
+            .filter(entry => (!filter || entry.url.toLowerCase().includes(filter)) && (params.only_failed !== true || entry.failed || (entry.status ?? 0) >= 400))
+          return { total: entries.length, entries: entries.slice(-limit) }
+        }
+        case 'network.clear':
+          this.manager.clearNetwork(requiredString(params.tab_id, 'tab_id'))
           return { ok: true }
         case 'lease.release':
           this.releaseLease(requiredString(params.tab_id, 'tab_id'), clientId)

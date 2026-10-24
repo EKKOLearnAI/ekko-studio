@@ -33,6 +33,8 @@ async function setup() {
         }
         if (method === 'DOM.resolveNode') return { object: { objectId: `node-${params.backendNodeId}` } }
         let effect = ''
+        // Readiness probes and pointer measurement only scroll; they are not page effects.
+        if (method === 'Runtime.callFunctionOn' && params.functionDeclaration.includes('covered')) return { result: { value: null } }
         if (method === 'Runtime.callFunctionOn' && !params.functionDeclaration.includes("return 'not visible'")) effect = `${params.functionDeclaration.includes('target.click') ? 'click' : 'focus'}:${params.objectId}`
         if (method === 'Input.insertText') effect = `type:${params.text}`
         if (method === 'Input.dispatchKeyEvent') effect = `${params.type}:${params.key}`
@@ -190,6 +192,77 @@ describe('desktop browser batch interactions', () => {
     expect(manager.state().tabs[0].agentControl).toBe('idle')
   })
 
+  it('stops at a page dialog, reports it instead of a snapshot, and continues after it is answered', async () => {
+    const { page, batch, manager, contents } = await setup()
+    const listeners: Array<(...args: any[]) => void> = []
+    Object.assign(contents.debugger, { on: (event: string, listener: (...args: any[]) => void) => { if (event === 'message') listeners.push(listener) } })
+    await manager.snapshot('tab')
+    const fresh = await manager.snapshot('tab')
+    page.onEffect = effect => {
+      if (effect === 'click:node-1') {
+        for (const listener of listeners) listener({}, 'Page.javascriptDialogOpening', { type: 'alert', message: 'Saved', url: page.url })
+        return new Promise(() => {})
+      }
+    }
+    const result = await batch([{ action: 'click', ref: '@e1' }, { action: 'click', ref: '@e2' }], fresh.snapshotId)
+    expect(result.results.map(item => item.status)).toEqual(['completed', 'skipped'])
+    expect(result.snapshot).toBeUndefined()
+    expect(result.observation).toMatchObject({ dialog: { type: 'alert', message: 'Saved' }, hint: expect.stringContaining('ekko_studio_browser_dialog') })
+    expect(page.effects).toEqual(['click:node-1'])
+    expect(manager.pageDialog('tab')).toMatchObject({ type: 'alert' })
+
+    page.onEffect = () => {}
+    const answered = await manager.handleDialog('tab', true)
+    expect(contents.debugger.sendCommand).toHaveBeenCalledWith('Page.handleJavaScriptDialog', { accept: true })
+    expect(answered.dialog.type).toBe('alert')
+    expect(answered.snapshot?.nodes).toHaveLength(3)
+    expect(manager.pageDialog('tab')).toBeUndefined()
+  })
+
+  it('keeps native alert/confirm boxes off screen while the agent controls the tab', async () => {
+    const { EventEmitter } = await import('node:events')
+    const { manager, internal, record, contents } = await setup()
+    const shown: unknown[] = []
+    const emitter = Object.assign(new EventEmitter(), contents)
+    emitter.on('-run-dialog', (info: unknown) => { shown.push(info) })
+    record.view.webContents = emitter
+    internal.routePageDialogs(record)
+
+    // The agent controls the tab: Electron's box is not shown; the agent answers via DevTools.
+    emitter.emit('-run-dialog', 'agent-confirm', () => {})
+    expect(shown).toEqual([])
+    expect(record.heldDialog).toMatchObject({ info: 'agent-confirm' })
+
+    // The user takes over before the agent answered: the box is handed to the user.
+    internal.automation.pageDialog = () => ({ type: 'confirm' })
+    manager.revokeAgentControl('tab')
+    expect(shown).toEqual(['agent-confirm'])
+    expect(record.heldDialog).toBeUndefined()
+
+    // The user's own browsing keeps Electron's normal native box.
+    emitter.emit('-run-dialog', 'user-alert', () => {})
+    expect(shown).toEqual(['agent-confirm', 'user-alert'])
+
+    // Answered by the agent, then released: nothing is replayed.
+    manager.setAgentControl('tab', 'active')
+    emitter.emit('-run-dialog', 'answered', () => {})
+    internal.automation.pageDialog = () => undefined
+    manager.revokeAgentControl('tab')
+    expect(shown).toEqual(['agent-confirm', 'user-alert'])
+  })
+
+  it('intercepts file pickers only while the agent controls the tab', async () => {
+    const { manager, contents } = await setup()
+    manager.setAgentControl('tab', 'idle')
+    manager.setAgentControl('tab', 'active')
+    manager.setAgentControl('tab', 'active')
+    manager.revokeAgentControl('tab')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const toggles = contents.debugger.sendCommand.mock.calls.filter(([method]) => method === 'Page.setInterceptFileChooserDialog').map(([, params]) => params.enabled)
+    // The fixture tab starts under agent control; repeated active states do not re-send.
+    expect(toggles).toEqual([false, true, false])
+  })
+
   it('uses the configured download preferences for Agent downloads', async () => {
     const { internal, manager, record, contents } = await setup()
     record.tab.profileId = 'profile'
@@ -236,6 +309,20 @@ describe('batch request validation', () => {
     [{ action: 'constructor' }], [{ action: 'click', ref: '' }],
   ])('rejects malformed or oversized batches: %j', value => {
     expect(() => parseBrowserBatchActions(value)).toThrow()
+  })
+
+  it('accepts pointer, drag and coordinate steps and rejects malformed ones', () => {
+    expect(parseBrowserBatchActions([
+      { action: 'double_click', ref: '@e1' }, { action: 'right_click', ref: '@e1' }, { action: 'drag', ref: '@e1', target_ref: '@e2' },
+      { action: 'click_at', x: 10, y: 20, button: 'right', click_count: 2 }, { action: 'drag_at', x: 1, y: 2, to_x: 3, to_y: 4 },
+    ])).toEqual([
+      { action: 'double_click', ref: '@e1' }, { action: 'right_click', ref: '@e1' }, { action: 'drag', ref: '@e1', target_ref: '@e2' },
+      { action: 'click_at', x: 10, y: 20, button: 'right', click_count: 2 }, { action: 'drag_at', x: 1, y: 2, to_x: 3, to_y: 4 },
+    ])
+    for (const bad of [{ action: 'drag', ref: '@e1' }, { action: 'click_at', x: -1, y: 0 }, { action: 'click_at', x: 1, y: 1, click_count: 3 },
+      { action: 'click_at', x: 1, y: 1, button: 'back' }, { action: 'drag_at', x: 1, y: 1, to_x: 2 }, { action: 'click_at', x: '1', y: 1 }]) {
+      expect(() => parseBrowserBatchActions([bad])).toThrow()
+    }
   })
 
   it('accepts hover and select steps with their required fields', () => {

@@ -112,7 +112,7 @@ describe('desktop browser automation safety', () => {
       name: { value: 'Name' }, value: { value } }] })
     const snapshot = await automation.snapshot('tab', contents)
     const observation = observeBrowserState(undefined, automation.observedState('tab')!, [
-      { nodeId: 7, actionIndex: 0, text: typed },
+      { nodeId: '#7', actionIndex: 0, text: typed },
     ])
     expect(observation.targets?.[0].valueMatches).toBe(matches)
     expect(snapshot.nodes[0].value).toBe(value)
@@ -128,7 +128,7 @@ describe('desktop browser automation safety', () => {
       name: { value: 'Name' }, value: { value },
       properties: protectedValue ? [{ name: 'protected', value: { value: true } }] : [] }] }))
     const observation = observeBrowserState(undefined, automation.observedState('tab')!, [
-      { nodeId: 7, actionIndex: 0, text: typed },
+      { nodeId: '#7', actionIndex: 0, text: typed },
     ])
     expect(observation.targets?.[0]).not.toHaveProperty('valueMatches')
     expect(JSON.stringify(observation)).not.toContain('private')
@@ -144,6 +144,8 @@ describe('desktop browser automation safety', () => {
     let probes = 0, clicks = 0
     const contents = fakeContents({ runtimeCall: params => {
       if (params.functionDeclaration.includes('target.click')) { clicks++; return { result: { value: true } } }
+      // The pointer measurement is not a readiness probe; an unmeasurable target falls back to a DOM click.
+      if (params.functionDeclaration.includes('covered')) return { result: { value: null } }
       return { result: { value: ++probes < 3 ? 'not visible' : true } }
     } })
     const snapshot = await automation.snapshot('tab', contents)

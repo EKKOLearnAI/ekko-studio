@@ -3,11 +3,12 @@ import { redactBrowserContent } from './browser-url'
 
 export interface BrowserObservedState {
   url: string
-  nodes: Map<number, BrowserSnapshotNode>
+  nodes: Map<string, BrowserSnapshotNode>
 }
 
 export interface BrowserObservedTarget {
-  nodeId: number
+  /** Session-qualified DOM node key. */
+  nodeId: string
   actionIndex: number
   text?: string
 }

@@ -38,10 +38,13 @@ import {
   type BrowserUploadResult,
 } from './browser-files'
 import type {
+  BrowserNetworkEntry,
+  BrowserPageDialog,
   BrowserAgentControl,
   BrowserBatchResult,
   BrowserBounds,
   BrowserConsoleEntry,
+  BrowserBatchAction,
   BrowserInteractAction,
   BrowserInteractionResult,
   BrowserProfileCreateInput,
@@ -68,7 +71,15 @@ interface TabRecord {
   ephemeral?: boolean
   documentGeneration?: number
   openerTabId?: string
+  /** Agent right-clicks must reach the page without popping the annotation menu. */
+  suppressContextMenuUntil?: number
+  /** alert/confirm opened while the agent controls the tab; answered via DevTools instead of a native box. */
+  heldDialog?: { info: unknown; callback: unknown }
+  /** Electron's own JavaScript dialog handlers, which show the native message box. */
+  nativeDialogListeners?: Array<(...args: unknown[]) => void>
 }
+
+const AGENT_CONTEXT_MENU_GRACE_MS = 1500
 
 interface BrowserManagerOptions {
   selectElementLabel: string
@@ -445,18 +456,92 @@ export class BrowserManager {
     const targets = this.automation.observedTargets(tabId, 'snapshot_id' in action ? action.snapshot_id : undefined, [action])
     const generation = record.documentGeneration || 0
     const tabs = new Set(this.records.keys())
+    const started = Date.now()
     return this.withAutomationView(record, async () => {
+      this.allowAgentContextMenu(record, [action])
       await this.automation.interact(tabId, record.view.webContents, action, assertActive)
-      const evidence = await this.observeOperation(record, before, targets, options, generation, tabs, assertActive)
+      const pointer = this.automation.lastPointer(record.view.webContents)
+      const evidence = await this.observeOperation(record, before, targets, options, generation, tabs, assertActive, started)
+      if (pointer && evidence.observation) evidence.observation.pointer = pointer
       return { ...copyTab(record.tab), ...evidence }
     })
   }
 
+  private allowAgentContextMenu(record: TabRecord, actions: Array<BrowserInteractAction | BrowserBatchAction>): void {
+    if (actions.some(action => action.action === 'right_click' || action.action === 'click_at' && action.button === 'right')) {
+      record.suppressContextMenuUntil = Date.now() + AGENT_CONTEXT_MENU_GRACE_MS
+    }
+  }
+
+  /**
+   * While the agent controls a tab, alert/confirm stay off the user's screen: the agent sees
+   * them as observation.dialog and answers through DevTools. Electron's internal -run-dialog
+   * handler (which shows the native box) is only used for the user's own browsing, or when
+   * the user takes over while a dialog is still unanswered.
+   */
+  private routePageDialogs(record: TabRecord): void {
+    const emitter = record.view.webContents as unknown as NodeJS.EventEmitter
+    if (typeof emitter.listeners !== 'function') return
+    const native = emitter.listeners('-run-dialog') as Array<(...args: unknown[]) => void>
+    if (!native.length) return
+    record.nativeDialogListeners = native
+    emitter.removeAllListeners('-run-dialog')
+    emitter.on('-run-dialog', (info: unknown, callback: unknown) => {
+      if (record.tab.agentControl === 'active') {
+        record.heldDialog = { info, callback }
+        return
+      }
+      for (const listener of native) listener.call(emitter, info, callback)
+    })
+  }
+
+  private releaseHeldDialog(record: TabRecord): void {
+    const held = record.heldDialog
+    if (!held) return
+    record.heldDialog = undefined
+    // Only hand an unanswered dialog to the user; the page would otherwise stay blocked.
+    if (!this.automation.pageDialog(record.view.webContents)) return
+    for (const listener of record.nativeDialogListeners || []) listener.call(record.view.webContents, held.info, held.callback)
+  }
+
+  pageDialog(tabId: string): BrowserPageDialog | undefined {
+    return this.automation.pageDialog(this.requireTab(tabId).view.webContents)
+  }
+
+  async handleDialog(tabId: string, accept: boolean, promptText?: string): Promise<BrowserInteractionResult & { dialog: BrowserPageDialog }> {
+    const record = this.requireTab(tabId)
+    const before = this.automation.observedState(tabId)
+    const options = this.automation.snapshotSelection(tabId)
+    const generation = record.documentGeneration || 0
+    const tabs = new Set(this.records.keys())
+    const dialog = await this.automation.handleDialog(tabId, record.view.webContents, accept, promptText)
+    // DevTools already answered the page; Electron's callback for the held dialog is dropped, as it
+    // is when Electron aborts its own box.
+    record.heldDialog = undefined
+    const evidence = await this.observeOperation(record, before, [], options, generation, tabs, () => {}, Date.now())
+    return { ...copyTab(record.tab), ...evidence, dialog }
+  }
+
+  networkEntries(tabId: string): BrowserNetworkEntry[] {
+    return this.automation.networkEntries(this.requireTab(tabId).view.webContents)
+  }
+
+  clearNetwork(tabId: string): void {
+    this.automation.clearNetwork(this.requireTab(tabId).view.webContents)
+  }
+
   private async observeOperation(
     record: TabRecord, before: BrowserObservedState | undefined, targets: BrowserObservedTarget[],
-    options: BrowserSnapshotOptions, generation: number, tabs: Set<string>, assertActive: () => void,
+    options: BrowserSnapshotOptions, generation: number, tabs: Set<string>, assertActive: () => void, started = Date.now(),
   ): Promise<Pick<BrowserInteractionResult, 'snapshot' | 'snapshotError' | 'observation'>> {
     const tabId = record.tab.id
+    const contents = record.view.webContents
+    // The page is blocked until the dialog is answered, so report it instead of reading a snapshot.
+    const dialog = this.automation.pageDialog(contents)
+    if (dialog) {
+      return { observation: { status: 'observed', tabId, changed: true, dialog,
+        hint: `The page opened a ${dialog.type} dialog and is blocked until it is answered. Call ekko_studio_browser_dialog with action=accept or action=dismiss, then take a new snapshot.` } }
+    }
     try {
       assertActive()
       const newDocument = () => (record.documentGeneration || 0) !== generation
@@ -492,9 +577,20 @@ export class BrowserManager {
         observation.hint = 'A new tab opened. Use its tab_id and snapshot to inspect the destination; the originating tab is not destination evidence.'
         if (openedTabs.length === 1) snapshot = await this.snapshot(openedTabs[0].id)
       }
+      const fileChooser = this.automation.fileChooserSince(contents, started)
+      if (fileChooser) {
+        observation.fileChooser = fileChooser
+        observation.changed = true
+        observation.hint = `The page tried to open a file picker; the OS dialog was suppressed. Call ekko_studio_browser_upload without ref to give it ${fileChooser.multiple ? 'files' : 'one file'}.`
+      }
       assertActive()
       return { snapshot, observation }
     } catch (error) {
+      const lateDialog = this.automation.pageDialog(contents)
+      if (lateDialog) {
+        return { observation: { status: 'observed', tabId, changed: true, dialog: lateDialog,
+          hint: `The page opened a ${lateDialog.type} dialog. Call ekko_studio_browser_dialog with action=accept or action=dismiss, then take a new snapshot.` } }
+      }
       assertActive()
       const message = redactBrowserText(error instanceof Error ? error.message : String(error), 500)
       return { snapshotError: message, observation: { status: 'unavailable',
@@ -527,9 +623,12 @@ export class BrowserManager {
       }
     }
     const result: BrowserBatchResult = { tabId, completed: 0, total: actions.length, results: [] }
+    const started = Date.now()
+    this.allowAgentContextMenu(record, actions)
     for (let index = 0; index < prepared.length; index += 1) {
       const action = actions[index].action
-      if (result.completed !== index) {
+      // A page dialog blocks the page; the remaining steps would act on an unknown state.
+      if (result.completed !== index || this.automation.pageDialog(record.view.webContents)) {
         result.results.push({ index, action, status: 'skipped' })
         continue
       }
@@ -550,7 +649,7 @@ export class BrowserManager {
       Object.assign(result, await this.observeOperation(record, before, targets.filter(target => target.actionIndex < result.completed), snapshotOptions, generation, tabs, () => {
         assertControl()
         if (Date.now() >= deadline) throw new Error('Browser batch timed out')
-      }))
+      }, started))
       assertControl()
     } catch (error) {
       delete result.snapshot
@@ -560,7 +659,7 @@ export class BrowserManager {
   }
 
   async upload(
-    tabId: string, snapshotId: string, ref: string, files: BrowserUploadFile[], method: BrowserUploadMethod,
+    tabId: string, snapshotId: string | undefined, ref: string | undefined, files: BrowserUploadFile[], method: BrowserUploadMethod,
     assertActive: () => void = () => {},
   ): Promise<BrowserInteractionResult & { upload: BrowserUploadResult }> {
     assertActive()
@@ -633,8 +732,14 @@ export class BrowserManager {
   }
 
   setAgentControl(tabId: string, control: BrowserAgentControl, label?: string, action?: string): void {
-    const tab = this.requireTab(tabId).tab
+    const record = this.requireTab(tabId)
+    const tab = record.tab
+    if ((tab.agentControl === 'active') !== (control === 'active')) {
+      // Agent clicks on upload buttons must not open the OS file dialog on the user's screen.
+      void this.automation.setFileChooserInterception(record.view.webContents, control === 'active').catch(() => undefined)
+    }
     tab.agentControl = control
+    if (control !== 'active') this.releaseHeldDialog(record)
     tab.agentLabel = label
     tab.agentAction = action
     this.emitState()
@@ -913,6 +1018,7 @@ export class BrowserManager {
     }
     const record: TabRecord = { tab, view, console: [] }
     const contents = view.webContents
+    this.routePageDialogs(record)
     contents.on('dom-ready', () => {
       void applyBrowserColorScheme(view, this.colorScheme).catch(error => {
         console.warn('[desktop-browser] color scheme update failed', error)
@@ -927,6 +1033,7 @@ export class BrowserManager {
     })
     contents.on('context-menu', event => {
       event.preventDefault()
+      if ((record.suppressContextMenuUntil || 0) > Date.now()) return
       if (!this.options || contents.isDestroyed()) return
       Menu.buildFromTemplate([
         { label: this.options.selectElementLabel, click: () => this.options?.onAnnotationRequest(id, 'element') },
