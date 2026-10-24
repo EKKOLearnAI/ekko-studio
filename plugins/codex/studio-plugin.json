@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "studio.agent-codex",
+  "version": "0.1.0",
+  "engines": { "studioSdk": "^0.1.0", "rpc": 1 },
+  "backend": "dist/index.cjs",
+  "activation": "profile",
+  "contributes": { "agents": ["codex"] },
+  "requires": { "capabilities": ["agents.register", "processes.spawn", "models.gateway", "artifacts.read"] },
+  "configSchema": { "type": "object", "additionalProperties": false }
+}

@@ -8,25 +8,25 @@ import {
   responsesToOpenAiChat,
   stripHistoricalResponsesInlineImages,
   truncateResponsesToolOutputs,
-} from '../../packages/server/src/modules/coding-agents/protocol/adapters/responses'
+} from '../../packages/server/src/modules/studio/public/model-protocol'
 import {
   anthropicToOpenAiChat,
   anthropicToOpenAiResponses,
   openAiResponsesToAnthropicMessage,
   openAiToAnthropicMessage,
-} from '../../packages/server/src/modules/coding-agents/protocol/adapters/anthropic'
+} from '../../packages/server/src/modules/studio/public/model-protocol'
 import {
   openAiChatSseToAnthropicEvents,
   openAiResponsesSseToAnthropicEvents,
   type AnthropicStreamEvent,
-} from '../../packages/server/src/modules/coding-agents/protocol/adapters/anthropic-stream'
+} from '../../packages/server/src/modules/studio/public/model-protocol'
 import {
   anthropicMessagesSseToResponsesEvents,
   normalizeResponsesSseEvents,
   openAiChatSseToResponsesEvents,
   openAiResponsesSseToResponsesEvents,
   type CanonicalResponsesEvent,
-} from '../../packages/server/src/modules/coding-agents/protocol/adapters/responses-stream'
+} from '../../packages/server/src/modules/studio/public/model-protocol'
 
 const target = { model: 'test-model' }
 const codexTarget = { model: 'test-model', annotateMcpToolNamespaces: true }

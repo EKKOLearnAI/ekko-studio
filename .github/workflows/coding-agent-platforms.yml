@@ -5,6 +5,11 @@ on:
     branches: [main, base]
     paths:
       - 'packages/server/src/**'
+      - 'packages/studio-plugin-sdk/**'
+      - 'packages/studio-plugin-runner/**'
+      - 'packages/studio-agent-drivers/**'
+      - 'packages/ekko-agent/**'
+      - 'tests/ekko-agent/mcp-*.test.ts'
       - 'tests/server/**'
       - 'tests/setup.ts'
       - 'package*.json'
@@ -14,6 +19,11 @@ on:
     branches: [main]
     paths:
       - 'packages/server/src/**'
+      - 'packages/studio-plugin-sdk/**'
+      - 'packages/studio-plugin-runner/**'
+      - 'packages/studio-agent-drivers/**'
+      - 'packages/ekko-agent/**'
+      - 'tests/ekko-agent/mcp-*.test.ts'
       - 'tests/server/**'
       - 'tests/setup.ts'
       - 'package*.json'
@@ -58,3 +68,25 @@ jobs:
           tests/server/zcode-desktop-command.test.ts
           tests/server/native-chat-turn.test.ts
           --maxWorkers=1 --testTimeout=30000
+      - name: Verify managed processes and plugin worker ownership
+        run: >-
+          npm run test --
+          tests/server/studio-managed-processes.test.ts
+          tests/server/studio-managed-acp.test.ts
+          tests/server/studio-native-rpc.test.ts
+          tests/server/studio-agent-event-queue.test.ts
+          tests/server/studio-agent-artifacts.test.ts
+          tests/server/studio-qwen-plugin.test.ts
+          tests/server/studio-codex-plugin.test.ts
+          tests/server/studio-managed-mcp.test.ts
+          tests/server/studio-mcp-tools.test.ts
+          tests/server/studio-plugin-mcp-bridge.test.ts
+          tests/ekko-agent/mcp-lifecycle.test.ts
+          tests/server/native-acp-turn.test.ts
+          tests/server/studio-plugin-processes.test.ts
+          tests/server/studio-plugin-process-bridge.test.ts
+          tests/server/studio-agent-lifecycle.test.ts
+          tests/server/studio-agent-management.test.ts
+          tests/server/studio-agent-state-directory.test.ts
+          tests/server/studio-model-gateway.test.ts
+          --maxWorkers=1

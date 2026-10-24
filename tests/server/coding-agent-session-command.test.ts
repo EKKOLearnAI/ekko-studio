@@ -507,4 +507,22 @@ describe('coding agent session commands', () => {
     })
     expect(command.message).toContain('auto compact: on')
   })
+  it('observes asynchronous native compact results for a direct caller with existing Web observers', async () => {
+    getSessionMock.mockReturnValue({ agent: 'codex' })
+    getRunInfoMock.mockReturnValue({ exists: true, agentId: 'codex' })
+    compactMock.mockResolvedValue({ started: true })
+    const { handleCodingAgentSessionCommand } = await import('../../packages/server/src/modules/coding-agents/services/session-command')
+    const { nsp } = makeSocket()
+    nsp.adapter.rooms.set('session:session-1', new Set(['web']))
+    const caller = {
+      kind: 'direct' as const, originId: 'http', isActive: () => true,
+      observeSession: vi.fn(), reply: vi.fn(), publishToPeers: vi.fn(),
+    }
+    await handleCodingAgentSessionCommand(nsp, caller, { session_id: 'session-1' },
+      { name: 'compact', rawName: 'compact', args: '' }, 'default', new Map())
+    expect(caller.observeSession).toHaveBeenCalledWith('session-1')
+    expect(caller.observeSession.mock.invocationCallOrder[0]).toBeLessThan(compactMock.mock.invocationCallOrder[0])
+    expect(caller.reply).toHaveBeenCalledWith('session.command', expect.objectContaining({ started: true, terminal: false }))
+  })
+
 })

@@ -706,7 +706,6 @@ export default {
     updateSuccess: '更新成功，請稍後重新整理頁面，如長時間未啟動，請手動啟動',
     updateFailed: '更新失敗',
     logout: '登出',
-    nodeVersionWarning: '偵測到 Node.js v{version}，請升級至 23 以上版本。',
     changelog: '更新日誌',
     noChangelog: '目前無更新日誌',
     versionManagement: '版本管理',

@@ -44,6 +44,7 @@ const openapi = {
 // Tag mappings based on route directories
 const tagMappings = {
   'modules/studio/routes/desktop-browser.ts': { name: 'Desktop Browser', description: 'Authenticated remote Desktop browser relay with explicit Desktop consent' },
+  'modules/studio/routes/studio-plugins.ts': { name: 'Studio Plugins', description: 'Studio backend plugin installation, protected system plugins, profile activation and registered Agent types; separate from Hermes native plugins' },
   'modules/hermes/routes/profiles.ts': { name: 'Profiles', description: 'Hermes profile management' },
   'modules/hermes/routes/models.ts': { name: 'Models', description: 'Model configuration' },
   'modules/hermes/routes/providers.ts': { name: 'Providers', description: 'Model provider management' },
@@ -1939,6 +1940,142 @@ for (const action of ['list', 'update']) {
   }
   delete operation.responses['404']
 }
+
+// Studio backend plugins are distinct from Hermes-native plugin management.
+const studioPluginBody = schema => ({ required: true, content: { 'application/json': { schema } } })
+const studioPluginProfile = { name: 'profile', in: 'query', required: true, schema: { type: 'string', minLength: 1 }, description: 'Authorized Studio profile.' }
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  if (!path.startsWith('/api/studio/plugins') && !path.startsWith('/api/studio/agent-')) continue
+  for (const operation of Object.values(methods)) {
+    operation.tags = ['Studio Plugins']
+    operation.security = [{ BearerAuth: [] }]
+    operation.description = path.startsWith('/api/studio/agent-')
+      ? 'Operates on registered Agent types and owner-bound instances/runs in the authorized profile. Plugin migration is in progress; existing native Agent execution remains separate until migration completes.'
+      : 'Requires super administrator access. System Coding Agent plugin identities are protected from deletion and replacement. This endpoint manages Studio plugin artifacts, not native CLI installations.'
+    operation.responses = { '200': { description: 'Result wrapped as { ok: true, data }.' }, '400': { description: 'Invalid request or manifest.' },
+      '401': { $ref: '#/components/responses/Unauthorized' }, '403': { description: 'Access denied or SYSTEM_PLUGIN_PROTECTED; no deletion side effects.' },
+      '404': { description: 'Plugin not installed.' }, '409': { description: 'Revision conflict, registration conflict or active runtime leases.' },
+      '422': { description: 'Plugin requests unsupported capabilities.' }, '503': { description: 'Plugin host or runtime unavailable.' } }
+    if (path.endsWith('/profile') || path.endsWith('/diagnostic') || path.includes('/consumers') || path.startsWith('/api/studio/agent-')) {
+      operation.parameters = [...(operation.parameters || []).filter(parameter => parameter.name !== 'profile'), studioPluginProfile]
+    }
+  }
+}
+openapi.paths['/api/studio/plugins'].post.requestBody = studioPluginBody({ type: 'object', additionalProperties: false, required: ['path'], properties: {
+  path: { type: 'string', minLength: 1, description: 'Local trusted plugin directory containing studio-plugin.json and compiled backend entry. Installation copies an immutable artifact without executing package scripts.' },
+} })
+openapi.paths['/api/studio/plugins/{id}/consumers/{consumerId}/control'].post.requestBody = studioPluginBody({ type: 'object', additionalProperties: false,
+  required: ['action', 'revision'], properties: { action: { type: 'string', enum: ['pause', 'resume', 'reset-now'] }, revision: { type: 'integer', minimum: 1 }, profile: { type: 'string' } },
+})
+openapi.paths['/api/studio/plugins/{id}/consumers/{consumerId}/retry'].post.requestBody = studioPluginBody({ type: 'object', additionalProperties: false,
+  required: ['position', 'revision'], properties: { position: { type: 'integer', minimum: 1 }, revision: { type: 'integer', minimum: 1 }, profile: { type: 'string' } },
+})
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  if (!path.startsWith('/api/studio/plugins/') || !path.includes('/consumers')) continue
+  for (const operation of Object.values(methods)) {
+    operation.description += ' Durable consumers are scoped to this plugin and authorized profile. Diagnostics expose delivery metadata, never event payloads or lease tokens. Pause preserves pending deliveries; reset-now explicitly discards them and moves to the current event position. Retry requires the dead letter revision.'
+    operation.responses['409'].description = 'Revision conflict or EVENT_CURSOR_EXPIRED; expired cursors require an explicit reset.'
+  }
+}
+openapi.paths['/api/studio/plugins/{id}/diagnostic'].get.responses['200'] = {
+  description: 'Profile activation state and stable error code. Does not expose configuration, credentials, paths or raw worker errors.',
+  content: { 'application/json': { schema: { type: 'object', required: ['ok', 'data'], properties: {
+    ok: { type: 'boolean', enum: [true] }, data: { type: 'object', additionalProperties: false,
+      required: ['pluginId', 'profileId', 'generation', 'configurationRevision', 'state', 'errorCode', 'updatedAt', 'hasActiveLeases'], properties: {
+        pluginId: { type: 'string' }, profileId: { type: 'string' }, generation: { type: 'string' }, configurationRevision: { type: 'integer', minimum: 0 },
+        state: { type: 'string', enum: ['disabled', 'inactive', 'activating', 'ready', 'blocked', 'failed'] },
+        errorCode: { type: 'string', nullable: true }, updatedAt: { type: 'integer', nullable: true }, hasActiveLeases: { type: 'boolean' },
+      },
+    },
+  } } } },
+}
+openapi.paths['/api/studio/plugins/{id}/profile'].put.requestBody = studioPluginBody({ type: 'object', additionalProperties: false,
+  required: ['enabled', 'config', 'grants', 'revision'], properties: {
+    enabled: { type: 'boolean' }, config: { type: 'object', additionalProperties: true },
+    grants: { type: 'array', uniqueItems: true, items: { type: 'string' }, description: 'Explicit subset of the manifest capabilities; activation requires all declared capabilities.' },
+    revision: { type: 'integer', minimum: 0, description: 'Current profile configuration revision, or 0 for initial configuration.' },
+    profile: { type: 'string' },
+  },
+})
+const agentImageUpload = openapi.paths['/api/studio/agent-images'].post
+agentImageUpload.summary = 'Upload an Agent image artifact'
+agentImageUpload.description += ' Upload raw single-frame PNG, JPEG, WebP or GIF bytes, at most 4 MiB and 40 million pixels. The host detects the media type. Returns an immutable artifact reference owned by the current user/profile; no client path, URL or identity is accepted. Up to 64 MiB/256 images per user and 256 MiB/4096 images per host.'
+agentImageUpload.requestBody = { required: true, content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } } }
+agentImageUpload.responses['429'] = { description: 'Upload concurrency or storage quota exceeded.' }
+agentImageUpload.responses['200'] = { description: 'Image artifact reference.', content: { 'application/json': { schema: {
+  type: 'object', required: ['ok', 'data'], properties: { ok: { type: 'boolean', enum: [true] }, data: {
+    type: 'object', required: ['id', 'mediaType', 'byteLength'], properties: { id: { type: 'string', format: 'uuid' }, mediaType: { type: 'string' }, byteLength: { type: 'integer', minimum: 1, maximum: 4194304 } },
+  } },
+} } } }
+openapi.paths['/api/studio/agent-images/{id}'].delete.summary = 'Remove an unused Agent image'
+openapi.paths['/api/studio/agent-images/{id}'].delete.description += ' Only the owner in the same profile may remove an image. Accepted Run attachments are retained with history and return REVISION_CONFLICT.'
+openapi.paths['/api/studio/agent-instances'].post.requestBody = studioPluginBody({ type: 'object', additionalProperties: false,
+  required: ['agentTypeId', 'config', 'mode'], properties: {
+    agentTypeId: { type: 'string' }, config: { type: 'object', additionalProperties: true }, mode: { type: 'string', enum: ['scoped', 'global'] }, profile: { type: 'string' },
+  },
+})
+openapi.paths['/api/studio/agent-instances/{id}/runs'].post.requestBody = studioPluginBody({ type: 'object', additionalProperties: false,
+  required: ['input', 'idempotencyKey'], properties: {
+    idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 }, profile: { type: 'string' },
+    input: { type: 'object', additionalProperties: false, required: ['content'], properties: {
+      content: { type: 'array', minItems: 1, maxItems: 100, items: { oneOf: [
+        { type: 'object', additionalProperties: false, required: ['type', 'text'], properties: { type: { type: 'string', enum: ['text'] }, text: { type: 'string' } } },
+        { type: 'object', additionalProperties: false, required: ['type', 'artifactId', 'mediaType'], properties: {
+          type: { type: 'string', enum: ['image'] }, artifactId: { type: 'string', format: 'uuid' },
+          mediaType: { type: 'string', enum: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] },
+        } },
+      ] }, description: 'At most eight images and 6 MiB of image bytes per Run. References must belong to this user/profile and match stored media types.' },
+      model: { type: 'string' }, timeoutMs: { type: 'integer', minimum: 100, maximum: 3600000 },
+    } },
+  },
+})
+openapi.paths['/api/studio/agent-instances/{id}'].put.requestBody = studioPluginBody({ type: 'object', additionalProperties: false,
+  required: ['revision', 'config', 'mode'], properties: {
+    revision: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER }, config: { type: 'object', additionalProperties: true },
+    mode: { type: 'string', enum: ['scoped', 'global'] }, profile: { type: 'string' },
+  },
+})
+openapi.paths['/api/studio/agent-instances/{id}'].put.description += ' Replaces instance configuration after validating its revision and registered schema. Active/queued runs block changes. Idle native resources must finish disposal before committing; new runs are blocked during disposal. The new revision starts a fresh native session; prior run history remains readable.'
+openapi.paths['/api/studio/agent-instances/{id}'].put.summary = 'Update Agent instance configuration'
+openapi.paths['/api/studio/agent-instances/{id}'].put.responses['404'].description = 'Agent instance is unavailable in this owner/profile scope.'
+const agentInspection = openapi.paths['/api/studio/agent-instances/{id}/inspect'].post
+agentInspection.summary = 'Inspect native Agent metadata'
+agentInspection.description += ' Requires an idle owned instance and a declared management adapter. Starts short-lived managed resources; does not create a Studio Run or native chat session, log in, refresh credentials or change configuration. Serializes with instance changes and new runs. Results contain only native name/version, authentication state/method labels and native model choices. Unknown authentication and unsupported model discovery are explicit. Rechecks access and provider/configuration revision; cancellation, revocation and the 25-second deadline dispose resources.'
+agentInspection.requestBody = studioPluginBody({ type: 'object', additionalProperties: false, properties: { profile: { type: 'string' } } })
+agentInspection.requestBody.required = false
+agentInspection.responses['404'].description = 'Agent instance is unavailable in this owner/profile scope.'
+agentInspection.responses['429'] = { description: 'Concurrent inspection or metadata size limit exceeded.' }
+agentInspection.responses['504'] = { description: 'Native inspection deadline exceeded.' }
+const inspectionString = { type: 'string', minLength: 1, maxLength: 256 }
+agentInspection.responses['200'] = { description: 'Native metadata snapshot; no raw configuration, account identifiers or credentials.', content: { 'application/json': { schema: {
+  type: 'object', required: ['ok', 'data'], properties: { ok: { type: 'boolean', enum: [true] }, data: {
+    type: 'object', additionalProperties: false, required: ['instanceId', 'configRevision', 'provider', 'native', 'authentication', 'models'], properties: {
+      instanceId: { type: 'string' }, configRevision: { type: 'integer', minimum: 1 }, provider: { type: 'object', description: 'Host-resolved builtin or plugin provider snapshot.' },
+      native: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: inspectionString, version: inspectionString } },
+      authentication: { type: 'object', additionalProperties: false, required: ['state', 'methods'], properties: {
+        state: { type: 'string', enum: ['authenticated', 'required', 'not_required', 'unknown'] }, methods: { type: 'array', maxItems: 32, items: {
+          type: 'object', additionalProperties: false, required: ['id', 'name'], properties: { id: inspectionString, name: inspectionString },
+        } },
+      } },
+      models: { type: 'object', additionalProperties: false, required: ['status', 'items'], properties: {
+        status: { type: 'string', enum: ['available', 'unsupported'] }, items: { type: 'array', maxItems: 512, items: {
+          type: 'object', additionalProperties: false, required: ['id', 'name'], properties: {
+            id: inspectionString, name: inspectionString, isDefault: { type: 'boolean' }, reasoningEfforts: { type: 'array', maxItems: 32, uniqueItems: true, items: inspectionString },
+          },
+        } },
+      } },
+    },
+  } },
+} } } }
+openapi.paths['/api/studio/agent-runs/{id}/output'].get.parameters.push({ name: 'after', in: 'query', schema: { type: 'integer', minimum: -1, default: -1 }, description: 'Exclusive producer sequence cursor; returns up to 100 persisted output events.' })
+openapi.paths['/api/studio/agent-runs/{id}/respond'].post.requestBody = studioPluginBody({ type: 'object', additionalProperties: false,
+  required: ['interactionId', 'idempotencyKey'], properties: {
+    interactionId: { type: 'string', minLength: 1, maxLength: 256 }, idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
+    choiceId: { type: 'string', minLength: 1, maxLength: 256 }, text: { type: 'string', maxLength: 16384 }, profile: { type: 'string' },
+  },
+})
+openapi.paths['/api/studio/agent-runs/{id}/usage'].get.description += ' Returns one normalized record per model call; cumulative snapshots replace prior counts and final revisions may correct them. An empty list means unknown usage, not a measured zero.'
+openapi.paths['/api/studio/agent-runs/{id}/interactions'].get.description += ' Returns persisted approval/clarification requests for this run. Responses require one declared choice or permitted clarification text and an idempotency key. Choice descriptions and allowText describe the input constraints. Native withdrawal is recorded as withdrawn, without inventing an answer; expired, withdrawn or foreign interactions cannot reach the runtime.'
 
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')

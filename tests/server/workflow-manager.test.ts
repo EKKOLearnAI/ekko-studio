@@ -4091,3 +4091,63 @@ describe('workflow manager', () => {
   })
 
 })
+
+it('accepts concurrent idempotent workflow requests once and retains the binding after completion', async () => {
+  const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+  const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+  const { workflowRequestIdentity } = await import('../../packages/server/src/modules/studio/services/workflow/input')
+  initAllStores()
+  chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
+  const manager = new WorkflowManager()
+  const workflow = manager.create({ name: 'Idempotent workflow', profile: 'default', nodes: [{ id: 'node', type: 'agent', data: { agent: 'hermes', input: 'work' } }], edges: [] })
+  const request = workflowRequestIdentity('42', 'default', { workflowId: workflow.id, idempotencyKey: workflow.id })
+  const args = { user: { id: 42, username: 'owner', role: 'super_admin' as const }, requestIdentity: request }
+  try {
+    const [first, second] = await Promise.all([manager.runNow(workflow.id, args), manager.runNow(workflow.id, args)])
+    expect(first.run.id).toBe(second.run.id)
+    expect(chatRunMock.runAndWait).toHaveBeenCalledOnce()
+    expect((await manager.runNow(workflow.id, args)).run.id).toBe(first.run.id)
+    await expect(manager.runNow(workflow.id, { ...args, requestIdentity: { ...request, hash: 'different' } })).rejects.toMatchObject({ code: 'REVISION_CONFLICT' })
+    expect(chatRunMock.runAndWait).toHaveBeenCalledOnce()
+  } finally { await manager.delete(workflow.id) }
+})
+
+it('does not persist workflow acceptance when final authorization or snapshot validation fails', async () => {
+  const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+  const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+  const { listWorkflowRuns } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+  initAllStores()
+  chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
+  const manager = new WorkflowManager()
+  const workflow = manager.create({ name: 'Admission revocation', profile: 'default', nodes: [{ id: 'node', type: 'agent', data: { agent: 'hermes', input: 'work' } }], edges: [] })
+  try {
+    const assertCanStart = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('revoked'))
+    await expect(manager.runNow(workflow.id, { assertCanStart })).rejects.toThrow('revoked')
+    expect(listWorkflowRuns(workflow.id)).toEqual([])
+    await expect(manager.runNow(workflow.id, { definitionSnapshot: 'stale' })).rejects.toMatchObject({ code: 'REVISION_CONFLICT' })
+    expect(listWorkflowRuns(workflow.id)).toEqual([])
+    expect(chatRunMock.runAndWait).not.toHaveBeenCalled()
+  } finally { await manager.delete(workflow.id) }
+})
+
+it('rolls back the actual workflow Run if its idempotency binding cannot commit', async () => {
+  const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+  const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database')
+  const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+  const { listWorkflowRuns } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+  const { workflowRequestStore } = await import('../../packages/server/src/modules/studio/repositories/workflow-request-store')
+  const { workflowRequestIdentity } = await import('../../packages/server/src/modules/studio/services/workflow/input')
+  initAllStores()
+  chatRunMock.runAndWait.mockReset()
+  const manager = new WorkflowManager()
+  const workflow = manager.create({ name: 'Atomic workflow request', profile: 'default', nodes: [{ id: 'node', type: 'agent', data: { agent: 'hermes', input: 'work' } }], edges: [] })
+  const store = workflowRequestStore(), db = getDb()!
+  const requestIdentity = workflowRequestIdentity('42', 'default', { workflowId: workflow.id, idempotencyKey: workflow.id })
+  db.exec("CREATE TRIGGER reject_workflow_request BEFORE INSERT ON studio_workflow_requests BEGIN SELECT RAISE(ABORT, 'binding failed'); END")
+  try {
+    await expect(manager.runNow(workflow.id, { user: { id: 42, username: 'owner', role: 'super_admin' }, requestIdentity })).rejects.toThrow('binding failed')
+    expect(listWorkflowRuns(workflow.id)).toEqual([])
+    expect(store.find(requestIdentity)).toBeNull()
+    expect(chatRunMock.runAndWait).not.toHaveBeenCalled()
+  } finally { db.exec('DROP TRIGGER reject_workflow_request'); await manager.delete(workflow.id) }
+})

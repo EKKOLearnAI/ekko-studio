@@ -79,6 +79,74 @@ This checks all five toolsets with Node mode deliberately removed, validates the
 JSON-RPC initialize response, and checks clean exit on stdin EOF. It uses temporary
 state and does not require a running Gateway.
 
+## Browser test cost and coverage ownership
+
+Playwright builds the client once and serves the output from
+`node_modules/.cache/playwright-client-<port>`. It uses the production Vite
+configuration; only Socket.IO is emitted as a separate real module so existing
+per-page network mocks can replace it. The test server does not proxy missing
+mocks to a running backend. Each run rebuilds and owns its server; it must not
+silently reuse a stale preview. `PLAYWRIGHT_DEV_SERVER=1 npm run test:e2e` keeps
+the Vite development server available for interactive frontend work.
+
+Geometry fixtures must update both document `lang` and `dir`, matching the app's
+locale handling (`setDocumentDirection` in `tests/e2e/fixtures.ts`). Built CSS can
+lower logical properties to language selectors. Keep real language-menu tests
+for translation and direction switching; do not relax geometry assertions.
+
+First attempts do not collect traces or encode video by default. CI captures a
+trace on the first retry and keeps failure screenshots. For a local failure, rerun the exact
+case with `--trace retain-on-failure`; use `PLAYWRIGHT_VIDEO=1` when investigating
+motion (managed Chromium only). Keep test failures and retries visible in reports.
+
+Keep every route's own loading, failure and responsive-layout wiring covered.
+Exercise shared platform behavior on representative header/sidebar families,
+plus explicit historical regression cases, instead of multiplying every page by
+every platform. The header suite lists these representatives next to the full
+route inventory. A new cross-product case needs a distinct interaction to protect.
+Keep routes as independent tests so CI can still shard them.
+Keep independent fixtures parallel as well. Do not use serial groups to hide
+missing readiness checks: wait for the relevant socket or mounted component.
+Serial groups also skip later cases after a failure, increasing the recovery cost.
+
+Use controlled clocks for repeated minimum-display delays and long timeout
+boundaries. Retain small real-time/render/process checks for the actual boundary;
+do not shorten production deadlines or replace child-exit checks with mocks.
+Reuse immutable fixture data while keeping mutable browser/runtime state isolated.
+
+Measure changes with the same Node version and worker count. Playwright's JSON
+reporter records per-case durations and the full run duration:
+
+```bash
+PLAYWRIGHT_JSON_OUTPUT_FILE=/tmp/playwright-cost.json npm run test:e2e -- --workers=2 --reporter=line,json
+```
+
+Compare both elapsed time and the risk checks retained. Moving a suite to another
+schedule or merely merging cases does not establish lower total test cost.
+
+### Local measurement, 2026-10-24
+
+Measured on macOS arm64 with Node 24.22.1, two browser workers and no retries:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Header layout, page loading and streaming batch | 219 cases, 191.9 s | 133 cases, 69.5 s, including four additional startup-logo cases |
+| Profile deletion test file | 2 cases, 12.1 s | 3 cases, 1.1 s |
+| Complete browser inventory | 1,024 cases | 935 cases |
+
+The inventory removes 90 repeated desktop combinations and adds one test-server
+contract check. All 39 routes retain all four browser widths; desktop coverage
+uses nine header/sidebar families and the existing interaction regressions.
+The long cleanup timeout and desktop inset checks were also verified against
+deliberately reintroduced faults, both of which the tests detected.
+
+The full browser sweep took 17 min 42 s with 899 passes, six failures and 30
+cases blocked by a serial-group failure. Corrections to fixture readiness, DOM
+locale setup and the canonical Models URL were then verified with affected-file
+runs; the combined reports cover all 935 cases with passing results. This is
+not a clean full-suite timing comparison: the roughly 64% batch reduction must
+not be presented as a whole-project speedup.
+
 ## CI Mapping
 
 - Build workflow: installs dependencies, runs coverage, and builds production
@@ -96,7 +164,7 @@ state and does not require a running Gateway.
   The final `e2e` check requires every shard to pass. Keep route/viewport sweeps
   as independent route tests so they can be distributed across runners.
   Mock both HTTP and WebSocket channels: `page.route` does not intercept native
-  WebSockets, and the test Vite server has no backend on port 8648.
+  WebSockets, and the browser test server has no backend.
 - NPM lockfile workflow: verifies `package-lock.json` is synchronized.
 - Desktop release and manual desktop build workflows build and upload
   platform-specific desktop artifacts.

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "example.echo",
+  "version": "1.0.0",
+  "engines": { "studioSdk": "^0.1.0", "rpc": 1 },
+  "backend": "index.cjs",
+  "activation": "profile",
+  "contributes": { "agents": ["example.echo/assistant"] },
+  "requires": { "capabilities": ["agents.register", "events.subscribe:run.completed"] },
+  "configSchema": {
+    "type": "object",
+    "properties": { "prefix": { "type": "string", "maxLength": 100 } },
+    "additionalProperties": false
+  }
+}

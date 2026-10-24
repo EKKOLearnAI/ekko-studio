@@ -242,7 +242,7 @@ it('synchronizes deleted-session cleanup to both live devices without disclosing
   }))
   sessionFixtures.set('deleted-chat', null)
   mutedTokens.add('phone-b') // Cleanup is synchronization, even when result alerts are muted.
-  publishSessionRemoval({ id: 'deleted-chat', profile: 'default', user_id: '1' }, 'deleted')
+  publishSessionRemoval({ id: 'deleted-chat', profile: 'default', user_id: '2', studio_user_id: '1', source: 'cli' }, 'deleted')
   await vi.waitFor(() => {
    expect(received[0]).toHaveLength(1)
    expect(received[1]).toHaveLength(1)
@@ -251,6 +251,7 @@ it('synchronizes deleted-session cleanup to both live devices without disclosing
   expect(received[1][0]).toEqual(received[0][0])
   expect(received[2]).toEqual([])
   expect(JSON.stringify(received)).not.toContain('owner_user_id')
+  expect(JSON.stringify(received)).not.toContain('studio_owner_id')
   auth.profiles = []
   publishSessionRemoval({ id: 'revoked-chat', user_id: 1 }, 'deleted')
   await flush()

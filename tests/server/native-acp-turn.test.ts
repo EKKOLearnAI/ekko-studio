@@ -8,11 +8,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NativeAcpTurn } from '../../packages/server/src/modules/coding-agents/protocol/acp/turn'
 import { acpMcpServers, applyNativeAcpUpdate } from '../../packages/server/src/modules/coding-agents/protocol/acp/events'
 import { applyZcodeEvent } from '../../packages/server/src/modules/coding-agents/services/zcode/event-adapter'
+import type { AcpPermissionRequest } from '../../packages/studio-agent-drivers/src'
 
 const turns: NativeAcpTurn[] = []
 afterEach(() => { for (const turn of turns.splice(0)) turn.dispose() })
 
-function connection(options: { image?: boolean; load?: boolean; resume?: boolean; error?: boolean; hold?: boolean; permissionRequired?: boolean; configOptions?: any[] } = {}) {
+function connection(options: { image?: boolean; load?: boolean; resume?: boolean; error?: boolean; hold?: boolean; permissionRequired?: boolean; configOptions?: any[]; permission?(request: AcpPermissionRequest, signal: AbortSignal): Promise<string | null> } = {}) {
   const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough() })
   const sent: any[] = [], update = vi.fn(), session = vi.fn()
   const receive = (message: object) => child.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
@@ -28,10 +29,85 @@ function connection(options: { image?: boolean; load?: boolean; resume?: boolean
     queueMicrotask(() => receive({ id: message.id, ...(options.error && message.method === 'session/load'
       ? { error: { code: -32000, message: 'Session missing' } } : { result }) }))
   })
-  const turn = new NativeAcpTurn(child as unknown as ChildProcess, { update, session, permissionRequired: options.permissionRequired })
+  const turn = new NativeAcpTurn(child as unknown as ChildProcess, { update, session, permissionRequired: options.permissionRequired, permission: options.permission })
   turns.push(turn)
   return { child, turn, sent, receive, update, session }
 }
+
+const permissionParams = {
+  sessionId: 'native', toolCall: { toolCallId: 'tool', title: 'Read a file?' },
+  options: [{ optionId: 'allow', name: 'Allow once', kind: 'allow_once' }, { optionId: 'deny', name: 'Deny', kind: 'reject_once' }],
+}
+
+describe('host-mediated ACP approvals', () => {
+  it('waits for a selected wire option before replying and then finishes the prompt', async () => {
+    let resolve!: (id: string | null) => void
+    const permission = vi.fn(() => new Promise<string | null>(done => { resolve = done }))
+    const f = connection({ hold: true, permission })
+    const result = f.turn.prompt({ cwd: '/workspace', text: 'go', mcpServers: [] })
+    await vi.waitFor(() => expect(f.sent.at(-1).method).toBe('session/prompt'))
+    const promptId = f.sent.at(-1).id
+    f.receive({ id: 'p1', method: 'session/request_permission', params: permissionParams })
+    await vi.waitFor(() => expect(permission).toHaveBeenCalledOnce())
+    expect(f.sent.some(frame => frame.id === 'p1')).toBe(false)
+    resolve('allow')
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ id: 'p1', result: { outcome: { outcome: 'selected', optionId: 'allow' } } }))
+    f.receive({ id: promptId, result: { stopReason: 'end_turn' } })
+    await expect(result).resolves.toBe('end_turn')
+  })
+
+  it.each(['invalid', 'throw', 'mutate'])('fails closed when the approval handler returns %s', async mode => {
+    const f = connection({ hold: true, permission: async request => {
+      if (mode === 'throw') throw new Error('handler failed')
+      if (mode === 'mutate') request.options.push({ optionId: 'invented', name: 'invented', kind: 'allow_once' })
+      return 'invented'
+    } })
+    const result = f.turn.prompt({ cwd: '/workspace', text: 'go', mcpServers: [] })
+    const rejected = expect(result).rejects.toThrow('disposed')
+    await vi.waitFor(() => expect(f.sent.at(-1).method).toBe('session/prompt'))
+    f.receive({ id: 91, method: 'session/request_permission', params: permissionParams })
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ id: 91, result: { outcome: { outcome: 'cancelled' } } }))
+    f.turn.dispose()
+    await rejected
+  })
+
+  it('aborts outstanding approvals on cancellation and suppresses late user choices', async () => {
+    let signal!: AbortSignal, resolve!: (choice: string) => void
+    const f = connection({ hold: true, permission: async (_request, abort) => {
+      signal = abort
+      return new Promise<string>(done => { resolve = done })
+    } })
+    const result = f.turn.prompt({ cwd: '/workspace', text: 'go', mcpServers: [] })
+    const rejected = expect(result).rejects.toThrow('disposed')
+    await vi.waitFor(() => expect(f.sent.at(-1).method).toBe('session/prompt'))
+    f.receive({ id: 'p1', method: 'session/request_permission', params: permissionParams })
+    await vi.waitFor(() => expect(signal).toBeDefined())
+    f.turn.cancel()
+    expect(signal.aborted).toBe(true)
+    resolve('allow')
+    await new Promise(resolve => setImmediate(resolve))
+    expect(f.sent.filter(frame => frame.id === 'p1')).toEqual([
+      expect.objectContaining({ result: { outcome: { outcome: 'cancelled' } } }),
+    ])
+    f.turn.dispose()
+    await rejected
+  })
+
+  it('rejects malformed options and wrong sessions without asking the host', async () => {
+    const permission = vi.fn(async () => 'allow')
+    const f = connection({ hold: true, permission })
+    const result = f.turn.prompt({ cwd: '/workspace', text: 'go', mcpServers: [] })
+    const rejected = expect(result).rejects.toThrow('disposed')
+    await vi.waitFor(() => expect(f.sent.at(-1).method).toBe('session/prompt'))
+    f.receive({ id: 92, method: 'session/request_permission', params: { ...permissionParams, options: [{ optionId: 'allow' }] } })
+    expect(f.sent.at(-1)).toMatchObject({ id: 92, error: { code: -32602 } })
+    f.receive({ id: 93, method: 'session/request_permission', params: { ...permissionParams, sessionId: 'other' } })
+    expect(f.sent.at(-1)).toMatchObject({ id: 93, error: { code: -32601 } })
+    expect(permission).not.toHaveBeenCalled()
+    f.turn.dispose()
+    await rejected
+  })
+})
 
 describe('native ACP session transport', () => {
   it.each(['high', 'off', 'on'])('applies native model and thought selector %s before sending the prompt', async reasoningEffort => {

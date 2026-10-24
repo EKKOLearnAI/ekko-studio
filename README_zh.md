@@ -362,7 +362,7 @@ ekko-studio-web start
 
 打开 **http://localhost:8648**
 
-需要 Node.js **23 或更高版本**。Ekko Agent 随包内置；使用 Hermes Agent 时，需在同一台机器安装其运行时，或选择内置运行时的桌面版/Docker。
+需要 Node.js **24.22.1**。Ekko Agent 随包内置；使用 Hermes Agent 时，需在同一台机器安装其运行时，或选择内置运行时的桌面版/Docker。
 
 ### Docker Compose
 

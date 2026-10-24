@@ -1,4 +1,5 @@
-import type { Server, Socket } from 'socket.io'
+import { chatRunCaller, isDirectChatRunCaller, type ChatRunCallerTarget } from './caller'
+import type { Server } from 'socket.io'
 import { addMessage, createSession, getSession, updateSession, updateSessionStats } from '../../repositories/session-store'
 import { historySessionSource } from '../../contracts/history-source'
 import { getRecordedUsageTotals, getUsage } from '../../repositories/usage-store'
@@ -35,22 +36,22 @@ export function parseEkkoRunCommand(
 /** Ekko owns these commands; legacy coding_agent transport fields do not select its family. */
 export async function handleEkkoSessionCommand(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   data: EkkoAgentRunSocketData,
   command: EkkoSessionCommand,
   profile: string,
   sessionMap: Map<string, SessionState>,
-  dequeue?: (socket: Socket, sessionId: string, profile: string) => boolean,
+  dequeue?: (socket: ChatRunCallerTarget, sessionId: string, profile: string) => boolean,
 ): Promise<void> {
   const sessionId = String(data.session_id || '').trim()
   if (!sessionId) return
-  socket.join(`session:${sessionId}`)
+  if (!isDirectChatRunCaller(socket)) chatRunCaller(socket).observeSession(sessionId)
   const state = getOrCreateSession(sessionMap, sessionId)
   const emit = (event: string, payload: Record<string, unknown>) => {
     const tagged = { event, ...payload, session_id: sessionId }
     data.onEvent?.(event, tagged)
     nsp.to(`session:${sessionId}`).emit(event, tagged)
-    if (!nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) socket.emit(event, tagged)
+    if (!data.onEvent && (isDirectChatRunCaller(socket) || !nsp.adapter.rooms.get(`session:${sessionId}`)?.size) && chatRunCaller(socket).isActive()) chatRunCaller(socket).reply(event, tagged)
   }
   const reply = (payload: Record<string, unknown>) => emit('session.command', {
     command: command.rawName, action: command.name, source: 'ekko',
@@ -72,7 +73,7 @@ export async function handleEkkoSessionCommand(
       createSession({
         id: sessionId, profile, source: data.session_source === 'global_agent' || data.source === 'global_agent' ? 'global_agent' : 'builtin_agent', agent: 'ekko-agent', agent_mode: 'scoped',
         model: model.model, provider: model.provider, title: 'Ekko', workspace: data.workspace || undefined,
-        user_id: socket.data?.user?.id == null ? undefined : String(socket.data.user.id),
+        user_id: chatRunCaller(socket).user?.id == null ? undefined : String(chatRunCaller(socket).user?.id),
         category_id: data.category_id,
       })
       row = getSession(sessionId)

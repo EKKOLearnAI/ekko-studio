@@ -55,9 +55,12 @@ test('drags within bounds, aligns the header, and remembers width across routes 
     await expect(page.locator(selector)).toHaveCSS('width', '340px')
     const handle = page.getByRole('separator', { name: 'Resize sidebar' })
     await expect(handle).toBeVisible()
-    const sidebarBox = (await page.locator(selector).boundingBox())!
-    const handleBox = (await handle.boundingBox())!
-    expect(handleBox.x + handleBox.width).toBe(sidebarBox.x + sidebarBox.width - 1)
+    // Route initialization can replace the sidebar between two layout reads.
+    await expect.poll(async () => {
+      const sidebarBox = await page.locator(selector).boundingBox()
+      const handleBox = await handle.boundingBox()
+      return sidebarBox && handleBox ? handleBox.x + handleBox.width - (sidebarBox.x + sidebarBox.width - 1) : null
+    }).toBe(0)
     await expect(page.locator('.header-sidebar-control')).toHaveCSS('width', '340px')
   }
   await page.goto('/#/hermes/chat')

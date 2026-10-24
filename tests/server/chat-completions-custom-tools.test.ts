@@ -4,8 +4,8 @@ import {
   chatCompletionsToResponses,
   responsesToChatCompletion,
   responsesToChatCompletionSse,
-} from '../../packages/server/src/modules/coding-agents/protocol/adapters/chat-completions'
-import { truncateResponsesToolOutputs } from '../../packages/server/src/modules/coding-agents/protocol/adapters/responses'
+} from '../../packages/server/src/modules/studio/public/model-protocol'
+import { truncateResponsesToolOutputs } from '../../packages/server/src/modules/studio/public/model-protocol'
 
 async function frames(events: any[], includeUsage = false) {
   let output = ''

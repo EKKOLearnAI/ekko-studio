@@ -10,7 +10,7 @@ import {
   providerEndpointUrl,
   responsesUrl,
 } from '../../packages/server/src/modules/coding-agents/protocol/endpoint-resolver'
-import { parseSseFrame, readSseFrames, readSseFrameTexts, sseEvent } from '../../packages/server/src/modules/coding-agents/protocol/sse'
+import { parseSseFrame, readSseFrames, readSseFrameTexts, sseEvent } from '../../packages/server/src/modules/studio/public/model-protocol'
 import { AgentTargetRegistry, type AgentTargetInput } from '../../packages/server/src/modules/coding-agents/protocol/target-registry'
 import { teeAsyncIterable } from '../../packages/server/src/modules/coding-agents/protocol/stream-tee'
 import {

@@ -1,6 +1,6 @@
 import { readFile } from 'fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY, TEST_MODEL_GROUP } from './fixtures'
+import { authenticate, mockChatSocket, mockHermesApi, setDocumentDirection, TEST_ACCESS_KEY, TEST_MODEL_GROUP } from './fixtures'
 
 async function selectWorkflowScheduleFrequency(page: Page, modal: Locator, frequency: string) {
   await modal.getByTestId('workflow-schedule-frequency').click()
@@ -691,7 +691,7 @@ test('workflow edge editor never exposes technical node ids when node titles are
   await page.mouse.up()
   await expect.poll(async () => (await chatPanel.boundingBox())!.width).toBeLessThan(ltr.panel.width - 20)
 
-  await page.locator('html').evaluate(element => element.setAttribute('dir', 'rtl'))
+  await setDocumentDirection(page, 'rtl')
   await expect.poll(async () => {
     const { body, panel } = await geometry()
     return Math.abs(panel.x + panel.width - (body.x + body.width)) <= 1

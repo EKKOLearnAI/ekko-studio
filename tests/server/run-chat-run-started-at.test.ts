@@ -291,7 +291,8 @@ describe('group run MCP credential lifecycle', () => {
     const sessionId = `group-${terminal}`
     let runtimeData: any
     handleCodingAgentRunMock.mockImplementation(async (_nsp: any, socket: any, data: any, _profile: any, sessionMap: any) => {
-      expect(socket.data.user).toBeUndefined()
+      expect(socket.kind).toBe('direct')
+      expect(socket.user).toBeUndefined()
       runtimeData = data
       Object.assign(sessionMap.get(sessionId), { isWorking: true, activeRunMarker: 'real-native-turn' })
       return { runId: 'native-runtime' } as any

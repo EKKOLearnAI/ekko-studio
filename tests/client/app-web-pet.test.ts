@@ -9,7 +9,6 @@ const routeMock = vi.hoisted(() => ({
   meta: {} as Record<string, unknown>,
 }))
 const appStoreMock = vi.hoisted(() => ({
-  nodeVersion: '23.0.0',
   sidebarOpen: true,
   sidebarCollapsed: false,
   pageSidebarExpanded: true,
@@ -34,7 +33,7 @@ vi.mock('vue-router', async (importOriginal) => {
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string, params?: Record<string, unknown>) => params?.version ? `${key}:${params.version}` : key,
+    t: (key: string) => key,
     locale: { value: 'en' },
   }),
 }))

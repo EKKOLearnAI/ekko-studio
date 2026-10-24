@@ -1,4 +1,6 @@
-import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
+import { StudioError, type SessionRemovalResult } from '../contracts/plugins'
+import { randomUUID } from 'node:crypto'
+import { isProviderAgentSession, removeStudioSession, SessionRemovalError, type SessionRemovalAccess } from '../services/sessions/removal'
 import { withRunUsage } from '../public/usage'
 import { businessEvents } from '../services/webhooks/business-events'
 import { publishSessionRemoval } from '../services/notifications/session-removal'
@@ -12,17 +14,14 @@ import { getSessionTaskPlans } from '../services/task-plans'
 import { getSessionTasks, listSessionTaskItems } from '../services/session-tasks'
 import { historySessionSource, isBuiltinEkkoAgent } from '../contracts/history-source'
 import {
-  deleteHermesSessionForProfile,
   getHermesCliSession,
   getHermesModelContextLength,
   getHermesSessionDetail,
   getHermesSessionDetailForProfile,
   getHermesSessionDetailPaginatedForProfile,
-  getExactHermesSessionDetailForProfile,
   listHermesSessionSummaries,
   listHermesSessionSummaryGroups,
   notifyHermesSessionModelChanged,
-  stopCodingAgentSessionRun,
   invalidateCodingAgentSessionRuntime,
   validateCodingAgentModelEffort,
 } from '../public/session-agent-runtime'
@@ -32,7 +31,6 @@ import {
   searchSessions as localSearchSessions,
   getSession as localGetSession,
   getSessionDetail as localGetSessionDetail,
-  deleteSession as localDeleteSession,
   renameSession as localRenameSession,
   setSessionArchived as localSetSessionArchived,
   setSessionPushEnabled as localSetSessionPushEnabled,
@@ -55,7 +53,7 @@ import {
   renameSessionCategory,
   setSessionCategory,
 } from '../public/sessions'
-import { deleteWorkspaceRunChangesForSession, getWorkspaceRunChangeFile as getWorkspaceRunChangeFileFromDb, listWorkspaceRunChangesForAssistantMessages, listWorkspaceRunChangesForSession } from '../public/sessions'
+import { getWorkspaceRunChangeFile as getWorkspaceRunChangeFileFromDb, listWorkspaceRunChangesForAssistantMessages, listWorkspaceRunChangesForSession } from '../public/sessions'
 import { getActiveProfileDir, getActiveProfileName, getProfileDir, listProfileNamesFromDisk, readConfigYamlForProfile } from '../public/profile-config'
 import { isNearestExistingRealPathWithin, isPathWithin, relativePathFromBase } from '../services/files/path'
 import {
@@ -233,24 +231,6 @@ function mergeHermesHistorySessions(
   ))
 }
 
-function isProviderAgentSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null } | null): boolean {
-  return session?.source === 'builtin_agent' || isBuiltinEkkoAgent(session?.agent) || session?.source === 'coding_agent' ||
-    session?.agent === 'claude' ||
-    session?.agent === 'codex' ||
-    session?.agent === 'pi' ||
-    session?.agent === 'grok' ||
-    session?.agent === 'opencode' ||
-    (session?.agent === 'cursor' || (session?.agent === 'antigravity' || isNativeCodingAgent(session?.agent))) ||
-    Boolean(session?.agent_session_id)
-}
-
-interface HermesDeleteResult {
-  attempted: boolean
-  deleted: boolean
-  profile?: string
-  error?: string
-}
-
 interface BatchDeleteTarget {
   id: string
   profile?: string | null
@@ -274,39 +254,6 @@ interface LocalImportMessage {
   reasoning?: string | null
   reasoning_details?: string | null
   reasoning_content?: string | null
-}
-
-function hasProfileOnDisk(profile: string): boolean {
-  return listProfileNamesFromDisk().includes(profile || 'default')
-}
-
-async function deleteHermesSessionIfPresent(sessionId: string, profile?: string | null): Promise<HermesDeleteResult> {
-  const targetProfile = profile || 'default'
-  if (!isHermesAgentAvailable()) {
-    return { attempted: false, deleted: false, profile: targetProfile }
-  }
-  if (!hasProfileOnDisk(targetProfile)) {
-    return { attempted: false, deleted: false, profile: targetProfile }
-  }
-
-  try {
-    const hermesSession = await getExactHermesSessionDetailForProfile(sessionId, targetProfile)
-    if (!hermesSession) {
-      return { attempted: false, deleted: false, profile: targetProfile }
-    }
-
-    const deleted = await deleteHermesSessionForProfile(sessionId, targetProfile)
-    return {
-      attempted: true,
-      deleted,
-      profile: targetProfile,
-      error: deleted ? undefined : 'Failed to delete Hermes session',
-    }
-  } catch (err: any) {
-    const message = err?.message || 'Failed to inspect Hermes session'
-    logger.warn({ err, sessionId, profile: targetProfile }, 'Hermes Session: profile delete skipped')
-    return { attempted: true, deleted: false, profile: targetProfile, error: message }
-  }
 }
 
 async function getProfileDefaultModel(profile: string): Promise<ProfileDefaultModel> {
@@ -1419,25 +1366,34 @@ export async function deleteMessages(ctx: any) {
   ctx.body = await server.deleteSessionMessages(session.id, [...new Set(messageIds)], historyRevision)
 }
 
+function sessionRemovalAccess(ctx: any): SessionRemovalAccess {
+  const traceId = randomUUID()
+  const user = ctx.state?.user
+  return { scope: profileId => ({ scopeId: randomUUID(), traceId, profileId, surface: 'api',
+    principal: user ? { kind: 'user', id: String(user.id) } : { kind: 'service', id: 'studio-http' },
+  }), authorize: profile => {
+    if (!canAccessProfile(ctx, profile)) throw new StudioError('FORBIDDEN', `Profile "${profile}" is not available for this user`)
+  } }
+}
+
+function hermesRemovalResult(native: SessionRemovalResult['native']) {
+  const { profileId, ...result } = native
+  return { ...result, profile: profileId }
+}
+
 export async function remove(ctx: any) {
-  const sessionId = ctx.params.id
-  const existing = localGetSession(sessionId)
-  if (denySessionAccess(ctx, existing)) return
-  const hermesProfile = requestedProfile(ctx) || existing?.profile || getActiveProfileName()
-  const providerAgentSession = isProviderAgentSession(existing)
-  if (providerAgentSession) stopCodingAgentSessionRun(sessionId, { reportClosed: false })
-  const hermes = providerAgentSession
-    ? { attempted: false, deleted: false, profile: hermesProfile }
-    : await deleteHermesSessionIfPresent(sessionId, hermesProfile)
-  const localDeleted = existing ? localDeleteSession(sessionId) : true
-  if (!localDeleted) {
-    ctx.status = 500
-    ctx.body = { error: 'Failed to delete session' }
-    return
+  try {
+    const result = await removeStudioSession({ id: ctx.params.id, profileId: requestedProfile(ctx) }, {
+      ...sessionRemovalAccess(ctx), fallbackProfile: getActiveProfileName(),
+    })
+    ctx.body = { ok: true, deleted: result.deleted, hermes: hermesRemovalResult(result.native) }
+  } catch (error) {
+    if (!(error instanceof StudioError)) throw error
+    ctx.status = error.code === 'FORBIDDEN' ? 403 : error.code === 'INVALID_ARGUMENT' ? 400
+      : error.code === 'REVISION_CONFLICT' || error.code === 'CANCELLED' ? 409 : error.code === 'DEADLINE_EXCEEDED' ? 504
+        : error.code === 'PLUGIN_UNAVAILABLE' ? 503 : error.code === 'CAPABILITY_UNSUPPORTED' ? 422 : 500
+    ctx.body = { error: error.message }
   }
-  deleteWorkspaceRunChangesForSession(sessionId)
-  if (existing) publishSessionRemoval(existing, 'deleted')
-  ctx.body = { ok: true, deleted: Boolean(existing), hermes }
 }
 
 export async function batchRemove(ctx: any) {
@@ -1480,49 +1436,28 @@ export async function batchRemove(ctx: any) {
     hermesErrors: [] as Array<{ id: string; profile?: string; error: string }>
   }
 
+  const recordNative = (id: string, native: SessionRemovalResult['native']) => {
+    if (native.deleted) results.hermesDeleted++
+    else if (native.attempted && native.error) {
+      results.hermesFailed++
+      results.hermesErrors.push({ id, profile: native.profileId, error: native.error })
+    }
+  }
   for (const target of targets) {
     const { id } = target
-    const existing = localGetSession(id)
-    const targetProfile = target.profile || existing?.profile
-    if (targetProfile && !canAccessProfile(ctx, targetProfile)) {
-      results.failed++
-      results.errors.push({ id, error: `Profile "${targetProfile || 'default'}" is not available for this user` })
-      continue
-    }
-    if (!targetProfile && existing && !canAccessProfile(ctx, existing.profile)) {
-      results.failed++
-      results.errors.push({ id, error: `Profile "${existing.profile || 'default'}" is not available for this user` })
-      continue
-    }
-
-    const providerAgentSession = isProviderAgentSession(existing)
-    if (providerAgentSession) stopCodingAgentSessionRun(id, { reportClosed: false })
-    const hermes = providerAgentSession
-      ? { attempted: false, deleted: false, profile: targetProfile || 'default' }
-      : await deleteHermesSessionIfPresent(id, targetProfile)
-    if (hermes.deleted) {
-      results.hermesDeleted++
-    } else if (hermes.attempted && hermes.error) {
-      results.hermesFailed++
-      results.hermesErrors.push({ id, profile: hermes.profile, error: hermes.error })
-    }
-
-    const shouldDeleteLocal = Boolean(existing && (!targetProfile || existing.profile === targetProfile))
-    if (shouldDeleteLocal) {
-      const ok = localDeleteSession(id)
-      if (ok) {
-        deleteWorkspaceRunChangesForSession(id)
-        publishSessionRemoval(existing!, 'deleted')
-        results.deleted++
-      } else {
+    try {
+      const result = await removeStudioSession({ id, profileId: target.profile || undefined }, sessionRemovalAccess(ctx))
+      recordNative(id, result.native)
+      if (result.deleted || result.native.deleted) results.deleted++
+      else {
         results.failed++
-        results.errors.push({ id, error: 'Failed to delete session' })
+        results.errors.push({ id, error: 'Session not found' })
       }
-    } else if (hermes.deleted) {
-      results.deleted++
-    } else {
+    } catch (error) {
+      if (!(error instanceof StudioError)) throw error
+      if (error instanceof SessionRemovalError) recordNative(id, error.native)
       results.failed++
-      results.errors.push({ id, error: 'Session not found' })
+      results.errors.push({ id, error: error.message })
     }
   }
 

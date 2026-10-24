@@ -10,7 +10,7 @@ import { requireUserJwt, resolveUserProfile, signUserJwt } from '../../packages/
 import { TaskPlanError, TaskPlanRuns } from '../../packages/server/src/modules/studio/services/task-plan-runs'
 import { groupRunUser } from '../../packages/server/src/modules/studio/services/group-chat/run-user'
 import { isSensitivePath } from '../../packages/server/src/modules/studio/services/files/file-policy'
-import { leaseEkkoMcpServers } from '../../packages/server/src/modules/studio/services/chat-run/ekko-mcp-lease'
+import { leaseStudioMcpServers } from '../../packages/server/src/modules/studio/services/mcp/credential-lease'
 
 const users = vi.hoisted(() => ({
   findUserById: vi.fn(), userCanAccessProfile: vi.fn(() => true),
@@ -83,8 +83,8 @@ it('leases authenticated direct-chat MCP credentials without replacing a running
   const servers = { 'ekko-studio-browser': { command: 'node', env: {
     HERMES_WEB_UI_MANAGED_MCP: '1', AUTH_TOKEN: 'stale-static-token',
   } }, custom: { command: 'custom' } }
-  const a = await leaseEkkoMcpServers(servers, { sessionId: 'direct', profile: 'research', userId: 7, signal: controller.signal })
-  const b = await leaseEkkoMcpServers(servers, { sessionId: 'direct', profile: 'research', userId: 7, signal: new AbortController().signal })
+  const a = await leaseStudioMcpServers(servers, { sessionId: 'direct', profile: 'research', agentId: 'ekko-agent', nativeTaskPlan: true, userId: 7, signal: controller.signal })
+  const b = await leaseStudioMcpServers(servers, { sessionId: 'direct', profile: 'research', agentId: 'ekko-agent', nativeTaskPlan: true, userId: 7, signal: new AbortController().signal })
   const file = (lease: typeof a) => (lease.servers!['ekko-studio-browser'] as any).env.HERMES_WEB_UI_RUN_TOKEN_FILE
   try {
     const credential = JSON.parse(readFileSync(file(a), 'utf8'))
@@ -104,6 +104,62 @@ it('leases authenticated direct-chat MCP credentials without replacing a running
     expect(existsSync(file(b))).toBe(true)
   } finally { a.dispose(); b.dispose() }
   expect(existsSync(file(b))).toBe(false)
+})
+
+it('rebuilds a credential-bearing managed transport instead of trusting its configured command, URL or env', async () => {
+  const servers = { 'ekko-studio-api': { command: 'untrusted-command', args: ['private-arg'], type: 'streamable_http',
+    url: 'https://untrusted.example/mcp', headers: { authorization: 'private-header' }, env: {
+      HERMES_WEB_UI_MANAGED_MCP: '1', HERMES_WEB_UI_URL: 'https://untrusted.example', HERMES_WEB_UI_HOME: '/untrusted',
+      AUTH_TOKEN: 'private-static', HERMES_WEB_UI_TOKEN: 'private-static', ELECTRON_RUN_AS_NODE: '0', CUSTOM_SECRET: 'private-env',
+    }, supports_parallel_tool_calls: true, requestTimeoutMs: 120_000 } }
+  const lease = await leaseStudioMcpServers(servers, { sessionId: 'safe-local', profile: 'research', agentId: 'test.plugin/agent',
+    userId: 7, signal: new AbortController().signal })
+  try {
+    const configured = lease.servers!['ekko-studio-api'] as any
+    expect(configured).toMatchObject({ command: process.execPath, args: [join(process.cwd(), 'bin/ekko-studio-mcp.mjs'), 'api'], supports_parallel_tool_calls: true, requestTimeoutMs: 120_000,
+      env: { ELECTRON_RUN_AS_NODE: '1', AUTH_TOKEN: '', HERMES_WEB_UI_TOKEN: '', HERMES_WEB_UI_HOME: home,
+        HERMES_WEB_UI_PROFILE: 'research', HERMES_MCP_USER_CLARIFICATION: '1' } })
+    expect(configured.env.HERMES_WEB_UI_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
+    expect(configured.type).toBeUndefined(); expect(configured.url).toBeUndefined(); expect(configured.headers).toBeUndefined()
+    expect(JSON.stringify(configured)).not.toMatch(/untrusted|private-arg|private-header|private-static|private-env/)
+    const credential = JSON.parse(readFileSync(configured.env.HERMES_WEB_UI_RUN_TOKEN_FILE, 'utf8'))
+    expect(runMcpCredentials.authenticate(credential.token)).toMatchObject({ sessionId: 'safe-local', profile: 'research', agentId: 'test.plugin/agent', userId: 7 })
+  } finally { lease.dispose() }
+})
+
+it('does not issue credentials for disabled managed servers or unrelated external servers', async () => {
+  const servers = {
+    'ekko-studio-api': { enabled: false, command: 'disabled', env: { HERMES_WEB_UI_MANAGED_MCP: '1' } },
+    'ekko-studio-browser': { disabled: true, command: 'disabled', env: { HERMES_WEB_UI_MANAGED_MCP: '1' } },
+    external: { command: 'external', env: { HERMES_WEB_UI_MANAGED_MCP: '1' } },
+  }
+  const lease = await leaseStudioMcpServers(servers, { sessionId: 'disabled', profile: 'research', agentId: 'ekko-agent', signal: new AbortController().signal })
+  try {
+    expect(lease.servers).toBe(servers)
+    expect(existsSync(join(home, 'runtime', 'mcp-credentials'))).toBe(false)
+  } finally { lease.dispose() }
+})
+
+it('preserves native interaction ownership while refreshing managed credentials', async () => {
+  const lease = await leaseStudioMcpServers({ 'ekko-studio-use': { env: { HERMES_WEB_UI_MANAGED_MCP: '1' } } }, {
+    sessionId: 'native', profile: 'research', agentId: 'ekko-agent', nativeTaskPlan: true, signal: new AbortController().signal,
+  })
+  try {
+    const env = (lease.servers!['ekko-studio-use'] as any).env
+    expect(env.HERMES_MCP_NATIVE_TASK_PLAN).toBe('1')
+    expect(env.HERMES_MCP_USER_CLARIFICATION).toBeUndefined()
+  } finally { lease.dispose() }
+})
+
+it('maps the interaction server name to the existing plan transport toolset', async () => {
+  const lease = await leaseStudioMcpServers({ 'ekko-studio-interaction': { env: { HERMES_WEB_UI_MANAGED_MCP: '1' } } }, {
+    sessionId: 'interaction', profile: 'research', agentId: 'test.plugin/agent', signal: new AbortController().signal,
+  })
+  try {
+    const server = lease.servers!['ekko-studio-interaction'] as any
+    expect(server.args.at(-1)).toBe('plan')
+    expect(server.env).toMatchObject({ HERMES_MCP_SERVER_NAME: 'ekko-studio-interaction', HERMES_MCP_TOOLSET: 'plan' })
+  } finally { lease.dispose() }
 })
 
 it.each(['/api/studio/task-plans/update', '/api/studio/clarifications/request', '/api/studio/session-tasks/list', '/api/studio/session-tasks/update'])('authorizes only the current anonymous interaction: %s', async path => {

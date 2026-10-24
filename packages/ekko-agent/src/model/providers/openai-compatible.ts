@@ -153,6 +153,14 @@ export class OpenAICompatibleModelClient implements ModelClient {
     return chatCompletionsUrl(this.config)
   }
 
+  nativeRequest(body: Record<string, unknown>, request: ModelRequest): Promise<Response> {
+    return this.fetchImpl(chatCompletionsUrl(this.config), {
+      method: 'POST', headers: modelRequestHeaders(this.config, request),
+      body: JSON.stringify({ ...body, model: request.model ?? this.config.defaultModel }),
+      signal: abortSignal(this.config.timeoutMs, request.signal), redirect: 'error',
+    })
+  }
+
   async create(request: ModelRequest): Promise<ModelResponse> {
     const response = await this.postWithImageFallback(request, false, request.signal)
     return normalizeOpenAIChatResponse(this.provider, await parseResponseJson(this.provider, response))

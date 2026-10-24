@@ -12,7 +12,7 @@ import type {
   ModelResponse,
   ModelUsage,
 } from '../types'
-import { modelRequestHeaders, isPlainRecord, parseJson, postJson, postStream, providerUrl, readServerSentEvents } from '../http'
+import { abortSignal, modelRequestHeaders, isPlainRecord, parseJson, postJson, postStream, providerUrl, readServerSentEvents } from '../http'
 import { collectModelEvents, normalizeAgentReasoning } from '../messages'
 import { createHash } from 'node:crypto'
 
@@ -126,6 +126,14 @@ export class OpenAIResponsesModelClient implements ModelClient {
 
   requestTarget(): string {
     return responsesUrl(this.config)
+  }
+
+  nativeRequest(body: Record<string, unknown>, request: ModelRequest): Promise<Response> {
+    return this.fetchImpl(responsesUrl(this.config), {
+      method: 'POST', headers: modelRequestHeaders(this.config, request),
+      body: JSON.stringify({ ...body, model: request.model ?? this.config.defaultModel }),
+      signal: abortSignal(this.config.timeoutMs, request.signal), redirect: 'error',
+    })
   }
 
   async create(request: ModelRequest): Promise<ModelResponse> {

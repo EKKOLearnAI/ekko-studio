@@ -368,7 +368,7 @@ package before installing the other. User data remains in `~/.hermes-web-ui`.
 
 Open **http://localhost:8648**
 
-Requires Node.js **23 or newer**. Ekko Agent is included; to use Hermes Agent, install its runtime on the same machine or use the bundled Desktop/Docker distribution.
+Requires Node.js **24.22.1**. Ekko Agent is included; to use Hermes Agent, install its runtime on the same machine or use the bundled Desktop/Docker distribution.
 
 ### Docker Compose
 

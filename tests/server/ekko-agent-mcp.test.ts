@@ -46,6 +46,7 @@ describe('Ekko MCP server context', () => {
       command: process.execPath,
       args: [join(process.cwd(), 'bin/ekko-studio-mcp.mjs'), 'api'],
       env: {
+        AUTH_TOKEN: '', HERMES_WEB_UI_TOKEN: '',
         ELECTRON_RUN_AS_NODE: '1',
         HERMES_WEB_UI_URL: 'http://127.0.0.1:8648',
         HERMES_WEB_UI_HOME: '/Users/test/.hermes-web-ui',

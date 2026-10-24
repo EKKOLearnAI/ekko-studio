@@ -4,6 +4,14 @@ This document defines project-level development rules for Ekko Studio. It is too
 
 ## Commands
 
+Use Node.js **24.22.1** for source development, standalone npm installs, CI and
+Docker. `.nvmrc` and `.node-version` pin the development version; with nvm, run
+`nvm install && nvm use` before installing dependencies.
+
+Desktop keeps its existing Electron Node runtime and separately bundled
+Node.js 22.22.0 for agent tools. The build machine's Node version does not select
+either desktop runtime.
+
 ```bash
 npm install
 npm run dev

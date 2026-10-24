@@ -10,11 +10,7 @@
       "unowned-background | .app-shell--navigation-rail | background-color: $bg-sidebar": 1,
       "unowned-background | .app-shell--navigation-rail .app-layout | background-color: $bg-sidebar": 1,
       "unowned-background | .app-shell--custom-background.app-shell--navigation-rail .app-layout | background-color: $bg-sidebar": 1,
-      "unowned-background | .app-shell--custom-background.app-shell--navigation-rail .app-layout | background-image: linear-gradient(var(--app-background-overlay, transparent), var(--app-background-overlay, transparent)), var(--app-background-image, none), var(--app-background-gradient, none)": 1,
-      "literal-color | .node-warning-bar | color: #b45309": 1,
-      "literal-color | .node-warning-bar | background-color: #fef3c7": 1,
-      "unowned-background | .node-warning-bar | background-color: #fef3c7": 1,
-      "literal-color | .node-warning-bar | border-bottom: var(--border-width, 1px) solid #fde68a": 1
+      "unowned-background | .app-shell--custom-background.app-shell--navigation-rail .app-layout | background-image: linear-gradient(var(--app-background-overlay, transparent), var(--app-background-overlay, transparent)), var(--app-background-image, none), var(--app-background-gradient, none)": 1
     },
     "packages/client/src/components/hermes/ApiRelayUsageCard.vue": {
       "unowned-background | .relay-usage-sources li | background: $bg-secondary": 1

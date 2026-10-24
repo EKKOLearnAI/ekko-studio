@@ -3,7 +3,7 @@
  * Uses the same ensureTable/getDb pattern as usage-store.ts.
  */
 import { isSqliteAvailable, getDb } from '../infrastructure/database'
-import { TASK_PLANS_TABLE, SESSION_TASKS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE, SESSION_CATEGORIES_TABLE } from '../infrastructure/database/schemas'
+import { TASK_PLANS_TABLE, SESSION_TASKS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE, SESSION_CATEGORIES_TABLE, WORKSPACE_RUN_CHANGES_TABLE, WORKSPACE_RUN_CHANGE_FILES_TABLE } from '../infrastructure/database/schemas'
 import { normalizeMessageContentForStorageRole } from './message-content'
 import { copyCompressionSnapshot } from './compression-snapshot'
 import { recordSkillUsageMessage } from './skill-usage-store'
@@ -12,6 +12,8 @@ import { SESSION_PREVIEW_SQL, sessionDisplayTitle } from './session-display'
 import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
 import { BUILTIN_EKKO_AGENT_IDS, BUILTIN_HISTORY_SOURCES, isBuiltinEkkoAgent, normalizeSessionIdentity } from '../contracts/history-source'
 import { studioSessionAccount } from '../contracts/runs/usage'
+import { randomUUID } from 'node:crypto'
+import { PluginEventStore } from './plugin-event-store'
 
 // Re-export types for compatibility with sessions-db.ts consumers
 export interface HermesSessionRow {
@@ -505,16 +507,27 @@ export function updateSession(id: string, data: Partial<Omit<HermesSessionRow, '
   db.prepare(`UPDATE ${SESSIONS_TABLE} SET ${fields.join(', ')} WHERE id = ?`).run(...values, id)
 }
 
-export function deleteSession(id: string): boolean {
+export function deleteSession(id: string, notification?: { id: string; occurredAt: number }): boolean {
   if (!isSqliteAvailable()) return false
   const db = getDb()!
+  const events = new PluginEventStore(db)
   db.exec('BEGIN')
   try {
+    const session = getSession(id)
+    db.prepare(`DELETE FROM ${WORKSPACE_RUN_CHANGE_FILES_TABLE} WHERE session_id = ?`).run(id)
+    db.prepare(`DELETE FROM ${WORKSPACE_RUN_CHANGES_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${TASK_PLANS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${SESSION_TASKS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${COMPRESSION_SNAPSHOT_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ?`).run(id)
     const result = db.prepare(`DELETE FROM ${SESSIONS_TABLE} WHERE id = ?`).run(id)
+    if (result.changes && session) {
+      const eventId = notification?.id || randomUUID(), profileId = session.profile || 'default'
+      const accepted = events.append([{ schemaVersion: 1, id: eventId, type: 'session.deleted', occurredAt: notification?.occurredAt ?? Date.now(),
+        partitionKey: `${profileId}:${id}`, sequence: 0, subject: { profileId, sessionId: id }, data: { sessionId: id }, correlationId: eventId,
+      }], studioSessionAccount(session))
+      if (accepted.length !== 1) throw new Error('Session deletion event identity already exists')
+    }
     db.exec('COMMIT')
     return result.changes > 0
   } catch (error) {

@@ -86,7 +86,10 @@ function functionNode(ast, identifier) {
 
 /** Inspect syntax rather than comments; import aliases still identify a consumer. */
 export function jevUsage(file, source) {
-  const ast = parseSource(file, source)
+  return inspectJevUsage(parseSource(file, source))
+}
+
+function inspectJevUsage(ast) {
   let used = false
   let evaluates = false
   let directSdk = false
@@ -172,12 +175,24 @@ export function jevHarnessViolations(sources, manifest) {
     if (!sources.has(file)) fail(`missing required file ${file}`)
     return sources.get(file) ?? ''
   }
+  // Reuse syntax within one check only: mutation tests and subsequent checks
+  // must still see edited sources, missing files and changed registrations.
+  const parsed = new Map()
+  const usages = new Map()
+  const astFor = file => {
+    if (!parsed.has(file)) parsed.set(file, parseSource(file, get(file)))
+    return parsed.get(file)
+  }
+  const usageFor = file => {
+    if (!usages.has(file)) usages.set(file, inspectJevUsage(astFor(file)))
+    return usages.get(file)
+  }
   const { settings, integrations } = manifest
   if (!settings?.fields || !Array.isArray(integrations)) return ['JEV: invalid integration manifest']
-  const server = parseSource(settings.server, get(settings.server))
-  const client = parseSource(settings.client, get(settings.client))
+  const server = astFor(settings.server)
+  const client = astFor(settings.client)
   const formSource = get(settings.form)
-  const form = parseSource(settings.form, formSource)
+  const form = astFor(settings.form)
   const defaults = variableObject(server, 'defaults')
   const serverFields = interfaceFields(server)
   const clientFields = interfaceFields(client)
@@ -228,7 +243,7 @@ export function jevHarnessViolations(sources, manifest) {
     for (const [file, source] of sources) {
       if (!/^packages\/client\/src\/i18n\/locales\/[^/]+\.ts$/.test(file)) continue
       const keys = field.label?.split('.') ?? []
-      let node = parseSource(file, source).statements.find(ts.isExportAssignment)?.expression
+      let node = astFor(file).statements.find(ts.isExportAssignment)?.expression
       for (const part of keys) node = objectProperties(node).get(part)
       if (!keys.length || !node) fail(`${key} is missing label ${field.label} in ${file}`)
     }
@@ -257,7 +272,7 @@ export function jevHarnessViolations(sources, manifest) {
     }
     if (!integration.sources?.length || !integration.tests?.length) fail(`${id} must list concrete source and regression test files`)
     for (const file of integration.sources ?? []) {
-      const usage = jevUsage(file, get(file))
+      const usage = usageFor(file)
       if (evaluationInfrastructure.has(file) || infrastructure.has(file) && !usage.evaluates) fail(`${id}: ${file} is infrastructure, not a business integration`)
       if (!usage.used) fail(`${id}: ${file} no longer uses JEV; remove the stale registration`)
       if (status === 'configuration-only' && usage.evaluates) fail(`${id}: configuration-only registration cannot evaluate JEV`)
@@ -266,7 +281,7 @@ export function jevHarnessViolations(sources, manifest) {
     for (const file of integration.tests ?? []) get(file)
     if (integration.runtimeConfig) {
       const runtime = integration.runtimeConfig
-      const ast = parseSource(runtime.file, get(runtime.file))
+      const ast = astFor(runtime.file)
       if (interfaceFields(ast, runtime.interface).get(runtime.enabledKey) !== 'boolean'
         || variableObject(ast, runtime.defaults).get(runtime.enabledKey)?.kind !== ts.SyntaxKind.FalseKeyword) fail(`${id}: standalone runtime switch must also default to false`)
       const mapping = functionNode(server, runtime.mappingFunction)
@@ -281,7 +296,7 @@ export function jevHarnessViolations(sources, manifest) {
   for (const [file, source] of sources) {
     if (!sourceRoots.some(root => file.startsWith(`${root}/`))) continue
     if (!/jev|typesafe|systemOne|tryEvaluate/i.test(source)) continue
-    const usage = jevUsage(file, source)
+    const usage = usageFor(file)
     if (usage.directSdk && !sdkInfrastructure.has(file)) fail(`${file}: business integrations must use the public JEV facade, not the provider SDK`)
     // Wiring can stay in runtime/setup; a new evaluation there still needs registration.
     if (evaluationInfrastructure.has(file) || infrastructure.has(file) && !usage.evaluates) continue

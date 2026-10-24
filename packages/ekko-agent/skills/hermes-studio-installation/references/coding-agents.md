@@ -4,7 +4,7 @@ Use the Studio Agents page for cross-platform installation. It detects the same 
 
 ## Prerequisites
 
-All four coding agents require Node.js and npm. Ekko Studio itself requires Node.js 23 or newer for npm/source installations.
+All four coding agents require Node.js and npm. Ekko Studio itself requires Node.js 24.22.1 for npm/source installations.
 
 Before installing, inspect:
 

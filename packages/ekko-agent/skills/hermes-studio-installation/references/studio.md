@@ -26,7 +26,7 @@ Upgrade the packaged Desktop from its **Check for Updates** action. The updater 
 
 ## npm installation
 
-Requirements: Node.js 23 or newer and a working npm global prefix.
+Requirements: Node.js 24.22.1 and a working npm global prefix.
 
 ```bash
 node --version
@@ -77,7 +77,7 @@ Do not use Desktop Runtime migration inside the container. Docker owns the runti
 
 ## Source development install
 
-Requirements: Git, Node.js 23 or newer, and npm.
+Requirements: Git, Node.js 24.22.1, and npm.
 
 ```bash
 git clone https://github.com/EKKOLearnAI/ekko-studio.git

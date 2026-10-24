@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Readable } from 'node:stream'
 import { codingAgentProxyChatCompletions, registerCodexProxyTarget } from '../../packages/server/src/modules/coding-agents/services/codex/proxy'
 import { claudeProxyMessages, registerClaudeCodeProxyTarget } from '../../packages/server/src/modules/coding-agents/services/claude-code/proxy'
-import { chatCompletionsToResponses, responsesToChatCompletionSse } from '../../packages/server/src/modules/coding-agents/protocol/adapters/chat-completions'
+import { chatCompletionsToResponses, responsesToChatCompletionSse } from '../../packages/server/src/modules/studio/public/model-protocol'
 import { codingAgentRunManager } from '../../packages/server/src/modules/coding-agents/services/runtime/run-manager'
 
 vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({ codingAgentRunManager: {

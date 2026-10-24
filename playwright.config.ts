@@ -6,6 +6,7 @@ const BASE_URL = `http://127.0.0.1:${PORT}`
 // Allow environments without managed Playwright Chromium to use a local browser.
 // Example: PLAYWRIGHT_CHANNEL=chrome npx playwright test
 const BROWSER_CHANNEL = process.env.PLAYWRIGHT_CHANNEL as 'chrome' | 'msedge' | undefined
+const DEV_SERVER = process.env.PLAYWRIGHT_DEV_SERVER === '1'
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -19,16 +20,20 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     locale: 'en-US',
-    trace: 'retain-on-failure',
+    // CI retries keep a diagnostic trace; passing tests avoid DOM snapshots on
+    // every action. Local investigations can use --trace retain-on-failure.
+    trace: 'on-first-retry',
     screenshot: 'only-on-failure',
-    // Managed ffmpeg is not always available when using a system browser channel.
-    video: BROWSER_CHANNEL ? 'off' : 'retain-on-failure',
+    // Failure screenshots and retry traces cover routine debugging without
+    // encoding video for every passing case. Opt in when investigating motion.
+    // System browser channels may not have managed ffmpeg available.
+    video: !BROWSER_CHANNEL && process.env.PLAYWRIGHT_VIDEO === '1' ? 'retain-on-failure' : 'off',
   },
   webServer: {
-    env: { NODE_ENV: 'development', HERMES_WEB_UI_VITE_CACHE_DIR: `node_modules/.vite/playwright-${PORT}` },
-    command: `npx vite --host 127.0.0.1 --port ${PORT}`,
+    env: { NODE_ENV: DEV_SERVER ? 'development' : 'production', HERMES_WEB_UI_VITE_CACHE_DIR: `node_modules/.vite/playwright-${PORT}` },
+    command: DEV_SERVER ? `npx vite --host 127.0.0.1 --port ${PORT}` : `node scripts/serve-playwright.mjs ${PORT}`,
     url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: DEV_SERVER && !process.env.CI,
     timeout: 120_000,
   },
   projects: [

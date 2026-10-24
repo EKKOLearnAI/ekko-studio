@@ -47,6 +47,8 @@ import {
 } from '../../public/workflow-runtime'
 import { logger } from '../../public/logging'
 import { assertAgentAvailable } from '../agent-availability'
+import { workflowRequestStore, type WorkflowRequestIdentity } from '../../repositories/workflow-request-store'
+import { StudioError } from '../../contracts/plugins'
 
 export type { WorkflowCreateInput, WorkflowRecord, WorkflowUpdateInput }
 
@@ -81,6 +83,10 @@ export interface WorkflowExecutionPreflightResult {
 }
 
 export interface WorkflowRunNowInput {
+  /** Host-issued admission constraints, never accepted from a transport payload. */
+  assertCanStart?: () => void | Promise<void>
+  definitionSnapshot?: string
+  requestIdentity?: WorkflowRequestIdentity
   pushActor?: PushActor
   pushSnapshot?: { ciphertext: string | null; platform: string }
   profile?: string | null
@@ -2253,14 +2259,39 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
     let profile: string
     let executionPreflight: Awaited<ReturnType<typeof preflightWorkflowExecutionDefinition>>
     try {
+      await input.assertCanStart?.()
+      profile = input.profile?.trim() || workflow.profile || 'default'
+      const requests = input.requestIdentity ? workflowRequestStore() : undefined
+      if (input.requestIdentity) {
+        if (input.requestIdentity.profileId !== profile || input.requestIdentity.ownerId !== String(input.user?.id)) throw new StudioError('FORBIDDEN', 'Workflow request identity is unavailable')
+        const previousId = requests!.find(input.requestIdentity)
+        if (previousId) {
+          const previous = getWorkflowRun(previousId)
+          if (!previous) throw new StudioError('NOT_FOUND', 'Accepted workflow run was removed')
+          input.onAccepted?.(previous)
+          return { run: previous, nodeSessions: listWorkflowRunNodeSessions(previousId) }
+        }
+      }
       if (listActiveWorkflowRuns().some(activeRun => activeRun.workflow_id === workflowId)) {
         const err = new Error('workflow is already running')
         ;(err as any).status = 409
         throw err
       }
 
-      profile = input.profile?.trim() || workflow.profile || 'default'
       executionPreflight = await preflightWorkflowExecutionDefinition(workflow.nodes, workflow.edges, profile, input.startNodeIds || [])
+      await input.assertCanStart?.()
+      if (input.definitionSnapshot && JSON.stringify(this.get(workflowId)) !== input.definitionSnapshot) throw new StudioError('REVISION_CONFLICT', 'Workflow changed during admission')
+      // A different workflow can race on the same owner/profile key while this
+      // graph is being preflighted. Recheck inside the synchronous commit boundary.
+      if (input.requestIdentity) {
+        const previousId = requests!.find(input.requestIdentity)
+        if (previousId) {
+          const previous = getWorkflowRun(previousId)
+          if (!previous) throw new StudioError('NOT_FOUND', 'Accepted workflow run was removed')
+          input.onAccepted?.(previous)
+          return { run: previous, nodeSessions: listWorkflowRunNodeSessions(previousId) }
+        }
+      }
       const startedAt = Date.now()
       const runDeadline = input.timeoutMs && input.timeoutMs > 0 ? startedAt + input.timeoutMs : null
       const snapshot = workflowRunSnapshotGraph(workflow.nodes, workflow.edges, executionPreflight.compiled)
@@ -2284,9 +2315,11 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
         scheduled_at: input.triggerSource === 'scheduled' ? input.scheduledAt ?? null : null,
       })
         if (input.pushActor) bindRunPushTarget({ kind: 'workflow', profile, runId: created.id }, workflow.id, input.pushActor, input.pushSnapshot)
+        if (input.requestIdentity) requests!.bind(input.requestIdentity, created.id)
         return created
       }
-      run = input.pushActor ? pushRunTransaction(createRun) : createRun()
+      const commit = () => input.pushActor ? pushRunTransaction(createRun) : createRun()
+      run = requests ? requests.transaction(commit) : commit()
     } finally {
       releaseAdmission()
     }

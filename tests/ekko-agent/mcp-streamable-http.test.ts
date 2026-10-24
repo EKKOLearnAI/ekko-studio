@@ -107,6 +107,15 @@ afterEach(async () => {
 })
 
 describe('Ekko Streamable HTTP MCP', () => {
+  it('does not connect or send credentials for either disabled-server spelling', async () => {
+    const provider = createMcpToolProvider()
+    const tools = await provider.listTools({ mcpServers: {
+      a: { url: endpoint, enabled: false, headers: { 'x-api-key': 'disabled-a' } },
+      b: { url: endpoint, disabled: true, headers: { 'x-api-key': 'disabled-b' } },
+    } })
+    expect(tools).toEqual([])
+    expect(initializeCount).toBe(0); expect(apiKeyHeaders).toEqual([])
+  })
   it('isolates concurrent run credentials and never reconnects a completed scope', async () => {
     const provider = createMcpToolProvider()
     const scopes = [new AbortController(), new AbortController()]

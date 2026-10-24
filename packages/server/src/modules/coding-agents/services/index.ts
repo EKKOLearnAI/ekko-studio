@@ -9,6 +9,7 @@ import { isNativeCodingAgent, nativeCodingAgentSupportsScoped, isGlobalOnlyCodin
 import { prioritizeManagedNpmBin } from './managed-command-path'
 import { readTomlAssignment } from './toml-assignment'
 import { studioMcpCapabilities } from '../../studio/public/runs/mcp-capabilities'
+import { studioManagedMcpConfig } from '../../studio/public/runs/mcp-launch'
 import { prepareDshRuntime, DSH_API_KEY_ENV } from './dsh/runtime-config'
 import { readDshMcpServers, validateDshSettings } from './dsh/config'
 import { createDshHost } from './dsh/host'
@@ -1051,59 +1052,8 @@ function tomlInlineStringTable(values: Record<string, string>): string {
   return `{ ${Object.entries(values).map(([key, value]) => `${key} = ${tomlString(value)}`).join(', ')} }`
 }
 
-function isDesktopRuntime(): boolean {
-  return String(process.env.HERMES_DESKTOP || '').trim().toLowerCase() === 'true'
-}
-
-function candidateBundledMcpScripts(): string[] {
-  return [
-    process.env.HERMES_WEB_UI_MCP_BIN,
-    join(process.cwd(), 'bin/ekko-studio-mcp.mjs'),
-    join(__dirname, '../../bin/ekko-studio-mcp.mjs'),
-    join(__dirname, '../../../../../../bin/ekko-studio-mcp.mjs'),
-    join(__dirname, '../../../../../bin/ekko-studio-mcp.mjs'),
-    join(process.cwd(), 'bin/hermes-web-ui-mcp.mjs'),
-    join(__dirname, '../../bin/hermes-web-ui-mcp.mjs'),
-    join(__dirname, '../../../../../../bin/hermes-web-ui-mcp.mjs'),
-    join(__dirname, '../../../../../bin/hermes-web-ui-mcp.mjs'),
-  ].filter((value): value is string => !!value)
-}
-
-function bundledMcpScriptPath(): string | null {
-  return candidateBundledMcpScripts().find(candidate => existsSync(candidate)) || null
-}
-
-function runtimeNodePath(): string | null {
-  const node = process.env.HERMES_AGENT_NODE?.trim()
-  return node || null
-}
-
-function hermesMcpCommandConfig(toolset: string): { command: string; args?: string[] } {
-  const script = bundledMcpScriptPath()
-  if (script) return { command: runtimeNodePath() || process.execPath, args: [script, toolset] }
-  if (isDesktopRuntime()) return { command: 'ekko-studio-mcp', args: [toolset] }
-  return { command: 'ekko-studio-mcp', args: [toolset] }
-}
-
 function hermesMcpServerConfig(profile: string, serverName: string, toolset: string): { command: string; args?: string[]; env: Record<string, string> } {
-  const appHome = getWebUiHome()
-  return {
-    ...hermesMcpCommandConfig(toolset),
-    env: {
-      ELECTRON_RUN_AS_NODE: '1',
-      // Managed transports read the current profile or run credential, not parent bearer tokens.
-      HERMES_WEB_UI_TOKEN: '',
-      AUTH_TOKEN: '',
-      HERMES_WEB_UI_URL: `http://127.0.0.1:${process.env.PORT || '8648'}`,
-      HERMES_WEB_UI_HOME: appHome,
-      HERMES_WEBUI_STATE_DIR: appHome,
-      HERMES_WEB_UI_PROFILE: profile,
-      HERMES_MCP_SERVER_NAME: serverName,
-      HERMES_MCP_TOOLSET: toolset,
-      HERMES_MCP_USER_CLARIFICATION: '1',
-      [HERMES_MCP_MANAGED_ENV_KEY]: '1',
-    },
-  }
+  return studioManagedMcpConfig(profile, serverName, toolset, { appHome: getWebUiHome(), port: process.env.PORT || '8648' })
 }
 
 function managedHermesMcpServerConfig(

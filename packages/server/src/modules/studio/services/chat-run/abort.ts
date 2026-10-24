@@ -1,8 +1,9 @@
+import { chatRunCaller, isDirectChatRunCaller, type ChatRunCallerTarget } from './caller'
 /**
  * Abort handler — cancels in-progress runs (both API server and CLI bridge).
  */
 
-import type { Server, Socket } from 'socket.io'
+import type { Server } from 'socket.io'
 import { updateSession, updateSessionStats } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
 import { chatCodingAgentRunManager as codingAgentRunManager } from '../../public/chat-agent-runtime'
@@ -51,11 +52,11 @@ function settleInterruptedBackgroundTasks(state: SessionState): Array<Record<str
 
 export async function handleAbort(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   sessionId: string,
   sessionMap: Map<string, SessionState>,
   bridge: any,
-  runQueuedItem: (socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void,
+  runQueuedItem: (socket: ChatRunCallerTarget, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void,
 ) {
   let state = sessionMap.get(sessionId)
   const hasCodingAgentRun = codingAgentRunManager.hasSession(sessionId)
@@ -259,11 +260,11 @@ export async function handleAbort(
 
 export async function markAbortCompleted(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   sessionId: string,
   runId: string,
   sessionMap: Map<string, SessionState>,
-  runQueuedItem: (socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void,
+  runQueuedItem: (socket: ChatRunCallerTarget, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void,
   synced = true,
   expectedRunMarker?: string,
 ) {
@@ -358,10 +359,10 @@ export async function markAbortCompleted(
   logger.info({ sessionId, runId, synced }, '[chat-run-socket][abort] completed')
 }
 
-function emitToSession(nsp: ReturnType<Server['of']>, socket: Socket, sessionId: string, event: string, payload: any) {
+function emitToSession(nsp: ReturnType<Server['of']>, socket: ChatRunCallerTarget, sessionId: string, event: string, payload: any) {
   const tagged = { ...payload, session_id: sessionId }
   nsp.to(`session:${sessionId}`).emit(event, tagged)
-  if (!nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
-    socket.emit(event, tagged)
+  if ((isDirectChatRunCaller(socket) || !nsp.adapter.rooms.get(`session:${sessionId}`)?.size) && chatRunCaller(socket).isActive()) {
+    chatRunCaller(socket).reply(event, tagged)
   }
 }

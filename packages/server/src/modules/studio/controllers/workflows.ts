@@ -1,3 +1,5 @@
+import { startWorkflowExecution } from '../services/workflow/start'
+import { StudioError } from '../contracts/plugins'
 import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/notifications/push-registration'
 import type { Context } from 'koa'
 import { assertWorkflowNodeSkillDependencies, getWorkflowManager, preflightWorkflowExecutionDefinition, preflightWorkflowRerunDefinition, type WorkflowRerunFromNodeInput, type WorkflowRunNowInput, type WorkflowUpdateInput, compileWorkflowGraphPreflight } from '../services/workflow/manager'
@@ -10,6 +12,9 @@ import { getWorkflowAvailableModelGroups } from '../public/workflow-runtime'
 import { assertWorkflowScheduleCron, nextWorkflowScheduleAt, normalizeWorkflowSchedule } from '../services/workflow/schedule'
 
 const MAX_BATCH_DELETE = 200
+const WORKFLOW_ERROR_STATUS: Partial<Record<StudioError['code'], number>> = {
+  FORBIDDEN: 403, NOT_FOUND: 404, REVISION_CONFLICT: 409, CANCELLED: 409, RUNTIME_UNAVAILABLE: 503,
+}
 
 function bodyRecord(ctx: Context): Record<string, unknown> {
   const body = ctx.request.body
@@ -660,31 +665,19 @@ export async function runNow(ctx: Context) {
   if (input.value !== undefined) runInput.input = input.value
   if (timeoutMs.value !== undefined) runInput.timeoutMs = timeoutMs.value
 
-  const manager = getWorkflowManager()
   try {
-    const preflight = await preflightWorkflowExecutionDefinition(workflow.nodes, workflow.edges, workflow.profile, runInput.startNodeIds || [])
-    await assertWorkflowExecutionCapabilities(workflow.profile, preflight.activeNodes)
-    let accept!: (run: unknown) => void
-    const accepted = new Promise<{ kind: 'accepted' }>(resolve => {
-      accept = () => resolve({ kind: 'accepted' })
-    })
     const auth = ctx.get('authorization')
     const pushActor = await authenticatedPushActor(auth.startsWith('Bearer ') ? auth.slice(7) : '')
-    const execution = manager.runNow(id, { ...runInput, ...(pushActor ? { pushActor, pushSnapshot: { ciphertext: prepareRunPushSnapshot(pushActor, body.push_snapshot), platform: String((body.push_snapshot as any)?.platform || 'unknown') } } : {}), onAccepted: accept })
-    const outcome = await Promise.race([
-      accepted,
-      execution.then(() => ({ kind: 'completed-before-acceptance' as const })),
-    ])
-    if (outcome.kind !== 'accepted') {
-      throw Object.assign(new Error('workflow execution completed before durable acceptance'), { status: 500 })
-    }
-    void execution.catch((err: any) => {
-      const message = err?.message || 'failed to run workflow'
-      logger.error(err, '[workflow] async run failed for workflow %s', id)
-      manager.setRuntimeStatus(id, { status: 'failed', completedAt: Date.now(), error: message })
+    const user = ctx.state?.user ? structuredClone(ctx.state.user) : undefined
+    await startWorkflowExecution(id, { ...runInput, ...(pushActor ? { pushActor, pushSnapshot: { ciphertext: prepareRunPushSnapshot(pushActor, body.push_snapshot), platform: String((body.push_snapshot as any)?.platform || 'unknown') } } : {}) }, {
+      authorize: profile => {
+        if (user && user.role !== 'super_admin' && !listUserProfiles(user.id).some(value => value.profile_name === profileName(profile))) {
+          throw Object.assign(new Error(`Profile "${profileName(profile)}" is not available for this user`), { status: 403 })
+        }
+      },
     })
   } catch (err: any) {
-    ctx.status = typeof err?.status === 'number' && err.status >= 400 && err.status <= 599 ? err.status : 400
+    ctx.status = err instanceof StudioError ? WORKFLOW_ERROR_STATUS[err.code] || 400 : typeof err?.status === 'number' && err.status >= 400 && err.status <= 599 ? err.status : 400
     ctx.body = { error: err?.message || 'workflow preflight failed' }
     return
   }

@@ -9,6 +9,7 @@ export interface HealthResponse {
   webui_latest?: string
   webui_update_available?: boolean
   node_version?: string
+  node_runtime?: 'node' | 'electron'
   is_docker?: boolean
   agent_bridge?: {
     status: string

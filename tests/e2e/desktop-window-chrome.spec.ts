@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { expectNewChatEffectsMoving } from './new-chat-helpers'
-import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
+import { authenticate, mockChatSocket, mockHermesApi, setDocumentDirection, TEST_ACCESS_KEY } from './fixtures'
 
 type DesktopPlatform = 'darwin' | 'linux' | 'win32'
 type DesktopWindowKind = 'main' | 'chat'
@@ -282,7 +282,7 @@ for (const platform of ['win32', 'linux'] as const) {
     await expect(controls.locator('.desktop-window-btn')).toHaveCount(3)
     const ltrPositions = await buttonPositions()
 
-    await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'))
+    await setDocumentDirection(page, 'rtl')
 
     await expect(titleBar).toHaveCSS('direction', 'ltr')
     await expect.poll(buttonPositions).toEqual(ltrPositions)
@@ -358,7 +358,7 @@ test('reserves the macOS traffic-light area above the avatar in LTR and RTL', as
   expect((await page.locator('.studio-navigation-rail').boundingBox())?.y).toBe(0)
   await expect(page.locator('.studio-navigation-rail')).toHaveCSS('border-right-width', '0px')
   for (const direction of ['ltr', 'rtl']) {
-    await page.evaluate(dir => document.documentElement.setAttribute('dir', dir), direction)
+    await setDocumentDirection(page, direction)
     const rail = (await page.locator('.studio-navigation-rail').boundingBox())!
     const avatar = (await page.locator('.studio-navigation-rail .page-sidebar-account-btn').boundingBox())!
     expect(rail.x).toBe(0)
@@ -546,7 +546,7 @@ test('keeps the chat tool drawer unchanged in LTR and mirrors its resize seam in
   await page.mouse.up()
   await expect.poll(async () => (await geometry()).panelWidth).toBeLessThan(ltr.panelWidth)
 
-  await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'))
+  await setDocumentDirection(page, 'rtl')
   await expect.poll(async () => {
     const current = await geometry()
     return Math.abs(current.panelLeft - current.wrapperLeft) <= 1
@@ -582,7 +582,7 @@ test('shows the mobile file tree from the inline start edge in LTR and RTL', asy
     return box ? Math.round(box.x) : null
   }).toBe(0)
 
-  await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'))
+  await setDocumentDirection(page, 'rtl')
   await expect.poll(async () => {
     const box = await tree.boundingBox()
     return box ? Math.round(box.x + box.width) : null

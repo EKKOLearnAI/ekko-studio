@@ -2615,6 +2615,53 @@ describe('session conversations controller', () => {
     } finally {stop()}
   })
 
+  it('uses the same removal outcome through HTTP and the scoped SDK', async () => {
+    getSessionMock.mockReturnValue({ id: 'session', profile: 'default', source: 'coding_agent' })
+    localDeleteSessionMock.mockReturnValue(true)
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const { removeStudioSession } = await import('../../packages/server/src/modules/studio/services/sessions/removal')
+    const { createExecutionContext } = await import('../../packages/server/src/modules/studio/services/context/execution')
+    const authorize = vi.fn(async () => {})
+    const controller = new AbortController()
+    const sdk = createExecutionContext({ scopeId: 'scope', principal: { kind: 'user', id: '1' }, profileId: 'default', surface: 'api', traceId: 'trace' },
+      controller.signal, { info() {}, warn() {}, error() {} }, { authorize, agents: { list: async () => [] }, sessions: {
+        get: async () => null, remove: (scope, id, signal) => removeStudioSession({ id, profileId: scope.profileId }, { signal, authorize: async () => {} }),
+      } })
+    const ctx: any = { params: { id: 'session' }, query: { profile: 'default' } }
+    await mod.remove(ctx)
+    const result = await sdk.sessions.remove('session')
+    expect(ctx.body).toEqual({ ok: true, deleted: result.deleted,
+      hermes: { attempted: result.native.attempted, deleted: result.native.deleted, profile: result.native.profileId } })
+    expect(authorize).toHaveBeenCalledWith(expect.objectContaining({ profileId: 'default' }), 'sessions.remove', 'session')
+    expect(codingAgentRunManagerMock.stop).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['remove', 'batchRemove'] as const)('does not stop or delete a same-ID local session in another profile through %s', async action => {
+    getSessionMock.mockReturnValue({ id: 'same', profile: 'default', source: 'coding_agent' })
+    getExactSessionDetailFromDbWithProfileMock.mockResolvedValue({ id: 'same' })
+    deleteHermesSessionForProfileMock.mockResolvedValue(true)
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'same' }, query: { profile: 'travel' }, request: { body: { sessions: [{ id: 'same', profile: 'travel' }] } } }
+    await mod[action](ctx)
+    expect(deleteHermesSessionForProfileMock).toHaveBeenCalledWith('same', 'travel')
+    expect(localDeleteSessionMock).not.toHaveBeenCalled()
+    expect(codingAgentRunManagerMock.stop).not.toHaveBeenCalled()
+  })
+
+  it.each(['remove', 'batchRemove'] as const)('rejects an unauthorized native-only profile through %s before inspecting or deleting', async action => {
+    getSessionMock.mockReturnValue(null)
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'default' }])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'native' }, query: { profile: 'travel' }, state: { user: { id: 1, role: 'user' } },
+      request: { body: { sessions: [{ id: 'native', profile: 'travel' }] } } }
+    await mod[action](ctx)
+    if (action === 'remove') expect(ctx.status).toBe(403)
+    else expect(ctx.body).toMatchObject({ failed: 1, deleted: 0 })
+    expect(getExactSessionDetailFromDbWithProfileMock).not.toHaveBeenCalled()
+    expect(localDeleteSessionMock).not.toHaveBeenCalled()
+    expect(codingAgentRunManagerMock.stop).not.toHaveBeenCalled()
+  })
+
   it('deletes a current-profile Hermes history session even when no local Web UI session exists', async () => {
     getActiveProfileNameMock.mockReturnValue('travel')
     getSessionMock.mockReturnValue(null)
@@ -2650,7 +2697,7 @@ describe('session conversations controller', () => {
     expect(codingAgentRunManagerMock.stop).toHaveBeenCalledWith('codex-session', { reportClosed: false })
     expect(getExactSessionDetailFromDbWithProfileMock).not.toHaveBeenCalled()
     expect(deleteHermesSessionForProfileMock).not.toHaveBeenCalled()
-    expect(localDeleteSessionMock).toHaveBeenCalledWith('codex-session')
+    expect(localDeleteSessionMock).toHaveBeenCalledWith('codex-session', { id: expect.any(String), occurredAt: expect.any(Number) })
     expect(ctx.body).toEqual({
       ok: true,
       deleted: true,
@@ -2689,8 +2736,8 @@ describe('session conversations controller', () => {
     expect(getExactSessionDetailFromDbWithProfileMock).toHaveBeenCalledWith('travel-session', 'travel')
     expect(deleteHermesSessionForProfileMock).toHaveBeenCalledWith('default-session', 'default')
     expect(deleteHermesSessionForProfileMock).toHaveBeenCalledWith('travel-session', 'travel')
-    expect(localDeleteSessionMock).toHaveBeenCalledWith('default-session')
-    expect(localDeleteSessionMock).toHaveBeenCalledWith('travel-session')
+    expect(localDeleteSessionMock).toHaveBeenCalledWith('default-session', { id: expect.any(String), occurredAt: expect.any(Number) })
+    expect(localDeleteSessionMock).toHaveBeenCalledWith('travel-session', { id: expect.any(String), occurredAt: expect.any(Number) })
     expect(ctx.body).toMatchObject({ ok: true, deleted: 2, failed: 0, hermesDeleted: 2 })
   })
 
@@ -2716,7 +2763,7 @@ describe('session conversations controller', () => {
     expect(codingAgentRunManagerMock.stop).toHaveBeenCalledWith('codex-session', { reportClosed: false })
     expect(getExactSessionDetailFromDbWithProfileMock).not.toHaveBeenCalled()
     expect(deleteHermesSessionForProfileMock).not.toHaveBeenCalled()
-    expect(localDeleteSessionMock).toHaveBeenCalledWith('codex-session')
+    expect(localDeleteSessionMock).toHaveBeenCalledWith('codex-session', { id: expect.any(String), occurredAt: expect.any(Number) })
     expect(ctx.body).toMatchObject({ ok: true, deleted: 1, failed: 0, hermesDeleted: 0 })
   })
 

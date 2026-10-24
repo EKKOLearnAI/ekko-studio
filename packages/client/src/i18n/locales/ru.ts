@@ -628,7 +628,6 @@ export default {
     updateSuccess: 'Обновление успешно. Обновите страницу. Если долго не запускается, запустите вручную.',
     updateFailed: 'Ошибка обновления',
     logout: 'Выйти',
-    nodeVersionWarning: 'Обнаружена Node.js v{version}. Пожалуйста, обновитесь до версии 23 или выше.',
     changelog: 'Список изменений',
     noChangelog: 'Нет списка изменений',
     versionManagement: 'Управление версиями',

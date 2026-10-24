@@ -88,6 +88,7 @@ export class StudioHealthService {
             && isNewerVersion(this.cachedLatestVersion, this.localVersion),
           ),
       node_version: process.versions.node,
+      node_runtime: process.versions.electron ? 'electron' : 'node',
       agent_bridge: agentBridge,
       is_docker: this.dependencies.isDockerContainer(),
     }

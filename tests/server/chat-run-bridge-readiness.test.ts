@@ -20,6 +20,8 @@ vi.mock('../../packages/server/src/modules/studio/repositories/task-plan-store',
 }))
 
 const handleBridgeRunMock = vi.hoisted(() => vi.fn(async () => {}))
+const handleAbortMock = vi.hoisted(() => vi.fn(async (..._args: any[]) => {}))
+vi.mock('../../packages/server/src/modules/studio/services/chat-run/abort', () => ({ handleAbort: handleAbortMock }))
 const resumeBridgeRunMock = vi.hoisted(() => vi.fn(async () => {}))
 const handleEkkoAgentRunMock = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run', () => ({
@@ -436,6 +438,18 @@ describe('ensureBridgeReadyForChatRun', () => {
 })
 
 describe('ChatRunSocket bridge readiness gating', () => {
+  it('uses an internal caller port for orchestrated cancellation', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    await server.abortSession('internal', 'Workflow stopped')
+    const caller = handleAbortMock.mock.calls.at(-1)![1]
+    expect(caller.kind).toBe('direct')
+    expect(caller).not.toHaveProperty('emit')
+    expect(caller).not.toHaveProperty('to')
+    expect(caller.isActive()).toBe(false)
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     startBridgeMock.mockReset()
@@ -1377,4 +1391,276 @@ describe('cross-profile session resume', () => {
     }))
     expect(resumeSession).not.toHaveBeenCalled()
   })
+})
+
+describe('direct chat admission and delivery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    userCanAccessProfileMock.mockReturnValue(true)
+    getSessionMock.mockImplementation((id?: string) => id ? { id, profile: 'default', source: 'cli', model: 'test', provider: 'openai' } : undefined)
+    ensureReadyMock.mockResolvedValue({ reachable: true, status: 'ready' })
+    handleBridgeRunMock.mockReset()
+    handleEkkoAgentRunMock.mockReset()
+    handleCodingAgentRunMock.mockReset()
+    bridgeMock.close.mockResolvedValue(undefined)
+  })
+  const tick = () => new Promise(resolve => setImmediate(resolve))
+  const options = (onEvent = vi.fn()) => ({ profile: 'default', user: { id: 42, username: 'owner', role: 'super_admin' as const }, pushActor: vi.fn(async () => null), onEvent })
+
+  it('cancels before admission without queuing, binding or starting', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness(), server = new ChatRunSocket(io as any), opts = options()
+    const handle = server.startDirectRun({ input: 'hello', session_id: 'session-1' }, opts)
+    await handle.cancel!()
+    await tick()
+    expect(opts.onEvent).toHaveBeenCalledWith('abort.completed', expect.objectContaining({ synced: true }))
+    expect(opts.pushActor).not.toHaveBeenCalled()
+    expect(handleBridgeRunMock).not.toHaveBeenCalled()
+    expect(handleAbortMock).not.toHaveBeenCalled()
+    handle.dispose(); await server.close()
+  })
+
+  it('cancels only its own queued input and guards a dequeued authorization race', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness(), server = new ChatRunSocket(io as any)
+    const state = { isWorking: true, messages: [], queue: [] as any[], events: [] }
+    ;(server as any).sessionMap.set('session-1', state)
+    const first = server.startDirectRun({ input: 'first', session_id: 'session-1' }, options())
+    const second = server.startDirectRun({ input: 'second', session_id: 'session-1' }, options())
+    await tick()
+    const queued = state.queue[0]
+    await first.cancel!()
+    expect(state.queue.map(item => item.input)).toEqual(['second'])
+    await expect(queued.authorize()).rejects.toThrow('cancelled')
+    expect(state.isWorking).toBe(true)
+    expect(handleAbortMock).not.toHaveBeenCalled()
+    first.dispose(); second.dispose(); await server.close()
+  })
+
+  it('defers cancellation during setup until its runtime starts and never aborts the next run', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness(), server = new ChatRunSocket(io as any), opts = options()
+    let notify!: (event: string, payload: unknown) => void
+    handleCodingAgentRunMock.mockImplementationOnce(async (...args: any[]) => {
+      args[1].observeSession('session-1')
+      notify = args[1].reply
+    })
+    const handle = server.startDirectRun({ input: 'hello', session_id: 'session-1', source: 'coding_agent', coding_agent_id: 'codex' }, opts)
+    await tick()
+    await handle.cancel!()
+    expect(handleAbortMock).not.toHaveBeenCalled()
+    notify('run.started', { run_id: 'own-run' })
+    await tick()
+    expect(handleAbortMock).toHaveBeenCalledOnce()
+    expect(handleAbortMock.mock.calls[0][1]).toMatchObject({ kind: 'direct', executionScope: { sessionId: 'session-1' } })
+    notify('run.completed', { output: 'completion won' })
+    await handle.cancel!()
+    expect(handleAbortMock).toHaveBeenCalledOnce()
+    handle.dispose(); await server.close()
+  })
+
+  it('does not run a pending native abort after completion arrives in the same turn', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness(), server = new ChatRunSocket(io as any), opts = options()
+    let notify!: (event: string, payload: unknown) => void
+    handleCodingAgentRunMock.mockImplementationOnce(async (...args: any[]) => { notify = args[1].reply })
+    const handle = server.startDirectRun({ input: 'hello', session_id: 'session-1', source: 'coding_agent', coding_agent_id: 'codex' }, opts)
+    await tick()
+    await handle.cancel!()
+    notify('run.started', { run_id: 'own-run' })
+    notify('run.completed', { output: 'done' })
+    await tick()
+    expect(handleAbortMock).not.toHaveBeenCalled()
+    handle.dispose(); await server.close()
+  })
+
+  it.each(['cli', 'builtin_agent'])('delivers %s callbacks without a Socket object even with Web observers', async source => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, namespace } = makeServerHarness()
+    namespace.adapter.rooms.set('session:session-1', new Set(['web-observer']))
+    const server = new ChatRunSocket(io as any)
+    const mock = source === 'cli' ? handleBridgeRunMock : handleEkkoAgentRunMock
+    mock.mockImplementationOnce(async (...args: any[]) => {
+      const caller = args[1], data = args[2]
+      expect(caller).toMatchObject({ kind: 'direct', user: { id: 42 } })
+      expect(caller).not.toHaveProperty('handshake')
+      expect(caller).not.toHaveProperty('join')
+      expect(caller).not.toHaveProperty('emit')
+      data.onEvent('message.delta', { delta: 'hello', session_id: 'session-1' })
+      data.onEvent('run.completed', { session_id: 'session-1' })
+    })
+    const opts = options()
+    const handle = server.startDirectRun({ input: 'hello', session_id: 'session-1', source, ...(source === 'builtin_agent' ? { agent_id: 'ekko-agent' } : {}) }, opts)
+    await tick()
+    expect(mock).toHaveBeenCalledOnce()
+    expect(opts.onEvent.mock.calls.map(call => call[0])).toEqual(['message.delta', 'run.completed'])
+    handle.dispose()
+    await server.close()
+  })
+
+  it('waits for its own queued native run, retaining identity without any connected sockets', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, emitted } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const state = { isWorking: true, messages: [], queue: [] as any[], events: [], profile: 'default' }
+    ;(server as any).sessionMap.set('session-1', state)
+    const opts = options()
+    const handle = server.startDirectRun({ input: 'queued', session_id: 'session-1', source: 'coding_agent', coding_agent_id: 'codex' }, opts)
+    await tick()
+    expect(state.queue).toHaveLength(1)
+    expect(JSON.stringify(emitted)).not.toContain('directCaller')
+    server.emitExternalEvent('session-1', 'run.completed', { output: 'previous result' })
+    expect(opts.onEvent).not.toHaveBeenCalledWith('run.completed', expect.anything())
+    handleCodingAgentRunMock.mockImplementationOnce(async (...args: any[]) => {
+      const caller = args[1]
+      expect(caller.user.id).toBe(42)
+      caller.observeSession('session-1')
+      server.emitExternalEvent('session-1', 'message.delta', { delta: 'own result' })
+      server.emitExternalEvent('session-1', 'run.completed', { output: 'own result' })
+    })
+    server.markExternalRunCompleted('session-1', 'run.completed')
+    await tick()
+    expect(handleCodingAgentRunMock).toHaveBeenCalledOnce()
+    expect(opts.onEvent).toHaveBeenCalledWith('run.completed', expect.objectContaining({ output: 'own result' }))
+    handle.dispose()
+    expect((server as any).runWaiters.size).toBe(0)
+    await server.close()
+  })
+
+  it('continues queued input with its original caller after the HTTP observer detaches', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).sessionMap.set('session-1', { isWorking: true, messages: [], queue: [], events: [] })
+    const controller = new AbortController()
+    const opts = { ...options(), context: { signal: controller.signal, scope: {
+      scopeId: 'context', traceId: 'trace', surface: 'api' as const, profileId: 'default', sessionId: 'session-1',
+      principal: { kind: 'user' as const, id: '42' },
+    } } }
+    const input = { input: 'queued', session_id: 'session-1', source: 'coding_agent', coding_agent_id: 'codex' as const }
+    const handle = server.startDirectRun(input, opts)
+    input.input = 'changed'
+    opts.user.id = 999
+    opts.context.scope.principal.id = '999'
+    await tick()
+    controller.abort()
+    handle.dispose()
+    opts.onEvent.mockClear()
+    handleCodingAgentRunMock.mockImplementationOnce(async (...args: any[]) => {
+      expect(args[1].user.id).toBe(42)
+      expect(args[1].executionScope).toMatchObject({ scopeId: 'context', principal: { id: '42' }, sessionId: 'session-1' })
+      expect(args[2].input).toBe('queued')
+      args[1].observeSession('session-1')
+      args[1].reply('run.completed', {})
+    })
+    server.markExternalRunCompleted('session-1', 'run.completed')
+    await tick()
+    expect(handleCodingAgentRunMock).toHaveBeenCalledOnce()
+    expect(opts.onEvent).not.toHaveBeenCalled()
+    expect((server as any).runWaiters.size).toBe(0)
+    await server.close()
+  })
+
+  it('rejects a cancelled host context before queue, device binding or execution', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const controller = new AbortController()
+    const opts = { ...options(), context: { signal: controller.signal, scope: {
+      scopeId: 'context', traceId: 'trace', surface: 'api' as const, profileId: 'default', sessionId: 'session-1',
+      principal: { kind: 'user' as const, id: '42' },
+    } } }
+    const handle = server.startDirectRun({ input: 'cancelled', session_id: 'session-1' }, opts)
+    controller.abort()
+    await tick()
+    expect(opts.onEvent).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'Chat admission was cancelled' }))
+    expect(opts.pushActor).not.toHaveBeenCalled()
+    expect(handleBridgeRunMock).not.toHaveBeenCalled()
+    expect((server as any).sessionMap.size).toBe(0)
+    handle.dispose()
+    await server.close()
+  })
+
+  it('drops only the revoked direct caller’s queued input', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const state = { isWorking: true, messages: [], queue: [] as any[], events: [] }
+    ;(server as any).sessionMap.set('session-1', state)
+    const first = server.startDirectRun({ input: 'first', session_id: 'session-1' }, options())
+    const second = server.startDirectRun({ input: 'second', session_id: 'session-1' }, options())
+    await tick()
+    expect(state.queue).toHaveLength(2)
+    first.dispose(); first.dropQueued()
+    expect(state.queue.map(item => item.input)).toEqual(['second'])
+    expect(state.isWorking).toBe(true)
+    second.dispose()
+    await server.close()
+  })
+
+  it('reports queued execution rejection to the originating direct caller', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    ;(server as any).sessionMap.set('session-1', { isWorking: true, messages: [], queue: [], events: [] })
+    const opts = options()
+    const handle = server.startDirectRun({ input: 'queued', session_id: 'session-1', source: 'coding_agent', coding_agent_id: 'codex' }, opts)
+    await tick()
+    handleCodingAgentRunMock.mockRejectedValueOnce(new Error('launch failed'))
+    server.markExternalRunCompleted('session-1', 'run.completed')
+    await tick()
+    expect(opts.onEvent).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'launch failed' }))
+    handle.dispose()
+    await server.close()
+  })
+
+  it('rejects a revoked share before it can enter the queue', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const opts = { ...options(), shared: true, reauthorize: vi.fn(async () => { throw new Error('share_access_denied') }) }
+    const handle = server.startDirectRun({ input: 'secret', session_id: 'session-1' }, opts)
+    await tick()
+    expect(opts.onEvent).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'share_access_denied' }))
+    expect(handleBridgeRunMock).not.toHaveBeenCalled()
+    expect((server as any).sessionMap.size).toBe(0)
+    handle.dispose()
+    await server.close()
+  })
+  it('keeps device-consent events scoped to the authenticated device', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const target = { deviceCode: 'phone', userId: '42', profile: 'default' }
+    const opts = { ...options(), mobileDeviceTarget: target }
+    handleCodingAgentRunMock.mockImplementationOnce(async (...args: any[]) => { args[1].observeSession('session-1') })
+    const handle = server.startDirectRun({ input: 'hello', session_id: 'session-1', source: 'coding_agent', coding_agent_id: 'codex' }, opts)
+    await tick()
+    ;(server as any).emitMobileCalendarEvent('default', 'session-1', 'calendar.requested', {
+      target_device_id: 'another-phone', target_user_id: '42', target_profile: 'default',
+    })
+    expect(opts.onEvent).not.toHaveBeenCalled()
+    ;(server as any).emitMobileCalendarEvent('default', 'session-1', 'calendar.requested', {
+      target_device_id: 'phone', target_user_id: '42', target_profile: 'default',
+    })
+    ;(server as any).emitMobileLocationEvent('default', 'session-1', 'location.requested', {})
+    expect(opts.onEvent.mock.calls.map(call => call[0])).toEqual(['calendar.requested', 'location.requested'])
+    handle.dispose()
+    await server.close()
+  })
+
+  it('settles a queued observer on shutdown and rejects new work', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const opts = options()
+    const handle = server.startDirectRun({ input: 'hello', session_id: 'session-1' }, opts)
+    await server.close()
+    await tick()
+    expect(opts.onEvent).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'Chat run service is shutting down' }))
+    expect(handleBridgeRunMock).not.toHaveBeenCalled()
+    expect(() => server.startDirectRun({ input: 'late' }, opts)).toThrow('unavailable')
+    handle.dispose()
+  })
+
 })

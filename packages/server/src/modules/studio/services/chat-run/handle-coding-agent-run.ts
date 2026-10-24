@@ -1,10 +1,11 @@
+import { chatRunCaller, type ChatRunCallerTarget } from './caller'
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
 import { codingAgentId } from './types'
 import { studioMcpCapabilities, type StudioMcpCapabilities } from '../../public/runs/mcp-capabilities'
 import { clarificationTurnInstruction } from '../clarification-runs'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
-import type { Server, Socket } from 'socket.io'
+import type { Server } from 'socket.io'
 import { chatCodingAgentRunManager as codingAgentRunManager } from '../../public/chat-agent-runtime'
 import {
   getChatCodingAgentMcpServers,
@@ -58,19 +59,19 @@ export interface CodingAgentRunSocketData {
 
 export async function handleCodingAgentRun(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   data: CodingAgentRunSocketData,
   profile: string,
   sessionMap: Map<string, SessionState>,
 ) {
   const sessionId = String(data.session_id || '').trim()
   if (!sessionId) {
-    socket.emit('run.failed', { event: 'run.failed', error: 'session_id is required for coding agent runs' })
+    chatRunCaller(socket).reply('run.failed', { event: 'run.failed', error: 'session_id is required for coding agent runs' })
     return
   }
-  const socketUser = socket.data?.user as AuthenticatedUser | undefined
+  const socketUser = chatRunCaller(socket).user as AuthenticatedUser | undefined
 
-  socket.join(`session:${sessionId}`)
+  chatRunCaller(socket).observeSession(sessionId)
   const agentId = codingAgentId(data)
   const mcpCapabilities = data.studio_mcp_capabilities
     ?? studioMcpCapabilities(getChatCodingAgentMcpServers(agentId, profile))

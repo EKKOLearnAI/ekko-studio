@@ -1,5 +1,6 @@
+import { chatRunCaller, isDirectChatRunCaller, type ChatRunCallerTarget } from '../../studio/public/chat-run-caller'
 import { isNativeCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
-import type { Server, Socket } from 'socket.io'
+import type { Server } from 'socket.io'
 import { addMessage, getSession, updateSessionStats } from '../../studio/public/sessions'
 import { getModelContextLength } from '../../studio/public/provider-runtime'
 import { calcAndUpdateUsage, getOrCreateSession } from '../../studio/public/run-state'
@@ -54,7 +55,7 @@ export interface CodingAgentSessionCommandData {
 
 export async function handleCodingAgentSessionCommand(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   data: CodingAgentSessionCommandData,
   command: ParsedCodingAgentCommand,
   profile: string,
@@ -62,7 +63,8 @@ export async function handleCodingAgentSessionCommand(
 ): Promise<void> {
   const sessionId = String(data.session_id || '').trim()
   if (!sessionId) return
-  socket.join(`session:${sessionId}`)
+  // Native /compact can finish asynchronously through external run events.
+  chatRunCaller(socket).observeSession(sessionId)
   const state = getOrCreateSession(sessionMap, sessionId)
   const displayCommand = `/${command.rawName}${command.args ? ` ${command.args}` : ''}`
   persistCommandMessage(sessionId, state, displayCommand)
@@ -452,14 +454,14 @@ function persistCommandMessage(sessionId: string, state: SessionState, content: 
 
 function emitToSession(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   sessionId: string,
   event: string,
   payload: Record<string, unknown>,
 ) {
   const tagged = { ...payload, session_id: sessionId }
   nsp.to(`session:${sessionId}`).emit(event, tagged)
-  if (!nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
-    socket.emit(event, tagged)
+  if ((isDirectChatRunCaller(socket) || !nsp.adapter.rooms.get(`session:${sessionId}`)?.size) && chatRunCaller(socket).isActive()) {
+    chatRunCaller(socket).reply(event, tagged)
   }
 }

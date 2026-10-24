@@ -1,77 +1,12 @@
-import type { ModelClient, ModelProviderConfig } from '../../../../../../ekko-agent/src/model/types'
-import { getSessionAvailableModelGroups } from '../../public/session-agent-runtime'
-import { resolveProviderCatalogApiMode } from '../../contracts/providers'
-import {
-  createChatEkkoAuthorizedProviderFetch, createChatEkkoModelClient,
-  resolveChatEkkoModelProviderConfigs, resolveChatEkkoProviderRuntimeConfig,
-} from '../../public/chat-agent-runtime'
+import { hostedModelCatalog as unifiedCatalog, hostedModelApiMode as apiMode, hostedModelCallable as callable,
+  hostedModelSupported as supported, resolveHostedModel } from '../models/hosted-provider'
 import { logger } from '../../public/logging'
 import { recordSessionUsage, type RecordedUsage } from '../usage/usage-recorder'
 import { ModelApiError, modelApiErrorBody } from './errors'
 import { responsesModelRequest, validateResponsesBody } from './input'
 import { ResponsesOutput, type ResponsesEvent } from './output'
 import { reasoningCodec } from './reasoning'
-import { findModelApiKey } from './keys'
 import { checkModelApiBudget, startModelApiKeyRequest } from './budget'
-
-interface ModelGroup {
-  provider: string
-  models: string[]
-  base_url?: string
-  api_key?: string
-  api_mode?: string
-  api_mode_by_model?: Record<string, string>
-  model_meta?: Record<string, { disabled?: boolean }>
-}
-
-function qualifiedId(provider: string, model: string): string {
-  // Custom provider names may contain slashes; avoid colliding with a nested model ID.
-  return `${provider.replaceAll('%', '%25').replaceAll('/', '%2F')}/${model}`
-}
-
-function apiMode(group: ModelGroup, model: string): string | undefined {
-  return group.api_mode_by_model?.[model] || group.api_mode || resolveProviderCatalogApiMode(group.provider, model)
-}
-
-function supported(group: ModelGroup, model: string): boolean {
-  return !['bedrock_converse', 'codex_app_server'].includes(apiMode(group, model) || '')
-}
-
-interface CatalogEntry { profile: string; group: ModelGroup; model: string }
-function callable(entry: CatalogEntry): boolean {
-  return supported(entry.group, entry.model) && !entry.group.model_meta?.[entry.model]?.disabled
-}
-
-function isSelfModelApi(group: ModelGroup): boolean {
-  if (!group.base_url || !group.api_key) return false
-  let url: URL
-  try { url = new URL(group.base_url) } catch { return false }
-  if (!['http:', 'https:'].includes(url.protocol) || !url.pathname.replace(/\/+$/, '').endsWith('/api/ekko-studio/models/v1')) return false
-  // A locally issued key identifies this instance even behind a proxy or LAN URL.
-  // Do not re-export the cached catalog of a provider pointing back to ourselves.
-  return findModelApiKey(group.api_key.trim()) !== null
-}
-
-async function unifiedCatalog(profiles: string[]): Promise<Map<string, CatalogEntry>> {
-  const names = [...new Set(profiles)]
-  const groupsByProfile = await Promise.all(names.map(profile => getSessionAvailableModelGroups(profile) as Promise<ModelGroup[]>))
-  const catalog = new Map<string, CatalogEntry>()
-  for (const [index, groups] of groupsByProfile.entries()) {
-    for (const group of groups) {
-      // MoA presets require agent orchestration and are not public API models.
-      if (group.provider === 'moa' || isSelfModelApi(group)) continue
-      for (const model of group.models) {
-        const id = qualifiedId(group.provider, model)
-        const entry = { profile: names[index], group, model }
-        const existing = catalog.get(id)
-        // Keep a callable configuration over a disabled/unsupported duplicate.
-        // Otherwise the caller's stable Profile order wins, independent of fetch timing.
-        if (!existing || (!callable(existing) && callable(entry))) catalog.set(id, entry)
-      }
-    }
-  }
-  return catalog
-}
 
 export async function listApiModels(profiles: string[], allowedModels?: readonly string[]) {
   const catalog = await unifiedCatalog(profiles)
@@ -91,9 +26,14 @@ export async function prepareModelResponse(input: {
   allowedModels?: readonly string[]
   body: unknown
   signal: AbortSignal
+  /** Trusted host binding; never read from the public request body. */
+  internal?: { id: string; sessionId?: string; parentRunId?: string; authorize(): void }
 }) {
   validateResponsesBody(input.body)
-  const checkBudget = () => { if (input.apiKeyId && input.accountId) checkModelApiBudget(Number(input.accountId), input.apiKeyId) }
+  const checkBudget = () => {
+    input.internal?.authorize()
+    if (input.apiKeyId && input.accountId) checkModelApiBudget(Number(input.accountId), input.apiKeyId)
+  }
   const startAccounting = (id: string) => input.apiKeyId && input.accountId ? startModelApiKeyRequest(Number(input.accountId), input.apiKeyId, id) : () => {}
   checkBudget()
   const body = input.body
@@ -103,28 +43,23 @@ export async function prepareModelResponse(input: {
   if (!selected || selected.group.model_meta?.[selected.model]?.disabled) throw new ModelApiError('Model is not available.', 404, 'model')
   const { profile, group, model } = selected
   if (!supported(group, model)) throw new ModelApiError('This provider requires a runtime that does not support direct model requests.', 501, 'model')
-  const runtime = await resolveChatEkkoProviderRuntimeConfig({ profile, provider: group.provider, model, apiMode: apiMode(group, model) })
-  const resolved: { providerConfig: ModelProviderConfig } = resolveChatEkkoModelProviderConfigs({
-    ...runtime, provider: group.provider, model,
-  })
-  const codec = await reasoningCodec(JSON.stringify([profile, group.provider, model, resolved.providerConfig.baseUrl, resolved.providerConfig.requestStyle]))
+  const { client, baseUrl, accountingBaseUrl, requestStyle } = await resolveHostedModel(selected, input.internal?.authorize)
+  const codec = await reasoningCodec(JSON.stringify([profile, group.provider, model, baseUrl, requestStyle]))
   const request = responsesModelRequest(body, model, codec, input.signal)
-  const client: ModelClient = createChatEkkoModelClient(resolved.providerConfig, { fetch: createChatEkkoAuthorizedProviderFetch({
-    profile, provider: group.provider, model, accessToken: runtime.apiKey,
-  }) })
   if (request.messages.some(message => message.contentParts?.some(part => part.type === 'image')) && !client.capabilities.vision) {
     throw new ModelApiError('This model does not support images.', 400, 'input')
   }
-  const output = new ResponsesOutput(body.model, codec, body, resolved.providerConfig.requestStyle !== 'openai-responses')
+  const output = new ResponsesOutput(body.model, codec, body, requestStyle !== 'openai-responses', input.internal?.id)
   let recorded = false
   const record = (startedAt: number) => {
     if (recorded) return
     recorded = true
     recordSessionUsage({
       onRecorded: input.onUsage,
-      sessionId: '', runId: output.id, origin: 'external', accountId: input.accountId, modelApiKeyId: input.apiKeyId,
+      sessionId: input.internal?.sessionId || '', runId: output.id, origin: input.internal ? 'internal' : 'external', accountId: input.accountId, modelApiKeyId: input.apiKeyId,
+      ...(input.internal ? { parentRunId: input.internal.parentRunId, requirePersistence: true } : {}),
       source: 'model_api', agent: 'model_api', usageScope: 'model_call', apiCalls: 1,
-      profile, provider: group.provider, model, baseUrl: runtime.baseUrl,
+      profile, provider: group.provider, model, baseUrl: accountingBaseUrl,
       usage: output.usage, apiDuration: (performance.now() - startedAt) / 1000,
     })
   }

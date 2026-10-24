@@ -706,7 +706,6 @@ export default {
     updateSuccess: 'Update successful. Please refresh the page shortly. If it does not start after a while, start it manually.',
     updateFailed: 'Update failed',
     logout: 'Sign Out',
-    nodeVersionWarning: 'Detected Node.js v{version}. Please upgrade to version 23 or later.',
     changelog: 'Changelog',
     noChangelog: 'No changelog available',
     versionManagement: 'Version Management',
