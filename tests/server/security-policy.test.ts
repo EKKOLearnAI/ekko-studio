@@ -92,6 +92,43 @@ describe('server security policy', () => {
     expect(response.headers.get('strict-transport-security')).toContain('max-age=31536000')
   })
 
+  async function fetchContentSecurityPolicy(options?: Parameters<typeof securityHeaders>[0]): Promise<string> {
+    const app = new Koa()
+    app.use(securityHeaders(options))
+    app.use((ctx) => {
+      ctx.body = { ok: true }
+    })
+    const server = app.listen(0)
+    servers.push(server)
+    await new Promise<void>((resolve) => server.once('listening', () => resolve()))
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('expected tcp server')
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/health`)
+    return response.headers.get('content-security-policy') || ''
+  }
+
+  function cspDirective(policy: string, name: string): string | undefined {
+    return policy.split(';').map(part => part.trim()).find(part => part.startsWith(`${name} `))
+  }
+
+  it('does not let the browser load remote images by default', async () => {
+    const policy = await fetchContentSecurityPolicy()
+
+    expect(cspDirective(policy, 'img-src')).toBe("img-src 'self' data: blob:")
+    expect(policy).toContain("default-src 'self'")
+    expect(cspDirective(policy, 'connect-src')).toBe("connect-src 'self' http: https: ws: wss:")
+  })
+
+  it('re-allows remote https images only when explicitly enabled', async () => {
+    const policy = await fetchContentSecurityPolicy({ allowRemoteImages: true })
+
+    expect(cspDirective(policy, 'img-src')).toBe("img-src 'self' data: blob: https:")
+
+    const disabled = await fetchContentSecurityPolicy({ allowRemoteImages: false })
+    expect(cspDirective(disabled, 'img-src')).toBe("img-src 'self' data: blob:")
+  })
+
   it('preserves the opener only for the dedicated group chat Agent authorization document', async () => {
     const app = new Koa()
     app.use(securityHeaders())

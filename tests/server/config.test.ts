@@ -7,6 +7,7 @@ import {
   getListenHost,
   getWebUiHome,
   isAppEntitlementRequired,
+  isRemoteImagesAllowed,
   shouldCreateWebUiDataDir,
 } from '../../packages/server/src/modules/studio/public/config'
 
@@ -46,6 +47,17 @@ describe('server config', () => {
 
   it('uses CORS_ORIGINS when provided', () => {
     expect(getCorsOrigins({ CORS_ORIGINS: ' https://app.example, http://localhost:3000 ' })).toBe('https://app.example, http://localhost:3000')
+  })
+
+  it('keeps remote images off unless HERMES_WEB_UI_ALLOW_REMOTE_IMAGES opts in', () => {
+    expect(isRemoteImagesAllowed({})).toBe(false)
+    expect(isRemoteImagesAllowed({ HERMES_WEB_UI_ALLOW_REMOTE_IMAGES: '' })).toBe(false)
+    expect(isRemoteImagesAllowed({ HERMES_WEB_UI_ALLOW_REMOTE_IMAGES: '0' })).toBe(false)
+    expect(isRemoteImagesAllowed({ HERMES_WEB_UI_ALLOW_REMOTE_IMAGES: 'false' })).toBe(false)
+    expect(isRemoteImagesAllowed({ HERMES_WEB_UI_ALLOW_REMOTE_IMAGES: 'maybe' })).toBe(false)
+    expect(isRemoteImagesAllowed({ HERMES_WEB_UI_ALLOW_REMOTE_IMAGES: '1' })).toBe(true)
+    expect(isRemoteImagesAllowed({ HERMES_WEB_UI_ALLOW_REMOTE_IMAGES: ' TRUE ' })).toBe(true)
+    expect(isRemoteImagesAllowed({ HERMES_WEB_UI_ALLOW_REMOTE_IMAGES: 'on' })).toBe(true)
   })
 
   it('normalizes the Docker LAN advertise origin', () => {

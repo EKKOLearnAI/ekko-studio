@@ -8,6 +8,8 @@ import { homedir } from 'os'
  * - PORT: Web UI listen port. Default: 8648.
  * - BIND_HOST: Web UI bind host. Default: 0.0.0.0.
  * - CORS_ORIGINS: Comma/space-separated cross-origin allowlist. Default: same host only.
+ * - HERMES_WEB_UI_ALLOW_REMOTE_IMAGES: Set 1/true/yes/on to let the browser load remote https images
+ *   (CSP img-src https:). Default: off, so a remote image URL in rendered model output is not fetched.
  *
  * Web UI storage:
  * - HERMES_WEB_UI_HOME: Web UI data home for auth token, credentials, logs, DB, and default uploads.
@@ -62,6 +64,11 @@ export function getCorsOrigins(env: Record<string, string | undefined> = process
   return env.CORS_ORIGINS?.trim() || ''
 }
 
+export function isRemoteImagesAllowed(env: Record<string, string | undefined> = process.env): boolean {
+  const value = String(env.HERMES_WEB_UI_ALLOW_REMOTE_IMAGES || '').trim().toLowerCase()
+  return ['1', 'true', 'yes', 'on'].includes(value)
+}
+
 export function getLanAdvertiseUrl(env: Record<string, string | undefined> = process.env): string {
   const value = env.HERMES_LAN_ADVERTISE_URL?.trim()
   if (!value) return ''
@@ -99,6 +106,7 @@ export const config = {
     ? resolve(__dirname, '../../../../data')
     : resolve(__dirname, '..', 'data'),
   corsOrigins: getCorsOrigins(),
+  allowRemoteImages: isRemoteImagesAllowed(),
   lanAdvertiseUrl: getLanAdvertiseUrl(),
   remoteRelay,
   appRelay,
