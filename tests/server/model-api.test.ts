@@ -329,6 +329,17 @@ describe('public Responses model API', () => {
     expect(mocks.record.mock.calls[0][0].usage.inputTokens).toBe(12)
   })
 
+  it('classifies a provider timeout in the failed stream frame without echoing the cause', async () => {
+    mocks.createClient.mockReturnValue({ capabilities: {}, async *stream(): AsyncIterable<ModelEvent> {
+      throw new DOMException('https://upstream.example/v1 timed out with key sk-upstream-secret', 'TimeoutError')
+    } })
+    const events = await Array.fromAsync((await prepare(body({ stream: true }))).events())
+    const failed = events.at(-1) as any
+    expect(failed.type).toBe('response.failed')
+    expect(failed.response.error).toMatchObject({ type: 'server_error', code: 'provider_timeout' })
+    expect(JSON.stringify(events)).not.toContain('sk-upstream-secret')
+  })
+
   it('keeps separate Gemini streaming tool calls and multiple tool rounds distinct', async () => {
     mocks.groups.mockResolvedValue([{ provider: 'google', models: ['gemini'], api_mode: 'gemini_contents' }])
     mocks.runtime.mockResolvedValue({ provider: 'google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', apiMode: 'gemini_contents', apiKey: 'secret' })

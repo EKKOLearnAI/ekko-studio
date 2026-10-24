@@ -1,9 +1,10 @@
 # Model API
 
-Studio exposes a stateless OpenAI Responses-compatible model endpoint:
+Studio exposes stateless OpenAI-compatible model endpoints:
 
 - `GET /api/ekko-studio/models/v1/models`
 - `POST /api/ekko-studio/models/v1/responses`
+- `POST /api/ekko-studio/models/v1/chat/completions`
 
 Use `http://localhost:8648/api/ekko-studio/models/v1` as the OpenAI SDK `base_url`
 (replace the host and port for your instance). Authentication accepts a dedicated
@@ -114,6 +115,45 @@ Coding Agent already performs protocol conversion in its own proxy. It remains
 separate: this endpoint reuses Ekko model adapters without starting an agent,
 executing tools, or modifying Hermes provider configuration.
 
+## Chat Completions
+
+`POST /api/ekko-studio/models/v1/chat/completions` serves the same catalog to clients
+that only speak the OpenAI Chat Completions protocol, such as Cline, Continue and the
+OpenAI SDKs. Any Model API key that may call a model may call it here; the key budget,
+model scope, external usage accounting and error codes are identical to `/responses`.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8648/api/ekko-studio/models/v1",
+    api_key="YOUR_MODEL_API_KEY",
+)
+models = client.models.list()
+reply = client.chat.completions.create(
+    model="glm/glm-5.3",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(reply.choices[0].message.content)
+```
+
+Streaming sends `data: <chunk>` frames and finishes with `data: [DONE]`. Set
+`stream_options: {"include_usage": true}` to receive the trailing usage chunk.
+Reasoning models report their summary in `delta.reasoning_content` and in
+`message.reasoning_content`, so clients that render thinking keep working.
+Function calling uses the OpenAI shape: `tools[].function`, assistant
+`tool_calls[]` and `role: "tool"` with `tool_call_id`.
+
+Supported request fields are `messages`, `stream`, `stream_options.include_usage`,
+`temperature`, `max_tokens`/`max_completion_tokens`, `reasoning_effort`, `tools`,
+`tool_choice` (`auto`, `none`, `required`) and `parallel_tool_calls`. Images must be
+base64 data URLs on user messages. The endpoint rejects, instead of silently
+approximating, `n > 1`, `logprobs`, `stop`, structured `response_format`, audio or
+modalities, legacy `functions`/`function_call`, named `tool_choice` objects, strict
+tool schemas and disabling parallel tool calls. Sampling fields the provider
+adapters cannot forward (`top_p`, penalties, `seed`, `user`) are accepted and
+dropped; they never change the routed model.
+
 ## Requests
 
 ```python
@@ -176,8 +216,32 @@ This is a model-inference subset of Responses. It explicitly rejects stored
 conversations, `previous_response_id`, background requests, hosted tools, strict
 tool schemas, structured text output, remote image URLs/file IDs, forced named
 tool choice and disabling parallel tool calls. These features are not silently
-emulated. There are no response retrieval/delete routes or `/chat/completions`
-endpoint in this API.
+emulated. There are no response retrieval/delete routes and no `/completions`,
+`/messages` or `/embeddings` endpoint in this API.
+
+## Upstream failures
+
+A provider that times out, refuses the stored credential, rate limits the key,
+cannot be reached or answers 5xx fails the request. The caller receives a
+classified error instead of one anonymous `502`, so a retry policy can tell a
+transient outage from a configuration problem. The provider payload and URL stay
+in the Studio log; neither is echoed to the caller.
+
+| Status | `error.code` | Meaning |
+| --- | --- | --- |
+| `504` | `provider_timeout` | The provider did not answer inside the configured model request timeout. |
+| `502` | `provider_rate_limited` | The provider rate limited this key (HTTP 429 upstream). This is not the Model API key budget, which reports `429` with `insufficient_quota`. |
+| `502` | `provider_unauthorized` | The provider rejected the stored credential (HTTP 401/403 upstream). |
+| `502` | `provider_unavailable` | The provider answered 5xx. |
+| `502` | `provider_rejected_request` | The provider rejected the request body (HTTP 4xx upstream). |
+| `502` | `provider_unreachable` | The provider host could not be reached (DNS, refused or reset connection). |
+| `502` | `provider_tls_error` | The provider TLS certificate could not be verified. |
+| `502` | `provider_request_failed` | The provider request failed for an unclassified reason. |
+| `499` | `request_cancelled` | The caller disconnected before the provider answered. |
+
+The upstream timeout is `model.requestTimeoutMs`, or the provider's own
+`timeoutMs` when it sets one. Streaming clients see the same classification in
+the `response.failed` frame, after `response.created` and `response.in_progress`.
 
 ## Usage
 

@@ -76,7 +76,7 @@ const tagMappings = {
   'modules/ekko/routes/config.ts': { name: 'Ekko Config', description: 'Ekko runtime configuration management' },
   'modules/studio/routes/workflows.ts': { name: 'Workflows', description: 'Cross-agent workflow orchestration' },
   'modules/studio/routes/sessions.ts': { name: 'Sessions', description: 'Cross-agent chat session management' },
-  'modules/studio/routes/model-api.ts': { name: 'Model API', description: 'OpenAI Responses-compatible inference across configured providers; external usage accounting' },
+  'modules/studio/routes/model-api.ts': { name: 'Model API', description: 'OpenAI Responses and Chat Completions inference across configured providers; external usage accounting' },
   'modules/studio/routes/session-shares.ts': { name: 'Session Shares', description: 'App-bound single-session share tokens, first claim, permissions and revocation' },
   'modules/studio/routes/logs.ts': { name: 'Logs', description: 'Cross-agent log file access' },
   'modules/studio/routes/social-messages.ts': { name: 'Social Messages', description: 'Unified outbound messaging for configured social platforms' },
@@ -1692,7 +1692,10 @@ const modelApiErrors = Object.fromEntries([
   ['400', 'Invalid input or unsupported Responses feature'], ['401', 'Missing, invalid or revoked Model API key, or expired Studio user JWT'],
   ['403', 'User or Profile access denied'], ['404', 'Profile or configured model not found'],
   ['429', 'Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)'],
-  ['501', 'Provider requires an unsupported direct-request runtime'], ['502', 'Upstream model request failed'],
+  ['501', 'Provider requires an unsupported direct-request runtime'],
+  ['502', 'Upstream model request failed; code is provider_rate_limited, provider_unauthorized, provider_unavailable, provider_rejected_request, provider_unreachable, provider_tls_error or provider_request_failed'],
+  ['504', 'Upstream model provider did not answer within the configured timeout (provider_timeout)'],
+  ['499', 'Caller disconnected before the provider answered (request_cancelled)'],
 ].map(([status, description]) => [status, { description }]))
 const keyBudgetSchema = { type: 'number', nullable: true, minimum: 0, maximum: 1000000, description: 'Lifetime USD budget. Null or omitted means unlimited; 0 blocks inference. Editing never resets spending.' }
 const keyMetadata = { type: 'object', properties: {
@@ -1756,6 +1759,13 @@ modelListOperation.responses = { ...modelApiErrors, '200': { description: 'OpenA
 const modelResponseOperation = openapi.paths['/api/ekko-studio/models/v1/responses'].post
 modelResponseOperation.summary = 'Request a configured model using OpenAI Responses format'
 modelResponseOperation.parameters = modelApiParameters
+const chatCompletionsOperation = openapi.paths['/api/ekko-studio/models/v1/chat/completions']?.post
+if (chatCompletionsOperation) {
+  chatCompletionsOperation.summary = 'Request a configured model using OpenAI Chat Completions format'
+  chatCompletionsOperation.description = 'OpenAI Chat Completions inference for clients that do not speak Responses (Cline, Continue, the OpenAI SDKs). Same unified catalog, Model API key budget, allowed-model scope, external usage accounting and error codes as POST /responses. Supports JSON and SSE, function calling in the OpenAI shape, base64 image inputs and reasoning_content passthrough. Rejects n>1, logprobs, stop, structured response_format, audio/modalities, legacy functions, named tool_choice and strict tool schemas instead of approximating them. See docs/model-api.md for the supported subset.'
+  chatCompletionsOperation.operationId = 'modelApiChatCompletions'
+  Object.assign(chatCompletionsOperation.responses ??= {}, modelApiErrors)
+}
 modelResponseOperation.description = 'Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. Every attempted upstream request records external usage under the authenticated user. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations.'
 modelResponseOperation.requestBody = { required: true, content: { 'application/json': { schema: {
   type: 'object', required: ['model', 'input'], properties: {
