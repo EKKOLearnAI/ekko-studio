@@ -491,7 +491,19 @@ describe('hermes-web-ui MCP server', () => {
       writeRpc(child, 1, 'tools/list')
       const tools = (await waitForRpc(responses, 1)).result.tools
       expect(tools.map((tool: any) => tool.name)).toEqual(native ? [] : clarify ? ['ekko_studio_clarify', 'ekko_studio_update_plan', 'ekko_studio_list_session_tasks', 'ekko_studio_update_session_tasks'] : ['ekko_studio_update_plan', 'ekko_studio_list_session_tasks', 'ekko_studio_update_session_tasks'])
-      if (!native) expect(tools.find((tool: any) => tool.name === 'ekko_studio_update_plan').inputSchema.required).toEqual(['context_id', 'plan'])
+      if (!native) {
+        const planTool = tools.find((tool: any) => tool.name === 'ekko_studio_update_plan')
+        expect(planTool.inputSchema.required).toEqual(['context_id', 'plan'])
+        expect(planTool.inputSchema.properties.plan).toMatchObject({
+          minItems: 1, maxItems: 30,
+          items: { type: 'object', additionalProperties: false, required: ['id', 'step', 'status'], properties: {
+            id: { type: 'string', minLength: 1, maxLength: 100 },
+            step: { type: 'string', minLength: 1, maxLength: 200 },
+            status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+          } },
+        })
+        expect(planTool.description).toContain('step (the task text, not title or text)')
+      }
       const input = { context_id: 'current-turn', plan: [{ id: 'check', step: 'Check', status: 'in_progress' }] }
       writeRpc(child, 2, 'tools/call', { name: 'ekko_studio_update_plan', arguments: input })
       const response = (await waitForRpc(responses, 2)).result

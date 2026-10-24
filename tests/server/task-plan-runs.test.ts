@@ -121,6 +121,24 @@ describe('shared MCP task plans', () => {
     expect(() => parseTaskPlanUpdate(input)).toThrow()
   })
 
+  it.each([{ title: 'Do the thing' }, { text: 'Do the thing' }, {}, { step: 42 }])(
+    'identifies a missing or non-string step field: %j', fields => {
+      expect(() => parseTaskPlanUpdate({ plan: [{ id: 'a', status: 'pending', ...fields }] }))
+        .toThrow('requires a "step" string')
+    }
+  )
+
+  it('documents a valid entry in the injected instruction and preserves step limits', () => {
+    const instruction = taskPlanRunInstruction()
+    const example = JSON.parse(instruction.match(/\{[^{}]*"step"[^{}]*\}/)?.[0] || '{}')
+    expect(parseTaskPlanUpdate({ plan: [example] }).plan).toEqual([example])
+    expect(instruction).toContain('not title or text')
+    const limit = { id: 'i'.repeat(100), step: 's'.repeat(200), status: 'pending' }
+    expect(parseTaskPlanUpdate({ plan: [limit] }).plan).toEqual([limit])
+    expect(() => parseTaskPlanUpdate({ plan: [{ ...limit, step: 's'.repeat(201) }] })).toThrow('1 to 200')
+    expect(() => parseTaskPlanUpdate({ plan: [{ ...limit, id: 'i'.repeat(101) }] })).toThrow('at most 100')
+  })
+
   it('adds fresh turn context without mutating image blocks or the original input', () => {
     const blocks = [{ type: 'text', text: 'Show a task card' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,test' } }]
     const original = structuredClone(blocks)
