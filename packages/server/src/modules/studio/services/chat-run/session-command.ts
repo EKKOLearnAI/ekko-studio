@@ -52,6 +52,7 @@ interface SessionCommandContext {
   model_groups?: Array<{ provider: string; models: string[] }>
   instructions?: string
   queueId?: string
+  workspace?: string | null
   runQueuedItem: (socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void
 }
 
@@ -222,6 +223,7 @@ export async function handleSessionCommand(
         profile: ctx.profile,
         source: 'cli',
         originSocketId: ctx.socket.id,
+        workspace: ctx.workspace,
       }
 
       if (state.isWorking) {
@@ -301,6 +303,7 @@ export async function handleSessionCommand(
         profile: ctx.profile,
         source: 'cli',
         originSocketId: ctx.socket.id,
+        workspace: ctx.workspace,
       }
 
       if (state.isWorking) {
@@ -364,6 +367,7 @@ export async function handleSessionCommand(
       profile: ctx.profile,
       source: 'cli',
       originSocketId: ctx.socket.id,
+      workspace: ctx.workspace,
       oneShotModel: true,
     }
 
@@ -516,6 +520,7 @@ export async function handleSessionCommand(
         profile: ctx.profile,
         source: 'cli',
         originSocketId: ctx.socket.id,
+        workspace: ctx.workspace,
       })
       emitToSession(ctx.nsp, ctx.socket, sessionId, 'run.queued', {
         event: 'run.queued',
@@ -572,6 +577,7 @@ export async function handleSessionCommand(
         profile: ctx.profile,
         source: 'cli',
         originSocketId: ctx.socket.id,
+        workspace: ctx.workspace,
       }
 
       if (state.isWorking) {
@@ -664,6 +670,7 @@ export async function handleSessionCommand(
         profile: ctx.profile,
         source: 'cli',
         originSocketId: ctx.socket.id,
+        workspace: ctx.workspace,
       }
 
       if (state.isWorking) {
@@ -719,7 +726,7 @@ export async function handleSessionCommand(
       }
       const title = command.args.slice(0, 120)
       if (!getSession(sessionId)) {
-        createSession({ id: sessionId, profile: ctx.profile, source: 'cli', model: ctx.model, title })
+        createSession({ id: sessionId, profile: ctx.profile, source: 'cli', model: ctx.model, title, workspace: ctx.workspace || undefined })
       }
       const updated = renameSession(sessionId, title)
       emitCommand({
@@ -1170,6 +1177,7 @@ function ensureCommandSession(sessionId: string, command: ParsedSessionCommand, 
     source: 'cli',
     model: ctx.model,
     title: buildCommandSessionTitle(command),
+    workspace: ctx.workspace || undefined,
   })
 }
 
