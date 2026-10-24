@@ -13,6 +13,7 @@ import type {
   ModelUsage,
 } from '../types'
 import { ModelProviderError } from '../errors'
+import { minimaxThinkingParameters } from './minimax'
 import { isPlainRecord, parseJson, postJson, postStream, providerUrl, readServerSentEvents, modelRequestHeaders } from '../http'
 import { agentReasoningText, normalizeAgentReasoning } from '../messages'
 
@@ -202,6 +203,7 @@ export function toAnthropicMessagesPayload(config: ModelProviderConfig, request:
       .filter(message => message.role !== 'system')
       .map(message => toAnthropicMessage(message, config, request.model ?? config.defaultModel)),
     max_tokens: request.maxTokens ?? 4096,
+    ...minimaxThinkingParameters(config, request, 'anthropic'),
     temperature: request.temperature,
     ...(tools
       ? {

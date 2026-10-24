@@ -2,7 +2,7 @@ import { openCodeSessionHeaders } from '../../../studio/public/opencode-session'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { getCompatibleCustomProviders } from '../../../studio/contracts/provider-compat'
-import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
+import { currentMiniMaxCatalogModels, PROVIDER_PRESETS } from '../../../studio/contracts/providers'
 import { readAppConfig } from '../../../studio/public/app-config'
 import { config } from '../../../studio/public/config'
 import { logger } from '../../../studio/public/logging'
@@ -177,7 +177,7 @@ export function resolveProviderCatalogModels(
   const hasStaticManifest = options.hasStaticManifest ?? staticModels.length > 0
   if (entry.source === 'fallback' && hasStaticManifest) return [...staticModels]
   const unavailable = uniqueModels(entry.unavailable_models || [])
-  return uniqueModels([...entry.models, ...unavailable])
+  return currentMiniMaxCatalogModels(provider, baseUrl, uniqueModels([...entry.models, ...unavailable]))
 }
 
 export async function writeProviderModelCatalogEntry(input: {

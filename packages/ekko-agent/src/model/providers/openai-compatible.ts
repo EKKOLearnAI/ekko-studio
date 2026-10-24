@@ -1,4 +1,5 @@
 import { ModelProviderError } from '../errors'
+import { minimaxThinkingParameters } from './minimax'
 import { agentReasoningText, normalizeAgentReasoning } from '../messages'
 import {
   abortSignal,
@@ -402,6 +403,7 @@ export function toOpenAIChatPayload(config: ModelProviderConfig, request: ModelR
     messages: chatMessages,
     temperature: request.temperature,
     max_tokens: request.maxTokens,
+    ...minimaxThinkingParameters(config, request, 'openai'),
     ...(tools
       ? {
           tools,
@@ -531,6 +533,7 @@ function openAIReasoningReplayField(
   // Several Chat Completions dialects use `reasoning_content`; the remaining
   // OpenAI-compatible Chat adapters receive the common `reasoning` field.
   if (identifier.includes('openrouter')) return 'reasoning_details'
+  if (/^https:\/\/api\.(?:minimax\.io|minimaxi\.com)(?:\/|$)/i.test(config.baseUrl || '')) return 'reasoning_content'
   if (usesReasoningContentProtocol(identifier)) return 'reasoning_content'
   return 'reasoning'
 }

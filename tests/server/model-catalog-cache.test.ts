@@ -37,7 +37,8 @@ vi.mock('../../packages/server/src/modules/studio/public/config', () => ({
   config: { appHome: '/app-home' },
 }))
 
-vi.mock('../../packages/server/src/modules/studio/contracts/providers', () => ({
+vi.mock('../../packages/server/src/modules/studio/contracts/providers', async importOriginal => ({
+  ...await importOriginal<typeof import('../../packages/server/src/modules/studio/contracts/providers')>(),
   PROVIDER_PRESETS: [
     {
       value: 'openrouter',
@@ -184,6 +185,24 @@ describe('model catalog cache', () => {
         ],
       }
     })
+  })
+
+  it('curates live MiniMax discoveries without modifying cached history', async () => {
+    const { providerModelCatalogKey, resolveProviderCatalogModels } = await import(
+      '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
+    )
+    for (const provider of ['minimax', 'custom:minimax']) {
+      const baseUrl = 'https://api.minimax.io/anthropic/v1'
+      const entry = {
+        provider, label: 'MiniMax', base_url: baseUrl, source: 'live' as const,
+        models: ['MiniMax-M2.7', 'MiniMax-M3'], unavailable_models: ['MiniMax-M2.5'],
+        updated_at: '2026-10-20T00:00:00.000Z',
+      }
+      const cache = { version: 1 as const, updated_at: entry.updated_at, providers: { [providerModelCatalogKey(provider, baseUrl)]: entry } }
+      expect(resolveProviderCatalogModels(cache, provider, baseUrl, [])).toEqual(['MiniMax-M3.1-Flash', 'MiniMax-M3'])
+      expect(entry.models).toEqual(['MiniMax-M2.7', 'MiniMax-M3'])
+      expect(entry.unavailable_models).toEqual(['MiniMax-M2.5'])
+    }
   })
 
   it('resolves cached catalogs by source and authoritative manifest presence', async () => {
