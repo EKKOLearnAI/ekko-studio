@@ -1,3 +1,4 @@
+import { generateSessionAutoTitle, prepareSessionAutoTitle } from './session-auto-title'
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
@@ -553,6 +554,7 @@ export async function handleEkkoAgentRun(
       api_mode: apiMode || '',
       reasoning_effort: persistedReasoningEffort || '',
       title,
+      title_origin: 'fallback',
       workspace,
       category_id: data.category_id,
       push_enabled: data.push_enabled,
@@ -630,6 +632,8 @@ export async function handleEkkoAgentRun(
       },
     })
   }
+
+  const autoTitleSnapshot = prepareSessionAutoTitle(sessionId)
 
   const { providerConfig, fallbackProviderConfig } = resolveModelProviderConfigs({
     provider: modelConfig.provider,
@@ -1679,6 +1683,14 @@ export async function handleEkkoAgentRun(
       workspace_run_change: workspaceRunChange,
       run_usage: completeRunUsage(sessionId, runId || result.runId, assistantMessageId),
     })
+    if (!boundaryInterrupted && !abortController.signal.aborted &&
+      !['error', 'max_steps', 'tool_calls', 'length', 'content_filter'].includes(result.output.finishReason || '') &&
+      !result.output.toolCalls?.length && String(result.output.content || '').trim()) {
+      void generateSessionAutoTitle({
+        snapshot: autoTitleSnapshot, replyId: assistantMessageId, reply: assistantText,
+        model: modelConfig.model, provider: modelConfig.provider, modelClient, emit,
+      })
+    }
   } catch (err) {
     if (abortController.signal.aborted || isAbortError(err)) {
       logger.info('[chat-run-socket] ekko-agent run aborted for session %s', sessionId)
