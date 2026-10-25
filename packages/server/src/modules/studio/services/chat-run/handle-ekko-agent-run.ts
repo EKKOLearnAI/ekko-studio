@@ -1,13 +1,14 @@
+import { chatRunCaller, isDirectChatRunCaller, type ChatRunCallerTarget } from './caller'
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
-import { leaseEkkoMcpServers } from './ekko-mcp-lease'
+import { leaseStudioMcpServers } from '../mcp/credential-lease'
 import { studioMcpCapabilities } from '../../public/runs/mcp-capabilities'
 import { saveTaskPlan } from '../../repositories/task-plan-store'
 import { getSessionTasks, updateSessionTasks } from '../session-tasks'
 import type { SessionTasksUpdate } from '../../contracts/session-task'
 import type { TaskPlanSnapshot } from '../../contracts/task-plan'
-import type { Server, Socket } from 'socket.io'
+import type { Server } from 'socket.io'
 import { createHash, randomUUID } from 'crypto'
 import {
   chatEkkoAgentReasoningText as agentReasoningText,
@@ -423,21 +424,21 @@ function createProviderModelClient(
 
 export async function handleEkkoAgentRun(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   data: EkkoAgentRunSocketData,
   profile: string,
   sessionMap: Map<string, SessionState>,
-  dequeueNextQueuedRun: (socket: Socket, sessionId: string, fallbackProfile?: string) => boolean,
+  dequeueNextQueuedRun: (socket: ChatRunCallerTarget, sessionId: string, fallbackProfile?: string) => boolean,
   skipUserMessage = false,
   backgroundContinuationContext?: BackgroundContinuationContext,
 ) {
   const sessionId = String(data.session_id || '').trim()
   if (!sessionId) {
-    socket.emit('run.failed', { event: 'run.failed', error: 'session_id is required for ekko-agent runs' })
+    chatRunCaller(socket).reply('run.failed', { event: 'run.failed', error: 'session_id is required for ekko-agent runs' })
     return
   }
   if (!isEkkoAgentId(data)) {
-    socket.emit('run.failed', { event: 'run.failed', session_id: sessionId, error: 'ekko-agent run requires agent_id=ekko-agent' })
+    chatRunCaller(socket).reply('run.failed', { event: 'run.failed', session_id: sessionId, error: 'ekko-agent run requires agent_id=ekko-agent' })
     return
   }
   const storedSession = getSession(sessionId)
@@ -446,9 +447,9 @@ export async function handleEkkoAgentRun(
     await handleEkkoSessionCommand(nsp, socket, data, command, profile, sessionMap, dequeueNextQueuedRun)
     return
   }
-  const authenticatedUserId = socket.data?.user?.id == null ? undefined : String(socket.data.user.id)
+  const authenticatedUserId = chatRunCaller(socket).user?.id == null ? undefined : String(chatRunCaller(socket).user?.id)
 
-  socket.join(`session:${sessionId}`)
+  chatRunCaller(socket).observeSession(sessionId)
   const state = getOrCreateSession(sessionMap, sessionId)
   state.isWorking = true
   state.isAborting = false
@@ -533,8 +534,8 @@ export async function handleEkkoAgentRun(
     appendStateEvent(state, event, tagged)
     const outbound = buildOutboundRunEvent(event, tagged)
     nsp.to(`session:${sessionId}`).emit(event, outbound)
-    if (!data.onEvent && !nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
-      socket.emit(event, outbound)
+    if (!data.onEvent && (isDirectChatRunCaller(socket) || !nsp.adapter.rooms.get(`session:${sessionId}`)?.size) && chatRunCaller(socket).isActive()) {
+      chatRunCaller(socket).reply(event, outbound)
     }
   }
 
@@ -618,7 +619,7 @@ export async function handleEkkoAgentRun(
     })
     const peerTarget = data.peerExcludeSocketId
       ? nsp.to(`session:${sessionId}`).except(data.peerExcludeSocketId)
-      : socket.to(`session:${sessionId}`)
+      : { emit: (event: string, payload: any) => chatRunCaller(socket).publishToPeers(sessionId, event, payload) }
     peerTarget.emit('run.peer_user_message', {
       event: 'run.peer_user_message',
       session_id: sessionId,
@@ -1286,8 +1287,8 @@ export async function handleEkkoAgentRun(
   }
 
   try {
-    const mcpLease = await leaseEkkoMcpServers(mcpServers, { sessionId, profile,
-      userId: socket.data?.user?.id, signal: abortController.signal })
+    const mcpLease = await leaseStudioMcpServers(mcpServers, { sessionId, profile, agentId: 'ekko-agent', nativeTaskPlan: true,
+      userId: chatRunCaller(socket).user?.id, signal: abortController.signal })
     releaseMcp = mcpLease.dispose
     logger.info('[chat-run-socket] starting ekko-agent run for session %s', sessionId)
     const goalHistoryRevision = getSession(sessionId)?.history_revision || 0

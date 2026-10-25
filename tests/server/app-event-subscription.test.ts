@@ -17,6 +17,19 @@ import { publishDomainEvent, publishGroupMessage } from '../../packages/server/s
 function socket(){const handlers=new Map<string,Function>();return {id:Math.random().toString(),handshake:{auth:{token:'test'}},data:{},emit:vi.fn(),on:(n:string,f:Function)=>{const old=handlers.get(n);handlers.set(n,old?(...args:any[])=>{old(...args);f(...args)}:f)},once:(n:string,f:Function)=>handlers.set(n,f),handlers}}
 const flush=()=>new Promise(r=>setTimeout(r,15))
 beforeEach(()=>{sessionFixtures.clear();accountTokens.clear();mutedTokens.clear();auth.user={id:1,role:'user'};auth.profiles=['default'];ownership.sessionUser='1';ownership.runUser=1})
+it('intersects managed chat ownership and fresh availability with App event profile permissions', async () => {
+ const { setAgentChatService } = await import('../../packages/server/src/modules/studio/services/agents/chat-registry')
+ const { canReceiveAppEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/app-events')
+ const { stateEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+ let active = true
+ setAgentChatService({ isBound:(id:string)=>id==='managed', ownedBinding:(scope:any)=>{if(!active || scope.principal.id!=='1') throw Error('Unavailable')} } as any)
+ try {
+  const event = stateEvent('chat.run.updated','default',{session_id:'managed'},{state:{status:'running'}})
+  expect(canReceiveAppEvent(auth.user,event)).toBe(true)
+  expect(canReceiveAppEvent({id:2,role:'super_admin'} as any,event)).toBe(false)
+  active=false;expect(canReceiveAppEvent(auth.user,event)).toBe(false)
+ } finally {setAgentChatService(undefined)}
+})
 it('normalizes omitted/blank profile before authorization and validates types',async()=>{
  expect(parseAppSubscription({schema_version:1}).profile).toBe('default')
  expect(()=>parseAppSubscription({schema_version:1,types:['unsafe']})).toThrow()
@@ -242,7 +255,7 @@ it('synchronizes deleted-session cleanup to both live devices without disclosing
   }))
   sessionFixtures.set('deleted-chat', null)
   mutedTokens.add('phone-b') // Cleanup is synchronization, even when result alerts are muted.
-  publishSessionRemoval({ id: 'deleted-chat', profile: 'default', user_id: '1' }, 'deleted')
+  publishSessionRemoval({ id: 'deleted-chat', profile: 'default', user_id: '2', studio_user_id: '1', source: 'cli' }, 'deleted')
   await vi.waitFor(() => {
    expect(received[0]).toHaveLength(1)
    expect(received[1]).toHaveLength(1)
@@ -251,6 +264,7 @@ it('synchronizes deleted-session cleanup to both live devices without disclosing
   expect(received[1][0]).toEqual(received[0][0])
   expect(received[2]).toEqual([])
   expect(JSON.stringify(received)).not.toContain('owner_user_id')
+  expect(JSON.stringify(received)).not.toContain('studio_owner_id')
   auth.profiles = []
   publishSessionRemoval({ id: 'revoked-chat', user_id: 1 }, 'deleted')
   await flush()

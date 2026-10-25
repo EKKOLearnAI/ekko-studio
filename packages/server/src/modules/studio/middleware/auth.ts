@@ -3,6 +3,7 @@ import type { Context, Next } from 'koa'
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { getToken } from '../services/auth/token-auth'
 import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
+import { bindRunRequestContext } from '../services/auth/run-request-context'
 import { MODEL_API_KEY_PREFIX, findModelApiKey, touchModelApiKey } from '../services/model-api/keys'
 import { ModelApiError, modelApiErrorBody } from '../services/model-api/errors'
 import {
@@ -401,7 +402,8 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
       return
     }
     ctx.state.profile = { name: binding.profile }
-    await next()
+    const release = bindRunRequestContext(ctx, { runId: binding.runId, sessionId: binding.sessionId, profile: binding.profile })
+    try { await next() } finally { release() }
     return
   }
   const payload = token ? verifyUserJwt(token, secret) : null
@@ -445,6 +447,16 @@ export async function requireSuperAdmin(ctx: Context, next: Next): Promise<void>
     return
   }
   await next()
+}
+
+/** Turn credentials cannot open interactive shells, even when their requester is an administrator. */
+export async function requireInteractiveSuperAdmin(ctx: Context, next: Next): Promise<void> {
+  if (runMcpCredentials.recognizes(requestToken(ctx))) {
+    ctx.status = 403
+    ctx.body = { error: 'Native terminal requires an interactive Studio login' }
+    return
+  }
+  await requireSuperAdmin(ctx, next)
 }
 
 export async function requireAdmin(ctx: Context, next: Next): Promise<void> {

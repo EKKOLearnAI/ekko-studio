@@ -23,7 +23,8 @@ const props = defineProps<{
   canPin?: boolean
   loadContent?: (category: string, skill: string, filePath?: string) => Promise<string>
   loadFiles?: (category: string, skill: string) => Promise<SkillFileEntry[]>
-  saveContent?: (category: string, skill: string, content: string) => Promise<void>
+  saveContent?: (category: string, skill: string, content: string, filePath?: string) => Promise<void>
+  canEditFile?: (category: string, skill: string, filePath: string) => boolean
 }>()
 
 const emit = defineEmits<{
@@ -38,12 +39,19 @@ const loading = ref(false)
 const fileContent = ref('')
 const viewingFile = ref<string | null>(null)
 const fileLoading = ref(false)
+let fileLoadVersion = 0
 const editing = ref(false)
 const saving = ref(false)
-const isDirty = computed(() => draftContent.value !== content.value)
+const loadError = ref(false)
+const activeContent = computed(() => viewingFile.value ? fileContent.value : content.value)
+const isDirty = computed(() => draftContent.value !== activeContent.value)
+const editable = computed(() => !props.readonly && !loading.value && !fileLoading.value && !loadError.value && (!viewingFile.value || props.canEditFile?.(props.category, props.skill, viewingFile.value)))
 
 async function loadSkill() {
   loading.value = true
+  ++fileLoadVersion
+  fileLoading.value = false
+  loadError.value = false
   viewingFile.value = null
   fileContent.value = ''
   files.value = []
@@ -63,6 +71,7 @@ async function loadSkill() {
     draftContent.value = skillContent
     files.value = skillFiles.filter(f => !f.isDir && f.path !== 'SKILL.md')
   } catch (err: any) {
+    loadError.value = true
     content.value = t('skills.loadFailed') + `: ${err.message}`
     draftContent.value = content.value
   } finally {
@@ -71,6 +80,9 @@ async function loadSkill() {
 }
 
 async function viewFile(filePath: string) {
+  if (saving.value || editing.value) return
+  const version = ++fileLoadVersion
+  loadError.value = false
   fileLoading.value = true
   viewingFile.value = filePath
   try {
@@ -86,23 +98,32 @@ async function viewFile(filePath: string) {
         relPath = afterSkillDir
       }
     }
-    fileContent.value = props.loadContent
+    const result = props.loadContent
       ? await props.loadContent(props.category, props.skill, relPath)
       : await fetchSkillContent(`${base}${relPath}`, props.target || 'hermes')
+    if (version === fileLoadVersion) fileContent.value = result
   } catch (err: any) {
+    if (version !== fileLoadVersion) return
+    loadError.value = true
     fileContent.value = t('skills.fileLoadFailed') + `: ${err.message}`
   } finally {
-    fileLoading.value = false
+    if (version === fileLoadVersion) fileLoading.value = false
   }
 }
 
 function backToSkill() {
+  if (saving.value) return
+  ++fileLoadVersion
+  fileLoading.value = false
+  editing.value = false
+  loadError.value = false
   viewingFile.value = null
   fileContent.value = ''
 }
 
 function startEditing() {
-  draftContent.value = content.value
+  if (!editable.value) return
+  draftContent.value = activeContent.value
   editing.value = true
 }
 
@@ -112,12 +133,17 @@ function cancelEditing() {
 }
 
 async function saveSkill() {
-  if (saving.value || props.readonly) return
+  if (saving.value || !editable.value) return
   saving.value = true
+  const savedContent = draftContent.value
   try {
-    if (props.saveContent) await props.saveContent(props.category, props.skill, draftContent.value)
-    else await saveSkillContent(props.category, props.skill, draftContent.value, props.target || 'hermes')
-    content.value = draftContent.value
+    if (props.saveContent) {
+      if (viewingFile.value) await props.saveContent(props.category, props.skill, savedContent, viewingFile.value)
+      else await props.saveContent(props.category, props.skill, savedContent)
+    }
+    else await saveSkillContent(props.category, props.skill, savedContent, props.target || 'hermes')
+    if (viewingFile.value) fileContent.value = savedContent
+    else content.value = savedContent
     editing.value = false
     message.success(t('skills.saveSuccess'))
     message.info(t('skills.reloadHint'), { duration: 6000 })
@@ -158,15 +184,15 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
         <span class="detail-name">{{ skill }}</span>
       </div>
       <div class="usage-stats">
-        <button v-if="!readonly && !viewingFile && !editing" class="detail-action" :title="t('skills.edit')" @click="startEditing">
+        <button v-if="editable && !editing" class="detail-action" :title="t('skills.edit')" @click="startEditing">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
           <span>{{ t('skills.edit') }}</span>
         </button>
-        <button v-if="!readonly && !viewingFile && editing" class="detail-action" :disabled="saving || !isDirty" :title="t('common.save')" @click="saveSkill">
+        <button v-if="editable && editing" class="detail-action" :disabled="saving || !isDirty" :title="t('common.save')" @click="saveSkill">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
           <span>{{ saving ? t('skills.saving') : t('common.save') }}</span>
         </button>
-        <button v-if="!readonly && !viewingFile && editing" class="detail-action" :disabled="saving" :title="t('common.cancel')" @click="cancelEditing">
+        <button v-if="editable && editing" class="detail-action" :disabled="saving" :title="t('common.cancel')" @click="cancelEditing">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           <span>{{ t('common.cancel') }}</span>
         </button>
@@ -193,7 +219,7 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
     <template v-else>
       <!-- Breadcrumb for file view -->
       <div v-if="viewingFile" class="detail-breadcrumb">
-        <button class="back-btn" @click="backToSkill">
+        <button class="back-btn" :disabled="saving" @click="backToSkill">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="15 18 9 12 15 6" />
           </svg>
@@ -204,15 +230,16 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
 
       <!-- Skill content -->
       <div class="detail-content">
-        <MarkdownRenderer v-if="viewingFile" :content="fileContent" />
+        <NSpin v-if="fileLoading" />
         <textarea
           v-else-if="editing"
           v-model="draftContent"
+          :readonly="saving"
           class="skill-editor"
           :aria-label="t('skills.editorLabel')"
           spellcheck="false"
         />
-        <MarkdownRenderer v-else :content="content" />
+        <MarkdownRenderer v-else :content="activeContent" />
       </div>
 
       <!-- Attached files -->
@@ -223,6 +250,7 @@ watch(() => `${props.target || 'hermes'}/${props.category}/${props.skill}`, load
             v-for="f in files"
             :key="f.path"
             class="file-item"
+            :disabled="saving || editing"
             @click="viewFile(f.path)"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">

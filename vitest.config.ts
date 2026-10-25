@@ -7,6 +7,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'packages/client/src'),
+      '@ekko-studio/plugin-sdk': resolve(__dirname, 'packages/studio-plugin-sdk/src/index.ts'),
+      '@ekko-studio/agent-drivers': resolve(__dirname, 'packages/studio-agent-drivers/src/index.ts'),
       electron: resolve(__dirname, 'tests/mocks/electron.ts'),
       'dbus-next': resolve(__dirname, 'tests/mocks/dbus-next.ts'),
       'electron-updater': resolve(__dirname, 'tests/mocks/electron-updater.ts'),

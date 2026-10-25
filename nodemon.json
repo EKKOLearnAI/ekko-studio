@@ -1,5 +1,5 @@
 {
-  "watch": ["packages/server/src", "packages/ekko-agent/src"],
+  "watch": ["packages/server/src", "packages/ekko-agent/src", "packages/studio-plugin-sdk/src", "packages/studio-plugin-runner/src", "packages/studio-agent-drivers/src"],
   "ext": "ts,tsx",
   "execMap": {
     "ts": "node -r ts-node/register"
@@ -10,7 +10,7 @@
     "TS_NODE_PROJECT": "packages/server/tsconfig.json",
     "HERMES_WEB_UI_STOP_GATEWAYS_ON_SHUTDOWN": "1"
   },
-  "exec": "node -r ts-node/register packages/server/src/index.ts",
+  "exec": "node scripts/build-plugin-runtime.mjs && node -r ts-node/register packages/server/src/index.ts",
   "nodeArgs": ["--no-warnings"],
   "delay": "1000"
 }

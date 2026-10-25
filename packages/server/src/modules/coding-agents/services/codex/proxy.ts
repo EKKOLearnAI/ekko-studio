@@ -1,6 +1,6 @@
 import { geminiToResponses, responsesToGemini } from '../antigravity/gemini-adapter'
 import { isNativeCodingAgent } from '../../../studio/contracts/agents/native-coding-agents'
-import { chatCompletionsToResponses, responsesToChatCompletion, responsesToChatCompletionSse } from '../../protocol/adapters/chat-completions'
+import { chatCompletionsToResponses, responsesToChatCompletion, responsesToChatCompletionSse } from '../../../studio/public/model-protocol'
 import { Readable } from 'stream'
 import type { Context } from 'koa'
 import { config } from '../../../studio/public/config'
@@ -9,7 +9,7 @@ import {
   chatCompletionsUrl as resolveChatCompletionsUrl,
   responsesUrl as resolveResponsesUrl,
 } from '../../protocol/endpoint-resolver'
-import { sseEvent } from '../../protocol/sse'
+import { sseEvent } from '../../../studio/public/model-protocol'
 import { AgentTargetRegistry, type AgentTargetInput, type RegisteredAgentTarget } from '../../protocol/target-registry'
 import type { ApiMode } from '../../protocol/types'
 import {
@@ -20,14 +20,14 @@ import {
   stripHistoricalResponsesInlineImages,
   targetReasoningEffort,
   truncateResponsesToolOutputs,
-} from '../../protocol/adapters/responses'
+} from '../../../studio/public/model-protocol'
 import {
   anthropicMessagesSseToResponsesEvents,
   normalizeResponsesSseEvents,
   openAiChatSseToResponsesEvents,
   openAiResponsesSseToResponsesEvents,
   type CanonicalResponsesEvent,
-} from '../../protocol/adapters/responses-stream'
+} from '../../../studio/public/model-protocol'
 import { agentRunGateway } from '../../protocol/gateway'
 import { codingAgentRunManager } from '../runtime/run-manager'
 import { codingAgentOutputLimit } from '../context-policy'

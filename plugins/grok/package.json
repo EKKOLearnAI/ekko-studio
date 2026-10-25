@@ -1,0 +1,1 @@
+{"name":"@ekko-studio/plugin-grok","version":"0.1.0","private":true,"description":"Grok native streaming JSON runtime for Studio","license":"BSL-1.1","main":"dist/index.cjs","files":["dist","studio-plugin.json","README.md"]}

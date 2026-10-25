@@ -1,9 +1,11 @@
+import { agentManagementMessages } from '../agent-management-messages'
 import { remoteDeviceMessages } from '../remote-device-messages'
 import { themePresetMessages } from '../theme-preset-locales'
 import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
+  agentManagement: agentManagementMessages['ko'],
   sessionTasks: {
       "title": "작업",
       "task": "작업",
@@ -708,7 +710,6 @@ export default {
     updateSuccess: '업데이트가 완료되었습니다. 잠시 후 페이지를 새로고침하세요. 오랫동안 시작되지 않으면 수동으로 시작하세요.',
     updateFailed: '업데이트 실패',
     logout: '로그아웃',
-    nodeVersionWarning: 'Node.js v{version}이 감지되었습니다. 버전 23 이상으로 업그레이드하세요.',
     changelog: '변경 이력',
     noChangelog: '변경 이력이 없습니다',
     versionManagement: '버전 관리',
@@ -1077,6 +1078,10 @@ export default {
 
   // 채팅
   chat: {
+    pluginCommandChanged: "명령 또는 대화가 변경되었습니다. 명령을 다시 선택하세요.",
+    pluginCommandAmbiguous: "여러 플러그인이 이 명령을 제공합니다. 출처가 포함된 이름을 선택하세요.",
+    pluginCommandTextOnly: "플러그인 명령은 현재 텍스트만 지원합니다.",
+    pluginCommandsUnavailable: "플러그인 명령을 불러올 수 없습니다.",
     selectMessages: "메시지 선택",
     messagesSelected: "{count}개 선택됨",
     deleteSelectedMessages: "선택 항목 삭제",
@@ -2808,6 +2813,15 @@ export default {
   },
 
   codingAgents: {
+    defaultConfiguration: "기본 설정",
+    resourceInstance: "Agent 인스턴스", resourceSkillSource: '스킬 저장 위치', resourcesNextRun: '다음 실행에서 업데이트된 스킬을 자동으로 불러옵니다.',
+    resourceFile: "설정 파일",
+    resourceReadOnly: "읽기 전용",
+    resourcesEmpty: "이 위치에 리소스가 없습니다",
+    resourcesUnsupported: "이 리소스 유형은 제공되지 않습니다",
+    resourcesUnavailable: "Agent 리소스를 사용할 수 없습니다",
+    resourcesChanged: "인스턴스가 변경되었습니다. 저장 전에 새로고침하세요.",
+
     nativeUsage: "사용량: 입력 {inputTokens}, 출력 {outputTokens}, 캐시 읽기 {cacheReadTokens}, 캐시 쓰기 {cacheWriteTokens}, 총 {totalTokens} 토큰.",
     nativeUsageUnknown: "사용량 알 수 없음: 이 세션의 네이티브 토큰 사용량이 아직 보고되지 않았습니다.",
     nativeContextUnknown: "컨텍스트 알 수 없음: 네이티브 세션의 현재 사용량과 한도를 가져올 수 없습니다.",

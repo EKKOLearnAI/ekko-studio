@@ -188,6 +188,27 @@ describe('ChatRunSocket reports when the run started', () => {
     expect(resumed![1]).toMatchObject({ isWorking: true, runStartedAt: startedAt })
   })
 
+  it('resumes persisted plugin command messages without finishing the active chat run', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket, emitted } = makeServerHarness()
+    ;(socket.data as any).user = { id: 1, username: 'admin', role: 'super_admin' }
+    const server = new ChatRunSocket(io as any)
+    const state = { messages: [], events: [], queue: [], isWorking: true, profile: 'default', runStartedAt: 123, runId: 'native-run' }
+    ;(server as any).sessionMap.set('s1', state)
+    server.cachePluginCommandMessage('s1', '/example.echo:echo hello', 10)
+    server.cachePluginCommandMessage('s1', 'hello', 11)
+    server.cachePluginCommandMessage('s1', 'hello', 11)
+    server.publishPluginCommandResult({ event: 'session.command', session_id: 's1', commandCallId: 'call', commandSequence: 0, messageId: 11,
+      command: 'example.echo:echo', action: 'echo', ok: true, message: 'hello', terminal: false })
+    expect(state).toMatchObject({ isWorking: true, runId: 'native-run', runStartedAt: 123, events: [] })
+    expect(emitted).toContainEqual(expect.objectContaining({ room: 'session:s1', event: 'session.command' }))
+    ;(server as any).onConnection(socket)
+    await handlers.get('resume')?.({ session_id: 's1' })
+    const resumed = socket.emit.mock.calls.find((call: any[]) => call[0] === 'resumed')![1]
+    expect(resumed.messages).toEqual([expect.objectContaining({ id: 10, role: 'command' }), expect.objectContaining({ id: 11, content: 'hello' })])
+    expect(resumed.isWorking).toBe(true)
+  })
+
   it.each([
     { activeRunMarker: 'turn-current', responseRun: { runMarker: 'older-response' } },
     { responseRun: { runMarker: 'turn-current' } },
@@ -291,7 +312,8 @@ describe('group run MCP credential lifecycle', () => {
     const sessionId = `group-${terminal}`
     let runtimeData: any
     handleCodingAgentRunMock.mockImplementation(async (_nsp: any, socket: any, data: any, _profile: any, sessionMap: any) => {
-      expect(socket.data.user).toBeUndefined()
+      expect(socket.kind).toBe('direct')
+      expect(socket.user).toBeUndefined()
       runtimeData = data
       Object.assign(sessionMap.get(sessionId), { isWorking: true, activeRunMarker: 'real-native-turn' })
       return { runId: 'native-runtime' } as any

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
+import { SOCKET_CLIENT_MODULE } from './fixtures'
 
 const sharedRoom = {
   id: 'room-shared',
@@ -21,7 +22,7 @@ const previewPng = Buffer.from(
 
 async function mockInviteSocket(page: Page, joinFailure: { code: string, error: string } | null = null, workerContent = 'How can I help?', withTools = false, historyCards: unknown[] = []) {
   const joinFailureJson = JSON.stringify(joinFailure)
-  await page.route('**/node_modules/.vite/**/socket__io-client.js*', async (route) => {
+  await page.route(SOCKET_CLIENT_MODULE, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/javascript',

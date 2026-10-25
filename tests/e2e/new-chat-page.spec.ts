@@ -417,7 +417,7 @@ for (const mobile of [false, true]) test(`missing required connection fields fit
   await page.setViewportSize(mobile ? { width: 320, height: 568 } : { width: 1280, height: 720 })
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   if (mobile) await page.addInitScript(() => localStorage.setItem('hermes_new_chat_agent_v1', 'dsh'))
-  await mockHermesApi(page, { modelGroups: [{ provider: 'manual-provider', label: 'Manual Provider', models: ['manual-model'] }] })
+  const api = await mockHermesApi(page, { modelGroups: [{ provider: 'manual-provider', label: 'Manual Provider', models: ['manual-model'] }] })
   await mockChatSocket(page)
   await page.goto('/#/hermes/chat')
   if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
@@ -454,9 +454,10 @@ for (const mobile of [false, true]) test(`missing required connection fields fit
   await settings.getByRole('button', { name: 'Close', exact: true }).click()
   if (mobile) await page.setViewportSize({ width: 320, height: 568 })
   await draft.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({
-    ...(mobile ? { coding_agent_id: 'dsh' } : { agent_id: 'ekko-agent' }), provider: 'manual-provider', model: 'manual-model', baseUrl: 'https://example.invalid/v1', apiKey: 'test-credential',
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload)).toMatchObject(mobile ? { managed_agent_protocol: 1 } : {
+    agent_id: 'ekko-agent', provider: 'manual-provider', model: 'manual-model', baseUrl: 'https://example.invalid/v1', apiKey: 'test-credential',
   })
+  if (mobile) expect(JSON.parse(api.requests.find(item => item.pathname === '/api/studio/agent-chats')!.postData!)).toMatchObject({ agentTypeId: 'dsh', provider: 'manual-provider', model: 'manual-model', baseUrl: 'https://example.invalid/v1', apiKey: 'test-credential' })
 })
 
 for (const { automatic, selectedModel, apiMode } of [

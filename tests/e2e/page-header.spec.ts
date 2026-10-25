@@ -41,7 +41,9 @@ test('replaces the shared header on navigation and leaves page content below it'
     const link = rail.getByRole('link', { name, exact: true })
     const href = await link.getAttribute('href')
     await link.click()
-    await expect.poll(() => new URL(page.url()).hash).toBe(href)
+    // Models canonicalizes its URL with the active profile; wait for the settled
+    // route instead of relying on the brief pre-normalization navigation state.
+    await expect.poll(() => new URL(page.url()).hash).toBe(name === 'Models' ? `${href}?modelProfile=research` : href)
     const pageHeader = host.locator(':scope > :not(.header-sidebar-control)')
     await expect(pageHeader).toHaveCount(1)
     await expect(pageHeader).toBeVisible()

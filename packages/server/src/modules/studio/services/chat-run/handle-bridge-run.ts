@@ -1,3 +1,4 @@
+import { chatRunCaller, isDirectChatRunCaller, type ChatRunCallerTarget } from './caller'
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { hermesStudioMcpCapabilities } from './studio-mcp'
@@ -7,7 +8,7 @@ import { withTaskPlanTurnContext } from '../task-plan-runs'
  * to communicate with Hermes CLI agent.
  */
 
-import type { Server, Socket } from 'socket.io'
+import type { Server } from 'socket.io'
 import { getSystemPrompt } from '../../public/runs/prompt'
 import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
 import { logger, bridgeLogger } from '../../public/logging'
@@ -464,14 +465,14 @@ async function ensureBridgeFixedContext(args: {
 
 export async function handleBridgeRun(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   data: { task_plan_context_id?: string; input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; onEvent?: (event: string, payload: any) => void },
   profile: string,
   sessionMap: Map<string, SessionState>,
   bridge: AgentBridgeClient,
   skipUserMessage = false,
   loadSessionStateFromDbFn: (sid: string, sessionMap: Map<string, SessionState>) => Promise<SessionState>,
-  dequeueNextQueuedRun: (socket: Socket, sessionId: string, fallbackProfile?: string) => void,
+  dequeueNextQueuedRun: (socket: ChatRunCallerTarget, sessionId: string, fallbackProfile?: string) => void,
   backgroundContinuationContext?: BackgroundContinuationContext,
 ) {
   const { input, session_id, instructions } = data
@@ -481,10 +482,10 @@ export async function handleBridgeRun(
   // boundaries and remain disabled independently of this default.
   const backgroundDelegationEnabled = data.background_delegation_enabled !== false
   if (!session_id) {
-    socket.emit('run.failed', { event: 'run.failed', queue_id: data.queue_id, error: 'session_id is required for cli source' })
+    chatRunCaller(socket).reply('run.failed', { event: 'run.failed', queue_id: data.queue_id, error: 'session_id is required for cli source' })
     return
   }
-  const socketUser = socket.data.user as AuthenticatedUser | undefined
+  const socketUser = chatRunCaller(socket).user as AuthenticatedUser | undefined
   const callbackContext = data.background_delegation_id
     && backgroundContinuationContext?.runtime === 'hermes'
     && backgroundContinuationContext.delegationId === data.background_delegation_id
@@ -651,11 +652,11 @@ export async function handleBridgeRun(
     createSession({ id: session_id, profile, source: runSource, user_id: socketUser?.id, studio_user_id: socketUser?.id, model: resolvedModel, provider: selectedProvider, reasoning_effort: reasoningEffort || '', title: preview, workspace, category_id: data.category_id, push_enabled: data.push_enabled })
   }
 
-  socket.join(`session:${session_id}`)
+  chatRunCaller(socket).observeSession(session_id)
   if (shouldPersistUserMessage) {
     const peerTarget = data.peerExcludeSocketId
       ? nsp.to(`session:${session_id}`).except(data.peerExcludeSocketId)
-      : socket.to(`session:${session_id}`)
+      : { emit: (event: string, payload: any) => chatRunCaller(socket).publishToPeers(session_id, event, payload) }
     peerTarget.emit('run.peer_user_message', {
       event: 'run.peer_user_message',
       session_id,
@@ -673,8 +674,8 @@ export async function handleBridgeRun(
     data.onEvent?.(event, tagged)
     const outbound = buildOutboundRunEvent(event, tagged)
     nsp.to(`session:${session_id}`).emit(event, outbound)
-    if (!data.onEvent && !nsp.adapter.rooms.get(`session:${session_id}`)?.size && socket.connected) {
-      socket.emit(event, outbound)
+    if (!data.onEvent && (isDirectChatRunCaller(socket) || !nsp.adapter.rooms.get(`session:${session_id}`)?.size) && chatRunCaller(socket).isActive()) {
+      chatRunCaller(socket).reply(event, outbound)
     }
   }
   if (shouldEmitWorkspaceUpdate) {
@@ -1023,7 +1024,7 @@ function latestAssistantText(state: SessionState): string {
 
 export async function resumeBridgeRun(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   args: {
     sessionId: string
     runId: string
@@ -1037,7 +1038,7 @@ export async function resumeBridgeRun(
   },
   sessionMap: Map<string, SessionState>,
   bridge: AgentBridgeClient,
-  dequeueNextQueuedRun: (socket: Socket, sessionId: string, fallbackProfile?: string) => void,
+  dequeueNextQueuedRun: (socket: ChatRunCallerTarget, sessionId: string, fallbackProfile?: string) => void,
 ) {
   const { sessionId, runId, profile, instructions } = args
   const runSource = normalizeBridgeRunSource(args.source)
@@ -1064,8 +1065,8 @@ export async function resumeBridgeRun(
     args.onEvent?.(event, tagged)
     const outbound = buildOutboundRunEvent(event, tagged)
     nsp.to(`session:${sessionId}`).emit(event, outbound)
-    if (!nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
-      socket.emit(event, outbound)
+    if ((isDirectChatRunCaller(socket) || !nsp.adapter.rooms.get(`session:${sessionId}`)?.size) && chatRunCaller(socket).isActive()) {
+      chatRunCaller(socket).reply(event, outbound)
     }
   }
 
@@ -1284,7 +1285,7 @@ async function estimateSnapshotAwareMessageTokens(args: {
 
 async function applyBridgeChunkAsync(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   state: SessionState,
   sessionId: string,
   runMarker: string,
@@ -1293,7 +1294,7 @@ async function applyBridgeChunkAsync(
   profile: string,
   sessionMap: Map<string, SessionState>,
   bridge: AgentBridgeClient,
-  dequeueNextQueuedRun: (socket: Socket, sessionId: string, fallbackProfile?: string) => void,
+  dequeueNextQueuedRun: (socket: ChatRunCallerTarget, sessionId: string, fallbackProfile?: string) => void,
   instructions: string,
   modelContext: { model?: string | null; provider?: string | null },
   runSource: BridgeRunSource,
@@ -1976,7 +1977,7 @@ function hasRealQueuedRun(state: SessionState): boolean {
 
 async function maybeEnqueueGoalContinuation(args: {
   nsp: ReturnType<Server['of']>
-  socket: Socket
+  socket: ChatRunCallerTarget
   sessionId: string
   state: SessionState
   bridge: AgentBridgeClient
@@ -2049,7 +2050,7 @@ function isGoalJudgeUnavailable(reason?: string | null): boolean {
 
 function emitGoalStatus(
   nsp: ReturnType<Server['of']>,
-  socket: Socket,
+  socket: ChatRunCallerTarget,
   sessionId: string,
   state: SessionState,
   action: string,
@@ -2078,8 +2079,8 @@ function emitGoalStatus(
     message,
     terminal: false,
   })
-  if (!nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
-    socket.emit('session.command', {
+  if ((isDirectChatRunCaller(socket) || !nsp.adapter.rooms.get(`session:${sessionId}`)?.size) && chatRunCaller(socket).isActive()) {
+    chatRunCaller(socket).reply('session.command', {
       event: 'session.command',
       session_id: sessionId,
       command: 'goal',

@@ -95,7 +95,11 @@ async function loadTags() {
 async function handleRefresh() {
   loading.value = true
   try {
-    await Promise.all([loadStatus(), loadTags()])
+    const results = await Promise.allSettled([loadStatus(), loadTags()])
+    const failure = results.find(result => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
+  } catch (err: any) {
+    message.error(err?.message || t('githubPreview.actionFailed'))
   } finally {
     loading.value = false
   }

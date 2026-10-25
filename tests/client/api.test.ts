@@ -32,6 +32,16 @@ describe('API Client', () => {
     Object.assign(router.currentRoute.value, { name: 'hermes.chat', query: {} })
   })
 
+  it('routes opaque chat image references through their owned history endpoint and explicit profile', () => {
+    localStorage.setItem('hermes_api_key', 'fixture-token')
+    localStorage.setItem('hermes_active_profile_name', 'unrelated')
+    const url = new URL(getDownloadUrl('agent-artifact:chat%20one/ab012345-6789-0123-4567-0123456789ab', 'image.png', 'research'), 'http://localhost')
+    expect(url.pathname).toBe('/api/studio/agent-chats/chat%20one/images/ab012345-6789-0123-4567-0123456789ab')
+    expect(url.searchParams.get('profile')).toBe('research')
+    expect(url.searchParams.get('token')).toBe('fixture-token')
+    expect(url.searchParams.has('path')).toBe(false)
+  })
+
   it('uses the Models page Profile for settings requests without changing global Profile or other requests', async () => {
     localStorage.setItem('hermes_active_profile_name', 'default')
     Object.assign(router.currentRoute.value, { name: 'hermes.models', query: { modelProfile: 'research' } })

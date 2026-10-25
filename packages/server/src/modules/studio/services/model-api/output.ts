@@ -19,7 +19,7 @@ export function responsesUsage(usage?: ModelUsage) {
 
 /** The same state builds JSON and SSE output, keeping terminal output and usage identical. */
 export class ResponsesOutput {
-  readonly id = `resp_${randomUUID().replaceAll('-', '')}`
+  readonly id: string
   readonly output: any[] = []
   usage?: ModelUsage
   private sequence = 0
@@ -28,7 +28,9 @@ export class ResponsesOutput {
   private nativeCallIds = new Map<string, string>()
   private createdAt = Math.floor(Date.now() / 1000)
 
-  constructor(readonly model: string, private readonly codec: ReasoningCodec, private readonly options: Record<string, any> = {}, private readonly scopeToolIds = false) {}
+  constructor(readonly model: string, private readonly codec: ReasoningCodec, private readonly options: Record<string, any> = {}, private readonly scopeToolIds = false, id?: string) {
+    this.id = id ?? `resp_${randomUUID().replaceAll('-', '')}`
+  }
 
   event(type: string, data: Record<string, unknown> = {}): ResponsesEvent {
     return { type, sequence_number: this.sequence++, ...data }

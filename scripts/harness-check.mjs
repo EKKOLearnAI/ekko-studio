@@ -8,6 +8,7 @@ import { checkDshModuleBoundaries } from './dsh-module-harness.mjs'
 import { checkCodingAgentModuleBoundaries } from './coding-agent-module-harness.mjs'
 import { checkJevIntegrations } from './jev-harness.mjs'
 import { checkUiTheme } from './ui-theme-harness.mjs'
+import { checkStudioPluginBoundaries } from './studio-plugin-boundaries.mjs'
 
 const root = process.cwd()
 const failures = []
@@ -15,6 +16,7 @@ failures.push(...await checkDshModuleBoundaries(root))
 failures.push(...await checkCodingAgentModuleBoundaries(root))
 failures.push(...await checkJevIntegrations(root))
 failures.push(...await checkUiTheme(root))
+failures.push(...await checkStudioPluginBoundaries(root))
 
 function fail(message) {
   failures.push(message)
@@ -141,8 +143,7 @@ for (const failure of await checkServerModuleBoundaries(root)) {
 
 for (const [file, factory] of [
   ['packages/server/src/modules/hermes/services/mcp/studio-autoinject.ts', 'managedConfig'],
-  ['packages/server/src/modules/ekko/services/mcp.ts', 'managedMcpServerConfig'],
-  ['packages/server/src/modules/coding-agents/services/index.ts', 'hermesMcpServerConfig'],
+  ['packages/server/src/modules/studio/services/mcp/managed-config.ts', 'studioManagedMcpConfig'],
 ]) {
   if (!hasManagedMcpNodeMode(await readText(file), factory)) {
     fail(`${file}: ${factory} must inject ELECTRON_RUN_AS_NODE: '1' into every managed MCP env; Electron fallback must not launch the desktop GUI`)

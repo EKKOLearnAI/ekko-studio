@@ -18,6 +18,7 @@ export interface ChatMessage {
 }
 
 export interface StartRunRequest {
+  managed_agent_protocol?: number
   input: string | ContentBlock[]
   /** Optional UI/storage representation when model input carries hidden metadata. */
   display_input?: string | ContentBlock[] | null
@@ -58,6 +59,12 @@ export interface StartRunResponse {
 
 // SSE event types from /v1/runs/{id}/events
 export interface RunEvent {
+  agent_instance_revision?: number
+  /** Private replay of a previously completed canonical invocation. */
+  replayed?: boolean
+  agent_run_id?: string
+  messages?: import('./sessions').HermesMessage[]
+  interaction?: import('../../../../studio-plugin-sdk/src/types').AgentInteraction
   run_usage?: import('@/utils/run-usage').RunUsageSummary
   event: string
   run_id?: string
@@ -165,6 +172,13 @@ export interface RunEvent {
 }
 
 export interface ResumeSessionPayload {
+  managed_agent_protocol?: number
+  agent_instance_id?: string
+  agent_chat_settings?: boolean
+  agent_instance_revision?: number
+  agent_usage?: import('./sessions').ManagedAgentUsage
+  agent_mode?: string
+  agentInteractions?: import('../../../../studio-plugin-sdk/src/types').AgentInteraction[]
   taskPlans?: TaskPlanSnapshot[]
   session_id: string
   messages: any[]
@@ -226,6 +240,7 @@ const TRANSIENT_DISCONNECT_REASONS = new Set<string>([
  */
 const sessionEventHandlers = new Map<string, {
   onMessageDelta: (event: RunEvent) => void
+  onMessagePersisted?: (event: RunEvent) => void
   onMessageInterim: (event: RunEvent) => void
   onReasoningDelta: (event: RunEvent) => void
   onThinkingDelta: (event: RunEvent) => void
@@ -263,6 +278,14 @@ const sessionTitleUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionWorkspaceUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionSettingsUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const runUsageUpdatedHandlers = new Set<(event: RunEvent) => void>()
+const persistedMessageHandlers = new Set<(event: RunEvent) => void>()
+const agentInteractionHandlers = new Set<(event: RunEvent) => void>()
+export function onPersistedAgentMessage(handler: (event: RunEvent) => void): () => void {
+  persistedMessageHandlers.add(handler); return () => { persistedMessageHandlers.delete(handler) }
+}
+export function onAgentInteraction(handler: (event: RunEvent) => void): () => void {
+  agentInteractionHandlers.add(handler); return () => { agentInteractionHandlers.delete(handler) }
+}
 
 export function onRunUsageUpdated(handler: (event: RunEvent) => void): () => void {
   runUsageUpdatedHandlers.add(handler)
@@ -666,7 +689,8 @@ export function registerSessionHandlers(
   sessionId: string,
   handlers: {
     onMessageDelta: (event: RunEvent) => void
-    onMessageInterim: (event: RunEvent) => void
+    onMessagePersisted?: (event: RunEvent) => void
+  onMessageInterim: (event: RunEvent) => void
     onReasoningDelta: (event: RunEvent) => void
     onThinkingDelta: (event: RunEvent) => void
     onReasoningAvailable: (event: RunEvent) => void
@@ -844,6 +868,11 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
   if (!globalListenersRegistered) {
     // Message events
     on('message.delta', globalMessageDeltaHandler)
+    on('message.persisted', (event: RunEvent) => {
+      for (const handler of persistedMessageHandlers) handler(event)
+      if (event.session_id) sessionEventHandlers.get(event.session_id)?.onMessagePersisted?.(event)
+    })
+    on('agent.interaction.updated', (event: RunEvent) => { for (const handler of agentInteractionHandlers) handler(event) })
     on('message.interim', globalMessageInterimHandler)
     on('reasoning.delta', globalReasoningDeltaHandler)
     on('thinking.delta', globalThinkingDeltaHandler)
@@ -964,6 +993,7 @@ export function startRunViaSocket(
     transport?: ChatRunTransport
   },
 ): { abort: () => void } {
+  body = { ...body, managed_agent_protocol: 1 }
   const sid = body.session_id
   if (!sid) {
     throw new Error('session_id is required for startRunViaSocket')
@@ -1048,6 +1078,7 @@ export function startRunViaSocket(
       if (closed) return
       onEvent(evt)
     },
+    onMessagePersisted: (evt: RunEvent) => { if (!closed) onEvent(evt) },
     onMessageInterim: (evt: RunEvent) => {
       if (closed) return
       onEvent(evt)

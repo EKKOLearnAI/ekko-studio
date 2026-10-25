@@ -504,6 +504,24 @@ describe('GlobalPendingActions', () => {
     expect(chatState.respondToClarifyFor).toHaveBeenCalledWith('session-b', 'clarify-b', 'staging')
   })
 
+  it('renders a native approval as a choice-only permission prompt and sends its selection directly', async () => {
+    chatState.sessions = [{ id: 'session-b', title: 'B' }]
+    chatState.pendingClarifies = new Map([['session-b', {
+      sessionId: 'session-b', clarifyId: 'native', question: 'Allow native operation?', choices: ['Allow once'],
+      nativeInteraction: { id: 'native', runId: 'run', kind: 'approval', expiresAt: null, status: 'pending' },
+    }]])
+    mount(GlobalPendingActions)
+    await nextTick()
+    const title = await render(created[0].options.title)
+    expect(title.text()).toContain('chat.approvalTitle')
+    const content = await render(created[0].options.content)
+    expect(content.find('input').exists()).toBe(false)
+    expect(content.find('.pending-interaction-countdown').exists()).toBe(false)
+    expect(created[0].options.action).toBeUndefined()
+    await content.get('button').trigger('click')
+    expect(chatState.respondToClarifyFor).toHaveBeenCalledWith('session-b', 'native', 'Allow once')
+  })
+
   it('warns when a timed-out interaction is closed after an attempted response', async () => {
     mount(GlobalPendingActions)
     window.dispatchEvent(new CustomEvent('hermes:pending-interaction-expired'))

@@ -15,6 +15,7 @@ function handleSessionTasks(ctx: Context, write: boolean) {
     if (typeof input.context_id !== 'string' || !input.context_id.trim()) throw new SessionTasksError('context_id is required')
     if (!write && Object.keys(input).some(key => key !== 'context_id')) throw new SessionTasksError('Session task queries accept only context_id')
     const profile = String(ctx.state.profile?.name || 'default').trim() || 'default'
+    server.authorizeAgentInteractionContext?.(input.context_id, profile, String(ctx.state.user?.id ?? ''))
     const snapshot = write ? server.updateSessionTasks(input.context_id, profile, input) : server.listSessionTasks(input.context_id, profile)
     ctx.body = { ok: true, ...snapshot }
   } catch (error) {

@@ -24,6 +24,18 @@ describe('Antigravity scoped provider bridge', () => {
     expect(responsesToGemini({ output: [{ type: 'function_call', name: 'read', arguments: '{"path":"a"}' }], usage: { input_tokens: 10, output_tokens: 3, total_tokens: 13 } })).toMatchObject({ candidates: [{ content: { parts: [{ functionCall: { name: 'read', args: { path: 'a' } } }] } }], usageMetadata: { totalTokenCount: 13 } })
     expect(() => responsesToGemini({ output: [{ type: 'function_call', name: 'read', arguments: '{' }] })).toThrow()
   })
+  it('preserves native IDs for parallel calls with the same name and out-of-order results', () => {
+    const result = geminiToResponses({ contents: [
+      { role: 'model', parts: [{ functionCall: { id: 'call-a', name: 'read', args: { path: 'a' } } }, { functionCall: { id: 'call-b', name: 'read', args: { path: 'b' } } }] },
+      { role: 'user', parts: [{ functionResponse: { id: 'call-b', name: 'read', response: { value: 'b' } } }, { functionResponse: { id: 'call-a', name: 'read', response: { value: 'a' } } }] },
+    ] })
+    expect(result.input.map((item: any) => item.call_id)).toEqual(['call-a', 'call-b', 'call-b', 'call-a'])
+    expect(responsesToGemini({ output: [{ type: 'function_call', call_id: 'native-next', name: 'read', arguments: '{}' }] })
+      .candidates[0].content.parts[0].functionCall.id).toBe('native-next')
+    expect(() => geminiToResponses({ contents: [{ parts: [{ functionCall: { id: 3, name: 'read' } }] }] })).toThrow('Invalid Gemini function ID')
+    expect(() => geminiToResponses({ contents: [{ parts: [{ functionCall: { id: 'same', name: 'read' } }, { functionCall: { id: 'same', name: 'read' } }] }] })).toThrow('Duplicate Gemini function ID')
+    expect(() => geminiToResponses({ contents: [{ parts: [{ functionCall: { id: 'one', name: 'read' } }, { functionResponse: { id: 'other', name: 'read' } }] }] })).toThrow('Unmatched Gemini function response')
+  })
   it.each(['chat_completions', 'codex_responses', 'anthropic_messages'] as const)('pins both title and main requests to the selected %s model', async apiMode => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify(apiMode === 'chat_completions'
       ? { id: 'r', choices: [{ message: { content: 'external answer' } }], usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 } }

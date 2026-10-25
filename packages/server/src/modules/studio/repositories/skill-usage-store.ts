@@ -184,9 +184,9 @@ function matchingAssistantRows(db: StudioDb, sessionIds: string[]): Array<Record
 }
 
 /** Record a newly persisted, evidence-backed skill tool event. */
-export function recordSkillUsageMessage(messageId: number, message: SkillMessageInput): void {
+export function recordSkillUsageMessage(messageId: number, message: SkillMessageInput, database?: StudioDb): void {
   if (message.role !== 'tool' || !Number.isFinite(messageId)) return
-  const db = getDb()
+  const db = database ?? getDb()
   if (!db) return
   try {
     const session = db.prepare('SELECT profile, source, agent FROM sessions WHERE id = ?').get(message.session_id) as Record<string, unknown> | undefined

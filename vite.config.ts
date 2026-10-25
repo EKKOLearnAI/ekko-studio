@@ -74,6 +74,9 @@ export default defineConfig({
       'vue-router',
       'pinia',
       'naive-ui',
+      // Worker entrypoints are outside the initial HTML dependency scan. Discovering
+      // this during the first XLSX preview forces a reload and closes open previews.
+      'read-excel-file/web-worker',
     ],
   },
   server: {

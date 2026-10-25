@@ -1,32 +1,14 @@
-import { EventEmitter } from 'events'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-const ioMock = vi.hoisted(() => vi.fn())
-const scenarioMock = vi.hoisted(() => ({
-  emitRunEvents: vi.fn(),
+const scenarioMock = vi.hoisted(() => ({ emitRunEvents: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/public/chat-run', () => ({ getChatRunServer: () => ({
+  startDirectRun: (payload: unknown, options: any) => {
+    scenarioMock.emitRunEvents(options.onEvent, payload)
+    return { dispose: vi.fn(), dropQueued: vi.fn() }
+  },
+}) }))
+vi.mock('../../packages/server/src/modules/studio/public/auth', () => ({
+  authenticateUserToken: vi.fn(), inspectAppUserToken: vi.fn(async () => null), isAuthEnabled: vi.fn(async () => false),
 }))
-
-vi.mock('socket.io-client', () => ({
-  io: ioMock,
-}))
-
-function makeSocket() {
-  const emitter = new EventEmitter() as EventEmitter & {
-    emit: ReturnType<typeof vi.fn>
-    disconnect: ReturnType<typeof vi.fn>
-    emitNative: (event: string, payload?: unknown) => boolean
-  }
-  const nativeEmit = EventEmitter.prototype.emit.bind(emitter)
-  emitter.emitNative = nativeEmit
-  emitter.emit = vi.fn((event: string, payload?: unknown) => {
-    if (event === 'run') {
-      process.nextTick(() => scenarioMock.emitRunEvents(nativeEmit, payload))
-    }
-    return true
-  }) as any
-  emitter.disconnect = vi.fn()
-  return emitter
-}
 
 function makeCtx(body: Record<string, unknown>) {
   return {
@@ -44,8 +26,6 @@ describe('chat-run action/event baseline', () => {
   })
 
   it('returns requires_action when approval is requested', async () => {
-    const socket = makeSocket()
-    ioMock.mockReturnValue(socket)
     scenarioMock.emitRunEvents.mockImplementation((emitNative: Function) => {
       emitNative('run.started', { run_id: 'run-1' })
       emitNative('approval.requested', { run_id: 'run-1', approval_id: 'approval-1', command: 'touch file' })
@@ -53,9 +33,7 @@ describe('chat-run action/event baseline', () => {
 
     const { runOnce } = await import('../../packages/server/src/modules/studio/controllers/chat-run')
     const ctx = makeCtx({ session_id: 'session-1', input: 'needs approval', include_events: true })
-    const pending = runOnce(ctx as any)
-    socket.emitNative('connect')
-    await pending
+    await runOnce(ctx as any)
 
     expect(ctx.status).toBe(409)
     expect(ctx.body).toMatchObject({
@@ -70,8 +48,6 @@ describe('chat-run action/event baseline', () => {
   })
 
   it('returns requires_action when clarification is requested', async () => {
-    const socket = makeSocket()
-    ioMock.mockReturnValue(socket)
     scenarioMock.emitRunEvents.mockImplementation((emitNative: Function) => {
       emitNative('run.started', { run_id: 'run-1' })
       emitNative('clarify.requested', { run_id: 'run-1', question: 'Which room?' })
@@ -79,9 +55,7 @@ describe('chat-run action/event baseline', () => {
 
     const { runOnce } = await import('../../packages/server/src/modules/studio/controllers/chat-run')
     const ctx = makeCtx({ session_id: 'session-1', input: 'needs clarify', include_events: true })
-    const pending = runOnce(ctx as any)
-    socket.emitNative('connect')
-    await pending
+    await runOnce(ctx as any)
 
     expect(ctx.status).toBe(409)
     expect(ctx.body).toMatchObject({
@@ -93,8 +67,6 @@ describe('chat-run action/event baseline', () => {
   })
 
   it('records bounded event history and accumulates output/reasoning when include_events is true', async () => {
-    const socket = makeSocket()
-    ioMock.mockReturnValue(socket)
     scenarioMock.emitRunEvents.mockImplementation((emitNative: Function) => {
       emitNative('run.started', { run_id: 'run-1' })
       emitNative('reasoning.delta', { run_id: 'run-1', delta: 'thought' })
@@ -106,9 +78,7 @@ describe('chat-run action/event baseline', () => {
 
     const { runOnce } = await import('../../packages/server/src/modules/studio/controllers/chat-run')
     const ctx = makeCtx({ session_id: 'session-1', input: 'hello', include_events: true })
-    const pending = runOnce(ctx as any)
-    socket.emitNative('connect')
-    await pending
+    await runOnce(ctx as any)
 
     expect(ctx.status).toBe(200)
     expect(ctx.body).toMatchObject({

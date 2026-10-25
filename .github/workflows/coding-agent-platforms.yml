@@ -5,6 +5,12 @@ on:
     branches: [main, base]
     paths:
       - 'packages/server/src/**'
+      - 'packages/studio-plugin-sdk/**'
+      - 'packages/studio-plugin-runner/**'
+      - 'packages/studio-agent-drivers/**'
+      - 'plugins/**'
+      - 'packages/ekko-agent/**'
+      - 'tests/ekko-agent/mcp-*.test.ts'
       - 'tests/server/**'
       - 'tests/setup.ts'
       - 'package*.json'
@@ -14,6 +20,12 @@ on:
     branches: [main]
     paths:
       - 'packages/server/src/**'
+      - 'packages/studio-plugin-sdk/**'
+      - 'packages/studio-plugin-runner/**'
+      - 'packages/studio-agent-drivers/**'
+      - 'plugins/**'
+      - 'packages/ekko-agent/**'
+      - 'tests/ekko-agent/mcp-*.test.ts'
       - 'tests/server/**'
       - 'tests/setup.ts'
       - 'package*.json'
@@ -58,3 +70,51 @@ jobs:
           tests/server/zcode-desktop-command.test.ts
           tests/server/native-chat-turn.test.ts
           --maxWorkers=1 --testTimeout=30000
+      - name: Verify managed processes and plugin worker ownership
+        run: >-
+          npm run test --
+          tests/server/studio-managed-processes.test.ts
+          tests/server/studio-managed-acp.test.ts
+          tests/server/studio-native-rpc.test.ts
+          tests/server/studio-agent-event-queue.test.ts
+          tests/server/studio-agent-artifacts.test.ts
+          tests/server/studio-qwen-plugin.test.ts
+          tests/server/studio-kimi-plugin.test.ts
+          tests/server/studio-kimi-environment.test.ts
+          tests/server/studio-qoder-plugin.test.ts
+          tests/server/studio-codebuddy-plugin.test.ts
+          tests/server/studio-copilot-plugin.test.ts
+          tests/server/studio-copilot-environment.test.ts
+          tests/server/studio-opencode-plugin.test.ts
+          tests/server/studio-pi-plugin.test.ts
+          tests/server/studio-dsh-plugin.test.ts
+          tests/server/studio-claude-code-plugin.test.ts
+          tests/server/studio-antigravity-plugin.test.ts
+          tests/server/studio-antigravity-plugin-cleanup.test.ts
+          tests/server/studio-cursor-plugin.test.ts
+          tests/server/studio-grok-plugin.test.ts
+          tests/server/studio-zcode-plugin.test.ts
+          tests/server/studio-zcode-plugin-relay.test.ts
+          tests/server/studio-codex-plugin.test.ts
+          tests/server/studio-codex-mcp-approval.test.ts
+          tests/server/studio-managed-mcp.test.ts
+          tests/server/studio-mcp-tools.test.ts
+          tests/server/studio-plugin-mcp-bridge.test.ts
+          tests/ekko-agent/mcp-lifecycle.test.ts
+          tests/server/native-acp-turn.test.ts
+          tests/server/studio-plugin-processes.test.ts
+          tests/server/studio-plugin-process-bridge.test.ts
+          tests/server/studio-plugin-pty.test.ts
+          tests/server/studio-agent-lifecycle.test.ts
+          tests/server/studio-agent-conversations.test.ts
+          tests/server/studio-agent-chat-projection.test.ts
+          tests/server/studio-agent-chats.test.ts
+          tests/server/studio-agent-native-context.test.ts
+          tests/server/studio-agent-management.test.ts
+          tests/server/studio-agent-login.test.ts
+          tests/server/studio-mcp-resources.test.ts
+          tests/server/run-mcp-credentials.test.ts
+          tests/server/studio-agent-state-directory.test.ts
+          tests/server/studio-model-gateway.test.ts
+          tests/server/studio-native-adapter.test.ts
+          --maxWorkers=1

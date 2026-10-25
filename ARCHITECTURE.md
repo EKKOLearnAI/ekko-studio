@@ -44,6 +44,15 @@ composition belongs in `bootstrap`.
 See `docs/harness/server-module-boundaries.md` for the complete target tree,
 ownership decisions, allowed dependency matrix, and migration rules.
 
+The unified backend context, Coding Agent plugin migration, and built-in
+Hermes/Ekko integration are being implemented as
+described in [Studio plugin architecture planning](docs/planning/studio-plugin-architecture.md),
+with linked contracts and execution criteria. [Implementation progress](docs/planning/studio-plugin-progress.md)
+distinguishes working plugin infrastructure from the remaining Agent migration.
+The existing module boundaries remain in effect. The independent SDK, runner and
+native protocol drivers live in `packages/studio-plugin-sdk`, `packages/studio-plugin-runner`
+and `packages/studio-agent-drivers`; `plugins/` must not import server private code.
+
 - Module `routes/` register HTTP entry points; `sockets/` own Socket.IO transports.
 - Module `controllers/` handle request-level behavior.
 - Module `services/` own reusable IO, domain behavior, processes, and integrations.

@@ -1,4 +1,5 @@
 import { getActiveProfileName, getApiKey, getBaseUrlValue } from '../client'
+import { parseAgentChatArtifactPath } from '../../../../shared/agent-chat-artifact'
 
 function safeDecodeURIComponent(value: string): string {
   try {
@@ -51,6 +52,15 @@ export function inferDownloadFileName(filePath: string, fileName?: string): stri
  */
 export function getDownloadUrl(filePath: string, fileName?: string, profile?: string | null): string {
   const base = getBaseUrlValue()
+  const artifact = parseAgentChatArtifactPath(filePath)
+  if (artifact) {
+    const params = new URLSearchParams()
+    const name = profile === undefined ? getActiveProfileName() : normalizeProfile(profile)
+    if (name) params.set('profile', name)
+    const token = getApiKey()
+    if (token) params.set('token', token)
+    return `${base}/api/studio/agent-chats/${encodeURIComponent(artifact.sessionId)}/images/${artifact.artifactId}?${params}`
+  }
 
   // Guard: if filePath is already a full download URL, extract the real path
   // to prevent double-wrapping (/api/studio/files/download?path=/api/studio/files/download?path=...)

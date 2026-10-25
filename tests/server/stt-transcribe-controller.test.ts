@@ -2,7 +2,7 @@ import { Readable } from 'stream'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
@@ -721,17 +721,15 @@ describe('stt transcribe controller', () => {
 })
 
 describe('route registration ordering', () => {
-  beforeEach(() => {
+  const ttsPublicMiddleware = async () => {}
+  const ttsProtectedMiddleware = async () => {}
+  const sttProtectedMiddleware = async () => {}
+  let registerRoutes: typeof import('../../packages/server/src/bootstrap/routes')['registerRoutes']
+
+  beforeAll(async () => {
     vi.resetModules()
     vi.clearAllMocks()
     vi.doUnmock('../../packages/server/src/bootstrap/routes')
-  })
-
-  it('mounts protected STT routes after requireAuth', async () => {
-    const ttsPublicMiddleware = async () => {}
-    const ttsProtectedMiddleware = async () => {}
-    const sttProtectedMiddleware = async () => {}
-
     vi.doMock('../../packages/server/src/modules/studio/routes/tts', () => ({
       ttsRoutes: { routes: vi.fn(() => ttsPublicMiddleware) },
       ttsProtectedRoutes: { routes: vi.fn(() => ttsProtectedMiddleware) },
@@ -740,7 +738,12 @@ describe('route registration ordering', () => {
       sttProtectedRoutes: { routes: vi.fn(() => sttProtectedMiddleware) },
     }))
 
-    const { registerRoutes } = await import('../../packages/server/src/bootstrap/routes')
+    // Loading the complete application graph is fixture setup. Keep the actual
+    // registration and ordering assertions inside the unchanged test deadline.
+    ;({ registerRoutes } = await import('../../packages/server/src/bootstrap/routes'))
+  })
+
+  it('mounts protected STT routes after requireAuth', () => {
     const use = vi.fn()
     const app = { use }
     const requireAuth = vi.fn(async () => {})

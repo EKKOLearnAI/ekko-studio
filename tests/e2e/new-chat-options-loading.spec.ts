@@ -145,7 +145,8 @@ for (const mode of ['scoped', 'global']) {
       expect(probeRequests).toBe(0)
       expect(availabilityRequests).toBe(2)
       await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted
-        ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({ coding_agent_id: 'codex', mode })
+        ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({ managed_agent_protocol: 1 })
+      expect(JSON.parse(api.requests.find(item => item.pathname === '/api/studio/agent-chats')!.postData!)).toMatchObject({ agentTypeId: 'codex', mode })
       expect(api.unexpectedRequests).toEqual([])
     } finally {
       probes.release()
@@ -207,9 +208,10 @@ for (const agent of agentCatalog.agents) {
       await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted
         ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({
           session_id: sessionId,
-          ...(agent.kind === 'coding-agent' ? { coding_agent_id: agent.id, mode }
+          ...(agent.kind === 'coding-agent' ? { managed_agent_protocol: 1 }
             : agent.kind === 'built-in' ? { agent_id: agent.id } : { source: 'cli' }),
         })
+      if (agent.kind === 'coding-agent') expect(JSON.parse(api.requests.find(item => item.pathname === '/api/studio/agent-chats')!.postData!)).toMatchObject({ agentTypeId: agent.id, mode })
       expect(api.unexpectedRequests).toEqual([])
     })
   }

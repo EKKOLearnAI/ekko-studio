@@ -7,6 +7,7 @@ import { getWebUiHome } from '../../public/config'
 const TOKEN_PREFIX = 'studio_run_'
 
 export interface RunMcpBinding {
+  runId?: string
   sessionId: string
   contextId: string
   profile: string

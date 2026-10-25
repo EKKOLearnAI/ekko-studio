@@ -18,6 +18,7 @@ const api = vi.hoisted(() => ({
 }))
 const route = vi.hoisted(() => ({ query: {} as Record<string, string> }))
 const replaceRoute = vi.hoisted(() => vi.fn())
+const pushRoute = vi.hoisted(() => vi.fn())
 const dialogWarning = vi.hoisted(() => vi.fn())
 const newChat = vi.hoisted(() => vi.fn())
 const restartApp = vi.hoisted(() => vi.fn())
@@ -60,7 +61,7 @@ vi.mock('@/components/layout/VersionManagementModal.vue', () => ({
 
 vi.mock('vue-router', () => ({
   useRoute: () => route,
-  useRouter: () => ({ push: vi.fn(), replace: replaceRoute }),
+  useRouter: () => ({ push: pushRoute, replace: replaceRoute }),
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -194,6 +195,16 @@ function agentStatusSnapshot() {
 }
 
 describe('Agent Manager page', () => {
+  it('lists all Coding Agents in the existing cards without an instance management step', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    for (const id of ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode']) {
+      expect(wrapper.find(`[data-testid="agent-card-${id}"]`).exists()).toBe(true)
+    }
+    expect(wrapper.findComponent({ name: 'AgentInstanceManager' }).exists()).toBe(false)
+    expect(pushRoute).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     route.query = {}

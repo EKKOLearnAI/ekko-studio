@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { startCursorTurnProcess } from '../../packages/server/src/modules/coding-agents/services/cursor/turn-process'
 import { startAntigravityTurnProcess } from '../../packages/server/src/modules/coding-agents/services/antigravity/turn-process'
 import { geminiToResponses } from '../../packages/server/src/modules/coding-agents/services/antigravity/gemini-adapter'
-import { responsesToOpenAiChat, responsesToAnthropicMessages } from '../../packages/server/src/modules/coding-agents/protocol/adapters/responses'
+import { responsesToOpenAiChat, responsesToAnthropicMessages } from '../../packages/server/src/modules/studio/public/model-protocol'
 
 vi.mock('child_process', async original => ({ ...await original<typeof import('child_process')>(), spawn: vi.fn() }))
 afterEach(() => vi.restoreAllMocks())

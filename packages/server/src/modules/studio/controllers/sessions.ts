@@ -1,4 +1,6 @@
-import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
+import { StudioError, type SessionRemovalResult } from '../contracts/plugins'
+import { randomUUID } from 'node:crypto'
+import { isProviderAgentSession, removeStudioSession, SessionRemovalError, type SessionRemovalAccess } from '../services/sessions/removal'
 import { withRunUsage } from '../public/usage'
 import { businessEvents } from '../services/webhooks/business-events'
 import { publishSessionRemoval } from '../services/notifications/session-removal'
@@ -7,22 +9,21 @@ import { getAggregatedUsageStats } from '../services/usage/usage-stats'
 import { getTodayUsageWindow } from '../services/usage/usage-period'
 import { ensureBusinessConsumers } from '../services/webhooks/business-consumers'
 import { authorizeSessionShare, authorizeShareFile } from '../services/session-shares/access'
+import { getAgentChatService, isManagedAgentChat } from '../services/agents/chat-registry'
+import { getRunRequestContext } from '../services/auth/run-request-context'
 import { sessionShareService } from '../services/session-shares/service'
 import { getSessionTaskPlans } from '../services/task-plans'
 import { getSessionTasks, listSessionTaskItems } from '../services/session-tasks'
 import { historySessionSource, isBuiltinEkkoAgent } from '../contracts/history-source'
 import {
-  deleteHermesSessionForProfile,
   getHermesCliSession,
   getHermesModelContextLength,
   getHermesSessionDetail,
   getHermesSessionDetailForProfile,
   getHermesSessionDetailPaginatedForProfile,
-  getExactHermesSessionDetailForProfile,
   listHermesSessionSummaries,
   listHermesSessionSummaryGroups,
   notifyHermesSessionModelChanged,
-  stopCodingAgentSessionRun,
   invalidateCodingAgentSessionRuntime,
   validateCodingAgentModelEffort,
 } from '../public/session-agent-runtime'
@@ -32,7 +33,6 @@ import {
   searchSessions as localSearchSessions,
   getSession as localGetSession,
   getSessionDetail as localGetSessionDetail,
-  deleteSession as localDeleteSession,
   renameSession as localRenameSession,
   setSessionArchived as localSetSessionArchived,
   setSessionPushEnabled as localSetSessionPushEnabled,
@@ -55,7 +55,7 @@ import {
   renameSessionCategory,
   setSessionCategory,
 } from '../public/sessions'
-import { deleteWorkspaceRunChangesForSession, getWorkspaceRunChangeFile as getWorkspaceRunChangeFileFromDb, listWorkspaceRunChangesForAssistantMessages, listWorkspaceRunChangesForSession } from '../public/sessions'
+import { getWorkspaceRunChangeFile as getWorkspaceRunChangeFileFromDb, listWorkspaceRunChangesForAssistantMessages, listWorkspaceRunChangesForSession } from '../public/sessions'
 import { getActiveProfileDir, getActiveProfileName, getProfileDir, listProfileNamesFromDisk, readConfigYamlForProfile } from '../public/profile-config'
 import { isNearestExistingRealPathWithin, isPathWithin, relativePathFromBase } from '../services/files/path'
 import {
@@ -136,6 +136,8 @@ function explicitProfileFilter(ctx: any): string | undefined {
 }
 
 function allowedProfileSet(ctx: any): Set<string> | null {
+  const run = getRunRequestContext(ctx)
+  if (run) return new Set([run.profile])
   const user = ctx.state?.user
   if (!user || user.role === 'super_admin') return null
   return new Set(listUserProfiles(user.id).map(profile => profile.profile_name))
@@ -148,14 +150,53 @@ function canAccessProfile(ctx: any, profile: string | null | undefined): boolean
 
 function filterByAllowedProfiles<T>(ctx: any, items: T[]): T[] {
   const allowed = allowedProfileSet(ctx)
-  if (!allowed) return items
-  return items.filter(item => allowed.has(((item as any).profile as string | null | undefined) || 'default'))
+  return items.filter(item => (!allowed || allowed.has(((item as any).profile as string | null | undefined) || 'default')) && canReadManagedChat(ctx, item))
+}
+
+function managedListOptions(ctx: any) { return { managedOwnerId: String(ctx.state?.user?.id ?? '') } }
+function canReadManagedChat(ctx: any, session: any): boolean {
+  const chats = getAgentChatService()
+  if (!isManagedAgentChat(session?.id)) return !session?.agent_instance_id
+  const shared = ctx.state?.sessionShare
+  if (ctx.method === 'GET' && shared?.share?.session_id === session.id && shared.share.profile === (session.profile || 'default')) return true
+  const user = ctx.state?.user
+  if (!user || !chats) return false
+  try {
+    chats.ownedBinding({ scopeId: randomUUID(), traceId: randomUUID(), principal: { kind: 'user', id: String(user.id) },
+      profileId: session.profile || 'default', surface: 'api', sessionId: session.id }, session.id)
+    return true
+  } catch { return false }
 }
 
 function denySessionAccess(ctx: any, session: any | null | undefined): boolean {
-  if (!session || canAccessProfile(ctx, session.profile)) return false
+  if (!session || (canAccessProfile(ctx, session.profile) && canReadManagedChat(ctx, session))) return false
   ctx.status = 403
-  ctx.body = { error: `Profile "${session.profile || 'default'}" is not available for this user` }
+  ctx.body = { error: canAccessProfile(ctx, session.profile) ? 'Session is not available for this user' : `Profile "${session.profile || 'default'}" is not available for this user` }
+  return true
+}
+function denyManagedInstanceSetting(ctx: any, session?: any): boolean {
+  if (!session?.agent_instance_id && !isManagedAgentChat(ctx.params.id)) return false
+  ctx.status = 409
+  ctx.body = { error: 'Edit the Agent instance configuration to change its model, workspace or reasoning settings.',
+    ...(session?.agent_instance_id ? { instanceId: session.agent_instance_id } : {}) }
+  return true
+}
+
+async function updateOrdinaryAgentSettings(ctx: any, session: any, patch: import('../contracts/plugins').JsonObject): Promise<boolean> {
+  if (!session?.agent_chat_settings) return false
+  const { getStudioPluginRuntime } = await import('../services/plugins/runtime')
+  const { respond } = await import('./studio-plugins')
+  await respond(ctx, async () => {
+    const run = getRunRequestContext(ctx)
+    const scope: import('../contracts/plugins').ExecutionScope = { scopeId: randomUUID(), traceId: randomUUID(),
+      principal: { kind: 'user', id: String(ctx.state?.user?.id ?? '') }, profileId: session.profile || 'default', surface: 'chat',
+      ...(run ? { sessionId: run.sessionId, ...(run.runId ? { runId: run.runId } : {}) } : {}) }
+    const result = await getStudioPluginRuntime().ordinaryChats.update(scope, session.id, patch)
+    const updated = localGetSession(session.id)!
+    getChatRunServer()?.emitSessionSettingsUpdated(session.id, { model: updated.model, provider: updated.provider, reasoning_effort: updated.reasoning_effort,
+      workspace: updated.workspace || undefined, agent_instance_revision: result.revision })
+    return { revision: result.revision }
+  })
   return true
 }
 
@@ -233,24 +274,6 @@ function mergeHermesHistorySessions(
   ))
 }
 
-function isProviderAgentSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null } | null): boolean {
-  return session?.source === 'builtin_agent' || isBuiltinEkkoAgent(session?.agent) || session?.source === 'coding_agent' ||
-    session?.agent === 'claude' ||
-    session?.agent === 'codex' ||
-    session?.agent === 'pi' ||
-    session?.agent === 'grok' ||
-    session?.agent === 'opencode' ||
-    (session?.agent === 'cursor' || (session?.agent === 'antigravity' || isNativeCodingAgent(session?.agent))) ||
-    Boolean(session?.agent_session_id)
-}
-
-interface HermesDeleteResult {
-  attempted: boolean
-  deleted: boolean
-  profile?: string
-  error?: string
-}
-
 interface BatchDeleteTarget {
   id: string
   profile?: string | null
@@ -274,39 +297,6 @@ interface LocalImportMessage {
   reasoning?: string | null
   reasoning_details?: string | null
   reasoning_content?: string | null
-}
-
-function hasProfileOnDisk(profile: string): boolean {
-  return listProfileNamesFromDisk().includes(profile || 'default')
-}
-
-async function deleteHermesSessionIfPresent(sessionId: string, profile?: string | null): Promise<HermesDeleteResult> {
-  const targetProfile = profile || 'default'
-  if (!isHermesAgentAvailable()) {
-    return { attempted: false, deleted: false, profile: targetProfile }
-  }
-  if (!hasProfileOnDisk(targetProfile)) {
-    return { attempted: false, deleted: false, profile: targetProfile }
-  }
-
-  try {
-    const hermesSession = await getExactHermesSessionDetailForProfile(sessionId, targetProfile)
-    if (!hermesSession) {
-      return { attempted: false, deleted: false, profile: targetProfile }
-    }
-
-    const deleted = await deleteHermesSessionForProfile(sessionId, targetProfile)
-    return {
-      attempted: true,
-      deleted,
-      profile: targetProfile,
-      error: deleted ? undefined : 'Failed to delete Hermes session',
-    }
-  } catch (err: any) {
-    const message = err?.message || 'Failed to inspect Hermes session'
-    logger.warn({ err, sessionId, profile: targetProfile }, 'Hermes Session: profile delete skipped')
-    return { attempted: true, deleted: false, profile: targetProfile, error: message }
-  }
 }
 
 async function getProfileDefaultModel(profile: string): Promise<ProfileDefaultModel> {
@@ -423,8 +413,9 @@ export async function listConversations(ctx: any) {
   const limit = ctx.query.limit ? parseInt(ctx.query.limit as string, 10) : undefined
 
   const profile = explicitProfileFilter(ctx)
-  const sessions = localListSessions(profile, source, limit && limit > 0 ? limit : 200)
+  const sessions = localListSessions(profile, source, limit && limit > 0 ? limit : 200, managedListOptions(ctx))
   const summaries: ConversationSummary[] = sessions.map(s => ({
+    ...(s.agent_instance_id ? { agent_instance_id: s.agent_instance_id, agent_instance_revision: s.agent_instance_revision, agent_chat_settings: s.agent_chat_settings, agent_usage: s.agent_usage } : {}),
     id: s.id,
     profile: s.profile || null,
     source: s.source,
@@ -517,6 +508,7 @@ export async function list(ctx: any) {
     ? [...knownProfiles].filter(name => !allowedProfiles || allowedProfiles.has(name))
     : undefined
   const listOptions = {
+    ...managedListOptions(ctx),
     ...(category === 'pinned' || ctx.query.pinned === 'true' ? { pinned: true } : ctx.query.pinned === 'false' ? { pinned: false } : {}),
     ...(categoryId !== undefined ? { categoryId } : {}),
     ...(includedIds !== undefined ? { includeSessionIds: includedIds } : {}),
@@ -525,7 +517,7 @@ export async function list(ctx: any) {
     includeArchived: false,
     excludeSessionIds: [...getPendingDeletedSessionIds(), ...excludedIds],
   }
-  const allSessions = localListSessions(profile, source, effectiveLimit + (paginated ? 1 : 0), {
+  const allSessions = localListSessions(profile, source, effectiveLimit + (paginated ? 1 : 0), { ...managedListOptions(ctx),
     ...listOptions,
     ...(paginated ? { offset } : {}),
   })
@@ -615,7 +607,7 @@ export async function removeCategory(ctx: any) {
 export async function count(ctx: any) {
   const source = (ctx.query.source as string) || undefined
   const profile = explicitProfileFilter(ctx)
-  const allSessions = localListSessions(profile, source, 2147483647)
+  const allSessions = localListSessions(profile, source, 2147483647, managedListOptions(ctx))
   const knownProfiles = profile ? null : new Set(listProfileNamesFromDisk())
   const sessions = filterPendingDeletedSessions(filterArchivedSessions(filterByAllowedProfiles(ctx, allSessions).filter(s =>
     isRequestedSessionSource(source, s.source) &&
@@ -642,16 +634,16 @@ export async function listHermesSessions(ctx: any) {
   const allowedProfiles = allowedProfileSet(ctx)
   const physicalSource = agentGroups && source === 'builtin_agent' ? undefined : source
   const localSessions = agentGroups && source
-    ? localListSessions(profile, physicalSource, candidateLimit, {
+    ? localListSessions(profile, physicalSource, candidateLimit, { ...managedListOptions(ctx),
         historySource: source,
         ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}),
       })
-    : localListSessions(profile, source, candidateLimit)
+    : localListSessions(profile, source, candidateLimit, managedListOptions(ctx))
   const allSessions = isHermesAgentAvailable() && !(agentGroups && source === 'builtin_agent')
     ? await listHermesSessionSummaries(source, candidateLimit, profile)
     : []
   if (agentGroups && allSessions.length) {
-    localSessions.push(...localListSessions(profile, undefined, allSessions.length, {
+    localSessions.push(...localListSessions(profile, undefined, allSessions.length, { ...managedListOptions(ctx),
       includeSessionIds: allSessions.map(session => session.id),
       ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}),
     }))
@@ -691,7 +683,7 @@ export async function listHermesSessionGroups(ctx: any) {
     .filter(Boolean)
     .slice(0, 100)
 
-  const localSessions = localListSessions(profile, undefined, 2000)
+  const localSessions = localListSessions(profile, undefined, 2000, managedListOptions(ctx))
   const hermesResult = isHermesAgentAvailable()
     ? await listHermesSessionSummaryGroups(limit, profile, includedIds)
     : { groups: [], included: [] }
@@ -710,13 +702,13 @@ export async function listHermesSessionGroups(ctx: any) {
   for (const source of sources) {
     const hermesGroup = hermesGroups.get(source)
     const localSourceSessions = agentGroups
-      ? localListSessions(profile, source === 'builtin_agent' ? undefined : source, limit + 1, {
+      ? localListSessions(profile, source === 'builtin_agent' ? undefined : source, limit + 1, { ...managedListOptions(ctx),
           historySource: source,
           ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}),
         })
       : localSessions.filter(session => session.source === source)
     if (agentGroups && hermesGroup?.sessions.length) {
-      localSourceSessions.push(...localListSessions(profile, undefined, hermesGroup.sessions.length, {
+      localSourceSessions.push(...localListSessions(profile, undefined, hermesGroup.sessions.length, { ...managedListOptions(ctx),
         includeSessionIds: hermesGroup.sessions.map(session => session.id),
         ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}),
       }))
@@ -740,8 +732,8 @@ export async function listHermesSessionGroups(ctx: any) {
 
   const localIncluded = agentGroups
     ? [
-        ...localListSessions(profile, undefined, 2000, { pinned: true, ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}) }),
-        ...(includedIds.length ? localListSessions(profile, undefined, includedIds.length, { includeSessionIds: includedIds, ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}) }) : []),
+        ...localListSessions(profile, undefined, 2000, { ...managedListOptions(ctx), pinned: true, ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}) }),
+        ...(includedIds.length ? localListSessions(profile, undefined, includedIds.length, { ...managedListOptions(ctx), includeSessionIds: includedIds, ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}) }) : []),
       ]
     : localSessions.filter(session => session.is_pinned || includedIds.includes(session.id))
   const included = mergeHermesHistorySessions(ctx, profile, hermesResult.included, localIncluded)
@@ -762,7 +754,7 @@ export async function search(ctx: any) {
     ? undefined
     : listProfileNamesFromDisk().filter(name => !allowedProfiles || allowedProfiles.has(name))
   const pendingDeletedIds = [...getPendingDeletedSessionIds()]
-  const results = localSearchSessions(profile, q, limit && limit > 0 ? limit : 20, {
+  const results = localSearchSessions(profile, q, limit && limit > 0 ? limit : 20, { ...managedListOptions(ctx),
     sources: requestedSessionSources(source),
     profiles: searchableProfiles,
     includeArchived: false,
@@ -1170,7 +1162,7 @@ export function listTasks(ctx: any) {
   const allowed = allowedProfileSet(ctx)
   const profiles = listProfileNamesFromDisk().filter(name => (!runScoped || Boolean(profile))
     && (!profile || profile === name) && (!allowed || allowed.has(name)))
-  ctx.body = listSessionTaskItems({ profiles, excludeSessionIds: [...getPendingDeletedSessionIds()],
+  ctx.body = listSessionTaskItems({ profiles, ...managedListOptions(ctx), excludeSessionIds: [...getPendingDeletedSessionIds()],
     search: search.trim(), status, order, offset: Number(offset), limit: Number(limit) })
 }
 
@@ -1219,6 +1211,12 @@ export async function getHermesSession(ctx: any) {
   // used by chat rendering and compression.
   const localSession = localGetSessionDetail(ctx.params.id)
   const localSessionProfile = (localSession?.profile || 'default') as string
+  if (isManagedAgentChat(ctx.params.id)) {
+    if (!localSession || (profile && localSessionProfile !== profile)) { ctx.status = 404; ctx.body = { error: 'Session not found' }; return }
+    if (denySessionAccess(ctx, localSession)) return
+    ctx.body = { session: { ...localSession, messages: withRunUsage(localSession.id, localSession.messages || []) } }
+    return
+  }
   if (localSession && isHermesHistorySessionSource(localSession.source) && (!profile || localSessionProfile === profile)) {
     if (denySessionAccess(ctx, localSession)) return
     ctx.body = { session: localSession }
@@ -1281,9 +1279,11 @@ export async function importHermesSession(ctx: any) {
 
   const existing = localGetSessionDetail(sessionId)
   if (existing) {
+    if (denySessionAccess(ctx, existing)) return
     ctx.body = { ok: true, imported: false, session: existing }
     return
   }
+  if (isManagedAgentChat(sessionId)) { ctx.status = 404; ctx.body = { error: 'Session not found' }; return }
 
   if (!isHermesAgentAvailable()) {
     ctx.status = 404
@@ -1419,25 +1419,40 @@ export async function deleteMessages(ctx: any) {
   ctx.body = await server.deleteSessionMessages(session.id, [...new Set(messageIds)], historyRevision)
 }
 
+function sessionRemovalAccess(ctx: any, sessionId?: string): SessionRemovalAccess {
+  const traceId = randomUUID()
+  const user = ctx.state?.user
+  const run = getRunRequestContext(ctx)
+  return { scope: profileId => ({ scopeId: randomUUID(), traceId, profileId, surface: 'api',
+    ...(run?.runId ? { runId: run.runId } : {}),
+    principal: user ? { kind: 'user', id: String(user.id) } : { kind: 'service', id: 'studio-http' },
+  }), authorize: profile => {
+    if (!canAccessProfile(ctx, profile)) throw new StudioError('FORBIDDEN', `Profile "${profile}" is not available for this user`)
+    const session = sessionId ? localGetSession(sessionId) : undefined
+    if (session && !canReadManagedChat(ctx, session)) throw new StudioError('FORBIDDEN', 'Session is not available for this user')
+  } }
+}
+
+function hermesRemovalResult(native: SessionRemovalResult['native']) {
+  const { profileId, ...result } = native
+  return { ...result, profile: profileId }
+}
+
 export async function remove(ctx: any) {
-  const sessionId = ctx.params.id
-  const existing = localGetSession(sessionId)
-  if (denySessionAccess(ctx, existing)) return
-  const hermesProfile = requestedProfile(ctx) || existing?.profile || getActiveProfileName()
-  const providerAgentSession = isProviderAgentSession(existing)
-  if (providerAgentSession) stopCodingAgentSessionRun(sessionId, { reportClosed: false })
-  const hermes = providerAgentSession
-    ? { attempted: false, deleted: false, profile: hermesProfile }
-    : await deleteHermesSessionIfPresent(sessionId, hermesProfile)
-  const localDeleted = existing ? localDeleteSession(sessionId) : true
-  if (!localDeleted) {
-    ctx.status = 500
-    ctx.body = { error: 'Failed to delete session' }
-    return
+  const session = localGetSession(ctx.params.id)
+  if (session && !canReadManagedChat(ctx, session)) { ctx.status = 403; ctx.body = { error: 'Session is not available for this user' }; return }
+  try {
+    const result = await removeStudioSession({ id: ctx.params.id, profileId: requestedProfile(ctx) }, {
+      ...sessionRemovalAccess(ctx, ctx.params.id), fallbackProfile: getActiveProfileName(),
+    })
+    ctx.body = { ok: true, deleted: result.deleted, hermes: hermesRemovalResult(result.native) }
+  } catch (error) {
+    if (!(error instanceof StudioError)) throw error
+    ctx.status = error.code === 'FORBIDDEN' ? 403 : error.code === 'NOT_FOUND' ? 404 : error.code === 'INVALID_ARGUMENT' ? 400
+      : error.code === 'REVISION_CONFLICT' || error.code === 'CANCELLED' ? 409 : error.code === 'DEADLINE_EXCEEDED' ? 504
+        : error.code === 'PLUGIN_UNAVAILABLE' ? 503 : error.code === 'CAPABILITY_UNSUPPORTED' ? 422 : 500
+    ctx.body = { error: error.message }
   }
-  deleteWorkspaceRunChangesForSession(sessionId)
-  if (existing) publishSessionRemoval(existing, 'deleted')
-  ctx.body = { ok: true, deleted: Boolean(existing), hermes }
 }
 
 export async function batchRemove(ctx: any) {
@@ -1480,49 +1495,30 @@ export async function batchRemove(ctx: any) {
     hermesErrors: [] as Array<{ id: string; profile?: string; error: string }>
   }
 
+  const recordNative = (id: string, native: SessionRemovalResult['native']) => {
+    if (native.deleted) results.hermesDeleted++
+    else if (native.attempted && native.error) {
+      results.hermesFailed++
+      results.hermesErrors.push({ id, profile: native.profileId, error: native.error })
+    }
+  }
   for (const target of targets) {
     const { id } = target
-    const existing = localGetSession(id)
-    const targetProfile = target.profile || existing?.profile
-    if (targetProfile && !canAccessProfile(ctx, targetProfile)) {
-      results.failed++
-      results.errors.push({ id, error: `Profile "${targetProfile || 'default'}" is not available for this user` })
-      continue
-    }
-    if (!targetProfile && existing && !canAccessProfile(ctx, existing.profile)) {
-      results.failed++
-      results.errors.push({ id, error: `Profile "${existing.profile || 'default'}" is not available for this user` })
-      continue
-    }
-
-    const providerAgentSession = isProviderAgentSession(existing)
-    if (providerAgentSession) stopCodingAgentSessionRun(id, { reportClosed: false })
-    const hermes = providerAgentSession
-      ? { attempted: false, deleted: false, profile: targetProfile || 'default' }
-      : await deleteHermesSessionIfPresent(id, targetProfile)
-    if (hermes.deleted) {
-      results.hermesDeleted++
-    } else if (hermes.attempted && hermes.error) {
-      results.hermesFailed++
-      results.hermesErrors.push({ id, profile: hermes.profile, error: hermes.error })
-    }
-
-    const shouldDeleteLocal = Boolean(existing && (!targetProfile || existing.profile === targetProfile))
-    if (shouldDeleteLocal) {
-      const ok = localDeleteSession(id)
-      if (ok) {
-        deleteWorkspaceRunChangesForSession(id)
-        publishSessionRemoval(existing!, 'deleted')
-        results.deleted++
-      } else {
+    try {
+      const local = localGetSession(id)
+      if (local && !canReadManagedChat(ctx, local)) throw new StudioError('FORBIDDEN', 'Session is not available for this user')
+      const result = await removeStudioSession({ id, profileId: target.profile || undefined }, sessionRemovalAccess(ctx, id))
+      recordNative(id, result.native)
+      if (result.deleted || result.native.deleted) results.deleted++
+      else {
         results.failed++
-        results.errors.push({ id, error: 'Failed to delete session' })
+        results.errors.push({ id, error: 'Session not found' })
       }
-    } else if (hermes.deleted) {
-      results.deleted++
-    } else {
+    } catch (error) {
+      if (!(error instanceof StudioError)) throw error
+      if (error instanceof SessionRemovalError) recordNative(id, error.native)
       results.failed++
-      results.errors.push({ id, error: 'Session not found' })
+      results.errors.push({ id, error: error.message })
     }
   }
 
@@ -1535,7 +1531,10 @@ export async function usageBatch(ctx: any) {
     ctx.body = {}
     return
   }
-  const idList = ids.split(',').filter(Boolean)
+  const idList = ids.split(',').filter(Boolean).filter(id => {
+    const session = localGetSession(id)
+    return !session || (canAccessProfile(ctx, session.profile) && canReadManagedChat(ctx, session))
+  })
   ctx.body = getUsageBatch(idList)
 }
 
@@ -1674,6 +1673,8 @@ export async function setWorkspace(ctx: any) {
   const id = ctx.params.id
   const existing = getSession(id)
   if (denySessionAccess(ctx, existing)) return
+  if (await updateOrdinaryAgentSettings(ctx, existing, { workspace: normalizeDirectoryTarget(workspace || '') || '' })) return
+  if (denyManagedInstanceSetting(ctx, existing)) return
   if (ctx.state?.sessionShare) sessionShareService.authorizeWorkspaceSwitch(ctx.state.sessionShare.token, ctx.state.sessionShare.actor, workspace)
   if (!existing) {
     createSession({ id, profile: requestedProfile(ctx) || 'default', title: '' })
@@ -1742,6 +1743,8 @@ export async function setModel(ctx: any) {
   const id = ctx.params.id
   const existing = getSession(id)
   if (denySessionAccess(ctx, existing)) return
+  if (await updateOrdinaryAgentSettings(ctx, existing, { model: model.trim(), provider: (provider || '').trim(), reasoningEffort: '' })) return
+  if (denyManagedInstanceSetting(ctx, existing)) return
   const profile = existing?.profile || requestedProfile(ctx) || 'default'
   const cleanModel = model.trim()
   const cleanProvider = (provider || '').trim()
@@ -1815,6 +1818,8 @@ export async function setReasoningEffort(ctx: any) {
   }
   const updates = { reasoning_effort: reasoningEffort,
     ...(typeof body.model === 'string' ? { model: body.model.trim() } : {}) }
+  if (await updateOrdinaryAgentSettings(ctx, existing, { reasoningEffort, ...(typeof body.model === 'string' ? { model: body.model.trim() } : {}) })) return
+  if (denyManagedInstanceSetting(ctx, existing)) return
   localUpdateSession(id, updates)
   if (existing.agent === 'grok') invalidateCodingAgentSessionRuntime(id)
   getChatRunServer()?.emitSessionSettingsUpdated(id, updates)
@@ -2254,7 +2259,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
   const localResult = getSessionDetailPaginated(ctx.params.id, offset, limit)
   const result = localResult && (!profile || localResult.session.profile === profile)
     ? localResult
-    : isHermesAgentAvailable()
+    : !isManagedAgentChat(ctx.params.id) && isHermesAgentAvailable()
       ? await getHermesSessionDetailPaginatedForProfile(ctx.params.id, profile || 'default', offset, limit)
       : null
 
@@ -2271,6 +2276,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
 
   ctx.body = {
     session: {
+      ...((session as any).agent_instance_id ? { agent_instance_id: (session as any).agent_instance_id, agent_instance_revision: (session as any).agent_instance_revision, agent_chat_settings: (session as any).agent_chat_settings, agent_usage: (session as any).agent_usage } : {}),
       id: session.id,
       profile: session.profile,
       source: session.source,

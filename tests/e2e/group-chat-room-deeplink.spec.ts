@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
-import { authenticate, TEST_MODEL_GROUP } from './fixtures'
+import { authenticate, setDocumentDirection, TEST_MODEL_GROUP, SOCKET_CLIENT_MODULE } from './fixtures'
 import type { AvailableModelGroup } from '../../packages/client/src/api/hermes/system'
 
 type DesktopPlatform = 'darwin' | 'win32'
@@ -431,7 +431,7 @@ async function mockGroupChatApi(page: Page, offlinePresence = false, modelGroups
 }
 
 async function mockGroupChatSocket(page: Page) {
-  await page.route('**/node_modules/.vite/**/socket__io-client.js*', async (route) => {
+  await page.route(SOCKET_CLIENT_MODULE, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/javascript',
@@ -587,16 +587,17 @@ async function setup(page: Page, path: string, platform?: DesktopPlatform, offli
 }
 
 async function triggerGroupSocket(page: Page, event: string, payload: unknown) {
-  await page.waitForFunction(() => Boolean((window as any).__PW_GROUP_SOCKET__?.sockets?.length))
+  await page.waitForFunction(() => (window as any).__PW_GROUP_SOCKET__?.sockets?.some((socket: any) => String(socket.url).endsWith('/group-chat')))
   await page.evaluate(({ event, payload }) => {
-    const sockets = (window as any).__PW_GROUP_SOCKET__?.sockets || []
+    const sockets = ((window as any).__PW_GROUP_SOCKET__?.sockets || []).filter((socket: any) => String(socket.url).endsWith('/group-chat'))
     if (sockets.length === 0) throw new Error('Group chat socket is not connected')
     for (const socket of sockets) socket.__trigger(event, payload)
   }, { event, payload })
 }
 
 async function connectGroupSocket(page: Page) {
-  await page.waitForFunction(() => Boolean((window as any).__PW_GROUP_SOCKET__?.sockets?.length))
+  // The workflow socket can exist before the group socket finishes bootstrapping.
+  await page.waitForFunction(() => (window as any).__PW_GROUP_SOCKET__?.sockets?.some((socket: any) => String(socket.url).endsWith('/group-chat')))
   await page.evaluate(() => {
     const state = (window as any).__PW_GROUP_SOCKET__
     for (const socket of state.sockets) {
@@ -824,9 +825,8 @@ test('keeps the Agent drawer closable when Agent status fails to load', async ({
 })
 
 test.describe('group chat room deep links', () => {
-  // This file already covers multi-tab behavior explicitly; keeping the deep-link/socket fixture serial
-  // avoids local fullyParallel races where early tests see the room list before route-room selection settles.
-  test.describe.configure({ mode: 'serial' })
+  // Each case owns its page, API state and socket fixture. Keep them independently
+  // schedulable so CI can shard them and a failure cannot skip the remaining cases.
 
   test('route room id opens selected room', async ({ page }) => {
     await setup(page, '/#/hermes/group-chat/room/room-beta')
@@ -1356,7 +1356,7 @@ test.describe('group chat room deep links', () => {
     await page.mouse.up()
     await expect.poll(async () => (await geometry()).panelWidth).toBeLessThan(ltr.panelWidth)
 
-    await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'))
+    await setDocumentDirection(page, 'rtl')
     await expect.poll(async () => {
       const current = await geometry()
       return Math.abs(current.panelLeft - current.wrapperLeft) <= 1

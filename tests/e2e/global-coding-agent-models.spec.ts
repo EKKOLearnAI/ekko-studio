@@ -2,6 +2,20 @@ import { expect, test, type Page } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 import { selectNewChatAgent, selectNewChatLaunchMode, sendNewChatMessage } from './new-chat-helpers'
 
+
+const creations = new WeakMap<Page, Record<string, unknown>[]>()
+test.beforeEach(({ page }) => {
+  const values: Record<string, unknown>[] = []
+  creations.set(page, values)
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === '/api/studio/agent-chats' && request.method() === 'POST') values.push(request.postDataJSON())
+  })
+})
+async function createdChat(page: Page) {
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload.managed_agent_protocol)).toBe(1)
+  return creations.get(page)?.at(-1)
+}
+
 const catalog = { agentId: 'codex', name: 'Codex', status: 'ready', source: 'app-server', scope: 'available',
   models: [
     { id: 'native-a', name: 'Native A', isDefault: true, reasoningEfforts: ['low', 'high'] },
@@ -68,8 +82,8 @@ for (const mobile of [false, true]) test(`Claude shows and searches resolved mod
   await picker.screenshot({ path: `/tmp/claude-resolved-model-${mobile ? 'mobile' : 'desktop'}.png` })
   await page.keyboard.press('Escape')
   await sendNewChatMessage(page, 'Use the native Claude alias')
-  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload))
-    .toMatchObject({ coding_agent_id: 'claude-code', mode: 'global', model: 'opus' })
+  await expect.poll(() => createdChat(page))
+    .toMatchObject({ agentTypeId: 'claude-code', mode: 'global', model: 'opus' })
   const sessionModel = page.locator('.chat-input-area .input-model-button')
   await expect(sessionModel).toHaveText('claude-opus-5-5')
   await expect(sessionModel).toHaveAttribute('aria-label', 'claude-opus-5-5')
@@ -178,8 +192,8 @@ for (const mobile of [false, true]) for (const native of [
   await expect(picker.getByRole('menuitemradio', { name: native.family, exact: true })).toHaveAttribute('aria-checked', 'true')
   await picker.getByRole('menuitemradio', { name: native.family, exact: true }).click()
   await sendNewChatMessage(page, 'Start with the chosen native variant')
-  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload))
-    .toMatchObject({ model: variantId(lastEffort), reasoning_effort: lastEffort })
+  await expect.poll(() => createdChat(page))
+    .toMatchObject({ model: variantId(lastEffort), reasoningEffort: lastEffort })
   const sid = await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.find((item: any) => item.event === 'run').payload.session_id)
   await page.evaluate(sid => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
@@ -198,7 +212,7 @@ for (const mobile of [false, true]) for (const native of [
   await page.locator('.chat-input-area textarea').fill('Continue with the original effort')
   await page.locator('.chat-input-area textarea').press('Enter')
   await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.filter((item: any) => item.event === 'run').at(-1)?.payload))
-    .toMatchObject({ model: variantId(lastEffort), reasoning_effort: lastEffort, input: 'Continue with the original effort' })
+    .toMatchObject({ managed_agent_protocol: 1, input: 'Continue with the original effort' })
   expect(api.unexpectedRequests).toEqual([])
 })
 
@@ -240,8 +254,8 @@ for (const native of [
   await expect(draft.locator('.reasoning-effort-label')).toHaveText(native.label)
   await page.keyboard.press('Escape')
   await sendNewChatMessage(page, 'Use the native reasoning level')
-  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({
-    coding_agent_id: native.agent, mode: 'global', model: native.model, reasoning_effort: native.efforts.at(-1),
+  await expect.poll(() => createdChat(page)).toMatchObject({
+    agentTypeId: native.agent, mode: 'global', model: native.model, reasoningEffort: native.efforts.at(-1),
   })
   await expect(page.locator('.reasoning-effort-button .reasoning-effort-label')).toHaveText(native.label)
   await expect(page.locator('.reasoning-effort-button')).toBeDisabled()
@@ -278,10 +292,10 @@ for (const mobile of [false, true]) test(`global draft selects native model and 
   await page.screenshot({ path: `/tmp/studio-global-models-${mobile ? 'mobile' : 'desktop'}.png`, animations: 'disabled' })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await sendNewChatMessage(page, 'Use native model and effort')
-  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({
-    coding_agent_id: 'codex', mode: 'global', model: 'native-b', reasoning_effort: 'high', input: 'Use native model and effort',
+  await expect.poll(() => createdChat(page)).toMatchObject({
+    agentTypeId: 'codex', mode: 'global', model: 'native-b', reasoningEffort: 'high',
   })
-  const payload = await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.find((item: any) => item.event === 'run').payload)
+  const payload = (await createdChat(page))!
   for (const key of ['provider', 'baseUrl', 'apiKey', 'apiMode']) expect(payload[key]).toBeUndefined()
   await expect(page.locator('.input-model-button')).toContainText('Native B')
   await expect(page.locator('.reasoning-effort-button')).toHaveAttribute('aria-label', /high/i)
@@ -322,7 +336,7 @@ test('cached native models stay usable while refresh is slow and survive page re
     await expect(models.getByRole('button', { name: 'Refresh', exact: true })).toBeDisabled()
     await models.getByRole('menuitemradio', { name: 'Native B', exact: true }).click()
     await sendNewChatMessage(page, 'Send while models refresh')
-    await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload.reasoning_effort)).toBe('high')
+    await expect.poll(async () => (await createdChat(page))?.reasoningEffort).toBe('high')
     await expect(page.locator('.reasoning-effort-button .reasoning-effort-label')).toHaveText('High')
     expect(requests).toBe(2)
     finishRefresh?.()
@@ -399,7 +413,7 @@ test('slow first discovery shows one loading indicator and does not block native
     await expect(models.locator('.n-base-loading')).toHaveCount(1)
     await models.getByRole('menuitemradio', { name: 'Agent default model', exact: true }).click()
     await sendNewChatMessage(page, 'Use native defaults without waiting')
-    await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload.mode)).toBe('global')
+    await expect.poll(() => createdChat(page).then(value => value?.mode)).toBe('global')
     finish()
   } finally { finish?.() }
 })
@@ -433,8 +447,8 @@ test('global native choices survive reopening and remain separate from scoped ch
   await selectNativeModel(page, 'Native Simple')
   await expect(draft.locator('.reasoning-effort-button')).toHaveCount(0)
   await sendNewChatMessage(page)
-  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload.model)).toBe('native-simple')
-  expect(await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.find((item: any) => item.event === 'run').payload.reasoning_effort)).toBeUndefined()
+  await expect.poll(() => createdChat(page).then(value => value?.model)).toBe('native-simple')
+  expect((await createdChat(page))?.reasoningEffort).toBeUndefined()
 })
 
 test('unavailable native catalogs allow agent defaults and refreshing the model list', async ({ page }) => {
@@ -452,8 +466,8 @@ test('unavailable native catalogs allow agent defaults and refreshing the model 
   await expect(models).toContainText('Native B')
   await models.getByRole('menuitemradio', { name: 'Agent default model', exact: true }).click()
   await sendNewChatMessage(page)
-  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload.mode)).toBe('global')
-  const payload = await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.find((item: any) => item.event === 'run').payload)
+  await expect.poll(() => createdChat(page).then(value => value?.mode)).toBe('global')
+  const payload = (await createdChat(page))!
   expect(payload.model).toBeUndefined()
-  expect(payload.reasoning_effort).toBeUndefined()
+  expect(payload.reasoningEffort).toBeUndefined()
 })

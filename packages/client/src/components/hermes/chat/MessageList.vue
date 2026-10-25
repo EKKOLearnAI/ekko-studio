@@ -1178,10 +1178,10 @@ defineExpose({
                 <line x1="12" y1="17" x2="12.01" y2="17" />
               </svg>
             </span>
-            <span>{{ t("chat.clarifyKicker") }}</span>
-            <PendingInteractionCountdown :deadline="visibleClarify.countdownDeadline" />
+            <span>{{ t(visibleClarify.nativeInteraction?.kind === 'approval' ? 'chat.approvalKicker' : 'chat.clarifyKicker') }}</span>
+            <PendingInteractionCountdown v-if="!visibleClarify.nativeInteraction || visibleClarify.nativeInteraction.expiresAt !== null" :deadline="visibleClarify.countdownDeadline" />
           </div>
-          <div class="approval-float-title">{{ t("chat.clarifyTitle") }}</div>
+          <div class="approval-float-title">{{ t(visibleClarify.nativeInteraction?.kind === 'approval' ? 'chat.approvalTitle' : 'chat.clarifyTitle') }}</div>
           <div class="approval-float-desc">{{ visibleClarify.question }}</div>
           <div v-if="visibleClarify.choices && visibleClarify.choices.length" class="approval-float-actions">
             <NButton
@@ -1189,15 +1189,17 @@ defineExpose({
               :key="choice"
               size="small"
               type="primary"
+              :disabled="visibleClarify.nativeInteraction?.status === 'responding'"
+              :loading="visibleClarify.nativeInteraction?.status === 'responding'"
               @click="handleClarify(choice)"
             >
               {{ choice }}
             </NButton>
-            <NButton size="small" type="error" secondary @click="handleClarify('')">
+            <NButton v-if="!visibleClarify.nativeInteraction" size="small" type="error" secondary @click="handleClarify('')">
               {{ t("chat.clarifyDismiss") }}
             </NButton>
           </div>
-          <div class="clarify-float-input-row">
+          <div v-if="!visibleClarify.nativeInteraction || (visibleClarify.nativeInteraction.kind === 'clarification' && visibleClarify.nativeInteraction.allowText !== false)" class="clarify-float-input-row">
             <NInput
               v-model:value="clarifyResponse"
               size="small"

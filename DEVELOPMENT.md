@@ -4,6 +4,14 @@ This document defines project-level development rules for Ekko Studio. It is too
 
 ## Commands
 
+Use Node.js **24.22.1** for source development, standalone npm installs, CI and
+Docker. `.nvmrc` and `.node-version` pin the development version; with nvm, run
+`nvm install && nvm use` before installing dependencies.
+
+Desktop keeps its existing Electron Node runtime and separately bundled
+Node.js 22.22.0 for agent tools. The build machine's Node version does not select
+either desktop runtime.
+
 ```bash
 npm install
 npm run dev
@@ -113,6 +121,25 @@ package name, update that package, and restart its CLI by absolute package path.
 Shared data stays under `~/.hermes-web-ui`. The packages provide overlapping
 command aliases and are intended as alternative installations, not simultaneous
 global installs; uninstall the previous package before switching names.
+
+## Plugin Library Artifacts
+
+`npm run pack:plugins -- /absolute/output/directory` builds and packs the public
+`@ekko-studio/plugin-sdk` and `@ekko-studio/agent-drivers` libraries. The driver
+pins the SDK version; both tarballs contain compiled JavaScript, declarations
+and the license without application sources or workspace links. This command
+does not publish anything.
+
+`npm run verify:plugins:packages` installs those tarballs in a temporary external
+consumer, installs TypeScript and Node types, compiles a custom Agent using only
+public imports, and loads it with a shared SDK error identity. It uses npm's
+configured registry for the consumer's development tools and removes the fixture
+after verification. Application tarballs omit development workspace metadata.
+
+`STUDIO_QODER_COMMAND=/absolute/path/to/qodercli.js npm run verify:plugins:qoder`
+builds the plugin and checks its pinned CLI version, native ACP metadata, login
+plan and resource locations through managed processes and disposable native
+storage. It neither logs into an account nor sends a model request.
 
 ## Commit And PR Rules
 

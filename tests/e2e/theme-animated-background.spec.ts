@@ -27,6 +27,7 @@ for (const width of [1280, 390]) {
       const image = await animatedThemeBackground(format.format)
       const name = `motion.${format.format}`
       await page.goto('/#/hermes/theme')
+      await expect(page.locator('.theme-editors')).not.toHaveAttribute('inert', '')
       await page.locator('.file-input').setInputFiles({
         name, mimeType: format.format === 'gif' && width === 390 ? '' : format.mime, buffer: image,
       })
@@ -62,6 +63,7 @@ test('accepts animated files with missing or generic MIME and rejects unsupporte
   const api = await mockHermesApi(page)
   const image = await animatedThemeBackground('gif')
   await page.goto('/#/hermes/theme')
+  await expect(page.locator('.theme-editors')).not.toHaveAttribute('inert', '')
   const input = page.locator('.file-input')
   for (const [index, mimeType] of ['', 'application/octet-stream'].entries()) {
     const name = `motion-${index}.GIF`

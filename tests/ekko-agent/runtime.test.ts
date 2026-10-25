@@ -2013,7 +2013,7 @@ describe('ekko-agent runtime', () => {
     expect(requests).toHaveLength(2)
   })
 
-  it('does not scan existing Skill metadata after an unrelated terminal command', async () => {
+  it.each([false, true])('does not report unchanged Skill metadata after an unrelated terminal command (writes cache: %s)', async (writesCache) => {
     const root = await mkdtemp(join(tmpdir(), 'ekko-runtime-unrelated-terminal-'))
     const skillDirectory = join(root, 'skills')
     await mkdir(join(skillDirectory, 'missing-keywords'), { recursive: true })
@@ -2034,7 +2034,9 @@ describe('ekko-agent runtime', () => {
             name: 'terminal_exec',
             arguments: {
               command: process.execPath,
-              args: ['-e', 'process.stdout.write("unrelated")'],
+              args: ['-e', writesCache
+                ? 'require("node:fs").writeFileSync("skills/missing-keywords/cache.bin", "cache");process.stdout.write("unrelated")'
+                : 'process.stdout.write("unrelated")'],
             },
           }],
         }

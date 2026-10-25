@@ -1,4 +1,5 @@
 import { desktopBrowserRoutes } from '../modules/studio/routes/desktop-browser'
+import { studioPluginRoutes } from '../modules/studio/routes/studio-plugins'
 import type { Context, Next } from 'koa'
 import './hermes-ops-adapter'
 import './agent-log-adapter'
@@ -113,6 +114,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(appRelayRoutes.routes())
   app.use(socialMessageRoutes.routes())
   app.use(sessionRoutes.routes())
+  app.use(studioPluginRoutes.routes())
   app.use(modelApiRoutes.routes())
   app.use(sessionShareRoutes.routes())
   app.use(profileRoutes.routes())

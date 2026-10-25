@@ -1,6 +1,7 @@
 import type { Context } from 'koa'
 import { getChatRunServer } from '../public/chat-run'
 import { ClarificationError } from '../services/clarification-runs'
+import { TaskPlanError } from '../services/task-plan-runs'
 
 export async function requestClarification(ctx: Context) {
   const body = (ctx.request.body || {}) as Record<string, unknown>
@@ -16,10 +17,11 @@ export async function requestClarification(ctx: Context) {
   try {
     if (typeof body.context_id !== 'string' || !body.context_id.trim()) throw new ClarificationError('context_id is required')
     const profile = String(ctx.state.profile?.name || 'default').trim() || 'default'
+    server.authorizeAgentInteractionContext?.(body.context_id, profile, String(ctx.state.user?.id ?? ''))
     const result = await server.requestClarification(body.context_id, profile, body, abort.signal)
     ctx.body = { ok: true, ...result }
   } catch (err) {
-    if (!(err instanceof ClarificationError)) throw err
+    if (!(err instanceof ClarificationError) && !(err instanceof TaskPlanError)) throw err
     ctx.status = err.status
     ctx.body = { ok: false, error: err.message }
   } finally {

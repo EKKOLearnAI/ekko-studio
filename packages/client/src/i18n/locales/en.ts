@@ -1,9 +1,11 @@
+import { agentManagementMessages } from '../agent-management-messages'
 import { remoteDeviceMessages } from '../remote-device-messages'
 import { themePresetMessages } from '../theme-preset-locales'
 import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesEn } from '../social-messages'
 
 export default {
+  agentManagement: agentManagementMessages['en'],
   sessionTasks: {
       "title": "Tasks",
       "task": "Task",
@@ -706,7 +708,6 @@ export default {
     updateSuccess: 'Update successful. Please refresh the page shortly. If it does not start after a while, start it manually.',
     updateFailed: 'Update failed',
     logout: 'Sign Out',
-    nodeVersionWarning: 'Detected Node.js v{version}. Please upgrade to version 23 or later.',
     changelog: 'Changelog',
     noChangelog: 'No changelog available',
     versionManagement: 'Version Management',
@@ -1098,6 +1099,10 @@ export default {
 
   // Chat
   chat: {
+    pluginCommandChanged: "Command or conversation changed. Select the command again.",
+    pluginCommandAmbiguous: "Several plugins provide this command. Select a qualified name.",
+    pluginCommandTextOnly: "Plugin commands currently accept text only.",
+    pluginCommandsUnavailable: "Unable to load plugin commands.",
     selectMessages: "Select messages",
     messagesSelected: "{count} selected",
     deleteSelectedMessages: "Delete selected",
@@ -3314,6 +3319,15 @@ export default {
   },
 
   codingAgents: {
+    defaultConfiguration: "Default configuration",
+    resourceInstance: "Agent instance", resourceSkillSource: 'Skill source', resourcesNextRun: 'The next run loads the updated Skills automatically.',
+    resourceFile: "Configuration file",
+    resourceReadOnly: "Read-only",
+    resourcesEmpty: "No resources at these locations",
+    resourcesUnsupported: "This resource type is not provided",
+    resourcesUnavailable: "Agent resources are unavailable",
+    resourcesChanged: "Instance changed. Reload before saving.",
+
     nativeUsage: "Usage: input {inputTokens}, output {outputTokens}, cache read {cacheReadTokens}, cache write {cacheWriteTokens}, total {totalTokens} tokens.",
     nativeUsageUnknown: "Usage: unknown. No native token usage has been reported for this session.",
     nativeContextUnknown: "Context: unknown. Current native context usage and its limit are not available.",

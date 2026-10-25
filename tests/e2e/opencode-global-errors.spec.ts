@@ -27,14 +27,15 @@ for (const mobile of [false, true]) test(`OpenCode global errors show the provid
   await page.locator('.model-cascader:visible').getByRole('menuitemradio', { name: model, exact: true }).click()
   await sendNewChatMessage(page, 'OpenCode global test')
   await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload))
-    .toMatchObject({ coding_agent_id: 'opencode', mode: 'global', model })
+    .toMatchObject({ managed_agent_protocol: 1 })
+  expect(JSON.parse(api.requests.find(item => item.pathname === '/api/studio/agent-chats')!.postData!)).toMatchObject({ agentTypeId: 'opencode', mode: 'global', model })
   const sessionId = await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.find((item: any) => item.event === 'run').payload.session_id)
   const message = 'Upstream request failed: Model is unavailable.'
   // The server's native-error normalization is covered by opencode-run.test.ts.
   await page.evaluate(({ sid, error }) => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
-    socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'opencode-failed' })
-    socket.__trigger('run.failed', { event: 'run.failed', session_id: sid, run_id: 'opencode-failed', error })
+    socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'opencode-failed', agent_run_id: 'opencode-failed', run_marker: 'opencode-failed' })
+    socket.__trigger('run.failed', { event: 'run.failed', session_id: sid, run_id: 'opencode-failed', agent_run_id: 'opencode-failed', run_marker: 'opencode-failed', error })
   }, { sid: sessionId, error: message })
   await expect(page.getByText(`Error: ${message}`, { exact: true })).toBeVisible()
   await expect(page.getByText('[object Object]', { exact: true })).toHaveCount(0)

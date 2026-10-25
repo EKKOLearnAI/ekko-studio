@@ -1,0 +1,9 @@
+{
+  "name": "@ekko-studio/agent-cursor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cursor native account plugin for Ekko Studio",
+  "main": "dist/index.cjs",
+  "files": ["dist", "studio-plugin.json", "README.md"],
+  "dependencies": { "@ekko-studio/plugin-sdk": "0.1.0", "@ekko-studio/agent-drivers": "0.1.0" }
+}

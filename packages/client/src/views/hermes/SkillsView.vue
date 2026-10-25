@@ -12,6 +12,7 @@ import SkillSourceLegend from '@/components/hermes/skills/SkillSourceLegend.vue'
 import PendingWriteApprovals from '@/components/hermes/skills/PendingWriteApprovals.vue'
 import { deleteSkillApi, importSkill, fetchSkills, type SkillCategory, type SkillSource, type SkillInfo, type SkillTarget } from '@/api/hermes/skills'
 import { fetchPendingWrites } from '@/api/hermes/write-gate'
+import type { ResourceSkillsAdapter } from '@/utils/agent-resource-skills'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 
 type SourceFilter = SkillSource | 'modified'
@@ -19,6 +20,7 @@ type SourceFilter = SkillSource | 'modified'
 const props = withDefaults(defineProps<{
   target?: SkillTarget
   embedded?: boolean
+  resourceAdapter?: ResourceSkillsAdapter
 }>(), {
   target: 'hermes',
   embedded: false,
@@ -51,8 +53,10 @@ const selectedSkillData = computed(() => {
   return cat?.skills.find(s => s.name === selectedSkill.value) ?? null
 })
 
-const isHermesTarget = computed(() => skillTarget.value === 'hermes')
-const canManageTarget = computed(() => isHermesTarget.value || skillTarget.value === 'dsh' || (skillTarget.value === 'cursor' || skillTarget.value === 'antigravity'))
+const isHermesTarget = computed(() => !props.resourceAdapter && skillTarget.value === 'hermes')
+const canManageTarget = computed(() => props.resourceAdapter ? !!props.resourceAdapter.prepareDeleteSkill
+  : isHermesTarget.value || skillTarget.value === 'dsh' || skillTarget.value === 'cursor' || skillTarget.value === 'antigravity')
+const canImportTarget = computed(() => props.resourceAdapter ? !!props.resourceAdapter.importSkill : canManageTarget.value)
 const selectedSkillReadonly = computed(() => {
   if (!selectedSkillData.value) return true
   if (selectedSkillData.value.readonly) return true
@@ -73,29 +77,38 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  ++loadGeneration
   mobileQuery?.removeEventListener('change', handleMobileChange)
 })
 
-watch(() => props.target, () => {
+let loadGeneration = 0
+watch([() => props.target, () => props.resourceAdapter, () => profilesStore.activeProfileName], () => {
   selectedCategory.value = ''
   selectedSkill.value = ''
+  categories.value = []
+  archived.value = []
+  showImportModal.value = false
+  showExternalDirsModal.value = false
   loadSkills()
 })
 
 async function loadSkills() {
+  const current = ++loadGeneration, adapter = props.resourceAdapter, target = skillTarget.value
   loading.value = true
   try {
     if (!profilesStore.activeProfileName || profilesStore.profiles.length === 0) {
       await profilesStore.fetchProfiles()
     }
-    const data = await fetchSkills(undefined, skillTarget.value)
+    if (current !== loadGeneration) return
+    const data = adapter ? await adapter.loadSkills() : await fetchSkills(undefined, target)
+    if (current !== loadGeneration) return
     categories.value = data.categories
     archived.value = data.archived
     ensureSelectedSkill()
   } catch (err: any) {
     console.error('Failed to load skills:', err)
   } finally {
-    loading.value = false
+    if (current === loadGeneration) loading.value = false
   }
 }
 
@@ -172,7 +185,7 @@ function handleSkillSaved() {
     <header class="page-header">
       <div class="skills-header-heading">
         <h2 class="header-title">{{ t('skills.title') }}</h2>
-        <button v-if="!showSidebar" class="sidebar-toggle" @click="showSidebar = true">
+        <button v-if="!showSidebar" class="sidebar-toggle" :aria-label="t('skills.title')" @click="showSidebar = true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
         <SkillSourceLegend v-model="sourceFilter" :show-hub="isHermesTarget" />
@@ -199,7 +212,7 @@ function handleSkillSaved() {
           </span>
         </NButton>
         <NButton
-          v-if="canManageTarget"
+          v-if="canImportTarget"
           class="header-action-btn"
           size="small"
           :title="t('skills.import')"
@@ -243,8 +256,9 @@ function handleSkillSaved() {
 
     <SkillImportModal
       v-if="showImportModal"
-      :allow-category="skillTarget !== 'dsh'"
-      :import-handler="!isHermesTarget ? (files, category) => importSkill(files, category, skillTarget) : undefined"
+      :allow-category="!!resourceAdapter || skillTarget !== 'dsh'"
+      :category-options="resourceAdapter?.importOptions"
+      :import-handler="resourceAdapter?.importSkill || (!isHermesTarget ? (files, category) => importSkill(files, category, skillTarget) : undefined)"
       @close="showImportModal = false"
       @saved="handleImported"
     />
@@ -278,6 +292,9 @@ function handleSkillSaved() {
               :readonly="!canManageTarget"
               :toggleable="isHermesTarget"
               :delete-handler="!isHermesTarget ? (category, name) => deleteSkillApi(category, name, skillTarget) : undefined"
+              :prepare-delete-handler="resourceAdapter?.prepareDeleteSkill"
+              :can-delete="resourceAdapter?.canDeleteSkill"
+              :scope-key="resourceAdapter?.managementKey"
               @select="handleSelect"
               @deleted="handleSkillDeleted"
             />
@@ -285,6 +302,7 @@ function handleSkillSaved() {
           <div class="skills-main">
             <SkillDetail
               v-if="selectedCategory && selectedSkill"
+              :key="`${selectedCategory}/${selectedSkill}`"
               :category="selectedCategory"
               :skill="selectedSkill"
               :skill-name="selectedSkillData?.name || selectedSkill"
@@ -293,6 +311,10 @@ function handleSkillSaved() {
               :view-count="selectedSkillData?.viewCount"
               :pinned="selectedSkillData?.pinned"
               :target="skillTarget"
+              :load-content="resourceAdapter?.loadContent"
+              :load-files="resourceAdapter?.loadFiles"
+              :save-content="resourceAdapter?.saveContent"
+              :can-edit-file="resourceAdapter?.canEditFile"
               :readonly="selectedSkillReadonly"
               :can-pin="isHermesTarget"
               @pin-toggled="handlePinToggled"

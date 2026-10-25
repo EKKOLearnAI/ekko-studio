@@ -73,6 +73,7 @@ packages/server/src/
         sessions.ts
         usage.ts
         model-catalog.ts           # shared local models.dev metadata and startup refresh
+        model-protocol.ts          # payload/SSE codecs shared by CLI proxies and plugin gateways
         workspace.ts
         workspace-files.ts          # shared path, preview, Git status, and file policy facade
         group-chat-agent-runtime.ts # injected concrete Agent adapters for Group Chat
@@ -153,6 +154,7 @@ packages/server/src/
         logging/
         notifications/
         providers/
+        models/protocol/           # shared model wire codecs; no run ownership or accounting
         sessions/
         social-messages/
         chat-run/                    # shared single-chat lifecycle and persistence
@@ -341,7 +343,11 @@ Its `definition.ts` declares CLI metadata, capabilities and editable config
 files. Agent-specific configuration, installation discovery and event parsing
 belong beside that definition. `services/registry/` composes the definitions
 and protocol adapters; `services/runtime/` manages shared process lifecycle and
-usage. Reusable ACP sessions and updates live in `protocol/acp/`. There is no
+usage. Model payload/SSE codecs live in `studio/services/models/protocol` and
+are consumed through `studio/public/model-protocol`; both legacy proxies and
+plugin Run gateways use the same implementation. Authorization, credentials,
+cancellation and accounting remain with each gateway lifecycle. Reusable ACP
+sessions and updates live in `protocol/acp/`. There is no
 `services/native/` catch-all for multiple agent implementations.
 
 The existing `services/index.ts` remains the public preparation and management

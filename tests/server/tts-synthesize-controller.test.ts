@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../packages/server/src/modules/studio/services/voice/config-sync', () => ({
   syncVoiceConfigToHermesProfile: vi.fn(async () => ({ stt: 'unchanged', tts: 'synced' })),
@@ -940,22 +940,24 @@ describe('tts routes', () => {
 })
 
 describe('route registration ordering', () => {
-  beforeEach(() => {
+  const ttsPublicMiddleware = async () => {}
+  const ttsProtectedMiddleware = async () => {}
+  let registerRoutes: typeof import('../../packages/server/src/bootstrap/routes')['registerRoutes']
+
+  beforeAll(async () => {
     vi.resetModules()
     vi.clearAllMocks()
     vi.doUnmock('../../packages/server/src/bootstrap/routes')
-  })
-
-  it('mounts protected synthesize routes after requireAuth', async () => {
-    const ttsPublicMiddleware = async () => {}
-    const ttsProtectedMiddleware = async () => {}
-
     vi.doMock('../../packages/server/src/modules/studio/routes/tts', () => ({
       ttsRoutes: { routes: vi.fn(() => ttsPublicMiddleware) },
       ttsProtectedRoutes: { routes: vi.fn(() => ttsProtectedMiddleware) },
     }))
 
-    const { registerRoutes } = await import('../../packages/server/src/bootstrap/routes')
+    // Application graph loading is fixture setup, separate from route ordering.
+    ;({ registerRoutes } = await import('../../packages/server/src/bootstrap/routes'))
+  })
+
+  it('mounts protected synthesize routes after requireAuth', () => {
     const use = vi.fn()
     const app = { use }
     const requireAuth = vi.fn(async () => {})

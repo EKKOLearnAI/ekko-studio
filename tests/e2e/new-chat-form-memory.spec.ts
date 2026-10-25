@@ -87,8 +87,11 @@ for (const mobile of [false, true]) test(`new chat remembers the configured form
   await draft.locator('textarea').fill('Use my remembered form')
   await draft.getByRole('button', { name: 'Send', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((event: any) => event.event === 'run')?.payload)).toMatchObject({
-    profile: 'default', coding_agent_id: 'dsh', provider: 'other', model: 'other-model', category_id: 9,
-    workspace: '/workspace/MyProject', apiMode: 'anthropic_messages', agent_preset: 'minimal', reasoning_effort: 'high',
+    profile: 'default', input: 'Use my remembered form', managed_agent_protocol: 1,
+  })
+  expect(JSON.parse(api.requests.find(item => item.pathname === '/api/studio/agent-chats')!.postData!)).toMatchObject({
+    agentTypeId: 'dsh', provider: 'other', model: 'other-model', categoryId: 9,
+    workspace: '/workspace/MyProject', apiMode: 'anthropic_messages', agentPreset: 'minimal', reasoningEffort: 'high',
     baseUrl: 'https://other.invalid/v1', apiKey: 'tab-only-credential',
   })
   draft = await openDraft(page, mobile)

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fetchPluginCommands, type PluginCommand } from '@/api/studio/commands'
 import { DEFAULT_REASONING_EFFORTS, agentReasoningEffortOptions, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import type { NativeEffortChoice } from '@/utils/native-model-families'
 import { isBuiltinEkkoSession, isExternalCodingAgentSession, isHermesSession } from '@/utils/hermes/session-agent'
@@ -75,7 +76,7 @@ const defaultReasoningEffortLabel = computed(() => t(isHermesSession(reasoningSe
   ? 'chat.reasoningEffort.options.default' : 'chat.reasoningEffort.options.none'))
 const isMoaSession = computed(() => reasoningSession.value?.provider === 'moa')
 const isGlobalCodingAgentSession = computed(() => reasoningSession.value?.codingAgentMode === 'global')
-const isReadOnlyCodingAgentEffort = computed(() => !props.draft && isGlobalCodingAgentSession.value && isExternalCodingAgentSession(composerSession.value))
+const isReadOnlyCodingAgentEffort = computed(() => (!!composerSession.value?.agentInstanceId && !composerSession.value.agentChatSettings) || (!props.draft && isGlobalCodingAgentSession.value && isExternalCodingAgentSession(composerSession.value)))
 function effortLabel(value: string) {
   return DEFAULT_REASONING_EFFORTS.includes(value) || ['ultra', 'disabled', 'enabled'].includes(value) ? t(`chat.reasoningEffort.options.${value}`) : value
 }
@@ -191,6 +192,7 @@ const configuredTextareaHeight = computed(() =>
 
 type SlashCommandOption = {
   name: string
+  pluginCommand?: PluginCommand
   args: string
   description: string
   insertText?: string
@@ -261,6 +263,38 @@ const bridgeCommands = computed<SlashCommandOption[]>(() =>
   }))
 )
 
+const pluginCommands = ref<PluginCommand[]>([])
+const pluginCommandError = ref('')
+const pluginCommandsLoading = ref(false)
+const selectedPluginCommand = ref<{ command: PluginCommand; target: string } | null>(null)
+const pluginTarget = computed(() => {
+  const session = composerSession.value
+  return session && !props.submit ? JSON.stringify([session.id, session.profile || profilesStore.activeProfileName || 'default', session.agentInstanceId, session.agentInstanceRevision, session.agent, session.model, session.provider, session.codingAgentMode, session.workspace]) : ''
+})
+let commandsRequest = 0
+let commandsLoadedTarget = ''
+async function loadPluginCommands(force = false) {
+  const session = composerSession.value, target = pluginTarget.value
+  if (!session || !target || (!force && (commandsLoadedTarget === target || pluginCommandsLoading.value))) return
+  const version = ++commandsRequest
+  pluginCommandsLoading.value = true
+  pluginCommandError.value = ''
+  try {
+    const result = await fetchPluginCommands(session.id, session.profile || profilesStore.activeProfileName || 'default')
+    if (version !== commandsRequest || target !== pluginTarget.value) return
+    pluginCommands.value = result
+    commandsLoadedTarget = target
+    updateSlashState()
+  } catch (error: any) {
+    if (version === commandsRequest) pluginCommandError.value = error?.message || String(error)
+  } finally { if (version === commandsRequest) pluginCommandsLoading.value = false }
+}
+watch(pluginTarget, () => {
+  commandsRequest++; commandsLoadedTarget = ''; pluginCommands.value = []; pluginCommandsLoading.value = false; pluginCommandError.value = ''
+  // Retain the selected target until submission so switching sessions cannot silently reroute a draft.
+  if (inputText.value.startsWith('/')) void loadPluginCommands()
+})
+
 const slashActive = ref(false)
 const slashQuery = ref('')
 const slashActiveIndex = ref(0)
@@ -282,13 +316,14 @@ let bundlesLoadRequestKey = ''
 const isBridgeSession = computed(() => {
   if (props.draft) return false
   const session = composerSession.value
+  if (session?.agentInstanceId) return false
   if (!session) return chatStore.runtimeMode !== 'global_agent'
   return session.source === 'cli' && !isBuiltinEkkoSession(session)
 })
-const isEkkoSession = computed(() => isBuiltinEkkoSession(composerSession.value))
+const isEkkoSession = computed(() => !composerSession.value?.agentInstanceId && isBuiltinEkkoSession(composerSession.value))
 const isCodingAgentSession = computed(() => isExternalCodingAgentSession(composerSession.value))
 const isCursorSession = computed(() => (composerSession.value?.codingAgentId === 'cursor' || composerSession.value?.codingAgentId === 'antigravity') || (composerSession.value?.agent === 'cursor' || composerSession.value?.agent === 'antigravity'))
-const showSessionUsage = computed(() => isCodingAgentSession.value)
+const showSessionUsage = computed(() => !!composerSession.value?.agentInstanceId || isCodingAgentSession.value)
 const isForkCommandSession = computed(() => !!composerSession.value && !isEkkoSession.value && !isCodingAgentSession.value)
 const skillPickerItems = computed(() => {
   const byName = new Map<string, SkillInfo>()
@@ -310,7 +345,7 @@ const skillPickerItems = computed(() => {
 })
 const filteredBridgeCommands = computed(() => {
   const query = slashQuery.value.trim().toLowerCase()
-  const commands = isEkkoSession.value
+  const legacyCommands: SlashCommandOption[] = composerSession.value?.agentInstanceId ? [] : isEkkoSession.value
     ? EKKO_SESSION_COMMAND_DEFINITIONS.map(command => ({ ...command, args: command.args || '', description: t(command.descriptionKey) }))
     : isBridgeSession.value
     ? bridgeCommands.value
@@ -325,12 +360,20 @@ const filteredBridgeCommands = computed(() => {
       : isForkCommandSession.value
         ? bridgeCommands.value.filter(command => command.name === 'fork')
         : []
+  const commands: SlashCommandOption[] = [...legacyCommands, ...pluginCommands.value.map(command => ({
+    key: `plugin:${command.id}`,
+    name: composerSession.value?.agentInstanceId && !pluginCommands.value.some(other => other.id !== command.id
+      && [other.name, other.qualifiedName, ...(other.aliases || [])].includes(command.name)) ? command.name : command.qualifiedName,
+    args: command.argsHint || '', description: command.description,
+    pluginCommand: command,
+  }))]
   if (!query) return commands
   return commands.filter((command) => {
     const name = command.name.toLowerCase()
     const insertText = command.insertText?.toLowerCase()
     const description = command.description.toLowerCase()
     return name.startsWith(query) || insertText?.startsWith(query) || description.includes(query)
+      || command.pluginCommand?.name.startsWith(query) || command.pluginCommand?.aliases?.some(alias => alias.startsWith(query))
   })
 })
 const filteredSkillPickerItems = computed(() => {
@@ -628,6 +671,7 @@ function scrollCommandIntoView() {
 }
 
 function updateSlashState() {
+  if (inputText.value.startsWith('/') && pluginTarget.value && !pluginCommandError.value) void loadPluginCommands()
   if (!isEkkoSession.value && !isBridgeSession.value && !isCodingAgentSession.value && !isForkCommandSession.value) {
     slashActive.value = false
     return
@@ -646,6 +690,7 @@ function updateSlashState() {
 }
 
 function selectBridgeCommand(command: SlashCommandOption) {
+  selectedPluginCommand.value = command.pluginCommand ? { command: command.pluginCommand, target: pluginTarget.value } : null
   if (command.opensSkillPicker) {
     slashActive.value = false
     void openSkillPicker()
@@ -872,6 +917,11 @@ watch(
 
 const cumulativeTokens = computed(() => {
   const session = composerSession.value
+  if (session?.agentInstanceId) {
+    // Canonical input already includes cache buckets. Missing counters remain unknown.
+    if (session.inputTokens == null || session.outputTokens == null) return null
+    return session.inputTokens + session.outputTokens
+  }
   return (session?.inputTokens ?? 0) + (session?.outputTokens ?? 0)
     + (session?.cacheReadTokens ?? 0) + (session?.cacheWriteTokens ?? 0)
 })
@@ -1026,6 +1076,12 @@ async function handleSend() {
   }
   const text = inputText.value.trim()
   if (!text && attachments.value.length === 0) return
+  if (composerSession.value?.agentInstanceId && !composerSession.value.agentChatSettings && (attachments.value.length > 8
+    || attachments.value.reduce((sum, att) => sum + (att.file?.size || att.size), 0) > 6 * 1024 * 1024
+    || attachments.value.some(att => !att.file || att.file.size > 4 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(att.type)))) {
+    message.error(t('agentManagement.imageInputLimit'))
+    return
+  }
   if (isBridgeSession.value && text === '/skill' && attachments.value.length === 0) {
     void openSkillPicker()
     return
@@ -1040,7 +1096,38 @@ async function handleSend() {
   }
 
   const files = attachments.value.length > 0 ? [...attachments.value] : undefined
-  if (props.submit) {
+  const submissionTarget = pluginTarget.value
+  let pluginHandled = false
+  // Existing platform commands keep their short names until their providers migrate.
+  const reservedCommand = !composerSession.value?.agentInstanceId && (BRIDGE_SESSION_COMMAND_DEFINITIONS.some(command => command.name === /^\/([^\s]+)/.exec(text)?.[1]?.toLowerCase()) || /^\/reload_skills(?:\s|$)/i.test(text))
+  if (text.startsWith('/') && pluginTarget.value && !props.submit && !reservedCommand) {
+    submitting.value = true
+    try {
+      const token = /^\/([^\s]+)/.exec(text)?.[1] || ''
+      const selected = selectedPluginCommand.value
+      const matches = (command: PluginCommand) => [command.name, command.qualifiedName, ...(command.aliases || [])].includes(token)
+      if (selected && matches(selected.command) && selected.target !== pluginTarget.value) throw new Error(t('chat.pluginCommandChanged'))
+      await loadPluginCommands(true)
+      if (submissionTarget !== pluginTarget.value) throw new Error(t('chat.pluginCommandChanged'))
+      if (pluginCommandError.value) throw new Error(pluginCommandError.value)
+      const candidates = pluginCommands.value.filter(matches)
+      if (candidates.length > 1) throw new Error(t('chat.pluginCommandAmbiguous'))
+      const command = candidates[0]
+      if (selected && matches(selected.command) && (!command || selected.command.revision !== command.revision)) throw new Error(t('chat.pluginCommandChanged'))
+      if (!command && token.includes(':')) throw new Error(t('chat.pluginCommandChanged'))
+      if (command) {
+        if (files?.length) throw new Error(t('chat.pluginCommandTextOnly'))
+        const session = composerSession.value!
+        await chatStore.sendPluginCommand(session.id, command, inputText.value, session.profile || profilesStore.activeProfileName || 'default')
+        pluginHandled = true
+      }
+    } catch (error: any) { message.error(error?.message || String(error)); return }
+    finally { submitting.value = false }
+  }
+  if (pluginHandled) {
+    if (submissionTarget !== pluginTarget.value) return
+    selectedPluginCommand.value = null
+  } else if (props.submit) {
     submitting.value = true
     try {
       if (!await props.submit(text, files)) return
@@ -1476,6 +1563,13 @@ function openAttachmentPreview(attachment: Attachment) {
           </NButton>
         </div>
       </div>
+      <div v-if="inputText.startsWith('/') && (pluginCommandsLoading || pluginCommandError)" class="plugin-command-feedback" role="status">
+        <NSpin v-if="pluginCommandsLoading" size="small" />
+        <template v-else>
+          <span>{{ t('chat.pluginCommandsUnavailable') }}</span>
+          <NButton text size="small" @click="loadPluginCommands(true)">{{ t('common.retry') }}</NButton>
+        </template>
+      </div>
       <Transition name="dropdown-fade">
         <div
           v-if="slashActive && filteredBridgeCommands.length > 0"
@@ -1490,7 +1584,7 @@ function openAttachmentPreview(attachment: Attachment) {
             @mousedown.prevent="selectBridgeCommand(command)"
             @mouseenter="handleCommandHover(i)"
           >
-            <span class="slash-command-name">/{{ command.name }}</span>
+            <span class="slash-command-name" :title="command.pluginCommand?.qualifiedName">/{{ command.name }}</span>
             <span v-if="command.args" class="slash-command-args">{{ command.args }}</span>
             <span class="slash-command-desc">{{ command.description }}</span>
           </div>
@@ -2438,6 +2532,13 @@ function openAttachmentPreview(attachment: Attachment) {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.plugin-command-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: $text-muted;
 }
 
 .slash-command-dropdown {

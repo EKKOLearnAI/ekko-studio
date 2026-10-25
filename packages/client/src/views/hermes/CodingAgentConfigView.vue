@@ -4,7 +4,7 @@ import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NButton, NInput, NTag, useMessage } from 'naive-ui'
+import { NButton, NInput, NTag, NSelect, NEmpty, NAlert, useMessage } from 'naive-ui'
 import {
   readCodingAgentConfigFile,
   writeCodingAgentConfigFile,
@@ -17,12 +17,21 @@ import CodingAgentSkillsPanel from '@/components/coding-agents/CodingAgentSkills
 import DshAgentPresetsPanel from '@/components/coding-agents/dsh/DshAgentPresetsPanel.vue'
 import DshPluginsPanel from '@/components/coding-agents/dsh/DshPluginsPanel.vue'
 
-const route = useRoute()
+import { useAgentResourceEditor } from '@/composables/useAgentResourceEditor'
 const { t } = useI18n()
 const message = useMessage()
+const route = useRoute()
+const resourceInstanceId = computed(() => typeof route.query.instance === 'string' ? route.query.instance : '')
+const section = computed(() => String(route.params.section || 'settings'))
+const resources = useAgentResourceEditor(resourceInstanceId, section)
+const { catalog, loading: resourcesLoading, error: resourcesError, file: resourceFile,
+  draft: resourceDraft, saving: resourceSaving, reading: resourceReading, selectedFile, fileOptions, skills: resourceSkills, dirty: resourceDirty } = resources
+async function saveResourceFile() {
+  try { await resources.save(); message.success(t('files.saveFile')) }
+  catch (err: any) { message.error(err.message || String(err)) }
+}
 
 const agentId = computed(() => String(route.params.agentId || ''))
-const section = computed(() => String(route.params.section || 'settings'))
 
 type SettingsEditor = 'preference' | 'configuration'
 
@@ -95,7 +104,7 @@ function resetEditors() {
 async function loadSettingsFiles() {
   const version = ++loadVersion
   resetEditors()
-  if (!validAgentId.value || section.value !== 'settings') {
+  if (resourceInstanceId.value || !validAgentId.value || section.value !== 'settings') {
     loading.value = false
     return
   }
@@ -143,18 +152,46 @@ async function saveSettingsFile(kind: SettingsEditor) {
   }
 }
 
-watch([agentId, section], loadSettingsFiles, { immediate: true })
+watch([agentId, section, resourceInstanceId], loadSettingsFiles, { immediate: true })
 </script>
 
 <template>
-  <PageLoading :show="loading" class="coding-agent-config-view">
+  <PageLoading :show="resourceInstanceId ? resourcesLoading : loading" class="coding-agent-config-view">
     <PageHeader>
     <header v-if="section === 'settings'" class="page-header">
       <h2 class="header-title">{{ t('sidebar.settings') }}</h2>
     </header>
     </PageHeader>
 
-    <DshPluginsPanel v-if="section === 'plugins' && validAgentId === 'dsh'" />
+    <div v-if="resourceInstanceId" class="resource-toolbar">
+      <NButton :disabled="resourceSaving || resourcesLoading" @click="resources.refresh">{{ t('codingAgents.refresh') }}</NButton>
+    </div>
+    <NAlert v-if="resourcesError" type="error" :bordered="false">{{ resourcesError }}</NAlert>
+
+    <template v-if="resourceInstanceId">
+      <div v-if="section === 'skills' && resourceSkills" class="coding-agent-skills-content" :inert="!!resourcesError || undefined">
+        <CodingAgentSkillsPanel :key="`${resourceInstanceId}/${catalog?.snapshot}`" target="hermes" :resource-adapter="resourceSkills" />
+      </div>
+      <div v-else-if="section === 'settings' && catalog" class="coding-agent-settings-content">
+        <div v-if="fileOptions.length" class="settings-editors">
+          <section class="settings-editor-panel" data-theme-surface="card">
+            <div class="editor-toolbar">
+              <NSelect :value="selectedFile" :options="fileOptions" :disabled="resourceSaving || resourceReading" :aria-label="t('codingAgents.resourceFile')" @update:value="resources.selectFile" />
+              <NButton type="primary" size="small" :loading="resourceSaving" :disabled="!resourceDirty || resourceFile?.readOnly || !!resourcesError || resourceReading" @click="saveResourceFile">{{ t('files.saveFile') }}</NButton>
+            </div>
+            <div class="resource-file-meta">
+              <span>{{ resourceFile?.absolutePath }}</span>
+              <NTag v-if="resourceFile?.readOnly" size="small">{{ t('codingAgents.resourceReadOnly') }}</NTag>
+              <NTag v-if="resourceFile && !resourceFile.exists" size="small">{{ t('codingAgents.configFileNotCreated') }}</NTag>
+            </div>
+            <NInput v-model:value="resourceDraft" class="config-editor" type="textarea" :readonly="resourceFile?.readOnly || resourceSaving || !!resourcesError" :disabled="resourceReading || !resourceFile" :placeholder="resourceFile?.absolutePath" />
+          </section>
+        </div>
+        <NEmpty v-else :description="t(catalog.configs ? 'codingAgents.resourcesEmpty' : 'codingAgents.resourcesUnsupported')" />
+      </div>
+      <NEmpty v-else-if="!resourcesLoading && !resourcesError" :description="t('codingAgents.resourcesUnsupported')" />
+    </template>
+    <DshPluginsPanel v-else-if="section === 'plugins' && validAgentId === 'dsh'" />
     <DshAgentPresetsPanel v-else-if="section === 'presets' && validAgentId === 'dsh'" />
     <div v-else-if="section === 'skills'" class="coding-agent-skills-content">
       <CodingAgentSkillsPanel :target="skillTarget" />
@@ -236,6 +273,23 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
   min-height: 0;
   padding: calc(20px * var(--spacing-scale, 1));
   overflow: hidden;
+}
+
+.resource-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  gap: 12px;
+  padding: 12px;
+  .n-select { min-width: 0; }
+}
+.resource-file-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow-wrap: anywhere;
+  color: $text-muted;
+  font-size: 12px;
+  margin-bottom: 12px;
 }
 
 .settings-loading {

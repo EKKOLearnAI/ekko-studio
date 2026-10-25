@@ -19,7 +19,10 @@ watch(expanded, value => appStore.setPageSidebarExpanded(value), { immediate: tr
 const agentId = computed(() => String(route.params.agentId || ''))
 const activeSection = computed(() => String(route.params.section || 'settings'))
 
-const items = computed(() => [
+const items = computed(() => route.query.instance ? [
+  { section: 'skills', label: t('sidebar.skills'), icon: 'skills' },
+  { section: 'settings', label: t('sidebar.settings'), icon: 'settings' },
+] : [
     ...(agentId.value === 'dsh' ? [{ section: 'plugins', label: t('sidebar.plugins'), icon: 'plugins' }, { section: 'presets', label: t('dshPresets.title'), icon: 'presets' }] : []),
     ...(agentMetadata(agentId.value)?.config.skillsTarget ? [{ section: 'skills', label: t('sidebar.skills'), icon: 'skills' }] : []),
     ...(agentMetadata(agentId.value)?.config.mcp ? [{ section: 'mcp', label: t('sidebar.mcp'), icon: 'mcp' }] : []),
@@ -49,7 +52,7 @@ function handleNavClick(event: MouseEvent) {
         :key="item.section"
         class="coding-agent-config-nav-item"
         :data-testid="`coding-agent-config-${item.section}`"
-        :to="{ name: 'codingAgent.config', params: { agentId, section: item.section } }"
+        :to="{ name: 'codingAgent.config', params: { agentId, section: item.section }, query: route.query }"
         :active="activeSection === item.section"
       >
         <PluginIcon v-if="item.icon === 'plugins'" />

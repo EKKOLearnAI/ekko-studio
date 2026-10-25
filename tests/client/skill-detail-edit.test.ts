@@ -94,3 +94,23 @@ describe('SkillDetail editing', () => {
     expect(wrapper.findAll('.detail-action')).toHaveLength(0)
   })
 })
+
+it('edits a writable skill attachment through its source adapter and preserves the draft on conflict', async () => {
+  const save = vi.fn().mockRejectedValueOnce(new Error('changed')).mockResolvedValue(undefined)
+  const wrapper = mount(SkillDetail, { props: {
+    category: 'native', skill: 'demo', skillName: 'demo', readonly: false,
+    loadContent: async (_category, _skill, path) => path ? '# Reference' : '# Skill',
+    loadFiles: async () => [{ path: 'references/guide.md', name: 'guide.md', isDir: false }],
+    canEditFile: () => true, saveContent: save,
+  } })
+  await flushPromises()
+  await wrapper.get('.file-item').trigger('click'); await flushPromises()
+  await wrapper.get('.detail-action').trigger('click')
+  await wrapper.get('textarea').setValue('# Edited reference')
+  await wrapper.findAll('.detail-action')[0].trigger('click'); await flushPromises()
+  expect(wrapper.get('textarea').element.value).toBe('# Edited reference')
+  await wrapper.findAll('.detail-action')[0].trigger('click'); await flushPromises()
+  expect(save).toHaveBeenLastCalledWith('native', 'demo', '# Edited reference', 'references/guide.md')
+  expect(wrapper.get('.markdown-renderer-stub').text()).toBe('# Edited reference')
+  wrapper.unmount()
+})

@@ -12,6 +12,7 @@ import type {
   ModelResponse,
   ModelUsage,
 } from '../types'
+import { abortSignal } from '../http'
 import { ModelProviderError } from '../errors'
 import { isPlainRecord, parseJson, postJson, postStream, providerUrl, readServerSentEvents, modelRequestHeaders } from '../http'
 import { agentReasoningText, normalizeAgentReasoning } from '../messages'
@@ -84,6 +85,14 @@ export class AnthropicMessagesModelClient implements ModelClient {
 
   requestTarget(): string {
     return anthropicUrl(this.config)
+  }
+
+  nativeRequest(body: Record<string, unknown>, request: ModelRequest): Promise<Response> {
+    return this.fetchImpl(anthropicUrl(this.config), {
+      method: 'POST', headers: anthropicHeaders(this.config, request),
+      body: JSON.stringify({ ...body, model: request.model ?? this.config.defaultModel }),
+      signal: abortSignal(this.config.timeoutMs, request.signal), redirect: 'error',
+    })
   }
 
   async create(request: ModelRequest): Promise<ModelResponse> {

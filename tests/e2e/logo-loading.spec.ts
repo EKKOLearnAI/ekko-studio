@@ -82,7 +82,7 @@ for (const theme of ['light', 'dark']) {
     let releaseSkills!: () => void
     const bootGate = new Promise<void>(resolve => { releaseBoot = resolve; pendingReleases.add(resolve) })
     const skillsGate = new Promise<void>(resolve => { releaseSkills = resolve; pendingReleases.add(resolve) })
-    await page.route('**/src/main.ts', async route => { await bootGate; await route.continue() })
+    await page.route(/\/(?:src\/main\.ts|assets\/js\/index-[^/]+\.js)(?:\?|$)/, async route => { await bootGate; await route.continue() })
     await page.route(/\/api\/hermes\/skills(?:\?.*)?$/, async route => {
       await skillsGate
       await route.fulfill({ json: { categories: [], archived: [] } })

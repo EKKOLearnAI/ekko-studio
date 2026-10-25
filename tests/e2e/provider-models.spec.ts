@@ -152,24 +152,25 @@ for (const mode of ['scoped', 'global']) test(`DSH ${mode} chat selects its mode
   await page.getByRole('button', { name: 'Send', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.filter((item: any) => item.event === 'run').length || 0)).toBe(1)
   const payload = await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.find((item: any) => item.event === 'run').payload)
-  expect(payload).toMatchObject({ coding_agent_id: 'dsh', mode })
-  if (mode === 'scoped') expect(payload).toMatchObject({ provider: 'test-provider', model: 'test-model' })
+  expect(payload).toMatchObject({ managed_agent_protocol: 1 })
+  expect(JSON.parse(api.requests.find(item => item.pathname === '/api/studio/agent-chats')!.postData!)).toMatchObject({ agentTypeId: 'dsh', mode })
+  if (mode === 'scoped') expect(JSON.parse(api.requests.find(item => item.pathname === '/api/studio/agent-chats')!.postData!)).toMatchObject({ provider: 'test-provider', model: 'test-model' })
   await expect(page.locator('img[src="/coding-agents/deepseek.svg"]').first()).toBeVisible()
   await page.evaluate(sid => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
-    socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'dsh-stream' })
-    socket.__trigger('message.delta', { event: 'message.delta', session_id: sid, run_id: 'dsh-stream', delta: 'DSH first chunk' })
+    socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'dsh-stream', agent_run_id: 'dsh-stream' })
+    socket.__trigger('message.persisted', { event: 'message.persisted', session_id: sid, agent_run_id: 'dsh-stream', messages: [{ id: 1, role: 'assistant', content: 'DSH first chunk', run_marker: 'dsh-stream', timestamp: 1 }] })
   }, payload.session_id)
   await expect(page.getByText('DSH first chunk', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
   await page.evaluate(sid => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
-    socket.__trigger('message.delta', { event: 'message.delta', session_id: sid, run_id: 'dsh-stream', delta: ' and second chunk' })
+    socket.__trigger('message.persisted', { event: 'message.persisted', session_id: sid, agent_run_id: 'dsh-stream', messages: [{ id: 1, role: 'assistant', content: 'DSH first chunk and second chunk', run_marker: 'dsh-stream', timestamp: 1 }] })
   }, payload.session_id)
   await expect(page.getByText('DSH first chunk and second chunk', { exact: true })).toBeVisible()
   await page.evaluate(sid => {
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
-    socket.__trigger('run.completed', { event: 'run.completed', session_id: sid, run_id: 'dsh-stream', output: 'DSH first chunk and second chunk' })
+    socket.__trigger('run.completed', { event: 'run.completed', session_id: sid, run_id: 'dsh-stream', agent_run_id: 'dsh-stream', output: 'DSH first chunk and second chunk' })
   }, payload.session_id)
   await expect(page.getByText('DSH first chunk and second chunk', { exact: true })).toHaveCount(1)
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0)

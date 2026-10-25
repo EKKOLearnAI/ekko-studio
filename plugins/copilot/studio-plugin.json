@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "studio.agent-copilot",
+  "version": "0.1.0",
+  "engines": { "studioSdk": "^0.1.0", "rpc": 1 },
+  "backend": "dist/index.cjs",
+  "activation": "global",
+  "contributes": { "agents": ["copilot"], "runtimeCommands": ["copilot"] },
+  "requires": { "capabilities": ["agents.register", "commands.register", "runs.start", "processes.spawn", "mcp.studio", "models.gateway", "artifacts.read"] },
+  "configSchema": { "type": "object", "additionalProperties": false }
+}

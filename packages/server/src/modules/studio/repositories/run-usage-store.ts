@@ -2,6 +2,7 @@ import { getDb, isSqliteAvailable } from '../infrastructure/database'
 import { RUN_USAGE_TABLE, USAGE_TABLE } from '../infrastructure/database/schemas'
 import type { RunUsageSummary } from '../contracts/runs/run-usage'
 import { logger } from '../public/logging'
+import { readAgentChatRunSummaries } from './agent-chat-summary'
 
 const metricColumns = [
   'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens',
@@ -57,7 +58,7 @@ function readSummaries(sessionId: string, assistantIds: string[]): RunUsageSumma
   const rows = getDb()?.prepare(`SELECT * FROM ${RUN_USAGE_TABLE}
     WHERE session_id = ? AND assistant_message_id IN (${assistantIds.map(() => '?').join(',')})`)
     .all(sessionId, ...assistantIds) as Array<Record<string, any>> | undefined
-  return (rows || []).map(mapSummary)
+  return [...(rows || []).map(mapSummary), ...(getDb() ? readAgentChatRunSummaries(getDb()!, sessionId, assistantIds) : [])]
 }
 
 /** Deduct the union of tool intervals only when their timing is complete. */

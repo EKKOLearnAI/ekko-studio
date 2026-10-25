@@ -85,20 +85,21 @@ for (const agent of ['Ekko', 'Hermes', 'Codex']) test(`${agent} new-chat forward
   await sendNewChatMessage(page, 'Use my draft reasoning effort')
   await expect(draft).toBeHidden()
   await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({
-    model: 'reasoning-model', reasoning_effort: 'max', input: 'Use my draft reasoning effort',
+    input: 'Use my draft reasoning effort', ...(agent === 'Codex' ? { managed_agent_protocol: 1 } : { model: 'reasoning-model', reasoning_effort: 'max' }),
   })
   await expect(page.locator('.reasoning-effort-button')).toHaveAttribute('aria-label', /max/i)
   await expect(page.locator('.reasoning-effort-button')).toBeEnabled()
   expect(api.requests.filter(request => request.pathname.endsWith('/reasoning-effort') && request.method !== 'GET')).toEqual([])
   expect(effortWrites).toEqual([])
   if (agent === 'Codex') {
+    expect(JSON.parse(api.requests.find(item => item.pathname === '/api/studio/agent-chats')!.postData!)).toMatchObject({ agentTypeId: 'codex', model: 'reasoning-model', reasoningEffort: 'max' })
     const sid = await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.find((item: any) => item.event === 'run').payload.session_id)
     await page.evaluate(sid => {
       const socket = (window as any).__PW_CHAT_SOCKET__.latest
-      socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'scoped-run' })
-      socket.__trigger('session.workspace.updated', { event: 'session.workspace.updated', session_id: sid, workspace: '/tmp/scoped-workspace' })
-      socket.__trigger('message.delta', { event: 'message.delta', session_id: sid, delta: 'Ready to continue.' })
-      socket.__trigger('run.completed', { event: 'run.completed', session_id: sid, run_id: 'scoped-run' })
+      const base = { session_id: sid, run_id: 'scoped-run', agent_run_id: 'scoped-run', run_marker: 'scoped-run' }
+      socket.__trigger('run.started', { ...base, event: 'run.started' })
+      socket.__trigger('message.persisted', { ...base, event: 'message.persisted', messages: [{ id: 1, role: 'assistant', content: 'Ready to continue.', run_marker: 'scoped-run', timestamp: 1 }] })
+      socket.__trigger('run.completed', { ...base, event: 'run.completed', status: 'completed', queue_remaining: 0 })
     }, sid)
     await page.locator('.reasoning-effort-button').click()
     await page.getByRole('slider').focus()
@@ -111,7 +112,7 @@ for (const agent of ['Ekko', 'Hermes', 'Codex']) test(`${agent} new-chat forward
     await input.fill('Continue with the new scoped effort')
     await input.press('Enter')
     await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.filter((item: any) => item.event === 'run').at(-1)?.payload))
-      .toMatchObject({ mode: 'scoped', model: 'reasoning-model', reasoning_effort: 'low', input: 'Continue with the new scoped effort' })
+      .toMatchObject({ managed_agent_protocol: 1, input: 'Continue with the new scoped effort' })
   }
   expect(api.unexpectedRequests).toEqual([])
 })
@@ -142,7 +143,7 @@ test('new-chat resets unsupported effort on a model switch and preserves the ori
 
 test('new-chat global CLI mode uses native reasoning configuration', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
-  await mockHermesApi(page, { modelGroups: draftGroups })
+  const api = await mockHermesApi(page, { modelGroups: draftGroups })
   await mockChatSocket(page)
   await page.goto('/#/hermes/chat')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
@@ -151,6 +152,7 @@ test('new-chat global CLI mode uses native reasoning configuration', async ({ pa
   await selectNewChatLaunchMode(page, 'global')
   await expect(page.locator('.new-chat-page .reasoning-effort-button')).toHaveCount(0)
   await sendNewChatMessage(page)
-  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload.mode)).toBe('global')
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload.managed_agent_protocol)).toBe(1)
+  expect(JSON.parse(api.requests.find(item => item.pathname === '/api/studio/agent-chats')!.postData!)).toMatchObject({ agentTypeId: 'codex', mode: 'global' })
   expect(await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.find((item: any) => item.event === 'run').payload.reasoning_effort)).toBeUndefined()
 })

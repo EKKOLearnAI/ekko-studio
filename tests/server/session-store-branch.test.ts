@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => {
   const updateForkPointRun = vi.fn()
   const selectSessionGet = vi.fn()
   const prepare = vi.fn((sql: string) => {
+    if (sql.includes("FROM sqlite_master WHERE type='table' AND name='studio_agent_chat_bindings'")) return { get: () => undefined }
     if (sql.includes('UPDATE sessions SET ended_at')) return { run: updateParentRun }
     if (sql.includes('UPDATE sessions SET fork_point_message_id')) return { run: updateForkPointRun }
     if (sql.includes('INSERT INTO sessions')) return { run: insertSessionRun }

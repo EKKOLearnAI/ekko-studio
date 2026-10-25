@@ -825,11 +825,12 @@ const activeSessionTitle = computed(
 
 const activeSessionUsesGlobalCodingAgentConfig = computed(() => {
   const session = chatStore.activeSession;
-  return session?.codingAgentMode === "global" && Boolean(session.codingAgentId || session.source === "coding_agent");
+  return !(session?.agentInstanceId && !session.agentChatSettings) && session?.codingAgentMode === "global" && Boolean(session.codingAgentId || session.source === "coding_agent");
 });
 
 const activeSessionModelLabel = computed(() => {
   const session = chatStore.activeSession;
+  if (session?.agentInstanceId && !session.agentChatSettings) return session.model || t('codingAgents.nativeModelDefault');
   if (activeSessionUsesGlobalCodingAgentConfig.value) {
     return nativeModelLabel(activeSessionNativeCatalog.value?.models, session?.model || "", t("codingAgents.nativeModelDefault"));
   }
@@ -2209,7 +2210,7 @@ function openNewChatWorkspace() {
 
 function openActiveSessionWorkspace() {
   const session = chatStore.activeSession;
-  if (!session?.id) return;
+  if (!session?.id || (session.agentInstanceId && !session.agentChatSettings)) return;
   workspaceIsDraft.value = false;
   workspaceSessionId.value = session.id;
   workspaceValue.value = session.workspace || "";
@@ -2333,6 +2334,8 @@ const sessionCanUseMoa = computed(() =>
 );
 
 async function openSessionModelPicker(sessionId: string | null, event?: MouseEvent) {
+  const configuredSession = chatStore.sessions.find(session => session.id === sessionId);
+  if (configuredSession?.agentInstanceId && !configuredSession.agentChatSettings) return;
   sessionModelTrigger.value = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   const isDraft = sessionId === null;
   const draftSequence = newChatOptionsLoadSequence;
@@ -3073,6 +3076,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             size="small"
             circle
             :title="chatStore.activeSession.workspace"
+            :disabled="!!chatStore.activeSession.agentInstanceId && !chatStore.activeSession.agentChatSettings"
             :aria-label="t('chat.setWorkspace')"
             @click="openActiveSessionWorkspace"
           >
@@ -3269,7 +3273,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             <ChatInput
               ref="chatInputRef"
               :model-label="activeSessionModelLabel"
-              :model-disabled="activeSessionUsesGlobalCodingAgentConfig"
+              :model-disabled="(!!chatStore.activeSession?.agentInstanceId && !chatStore.activeSession.agentChatSettings) || activeSessionUsesGlobalCodingAgentConfig"
               :native-reasoning-efforts="activeSessionUsesGlobalCodingAgentConfig ? activeSessionNativeReasoningEfforts : undefined"
               :native-effort-choices="activeSessionUsesGlobalCodingAgentConfig ? activeSessionNativeEffortChoices : undefined"
               :model-expanded="showSessionModelPicker && !sessionModelIsDraft && sessionModelSessionId === chatStore.activeSessionId"

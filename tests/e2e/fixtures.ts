@@ -236,7 +236,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
     }
 
     if (pathname === '/health') {
-      await route.fulfill(jsonResponse({ status: 'ok', webui_version: '0.5.23', node_version: '23.0.0' }))
+      await route.fulfill(jsonResponse({ status: 'ok', webui_version: '0.5.23', node_version: '24.22.1', node_runtime: 'node' }))
       return
     }
 
@@ -598,6 +598,16 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       return
     }
 
+    if (pathname === '/api/studio/agent-instances' && request.method() === 'GET') {
+      return route.fulfill({ json: { ok: true, data: [] } })
+    }
+    if (pathname === '/api/studio/agent-chats' && request.method() === 'POST') {
+      const input = request.postDataJSON()
+      return route.fulfill({ json: { ok: true, data: { sessionId: input.sessionId, instanceId: `chat-${input.sessionId}`, profileId: url.searchParams.get('profile'), configurationRevision: 1, createdAt: Date.now() } } })
+    }
+    if (pathname === '/api/studio/commands' && request.method() === 'GET') {
+      await route.fulfill({ json: { ok: true, data: [] } }); return
+    }
     if (pathname === '/api/studio/sessions') {
       await route.fulfill(jsonResponse({ sessions: options.sessions ?? [] }, tokenValidationStatus))
       return
@@ -1146,8 +1156,21 @@ export async function authenticate(page: Page, accessKey = TEST_ACCESS_KEY, prof
   }, { storedToken: accessKey, storedProfileName: profileName })
 }
 
+// Built-client boundary and Vite's optimized module share the same fixture.
+export const SOCKET_CLIENT_MODULE = /\/(?:__e2e|node_modules\/\.vite\/[^?]+)\/socket__io-client\.js(?:\?|$)/
+
+export async function setDocumentDirection(page: Page, direction: string) {
+  // Match the app's paired lang/dir updates for geometry-only checks. Built CSS
+  // can lower logical properties to :lang() selectors; changing dir alone leaves
+  // an inconsistent document. Real language switching has its own browser tests.
+  await page.evaluate(dir => {
+    document.documentElement.lang = dir === 'rtl' ? 'ar' : 'en'
+    document.documentElement.dir = dir
+  }, direction)
+}
+
 export async function mockChatSocket(page: Page) {
-  await page.route('**/node_modules/.vite/**/socket__io-client.js*', async (route) => {
+  await page.route(SOCKET_CLIENT_MODULE, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/javascript',

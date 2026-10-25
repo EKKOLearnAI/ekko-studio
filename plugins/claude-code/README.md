@@ -1,0 +1,13 @@
+# Claude Code plugin
+
+Independent Studio worker adapter for the pinned native `@anthropic-ai/claude-code@2.1.310` executable. It uses public Studio SDK/driver imports and Claude's bidirectional stream-json control protocol.
+
+Global mode keeps the native Home, account, settings, Skills, plugins, memory and MCP discovery. Scoped mode uses the host's private state directory and an Anthropic model gateway; its temporary model credential stays in process environment variables. Managed MCP configuration is a private per-runtime file removed after process cleanup. Native user/project MCP layers remain native-owned.
+
+Scoped launch pins provider routing with a non-secret `--settings` overlay and checks the effective native settings before sending user input. Settings that replace credentials, credential helpers, or private storage are rejected and retained for explicit editing. This prevents native `settings.env` from redirecting a Studio model credential; ordinary preferences and native resource files remain editable.
+
+Each turn initializes the native control channel, reads its native per-model usage baseline, submits bounded text/images, projects deltas and final snapshots, handles tool permissions and single-choice/free-text `AskUserQuestion`, then waits for the native result and confirmed clean process exit. The successful native UUID forms the checkpoint. Missing or invalid native history fails rather than replaying a conversation. Native dynamic commands and aliases are contributed by this plugin; `/compact` forwards its original arguments to Claude.
+
+Management offers an exact-version binary installation plan, version probe, explicit native login, and native resource locations. Both `auth status` and session initialization write `.claude.json`/backups on a fresh native Home; therefore read-only management reports authentication `unknown` and model discovery `unsupported` rather than modifying a user's account. Runtime initialization still discovers native commands and models. This management catalog gap is recorded for final migration acceptance.
+
+Native estimated cost, multiple-selection dialogs, unknown user-dialog kinds, and MCP elicitation schemas requiring form fields are not represented by the current public interaction/usage DTOs. Unsupported interactions fail explicitly. Global token accounting includes cache input and differences current native per-model totals, including recovery after failed turns; cache and thinking breakdowns are preserved when reported. Scoped usage belongs to the host gateway. Real account, supported OS matrix, historical migration and final end-to-end acceptance remain separate requirements.

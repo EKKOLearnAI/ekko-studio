@@ -10,7 +10,7 @@
     "directory": "packages/ekko-agent"
   },
   "engines": {
-    "node": ">=23.0.0"
+    "node": "24.22.1"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -20,6 +20,12 @@
       "require": "./dist/index.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp.d.ts",
+      "require": "./dist/mcp.js",
+      "import": "./dist/mcp.js",
+      "default": "./dist/mcp.js"
     }
   },
   "files": [

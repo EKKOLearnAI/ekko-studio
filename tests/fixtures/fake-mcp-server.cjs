@@ -5,6 +5,7 @@ const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity 
 rl.on('line', line => {
   if (!line.trim()) return
   const message = JSON.parse(line)
+  if (message.id === undefined) return // Notifications never receive JSON-RPC responses.
   if (message.method === 'initialize') {
     process.stdout.write(`${JSON.stringify({
       jsonrpc: '2.0',

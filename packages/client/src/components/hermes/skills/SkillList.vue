@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { NSwitch, useMessage, useDialog } from 'naive-ui'
 import type { SkillCategory, SkillSource, SkillInfo } from '@/api/hermes/skills'
 import { toggleSkill, deleteSkillApi } from '@/api/hermes/skills'
@@ -21,6 +21,9 @@ const props = withDefaults(defineProps<{
     toggleable?: boolean
     toggleHandler?: (category: string, skill: string, enabled: boolean) => Promise<void>
     deleteHandler?: (category: string, skill: string) => Promise<void>
+    prepareDeleteHandler?: (category: string, skill: string) => Promise<() => Promise<void>>
+    canDelete?: (category: string, skill: string) => boolean
+    scopeKey?: string
 }>(), {
     toggleable: true,
 })
@@ -34,6 +37,12 @@ const collapsedCategories = ref<Set<string>>(new Set())
 const archiveCollapsed = ref(true)
 const togglingSkills = ref<Set<string>>(new Set())
 const deletingSkills = ref<Set<string>>(new Set())
+const deleteKey = (category: string, skill: string) => JSON.stringify([category, skill])
+const deleteDialogs = new Set<{ destroy(): void }>()
+let deleteGeneration = 0
+const invalidateDelete = () => { ++deleteGeneration; for (const popup of deleteDialogs) popup.destroy(); deleteDialogs.clear(); deletingSkills.value.clear() }
+watch(() => props.scopeKey, invalidateDelete)
+onUnmounted(invalidateDelete)
 
 const filteredArchived = computed(() => {
     let result = props.archived
@@ -172,28 +181,42 @@ async function handleToggle(category: string, skillName: string, newEnabled: boo
     }
 }
 
-function confirmDelete(category: string, skillName: string) {
-    if (deletingSkills.value.has(skillName)) return
-    dialog.warning({
-        title: t('skills.delete'),
-        content: t('skills.deleteConfirm', { name: skillName }),
-        positiveText: t('common.delete'),
-        negativeText: t('common.cancel'),
-        onPositiveClick: async () => {
-            deletingSkills.value.add(skillName)
-            try {
-                if (props.deleteHandler) await props.deleteHandler(category, skillName)
-                else await deleteSkillApi(category, skillName)
-                message.success(t('skills.deleteSuccess'))
-                message.info(t('skills.reloadHint'), { duration: 6000 })
-                emit('deleted', category, skillName)
-            } catch (err: any) {
-                message.error(t('skills.deleteFailed') + `: ${err.message}`)
-            } finally {
-                deletingSkills.value.delete(skillName)
-            }
-        },
-    })
+async function confirmDelete(category: string, skillName: string) {
+    const key = deleteKey(category, skillName), generation = deleteGeneration
+    if (deletingSkills.value.has(key) || props.canDelete && !props.canDelete(category, skillName)) return
+    deletingSkills.value.add(key)
+    try {
+        const prepared = await props.prepareDeleteHandler?.(category, skillName)
+        if (generation !== deleteGeneration) return
+        const source = props.scopeKey ? props.categories.find(item => item.name === category)?.description : ''
+        const popup = dialog.warning({
+            title: t('skills.delete'),
+            content: t('skills.deleteConfirm', { name: source ? `${skillName} · ${source}` : skillName }),
+            positiveText: t('common.delete'),
+            negativeText: t('common.cancel'),
+            onAfterLeave: () => { deleteDialogs.delete(popup); if (generation === deleteGeneration) deletingSkills.value.delete(key) },
+            onPositiveClick: async () => {
+                if (generation !== deleteGeneration) return
+                try {
+                    if (prepared) await prepared()
+                    else if (props.deleteHandler) await props.deleteHandler(category, skillName)
+                    else await deleteSkillApi(category, skillName)
+                    if (generation !== deleteGeneration) return
+                    message.success(t('skills.deleteSuccess'))
+                    message.info(t(props.scopeKey ? 'codingAgents.resourcesNextRun' : 'skills.reloadHint'), { duration: 6000 })
+                    emit('deleted', category, skillName)
+                } catch (err: any) {
+                    if (generation === deleteGeneration) message.error(t('skills.deleteFailed') + `: ${err.message}`)
+                } finally {
+                    if (generation === deleteGeneration) deletingSkills.value.delete(key)
+                }
+            },
+        })
+        deleteDialogs.add(popup)
+    } catch (err: any) {
+        if (generation === deleteGeneration) deletingSkills.value.delete(key)
+        if (generation === deleteGeneration) message.error(t('skills.deleteFailed') + `: ${err.message}`)
+    }
 }
 </script>
 
@@ -261,7 +284,7 @@ function confirmDelete(category: string, skillName: string) {
         <!-- Default flat category list -->
         <template v-else>
             <div v-for="cat in filteredCategories" :key="cat.name" class="skill-category">
-                <button class="category-header" @click="toggleCategory(cat.name)">
+                <button class="category-header" :title="cat.description" @click="toggleCategory(cat.name)">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                         class="category-arrow" :class="{ collapsed: collapsedCategories.has(cat.name) }">
                         <polyline points="6 9 12 15 18 9" />
@@ -284,8 +307,8 @@ function confirmDelete(category: string, skillName: string) {
                             </span>
                             <span v-if="skill.description" class="skill-desc">{{ skill.description }}</span>
                         </div>
-                        <button v-if="!readonly && !skill.readonly && (skill.source ?? 'local') === 'local'" class="skill-action-btn"
-                            :title="t('skills.delete')" :disabled="deletingSkills.has(skill.name)"
+                        <button v-if="!readonly && !skill.readonly && (skill.source ?? 'local') === 'local' && (!canDelete || canDelete(cat.name, skill.name))" class="skill-action-btn"
+                            :title="t('skills.delete')" :disabled="deletingSkills.has(deleteKey(cat.name, skill.name))"
                             @click.stop="confirmDelete(cat.name, skill.name)">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

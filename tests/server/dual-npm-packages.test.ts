@@ -36,6 +36,7 @@ describe('dual npm release artifacts', () => {
       const pkg = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'))
       expect(pkg.name).toBe(artifact.name)
       expect(pkg.version).toBe('99.0.0-test.1')
+      expect(pkg).not.toHaveProperty('workspaces')
       expect(pkg.bin['ekko-studio-web']).toBeTruthy()
       expect(pkg.bin['hermes-web-ui']).toBeTruthy()
       expect(readFileSync(join(packageDir, 'dist/server/index.js'), 'utf8')).toBe('/* same server */')

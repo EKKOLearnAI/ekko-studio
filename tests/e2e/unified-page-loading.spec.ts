@@ -38,6 +38,7 @@ const pages = [
 
 for (const [path, endpoint] of pages) {
   test(`fills the page with one 72px logo and releases failures: ${path}`, async ({ page }) => {
+    await page.clock.install()
     await authenticate(page)
     await mockHermesApi(page)
     await mockChatSocket(page)
@@ -62,6 +63,10 @@ for (const [path, endpoint] of pages) {
         return Math.max(...(['x', 'y', 'width', 'height'] as const).map(key => Math.abs(box[key] - main[key])))
       })).toBeLessThanOrEqual(1)
       await expect(surface.locator(':scope > .page-loading-content')).toHaveAttribute('inert', '')
+      // These route cases protect pending/error wiring. The two real-clock
+      // cases below and PageLoading unit tests own the minimum display time.
+      await page.clock.fastForward(1000)
+      await expect(overlay).toBeVisible()
     } finally { release() }
     await expect(overlay).toHaveCount(0)
     await expect(surface).toHaveAttribute('aria-busy', 'false')

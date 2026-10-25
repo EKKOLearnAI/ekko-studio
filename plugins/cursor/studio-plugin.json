@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "studio.agent-cursor",
+  "version": "0.1.0",
+  "engines": { "studioSdk": "^0.1.0", "rpc": 1 },
+  "backend": "dist/index.cjs",
+  "activation": "global",
+  "contributes": { "agents": ["cursor"] },
+  "requires": { "capabilities": ["agents.register", "runs.start", "processes.spawn", "mcp.studio", "artifacts.read"] },
+  "configSchema": { "type": "object", "additionalProperties": false }
+}

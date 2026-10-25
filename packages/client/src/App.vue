@@ -102,7 +102,7 @@ const {
   hasCustomBackground,
   syncThemeFromServer,
 } = useTheme();
-const { t, locale } = useI18n();
+const { locale } = useI18n();
 const naiveLocale = computed(() => naiveLocaleFor(locale.value));
 const naiveRtl = computed(() => naiveRtlFor(locale.value));
 const appStore = useAppStore();
@@ -208,12 +208,6 @@ const showMobileMenuButton = computed(
       usesEkkoConfigSidebar.value ||
       usesCodingAgentConfigSidebar.value),
 );
-
-const nodeVersionLow = computed(() => {
-  const v = appStore.nodeVersion;
-  const major = parseInt(v.split(".")[0], 10);
-  return !isNaN(major) && major < 23;
-});
 
 const isDesktopShell = computed(() => desktopBridge()?.isDesktop === true);
 const desktopPlatform = computed(() => desktopBridge()?.platform || "");
@@ -364,16 +358,6 @@ useKeyboard();
               />
             </div>
             <div class="app-box">
-              <div
-                v-if="nodeVersionLow && !isStandaloneChatPage"
-                class="node-warning-bar"
-              >
-                {{
-                  t("sidebar.nodeVersionWarning", {
-                    version: appStore.nodeVersion,
-                  })
-                }}
-              </div>
               <div
                 class="app-layout"
                 :class="{
@@ -968,18 +952,4 @@ useKeyboard();
   }
 }
 
-.node-warning-bar {
-  position: relative;
-  flex: 0 0 auto;
-  width: 100%;
-  z-index: 100;
-  padding: calc(4px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
-  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
-  font-weight: 500;
-  color: #b45309;
-  background-color: #fef3c7;
-  border-bottom: var(--border-width, 1px) solid #fde68a;
-  text-align: center;
-  line-height: var(--line-height, 1.4);
-}
 </style>

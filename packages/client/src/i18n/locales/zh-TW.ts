@@ -1,9 +1,11 @@
+import { agentManagementMessages } from '../agent-management-messages'
 import { remoteDeviceMessages } from '../remote-device-messages'
 import { themePresetMessages } from '../theme-preset-locales'
 import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesZhTw } from '../social-messages'
 
 export default {
+  agentManagement: agentManagementMessages['zh-TW'],
   sessionTasks: {
       "title": "任務",
       "task": "任務",
@@ -706,7 +708,6 @@ export default {
     updateSuccess: '更新成功，請稍後重新整理頁面，如長時間未啟動，請手動啟動',
     updateFailed: '更新失敗',
     logout: '登出',
-    nodeVersionWarning: '偵測到 Node.js v{version}，請升級至 23 以上版本。',
     changelog: '更新日誌',
     noChangelog: '目前無更新日誌',
     versionManagement: '版本管理',
@@ -1091,6 +1092,10 @@ export default {
 
   // 對話
   chat: {
+    pluginCommandChanged: "命令或對話已變更，請重新選擇命令。",
+    pluginCommandAmbiguous: "多個外掛提供此命令，請選擇含來源的名稱。",
+    pluginCommandTextOnly: "外掛命令目前僅支援文字。",
+    pluginCommandsUnavailable: "無法載入外掛命令。",
     selectMessages: "多選訊息",
     messagesSelected: "已選 {count} 則",
     deleteSelectedMessages: "刪除所選",
@@ -3252,6 +3257,15 @@ export default {
   },
 
   codingAgents: {
+    defaultConfiguration: "預設設定",
+    resourceInstance: "Agent 執行個體", resourceSkillSource: 'Skills 位置', resourcesNextRun: '下一次執行會自動載入更新後的 Skills。',
+    resourceFile: "設定檔",
+    resourceReadOnly: "唯讀",
+    resourcesEmpty: "這些位置暫無資源",
+    resourcesUnsupported: "未提供此類資源",
+    resourcesUnavailable: "Agent 資源無法使用",
+    resourcesChanged: "執行個體已變更，請重新載入後儲存。",
+
     nativeUsage: "用量：輸入 {inputTokens}，輸出 {outputTokens}，快取讀取 {cacheReadTokens}，快取寫入 {cacheWriteTokens}，合計 {totalTokens} tokens。",
     nativeUsageUnknown: "用量未知：此工作階段尚未收到原生 Token 用量資料。",
     nativeContextUnknown: "上下文未知：暫時無法取得原生工作階段的目前占用及上限。",

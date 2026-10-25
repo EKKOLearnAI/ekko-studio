@@ -7,9 +7,10 @@ import { resolveModelProviderConfigs } from '../../packages/ekko-agent/src/model
 import type { ModelEvent } from '../../packages/ekko-agent/src/model/types'
 
 const mocks = vi.hoisted(() => ({
-  groups: vi.fn(), runtime: vi.fn(), record: vi.fn(), fetch: vi.fn(), createClient: vi.fn(), findKey: vi.fn(),
+  capabilities: vi.fn(), groups: vi.fn(), runtime: vi.fn(), record: vi.fn(), fetch: vi.fn(), createClient: vi.fn(), findKey: vi.fn(),
   config: { appHome: '' },
 }))
+vi.mock('../../packages/server/src/modules/studio/public/provider-runtime', () => ({ getModelRuntimeCapabilities: mocks.capabilities }))
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ config: mocks.config }))
 vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({ logger: { warn: vi.fn() } }))
 vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime', () => ({ getSessionAvailableModelGroups: mocks.groups }))
@@ -25,6 +26,7 @@ vi.mock('../../packages/server/src/modules/studio/services/model-api/keys', () =
 import { prepareModelResponse, listApiModels } from '../../packages/server/src/modules/studio/services/model-api/service'
 import { reasoningCodec } from '../../packages/server/src/modules/studio/services/model-api/reasoning'
 import { modelApiErrorBody } from '../../packages/server/src/modules/studio/services/model-api/errors'
+import { resolveNativeModel } from '../../packages/server/src/modules/studio/services/models/hosted-provider'
 
 const dir = mkdtempSync(join(tmpdir(), 'studio-model-api-'))
 mocks.config.appHome = dir
@@ -36,6 +38,7 @@ const sse = (chunks: any[]) => new Response(chunks.map(chunk => `data: ${typeof 
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.capabilities.mockReturnValue({ input: ['text', 'image'] })
   mocks.findKey.mockReturnValue(null)
   mocks.groups.mockResolvedValue([{ provider: 'deepseek', models: ['deepseek-reasoner'], api_mode: 'chat_completions', api_key: 'must-not-leak' }])
   mocks.runtime.mockImplementation(async input => ({ provider: input.provider, apiKey: 'upstream-secret', baseUrl: 'https://api.deepseek.com/v1', apiMode: input.apiMode }))
@@ -43,7 +46,82 @@ beforeEach(() => {
   mocks.fetch.mockImplementation(() => Promise.resolve(response()))
 })
 
+describe('host native model transport', () => {
+  it.each([['responses', 'codex_responses'], ['anthropic', 'anthropic_messages']] as const)('keeps credentials in the host and preserves %s wire tools and history', async (protocol, apiMode) => {
+    mocks.groups.mockResolvedValue([{ provider: 'fixture', models: ['native'], api_mode: apiMode }])
+    const authorize = vi.fn(), target = await resolveNativeModel('private-profile', 'fixture/native', protocol, authorize)
+    const input = { model: 'forged', stream: true, tools: [{ type: 'custom', name: 'patch', format: { type: 'text' } }],
+      input: [{ type: 'reasoning', encrypted_content: 'signature' }], parallel_tool_calls: false, max_output_tokens: 900 }
+    const response = await target.request(input, new AbortController().signal, 'host-session')
+    expect(response).toBeInstanceOf(Response)
+    const [url, request] = mocks.fetch.mock.calls[0]
+    expect(url).toBe(`https://api.deepseek.com/v1/${protocol === 'responses' ? 'responses' : 'messages'}`)
+    expect(JSON.parse(request.body)).toEqual({ ...input, model: 'native' })
+    expect(request.redirect).toBe('error')
+    expect(new Headers(request.headers).get(protocol === 'responses' ? 'authorization' : 'x-api-key')).toBe(protocol === 'responses' ? 'Bearer upstream-secret' : 'upstream-secret')
+    expect(Object.keys(target).sort()).toEqual(['images', 'record', 'request', 'transport'])
+    expect(target.transport).toBe('native')
+    expect(JSON.stringify(target)).not.toContain('secret')
+    authorize.mockImplementation(() => { throw new Error('revoked') })
+    expect(() => target.request({}, new AbortController().signal, 'host-session')).toThrow('revoked')
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+  })
+
+  it('uses selected model metadata rather than provider transport support to advertise images', async () => {
+    mocks.groups.mockResolvedValue([{ provider: 'fixture', models: ['native'], api_mode: 'anthropic_messages' }])
+    mocks.capabilities.mockReturnValue({ input: ['text'] })
+    expect((await resolveNativeModel('one', 'fixture/native', 'anthropic', () => {})).images).toBe(false)
+    mocks.capabilities.mockReturnValue({ input: ['text', 'image'] })
+    expect((await resolveNativeModel('one', 'fixture/native', 'anthropic', () => {})).images).toBe(true)
+    expect(mocks.capabilities).toHaveBeenLastCalledWith({ profile: 'one', provider: 'fixture', model: 'native' })
+  })
+
+  it.each(['responses', 'anthropic'] as const)('translates %s through the authorized model client without duplicate accounting', async protocol => {
+    const target = await resolveNativeModel('default', 'deepseek/deepseek-reasoner', protocol, () => {})
+    expect(target.transport).toBe('translated')
+    const input = protocol === 'responses' ? { input: 'hello' } : { messages: [{ role: 'user', content: 'hello' }], max_tokens: 100 }
+    const output = await (await target.request({ ...input, model: 'forged' }, new AbortController().signal, 'session')).json()
+    expect(output.model).toBe('deepseek/deepseek-reasoner')
+    expect(JSON.parse(mocks.fetch.mock.calls[0][1].body)).toMatchObject({ model: 'deepseek-reasoner', messages: [{ role: 'user', content: 'hello' }] })
+    expect(mocks.record).not.toHaveBeenCalled() // Gateway remains the sole accounting writer.
+  })
+
+  it('rejects disabled and missing model selections before requests', async () => {
+    mocks.groups.mockResolvedValue([{ provider: 'fixture', models: ['native'], api_mode: 'codex_responses', model_meta: { native: { disabled: true } } }])
+    await expect(resolveNativeModel('default', 'fixture/native', 'responses', () => {})).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(resolveNativeModel('other', 'missing/model', 'responses', () => {})).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(mocks.fetch).not.toHaveBeenCalled()
+  })
+})
+
 describe('public Responses model API', () => {
+  it('binds hosted SDK usage to a stable call and parent Run without exposing provider credentials', async () => {
+    mocks.fetch.mockResolvedValue(sse([
+      { choices: [{ delta: { content: 'hosted' } }] },
+      { choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 12, completion_tokens: 3 } }, '[DONE]',
+    ]))
+    const authorize = vi.fn()
+    const request = await prepareModelResponse({ profiles: ['default'], accountId: '7', body: body({ stream: true }), signal: new AbortController().signal,
+      internal: { id: 'model_stable', sessionId: 'session', parentRunId: 'parent-run', authorize } })
+    const events = []; for await (const event of request.events()) events.push(event)
+    expect(events.at(-1)).toMatchObject({ type: 'response.completed', response: { id: 'model_stable' } })
+    expect(mocks.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ sessionId: 'session', runId: 'model_stable', parentRunId: 'parent-run',
+      origin: 'internal', accountId: '7', requirePersistence: true, usageScope: 'model_call', apiCalls: 1 }))
+    expect(authorize).toHaveBeenCalled()
+    expect(JSON.stringify(events)).not.toMatch(/upstream-secret|must-not-leak/)
+  })
+
+  it('rechecks hosted authorization before request admission, without billing denied dispatch', async () => {
+    const authorize = vi.fn()
+    const request = await prepareModelResponse({ profiles: ['default'], body: body(), signal: new AbortController().signal,
+      internal: { id: 'denied', authorize } })
+    authorize.mockImplementation(() => { throw new Error('private authorization detail') })
+    const events = []; for await (const event of request.events()) events.push(event)
+    expect(events.at(-1)?.type).toBe('response.failed')
+    expect(mocks.fetch).not.toHaveBeenCalled(); expect(mocks.record).not.toHaveBeenCalled()
+    expect(JSON.stringify(events)).not.toContain('private authorization detail')
+  })
+
   it('filters the directory to the exact key model IDs, including nested and escaped IDs', async () => {
     mocks.groups.mockResolvedValue([
       { provider: 'p', models: ['a', 'vendor/b', 'future'] },

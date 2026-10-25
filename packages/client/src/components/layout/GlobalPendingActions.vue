@@ -217,7 +217,13 @@ function approvalCommand(action: Extract<GlobalPendingAction, { kind: 'chat-appr
 }
 
 function interactionCountdown(action: Extract<GlobalPendingAction, { kind: 'chat-approval' | 'chat-clarify' | 'group-approval' | 'group-clarify' }>) {
+  if (action.kind === 'chat-clarify' && action.pending.nativeInteraction?.expiresAt === null) return null
   return h(PendingInteractionCountdown, { deadline: action.pending.countdownDeadline })
+}
+
+function nativeChoiceOnly(action: GlobalPendingAction): boolean {
+  return action.kind === 'chat-clarify' && !!action.pending.nativeInteraction
+    && (action.pending.nativeInteraction.kind === 'approval' || action.pending.nativeInteraction.allowText === false)
 }
 
 function approvalButtons(action: Extract<GlobalPendingAction, { kind: 'chat-approval' | 'group-approval' }>) {
@@ -259,10 +265,12 @@ function clarifyContent(action: Extract<GlobalPendingAction, { kind: 'chat-clari
       ? h('div', { class: 'global-clarify-choices' }, action.pending.choices.map(choice => h(NButton, {
           size: 'small', secondary: clarifyDrafts[action.key] !== choice,
           type: clarifyDrafts[action.key] === choice ? 'primary' : 'default',
-          onClick: () => { clarifyDrafts[action.key] = choice },
+          loading: submitting[action.key] || (action.kind === 'chat-clarify' && action.pending.nativeInteraction?.status === 'responding'),
+          disabled: submitting[action.key] || (action.kind === 'chat-clarify' && action.pending.nativeInteraction?.status === 'responding'),
+          onClick: () => { clarifyDrafts[action.key] = choice; if (nativeChoiceOnly(action)) void submitClarify(action) },
         }, { default: () => choice })))
       : null,
-    h(NInput, {
+    (action.kind !== 'chat-clarify' || !action.pending.nativeInteraction || (action.pending.nativeInteraction.kind === 'clarification' && action.pending.nativeInteraction.allowText !== false)) ? h(NInput, {
       value: clarifyDrafts[action.key] || '',
       placeholder: t('chat.clarifyPlaceholder'),
       'onUpdate:value': (value: string) => { clarifyDrafts[action.key] = value },
@@ -272,7 +280,7 @@ function clarifyContent(action: Extract<GlobalPendingAction, { kind: 'chat-clari
           void submitClarify(action)
         }
       },
-    }),
+    }) : null,
   ])
 }
 
@@ -323,7 +331,7 @@ function openPendingSource(action: GlobalPendingAction) {
 }
 
 function systemNotificationCopy(action: GlobalPendingAction): { title: string; body: string } {
-  const clarify = action.kind === 'chat-clarify' || action.kind === 'group-clarify'
+  const clarify = (action.kind === 'chat-clarify' && action.pending.nativeInteraction?.kind !== 'approval') || action.kind === 'group-clarify'
   return {
     title: t(clarify ? 'settings.display.approvalNotificationClarifyTitle' : 'settings.display.approvalNotificationTitle'),
     body: t('settings.display.approvalNotificationBody'),
@@ -363,6 +371,7 @@ function notifyPendingAction(action: GlobalPendingAction) {
 }
 
 function notificationTitle(action: GlobalPendingAction, clarify: boolean) {
+  if (action.kind === 'chat-clarify' && action.pending.nativeInteraction?.kind === 'approval') clarify = false
   return h('button', {
     type: 'button',
     class: 'global-pending-title',
@@ -390,7 +399,7 @@ function createGlobalNotification(action: GlobalPendingAction): NotificationReac
             approvalCommand(action),
           ]),
     action: clarify
-      ? () => h(NButton, {
+      ? nativeChoiceOnly(action) ? undefined : () => h(NButton, {
           size: 'small', type: 'primary', disabled: !(clarifyDrafts[action.key] || '').trim(),
           loading: submitting[action.key], onClick: () => void submitClarify(action),
         }, { default: () => t('chat.clarifySubmit') })

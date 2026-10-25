@@ -1,9 +1,11 @@
+import { agentManagementMessages } from '../agent-management-messages'
 import { remoteDeviceMessages } from '../remote-device-messages'
 import { themePresetMessages } from '../theme-preset-locales'
 import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesEs } from '../social-messages-locales'
 
 export default {
+  agentManagement: agentManagementMessages['es'],
   sessionTasks: {
       "title": "Tareas",
       "task": "Tarea",
@@ -708,7 +710,6 @@ export default {
     updateSuccess: 'Actualizacion completada. Actualiza la pagina en breve. Si no se inicia despues de un tiempo, inicialo manualmente.',
     updateFailed: 'Error al actualizar',
     logout: 'Cerrar sesion',
-    nodeVersionWarning: 'Se detecto Node.js v{version}. Actualiza a la version 23 o posterior.',
     changelog: 'Registro de cambios',
     noChangelog: 'No hay registro de cambios',
     versionManagement: 'Gestión de versiones',
@@ -1077,6 +1078,10 @@ export default {
 
   // Chat
   chat: {
+    pluginCommandChanged: "El comando o la conversación ha cambiado. Selecciona el comando de nuevo.",
+    pluginCommandAmbiguous: "Varios complementos ofrecen este comando. Selecciona un nombre con su origen.",
+    pluginCommandTextOnly: "Los comandos de complementos solo admiten texto por ahora.",
+    pluginCommandsUnavailable: "No se pudieron cargar los comandos de complementos.",
     selectMessages: "Seleccionar mensajes",
     messagesSelected: "{count} seleccionados",
     deleteSelectedMessages: "Eliminar selección",
@@ -2808,6 +2813,15 @@ jobTriggered: 'Job ejecutado',
   },
 
   codingAgents: {
+    defaultConfiguration: "Configuración predeterminada",
+    resourceInstance: "Instancia del agente", resourceSkillSource: 'Ubicación del Skill', resourcesNextRun: 'La próxima ejecución cargará los Skills actualizados automáticamente.',
+    resourceFile: "Archivo de configuración",
+    resourceReadOnly: "Solo lectura",
+    resourcesEmpty: "No hay recursos en estas ubicaciones",
+    resourcesUnsupported: "Este tipo de recurso no está disponible",
+    resourcesUnavailable: "Los recursos del agente no están disponibles",
+    resourcesChanged: "La instancia cambió. Recarga antes de guardar.",
+
     nativeUsage: "Uso: entrada {inputTokens}, salida {outputTokens}, lectura de caché {cacheReadTokens}, escritura de caché {cacheWriteTokens}, total {totalTokens} tokens.",
     nativeUsageUnknown: "Uso desconocido. Esta sesión aún no ha recibido datos nativos de tokens.",
     nativeContextUnknown: "Contexto desconocido. No están disponibles el uso actual del contexto nativo ni su límite.",

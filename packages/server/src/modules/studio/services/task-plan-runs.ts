@@ -131,6 +131,13 @@ export class TaskPlanRuns {
     if (contextId) this.finish(contextId, state)
   }
 
+  /** Resolve a terminal event without letting an older canonical Run settle
+   * the next turn's plan or revoke its credential. */
+  contextForRun(sessionId: string, runId: string): string | undefined {
+    const contextId = this.sessions.get(sessionId), binding = contextId ? this.bindings.get(contextId) : undefined
+    return binding && (binding.runId || activeTurnId(binding.resolve())) === runId ? contextId : undefined
+  }
+
 }
 
 export function taskPlanRunInstruction(): string {

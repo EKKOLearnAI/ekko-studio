@@ -161,6 +161,8 @@ export interface ModelClient {
   capabilities: ModelCapabilities
   /** Resolve the credential-free request target used for diagnostics. */
   requestTarget?(request: ModelRequest): string
+  /** Host-only native wire request. The selected model and accounting identity are trusted inputs. */
+  nativeRequest?(body: Record<string, unknown>, request: ModelRequest): Promise<Response>
   create(request: ModelRequest): Promise<ModelResponse>
   stream(request: ModelRequest): AsyncIterable<ModelEvent>
 }

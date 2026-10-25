@@ -376,8 +376,9 @@ print(json.dumps({
 
   it('preserves reasoning and api mode across the run queue', () => {
     const source = readFileSync('packages/server/src/modules/studio/sockets/chat-run.ts', 'utf8')
-    expect(source).toContain('reasoningEffort: data.reasoning_effort')
-    expect(source).toContain('apiMode: data.apiMode')
+    const admission = readFileSync('packages/server/src/modules/studio/services/chat-run/start.ts', 'utf8')
+    expect(admission).toContain('reasoningEffort: data.reasoning_effort')
+    expect(admission).toContain('apiMode: data.apiMode')
     expect(source).toContain('reasoning_effort: next.reasoningEffort')
     expect(source).toContain('apiMode: next.apiMode')
   })

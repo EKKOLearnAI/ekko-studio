@@ -39,6 +39,8 @@ export interface ChatAgentRuntimeDependencies {
   waitForEkkoToolApproval(...args: any[]): Promise<any>
   waitForEkkoClarification(...args: any[]): Promise<any>
   getCodingAgentMcpServers(id: string, profile: string): Record<string, unknown>
+  getCodingAgentPluginMcpServers?(id: string, profile: string): Record<string, unknown>
+  getCodingAgentPluginLaunch?(id: string): Promise<{ command: string; args: string[]; env: Record<string, string> }>
   resolveEkkoMcpServers(...args: any[]): any
   resolveEkkoProviderRuntimeConfig(...args: any[]): Promise<any>
   createEkkoAuthorizedProviderFetch(...args: any[]): any
@@ -106,3 +108,13 @@ export const respondToChatEkkoToolApproval = (...args: any[]) => configured().re
 export const respondToChatEkkoClarification = (...args: any[]) => configured().respondToEkkoClarification(...args)
 
 export const getChatCodingAgentMcpServers = (id: string, profile: string) => configured().getCodingAgentMcpServers(id, profile)
+export const getChatCodingAgentPluginMcpServers = (id: string, profile: string) => {
+  const resolve = configured().getCodingAgentPluginMcpServers
+  if (!resolve) throw new Error('Coding Agent MCP configuration is unavailable')
+  return resolve(id, profile)
+}
+export const getChatCodingAgentPluginLaunch = (id: string) => {
+  const resolve = configured().getCodingAgentPluginLaunch
+  if (!resolve) throw new Error('Coding Agent executable discovery is unavailable')
+  return resolve(id)
+}

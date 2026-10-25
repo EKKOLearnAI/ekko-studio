@@ -1,12 +1,11 @@
-import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import {
   type EkkoAgentSetup,
   type EkkoMcpServerConfig as PersistedEkkoMcpServerConfig,
 } from '../../../../../ekko-agent/src'
 import { createMcpToolProvider } from '../../../../../ekko-agent/src/tools/mcp'
 import { config } from '../../studio/public/config'
+import { studioManagedMcpConfig } from '../../studio/public/runs/mcp-launch'
 import { setupGlobalEkkoAgent } from './manager'
 
 const MANAGED_ENV_KEY = 'HERMES_WEB_UI_MANAGED_MCP'
@@ -63,10 +62,6 @@ function isEnabledEnv(value: string | undefined): boolean {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase())
 }
 
-function isDesktopRuntime(): boolean {
-  return String(process.env.HERMES_DESKTOP || '').trim().toLowerCase() === 'true'
-}
-
 function allowTransientAutoinject(): boolean {
   return isEnabledEnv(process.env.HERMES_WEB_UI_ALLOW_TRANSIENT_MCP_AUTOINJECT)
 }
@@ -88,53 +83,13 @@ function shouldInjectManagedMcpServers(): boolean {
   return !isTransientAppHome(config.appHome) || allowTransientAutoinject()
 }
 
-function candidateBundledMcpScripts(): string[] {
-  return [
-    process.env.HERMES_WEB_UI_MCP_BIN,
-    join(process.cwd(), 'bin/ekko-studio-mcp.mjs'),
-    join(__dirname, '../../../bin/ekko-studio-mcp.mjs'),
-    join(__dirname, '../../../../../../bin/ekko-studio-mcp.mjs'),
-    join(process.cwd(), 'bin/hermes-web-ui-mcp.mjs'),
-    join(__dirname, '../../../bin/hermes-web-ui-mcp.mjs'),
-    join(__dirname, '../../../../../../bin/hermes-web-ui-mcp.mjs'),
-  ].filter((value): value is string => !!value)
-}
-
-function bundledMcpScriptPath(): string | null {
-  return candidateBundledMcpScripts().find(candidate => existsSync(candidate)) || null
-}
-
-function runtimeNodePath(): string | null {
-  return process.env.HERMES_AGENT_NODE?.trim() || null
-}
-
-function managedCommandConfig(toolset: string): Pick<EkkoMcpServerConfig, 'command' | 'args'> {
-  const bundledScript = bundledMcpScriptPath()
-  if (bundledScript) {
-    return { command: runtimeNodePath() || process.execPath, args: [bundledScript, toolset] }
-  }
-  if (isDesktopRuntime()) return { command: 'ekko-studio-mcp', args: [toolset] }
-  return { command: 'ekko-studio-mcp', args: [toolset] }
-}
-
 function managedMcpServerConfig(
   profile: string,
   serverName: string,
   toolset: string,
 ): EkkoMcpServerConfig {
   return {
-    ...managedCommandConfig(toolset),
-    env: {
-      ELECTRON_RUN_AS_NODE: '1',
-      HERMES_WEB_UI_URL: `http://127.0.0.1:${config.port}`,
-      HERMES_WEB_UI_HOME: config.appHome,
-      HERMES_WEBUI_STATE_DIR: config.appHome,
-      HERMES_WEB_UI_PROFILE: profile,
-      HERMES_MCP_SERVER_NAME: serverName,
-      HERMES_MCP_TOOLSET: toolset,
-      HERMES_MCP_NATIVE_TASK_PLAN: '1',
-      [MANAGED_ENV_KEY]: '1',
-    },
+    ...studioManagedMcpConfig(profile, serverName, toolset, { appHome: config.appHome, port: config.port, nativeTaskPlan: true }),
     enabled: true,
   }
 }

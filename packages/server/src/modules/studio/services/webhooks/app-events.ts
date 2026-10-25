@@ -11,6 +11,7 @@ import { foregroundNotification, foregroundNotificationAgent, foregroundNotifica
 import { appEventState, type AppStateProvider } from './app-event-state'
 import { taskPlanWebhookContent } from './task-plan'
 import { chatCompletionText } from '../notifications/chat-completion-text'
+import { getAgentChatService, isManagedAgentChat } from '../agents/chat-registry'
 
 interface Subscription { profile: string; types: string[]; sessionIds: string[]; roomIds: string[]; workflowIds: string[]; snapshot: boolean; unreadSessionIds?: string[] }
 interface GroupAccess { canReceive(user: AuthenticatedUser, roomId: string, event?: BusinessEvent): boolean }
@@ -102,6 +103,14 @@ export function canReceiveAppEvent(user: AuthenticatedUser | undefined, event: B
   if (!allowed(user, event.profile)) return false
   if (event.type === 'chat.session.removed' && event.source === 'chat') {
     return Boolean(event.subject.session_id && event.payload.owner_user_id === user.id)
+  }
+  if (event.subject.session_id && isManagedAgentChat(event.subject.session_id)) {
+    const chats = getAgentChatService()
+    if (!chats) return false
+    try {
+      chats.ownedBinding({ scopeId: randomUUID(), traceId: randomUUID(), principal: { kind: 'user', id: String(user.id) },
+        profileId: event.profile, surface: 'api', sessionId: event.subject.session_id }, event.subject.session_id)
+    } catch { return false }
   }
   if (event.source === 'workflow') {
     // Node events carry their own runtime ID; resolve the persisted root by session.

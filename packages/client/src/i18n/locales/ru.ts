@@ -1,9 +1,11 @@
+import { agentManagementMessages } from '../agent-management-messages'
 import { remoteDeviceMessages } from '../remote-device-messages'
 import { themePresetMessages } from '../theme-preset-locales'
 import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesRu } from '../social-messages-locales'
 
 export default {
+  agentManagement: agentManagementMessages['ru'],
   sessionTasks: {
       "title": "Задачи",
       "task": "Задача",
@@ -628,7 +630,6 @@ export default {
     updateSuccess: 'Обновление успешно. Обновите страницу. Если долго не запускается, запустите вручную.',
     updateFailed: 'Ошибка обновления',
     logout: 'Выйти',
-    nodeVersionWarning: 'Обнаружена Node.js v{version}. Пожалуйста, обновитесь до версии 23 или выше.',
     changelog: 'Список изменений',
     noChangelog: 'Нет списка изменений',
     versionManagement: 'Управление версиями',
@@ -771,6 +772,15 @@ export default {
   },
 
   codingAgents: {
+    defaultConfiguration: "Настройки по умолчанию",
+    resourceInstance: "Экземпляр агента", resourceSkillSource: 'Расположение Skill', resourcesNextRun: 'Обновлённые Skills загрузятся автоматически при следующем запуске.',
+    resourceFile: "Файл настроек",
+    resourceReadOnly: "Только чтение",
+    resourcesEmpty: "В этих расположениях нет ресурсов",
+    resourcesUnsupported: "Этот тип ресурсов не предоставлен",
+    resourcesUnavailable: "Ресурсы агента недоступны",
+    resourcesChanged: "Экземпляр изменён. Перезагрузите перед сохранением.",
+
     nativeModelDefault: 'Модель агента по умолчанию',
     nativeModelsFailed: 'Не удалось загрузить модели. Используйте модель по умолчанию или обновите список.',
     nativeModelsRefreshFailed: "Не удалось обновить. Показаны модели из кеша.",
@@ -1004,6 +1014,10 @@ export default {
 
 
   chat: {
+    pluginCommandChanged: "Команда или разговор изменились. Выберите команду снова.",
+    pluginCommandAmbiguous: "Эту команду предоставляют несколько плагинов. Выберите имя с указанием источника.",
+    pluginCommandTextOnly: "Команды плагинов пока поддерживают только текст.",
+    pluginCommandsUnavailable: "Не удалось загрузить команды плагинов.",
     selectMessages: "Выбрать сообщения",
     messagesSelected: "Выбрано: {count}",
     deleteSelectedMessages: "Удалить выбранное",

@@ -1,3 +1,4 @@
+import { agentManagementMessages } from '../agent-management-messages'
 import { remoteDeviceMessages } from '../remote-device-messages'
 import { themePresetMessages } from '../theme-preset-locales'
 import { themeAppearanceMessages } from '../theme-appearance-locales'
@@ -30,6 +31,13 @@ const writeApprovalMessages = {
 }
 
 export default {
+  agentManagement: agentManagementMessages['tr'],
+  codingAgents: {
+    refresh: 'Yenile',
+    defaultConfiguration: 'Varsayılan yapılandırma', resourceInstance: 'Agent örneği', resourceSkillSource: 'Skill konumu', resourcesNextRun: 'Güncellenen Skills bir sonraki çalıştırmada otomatik yüklenir.', resourceFile: 'Yapılandırma dosyası', resourceReadOnly: 'Salt okunur',
+    resourcesEmpty: 'Bu konumlarda kaynak yok', resourcesUnsupported: 'Bu kaynak türü sağlanmıyor', resourcesUnavailable: 'Agent kaynakları kullanılamıyor',
+    resourcesChanged: 'Örnek değişti. Kaydetmeden önce yeniden yükleyin.',
+  },
   sessionTasks: {
       "title": "Görevler",
       "task": "Görev",
@@ -523,6 +531,10 @@ export default {
   },
 
   chat: {
+    pluginCommandChanged: "Komut veya konuşma değişti. Komutu yeniden seçin.",
+    pluginCommandAmbiguous: "Birden fazla eklenti bu komutu sağlıyor. Kaynağı içeren bir ad seçin.",
+    pluginCommandTextOnly: "Eklenti komutları şu anda yalnızca metin kabul ediyor.",
+    pluginCommandsUnavailable: "Eklenti komutları yüklenemedi.",
     selectMessages: "Mesajları seç",
     messagesSelected: "{count} seçildi",
     deleteSelectedMessages: "Seçilenleri sil",

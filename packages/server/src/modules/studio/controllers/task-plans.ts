@@ -13,6 +13,7 @@ export function updateTaskPlan(ctx: Context) {
   try {
     if (typeof body.context_id !== 'string' || !body.context_id.trim()) throw new TaskPlanError('context_id is required')
     const profile = String(ctx.state.profile?.name || 'default').trim() || 'default'
+    server.authorizeAgentInteractionContext?.(body.context_id, profile, String(ctx.state.user?.id ?? ''))
     const plan = server.updateTaskPlan(body.context_id, profile, body)
     ctx.body = { ok: true, ...plan }
   } catch (err) {

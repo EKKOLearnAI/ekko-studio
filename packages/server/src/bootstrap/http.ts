@@ -16,6 +16,7 @@ import { setupTerminalWebSocket } from '../modules/hermes/sockets/terminal'
 import { setupKanbanEventsWebSocket } from '../modules/hermes/sockets/kanban-events'
 import { startVersionCheck } from './health'
 import { registerRoutes } from './routes'
+import { initializeStudioPlugins } from './plugins'
 import { dshPluginUi } from '../modules/coding-agents/services'
 import './chat-agent-runtime-adapter'
 import './skill-files-adapter'
@@ -479,6 +480,8 @@ export async function bootstrap() {
   // Initialize all web-ui SQLite tables
   const { initAllStores } = await import('../modules/studio/infrastructure/database/init')
   initAllStores()
+  const pluginRuntime = initializeStudioPlugins()
+  additionalShutdownSteps.push({ name: 'Studio plugins', close: () => pluginRuntime.close() })
   // Refresh once on every startup; context and cost lookups can use the disk cache immediately.
   void refreshModelCatalog(true)
   const { interruptOrphanedTaskPlans } = await import('../modules/studio/repositories/task-plan-store')
@@ -574,6 +577,8 @@ export async function bootstrap() {
   setChatRunServer(chatRunServer)
   activeGroupChatServer.setChatRunService(chatRunServer)
   chatRunServer.init()
+  await pluginRuntime.bundledAgents.registerDefaults()
+  await pluginRuntime.host.restore()
   const mobileTerminal = setupMobileTerminal(activeGroupChatServer.getIO(), context => {
     if (context.source === 'single') {
       const session = getTerminalSessionMetadata(context.sourceId)

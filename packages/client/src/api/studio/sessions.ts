@@ -2,6 +2,11 @@ import { request, getApiKey, getBaseUrlValue } from '../client'
 import type { ProviderApiMode } from './provider-api-mode'
 import { fetchAuthenticatedBlob, saveBlob } from './binary-content'
 
+export interface ManagedAgentUsage {
+  modelCalls: number; unknownModelCalls: number
+  inputTokens: number | null; outputTokens: number | null; cacheReadTokens: number | null
+  cacheWriteTokens: number | null; reasoningTokens: number | null; costUsd: number | null; estimatedCost: boolean
+}
 export interface SessionSummary {
   id: string
   profile?: string | null
@@ -10,6 +15,10 @@ export interface SessionSummary {
   agent_mode?: 'global' | 'scoped' | string
   agent_session_id?: string
   agent_native_session_id?: string
+  agent_instance_id?: string
+  agent_chat_settings?: boolean
+  agent_instance_revision?: number
+  agent_usage?: ManagedAgentUsage
   model: string
   provider?: string
   api_mode?: ProviderApiMode

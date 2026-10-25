@@ -72,6 +72,7 @@ const positionalArgs = process.argv.slice(2).filter(arg => !arg.startsWith('-'))
 const requestedToolset = String(positionalArgs[0] || process.env.HERMES_MCP_TOOLSET || 'api').trim().toLowerCase()
 const ACTIVE_TOOLSET = TOOLSETS.has(requestedToolset) ? requestedToolset : 'api'
 const SHARED_TASK_PLAN_ENABLED = process.env.HERMES_MCP_NATIVE_TASK_PLAN !== '1'
+const SESSION_TASKS_ENABLED = SHARED_TASK_PLAN_ENABLED && process.env.HERMES_MCP_SESSION_TASKS !== '0'
 const USER_CLARIFICATION_ENABLED = SHARED_TASK_PLAN_ENABLED && process.env.HERMES_MCP_USER_CLARIFICATION === '1'
 
 if (process.argv.includes('-h') || process.argv.includes('--help')) {
@@ -139,7 +140,7 @@ function readRunCredential(profile, contextId) {
   if (!credential || typeof credential.token !== 'string' || !credential.token.startsWith('studio_run_')
     || typeof credential.context_id !== 'string' || !credential.context_id
     || typeof credential.profile !== 'string' || credential.profile !== profile
-    || (contextLookup && credential.context_id !== contextId)) {
+    || ((contextLookup || process.env.HERMES_MCP_RUN_BOUND_CONTEXT === '1') && credential.context_id !== contextId)) {
     throw new Error('The MCP request does not match its configured run credential.')
   }
   return credential
@@ -245,8 +246,8 @@ async function requestEnvelope(path, options = {}) {
     : defaultProfile()
   // Explicit run bindings take precedence. Shared Hermes MCP connections can
   // select a restricted group-plan credential without changing process state.
-  const contextId = ['/api/studio/task-plans/update', '/api/studio/session-tasks/list', '/api/studio/session-tasks/update'].includes(path)
-    ? String(options.body?.context_id || '') : undefined
+  const contextId = nativeRunCallContext.getStore() ?? (['/api/studio/task-plans/update', '/api/studio/session-tasks/list', '/api/studio/session-tasks/update'].includes(path)
+    ? String(options.body?.context_id || '') : undefined)
   const runCredential = readRunCredential(profile, contextId)
   const token = runCredential?.token || readToken(options.token, options.allowTokenFile !== false, profile)
   const method = options.method || 'GET'
@@ -632,6 +633,7 @@ function withAuthArgs(args, options = {}) {
 }
 
 const browserCallContext = new AsyncLocalStorage()
+const nativeRunCallContext = new AsyncLocalStorage()
 const BROWSER_CLIENT_ID = `${SERVER_NAME}:${process.pid}:${randomUUID()}`
 let cachedBrowserSession = null
 
@@ -685,6 +687,12 @@ async function browserSession(descriptor, signal) {
 }
 
 async function browserRequest(method, params = {}, signal) {
+  if (process.env.HERMES_MCP_RUN_BOUND_CONTEXT === '1') {
+    return request('/api/studio/desktop-browser/request', {
+      method: 'POST', body: { method, params, client_id: BROWSER_CLIENT_ID }, signal,
+      ...(browserCallContext.getStore() || {}),
+    })
+  }
   let descriptor
   try { descriptor = browserDescriptor() } catch {
     return request('/api/studio/desktop-browser/request', {
@@ -1904,6 +1912,7 @@ function resolveToolName(name) {
 function activeToolsetTools() {
   return tools.filter(tool => tool.toolset === ACTIVE_TOOLSET
     && (SHARED_TASK_PLAN_ENABLED || tool.toolset !== 'plan')
+    && (SESSION_TASKS_ENABLED || !['ekko_studio_list_session_tasks', 'ekko_studio_update_session_tasks'].includes(tool.name))
     && (USER_CLARIFICATION_ENABLED || tool.name !== 'ekko_studio_clarify'))
 }
 
@@ -1922,7 +1931,7 @@ function categoryToolByName(name) {
 function serverInstructions() {
   if (ACTIVE_TOOLSET === 'plan') return SHARED_TASK_PLAN_ENABLED
     ? 'Use ekko_studio_update_plan from ekko-studio-interaction to maintain the current Studio task card. Use only the context_id supplied with the latest input; expired contexts cannot update another turn.'
-      + ' At the beginning of each turn, use ekko_studio_list_session_tasks to review past user goals. Record only independent deliverables, ongoing follow-up or explicit user-requested tracking; skip simple questions, one-off lookups and trivial edits without lasting tracking value. Keep one goal per user outcome and reuse its id for refinements, corrections and constraints. Use ekko_studio_update_session_tasks only for changed/new goals, creating eligible goals before execution and saving results before the final response. Reading an unchanged ledger does not require a write. Keep summaries to one or two short sentences about results and remaining blockers; put implementation and test logs in the conversation. Session goals span turns and are distinct from per-turn plan steps; no page card is created. Completed goals require concise completion_evidence of verified delivery.'
+      + (SESSION_TASKS_ENABLED ? ' At the beginning of each turn, use ekko_studio_list_session_tasks to review past user goals. Record only independent deliverables, ongoing follow-up or explicit user-requested tracking; skip simple questions, one-off lookups and trivial edits without lasting tracking value. Keep one goal per user outcome and reuse its id for refinements, corrections and constraints. Use ekko_studio_update_session_tasks only for changed/new goals, creating eligible goals before execution and saving results before the final response. Reading an unchanged ledger does not require a write. Keep summaries to one or two short sentences about results and remaining blockers; put implementation and test logs in the conversation. Session goals span turns and are distinct from per-turn plan steps; no page card is created. Completed goals require concise completion_evidence of verified delivery.' : '')
       + (USER_CLARIFICATION_ENABLED ? ' Use ekko_studio_clarify from this same MCP server to ask a necessary question and wait for the user in Studio/App, using the latest interaction context_id. Never treat timeout, dismissal, or cancellation as approval.' : '')
     : ''
   if (ACTIVE_TOOLSET === 'api') {
@@ -1934,9 +1943,12 @@ function serverInstructions() {
 
 function visibleTools() {
   const categoryToolset = categoryToolsetDefinition(ACTIVE_TOOLSET)
-  if (categoryToolset) return [categoryToolset]
-  const visible = activeToolsetTools()
-  return visible.map(({ toolset, ...tool }) => tool)
+  const visible = categoryToolset ? [categoryToolset] : activeToolsetTools().map(({ toolset, ...tool }) => tool)
+  if (process.env.HERMES_MCP_RUN_BOUND_CONTEXT !== '1') return visible
+  return visible.map(tool => ({ ...tool, inputSchema: { ...tool.inputSchema,
+    properties: { ...tool.inputSchema.properties, context_id: { type: 'string', minLength: 1, description: 'Current Studio MCP context supplied with this turn. Earlier contexts are invalid.' } },
+    required: [...new Set([...(tool.inputSchema.required || []), 'context_id'])],
+  } }))
 }
 
 function isToolCallable(name) {
@@ -2308,7 +2320,8 @@ async function handle(message) {
             protocolVersion: message.params?.protocolVersion || '2024-11-05',
             capabilities: { tools: {} },
             serverInfo: { name: SERVER_NAME, version: VERSION, toolset: ACTIVE_TOOLSET },
-            instructions: serverInstructions(),
+            instructions: serverInstructions() + (process.env.HERMES_MCP_RUN_BOUND_CONTEXT === '1'
+              ? ' Every Studio MCP call requires the current context_id supplied with this turn, including compact toolset wrappers. Do not reuse a previous turn context.' : ''),
           },
         }
       case 'tools/list':
@@ -2318,9 +2331,19 @@ async function handle(message) {
         const abort = resolvedName === 'ekko_studio_clarify' || resolvedName?.startsWith('ekko_studio_browser_') ? new AbortController() : undefined
         if (abort) pendingInteractions.set(message.id, abort)
         try {
+          const args = message.params?.arguments || {}
+          const invokeArgs = { ...args }
+          const invoke = () => callTool(message.params?.name, invokeArgs, abort?.signal)
+          let result
+          if (process.env.HERMES_MCP_RUN_BOUND_CONTEXT === '1') {
+            if (typeof args.context_id !== 'string' || !args.context_id.trim()) throw new Error('The current Studio MCP context_id is required for this tool call.')
+            if (!readRunCredential(typeof args.profile === 'string' && args.profile.trim() ? args.profile.trim() : defaultProfile(), args.context_id)) throw new Error('The current Studio run credential is unavailable.')
+            if (!tools.find(tool => tool.name === resolvedName)?.inputSchema?.properties?.context_id) delete invokeArgs.context_id
+            result = await nativeRunCallContext.run(args.context_id, invoke)
+          } else result = await invoke()
           return {
             jsonrpc: '2.0', id: message.id,
-            result: await callTool(message.params?.name, message.params?.arguments || {}, abort?.signal),
+            result,
           }
         } finally { pendingInteractions.delete(message.id) }
       }

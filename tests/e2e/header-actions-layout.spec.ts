@@ -14,6 +14,14 @@ const routes = [
   '/studio/agents/codex/mcp', '/studio/agents/codex/settings', '/studio/agents/dsh/plugins', '/studio/agents/dsh/presets',
 ]
 
+// Every page still runs at all four browser widths. Desktop insets belong to
+// the shared App shell: exercise its distinct header/sidebar families rather
+// than reloading every page for each OS. Keep the overflow regressions below.
+const desktopRoutes = [
+  '/hermes/chat', '/hermes/jobs', '/hermes/kanban', '/hermes/skills', '/hermes/usage',
+  '/hermes/files', '/ekko/settings', '/studio/agents/codex/settings', '/studio/agents/dsh/plugins',
+]
+
 async function setup(page: Page, platform?: string) {
   await authenticate(page)
   await mockChatSocket(page)
@@ -50,12 +58,13 @@ async function clippedControls(header: Locator) {
   })
 }
 
-for (const { widths, platform } of [
-  { widths: [390, 769, 900, 1440] },
-  { widths: [769], platform: 'win32' }, { widths: [769], platform: 'linux' },
-  { widths: [900], platform: 'darwin' },
+for (const { widths, platform, paths } of [
+  { widths: [390, 769, 900, 1440], paths: routes },
+  { widths: [769], platform: 'win32', paths: desktopRoutes },
+  { widths: [769], platform: 'linux', paths: desktopRoutes },
+  { widths: [900], platform: 'darwin', paths: desktopRoutes },
 ]) {
-  for (const route of routes) {
+  for (const route of paths) {
     test(`keeps header actions visible on ${route} (${platform || 'browser'})`, async ({ page }) => {
       await page.setViewportSize({ width: widths[0], height: 900 })
       await page.clock.install()

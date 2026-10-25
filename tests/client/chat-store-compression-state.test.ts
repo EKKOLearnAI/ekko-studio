@@ -10,7 +10,9 @@ const chatApi = vi.hoisted(() => ({
   registerSessionHandlers: vi.fn(),
   unregisterSessionHandlers: vi.fn(),
   socketEmit: vi.fn(),
+  respondManagedAgent: vi.fn(),
 }))
+vi.mock('@/api/studio/agent-management', () => ({ respondManagedAgent: chatApi.respondManagedAgent, uploadManagedAgentImage: vi.fn(), removeManagedAgentImage: vi.fn() }))
 
 vi.mock('@/api/studio/chat', () => ({
   startRunViaSocket: chatApi.startRunViaSocket,
@@ -23,7 +25,7 @@ vi.mock('@/api/studio/chat', () => ({
   onPeerUserMessage: vi.fn(() => vi.fn()),
   onSessionCommand: vi.fn(() => vi.fn()),
   onSessionTitleUpdated: vi.fn(() => vi.fn()),
-  onRunUsageUpdated: vi.fn(() => vi.fn()),
+  onPersistedAgentMessage: vi.fn(() => vi.fn()), onAgentInteraction: vi.fn(() => vi.fn()), onRunUsageUpdated: vi.fn(() => vi.fn()),
   onSessionWorkspaceUpdated: vi.fn(() => vi.fn()),
   onSessionSettingsUpdated: vi.fn(() => vi.fn()),
 }))
@@ -165,6 +167,73 @@ describe('chat store compression state', () => {
 
     await store.switchSession(session.id)
     expect(chatApi.resumeSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('submits managed chat text using its instance binding and preserves unknown canonical usage', async () => {
+    const store = useChatStore(), session = store.newChat({ model: 'managed-model', provider: 'legacy-provider' })
+    Object.assign(session, { agentInstanceId: 'instance', agentInstanceRevision: 2, source: 'coding_agent', agent: 'codex', codingAgentMode: 'scoped', baseUrl: 'https://legacy.invalid', apiKey: 'legacy-key', inputTokens: 12, outputTokens: 3 })
+    await store.sendMessage('/compact')
+    const [payload, onEvent] = chatApi.startRunViaSocket.mock.calls[0]
+    expect(payload).toEqual({ input: '/compact', session_id: session.id, profile: 'default', queue_id: expect.any(String), push_enabled: true })
+    expect(session.messages[0]).toMatchObject({ role: 'user', content: '/compact' })
+    onEvent({ event: 'run.completed', session_id: session.id, agent_run_id: 'run', output: 'Completed', agent_usage: {
+      modelCalls: 1, unknownModelCalls: 1, inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null, costUsd: null, estimatedCost: false,
+    } })
+    expect(session.inputTokens).toBeUndefined()
+    expect(session.outputTokens).toBeUndefined()
+    expect(session.contextTokens).toBeUndefined()
+  })
+
+  it('ignores an older completed retry while a later canonical Run is streaming', async () => {
+    const store = useChatStore(), session = store.newChat({ model: 'managed-model' })
+    Object.assign(session, { agentInstanceId: 'instance', source: 'coding_agent', agent: 'codex' })
+    await store.sendMessage('Second')
+    const onEvent = chatApi.startRunViaSocket.mock.calls[0][1]
+    onEvent({ event: 'run.started', session_id: session.id, agent_run_id: 'second', run_marker: 'second' })
+    expect(store.isStreaming).toBe(true)
+    onEvent({ event: 'message.persisted', session_id: session.id, agent_run_id: 'first', run_marker: 'first', replayed: true, terminal: true, messages: [] })
+    onEvent({ event: 'run.completed', session_id: session.id, agent_run_id: 'first', run_marker: 'first', replayed: true, output: 'Old replay' })
+    expect(store.isStreaming).toBe(true)
+    expect(session.messages.some(message => message.content === 'Old replay')).toBe(false)
+    onEvent({ event: 'message.delta', session_id: session.id, agent_run_id: 'second', run_marker: 'second', delta: 'Current answer' })
+    onEvent({ event: 'run.completed', session_id: session.id, agent_run_id: 'second', run_marker: 'second', output: 'Current answer' })
+    expect(session.messages.some(message => message.content === 'Current answer')).toBe(true)
+    expect(store.isStreaming).toBe(false)
+  })
+
+  it('restores native interaction choices from the canonical resume snapshot and removes stale questions', async () => {
+    const store = useChatStore()
+    store.sessions.push({ ...makeSession('managed'), agentInstanceId: 'instance' })
+    const question = { id: 'question', runId: 'run', requestId: 'native', kind: 'approval', prompt: 'Allow operation?', choices: [{ id: 'native-yes', label: 'Allow' }], expiresAt: null, status: 'pending' }
+    chatApi.resumeSession.mockImplementation((_id, onResumed) => {
+      onResumed({ session_id: 'managed', managed_agent_protocol: 1, agent_instance_id: 'instance', messages: [], isWorking: true, events: [], agentInteractions: [question] })
+      return {} as any
+    })
+    await store.switchSession('managed')
+    expect(store.pendingClarifies.get('managed')).toMatchObject({ nativeInteraction: question, choices: ['Allow'] })
+    chatApi.respondManagedAgent.mockRejectedValueOnce(new Error('Response not delivered'))
+    expect(store.respondToClarify('Allow')).toBe('submitted')
+    expect(store.pendingClarifies.has('managed')).toBe(true)
+    await vi.waitFor(() => expect(store.activeSession?.messages.some(message => message.content.includes('Response not delivered'))).toBe(true))
+    expect(store.pendingClarifies.has('managed')).toBe(true)
+    chatApi.respondManagedAgent.mockResolvedValueOnce({ id: 'question', runId: 'run', status: 'resolved' })
+    expect(store.respondToClarify('Allow')).toBe('submitted')
+    await vi.waitFor(() => expect(store.pendingClarifies.has('managed')).toBe(false))
+    expect(chatApi.respondManagedAgent.mock.calls[1][2]).toMatchObject({ interactionId: 'question', choiceId: 'native-yes' })
+    expect(chatApi.respondManagedAgent.mock.calls[1][2].idempotencyKey).toBe(chatApi.respondManagedAgent.mock.calls[0][2].idempotencyKey)
+    chatApi.resumeSession.mockImplementation((_id, onResumed) => {
+      onResumed({ session_id: 'managed', managed_agent_protocol: 1, messages: [], isWorking: true, events: [], agentInteractions: [{ ...question, expiresAt: Date.now() + 20_000 }] })
+      return {} as any
+    })
+    await store.switchSession('managed')
+    expect(store.pendingClarifies.get('managed')!.countdownDeadline).toBeGreaterThan(performance.now())
+    expect(store.pendingClarifies.get('managed')!.countdownDeadline).toBeLessThan(performance.now() + 21_000)
+    chatApi.resumeSession.mockImplementation((_id, onResumed) => {
+      onResumed({ session_id: 'managed', managed_agent_protocol: 1, messages: [], isWorking: false, events: [], agentInteractions: [] })
+      return {} as any
+    })
+    await store.switchSession('managed')
+    expect(store.pendingClarifies.has('managed')).toBe(false)
   })
 
   it('keeps an unsent draft ready while an older session resume is pending', async () => {

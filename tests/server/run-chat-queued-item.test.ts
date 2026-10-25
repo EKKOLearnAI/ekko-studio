@@ -384,6 +384,53 @@ describe('ChatRunSocket queued bridge runs', () => {
     expect(run).not.toHaveBeenCalled()
   })
 
+  it.each([false, true])('keeps host identity for background continuation with a busy parent: %s', async busy => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, socket } = makeServerHarness()
+    socket.data = { user: { id: 'unrelated-viewer', role: 'super_admin' } } as any
+    const server: any = new ChatRunSocket(io as any)
+    server.sessionMap.set('session-1', { messages: [], events: [], queue: [], isWorking: busy })
+    const run = vi.spyOn(server, 'handleRun').mockResolvedValue(undefined)
+    await server.scheduleBackgroundNotification({
+      session_id: 'session-1', delegation_id: 'd', claim_id: 'c', profile: 'default', message: 'wake',
+    })
+    if (busy) {
+      expect(run).not.toHaveBeenCalled()
+      const queued = server.sessionMap.get('session-1').queue.shift()
+      server.runQueuedItem(socket, 'session-1', queued)
+    }
+    expect(run).toHaveBeenCalledTimes(1)
+    const caller = run.mock.calls[0][0] as any
+    expect(caller).toMatchObject({ kind: 'background', executionScope: {
+      principal: { kind: 'service', id: 'studio-background-continuation' }, profileId: 'default', sessionId: 'session-1', surface: 'job',
+    } })
+    expect(caller.user).toBeUndefined()
+    expect(caller.emit).toBeUndefined()
+    expect(Object.isFrozen(caller.executionScope)).toBe(true)
+  })
+
+  it.each([false, true])('broadcasts background output and failures once with connected viewers: %s', async connected => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { chatRunCaller } = await import('../../packages/server/src/modules/studio/services/chat-run/caller')
+    const { io, namespace, roomEmit, socket } = makeServerHarness()
+    if (!connected) { namespace.sockets.clear(); namespace.adapter.rooms.clear() }
+    const server: any = new ChatRunSocket(io as any)
+    const caller = server.callerForBackgroundRun('session-1', 'default')
+    expect(chatRunCaller(caller)).toBe(caller)
+    handleBridgeRunMock.mockImplementationOnce(async (nsp: any, _caller: any, data: any) => {
+      const payload = { event: 'message.delta', session_id: 'session-1', text: 'once' }
+      nsp.to('session:session-1').emit('message.delta', payload)
+      data.onEvent('message.delta', payload)
+    })
+    await server.handleRun(caller, { input: 'wake', session_id: 'session-1', source: 'cli', autonomous: true }, 'default')
+    expect(roomEmit.mock.calls.filter(([event]) => event === 'message.delta')).toHaveLength(1)
+    expect(socket.emit).not.toHaveBeenCalled()
+    roomEmit.mockClear()
+    caller.reply('run.failed', { event: 'run.failed', error: 'unavailable' })
+    expect(roomEmit).toHaveBeenCalledTimes(1)
+    expect(roomEmit).toHaveBeenCalledWith('run.failed', { event: 'run.failed', error: 'unavailable' })
+  })
+
   it('tags a Bridge run.failed terminal event as an intentional queue insertion stop', async () => {
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const { io } = makeServerHarness()
@@ -580,7 +627,7 @@ describe('ChatRunSocket queued bridge runs', () => {
 
   it('supports bridge peer broadcasts during runAndWait workflow runs', async () => {
     handleBridgeRunMock.mockImplementationOnce(async (_nsp, socket, data) => {
-      socket.to(`session:${data.session_id}`).emit('run.peer_user_message', {
+      socket.publishToPeers(data.session_id, 'run.peer_user_message', {
         event: 'run.peer_user_message',
         session_id: data.session_id,
       })
@@ -639,6 +686,37 @@ describe('ChatRunSocket queued bridge runs', () => {
       output: 'answer',
       reasoning: 'thought',
     })
+  })
+
+  it.each(['workflow', 'group_chat', 'global_agent'] as const)('uses a scoped direct caller and snapshots internal %s input before readiness', async surface => {
+    let ready!: (value: unknown) => void
+    ensureReadyMock.mockImplementationOnce(() => new Promise(resolve => { ready = resolve }))
+    handleBridgeRunMock.mockImplementationOnce(async (_nsp, caller, data) => {
+      expect(caller.kind).toBe('direct')
+      expect(caller).not.toHaveProperty('emit')
+      expect(caller).not.toHaveProperty('to')
+      expect(caller).not.toHaveProperty('join')
+      expect(caller.user.id).toBe(7)
+      expect(caller.executionScope).toMatchObject({ sessionId: 'internal', profileId: 'default', principal: { kind: 'user', id: '7' },
+        surface: surface.replace('_', '-') })
+      expect(Object.isFrozen(caller.executionScope)).toBe(true)
+      expect(Object.isFrozen(caller.executionScope.principal)).toBe(true)
+      expect(data.input).toEqual([{ type: 'text', text: 'original' }])
+      data.onEvent('message.delta', { delta: 'once' })
+      data.onEvent('reasoning.delta', { delta: 'thought' })
+      data.onEvent('run.completed', { run_id: 'internal-run' })
+    })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const request = { session_id: 'internal', input: [{ type: 'text' as const, text: 'original' }], source: surface, session_source: surface }
+    const options = { profile: 'default', user: { id: 7, username: 'owner', role: 'super_admin' as const }, onEvent: vi.fn() }
+    const pending = server.runAndWait(request, options)
+    await vi.waitFor(() => expect(ready).toBeTypeOf('function'))
+    request.input[0].text = 'mutated'; options.user.id = 99; options.profile = 'foreign'
+    ready({ reachable: true, status: 'ready' })
+    expect(await pending).toMatchObject({ ok: true, output: 'once', reasoning: 'thought' })
+    expect(options.onEvent.mock.calls.map(call => call[0])).toEqual(['message.delta', 'reasoning.delta', 'run.completed'])
   })
 
   it('auto-responds once to approvals only when runAndWait enables it', async () => {

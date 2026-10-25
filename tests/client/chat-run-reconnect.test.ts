@@ -190,7 +190,8 @@ describe('chat-run socket reconnect handling', () => {
     startRunViaSocket(body, vi.fn(), vi.fn(), vi.fn())
     expect(socket.__listenerCount('connect')).toBe(1)
     expect(socket.__listenerCount('disconnect')).toBe(1)
-    expect(socket.emit).toHaveBeenCalledWith('run', body)
+    expect(socket.emit).toHaveBeenCalledWith('run', { ...body, managed_agent_protocol: 1 })
+    expect(body).not.toHaveProperty('managed_agent_protocol')
   })
 
   it('fans session.command events to run-local and global handlers', async () => {

@@ -1,4 +1,4 @@
-import { getCodingAgentManagedMcpServerConfigs, type CodingAgentId } from '../modules/coding-agents/services'
+import { getCodingAgentManagedMcpServerConfigs, getCodingAgentPluginMcpServers, getCodingAgentPluginLaunch, type CodingAgentId } from '../modules/coding-agents/services'
 import './agent-profile-adapter'
 import { AgentBridgeClient } from '../modules/hermes/services/bridge/client'
 import { getAgentBridgeManager } from '../modules/hermes/services/bridge/manager'
@@ -54,6 +54,8 @@ configureChatAgentRuntime({
   waitForEkkoToolApproval,
   waitForEkkoClarification,
   getCodingAgentMcpServers: (id, profile) => getCodingAgentManagedMcpServerConfigs(id as CodingAgentId, profile),
+  getCodingAgentPluginLaunch,
+  getCodingAgentPluginMcpServers,
   resolveEkkoMcpServers,
   resolveEkkoProviderRuntimeConfig,
   createEkkoAuthorizedProviderFetch,

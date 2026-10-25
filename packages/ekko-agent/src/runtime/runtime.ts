@@ -1807,9 +1807,12 @@ async function createDirectoryChangeProbe(directory: string): Promise<DirectoryC
       // watcher before deciding whether validation is necessary.
       await new Promise<void>(resolveStop => setImmediate(resolveStop))
       watcher.close()
-      if (changed) return true
       const after = await localSkillValidationSignature(directory)
-      return before !== undefined && after !== undefined && before !== after
+      // Watch notifications can be delayed/coalesced, or concern a Skill's
+      // generated assets. Only changed validation metadata should surface
+      // pre-existing issues after an otherwise unrelated terminal command.
+      if (before !== undefined && after !== undefined) return before !== after
+      return changed
     },
   }
 }

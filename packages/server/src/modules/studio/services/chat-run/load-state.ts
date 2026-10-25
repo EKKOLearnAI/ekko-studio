@@ -74,8 +74,8 @@ export function readSessionStateFromDb(sid: string): SessionState {
     logger.info(displayPayload, '[chat-run-socket] display page loaded')
     if (displayElapsedMs > 1_000) logger.warn(displayPayload, '[chat-run-socket] slow display page load')
 
-    let inputTokens: number
-    let outputTokens: number
+    let inputTokens: number | undefined
+    let outputTokens: number | undefined
     let contextTokens: number | undefined
     const session = actualDetail?.session || getSession(sid)
     const usageSource = isBuiltinEkkoAgent(session?.agent)
@@ -97,6 +97,12 @@ export function readSessionStateFromDb(sid: string): SessionState {
     if (contextTokens == null && usageSource !== 'coding_agent') {
       contextTokens = getSessionContextUsageEstimate(sid)?.tokens ?? estimateSessionContextTokens(sid)
     }
+    const managedUsage = session?.agent_usage
+    if (managedUsage) {
+      inputTokens = managedUsage.inputTokens ?? undefined
+      outputTokens = managedUsage.outputTokens ?? undefined
+      contextTokens = undefined
+    }
 
     logger.info('[chat-run-socket] loaded session %s from DB (%d messages)', sid, messages.length)
     return {
@@ -110,8 +116,8 @@ export function readSessionStateFromDb(sid: string): SessionState {
       events: [],
       inputTokens,
       outputTokens,
-      cacheReadTokens: totals.cacheReadTokens || 0,
-      cacheWriteTokens: totals.cacheWriteTokens || 0,
+      cacheReadTokens: managedUsage ? managedUsage.cacheReadTokens ?? undefined : totals.cacheReadTokens || 0,
+      cacheWriteTokens: managedUsage ? managedUsage.cacheWriteTokens ?? undefined : totals.cacheWriteTokens || 0,
       contextTokens,
       queue: [],
       backgroundDelegations: restoreBackgroundDelegations(messages),

@@ -2,7 +2,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import type { AgentTool, AgentToolContentPart, AgentToolContext, AgentToolProvider, AgentToolResult } from './types'
 
-interface StdioMcpServerConfig {
+export interface StdioMcpServerConfig {
   type: 'stdio'
   command: string
   args: string[]
@@ -11,7 +11,7 @@ interface StdioMcpServerConfig {
   requestTimeoutMs?: number
 }
 
-interface StreamableHttpMcpServerConfig {
+export interface StreamableHttpMcpServerConfig {
   type: 'streamable_http'
   url: string
   headers: Record<string, string>
@@ -19,8 +19,30 @@ interface StreamableHttpMcpServerConfig {
   requestTimeoutMs?: number
 }
 
-type McpServerConfig = StdioMcpServerConfig | StreamableHttpMcpServerConfig
-type McpClientTransport = StdioClientTransport | StreamableHTTPClientTransport
+export type McpServerConfig = StdioMcpServerConfig | StreamableHttpMcpServerConfig
+export type McpClientTransport = Parameters<Client['connect']>[0]
+export type McpReadRequest =
+  | { method: 'resources/list' | 'resources/templates/list' | 'prompts/list'; params?: { cursor?: string } }
+  | { method: 'resources/read'; params: { uri: string } }
+  | { method: 'prompts/get'; params: { name: string; arguments?: Record<string, string> } }
+export class McpCapabilityUnavailableError extends Error {
+  constructor(readonly capability: 'resources' | 'prompts') { super(`MCP server does not advertise ${capability}`); this.name = 'McpCapabilityUnavailableError' }
+}
+
+export interface McpToolProviderOptions {
+  /** Fail discovery when a configured server cannot initialize instead of omitting its tools. */
+  failOnConnectionError?: boolean
+  /** The provider owns the returned transport. Custom transports receive only explicitly configured env. */
+  createTransport?: (server: McpServerConfig, context: { serverName: string; signal: AbortSignal }) => McpClientTransport | Promise<McpClientTransport>
+}
+export interface McpToolProvider extends AgentToolProvider {
+  /** Single wire request on the same owned connection; list calls do not auto-page. */
+  read(serverName: string, request: McpReadRequest, context?: AgentToolContext): Promise<unknown>
+  /** Permanently end one connection scope and wait for confirmed transport cleanup. */
+  closeScope(signal?: AbortSignal): Promise<void>
+  /** End all scopes; a failed cleanup stays failed on subsequent calls. */
+  dispose(): Promise<void>
+}
 
 const DEFAULT_MCP_TIMEOUT_MS = 30_000
 const MODEL_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/
@@ -42,8 +64,8 @@ function normalizeServerType(value: unknown): string {
   return normalized
 }
 
-function normalizeServerConfig(value: unknown): McpServerConfig | null {
-  if (!isRecord(value) || value.enabled === false) return null
+function normalizeServerConfig(value: unknown, inheritEnv: boolean): McpServerConfig | null {
+  if (!isRecord(value) || value.enabled === false || value.disabled === true) return null
   const supportsParallelToolCalls = value.supports_parallel_tool_calls === true
   const requestTimeoutMs = typeof value.requestTimeoutMs === 'number'
     && Number.isInteger(value.requestTimeoutMs) && value.requestTimeoutMs > 0 ? value.requestTimeoutMs : undefined
@@ -74,7 +96,7 @@ function normalizeServerConfig(value: unknown): McpServerConfig | null {
     type: 'stdio',
     command,
     args: Array.isArray(value.args) ? value.args.map(arg => String(arg)) : [],
-    env: normalizeProcessEnv(value.env),
+    env: inheritEnv ? normalizeProcessEnv(value.env) : normalizeStringRecord(value.env),
     supportsParallelToolCalls,
     requestTimeoutMs,
   }
@@ -135,8 +157,12 @@ class McpClientSession {
   private client: Client | null = null
   private transport: McpClientTransport | null = null
   private initialized: Promise<void> | null = null
+  private closing?: Promise<void>
+  private transportClosing?: Promise<void>
+  private resourcesClosing?: Promise<void>
 
-  constructor(readonly fingerprint: string, private readonly server: McpServerConfig) {}
+  constructor(readonly fingerprint: string, private readonly server: McpServerConfig, private readonly scope: AbortSignal | undefined,
+    private readonly createTransport: () => McpClientTransport | Promise<McpClientTransport>) {}
 
   async listTools(timeoutMs: number): Promise<any[]> {
     const client = await this.ensureConnected(timeoutMs)
@@ -144,8 +170,20 @@ class McpClientSession {
     return result.tools
   }
 
-  async callTool(name: string, input: Record<string, unknown>, timeoutMs: number): Promise<AgentToolResult> {
+  async read(request: McpReadRequest, timeoutMs: number): Promise<unknown> {
+    this.scope?.throwIfAborted()
+    const client = await this.ensureConnected(timeoutMs)
+    const capability = request.method.startsWith('resources/') ? 'resources' : 'prompts'
+    if (!client.getServerCapabilities()?.[capability]) throw new McpCapabilityUnavailableError(capability)
+    // The convenience list APIs auto-aggregate. Keep the first request cursorless
+    // and preserve each remote cursor so the host can enforce its own limits.
+    return client.request(request, { timeout: this.server.requestTimeoutMs ?? timeoutMs })
+  }
+
+  async callTool(name: string, input: Record<string, unknown>, timeoutMs: number, scope?: AbortSignal): Promise<AgentToolResult> {
     try {
+      if (scope !== this.scope) throw new Error('MCP tool belongs to a different connection scope')
+      scope?.throwIfAborted()
       const client = await this.ensureConnected(timeoutMs)
       const result = await client.callTool({ name, arguments: input }, { timeout: this.server.requestTimeoutMs ?? timeoutMs })
       const content = responseContentToText(result)
@@ -162,53 +200,56 @@ class McpClientSession {
     }
   }
 
-  dispose(): void {
+  dispose(): Promise<void> {
     this.disposed = true
-    const client = this.client
-    const transport = this.transport
-    this.client = null
-    this.transport = null
-    this.initialized = null
-    if (!client) return
-    void (async () => {
-      try {
-        if (transport instanceof StreamableHTTPClientTransport) await transport.terminateSession()
-      } catch {
-        // Session termination is optional and some servers return 405.
-      } finally {
-        await client.close().catch(() => undefined)
-      }
+    return this.closing ??= (async () => {
+      // Stop an already acquired transport immediately, including during handshake.
+      const early = this.closeResources()
+      await Promise.allSettled([early, this.initialized])
+      await this.closeResources() // The factory may have returned after disposal began.
     })()
   }
 
+  private closeTransport(): Promise<void> {
+    return this.transportClosing ??= Promise.resolve().then(() => this.transport!.close())
+  }
+  private closeResources(): Promise<void> {
+    if (!this.transport) return Promise.resolve()
+    return this.resourcesClosing ??= (async () => {
+      if (this.transport instanceof StreamableHTTPClientTransport) {
+        // DELETE is optional. Bound it, then close() aborts any remaining HTTP work.
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try { await Promise.race([this.transport.terminateSession(), new Promise<void>(resolve => { timer = setTimeout(resolve, 1000) })]) }
+        catch { /* Servers may not support session termination. */ }
+        finally { clearTimeout(timer) }
+      }
+      try { await this.client?.close() }
+      finally { await this.closeTransport() }
+    })()
+  }
+
+  private async initialize(timeoutMs: number): Promise<void> {
+    const transport = await this.createTransport()
+    this.transport = transport
+    if (this.disposed) { await this.closeResources(); throw new Error('MCP connection scope has ended') }
+    const client = new Client({ name: 'ekko-agent', version: '0.1.0' })
+    this.client = client
+    // The MCP client may initiate close without awaiting it after handshake failure.
+    // Keep the real failure in our owned barrier, while protocol-driven close is handled.
+    const wrapped = new Proxy(transport, {
+      get: (target, key) => {
+        if (key === 'close') return () => this.closeTransport().catch(() => undefined)
+        const value = Reflect.get(target, key, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+      set: (target, key, value) => Reflect.set(target, key, value, target),
+    })
+    try { await client.connect(wrapped, { timeout: timeoutMs }) }
+    catch (error) { await this.closeResources(); throw error }
+  }
   private async ensureConnected(timeoutMs: number): Promise<Client> {
     if (this.disposed) throw new Error('MCP connection scope has ended')
-    if (!this.client) {
-      const client = new Client({ name: 'ekko-agent', version: '0.1.0' })
-      const transport = this.server.type === 'streamable_http'
-        ? new StreamableHTTPClientTransport(new URL(this.server.url), {
-            requestInit: Object.keys(this.server.headers).length
-              ? { headers: this.server.headers }
-              : undefined,
-          })
-        : new StdioClientTransport({
-            command: this.server.command,
-            args: this.server.args,
-            env: this.server.env,
-            stderr: 'ignore',
-          })
-      this.client = client
-      this.transport = transport
-      this.initialized = client.connect(transport, { timeout: timeoutMs }).catch(async error => {
-        if (this.client === client) {
-          this.client = null
-          this.transport = null
-          this.initialized = null
-        }
-        await client.close().catch(() => undefined)
-        throw error
-      })
-    }
+    this.initialized ??= this.initialize(timeoutMs)
     await this.initialized
     if (this.disposed) throw new Error('MCP connection scope has ended')
     return this.client!
@@ -235,7 +276,7 @@ class McpTool implements AgentTool {
   }
 
   async execute(input: Record<string, unknown>, context: AgentToolContext = {}): Promise<AgentToolResult> {
-    return await this.session.callTool(this.remoteName, input, context.timeoutMs || DEFAULT_MCP_TIMEOUT_MS)
+    return await this.session.callTool(this.remoteName, input, context.timeoutMs || DEFAULT_MCP_TIMEOUT_MS, context.mcpSessionSignal)
   }
 }
 
@@ -290,7 +331,7 @@ class McpProxyTool implements AgentTool {
       return { ok: false, content: error, error }
     }
     const remoteInput = isRecord(input.arguments) ? input.arguments : {}
-    return await this.session.callTool(remoteName, remoteInput, context.timeoutMs || DEFAULT_MCP_TIMEOUT_MS)
+    return await this.session.callTool(remoteName, remoteInput, context.timeoutMs || DEFAULT_MCP_TIMEOUT_MS, context.mcpSessionSignal)
   }
 }
 
@@ -319,87 +360,159 @@ function stableNameHash(value: string): string {
   return (hash >>> 0).toString(36)
 }
 
-export function createMcpToolProvider(): AgentToolProvider {
-  const sharedSessions = new Map<string, McpClientSession>()
-  const scopedSessions = new WeakMap<AbortSignal, Map<string, McpClientSession>>()
-  return {
+export function createMcpToolProvider(options: McpToolProviderOptions = {}): McpToolProvider {
+  interface Scope {
+    sessions: Map<string, McpClientSession>
+    lifecycle: AbortController
+    pending: Promise<void>
+    closing?: Promise<void>
+    detach?: () => void
+  }
+  const makeScope = (): Scope => ({ sessions: new Map(), lifecycle: new AbortController(), pending: Promise.resolve() })
+  const shared = makeScope(), scoped = new WeakMap<AbortSignal, Scope>(), live = new Set([shared])
+  let disposed = false, closing: Promise<void> | undefined
+  const close = (state: Scope): Promise<void> => {
+    state.lifecycle.abort()
+    state.detach?.()
+    return state.closing ??= (async () => {
+      const results = await Promise.allSettled([...state.sessions.values()].map(session => session.dispose()))
+      await state.pending.catch(() => undefined)
+      const failed = results.filter(result => result.status === 'rejected')
+      if (failed.length) throw new AggregateError(failed.map(result => result.reason), 'MCP connection cleanup failed')
+      state.sessions.clear(); live.delete(state)
+    })()
+  }
+  const getScope = (signal?: AbortSignal): Scope => {
+    if (!signal) return shared
+    let state = scoped.get(signal)
+    if (!state) {
+      state = makeScope(); scoped.set(signal, state); live.add(state)
+      const owned = state
+      const abort = () => { void close(owned).catch(() => undefined) }
+      state.detach = () => signal.removeEventListener('abort', abort)
+      if (signal.aborted) abort()
+      else signal.addEventListener('abort', abort, { once: true })
+    }
+    return state
+  }
+  const provider: McpToolProvider = {
     id: 'mcp',
+    async read(serverName, request, context) {
+      if (disposed) throw new Error('MCP provider has ended')
+      if (!['resources/list', 'resources/templates/list', 'resources/read', 'prompts/list', 'prompts/get'].includes(request?.method)) throw new Error('Unsupported MCP content request')
+      const state = getScope(context?.mcpSessionSignal)
+      const snapshot = { request: structuredClone(request), context: { ...context, mcpServers: structuredClone(context?.mcpServers || {}) } }
+      const operation = state.pending.then(async () => {
+        state.lifecycle.signal.throwIfAborted()
+        const server = normalizeServerConfig(snapshot.context.mcpServers[serverName], !options.createTransport)
+        if (!server) throw new Error('MCP server is unavailable')
+        const session = await sessionFor(state, serverName, server, snapshot.context)
+        const result = await session.read(snapshot.request, snapshot.context.timeoutMs || DEFAULT_MCP_TIMEOUT_MS)
+        state.lifecycle.signal.throwIfAborted()
+        return result
+      })
+      state.pending = operation.then(() => undefined, () => undefined)
+      return operation
+    },
+    closeScope: signal => close(getScope(signal)),
+    dispose() {
+      disposed = true
+      return closing ??= (async () => {
+        const results = await Promise.allSettled([...live].map(close))
+        const failed = results.filter(result => result.status === 'rejected')
+        if (failed.length) throw new AggregateError(failed.map(result => result.reason), 'MCP provider cleanup failed')
+      })()
+    },
     async listTools(context?: AgentToolContext): Promise<AgentTool[]> {
-      const scope = context?.mcpSessionSignal
-      scope?.throwIfAborted()
-      let sessions = scope ? scopedSessions.get(scope) : sharedSessions
-      if (!sessions) {
-        sessions = new Map()
-        scopedSessions.set(scope!, sessions)
-        const owned = sessions
-        scope!.addEventListener('abort', () => {
-          for (const session of owned.values()) session.dispose()
-          owned.clear()
-        }, { once: true })
-      }
-      const timeoutMs = context?.timeoutMs || DEFAULT_MCP_TIMEOUT_MS
-      const tools: AgentTool[] = []
-      const usedNames = new Set<string>()
-      const configuredServerNames = new Set<string>()
-
-      for (const [serverName, rawConfig] of Object.entries(context?.mcpServers || {})) {
-        scope?.throwIfAborted()
-        const server = normalizeServerConfig(rawConfig)
-        if (!server) continue
-        configuredServerNames.add(serverName)
-        const fingerprint = JSON.stringify(server)
-        let session = sessions.get(serverName)
-        if (!session || session.fingerprint !== fingerprint) {
-          session?.dispose()
-          session = new McpClientSession(fingerprint, server)
-          sessions.set(serverName, session)
-        }
-
-        try {
-          const remoteTools = (await session.listTools(timeoutMs))
-            .filter(tool => !!tool?.name)
-          scope?.throwIfAborted()
-          const requiresProxy = remoteTools.some(tool => {
-            const name = String(tool.name)
-            return !modelSafeToolName(name) || usedNames.has(name)
-          })
-
-          if (requiresProxy && remoteTools.length) {
-            const proxyName = proxyToolName(serverName, usedNames)
-            usedNames.add(proxyName)
-            tools.push(new McpProxyTool(
-              proxyName,
-              serverName,
-              remoteTools,
-              session,
-              server.supportsParallelToolCalls,
-            ))
-            continue
-          }
-
-          for (const tool of remoteTools) {
-            usedNames.add(String(tool.name))
-            tools.push(new McpTool(
-              serverName,
-              String(tool.name),
-              tool,
-              session,
-              server.supportsParallelToolCalls,
-            ))
-          }
-        } catch {
-          scope?.throwIfAborted()
-          // A broken MCP server should not prevent the rest of the agent run.
-        }
-      }
-
-      for (const [serverName, session] of sessions) {
-        if (configuredServerNames.has(serverName)) continue
-        session.dispose()
-        sessions.delete(serverName)
-      }
-
-      return tools
+      if (disposed) throw new Error('MCP provider has ended')
+      const state = getScope(context?.mcpSessionSignal)
+      const snapshot: AgentToolContext = { mcpSessionSignal: context?.mcpSessionSignal,
+        timeoutMs: context?.timeoutMs, mcpServers: structuredClone(context?.mcpServers || {}) }
+      const operation = state.pending.then(() => discover(state, snapshot))
+      state.pending = operation.then(() => undefined, () => undefined)
+      return operation
     },
   }
+  async function sessionFor(state: Scope, serverName: string, server: McpServerConfig, context?: AgentToolContext): Promise<McpClientSession> {
+    const fingerprint = JSON.stringify(server), scope = state.lifecycle.signal
+    let session = state.sessions.get(serverName)
+    if (!session || session.fingerprint !== fingerprint) {
+      await session?.dispose()
+      scope.throwIfAborted()
+      session = new McpClientSession(fingerprint, server, context?.mcpSessionSignal, () => options.createTransport
+        ? options.createTransport(server, { serverName, signal: scope })
+        : server.type === 'streamable_http'
+          ? new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } })
+          : new StdioClientTransport({ command: server.command, args: server.args, env: server.env, stderr: 'ignore' }))
+      state.sessions.set(serverName, session)
+    }
+    return session
+  }
+  async function discover(state: Scope, context?: AgentToolContext): Promise<AgentTool[]> {
+    const scope = state.lifecycle.signal, sessions = state.sessions
+    scope.throwIfAborted()
+    const timeoutMs = context?.timeoutMs || DEFAULT_MCP_TIMEOUT_MS
+    const tools: AgentTool[] = []
+    const usedNames = new Set<string>()
+    const configuredServerNames = new Set<string>()
+
+    for (const [serverName, rawConfig] of Object.entries(context?.mcpServers || {})) {
+      scope?.throwIfAborted()
+      const server = normalizeServerConfig(rawConfig, !options.createTransport)
+      if (!server) continue
+      configuredServerNames.add(serverName)
+      const session = await sessionFor(state, serverName, server, context)
+
+      try {
+        const remoteTools = (await session.listTools(timeoutMs))
+          .filter(tool => !!tool?.name)
+        scope?.throwIfAborted()
+        const requiresProxy = remoteTools.some(tool => {
+          const name = String(tool.name)
+          return !modelSafeToolName(name) || usedNames.has(name)
+        })
+
+        if (requiresProxy && remoteTools.length) {
+          const proxyName = proxyToolName(serverName, usedNames)
+          usedNames.add(proxyName)
+          tools.push(new McpProxyTool(
+            proxyName,
+            serverName,
+            remoteTools,
+            session,
+            server.supportsParallelToolCalls,
+          ))
+          continue
+        }
+
+        for (const tool of remoteTools) {
+          usedNames.add(String(tool.name))
+          tools.push(new McpTool(
+            serverName,
+            String(tool.name),
+            tool,
+            session,
+            server.supportsParallelToolCalls,
+          ))
+        }
+      } catch (error) {
+        await session.dispose()
+        if (sessions.get(serverName) === session) sessions.delete(serverName)
+        scope.throwIfAborted()
+        if (options.failOnConnectionError) throw error
+        // A broken server may be retried on the next discovery after confirmed cleanup.
+      }
+    }
+
+    for (const [serverName, session] of sessions) {
+      if (configuredServerNames.has(serverName)) continue
+      await session.dispose()
+      scope.throwIfAborted()
+      sessions.delete(serverName)
+    }
+
+    scope.throwIfAborted()
+    return tools
+  }
+  return provider
 }

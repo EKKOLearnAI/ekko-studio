@@ -1,0 +1,9 @@
+{
+  "name": "@ekko-studio/plugin-claude-code",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code native stream-json runtime for Studio",
+  "license": "BSL-1.1",
+  "main": "dist/index.cjs",
+  "files": ["dist", "studio-plugin.json", "README.md"]
+}

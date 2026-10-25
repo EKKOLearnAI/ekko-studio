@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { NModal, NUpload, NButton, NInput, NRadioGroup, NRadio, useMessage } from 'naive-ui'
+import { NModal, NUpload, NButton, NInput, NSelect, NRadioGroup, NRadio, useMessage } from 'naive-ui'
 import type { UploadFileInfo } from 'naive-ui'
 import { importSkill } from '@/api/hermes/skills'
 import { useI18n } from 'vue-i18n'
@@ -8,6 +8,7 @@ import { useI18n } from 'vue-i18n'
 const props = defineProps<{
   allowCategory?: boolean
   importHandler?: (files: File[], category?: string) => Promise<{ name?: string }>
+  categoryOptions?: Array<{ label: string; value: string }>
 }>()
 
 const emit = defineEmits<{
@@ -24,12 +25,13 @@ const mode = ref<'zip' | 'folder'>('folder')
 const zipFiles = ref<UploadFileInfo[]>([])
 const folderFiles = ref<File[]>([])
 const folderName = ref('')
-const category = ref('')
+const category = ref(props.categoryOptions?.length === 1 ? props.categoryOptions[0]!.value : '')
 const folderInputRef = ref<HTMLInputElement | null>(null)
 
 const hasSelection = computed(() =>
   mode.value === 'zip' ? zipFiles.value.length > 0 : folderFiles.value.length > 0
 )
+const hasSource = computed(() => !props.categoryOptions || props.categoryOptions.some(option => option.value === category.value))
 
 function onModeChange() {
   zipFiles.value = []
@@ -63,7 +65,7 @@ function onFolderSelected(e: Event) {
 }
 
 async function handleSave() {
-  if (!hasSelection.value) {
+  if (!hasSelection.value || !hasSource.value) {
     message.warning(t('skills.importNoSelection'))
     return
   }
@@ -85,7 +87,7 @@ async function handleSave() {
   try {
     const res = await (props.importHandler || importSkill)(files, category.value.trim() || undefined)
     message.success(t('skills.importSuccess') + (res?.name ? `: ${res.name}` : ''))
-    message.info(t('skills.reloadHint'), { duration: 6000 })
+    message.info(t(props.categoryOptions ? 'codingAgents.resourcesNextRun' : 'skills.reloadHint'), { duration: 6000 })
     emit('saved')
   } catch (err: any) {
     message.error(t('skills.importFailed') + `: ${err.message}`)
@@ -119,8 +121,11 @@ function handleClose() {
     </div>
 
     <div v-if="allowCategory !== false" class="form-row">
-      <label class="field-label">{{ t('skills.importTargetCategory') }}</label>
+      <label class="field-label">{{ t(categoryOptions ? 'codingAgents.resourceSkillSource' : 'skills.importTargetCategory') }}</label>
+      <NSelect v-if="categoryOptions" v-model:value="category" :options="categoryOptions" :disabled="loading"
+        :aria-label="t('codingAgents.resourceSkillSource')" />
       <NInput
+        v-else
         v-model:value="category"
         size="small"
         :placeholder="t('skills.importTargetCategoryPlaceholder')"
@@ -162,7 +167,7 @@ function handleClose() {
     <template #footer>
       <div class="modal-footer">
         <NButton :disabled="loading" @click="handleClose">{{ t('common.cancel') }}</NButton>
-        <NButton type="primary" :loading="loading" :disabled="!hasSelection" @click="handleSave">
+        <NButton type="primary" :loading="loading" :disabled="!hasSelection || !hasSource" @click="handleSave">
           {{ t('common.confirm') }}
         </NButton>
       </div>

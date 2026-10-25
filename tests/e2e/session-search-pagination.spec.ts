@@ -116,6 +116,10 @@ for (const { path, hit, listed, total } of [
     }
     await expect(page).toHaveURL(/#\/hermes\/session\/search-history$/)
     // Normal positioning must finish through layout stability, before its 5 s failsafe.
+    // On cross-page navigation the loader can be absent before the new list is
+    // mounted. Require the actual hit in an idle list, not that transient absence.
+    await expect(page.locator('.message-list-shell[aria-busy="false"]').locator(`#message-${hit}.highlight`))
+      .toBeVisible({ timeout: 3500 })
     await expect(loading).toBeHidden({ timeout: 3500 })
     if (listed) {
       expect(await page.evaluate(() => (window as any).__searchSpinner)).toEqual({

@@ -17,6 +17,11 @@ describe('usage recorder', () => {
     vi.clearAllMocks()
   })
 
+  it('rejects a host model accounting barrier if its usage write fails', () => {
+    updateUsageMock.mockImplementationOnce(() => { throw new Error('write failed') })
+    expect(() => recordSessionUsage({ sessionId: '', source: 'model_api', agent: 'model_api', runId: 'host-model', requirePersistence: true })).toThrow('write failed')
+  })
+
   it('normalizes OpenAI and Anthropic token detail fields', () => {
     expect(normalizeTokenUsage({
       input_tokens: 120,

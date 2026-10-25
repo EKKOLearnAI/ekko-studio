@@ -8,6 +8,7 @@ export {
   issueUserJwt,
   requireAdmin,
   requireSuperAdmin,
+  requireInteractiveSuperAdmin,
   requireUserProfile,
   type AuthenticatedUser,
 } from '../middleware/auth'

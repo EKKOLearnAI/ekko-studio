@@ -24,7 +24,9 @@ export function packNpmReleases(rootDir, outputDir, npmCli = process.env.npm_exe
       for (const path of ['bin', 'dist', 'README.md', 'LICENSE']) {
         cpSync(join(rootDir, path), join(staging, path), { recursive: true })
       }
-      writeFileSync(join(staging, 'package.json'), `${JSON.stringify({ ...pkg, name }, null, 2)}\n`)
+      // Source workspaces are not included in the application tarball.
+      const { workspaces: _workspaces, ...releaseManifest } = pkg
+      writeFileSync(join(staging, 'package.json'), `${JSON.stringify({ ...releaseManifest, name }, null, 2)}\n`)
       const [packed] = JSON.parse(execFileSync(process.execPath, [npmCli, 'pack', '--ignore-scripts', '--json',
         '--pack-destination', resolve(outputDir)], { cwd: staging, encoding: 'utf8' }))
       const files = new Set(packed.files.map(file => file.path))

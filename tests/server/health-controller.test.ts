@@ -122,6 +122,15 @@ describe('health controller version metadata', () => {
     ;(globalThis as any).__APP_VERSION__ = 'test'
   })
 
+  it.each([undefined, '42.3.0'])('identifies the actual backend runtime (Electron %s)', async (electron) => {
+    vi.stubGlobal('process', { ...process, versions: { ...process.versions, electron } })
+    const { healthCheck } = await loadHealthControllerWithoutInjectedVersion()
+    const ctx = createMockCtx()
+    await healthCheck(ctx)
+    expect(ctx.body.node_runtime).toBe(electron ? 'electron' : 'node')
+    expect(ctx.body.node_version).toBe(process.versions.node)
+  })
+
   it('reads the root package version in ts-node/dev mode instead of falling back to 0.0.0', async () => {
     const pkg = readRootPackage()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))

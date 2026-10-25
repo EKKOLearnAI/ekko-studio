@@ -110,6 +110,8 @@ beforeEach(async () => {
 afterEach(async () => {
   clients.splice(0).forEach(socket => socket.disconnect())
   terminalService?.close()
+  const { setChatRunServer } = await import('../../packages/server/src/modules/studio/public/chat-run')
+  setChatRunServer(null)
   if (io) await new Promise<void>(resolve => io.close(() => resolve()))
   db.close()
   await rm(root, { recursive: true, force: true })
@@ -209,13 +211,40 @@ describe('existing APIs with session share credentials', () => {
     expect((await denied).error).toBe('share_session_mismatch')
     expect(run).toHaveBeenCalledOnce()
     server.sessionMap.get('s1').isWorking = false
-    vi.stubEnv('HERMES_WEB_UI_URL', origin)
-    run.mockImplementationOnce(async (socket: any) => {
-      socket.emit('run.started', { session_id: 's1', run_id: 'http-run' })
-      socket.emit('run.completed', { session_id: 's1', run_id: 'http-run', output: 'shared HTTP reply' })
+    const { setChatRunServer } = await import('../../packages/server/src/modules/studio/public/chat-run')
+    setChatRunServer(server)
+    const connectedBefore = io.of('/chat-run').sockets.size
+    run.mockImplementationOnce(async (caller: any) => {
+      expect(caller.kind).toBe('direct')
+      expect(caller.user.id).toBe(7)
+      caller.reply('run.started', { session_id: 's1', run_id: 'http-run' })
+      caller.reply('run.completed', { session_id: 's1', run_id: 'http-run', output: 'shared HTTP reply' })
     })
     expect(await request(token, '/api/studio/chat-run/runs', 'POST', { session_id: 's1', input: 'HTTP message' }))
       .toMatchObject({ status: 200, body: { ok: true, session_id: 's1', output: 'shared HTTP reply' } })
+    expect(io.of('/chat-run').sockets.size).toBe(connectedBefore)
+  })
+
+  it('revokes a direct HTTP observer without returning already collected private output', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { setChatRunServer } = await import('../../packages/server/src/modules/studio/public/chat-run')
+    const server = new ChatRunSocket(io) as any
+    setChatRunServer(server)
+    const shared = await issue({ input: true })
+    const run = vi.spyOn(server, 'handleRun').mockImplementation(async (caller: any) => {
+      caller.observeSession('s1')
+      caller.reply('message.delta', { delta: 'private', session_id: 's1' })
+    })
+    const response = request(shared.token, '/api/studio/chat-run/runs', 'POST', {
+      session_id: 's1', input: 'shared HTTP message', include_events: true, timeout_ms: 3000,
+    }).catch(error => ({ error }))
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce())
+    await service.change(7, 's1', shared.record.id, { revoke: true })
+    // The existing share HTTP middleware destroys the connection on revocation.
+    // The direct waiter must still release its own observers behind that boundary.
+    expect(await response).toMatchObject({ error: expect.any(Error) })
+    await vi.waitFor(() => expect(server.runWaiters.size).toBe(0))
+    expect(server.directRunObservers.size).toBe(0)
   })
 
   it('uses the existing terminal protocol, isolates PTYs and kills them after revocation even while disconnected', async () => {

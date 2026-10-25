@@ -8,6 +8,8 @@ let initializeCount = 0
 let apiKeyHeaders: Array<string | undefined> = []
 let remoteTools: any[] = []
 let remoteToolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = []
+let contentEnabled = false
+let contentCursors: unknown[] = []
 
 async function readJson(request: IncomingMessage): Promise<any> {
   let body = ''
@@ -24,6 +26,7 @@ function json(response: ServerResponse, payload: unknown, session = false) {
 
 beforeEach(async () => {
   initializeCount = 0
+  contentEnabled = false; contentCursors = []
   apiKeyHeaders = []
   remoteTools = [{
     name: 'remote_echo',
@@ -56,7 +59,7 @@ beforeEach(async () => {
         id: message.id,
         result: {
           protocolVersion: message.params.protocolVersion,
-          capabilities: { tools: {} },
+          capabilities: { tools: {}, ...(contentEnabled ? { resources: {}, prompts: {} } : {}) },
           serverInfo: { name: 'fake-http-mcp', version: '1.0.0' },
         },
       }, true)
@@ -65,6 +68,16 @@ beforeEach(async () => {
     if (message.method === 'notifications/initialized') {
       response.statusCode = 202
       response.end()
+      return
+    }
+    if (message.method === 'resources/list') {
+      expect(request.headers['mcp-session-id']).toBe('ekko-test-session')
+      contentCursors.push(message.params?.cursor)
+      json(response, { jsonrpc: '2.0', id: message.id, result: { resources: [{ uri: 'fixture://one', name: 'One' }], ...(message.params?.cursor ? {} : { nextCursor: 'next' }) } })
+      return
+    }
+    if (message.method === 'prompts/get') {
+      json(response, { jsonrpc: '2.0', id: message.id, result: { messages: [{ role: 'user', content: { type: 'text', text: String(message.params.arguments?.whom) } }] } })
       return
     }
     if (message.method === 'tools/list') {
@@ -107,6 +120,30 @@ afterEach(async () => {
 })
 
 describe('Ekko Streamable HTTP MCP', () => {
+  it('keeps content pagination and prompts on the authenticated tools connection', async () => {
+    contentEnabled = true
+    const provider = createMcpToolProvider(), controller = new AbortController()
+    const context = { mcpSessionSignal: controller.signal, mcpServers: { remote: { url: endpoint, headers: { 'x-api-key': 'content-owner' } } } }
+    try {
+      await provider.listTools(context)
+      const page = await provider.read('remote', { method: 'resources/list' }, context) as { nextCursor: string }
+      expect(page.nextCursor).toBe('next')
+      await provider.read('remote', { method: 'resources/list', params: { cursor: page.nextCursor } }, context)
+      expect(await provider.read('remote', { method: 'prompts/get', params: { name: 'greeting', arguments: { whom: 'HTTP caller' } } }, context)).toMatchObject({ messages: [{ content: { text: 'HTTP caller' } }] })
+      expect(contentCursors).toEqual([undefined, 'next'])
+      expect(initializeCount).toBe(1)
+      expect(apiKeyHeaders.every(value => value === 'content-owner')).toBe(true)
+    } finally { controller.abort(); await provider.dispose() }
+  })
+  it('does not connect or send credentials for either disabled-server spelling', async () => {
+    const provider = createMcpToolProvider()
+    const tools = await provider.listTools({ mcpServers: {
+      a: { url: endpoint, enabled: false, headers: { 'x-api-key': 'disabled-a' } },
+      b: { url: endpoint, disabled: true, headers: { 'x-api-key': 'disabled-b' } },
+    } })
+    expect(tools).toEqual([])
+    expect(initializeCount).toBe(0); expect(apiKeyHeaders).toEqual([])
+  })
   it('isolates concurrent run credentials and never reconnects a completed scope', async () => {
     const provider = createMcpToolProvider()
     const scopes = [new AbortController(), new AbortController()]

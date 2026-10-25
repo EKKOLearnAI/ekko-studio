@@ -1,6 +1,14 @@
 const IMAGE_PART_TYPES = new Set(['image', 'image_url', 'input_image'])
 const DATA_IMAGE_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\r\n]+/g
 
+export function parseStoredToolCalls(value: unknown): any[] | null {
+  if (value == null || value === '') return null
+  if (Array.isArray(value)) return value
+  if (typeof value !== 'string') return null
+  try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : null }
+  catch { return null }
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }

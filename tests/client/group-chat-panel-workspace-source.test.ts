@@ -30,7 +30,7 @@ describe('GroupChatPanel workspace save handling', () => {
     expect(selection).toContain("priorAgentMode: input.priorAgentMode || ''")
   })
 
-  it('keeps free-text input available alongside clarification choices in single and group chat', () => {
+  it('keeps free-text input alongside clarification choices while honoring native response policy', () => {
     const sources = [
       readFileSync('packages/client/src/components/hermes/chat/MessageList.vue', 'utf8'),
       readFileSync('packages/client/src/components/hermes/group-chat/GroupChatPanel.vue', 'utf8'),
@@ -41,7 +41,9 @@ describe('GroupChatPanel workspace save handling', () => {
       const clarifyPanel = source.slice(start, source.indexOf('</Transition>', start))
 
       expect(clarifyPanel).toContain('visibleClarify.choices')
-      expect(clarifyPanel).toContain('<div class="clarify-float-input-row">')
+      if (source.includes('visibleClarify.nativeInteraction')) {
+        expect(clarifyPanel).toContain('<div v-if="!visibleClarify.nativeInteraction || (visibleClarify.nativeInteraction.kind === \'clarification\' && visibleClarify.nativeInteraction.allowText !== false)" class="clarify-float-input-row">')
+      } else expect(clarifyPanel).toContain('<div class="clarify-float-input-row">')
       expect(clarifyPanel).not.toContain('<div v-else class="clarify-float-input-row">')
     }
   })

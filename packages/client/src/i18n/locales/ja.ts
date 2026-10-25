@@ -1,9 +1,11 @@
+import { agentManagementMessages } from '../agent-management-messages'
 import { remoteDeviceMessages } from '../remote-device-messages'
 import { themePresetMessages } from '../theme-preset-locales'
 import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
+  agentManagement: agentManagementMessages['ja'],
   sessionTasks: {
       "title": "タスク",
       "task": "タスク",
@@ -708,7 +710,6 @@ export default {
     updateSuccess: '更新が完了しました。しばらくしてからページを再読み込みしてください。長時間起動しない場合は手動で起動してください。',
     updateFailed: '更新に失敗しました',
     logout: 'ログアウト',
-    nodeVersionWarning: 'Node.js v{version} が検出されました。バージョン23以降にアップグレードしてください。',
     changelog: '更新履歴',
     noChangelog: '更新履歴はありません',
     versionManagement: 'バージョン管理',
@@ -1077,6 +1078,10 @@ export default {
 
   // チャット
   chat: {
+    pluginCommandChanged: "コマンドまたは会話が変更されました。もう一度選択してください。",
+    pluginCommandAmbiguous: "複数のプラグインがこのコマンドを提供しています。提供元を含む名前を選択してください。",
+    pluginCommandTextOnly: "プラグインコマンドは現在テキストのみ対応しています。",
+    pluginCommandsUnavailable: "プラグインコマンドを読み込めません。",
     selectMessages: "メッセージを選択",
     messagesSelected: "{count} 件選択中",
     deleteSelectedMessages: "選択項目を削除",
@@ -2808,6 +2813,15 @@ export default {
   },
 
   codingAgents: {
+    defaultConfiguration: "既定の設定",
+    resourceInstance: "Agent インスタンス", resourceSkillSource: 'スキルの保存先', resourcesNextRun: '次の実行で更新されたスキルが自動的に読み込まれます。',
+    resourceFile: "設定ファイル",
+    resourceReadOnly: "読み取り専用",
+    resourcesEmpty: "これらの場所にリソースはありません",
+    resourcesUnsupported: "この種類のリソースは提供されていません",
+    resourcesUnavailable: "Agent のリソースを利用できません",
+    resourcesChanged: "インスタンスが変更されました。保存前に再読み込みしてください。",
+
     nativeUsage: "使用量：入力 {inputTokens}、出力 {outputTokens}、キャッシュ読取 {cacheReadTokens}、書込 {cacheWriteTokens}、合計 {totalTokens} トークン。",
     nativeUsageUnknown: "使用量は不明です。このセッションのネイティブトークン使用量はまだ報告されていません。",
     nativeContextUnknown: "コンテキストは不明です。ネイティブセッションの現在の使用量と上限を取得できません。",

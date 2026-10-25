@@ -10,6 +10,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMessage } from "naive-ui";
 import { downloadFile, getDownloadUrl } from "@/api/studio/download";
+import { parseAgentChatArtifactPath } from '../../../../../shared/agent-chat-artifact';
 import { copyToClipboard } from "@/utils/clipboard";
 import { parseThinking, countThinkingChars } from "@/utils/thinking-parser";
 import { useChatStore } from "@/stores/hermes/chat";
@@ -224,7 +225,9 @@ const contentFiles = computed<DisplayContentFile[] | null>(() => {
 
 function getContentFileUrl(file: DisplayContentFile): string {
   if (file.url) return file.url
-  return file.path ? getDownloadUrl(file.path, file.name) : ''
+  const reference = file.path ? parseAgentChatArtifactPath(file.path) : null
+  const profile = reference ? chatStore.sessions.find(session => session.id === reference.sessionId)?.profile : undefined
+  return file.path ? getDownloadUrl(file.path, file.name, profile) : ''
 }
 
 const toolExpanded = ref(false);
@@ -617,7 +620,7 @@ async function handleToolDetailClick(event: MouseEvent): Promise<void> {
 }
 
 const hasAttachments = computed(
-  () => (props.message.attachments?.length ?? 0) > 0,
+  () => !isContentBlockArray.value && (props.message.attachments?.length ?? 0) > 0,
 );
 
 const toolArgsPayload = computed(() => formatToolPayload(props.message.toolArgs));

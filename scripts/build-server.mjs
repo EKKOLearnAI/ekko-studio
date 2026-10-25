@@ -14,8 +14,9 @@ mkdirSync(serverOutDir, { recursive: true })
 await esbuild.build({
   entryPoints: [resolve(rootDir, 'packages/server/src/index.ts')],
   bundle: true,
+  alias: { '@ekko-studio/plugin-sdk': resolve(rootDir, 'packages/studio-plugin-sdk/src/index.ts') },
   platform: 'node',
-  target: 'node23',
+  target: 'node24.22.1',
   format: 'cjs',
   outfile: resolve(serverOutDir, 'index.js'),
   external: ['node-pty', 'node:sqlite', 'sharp', 'socket.io'],
@@ -27,6 +28,9 @@ await esbuild.build({
   treeShaking: true,
   logLevel: 'info',
 })
+
+await import('./build-plugin-runtime.mjs')
+await (await import('./build-agent-plugins.mjs')).buildAgentPlugins()
 
 const bridgeOutDir = resolve(serverOutDir, 'agent-bridge', 'python')
 const bridgeSrcDir = resolve(rootDir, 'packages/server/src/modules/hermes/services/bridge/python')

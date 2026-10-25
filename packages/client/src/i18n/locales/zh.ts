@@ -1,9 +1,11 @@
+import { agentManagementMessages } from '../agent-management-messages'
 import { remoteDeviceMessages } from '../remote-device-messages'
 import { themePresetMessages } from '../theme-preset-locales'
 import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesZh } from '../social-messages'
 
 export default {
+  agentManagement: agentManagementMessages['zh'],
   sessionTasks: {
       "title": "任务",
       "task": "任务",
@@ -706,7 +708,6 @@ export default {
     updateSuccess: '更新成功，请稍后刷新页面，如长时间未启动，请手动启动',
     updateFailed: '更新失败',
     logout: '退出登录',
-    nodeVersionWarning: '检测到 Node.js v{version}，请升级到23以上版本。',
     changelog: '更新日志',
     noChangelog: '暂无更新日志',
     versionManagement: '版本管理',
@@ -1098,6 +1099,10 @@ export default {
 
   // 对话
   chat: {
+    pluginCommandChanged: "命令或会话已变化，请重新选择命令。",
+    pluginCommandAmbiguous: "多个插件提供此命令，请选择带来源的名称。",
+    pluginCommandTextOnly: "插件命令目前仅支持文本。",
+    pluginCommandsUnavailable: "无法加载插件命令。",
     selectMessages: "多选消息",
     messagesSelected: "已选 {count} 条",
     deleteSelectedMessages: "删除所选",
@@ -3352,6 +3357,15 @@ export default {
   },
 
   codingAgents: {
+    defaultConfiguration: "默认配置",
+    resourceInstance: "Agent 实例", resourceSkillSource: 'Skills 位置', resourcesNextRun: '下一次运行会自动加载更新后的 Skills。',
+    resourceFile: "配置文件",
+    resourceReadOnly: "只读",
+    resourcesEmpty: "这些位置暂无资源",
+    resourcesUnsupported: "未提供此类资源",
+    resourcesUnavailable: "Agent 资源不可用",
+    resourcesChanged: "实例已改变，请重新加载后保存。",
+
     nativeUsage: "用量：输入 {inputTokens}，输出 {outputTokens}，缓存读取 {cacheReadTokens}，缓存写入 {cacheWriteTokens}，合计 {totalTokens} tokens。",
     nativeUsageUnknown: "用量未知：此会话尚未收到原生 Token 用量数据。",
     nativeContextUnknown: "上下文未知：暂时无法获取原生会话的当前占用及上限。",

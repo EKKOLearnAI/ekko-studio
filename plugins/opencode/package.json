@@ -1,0 +1,9 @@
+{
+  "name": "@ekko-studio/plugin-opencode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenCode ACP runtime for Studio",
+  "license": "BSL-1.1",
+  "main": "dist/index.cjs",
+  "files": ["dist", "studio-plugin.json", "README.md"]
+}

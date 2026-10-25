@@ -53,6 +53,10 @@ const bridgeGetRuntimeStateMock = vi.fn()
 const emitSessionSettingsUpdatedMock = vi.fn()
 const getChatRunServerMock = vi.fn()
 const agentStatusMocks = vi.hoisted(() => ({ hermesAvailable: true }))
+const ordinarySettings = vi.hoisted(() => ({ update: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/services/plugins/runtime', () => ({
+  getStudioPluginRuntime: () => ({ ordinaryChats: ordinarySettings }), authorizePluginScope: vi.fn(),
+}))
 vi.mock('../../packages/server/src/modules/studio/repositories/session-message-deletion', () => ({
   getMessageSelectionGroups: vi.fn(() => []),
 }))
@@ -271,6 +275,46 @@ vi.mock('../../packages/server/src/modules/studio/public/agent-status-registry',
 }))
 
 describe('session conversations controller', () => {
+  it('keeps authenticated Run requests in their bound profile even when the user owns another profile', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const { bindRunRequestContext } = await import('../../packages/server/src/modules/studio/services/auth/run-request-context')
+    const ctx: any = { method: 'GET', params: { id: 'other' }, query: {}, state: { user: { id: 7, role: 'super_admin' } } }
+    localGetSessionDetailMock.mockReturnValue({ id: 'other', profile: 'travel', source: 'cli', messages: [] })
+    const release = bindRunRequestContext(ctx, { runId: 'run', sessionId: 'bound-chat', profile: 'default' })
+    try {
+      await mod.get(ctx)
+      expect(ctx.status).toBe(403)
+      expect(ctx.body).not.toHaveProperty('session')
+    } finally { release() }
+    await mod.get(ctx)
+    expect(ctx.body.session.id).toBe('other')
+  })
+  it('requires managed ownership for history and list results even for another super administrator', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const { setAgentChatService } = await import('../../packages/server/src/modules/studio/services/agents/chat-registry')
+    const managed = { id: 'managed', source: 'coding_agent', profile: 'default', agent_instance_id: 'instance', messages: [] }
+    const ownedBinding = vi.fn((scope: any) => {
+      if (scope.principal.id !== '7') throw new Error('Not the instance owner')
+      return {}
+    })
+    setAgentChatService({ isBound: (id: string) => id === 'managed', ownedBinding } as any)
+    localGetSessionDetailMock.mockReturnValue(managed)
+    localListSessionsMock.mockReturnValue([managed, { id: 'legacy', source: 'cli', profile: 'default' }])
+    try {
+      const foreign: any = { method: 'GET', params: { id: 'managed' }, query: {}, state: { user: { id: 8, role: 'super_admin' } } }
+      await mod.get(foreign)
+      expect(foreign.status).toBe(403)
+      expect(foreign.body).not.toHaveProperty('session')
+      await mod.list(foreign)
+      expect(foreign.body.sessions.map((row: any) => row.id)).toEqual(['legacy'])
+      expect(localListSessionsMock).toHaveBeenLastCalledWith(undefined, undefined, 2000, expect.objectContaining({ managedOwnerId: '8' }))
+      listUserProfilesMock.mockReturnValue([{ profile_name: 'default' }])
+      const owner: any = { method: 'GET', params: { id: 'managed' }, query: {}, state: { user: { id: 7, role: 'user' } } }
+      await mod.get(owner)
+      expect(owner.body.session).toEqual(managed)
+      expect(ownedBinding).toHaveBeenLastCalledWith(expect.objectContaining({ principal: { kind: 'user', id: '7' }, sessionId: 'managed' }), 'managed')
+    } finally { setAgentChatService(undefined) }
+  })
   it('restricts task pages to existing account profiles before pagination, including explicit filters', async () => {
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
     listUserProfilesMock.mockReturnValue([{ profile_name: 'travel' }, { profile_name: 'deleted-profile' }])
@@ -331,6 +375,7 @@ describe('session conversations controller', () => {
   })
   beforeEach(() => {
     vi.resetModules()
+    ordinarySettings.update.mockReset().mockResolvedValue({ revision: 4 })
     agentStatusMocks.hermesAvailable = true
     listConversationSummariesFromDbMock.mockReset()
     getConversationDetailFromDbMock.mockReset()
@@ -497,7 +542,7 @@ describe('session conversations controller', () => {
     const ctx: any = { query: { humanOnly: 'true', limit: '5' }, body: null }
     await mod.listConversations(ctx)
 
-    expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 5)
+    expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 5, { managedOwnerId: '' })
     expect(listConversationSummariesMock).not.toHaveBeenCalled()
     expect(ctx.body.sessions[0]).toMatchObject({ id: 'local-conversation', source: 'cli', title: 'Local' })
   })
@@ -1122,6 +1167,7 @@ describe('session conversations controller', () => {
     await mod.list(ctx)
 
     expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 2000, {
+      managedOwnerId: '1',
       sources: ['api_server', 'cli', 'desktop', 'builtin_agent', 'coding_agent', 'global_agent'],
       profiles: ['default', 'travel'],
       includeArchived: false,
@@ -1142,6 +1188,7 @@ describe('session conversations controller', () => {
     await mod.list(ctx)
 
     expect(localListSessionsMock).toHaveBeenCalledWith('travel', undefined, 2000, {
+      managedOwnerId: '',
       sources: ['api_server', 'cli', 'desktop', 'builtin_agent', 'coding_agent', 'global_agent'],
       profiles: undefined,
       includeArchived: false,
@@ -1243,6 +1290,7 @@ describe('session conversations controller', () => {
     await mod.list(ctx)
 
     expect(localListSessionsMock).toHaveBeenCalledWith(undefined, 'global_agent', 2000, {
+      managedOwnerId: '',
       sources: undefined,
       profiles: ['default', 'travel'],
       includeArchived: false,
@@ -1287,6 +1335,7 @@ describe('session conversations controller', () => {
     await mod.list(workflowCtx)
 
     expect(localListSessionsMock).toHaveBeenLastCalledWith(undefined, 'workflow', 2000, {
+      managedOwnerId: '',
       sources: undefined,
       profiles: ['default', 'travel'],
       includeArchived: false,
@@ -1317,7 +1366,7 @@ describe('session conversations controller', () => {
     }
     await mod.count(ctx)
 
-    expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 2147483647)
+    expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 2147483647, { managedOwnerId: '1' })
     expect(ctx.body).toEqual({ count: 3 })
   })
 
@@ -1334,7 +1383,7 @@ describe('session conversations controller', () => {
     }
     await mod.count(ctx)
 
-    expect(localListSessionsMock).toHaveBeenCalledWith('travel', 'global_agent', 2147483647)
+    expect(localListSessionsMock).toHaveBeenCalledWith('travel', 'global_agent', 2147483647, { managedOwnerId: '' })
     expect(ctx.body).toEqual({ count: 1 })
   })
 
@@ -1390,7 +1439,7 @@ describe('session conversations controller', () => {
 
     await mod.listHermesSessions(ctx)
 
-    expect(localListSessionsMock).toHaveBeenCalledWith('travel', undefined, 2000)
+    expect(localListSessionsMock).toHaveBeenCalledWith('travel', undefined, 2000, { managedOwnerId: '' })
     expect(listSessionSummariesMock).toHaveBeenCalledWith(undefined, 2000, 'travel')
     expect(ctx.body.sessions).toEqual([
       expect.objectContaining({ id: 'cli-1', profile: 'travel', webui_imported: true }),
@@ -1509,7 +1558,7 @@ describe('session conversations controller', () => {
 
     await mod.listHermesSessions(ctx)
 
-    expect(localListSessionsMock).toHaveBeenCalledWith('travel', 'cli', 4)
+    expect(localListSessionsMock).toHaveBeenCalledWith('travel', 'cli', 4, { managedOwnerId: '' })
     expect(listSessionSummariesMock).toHaveBeenCalledWith('cli', 4, 'travel')
     expect(ctx.body).toMatchObject({
       sessions: [
@@ -1822,6 +1871,7 @@ describe('session conversations controller', () => {
     await mod.search(ctx)
 
     expect(localSearchSessionsMock).toHaveBeenCalledWith(undefined, 'docker', 10, {
+      managedOwnerId: '',
       sources: ['api_server', 'cli', 'desktop', 'builtin_agent', 'coding_agent', 'global_agent'],
       profiles: ['default', 'travel'],
       includeArchived: false,
@@ -1849,6 +1899,7 @@ describe('session conversations controller', () => {
     await mod.search(ctx)
 
     expect(localSearchSessionsMock).toHaveBeenCalledWith(undefined, 'docker', 10, {
+      managedOwnerId: '',
       sources: ['global_agent'],
       profiles: ['default', 'travel'],
       includeArchived: false,
@@ -2434,6 +2485,25 @@ describe('session conversations controller', () => {
     expect(getUsageStatsFromDbMock).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['setModel', { model: 'next-model', provider: 'provider' }, { model: 'next-model', provider: 'provider', reasoningEffort: '' }],
+    ['setWorkspace', { workspace: '/tmp/next-workspace' }, { workspace: '/tmp/next-workspace' }],
+    ['setReasoningEffort', { reasoningEffort: 'high' }, { reasoningEffort: 'high' }],
+  ])('updates an automatic plugin chat through %s with the stored session authority', async (method, body, patch) => {
+    getSessionMock.mockReturnValue({ id: 'managed-chat', profile: 'chat-profile', source: 'coding_agent', agent: 'codex',
+      agent_instance_id: 'internal-instance', agent_chat_settings: true, model: 'old-model' })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const { setAgentChatService } = await import('../../packages/server/src/modules/studio/services/agents/chat-registry')
+    setAgentChatService({ isBound: () => true, ownedBinding: vi.fn() } as any)
+    const ctx: any = { params: { id: 'managed-chat' }, query: {}, state: { profile: { name: 'active-profile' }, user: { id: 7, role: 'super_admin' } },
+      request: { body }, set: vi.fn() }
+    try { await (mod as any)[method](ctx) } finally { setAgentChatService(undefined) }
+    expect(ordinarySettings.update).toHaveBeenCalledWith(expect.objectContaining({ profileId: 'chat-profile', principal: { kind: 'user', id: '7' } }), 'managed-chat', patch)
+    expect(localUpdateSessionMock).not.toHaveBeenCalled()
+    expect(invalidateCodingAgentSessionRuntimeMock).not.toHaveBeenCalled()
+    expect(ctx.body).toEqual({ ok: true, data: { revision: 4 } })
+  })
+
   it('sets a session model and provider in the local session store', async () => {
     getSessionMock.mockReturnValue({ id: 'session-1' })
 
@@ -2615,6 +2685,53 @@ describe('session conversations controller', () => {
     } finally {stop()}
   })
 
+  it('uses the same removal outcome through HTTP and the scoped SDK', async () => {
+    getSessionMock.mockReturnValue({ id: 'session', profile: 'default', source: 'coding_agent' })
+    localDeleteSessionMock.mockReturnValue(true)
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const { removeStudioSession } = await import('../../packages/server/src/modules/studio/services/sessions/removal')
+    const { createExecutionContext } = await import('../../packages/server/src/modules/studio/services/context/execution')
+    const authorize = vi.fn(async () => {})
+    const controller = new AbortController()
+    const sdk = createExecutionContext({ scopeId: 'scope', principal: { kind: 'user', id: '1' }, profileId: 'default', surface: 'api', traceId: 'trace' },
+      controller.signal, { info() {}, warn() {}, error() {} }, { authorize, agents: { list: async () => [] }, sessions: {
+        get: async () => null, remove: (scope, id, signal) => removeStudioSession({ id, profileId: scope.profileId }, { signal, authorize: async () => {} }),
+      } })
+    const ctx: any = { params: { id: 'session' }, query: { profile: 'default' } }
+    await mod.remove(ctx)
+    const result = await sdk.sessions.remove('session')
+    expect(ctx.body).toEqual({ ok: true, deleted: result.deleted,
+      hermes: { attempted: result.native.attempted, deleted: result.native.deleted, profile: result.native.profileId } })
+    expect(authorize).toHaveBeenCalledWith(expect.objectContaining({ profileId: 'default' }), 'sessions.remove', 'session')
+    expect(codingAgentRunManagerMock.stop).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['remove', 'batchRemove'] as const)('does not stop or delete a same-ID local session in another profile through %s', async action => {
+    getSessionMock.mockReturnValue({ id: 'same', profile: 'default', source: 'coding_agent' })
+    getExactSessionDetailFromDbWithProfileMock.mockResolvedValue({ id: 'same' })
+    deleteHermesSessionForProfileMock.mockResolvedValue(true)
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'same' }, query: { profile: 'travel' }, request: { body: { sessions: [{ id: 'same', profile: 'travel' }] } } }
+    await mod[action](ctx)
+    expect(deleteHermesSessionForProfileMock).toHaveBeenCalledWith('same', 'travel')
+    expect(localDeleteSessionMock).not.toHaveBeenCalled()
+    expect(codingAgentRunManagerMock.stop).not.toHaveBeenCalled()
+  })
+
+  it.each(['remove', 'batchRemove'] as const)('rejects an unauthorized native-only profile through %s before inspecting or deleting', async action => {
+    getSessionMock.mockReturnValue(null)
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'default' }])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'native' }, query: { profile: 'travel' }, state: { user: { id: 1, role: 'user' } },
+      request: { body: { sessions: [{ id: 'native', profile: 'travel' }] } } }
+    await mod[action](ctx)
+    if (action === 'remove') expect(ctx.status).toBe(403)
+    else expect(ctx.body).toMatchObject({ failed: 1, deleted: 0 })
+    expect(getExactSessionDetailFromDbWithProfileMock).not.toHaveBeenCalled()
+    expect(localDeleteSessionMock).not.toHaveBeenCalled()
+    expect(codingAgentRunManagerMock.stop).not.toHaveBeenCalled()
+  })
+
   it('deletes a current-profile Hermes history session even when no local Web UI session exists', async () => {
     getActiveProfileNameMock.mockReturnValue('travel')
     getSessionMock.mockReturnValue(null)
@@ -2650,7 +2767,7 @@ describe('session conversations controller', () => {
     expect(codingAgentRunManagerMock.stop).toHaveBeenCalledWith('codex-session', { reportClosed: false })
     expect(getExactSessionDetailFromDbWithProfileMock).not.toHaveBeenCalled()
     expect(deleteHermesSessionForProfileMock).not.toHaveBeenCalled()
-    expect(localDeleteSessionMock).toHaveBeenCalledWith('codex-session')
+    expect(localDeleteSessionMock).toHaveBeenCalledWith('codex-session', { id: expect.any(String), occurredAt: expect.any(Number) })
     expect(ctx.body).toEqual({
       ok: true,
       deleted: true,
@@ -2689,8 +2806,8 @@ describe('session conversations controller', () => {
     expect(getExactSessionDetailFromDbWithProfileMock).toHaveBeenCalledWith('travel-session', 'travel')
     expect(deleteHermesSessionForProfileMock).toHaveBeenCalledWith('default-session', 'default')
     expect(deleteHermesSessionForProfileMock).toHaveBeenCalledWith('travel-session', 'travel')
-    expect(localDeleteSessionMock).toHaveBeenCalledWith('default-session')
-    expect(localDeleteSessionMock).toHaveBeenCalledWith('travel-session')
+    expect(localDeleteSessionMock).toHaveBeenCalledWith('default-session', { id: expect.any(String), occurredAt: expect.any(Number) })
+    expect(localDeleteSessionMock).toHaveBeenCalledWith('travel-session', { id: expect.any(String), occurredAt: expect.any(Number) })
     expect(ctx.body).toMatchObject({ ok: true, deleted: 2, failed: 0, hermesDeleted: 2 })
   })
 
@@ -2716,7 +2833,7 @@ describe('session conversations controller', () => {
     expect(codingAgentRunManagerMock.stop).toHaveBeenCalledWith('codex-session', { reportClosed: false })
     expect(getExactSessionDetailFromDbWithProfileMock).not.toHaveBeenCalled()
     expect(deleteHermesSessionForProfileMock).not.toHaveBeenCalled()
-    expect(localDeleteSessionMock).toHaveBeenCalledWith('codex-session')
+    expect(localDeleteSessionMock).toHaveBeenCalledWith('codex-session', { id: expect.any(String), occurredAt: expect.any(Number) })
     expect(ctx.body).toMatchObject({ ok: true, deleted: 1, failed: 0, hermesDeleted: 0 })
   })
 

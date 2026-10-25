@@ -4,6 +4,7 @@ import { MESSAGES_TABLE, SESSIONS_TABLE, SESSION_TASKS_TABLE } from '../infrastr
 import type { SessionTask, SessionTasksSnapshot, SessionTaskChange } from '../contracts/session-task'
 import type { SessionTaskListPage, SessionTaskListQuery } from '../contracts/session-task'
 import { SESSION_PREVIEW_SQL, sessionDisplayTitle } from './session-display'
+import { agentChatOwnerFilter } from './agent-chat-summary'
 
 /** Profile filtering happens in SQL, before counting or paginating. */
 export function listSessionTaskItems(query: SessionTaskListQuery): SessionTaskListPage {
@@ -15,6 +16,8 @@ export function listSessionTaskItems(query: SessionTaskListQuery): SessionTaskLi
     `s.source IN ('api_server', 'cli', 'desktop', 'builtin_agent', 'coding_agent')`,
   ]
   const args: (string | number)[] = [...query.profiles]
+  const managed = agentChatOwnerFilter(db, query.managedOwnerId)
+  if (managed) { where.push(managed.sql); args.push(...managed.params) }
   if (query.excludeSessionIds?.length) {
     where.push(`s.id NOT IN (${query.excludeSessionIds.map(() => '?').join(',')})`)
     args.push(...query.excludeSessionIds)

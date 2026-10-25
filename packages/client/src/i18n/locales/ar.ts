@@ -1,9 +1,11 @@
+import { agentManagementMessages } from '../agent-management-messages'
 import { remoteDeviceMessages } from '../remote-device-messages'
 import { themePresetMessages } from '../theme-preset-locales'
 import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
+  agentManagement: agentManagementMessages['ar'],
   sessionTasks: {
       "title": "المهام",
       "task": "المهمة",
@@ -706,7 +708,6 @@ export default {
     updateSuccess: 'تم التحديث بنجاح. الرجاء تحديث الصفحة بعد قليل. وإذا لم يبدأ بعد فترة، فابدأه يدويًا.',
     updateFailed: 'فشل التحديث',
     logout: 'تسجيل الخروج',
-    nodeVersionWarning: 'تم اكتشاف Node.js v{version}. الرجاء الترقية إلى الإصدار 23 أو أحدث.',
     changelog: 'سجل التغييرات',
     noChangelog: 'لا يوجد سجل تغييرات',
     versionManagement: 'إدارة الإصدارات',
@@ -1091,6 +1092,10 @@ export default {
 
   // Chat
   chat: {
+    pluginCommandChanged: "تغيّر الأمر أو المحادثة. اختر الأمر مجددًا.",
+    pluginCommandAmbiguous: "توفّر عدة إضافات هذا الأمر. اختر اسمًا يتضمن المصدر.",
+    pluginCommandTextOnly: "تقبل أوامر الإضافات النص فقط حاليًا.",
+    pluginCommandsUnavailable: "تعذّر تحميل أوامر الإضافات.",
     selectMessages: "تحديد الرسائل",
     messagesSelected: "تم تحديد {count}",
     deleteSelectedMessages: "حذف المحدد",
@@ -3302,6 +3307,15 @@ export default {
   },
 
   codingAgents: {
+    defaultConfiguration: "الإعدادات الافتراضية",
+    resourceInstance: "مثيل الوكيل", resourceSkillSource: 'موقع المهارة', resourcesNextRun: 'سيتم تحميل المهارات المحدّثة تلقائيًا في التشغيل التالي.',
+    resourceFile: "ملف الإعدادات",
+    resourceReadOnly: "للقراءة فقط",
+    resourcesEmpty: "لا توجد موارد في هذه المواقع",
+    resourcesUnsupported: "هذا النوع من الموارد غير متاح",
+    resourcesUnavailable: "موارد الوكيل غير متاحة",
+    resourcesChanged: "تغير المثيل. أعد التحميل قبل الحفظ.",
+
     nativeUsage: "الاستخدام: إدخال {inputTokens}، إخراج {outputTokens}، قراءة ذاكرة مؤقتة {cacheReadTokens}، كتابة ذاكرة مؤقتة {cacheWriteTokens}، الإجمالي {totalTokens} رمزًا.",
     nativeUsageUnknown: "الاستخدام غير معروف. لم تُبلّغ الأداة الأصلية بعد عن استخدام الرموز لهذه الجلسة.",
     nativeContextUnknown: "السياق غير معروف. استخدام السياق الأصلي الحالي وحدّه غير متاحين.",

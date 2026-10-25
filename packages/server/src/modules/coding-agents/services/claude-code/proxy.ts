@@ -7,7 +7,7 @@ import {
   chatCompletionsUrl as resolveChatCompletionsUrl,
   responsesUrl as resolveResponsesUrl,
 } from '../../protocol/endpoint-resolver'
-import { parseSseFrame, readSseFrameTexts, sseEvent } from '../../protocol/sse'
+import { parseSseFrame, readSseFrameTexts, sseEvent } from '../../../studio/public/model-protocol'
 import { AgentTargetRegistry, type AgentTargetInput, type RegisteredAgentTarget } from '../../protocol/target-registry'
 import type { ApiMode } from '../../protocol/types'
 import {
@@ -15,18 +15,18 @@ import {
   anthropicToOpenAiResponses,
   openAiResponsesToAnthropicMessage,
   openAiToAnthropicMessage,
-} from '../../protocol/adapters/anthropic'
+} from '../../../studio/public/model-protocol'
 import {
   openAiChatSseToAnthropicEvents,
   openAiResponsesSseToAnthropicEvents,
   type AnthropicStreamEvent,
-} from '../../protocol/adapters/anthropic-stream'
+} from '../../../studio/public/model-protocol'
 import {
   anthropicMessagesSseToResponsesEvents,
   openAiChatSseToResponsesEvents,
   openAiResponsesSseToResponsesEvents,
   type CanonicalResponsesEvent,
-} from '../../protocol/adapters/responses-stream'
+} from '../../../studio/public/model-protocol'
 import { agentRunGateway, ProviderApiError } from '../../protocol/gateway'
 import { teeAsyncIterable } from '../../protocol/stream-tee'
 import { codingAgentRunManager } from '../runtime/run-manager'

@@ -43,6 +43,7 @@ export interface SessionTaskListItem extends SessionTask {
 }
 
 export interface SessionTaskListQuery {
+  managedOwnerId?: string
   profiles: string[]
   excludeSessionIds?: string[]
   search?: string

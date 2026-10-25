@@ -1,5 +1,6 @@
+import { chatRunCaller, isDirectChatRunCaller, type ChatRunCallerTarget } from './caller'
 import { isNativeCodingAgent } from '../../contracts/agents/native-coding-agents'
-import type { Server, Socket } from 'socket.io'
+import type { Server } from 'socket.io'
 import { addMessage, clearSessionMessages, createBranchedSession, createSession, getSession, getSessionDetail, renameSession, updateSessionStats } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
 import type { PrimaryAgentBridgeClient as AgentBridgeClient } from '../../public/chat-agent-runtime'
@@ -43,7 +44,7 @@ interface ParsedSessionCommand {
 
 interface SessionCommandContext {
   nsp: ReturnType<Server['of']>
-  socket: Socket
+  socket: ChatRunCallerTarget
   sessionMap: Map<string, SessionState>
   bridge: AgentBridgeClient
   profile: string
@@ -52,7 +53,7 @@ interface SessionCommandContext {
   model_groups?: Array<{ provider: string; models: string[] }>
   instructions?: string
   queueId?: string
-  runQueuedItem: (socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void
+  runQueuedItem: (socket: ChatRunCallerTarget, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void
 }
 
 interface BranchSessionSummary {
@@ -128,7 +129,7 @@ export async function handleSessionCommand(
   ctx: SessionCommandContext,
 ): Promise<boolean | void> {
   const state = getOrCreateSession(ctx.sessionMap, sessionId)
-  ctx.socket.join(`session:${sessionId}`)
+  if (!isDirectChatRunCaller(ctx.socket)) chatRunCaller(ctx.socket).observeSession(sessionId)
   ensureCommandSession(sessionId, command, ctx)
   const isKnownCommand = Boolean(COMMAND_ALIASES[command.rawName])
   if (command.name !== 'plan' && command.name !== 'skill' && command.name !== 'bundles' && command.name !== 'learn' && command.name !== 'branch' && command.name !== 'moa' && isKnownCommand) {
@@ -221,7 +222,8 @@ export async function handleSessionCommand(
         instructions: ctx.instructions,
         profile: ctx.profile,
         source: 'cli',
-        originSocketId: ctx.socket.id,
+        originSocketId: chatRunCaller(ctx.socket).originId,
+        directCaller: isDirectChatRunCaller(ctx.socket) ? ctx.socket : undefined,
       }
 
       if (state.isWorking) {
@@ -300,7 +302,8 @@ export async function handleSessionCommand(
         instructions: ctx.instructions,
         profile: ctx.profile,
         source: 'cli',
-        originSocketId: ctx.socket.id,
+        originSocketId: chatRunCaller(ctx.socket).originId,
+        directCaller: isDirectChatRunCaller(ctx.socket) ? ctx.socket : undefined,
       }
 
       if (state.isWorking) {
@@ -363,7 +366,8 @@ export async function handleSessionCommand(
       instructions: ctx.instructions,
       profile: ctx.profile,
       source: 'cli',
-      originSocketId: ctx.socket.id,
+      originSocketId: chatRunCaller(ctx.socket).originId,
+      directCaller: isDirectChatRunCaller(ctx.socket) ? ctx.socket : undefined,
       oneShotModel: true,
     }
 
@@ -515,7 +519,8 @@ export async function handleSessionCommand(
         instructions: ctx.instructions,
         profile: ctx.profile,
         source: 'cli',
-        originSocketId: ctx.socket.id,
+        originSocketId: chatRunCaller(ctx.socket).originId,
+        directCaller: isDirectChatRunCaller(ctx.socket) ? ctx.socket : undefined,
       })
       emitToSession(ctx.nsp, ctx.socket, sessionId, 'run.queued', {
         event: 'run.queued',
@@ -571,7 +576,8 @@ export async function handleSessionCommand(
         instructions: ctx.instructions,
         profile: ctx.profile,
         source: 'cli',
-        originSocketId: ctx.socket.id,
+        originSocketId: chatRunCaller(ctx.socket).originId,
+        directCaller: isDirectChatRunCaller(ctx.socket) ? ctx.socket : undefined,
       }
 
       if (state.isWorking) {
@@ -663,7 +669,8 @@ export async function handleSessionCommand(
         instructions: ctx.instructions,
         profile: ctx.profile,
         source: 'cli',
-        originSocketId: ctx.socket.id,
+        originSocketId: chatRunCaller(ctx.socket).originId,
+        directCaller: isDirectChatRunCaller(ctx.socket) ? ctx.socket : undefined,
       }
 
       if (state.isWorking) {
@@ -1313,10 +1320,10 @@ function getLastVisibleMessage(messages: Array<{ role: string; content: string }
   return null
 }
 
-function emitToSession(nsp: ReturnType<Server['of']>, socket: Socket, sessionId: string, event: string, payload: any) {
+function emitToSession(nsp: ReturnType<Server['of']>, socket: ChatRunCallerTarget, sessionId: string, event: string, payload: any) {
   const tagged = { ...payload, session_id: sessionId }
   nsp.to(`session:${sessionId}`).emit(event, tagged)
-  if (!nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
-    socket.emit(event, tagged)
+  if ((isDirectChatRunCaller(socket) || !nsp.adapter.rooms.get(`session:${sessionId}`)?.size) && chatRunCaller(socket).isActive()) {
+    chatRunCaller(socket).reply(event, tagged)
   }
 }

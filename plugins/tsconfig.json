@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
+    "strict": true, "noEmit": true, "esModuleInterop": true, "skipLibCheck": true,
+    "types": ["node"], "lib": ["ES2022", "DOM"],
+    "paths": {
+      "@ekko-studio/plugin-sdk": ["../packages/studio-plugin-sdk/src/index.ts"],
+      "@ekko-studio/agent-drivers": ["../packages/studio-agent-drivers/src/index.ts"]
+    }
+  },
+  "include": ["*/src/**/*.ts"]
+}
