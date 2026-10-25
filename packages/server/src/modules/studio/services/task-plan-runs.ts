@@ -30,7 +30,8 @@ export function parseTaskPlanUpdate(input: Record<string, unknown>): PlanUpdate 
     if (typeof id !== 'string' || !id.trim() || id.trim().length > 100 || ids.has(id.trim())) {
       throw new TaskPlanError('Step ids must be unique non-empty strings of at most 100 characters')
     }
-    if (typeof step !== 'string' || !step.trim() || step.trim().length > 200) {
+    if (typeof step !== 'string') throw new TaskPlanError('Each plan step requires a "step" string (not "title" or "text")')
+    if (!step.trim() || step.trim().length > 200) {
       throw new TaskPlanError('Step text must contain 1 to 200 characters')
     }
     if (status !== 'pending' && status !== 'in_progress' && status !== 'completed') throw new TaskPlanError('Invalid step status')
@@ -134,7 +135,7 @@ export class TaskPlanRuns {
 }
 
 export function taskPlanRunInstruction(): string {
-  return `For multi-step work, maintain the user's Studio task card with ekko_studio_update_plan from the dedicated ekko-studio-interaction MCP server. Call the tool directly; it is not inside ekko_studio_use_toolset. If tools are deferred, search for ekko-studio-interaction / update_plan and use the exact discovered tool name (including its MCP prefix). The latest input supplies the current context_id; never reuse a context from history. Send the complete ordered plan each time, with stable step ids and statuses pending, in_progress, or completed; at most one step may be in_progress. Create the plan before substantial work and update it as work advances. Mark steps completed only after verification. Skip planning for simple one-step requests unless the user explicitly asks for a plan or task card. Prefer this shared tool over native todo/planning tools so progress appears in Studio and App.`
+  return `For multi-step work, maintain the user's Studio task card with ekko_studio_update_plan from the dedicated ekko-studio-interaction MCP server. Call the tool directly; it is not inside ekko_studio_use_toolset. If tools are deferred, search for ekko-studio-interaction / update_plan and use the exact discovered tool name (including its MCP prefix). The latest input supplies the current context_id; never reuse a context from history. Each entry needs id, step (the task text, not title or text), and status, for example {"id":"inspect","step":"Inspect the issue","status":"pending"}. Send the complete ordered plan each time, with stable step ids and statuses pending, in_progress, or completed; at most one step may be in_progress. Create the plan before substantial work and update it as work advances. Mark steps completed only after verification. Skip planning for simple one-step requests unless the user explicitly asks for a plan or task card. Prefer this shared tool over native todo/planning tools so progress appears in Studio and App.`
 }
 
 export function sessionTasksRunInstruction(): string {
