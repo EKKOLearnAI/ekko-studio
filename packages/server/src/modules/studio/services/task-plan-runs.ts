@@ -9,7 +9,7 @@ type RunState = { isWorking: boolean; isAborting?: boolean; runId?: string; acti
 function activeTurnId(state: RunState | undefined): string {
   return state?.activeRunMarker || state?.responseRun?.runMarker || state?.runId || ''
 }
-type Binding = { sessionId: string; profile: string; resolve: () => RunState | undefined; sessionTasksEnabled: boolean; runId?: string; snapshot?: TaskPlanSnapshot; publish?: (snapshot: TaskPlanSnapshot) => void }
+type Binding = { planId: string; sessionId: string; profile: string; resolve: () => RunState | undefined; sessionTasksEnabled: boolean; runId?: string; snapshot?: TaskPlanSnapshot; publish?: (snapshot: TaskPlanSnapshot) => void }
 
 export class TaskPlanError extends Error {
   constructor(message: string, public readonly status = 400) { super(message) }
@@ -54,23 +54,24 @@ export class TaskPlanRuns {
   begin(sessionId: string, profile: string, resolve: Binding['resolve'], publish?: Binding['publish'], sessionTasksEnabled = false): string {
     this.finishSession(sessionId, 'interrupted')
     const contextId = randomUUID()
-    this.bindings.set(contextId, { sessionId, profile, resolve, publish, sessionTasksEnabled })
+    // Durable plan identity must not expose the per-turn authorization context.
+    this.bindings.set(contextId, { planId: `mcp:${randomUUID()}`, sessionId, profile, resolve, publish, sessionTasksEnabled })
     this.sessions.set(sessionId, contextId)
     return contextId
   }
 
   update(contextId: string, profile: string, input: Record<string, unknown>): TaskPlanSnapshot {
     const binding = this.bindings.get(contextId)
-    if (!binding || binding.profile !== profile) throw new TaskPlanError('Task plan context is unavailable or has expired', 409)
+    if (!binding || binding.profile !== profile) throw new TaskPlanError("Task plan context is unavailable or has expired; read context_id from the current turn's studio_task_plan_context, not plan_id or history", 409)
     const state = binding.resolve()
     const runId = activeTurnId(state)
     if (!state?.isWorking || state.isAborting || !runId || (binding.runId && binding.runId !== runId) || (binding.snapshot && binding.snapshot.run_id !== runId)) {
-      throw new TaskPlanError('Task plan context has no active turn', 409)
+      throw new TaskPlanError("Task plan context has no active turn; read context_id from the current turn's studio_task_plan_context, not plan_id or history", 409)
     }
     const update = parseTaskPlanUpdate(input)
     const now = Date.now()
     const snapshot: TaskPlanSnapshot = {
-      ...update, session_id: binding.sessionId, run_id: runId, plan_id: `mcp:${contextId}`,
+      ...update, session_id: binding.sessionId, run_id: runId, plan_id: binding.planId,
       revision: (binding.snapshot?.revision || 0) + 1, execution_state: 'running',
       created_at: binding.snapshot?.created_at ?? now, updated_at: now,
     }

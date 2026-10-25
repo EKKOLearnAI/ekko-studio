@@ -527,6 +527,75 @@ describe('hermes-web-ui MCP server', () => {
     } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
   })
 
+  it('returns one opaque plan identity across MCP processes without echoing turn authority', async () => {
+    const { TaskPlanRuns } = await import('../../packages/server/src/modules/studio/services/task-plan-runs')
+    const { updateTaskPlan } = await import('../../packages/server/src/modules/studio/controllers/task-plans')
+    const { setChatRunServer } = await import('../../packages/server/src/modules/studio/services/chat-run/server-registry')
+    const committed: any[] = []
+    const published: any[] = []
+    const runs = new TaskPlanRuns(plan => committed.push(plan), (_id, plan) => published.push(plan))
+    const contextId = runs.begin('fixture-session', 'research', () => ({ isWorking: true, runId: 'fixture-turn' }))
+    setChatRunServer({ updateTaskPlan: runs.update.bind(runs) })
+    const server = createServer((req, res) => {
+      let raw = ''
+      req.on('data', part => { raw += part })
+      req.on('end', () => {
+        const ctx: any = { request: { body: JSON.parse(raw) }, state: { profile: { name: 'research' } }, status: 200 }
+        updateTaskPlan(ctx)
+        res.writeHead(ctx.status, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(ctx.body))
+      })
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const startClient = () => {
+      const client = spawn(globalThis.process.execPath, ['bin/ekko-studio-mcp.mjs', 'plan'], {
+        cwd: globalThis.process.cwd(), env: { ...globalThis.process.env,
+          HERMES_WEB_UI_URL: `http://127.0.0.1:${(server.address() as any).port}`,
+          HERMES_WEB_UI_PROFILE: 'research' },
+      })
+      const responses = new Map<number, any>()
+      let buffer = ''
+      client.stdout.on('data', chunk => {
+        buffer += String(chunk)
+        let newline: number
+        while ((newline = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1)
+          if (line.trim()) { const value = JSON.parse(line); responses.set(value.id, value) }
+        }
+      })
+      child = client
+      return responses
+    }
+    const input = { context_id: contextId, plan: [{ id: 'inspect', step: 'Inspect', status: 'in_progress' }] }
+    try {
+      let responses = startClient()
+      let planId = ''
+      for (const revision of [1, 2, 3]) {
+        if (revision === 3) {
+          const old = child!
+          const stopped = new Promise<void>(resolve => old.once('exit', () => resolve()))
+          old.kill(); await stopped
+          responses = startClient()
+        }
+        writeRpc(child!, revision, 'tools/call', { name: 'ekko_studio_update_plan', arguments: input })
+        const response = (await waitForRpc(responses, revision)).result
+        expect(response.isError).not.toBe(true)
+        const plan = JSON.parse(response.content[0].text)
+        expect(plan).toMatchObject({ ok: true, revision, session_id: 'fixture-session' })
+        expect(plan.plan_id).not.toContain(contextId)
+        expect(JSON.stringify(plan)).not.toContain(contextId)
+        planId ||= plan.plan_id
+        expect(plan.plan_id).toBe(planId)
+        expect(committed.at(-1)?.plan_id).toBe(planId)
+        expect(published.at(-1)?.plan_id).toBe(planId)
+      }
+    } finally {
+      child?.kill()
+      setChatRunServer(null)
+      server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
   it('exposes the curated Ekko Studio use catalog through one compact category tool', async () => {
     const server = createServer((req, res) => {
       res.setHeader('content-type', 'application/json')

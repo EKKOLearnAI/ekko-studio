@@ -37,7 +37,7 @@ status values retain their protocol form. This is model guidance; stored text is
 not translated or rejected by a language detector.
 The service resolves session and history run marker itself; supplied session,
 run, revision, and execution-state fields cannot redirect or finish a plan.
-Contexts expire at the end of a turn and reject other profiles. Coding runtime
+Contexts expire at the end of a turn and reject other profiles. A context remains valid for repeated updates within its turn. New shared plans have a separate opaque `plan_id`, stable for that turn and unrelated to its `context_id`; it is never a replacement authorization context. Existing stored plan IDs remain valid history identifiers. Coding runtime
 ids can span turns, so snapshots use the response stream's per-turn history
 marker instead. Ekko continues using its native `update_plan` tool. Its managed
 MCP definitions never register `ekko-studio-interaction` and set `HERMES_MCP_NATIVE_TASK_PLAN=1`, which excludes shared planning
