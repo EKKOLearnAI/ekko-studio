@@ -87,12 +87,9 @@ export function normalizeBridgeSessionCommandName(name: string): BridgeSessionCo
 export function readBridgeSessionCommandName(input: string): BridgeSessionCommandName | null {
   const trimmed = input.trim()
   if (!trimmed.startsWith('/')) return null
-  // Only the leading identifier matters here: the name is validated against the
-  // command table below, so the separator does not need to be ASCII whitespace.
-  // Requiring `\s` meant `/steer：do it` (full-width colon) was not recognised as
-  // a command at all, while `normalizeBridgeSessionCommandName` still rejects
-  // near-misses such as `/steerab`.
-  const match = trimmed.match(/^\/([a-zA-Z][\w-]*)/)
+  // Keep the boundary contract aligned with the server parser: explicit
+  // whitespace/punctuation, adjacent CJK letters, or the end of the command.
+  const match = trimmed.match(/^\/([a-zA-Z][\w-]*)(?=\s|[:：、,，]|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|$)/u)
   if (!match) return null
   return normalizeBridgeSessionCommandName(match[1])
 }

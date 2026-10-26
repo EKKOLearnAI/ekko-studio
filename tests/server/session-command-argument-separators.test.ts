@@ -148,3 +148,28 @@ describe('readBridgeSessionCommandName argument separators', () => {
     expect(readBridgeSessionCommandName('/abort')).toBe('abort')
   })
 })
+
+describe('command boundary regression', () => {
+  it.each([
+    ['/title : incident', 'title', ': incident'],
+    ['/steer ,keep punctuation', 'steer', ',keep punctuation'],
+    ['/plan ：literal', 'plan', '：literal'],
+    ['/steer：，keep punctuation', 'steer', '，keep punctuation'],
+    ['/steer\n: literal', 'steer', ': literal'],
+    ['/steer先停一下', 'steer', '先停一下'],
+    ['/steer待って', 'steer', '待って'],
+    ['/steer멈춰', 'steer', '멈춰'],
+  ])('preserves arguments and client/server agreement: %s', async (input, name, args) => {
+    const { parseSessionCommand } = await loadParser()
+    const { readBridgeSessionCommandName } = await import('../../packages/client/src/utils/hermes/bridge-session-commands')
+    expect(parseSessionCommand(input)).toMatchObject({ name, args })
+    expect(readBridgeSessionCommandName(input)).toBe(name)
+  })
+
+  it.each(['/clear/cache', '/abort.txt', '/plan?query', '/steer!now', '/steerab', '/steeré'])('rejects non-command boundaries: %s', async input => {
+    const { parseSessionCommand } = await loadParser()
+    const { readBridgeSessionCommandName } = await import('../../packages/client/src/utils/hermes/bridge-session-commands')
+    expect(parseSessionCommand(input)).toBeNull()
+    expect(readBridgeSessionCommandName(input)).toBeNull()
+  })
+})
