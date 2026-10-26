@@ -30,6 +30,8 @@ export interface HermesSessionRow {
   api_mode: string
   reasoning_effort: string
   title: string | null
+  title_origin?: string
+  title_generation_attempts?: number
   parent_session_id: string | null
   fork_point_message_id: string | null
   started_at: number
@@ -157,6 +159,8 @@ function mapStoredSessionRow(row: Record<string, unknown>): HermesSessionRow {
     api_mode: String(row.api_mode || ''),
     reasoning_effort: String(row.reasoning_effort || ''),
     title,
+    title_origin: String(row.title_origin || ''),
+    title_generation_attempts: Number(row.title_generation_attempts || 0),
     parent_session_id: row.parent_session_id != null ? String(row.parent_session_id) : null,
     fork_point_message_id: row.fork_point_message_id != null ? String(row.fork_point_message_id) : null,
     started_at: Number(row.started_at || 0),
@@ -228,6 +232,7 @@ export function createSession(data: {
   api_mode?: string
   reasoning_effort?: string
   title?: string
+  title_origin?: 'fallback' | 'manual'
   parent_session_id?: string | null
   workspace?: string
   category_id?: number | null
@@ -260,8 +265,8 @@ export function createSession(data: {
   }
   const db = getDb()!
   db.prepare(
-    `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_preset, agent_session_id, agent_native_session_id, user_id, studio_user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, push_enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_preset, agent_session_id, agent_native_session_id, user_id, studio_user_id, model, provider, api_mode, reasoning_effort, title, title_origin, parent_session_id, started_at, last_active, workspace, category_id, push_enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     data.id,
     data.profile || 'default',
@@ -278,6 +283,7 @@ export function createSession(data: {
     data.api_mode || '',
     data.reasoning_effort || '',
     data.title || null,
+    data.title_origin || '',
     data.parent_session_id || null,
     now,
     now,
@@ -479,6 +485,7 @@ export function updateSession(id: string, data: Partial<Omit<HermesSessionRow, '
       data = { ...data, ...identity }
     }
   }
+  if (data.title !== undefined && data.title_origin === undefined) data = { ...data, title_origin: 'manual' }
   const fields: string[] = []
   const values: any[] = []
   for (const [key, val] of Object.entries(data)) {
@@ -538,6 +545,7 @@ export function clearSessionMessages(id: string): number {
            task_summary_revision = task_summary_revision + 1,
            task_summary_updated_at = 0,
            history_cleared_at = ?,
+           title_generation_attempts = 0,
            message_count = 0,
            last_active = started_at
        WHERE id = ?`,
@@ -553,7 +561,7 @@ export function clearSessionMessages(id: string): number {
 export function renameSession(id: string, title: string): boolean {
   if (!isSqliteAvailable()) return false
   const db = getDb()!
-  const result = db.prepare(`UPDATE ${SESSIONS_TABLE} SET title = ? WHERE id = ?`).run(title, id)
+  const result = db.prepare(`UPDATE ${SESSIONS_TABLE} SET title = ?, title_origin = 'manual' WHERE id = ?`).run(title, id)
   return result.changes > 0
 }
 

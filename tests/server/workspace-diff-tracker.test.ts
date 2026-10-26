@@ -30,10 +30,22 @@ function git(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'ignore' })
 }
 
+// Source-only validation must not initialize SQLite, bootstrap adapters, or a Git repository.
+it('hides every Git subprocess window on Windows', () => {
+  const source = readFileSync(
+    'packages/server/src/modules/studio/services/chat-run/workspace-diff-tracker.ts',
+    'utf8',
+  )
+
+  expect(source.match(/execFileSync\('git'/g)).toHaveLength(4)
+  expect(source.match(/windowsHide: true/g)).toHaveLength(4)
+})
+
 describe('workspace diff tracker', () => {
   let root: string
   let repo: string
 
+  // Coverage-instrumented bootstrap plus a real Git fixture needs a bounded CI budget.
   beforeEach(async () => {
     vi.resetModules()
     root = mkdtempSync(join(tmpdir(), 'hermes-workspace-diff-'))
@@ -52,22 +64,12 @@ describe('workspace diff tracker', () => {
     writeFileSync(join(repo, 'changed.txt'), 'old\n')
     git(repo, ['add', '.'])
     git(repo, ['commit', '-m', 'initial'])
-  })
+  }, 30_000)
 
   afterEach(() => {
     state.db?.close()
     state.db = null
     rmSync(root, { recursive: true, force: true })
-  })
-
-  it('hides every Git subprocess window on Windows', () => {
-    const source = readFileSync(
-      'packages/server/src/modules/studio/services/chat-run/workspace-diff-tracker.ts',
-      'utf8',
-    )
-
-    expect(source.match(/execFileSync\('git'/g)).toHaveLength(4)
-    expect(source.match(/windowsHide: true/g)).toHaveLength(4)
   })
 
   it.each(['writer', 'observer'])('does not attribute ambiguous shared edits when %s finishes first', async first => {
